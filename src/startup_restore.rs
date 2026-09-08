@@ -164,3 +164,7 @@ mod tests {
         assert_eq!(advance(&mut world), None);
     }
 }
+
+#[cfg(all(test, feature = "headless", not(target_arch = "wasm32")))]
+#[path = "startup_restore_integration_tests.rs"]
+mod integration_tests;

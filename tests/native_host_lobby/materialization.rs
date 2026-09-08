@@ -4,7 +4,7 @@ use project_phoenix::lobby::{stations_config::ShipStations, SelectedShipResource
 use project_phoenix::native_host::world_load::NativeWorldLoadSet;
 use project_phoenix::sim_tick::SimTick;
 use project_phoenix::world::server::{WorldContentRuntime, WorldLayerMap};
-use project_phoenix::world_id::{IdNamespace, WorldId, WorldIdMint};
+use project_phoenix::world_id::{IdNamespace, LiveMint, WorldId};
 
 const ROOT: &str = "tests/fixtures/world_materialization_root.toml";
 const LAYERS: [&str; 2] = [
@@ -199,20 +199,30 @@ struct MintProbe {
 
 fn mint_before_load(
     config: Option<Res<WorldConfig>>,
-    mint: Res<WorldIdMint>,
+    mint: LiveMint<'_, { IdNamespace::Entity as usize }>,
     mut probe: ResMut<MintProbe>,
 ) {
     if config.is_none() {
-        probe.before = Some(mint.mint(IdNamespace::Entity));
+        probe.before = Some(
+            mint.as_deref()
+                .expect("the host installed its Entity mint")
+                .mint(),
+        );
     }
 }
 fn mint_after_load(
     config: Option<Res<WorldConfig>>,
-    mint: Res<WorldIdMint>,
+    mint: LiveMint<'_, { IdNamespace::Entity as usize }>,
     mut probe: ResMut<MintProbe>,
 ) {
     if config.is_some() && probe.after.is_none() {
-        probe.after = Some(mint.mint(IdNamespace::Entity));
+        // LiveMint also verifies that the handle belongs to the current
+        // aggregate, so restoring only WorldIdMint cannot satisfy this probe.
+        probe.after = Some(
+            mint.as_deref()
+                .expect("the host restored its Entity mint")
+                .mint(),
+        );
     }
 }
 
@@ -235,7 +245,13 @@ fn runtime_materialization_restores_the_live_tick_and_next_mint_sequence() {
         before.seq + 1,
         "parking at tick zero must not consume or reset the live tick's sequence"
     );
-    for (_, uuid) in entity_identities(&mut app) {
+    let identities = entity_identities(&mut app);
+    assert_eq!(
+        identities.len(),
+        2,
+        "the real tick-zero materialization ran"
+    );
+    for (_, uuid) in identities {
         assert_eq!(WorldId::parse(&uuid).unwrap().tick, 0);
     }
 }
@@ -280,6 +296,14 @@ fn both_schedules_register_the_same_materialization_members_once() {
     assert!(
         startup.iter().any(|name| name.ends_with("::setup_world")),
         "the shared pass includes anonymous spawning and dev system names are available"
+    );
+    assert_eq!(
+        startup
+            .iter()
+            .filter(|name| name.ends_with("::freeze_host_preloaded_content"))
+            .count(),
+        1,
+        "the shared pass includes the host-preloaded content freeze exactly once"
     );
     assert_eq!(
         startup, runtime,

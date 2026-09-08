@@ -60,6 +60,12 @@ At `Startup`, `insert_world_config_resource` copies the `WORLD_CONFIG` thread-lo
 
 Native boot freezes save compatibility from the same resolved script set it validates. Under `LoadPolicy::Activate`, `world::load` compiles the root and each static `extra_worlds` child against its own path/text and the injected resolver; the root-only raw transform is never applied to a child. It retains each `CompiledScripts`, supplies each exact spawn list to composition validation, and returns all script digests on the root ledger plan. `boot::ingest_world` applies that plan, then eagerly resolves root and children from their declarative `[[entity]]` paths, available hulls, GM palette and their own `CompiledScripts::spawned_templates`; only callers with no compiled set fall back to scanning `WorldConfig`'s inline bodies. These child compiled sets exist for validation and the pre-freeze declared-content census—not as runtime registrations. Additive layer activation compiles and owns a fresh child set, while boot rejects a broken static-child set because only root scripts cross the resource boundary into `PreCompiledScripts`. Changing a hull named only by a literal `ctx.effects.spawn_entity` call therefore refuses an older save as content-moved. A computed template path cannot join a load-time set: dispatch reports an uncovered path once and does not fold it late, because doing so would make the digest depend on mission progress and make a fresh resume reject a valid save. Browser inline roots enter the equivalent pre-init template preload.
 
+Before the browser's local-save and portable-import preparation gates read
+full compatibility, they declare the loaded root's `#scripts` ledger record
+from its lifted source set using the same sorted-source hash as compilation.
+This early declaration performs no compilation, activation or freeze;
+Startup remains responsible for validating and installing the script set.
+
 For a browser `HostPreloaded` boot, `PendingHostContentFreeze` defers sealing until `compile_world_scripts` has recorded the root-script digest. `freeze_host_preloaded_content` consumes the marker before `setup_world` and `spawn_world_entities`. Reader-based native loads already froze during ingest and carry no marker. The runtime native world-load schedule includes the same freeze system as a no-op, preserving the shared Startup order. This fixes the content boundary for ordinary browser-to-native GM replay; older records keep their original incompatible fingerprint.
 
 ## World materialization

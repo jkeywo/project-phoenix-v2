@@ -49,6 +49,11 @@ requires fresh ordinary browser exports after the new native and WASM builds.
 
 Content identity includes the uncurated world's declared playable hulls even
 when this crew selects another hull, and the root's compiled script record.
+Local catalogue Start and portable import check full compatibility before
+`wasm_init`. Both first declare the loaded root's `#scripts` ledger record
+from the lifted source set, using the same sorted-source hash as compilation.
+This does not compile or activate scripts, or freeze the ledger early.
+
 The browser seals its preload ledger after root-script compilation in Startup,
 before either spawn pass. Native boot records the declared hulls and compiled
 scripts before its own freeze. Recordings made before this boundary correction

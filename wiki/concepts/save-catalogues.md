@@ -87,6 +87,13 @@ loaded content digest. A pre-scenario catalogue may defer only the content
 answer until the row's scenario has loaded; damaged records and format/rules
 movement are hard refusals immediately.
 
+Before either local catalogue preparation or portable-save import performs its
+full pre-init compatibility check, the browser declares the loaded root
+world's `#scripts` ledger record from its lifted source set, using the same
+sorted-source hash as compilation. This declaration does not compile or
+activate scripts, or seal the ledger. Startup still owns compilation,
+validation and the final content freeze before spawning.
+
 The snapshot envelope also requires a `BootIdentity`: the selected hull,
 the frozen `FleetRoster`, and the authored-order UUID identity of every entity
 that actually spawned at `GameStart`. Startup validates the scenario and hull,
@@ -104,9 +111,11 @@ stance. Subsequent ordinary Captain commands still update neutral stances and
 clear attribution on stand-down. Separately, restoring objective records marks
 their presentation dirty, producing one exact `ObjectiveSummary` refresh even
 when authoritative objective state is unchanged. The damage continuation
-fixture retains that raw message and checks its payload and count separately:
-it drains during play, but remains unchanged in the undrained GameOver queue.
-All other state, attribution, events and pending messages must compare equal.
+fixture retains the exact `All` / `Reliable` wire refresh and proves that it
+drains once on the restored impact tick, after impact publications and before
+any GameOver transition. It is absent from the pending queue and later wire
+rows. Only that proven extra refresh is removed for comparison; all other
+state, attribution, events and messages must compare equal.
 
 The same format preserves the session-pause bit, complete canonical GM action
 journal, and exact `applied_grants` reducer frontier. That frontier cannot be

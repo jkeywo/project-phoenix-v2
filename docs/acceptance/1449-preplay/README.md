@@ -37,3 +37,11 @@ The landing case then passed alone with tracing (one test, exit 0). The original
 timeout is unexplained, so the broad run is not recorded as green. The loading
 test deliberately skips under browser automation, which bypasses Loading; its
 skip is not loading-progress evidence.
+
+Later current-flow evidence supersedes the need to rely on that failed broad
+attempt: port 3159 passed 14 landing/lobby-related cases, exit 0, 58.2 seconds.
+The skipped loading spec was replaced by `loading-progress.render.spec.js`,
+which drives actual GLB preload with SwiftShader and checks visible intermediate
+progress and client delivery. Its final port-3163 run passed 1 case, exit 0,
+16.6 seconds (19.2 total), using bundle `project-phoenix-5f8fb494bdf5d61a`.
+The earlier run remains a recorded failed attempt; it is not relabelled green.

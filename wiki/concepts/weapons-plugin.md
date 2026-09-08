@@ -2,7 +2,7 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
+sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
 updated: 2026-09-07
 ---
 
@@ -43,6 +43,16 @@ rechecks the live control policy before latching the unchanged frequency for
 the existing next-tick applier. The payload never selects or widens its own
 recipient.
 
+## Projectile identity
+
+Immediate torpedo launches in `handle_fire_torpedo` and blaster ticks in
+`tick_blaster_system` visit ships in UUID order before consuming the shared
+Projectile mint. This matches the burst-launch traversal in `tick_torpedoes`.
+Each ship retains its admitted-command order and authored bank/barrel order.
+The entity index breaks ties only for legacy fixtures without a stable UUID.
+`tests/projectile_ship_traversal.rs` moves a ship through an inert archetype
+without changing its state and compares actual projectile identities and full
+traces across both storage orders and fresh default/default/pinned processes.
 ## Damage pipelines
 
 Beam processing is phased so read-only shooter/LOS preparation completes before damage and lifetime updates. Torpedo processing similarly builds one target snapshot before advancing every ship's torpedoes. Both paths route shields and hull damage through the shared damage model, publish lifecycle events through `SimOutbox`, and leave the LocalShip present when defeat is latched.

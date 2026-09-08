@@ -583,6 +583,7 @@ pub(crate) fn tick_blaster_system(
         // p0 — the firing pass: every ship that carries blaster banks.
         Query<
             (
+                Entity,
                 Option<&crate::entities::spawner::EntityUuid>,
                 &Transform,
                 Option<&ModelMarkers>,
@@ -646,17 +647,38 @@ pub(crate) fn tick_blaster_system(
         .collect();
 
     let mut ship_q = ship_qs.p0();
-    for (
-        source_uuid_opt,
-        transform,
-        markers_opt,
-        mut physics,
-        blackboards_opt,
-        mut blaster_res,
-        ship_config_opt,
-        power_opt,
-    ) in ship_q.iter_mut()
-    {
+    // The shared projectile mint assigns IDs in call order. Walk stable ship
+    // identities before authored banks/barrels so moving an entity between
+    // archetypes cannot give another ship its projectile IDs (#1400).
+    // Entity index only breaks ties for legacy fixtures without a UUID.
+    let mut shooter_order: Vec<_> = ship_q
+        .iter()
+        .map(|(entity, uuid, ..)| {
+            (
+                (
+                    uuid.map(|u| u.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    shooter_order.sort();
+    for (_, shooter) in shooter_order {
+        let Ok((
+            _,
+            source_uuid_opt,
+            transform,
+            markers_opt,
+            mut physics,
+            blackboards_opt,
+            mut blaster_res,
+            ship_config_opt,
+            power_opt,
+        )) = ship_q.get_mut(shooter)
+        else {
+            continue;
+        };
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())
             .unwrap_or("")

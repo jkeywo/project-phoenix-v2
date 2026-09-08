@@ -572,6 +572,7 @@ pub(crate) fn handle_set_torpedo_volley_target(
 pub(crate) fn handle_fire_torpedo(
     mut ship_q: Query<
         (
+            Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
             &Transform,
@@ -615,23 +616,43 @@ pub(crate) fn handle_fire_torpedo(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (
-        control_sources,
-        physics,
-        transform,
-        markers_opt,
-        admitted,
-        blackboards_opt,
-        source_uuid_opt,
-        torpedo_sys_comp,
-        weapon_fired_comp,
-        magazine_policy_opt,
-        behaviour_opt,
-        origin_layer_opt,
-        ship_config_opt,
-        power_opt,
-    ) in ship_q.iter_mut()
-    {
+    // Immediate launches share the same tick-scoped mint as burst launches.
+    // Match tick_torpedoes' UUID ordering before walking each ship's admitted
+    // commands; archetype storage order must not assign projectile IDs (#1400).
+    let mut shooter_order: Vec<_> = ship_q
+        .iter()
+        .map(|(entity, _, _, _, _, _, _, uuid, ..)| {
+            (
+                (
+                    uuid.map(|u| u.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    shooter_order.sort();
+    for (_, shooter) in shooter_order {
+        let Ok((
+            _,
+            control_sources,
+            physics,
+            transform,
+            markers_opt,
+            admitted,
+            blackboards_opt,
+            source_uuid_opt,
+            torpedo_sys_comp,
+            weapon_fired_comp,
+            magazine_policy_opt,
+            behaviour_opt,
+            origin_layer_opt,
+            ship_config_opt,
+            power_opt,
+        )) = ship_q.get_mut(shooter)
+        else {
+            continue;
+        };
         // Per-entity component first; global Resource fallback for legacy tests.
         let mut torpedo_sys_comp = torpedo_sys_comp;
         let torpedo_sys: &mut crate::weapons::torpedo::TorpedoSystem =

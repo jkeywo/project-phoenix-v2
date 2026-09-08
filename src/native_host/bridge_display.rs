@@ -1713,8 +1713,7 @@ fn follow_layout_stations(
             );
             retile_notices.push(LayoutNotice::Adopted(note));
         }
-        bus.0.close(pane);
-        match bus.0.recreate(pane) {
+        match bus.0.rebuild(pane) {
             Some((rebuilt, _url)) => crate::pinfo!(
                 log,
                 LogCat::Lobby,
@@ -1939,12 +1938,12 @@ fn reconcile_seated_consoles(
         // survives, so a console that DOES come back is still the same
         // participant. The budget is the same per-identity one a flapping view
         // crash is held to, and it is what stops this becoming a rebuild loop.
-        bus.0.close(pane);
         if !bus.0.record_recreation_within_budget(pane) {
+            bus.0.close(pane);
             surrender.push((station.clone(), monitor));
             continue;
         }
-        match bus.0.recreate(pane) {
+        match bus.0.rebuild(pane) {
             Some((rebuilt, _url)) => crate::pwarn!(
                 log,
                 LogCat::Lobby,

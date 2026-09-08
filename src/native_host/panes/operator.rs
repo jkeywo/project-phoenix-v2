@@ -37,6 +37,18 @@ impl NativeOperators {
         self.replies.remove(&pane);
     }
 
+    /// A replacement view inherits active ownership before its page loads.
+    /// Called while the pane bus holds its lifecycle mutex, so no competing
+    /// console can acquire the controller between closing and rebuilding.
+    pub fn transfer(&mut self, previous: PaneId, replacement: PaneId) {
+        for (owner, _) in self.leases.values_mut() {
+            if *owner == previous {
+                *owner = replacement;
+            }
+        }
+        self.replies.remove(&previous);
+    }
+
     fn path(&self, name: &str) -> Option<PathBuf> {
         // Encoding bytes preserves distinct labels and cannot introduce path components.
         let encode = |value: &str| {

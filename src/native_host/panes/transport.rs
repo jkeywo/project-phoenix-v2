@@ -226,6 +226,10 @@ impl PaneBus {
     pub fn close(&self, id: PaneId) {
         let mut state = self.lock();
         state.operators.close(id);
+        Self::close_in_state(&mut state, id);
+    }
+
+    fn close_in_state(state: &mut BusState, id: PaneId) {
         if let Some((_token, pending)) = state.registry.close(id) {
             let connection = state.connection_ids[&id];
             for msg in pending {
@@ -233,7 +237,7 @@ impl PaneBus {
             }
             state.departing.push((connection, None));
         }
-        Self::withdraw(&mut state, id);
+        Self::withdraw(state, id);
     }
 
     /// Stop serving every pane document this bus published.
@@ -505,6 +509,25 @@ impl PaneBus {
     /// [`Closed`](PaneLifecycle::Closed) — see the same-token invariant below.
     pub fn recreate(&self, closed_id: PaneId) -> Option<(PaneId, String)> {
         let mut state = self.lock();
+        Self::recreate_in_state(&mut state, closed_id)
+    }
+
+    /// Deliberate move or bounded recovery: keep controller ownership across
+    /// the same-identity view replacement, including its page-load interval.
+    /// A failed rebuild is a closed console and releases the active lease.
+    pub fn rebuild(&self, id: PaneId) -> Option<(PaneId, String)> {
+        let mut state = self.lock();
+        Self::close_in_state(&mut state, id);
+        let rebuilt = Self::recreate_in_state(&mut state, id);
+        if let Some((replacement, _)) = &rebuilt {
+            state.operators.transfer(id, *replacement);
+        } else {
+            state.operators.close(id);
+        }
+        rebuilt
+    }
+
+    fn recreate_in_state(state: &mut BusState, closed_id: PaneId) -> Option<(PaneId, String)> {
         if state.superseded.contains(&closed_id) {
             return None;
         }
@@ -525,7 +548,7 @@ impl PaneBus {
                 return None;
             }
         }
-        Some(Self::open_with_document(&mut state, identity))
+        Some(Self::open_with_document(state, identity))
     }
 
     /// Open a **new** pane for a console the bridge layout just seated
@@ -996,6 +1019,52 @@ mod tests {
             vec![TransportEvent::Disconnected { token }]
         );
         assert!(bus.transport().poll().is_empty(), "and only once");
+    }
+
+    #[test]
+    fn rebuilt_console_keeps_controller_while_its_replacement_page_loads() {
+        use super::super::recovery::{service_faults, PaneFault};
+        const PADS: &str = "window.__phoenixSetGamepads([{\"index\":0,\"id\":\"pad\",\"buttons\":[{\"pressed\":true,\"value\":1}],\"axes\":[1]}])";
+        const SELECT: &str = r#"{"type":"NativeOperator","operation":"select","index":0}"#;
+        for crash in [false, true] {
+            let bus = PaneBus::default();
+            let original = bus.open(identity(1));
+            let competitor = bus.open(identity(2));
+            bus.observe_gamepads(PADS);
+            assert!(bus.submit_operator_record(original, SELECT));
+            let token = bus.token_of(original).unwrap();
+            let replacement = if crash {
+                bus.fault(original, PaneFault::ViewCrashed);
+                service_faults(&bus).pop().unwrap().recreated.unwrap().0
+            } else {
+                bus.rebuild(original).unwrap().0
+            };
+            assert_eq!(bus.token_of(replacement).as_deref(), Some(token.as_str()));
+            assert!(bus.submit_operator_record(competitor, SELECT));
+            assert!(bus.take_operator_replies(competitor)[0].contains("refused"));
+            assert!(bus
+                .gamepads_for_pane(replacement, PADS)
+                .contains("\"nativeOwned\":true"));
+            assert!(bus
+                .gamepads_for_pane(competitor, PADS)
+                .contains("\"available\":false"));
+            // The new page has not selected anything. Its controller belongs
+            // to it already, and closing the obsolete view cannot free it.
+            bus.close(original);
+            assert!(bus
+                .gamepads_for_pane(replacement, PADS)
+                .contains("\"nativeOwned\":true"));
+            bus.close(replacement);
+            assert!(bus.submit_operator_record(competitor, SELECT));
+            assert!(bus
+                .gamepads_for_pane(competitor, PADS)
+                .contains("\"nativeOwned\":true"));
+            bus.observe_gamepads("window.__phoenixSetGamepads([])");
+            bus.observe_gamepads(PADS);
+            assert!(bus
+                .gamepads_for_pane(competitor, PADS)
+                .contains("\"nativeOwned\":false"));
+        }
     }
 
     #[test]

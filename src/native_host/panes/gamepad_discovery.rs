@@ -19,18 +19,23 @@ pub(super) struct GamepadDiscoveryPlugin;
 
 impl Plugin for GamepadDiscoveryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ConnectedInventory>()
-            .add_systems(
-                Startup,
-                remember_connections.run_if(resource_exists::<Messages<GamepadConnectionEvent>>),
-            )
-            .add_systems(
-                PreUpdate,
-                (remember_connections, reconcile_connections)
-                    .chain()
-                    .after(InputSystems)
-                    .run_if(resource_exists::<Messages<GamepadConnectionEvent>>),
-            );
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<ConnectedInventory>(
+            StateClass::Timer,
+            "native-controller-preferences-and-assignment",
+        )
+        .init_resource::<ConnectedInventory>()
+        .add_systems(
+            Startup,
+            remember_connections.run_if(resource_exists::<Messages<GamepadConnectionEvent>>),
+        )
+        .add_systems(
+            PreUpdate,
+            (remember_connections, reconcile_connections)
+                .chain()
+                .after(InputSystems)
+                .run_if(resource_exists::<Messages<GamepadConnectionEvent>>),
+        );
     }
 }
 

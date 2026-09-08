@@ -165,7 +165,6 @@ pub fn service_faults(bus: &PaneBus) -> Vec<FaultOutcome> {
         // loaded — frames later — so the ordinary disconnect-then-reconnect
         // order is preserved. `recreate` reads the failed pane's identity from
         // its (now `Closed`) record, which the registry keeps.
-        bus.close(failed);
         let mut recreated = None;
         let mut recreation_exhausted = false;
         if fault.recreates() {
@@ -174,10 +173,13 @@ pub fn service_faults(bus: &PaneBus) -> Vec<FaultOutcome> {
             // per-identity budget, stop rebuilding into the same crash and leave
             // the pane closed for the operator — the ReliableOverflow conclusion.
             if bus.record_recreation_within_budget(failed) {
-                recreated = bus.recreate(failed);
+                recreated = bus.rebuild(failed);
             } else {
                 recreation_exhausted = true;
             }
+        }
+        if recreated.is_none() {
+            bus.close(failed);
         }
         outcomes.push(FaultOutcome {
             failed,

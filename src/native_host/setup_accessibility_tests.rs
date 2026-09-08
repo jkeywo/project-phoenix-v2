@@ -358,6 +358,7 @@ fn the_report_states_the_os_defaults_and_supported_range() {
         reduced_motion: true,
         high_contrast: true,
         text_scale: 1.25,
+        ..Default::default()
     };
     let report = render_accessibility_setup_report(None, &prefs);
     assert!(report.contains("Accessibility:"));
@@ -365,6 +366,22 @@ fn the_report_states_the_os_defaults_and_supported_range() {
     assert!(report.contains("reduced motion on"));
     assert!(report.contains("1x to 1.5x"));
     assert!(report.contains("No profile resolved"));
+}
+
+#[test]
+fn the_report_distinguishes_unavailable_from_neutral_os_values() {
+    let prefs = OsAccessibilityPrefs {
+        availability: Some(super::super::panes::os_prefs::OsPreferenceAvailability {
+            text_scale: false,
+            high_contrast: true,
+            reduced_motion: false,
+        }),
+        ..Default::default()
+    };
+    let report = render_accessibility_setup_report(None, &prefs);
+    assert!(report.contains("OS text size: unavailable"));
+    assert!(report.contains("OS motion: unavailable"));
+    assert!(!report.contains("OS contrast: unavailable"));
 }
 
 #[test]

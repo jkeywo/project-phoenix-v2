@@ -2327,14 +2327,14 @@ Three things are **parked in the kit's §9** rather than dropped, following
 
 - **Touch operation of the lobby** — no touch hardware, and PRD #1324 puts it out
   of scope explicitly, parked with #1124's Part B.
-- **`prefers-contrast` / reduced motion reaching the surface.** The CSS is here
-  (`gui/host-lobby.css`) and so is the reticle's Rust response
-  (`FocusReticleStyle::for_os_prefs`), but neither can be driven from Windows
-  today: Ultralight ships no OS-backed `matchMedia`, and
-  `panes::os_prefs::query_os_accessibility_prefs` is a documented stub returning
-  "no preference" on every target, because a live Windows read needs `unsafe` FFI
-  this crate forbids. A sanctioned live read drops into that one function and
-  unparks it.
+- **Windows preference adoption, observed.** Host builds now read text size,
+  contrast and animations through safe WinRT bindings in
+  `src/native_host/panes/os_prefs.rs`. The adapter seeds the existing private
+  default layer, reports each unavailable read, and retains explicit profile
+  precedence. New documents read once; crash recreation retains their defaults.
+  Actual pane/reticle adoption still needs the rig pass in
+  `docs/acceptance/1127-windows-preferences.md`. The shared 200% tracer remains
+  blocked; the native setup contract still declares 100–150% support.
 - **A crashed console's rebuild, observed.** Not constructible by hand — a view
   crash is an internal renderer fault and a borderless-fullscreen Station window
   has nothing to close. The rule is proved instead against a real running bridge

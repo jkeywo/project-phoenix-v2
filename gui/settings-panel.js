@@ -61,7 +61,7 @@ export {
   isSemanticModifierEvent,
   semanticModifierCode,
 } from './semantic-controls-remapper.js';
-import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
+import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP, unavailableOsPreferences } from './accessibility-profile.js';
 import {
   mountOverlayShell,
   renderSettingsOverlay,
@@ -725,6 +725,9 @@ export function mountSettings({
     const intro = section('settings.accessibility.presentation');
     intro.appendChild(hint('settings.accessibility.intro_hint'));
     intro.appendChild(hint('settings.accessibility.local_hint'));
+    if (unavailableOsPreferences(doc.defaultView).length) {
+      intro.appendChild(hint('settings.accessibility.os_unavailable'));
+    }
     body.appendChild(intro);
 
     // Text size — the observable effect proven end to end (AC3). Drives

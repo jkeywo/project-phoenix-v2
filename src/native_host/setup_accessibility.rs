@@ -346,6 +346,19 @@ pub fn render_accessibility_setup_report(
         "  Supported text scaling: {}x to {}x\n",
         SUPPORTED_TEXT_SCALE_MIN, SUPPORTED_TEXT_SCALE_MAX,
     ));
+    if let Some(availability) = prefs.availability {
+        for (name, available) in [
+            ("text size", availability.text_scale),
+            ("contrast", availability.high_contrast),
+            ("motion", availability.reduced_motion),
+        ] {
+            if !available {
+                out.push_str(&format!(
+                    "  OS {name}: unavailable; using the standard default.\n"
+                ));
+            }
+        }
+    }
 
     let Some(resolved) = resolved else {
         out.push_str("  No profile resolved; no pane layout to check.\n");

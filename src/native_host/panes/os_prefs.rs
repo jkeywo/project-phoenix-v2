@@ -33,25 +33,14 @@
 //! as it is for a phone — a set of Station ids, never a setting, a diagnosis or
 //! a reason.
 //!
-//! # The default read, and why the live OS query is deferred
+//! # Platform read
 //!
-//! [`OsAccessibilityPrefs`] and [`os_defaults_script`] are pure and Bevy-free,
-//! run by the ordinary `cargo test` CI. [`query_os_accessibility_prefs`] is the
-//! seam that would read the live machine settings; today it answers
-//! [`OsAccessibilityPrefs::default`] — "the OS states no preference" — on every
-//! target.
-//!
-//! A live Windows read (client-area animation, high-contrast, the
-//! `TextScaleFactor` registry value) needs either `unsafe` FFI or a Win32
-//! binding crate. This crate is `#![forbid(unsafe_code)]` (`src/lib.rs`), which
-//! an inner `#[allow]` cannot lift, and no safe OS-preference binding is a
-//! dependency — adding a ~1000-crate binding graph for three reads is the trade
-//! the crate has so far declined. So the read is deferred behind this ONE
-//! function: the entire default-layer seam above it — the injected global, the
-//! page's `matchMedia` overlay, the explicit-override precedence and the
-//! clamping — is complete and exercised, and a sanctioned live read (a safe
-//! binding, or an isolated FFI shim crate that may use `unsafe`) drops into
-//! here without touching anything else.
+//! Windows host builds use safe WinRT UISettings and AccessibilitySettings
+//! bindings. Each property can fail independently; availability accompanies the
+//! default layer so the page can explain a fallback. Objects are local to the
+//! read and dropped immediately. The windows binding owns runtime activation.
+//! Other platforms/builds explicitly report unavailable. Reads happen when a
+//! document is created; crash recreation retains that document's defaults.
 
 /// The three OS accessibility preferences a pane imports as its default layer.
 ///
@@ -68,6 +57,16 @@ pub struct OsAccessibilityPrefs {
     pub high_contrast: bool,
     /// The OS text-size multiplier (Windows "Make text bigger", `1.0` == 100%).
     pub text_scale: f32,
+    /// Per-property read outcome; None for synthetic preferences.
+    pub availability: Option<OsPreferenceAvailability>,
+}
+
+/// Availability stays machine-local beside the defaults, never in a profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OsPreferenceAvailability {
+    pub reduced_motion: bool,
+    pub high_contrast: bool,
+    pub text_scale: bool,
 }
 
 impl Default for OsAccessibilityPrefs {
@@ -76,6 +75,7 @@ impl Default for OsAccessibilityPrefs {
             reduced_motion: false,
             high_contrast: false,
             text_scale: 1.0,
+            availability: None,
         }
     }
 }
@@ -121,12 +121,22 @@ impl OsAccessibilityPrefs {
 /// `the_script_is_a_single_well_formed_assignment` test pins) before it reaches
 /// this `format!` — an unescaped string field here is an HTML/JS injection sink.
 pub fn os_defaults_script(prefs: &OsAccessibilityPrefs) -> String {
+    let availability = prefs
+        .availability
+        .map(|a| {
+            format!(
+                ",\"availability\":{{\"reducedMotion\":{},\"contrast\":{},\"textScale\":{}}}",
+                a.reduced_motion, a.high_contrast, a.text_scale,
+            )
+        })
+        .unwrap_or_default();
     format!(
         "window.PhoenixOsAccessibilityDefaults = \
-         {{\"reducedMotion\":{},\"contrast\":{},\"textScale\":{}}};",
+         {{\"reducedMotion\":{},\"contrast\":{},\"textScale\":{}{}}};",
         prefs.reduced_motion,
         prefs.high_contrast,
         format_scale(prefs.sane_text_scale()),
+        availability,
     )
 }
 
@@ -142,25 +152,98 @@ fn format_scale(scale: f32) -> String {
     s
 }
 
-/// Read the host machine's supported OS accessibility preferences, best-effort.
-///
-/// Returns [`OsAccessibilityPrefs::default`] — "the OS states no preference" —
-/// on every target today. The live Windows read (client-area animation,
-/// high-contrast, the `TextScaleFactor` registry value) is deferred because it
-/// needs `unsafe` FFI or a Win32 binding crate, and this crate is
-/// `#![forbid(unsafe_code)]` with no safe OS-preference binding among its
-/// dependencies (see the module note). A pane therefore starts from the same
-/// silent baseline a browser computes from an empty `matchMedia`; an explicit
-/// player choice still overrides it, and every other part of the seam — the
-/// injected global, the page overlay, precedence and clamping — is live. A
-/// sanctioned safe read slots in here without touching its callers.
+/// Map independently available OS properties to a finite default layer.
+fn from_os_reads(
+    animations: Option<bool>,
+    contrast: Option<bool>,
+    scale: Option<f64>,
+) -> OsAccessibilityPrefs {
+    let scale = scale.filter(|value| value.is_finite() && *value > 0.0);
+    OsAccessibilityPrefs {
+        reduced_motion: animations.is_some_and(|enabled| !enabled),
+        high_contrast: contrast.unwrap_or(false),
+        text_scale: scale
+            .unwrap_or(1.0)
+            .clamp(f64::from(TEXT_SCALE_FLOOR), f64::from(TEXT_SCALE_CEIL))
+            as f32,
+        availability: Some(OsPreferenceAvailability {
+            reduced_motion: animations.is_some(),
+            high_contrast: contrast.is_some(),
+            text_scale: scale.is_some(),
+        }),
+    }
+}
+
+/// Read supported Windows preferences without retaining OS handles or authority.
+/// Failure of one getter does not discard the other successful defaults.
+#[cfg(all(target_os = "windows", feature = "host"))]
 pub fn query_os_accessibility_prefs() -> OsAccessibilityPrefs {
-    OsAccessibilityPrefs::default()
+    use windows::UI::ViewManagement::{AccessibilitySettings, UISettings};
+    let ui = UISettings::new().ok();
+    from_os_reads(
+        ui.as_ref()
+            .and_then(|settings| settings.AnimationsEnabled().ok()),
+        AccessibilitySettings::new()
+            .ok()
+            .and_then(|settings| settings.HighContrast().ok()),
+        ui.as_ref()
+            .and_then(|settings| settings.TextScaleFactor().ok()),
+    )
+}
+
+/// Unsupported targets/builds publish explicit unavailable status.
+#[cfg(not(all(target_os = "windows", feature = "host")))]
+pub fn query_os_accessibility_prefs() -> OsAccessibilityPrefs {
+    from_os_reads(None, None, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independent_reads_preserve_success_and_report_unavailable_fields() {
+        let prefs = from_os_reads(Some(false), None, Some(1.5));
+        assert!(prefs.reduced_motion);
+        assert!(!prefs.high_contrast);
+        assert_eq!(prefs.text_scale, 1.5);
+        assert_eq!(
+            prefs.availability,
+            Some(OsPreferenceAvailability {
+                reduced_motion: true,
+                high_contrast: false,
+                text_scale: true,
+            })
+        );
+        assert!(os_defaults_script(&prefs).contains(
+            "\"availability\":{\"reducedMotion\":true,\"contrast\":false,\"textScale\":true}"
+        ));
+        let neutral = from_os_reads(Some(true), Some(false), Some(1.0));
+        assert!(!neutral.reduced_motion);
+        assert!(neutral.availability.unwrap().high_contrast);
+    }
+
+    #[test]
+    fn unavailable_and_invalid_scale_are_honest_finite_fallbacks() {
+        for value in [
+            None,
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+            Some(0.0),
+            Some(-1.0),
+        ] {
+            let prefs = from_os_reads(None, None, value);
+            assert_eq!(prefs.text_scale, 1.0);
+            assert!(!prefs.availability.unwrap().text_scale);
+        }
+        assert_eq!(from_os_reads(None, None, Some(2.25)).text_scale, 2.0);
+        assert!(
+            from_os_reads(None, None, Some(2.25))
+                .availability
+                .unwrap()
+                .text_scale
+        );
+    }
 
     #[test]
     fn the_default_states_no_preference() {
@@ -191,6 +274,7 @@ mod tests {
             reduced_motion: true,
             high_contrast: true,
             text_scale: 1.25,
+            ..Default::default()
         };
         assert_eq!(
             os_defaults_script(&prefs),
@@ -230,6 +314,7 @@ mod tests {
             reduced_motion: true,
             high_contrast: false,
             text_scale: 1.5,
+            ..Default::default()
         });
         assert!(s.starts_with("window.PhoenixOsAccessibilityDefaults = {"));
         assert!(s.ends_with("};"));
@@ -239,10 +324,9 @@ mod tests {
 
     #[test]
     fn a_query_never_panics_and_stays_in_range() {
-        // The deferred read yields the no-preference default today; whatever a
-        // future live read reports, the scale must stay a finite, sane number so
-        // the injected literal is always valid.
+        // A live read can be unavailable, but must never create invalid CSS/JS.
         let p = query_os_accessibility_prefs();
+        eprintln!("OS_ACCESSIBILITY_READ {p:?}");
         assert!(p.text_scale.is_finite());
         assert!(p.sane_text_scale() >= TEXT_SCALE_FLOOR);
         assert!(p.sane_text_scale() <= TEXT_SCALE_CEIL);

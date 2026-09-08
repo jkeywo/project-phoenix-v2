@@ -988,6 +988,7 @@ mod tests {
                 reduced_motion: true,
                 high_contrast: true,
                 text_scale: 1.25,
+                ..Default::default()
             },
         );
         let assign = seeded
@@ -1049,6 +1050,7 @@ mod tests {
                 reduced_motion: true,
                 high_contrast: true,
                 text_scale: 1.5,
+                ..Default::default()
             },
         );
         let line = seeded

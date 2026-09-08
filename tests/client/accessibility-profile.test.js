@@ -28,6 +28,7 @@ import {
   profileWithAssistance,
   osAccessibilityDefaults,
   readInjectedOsDefaults,
+  unavailableOsPreferences,
   resolveTriState,
   resolveTextScale,
   resolveEffects,
@@ -39,6 +40,17 @@ import {
 } from '../../gui/accessibility-profile.js';
 import * as profileModule from '../../gui/accessibility-profile.js';
 import { ClientSimState } from '../../gui/sim-state.js';
+
+it('reports failed native reads without treating neutral successful values as failures', () => {
+  const win = { PhoenixOsAccessibilityDefaults: {
+    reducedMotion: false, contrast: false, textScale: 1.5,
+    availability: { reducedMotion: true, contrast: false, textScale: true },
+  } };
+  expect(unavailableOsPreferences(win)).toEqual(['contrast']);
+  expect(readInjectedOsDefaults(win)).toEqual({ reducedMotion: false, contrast: false, textScale: 1.5 });
+  expect(unavailableOsPreferences({})).toEqual([]);
+  expect(unavailableOsPreferences({ get PhoenixOsAccessibilityDefaults() { throw new Error('unavailable'); } })).toEqual([]);
+});
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 

@@ -121,6 +121,12 @@ pub struct BridgeLayoutStore {
     pub remembered: Option<Remembered>,
 }
 
+/// A host Off action can release retained logical intent after hardware
+/// reconciliation already removed its physical seat. That accepted change
+/// must reach disk even when the visible layout compares equal to its baseline.
+#[derive(Resource, Default)]
+pub(crate) struct PendingLayoutSave(pub bool);
+
 /// One ship class's remembered bridge: the key it is filed under, the
 /// arrangement the file holds, and the bridge that arrangement was agreed on.
 #[derive(Clone, Debug)]
@@ -172,6 +178,7 @@ pub struct BridgeLayoutStorePlugin;
 
 impl Plugin for BridgeLayoutStorePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<PendingLayoutSave>();
         app.add_systems(
             Update,
             (
@@ -275,6 +282,9 @@ fn adopt_remembered_layout(
     ship: Option<Res<crate::lobby::SelectedShipResource>>,
     hull: Option<Res<crate::ship::components::PendingShipConfig>>,
     log: Option<Res<LogFilterConfig>>,
+    bus: Option<Res<super::panes::PaneBusResource>>,
+    mut assignments: Option<ResMut<super::console_assignment::ConsoleAssignments>>,
+    mut sessions: Option<ResMut<crate::lobby::Sessions>>,
 ) {
     // The hull-known moment: both resources land together, in
     // `install_world_selection`, on either world-arrival path.
@@ -362,6 +372,38 @@ fn adopt_remembered_layout(
             reconciled
         }
     };
+
+    // A selected class replaces logical screen intent too. In particular a
+    // same-id station saved Off on this hull cannot inherit the old hull's
+    // reservation merely because its prior view was unavailable. Hardware
+    // reconcile does not run this path; only an explicit class adoption does.
+    if let Some(bus) = &bus {
+        for (_, station) in bus.0.console_assignments() {
+            if next.monitor_of(&station).is_none() {
+                bus.0.release_console(&station.0);
+            }
+        }
+        // This adapter runs after the display follower. Reserve adopted seats
+        // now, before the next FixedUpdate can accept a competing phone claim.
+        for station in next.roster() {
+            if next.monitor_of(station).is_some() {
+                bus.0.reserve_console(&station.0);
+            }
+        }
+        if let Some(sessions) = sessions.as_mut() {
+            sessions
+                .0
+                .set_native_station_assignments(bus.0.console_assignments());
+        }
+    }
+    if let Some(assignments) = assignments.as_mut() {
+        assignments.0.clear();
+        for station in next.roster() {
+            if let Some(monitor) = next.monitor_of(station) {
+                assignments.0.insert(station.clone(), monitor.clone());
+            }
+        }
+    }
 
     // Written through a value compare so the frame this runs on a `--world`
     // host, where the reconcile is a no-op and there is no saved file, does not
@@ -467,13 +509,15 @@ fn remember_bridge_layout(
     mut store: ResMut<BridgeLayoutStore>,
     layout: Res<BridgeLayoutResource>,
     log: Option<Res<LogFilterConfig>>,
+    mut pending_save: ResMut<PendingLayoutSave>,
 ) {
+    let explicit_logical_change = std::mem::take(&mut pending_save.0);
     // Nothing to file until a class is known — which is also what stops the boot
     // seed being written over a saved layout that has not been read yet.
     let Some(remembered) = store.remembered.as_ref() else {
         return;
     };
-    if remembered.saved == layout.layout {
+    if !explicit_logical_change && remembered.saved == layout.layout {
         // THE DISK ALREADY HOLDS WHAT IS ON SCREEN, so there is nothing
         // outstanding — and that includes a refusal the operator has since
         // undone. Clearing the record here is what makes the retry promised in
@@ -503,7 +547,7 @@ fn remember_bridge_layout(
         return;
     }
     let class = remembered.class.clone();
-    if remembered.bridge != layout.layout.monitors() {
+    if !explicit_logical_change && remembered.bridge != layout.layout.monitors() {
         crate::pinfo!(
             log,
             LogCat::Lobby,

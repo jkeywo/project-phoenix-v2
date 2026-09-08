@@ -243,6 +243,153 @@ fn a_class_nobody_has_arranged_writes_nothing_until_the_first_press() {
 }
 
 #[test]
+fn switching_class_releases_an_unavailable_console_saved_off_on_the_new_hull() {
+    use crate::native_host::console_assignment::ConsoleAssignments;
+    use crate::native_host::panes::{transport::PaneBus, PaneBusResource};
+
+    let scratch = Scratch::new("class-releases-reservation");
+    let mut app = host(&scratch, None);
+    let bus = PaneBus::default();
+    app.insert_resource(PaneBusResource(bus.clone()));
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    app.add_message::<crate::lobby::InboundMessage>();
+    fly(&mut app, DESTROYER);
+    app.update();
+    // Both hulls have Helm, but this class's remembered bridge keeps it Off.
+    scratch
+        .store()
+        .save(
+            &ShipClassKey::from_template_path(CRUISER).unwrap(),
+            live(&app),
+        )
+        .unwrap();
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        },
+    );
+    let token = bus.console_assignments()[0].0.clone();
+    unplug(&mut app, "BenQ EX");
+    assert!(bus.open_pane_for_name("helm").is_none());
+    assert_eq!(
+        app.world()
+            .resource::<crate::lobby::Sessions>()
+            .0
+            .native_station_for_token(&token),
+        Some(&station("helm"))
+    );
+
+    fly(&mut app, CRUISER);
+    app.update();
+    app.update();
+    assert!(live(&app).monitor_of(&station("helm")).is_none());
+    assert!(bus.console_assignments().is_empty());
+    assert!(app.world().resource::<ConsoleAssignments>().0.is_empty());
+    assert!(app
+        .world()
+        .resource::<crate::lobby::Sessions>()
+        .0
+        .native_station_for_token(&token)
+        .is_none());
+}
+
+#[test]
+fn adopted_screens_reserve_their_station_before_the_next_display_pass() {
+    use crate::native_host::panes::{transport::PaneBus, PaneBusResource};
+
+    let scratch = Scratch::new("adoption-reserves-first");
+    let mut app = host(&scratch, None);
+    let bus = PaneBus::default();
+    app.insert_resource(PaneBusResource(bus.clone()));
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    app.add_message::<crate::lobby::InboundMessage>();
+    fly(&mut app, DESTROYER);
+    app.update();
+    let cruiser = live(&app)
+        .apply(&LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        })
+        .unwrap();
+    scratch
+        .store()
+        .save(
+            &ShipClassKey::from_template_path(CRUISER).unwrap(),
+            &cruiser,
+        )
+        .unwrap();
+
+    fly(&mut app, CRUISER);
+    app.update();
+    assert_eq!(live(&app).monitor_of(&station("helm")), Some(&m(BENQ)));
+    assert!(bus.open_pane_for_name("helm").is_none());
+    let sessions = &app.world().resource::<crate::lobby::Sessions>().0;
+    assert!(
+        !sessions.station_claim_allowed("phone", &station("helm")),
+        "the next fixed tick must refuse a phone even before the view opens"
+    );
+    let token = bus.console_assignments()[0].0.clone();
+    assert_eq!(
+        sessions.native_station_for_token(&token),
+        Some(&station("helm"))
+    );
+    app.update();
+    assert_eq!(
+        bus.token_of(bus.open_pane_for_name("helm").unwrap())
+            .as_deref(),
+        Some(token.as_str())
+    );
+}
+
+#[test]
+fn off_after_monitor_loss_releases_the_saved_assignment_too() {
+    use crate::native_host::host_lobby::{
+        drain_surface_records, pump_host_lobby, HostLobbyBridge, HostLobbyBridgeResource,
+    };
+    use crate::native_host::panes::{transport::PaneBus, PaneBusResource, RecordingSurface};
+
+    let scratch = Scratch::new("off-after-monitor-loss");
+    let mut app = host(&scratch, None);
+    let bus = PaneBus::default();
+    app.insert_resource(PaneBusResource(bus.clone()));
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    app.add_message::<crate::lobby::InboundMessage>();
+    let bridge = HostLobbyBridge::new();
+    app.insert_resource(HostLobbyBridgeResource(bridge.clone()));
+    app.add_systems(PreUpdate, drain_surface_records);
+    fly(&mut app, DESTROYER);
+    app.update();
+    press(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: station("helm"),
+            monitor: m(BENQ),
+        },
+    );
+    unplug(&mut app, "BenQ EX");
+    assert_eq!(
+        saved(&scratch, DESTROYER).monitor_of(&station("helm")),
+        Some(&m(BENQ))
+    );
+    let mut surface = RecordingSurface::ready();
+    surface.queue_record(r#"{"kind":"unassign-station","station":"helm"}"#);
+    pump_host_lobby(&bridge, &mut surface);
+    app.update();
+    assert!(bus.console_assignments().is_empty());
+    assert!(saved(&scratch, DESTROYER)
+        .monitor_of(&station("helm"))
+        .is_none());
+}
+
+#[test]
 fn arranging_the_bridge_and_relaunching_puts_it_back() {
     // Acceptance criterion one, end to end: arrange, quit, relaunch, pick the
     // same class — the viewscreen is on the remembered monitor and the assigned

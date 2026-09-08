@@ -603,7 +603,7 @@ export function hostLobbyStationRows(layout) {
         reason,
       });
     }
-    rows[st.station] = buttons.length === 0
+    rows[st.station] = buttons.length === 0 && !st.assigned_to
       // Phones only: the one display is the viewscreen, and a console never
       // covers it.
       ? {
@@ -621,7 +621,9 @@ export function hostLobbyStationRows(layout) {
           // comparing the others.
           off: { selected: !st.assigned_to },
           buttons,
-          message: null,
+          message: st.assigned_to && !buttons.some(button => button.selected)
+            ? { id: 'server.station_row.unavailable', params: {} }
+            : null,
         };
   }
   return rows;

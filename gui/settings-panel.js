@@ -302,6 +302,7 @@ export function buildSettingsState(opts = {}) {
       devices: [], selectedIndex: null, status: 'none', capturing: null,
     },
     stationId,
+    assignedStation: opts.assignedStation || null,
     afk,
     ratings,
     // The private Accessibility profile (issue #1102), reflected as the
@@ -994,7 +995,7 @@ export function mountSettings({
       body.appendChild(afkSection);
     }
 
-    if (view.stationId) {
+    if (view.stationId && !view.assignedStation) {
       const leaveSection = section('settings.station');
       leaveSection.appendChild(
         action(t('settings.leave_station'), 'settings-leave-btn', () => {
@@ -1039,6 +1040,7 @@ export function mountSettings({
     const view = buildSettingsState({
       state: getState ? getState() : {},
       myToken,
+      assignedStation: doc.defaultView?.__PHOENIX_ASSIGNED_STATION__ || null,
       demo: !!isDemo(),
       activeTab,
       semanticActions: typeof _getSemanticActions === 'function'

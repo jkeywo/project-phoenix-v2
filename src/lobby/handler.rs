@@ -165,7 +165,7 @@ pub(crate) fn handle_identify(
                 let occupied = sessions.players().iter().any(|p| {
                     p.connected && p.token != *id_token && p.station.as_ref() == Some(sid)
                 });
-                if !occupied {
+                if !occupied && sessions.station_claim_allowed(&id_token, sid) {
                     // Capture restore info for post-Welcome broadcasts.
                     let last_rating = sessions
                         .players()
@@ -346,6 +346,15 @@ pub(crate) fn handle_select_station(
         };
     }
 
+    if !sessions.station_claim_allowed(token, &station_def.id) {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
+
     // Check if sender already holds this station (own station → no-op)
     let sender_station = sessions.station_for_token(token).cloned();
     if sender_station.as_ref() == Some(&station_def.id) {
@@ -468,6 +477,15 @@ pub(crate) fn handle_release_station(
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut station_rating_update: Option<(StationId, String)> = None;
+
+    if sessions.native_station_for_token(token).is_some() {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
 
     let released_station = sessions.station_for_token(token).cloned();
     sessions.set_station(token, None);
@@ -626,6 +644,15 @@ pub(crate) fn handle_set_spectator(
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut station_rating_update: Option<(StationId, String)> = None;
+
+    if sessions.native_station_for_token(token).is_some() {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
 
     if spectator {
         // Capture the seat BEFORE `set_spectator` vacates it, so we only emit a

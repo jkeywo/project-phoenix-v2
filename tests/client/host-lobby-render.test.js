@@ -710,3 +710,18 @@ describe('a station card’s screen row', () => {
     expect(screenButtons().length).toBe(2);
   });
 });
+
+it('retains an actionable Off control and explanation when an assigned screen is unavailable', () => {
+  installLobbyPanel(document);
+  renderWithLayout({
+    monitors: [monitor()],
+    stations: [{ station: 'helm', assigned_to: 'Missing@1920x1080', monitors: [
+      screenChoice('BRAVIA@3840x2160', 'excluded', 'is-viewscreen'),
+    ] }],
+  }, { stations: [station({ id: 'helm' })] });
+  expect(screenButtons()).toHaveLength(1);
+  expect(screenButtons()[0].getAttribute('aria-pressed')).toBe('false');
+  expect(screenButtons()[0].disabled).toBe(false);
+  expect(document.querySelector('.station-screens-message').textContent)
+    .toBe(t('server.station_row.unavailable'));
+});

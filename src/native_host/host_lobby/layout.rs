@@ -183,8 +183,9 @@ pub struct StationRowPayload {
     /// The station id — the ship's own authoring key, which is what a press
     /// carries back and what the layout law is keyed on.
     pub station: String,
-    /// The monitor its console is open on, or absent when it is closed. The
-    /// row's "off" state is this being absent, not a monitor entry of its own.
+    /// The assigned monitor, retained while its console or display is absent.
+    /// The adapter overlays logical intent on the physical layout so Off and
+    /// move remain actionable during recovery. Absent means explicitly Off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_to: Option<String>,
     /// One entry per monitor this bridge has, in monitor order — including the
@@ -233,6 +234,8 @@ pub struct BridgeLayoutPayload {
 /// moving.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LayoutNotice {
+    /// A screen assignment may not silently displace a connected phone.
+    StationHeld { station: StationId, holder: String },
     /// A [`LayoutAction`] the law refused.
     Refused(LayoutRefusal),
     /// Something [`BridgeLayout::reconcile`] or `adopt_profile` had to degrade.
@@ -248,6 +251,10 @@ impl LayoutNotice {
     /// for why it is beside the note rather than inside it.
     pub fn payloads(&self) -> Vec<LayoutNoticePayload> {
         match self {
+            LayoutNotice::StationHeld { station, holder } => vec![notice(
+                "server.station_row.held_by_player",
+                vec![("station", station.0.clone()), ("holder", holder.clone())],
+            )],
             LayoutNotice::Refused(refusal) => vec![notice(refusal.string_id(), refusal.params())],
             LayoutNotice::Adopted(note) => {
                 let mut out = vec![notice(note.string_id(), note.params())];
@@ -263,6 +270,11 @@ impl LayoutNotice {
 impl std::fmt::Display for LayoutNotice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            LayoutNotice::StationHeld { station, holder } => write!(
+                f,
+                "station {} is held by {holder}; release it before assigning a native screen",
+                station.0
+            ),
             LayoutNotice::Refused(refusal) => refusal.fmt(f),
             LayoutNotice::Adopted(note) => note.fmt(f),
         }

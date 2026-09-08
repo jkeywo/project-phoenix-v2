@@ -69,6 +69,7 @@ pub mod bridge_media;
 /// borderless-fullscreen windows from a resolved profile is [`bridge_display`].
 pub mod bridge_profile;
 pub mod connections;
+pub mod console_assignment;
 /// The host as its own rendezvous (issue #1353): the in-process, single-game
 /// subset of the rendezvous service, so a phone on the LAN joins over the
 /// delivery port with no external service anywhere. Behind the `host` feature

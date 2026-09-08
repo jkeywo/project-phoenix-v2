@@ -43,6 +43,9 @@ pub enum RegisterError {
 /// pruning, so this module deliberately does not prune session records.
 pub struct SessionManager {
     players: Vec<Player>,
+    /// Host-owned native screen assignments. Kept apart from connected tenure:
+    /// a rebuilding screen reserves its station while Backfill operates it.
+    native_station_assignments: std::collections::HashMap<String, StationId>,
     /// Rating a player has chosen for a station while still in the Lobby
     /// (before the Ship entity — and thus `ActiveStationRatings` — exists).
     /// Keyed by station, not token: the choice belongs to whoever currently
@@ -88,6 +91,7 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             players: Vec::new(),
+            native_station_assignments: std::collections::HashMap::new(),
             pending_ratings: std::collections::HashMap::new(),
             eligibility: std::collections::HashMap::new(),
             afk_prev_rating: std::collections::HashMap::new(),
@@ -96,6 +100,29 @@ impl SessionManager {
 
     fn idx(&self, token: &str) -> Option<usize> {
         self.players.iter().position(|p| p.token == token)
+    }
+
+    /// Only the native display adapter may set these; no client message can.
+    pub fn set_native_station_assignments(
+        &mut self,
+        assignments: impl IntoIterator<Item = (String, StationId)>,
+    ) {
+        self.native_station_assignments = assignments.into_iter().collect();
+    }
+
+    pub fn native_station_for_token(&self, token: &str) -> Option<&StationId> {
+        self.native_station_assignments.get(token)
+    }
+
+    /// Applies to new claims and reconnect restoration, including while a
+    /// reserved screen is disconnected and therefore has no connected holder.
+    pub fn station_claim_allowed(&self, token: &str, station: &StationId) -> bool {
+        self.native_station_for_token(token)
+            .is_none_or(|bound| bound == station)
+            && !self
+                .native_station_assignments
+                .iter()
+                .any(|(owner, bound)| owner != token && bound == station)
     }
 
     pub fn register(&mut self, token: String, name: String) -> Result<&Player, RegisterError> {

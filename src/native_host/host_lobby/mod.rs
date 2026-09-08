@@ -149,6 +149,7 @@ use crate::core::messages::{ClientMessage, GamePhase};
 use crate::delivery::serve::HostedDocuments;
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::bridge_display::BridgeLayoutResource;
+use crate::native_host::bridge_layout::LayoutAction;
 use crate::native_host::panes::document::{connectable_host_addr, mint_document_nonce};
 use crate::native_host::panes::PaneId;
 use crate::native_host::world_load::{
@@ -953,6 +954,10 @@ pub(crate) fn drain_surface_records(
     window_mode: Option<ResMut<fullscreen::WindowModeToggle>>,
     mut exit: MessageWriter<AppExit>,
     log: Option<Res<LogFilterConfig>>,
+    bus: Option<Res<super::panes::PaneBusResource>>,
+    mut sessions: Option<ResMut<crate::lobby::Sessions>>,
+    mut assignments: Option<ResMut<super::console_assignment::ConsoleAssignments>>,
+    mut pending_save: Option<ResMut<super::layout_store_systems::PendingLayoutSave>>,
 ) {
     let Some(bridge) = bridge else {
         return;
@@ -1136,6 +1141,21 @@ pub(crate) fn drain_surface_records(
             continue;
         };
         let notices = layout_notices.get_or_insert_with(Vec::new);
+        if let LayoutAction::AssignStation { station, .. } = &action {
+            if let Some(holder) = sessions.as_ref().and_then(|s| {
+                s.0.players().iter().find(|p| {
+                    p.connected
+                        && p.station.as_ref() == Some(station)
+                        && s.0.native_station_for_token(&p.token) != Some(station)
+                })
+            }) {
+                notices.push(LayoutNotice::StationHeld {
+                    station: station.clone(),
+                    holder: holder.name.clone(),
+                });
+                continue;
+            }
+        }
         let result = if matches!(&action, crate::native_host::bridge_layout::LayoutAction::SetGameMaster { monitor } if monitor.is_some() != native_gm.as_ref().map_or(layout.layout.game_master_monitor().is_some(), |gm| gm.enabled))
             && phase
                 .as_ref()
@@ -1155,6 +1175,33 @@ pub(crate) fn drain_surface_records(
                 );
                 layout.layout = next;
                 notices.clear();
+                match &action {
+                    LayoutAction::AssignStation { station, monitor } => {
+                        if let Some(assignments) = assignments.as_mut() {
+                            assignments.0.insert(station.clone(), monitor.clone());
+                        }
+                        if let Some(bus) = &bus {
+                            bus.0.reserve_console(&station.0);
+                        }
+                    }
+                    LayoutAction::UnassignStation { station } => {
+                        let released = assignments
+                            .as_mut()
+                            .is_some_and(|assignments| assignments.0.remove(station).is_some());
+                        if let Some(pending_save) = pending_save.as_mut() {
+                            pending_save.0 |= released;
+                        }
+                        if let Some(bus) = &bus {
+                            bus.0.release_console(&station.0);
+                        }
+                    }
+                    _ => {}
+                }
+                if let (Some(sessions), Some(bus)) = (sessions.as_mut(), &bus) {
+                    sessions
+                        .0
+                        .set_native_station_assignments(bus.0.console_assignments());
+                }
             }
             Err(refusal) => {
                 crate::pwarn!(log, LogCat::Lobby, "host lobby: {refusal}");
@@ -1347,11 +1394,12 @@ fn publish_bridge_layout(
     bridge: Option<Res<HostLobbyBridgeResource>>,
     layout: Option<ResMut<BridgeLayoutResource>>,
     log: Option<Res<LogFilterConfig>>,
+    assignments: Option<Res<super::console_assignment::ConsoleAssignments>>,
 ) {
     let (Some(bridge), Some(mut layout)) = (bridge, layout) else {
         return;
     };
-    if !layout.is_changed() && !phase.as_ref().is_some_and(|p| p.is_changed()) {
+    if !layout.is_changed() && !phase.as_ref().is_some_and(|p| p.is_changed()) && !assignments.as_ref().is_some_and(|a| a.is_changed()) {
         return;
     }
     let mut payload = bridge_layout_payload(&layout.layout, &layout.monitors, &layout.notices);
@@ -1364,6 +1412,16 @@ fn publish_bridge_layout(
                 .as_ref()
                 .and_then(|g| g.desired_monitor.as_ref())
                 .map(|id| id.as_str().to_string());
+        }
+    }
+    if let Some(assignments) = assignments {
+        for row in &mut payload.stations {
+            if row.assigned_to.is_none() {
+                row.assigned_to = assignments
+                    .0
+                    .get(&crate::core::messages::StationId(row.station.clone()))
+                    .map(ToString::to_string);
+            }
         }
     }
     match crate::core::codec::encode_bridge_layout(&payload) {

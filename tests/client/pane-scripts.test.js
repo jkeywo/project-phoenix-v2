@@ -175,6 +175,13 @@ describe('pane_boot.js — the identity comes out of the fragment', () => {
     window.PhoenixNativeGamepad.select(2);
     expect(JSON.parse(sent[1])).toEqual({ type: 'NativeOperator', operation: 'select', index: 2 });
   });
+  it('carries a native station assignment through bootstrap without locking participant panes', () => {
+    runBoot(fragment('screen', 'Helm') + '&station=helm');
+    expect(window.__PHOENIX_ASSIGNED_STATION__).toBe('helm');
+    expect(window.location.hash).not.toContain('station=');
+    runBoot(fragment('participant', 'Ada'));
+    expect(window.__PHOENIX_ASSIGNED_STATION__).toBeNull();
+  });
   it('declares native capability gaps before the shared client profile loads', () => {
     // Gamepad is DECLARED here, and that is the newer rule: the native host
     // feeds a standard-mapped snapshot of every connected pad into

@@ -197,7 +197,7 @@
       continue;
     }
     var key = parts[p].slice(0, eq);
-    if (key !== 'token' && key !== 'name') continue;
+    if (key !== 'token' && key !== 'name' && key !== 'station') continue;
     try {
       identity[key] = decodeURIComponent(parts[p].slice(eq + 1));
     } catch (e) {
@@ -208,6 +208,7 @@
   try {
     // gui/session-token.js reads this key; seeding it is what makes the page
     // present the token the host minted rather than one of its own.
+    window.__PHOENIX_ASSIGNED_STATION__ = identity.station || null;
     sessionStorage.setItem('session-token', identity.token);
     sessionStorage.setItem('player-name', identity.name);
   } catch (e) {

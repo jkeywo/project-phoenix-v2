@@ -273,7 +273,7 @@ describe('the renderer resolves string ids and never picks one', () => {
     installLobby(document);
     render(seated());
     expect($('#station-list button.mine-btn').textContent).toBe('client.release');
-    expect($('#detail-panel .detail-release-btn').textContent).toBe('client.leave');
+    expect($('#detail-panel .detail-release-btn').textContent).toBe('client.change_station');
   });
 
   it('swaps BOTH release controls to the confirm label once armed mid-round', () => {
@@ -420,5 +420,32 @@ describe('the active-mods list is its own entry point', () => {
     renderClientMods(document, [], t);
     expect($('#lobby-mods').getAttribute('aria-hidden')).toBe('true');
     expect($('#lobby-mods').children).toHaveLength(0);
+  });
+});
+
+describe('claimed station guidance and assigned native screens', () => {
+  it('replaces the roster with the shared console guide until the station is released', () => {
+    installLobby(document);
+    const state = uiState({ players: [{ token: MY }], stations: [station({ holder_token: MY })] });
+    render(state);
+    expect($('#station-list').style.display).toBe('none');
+    expect($('#claimed-station-help').hidden).toBe(false);
+    expect($('#claimed-station-help .station-help-section')).not.toBeNull();
+    expect($('#detail-panel .detail-release-btn').textContent).toBe('client.change_station');
+    render(uiState({ players: [{ token: MY }], stations: [station()] }));
+    expect($('#station-list').style.display).toBe('');
+    expect($('#claimed-station-help').hidden).toBe(true);
+  });
+
+  it('an assigned native screen offers readiness and guide but no release or station switch', () => {
+    installLobby(document);
+    render(uiState({ players: [{ token: MY }], stations: [station({ holder_token: MY })] }), {
+      opts: { assignedStation: 'helm' },
+    });
+    expect($('#claimed-station-help').hidden).toBe(false);
+    expect($('#station-list button')).toBeNull();
+    expect($('#detail-panel .detail-release-btn')).toBeNull();
+    expect($('#spectate-btn').style.display).toBe('none');
+    expect($('#ready-btn').style.display).not.toBe('none');
   });
 });

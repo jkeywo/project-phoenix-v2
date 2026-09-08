@@ -328,12 +328,17 @@ pub const PANE_JOIN_CODE: &str = "PANESEAT";
 /// console. [`PANE_JOIN_CODE`] leads the fragment for exactly that reason, and
 /// [`PANE_BOOT_JS`] leaves only it behind once it has taken the identity out.
 pub fn pane_url(host_addr: &str, id: PaneId, nonce: &str, identity: &PaneIdentity) -> String {
-    format!(
+    let mut url = format!(
         "http://{host_addr}{}#{PANE_JOIN_CODE}&token={}&name={}",
         pane_document_path(id, nonce),
         fragment_encode(identity.token()),
         fragment_encode(identity.name()),
-    )
+    );
+    if let Some(station) = identity.assigned_station() {
+        url.push_str("&station=");
+        url.push_str(&fragment_encode(station));
+    }
+    url
 }
 
 /// What a pane document drops: any `<script>` element that loads PeerJS.

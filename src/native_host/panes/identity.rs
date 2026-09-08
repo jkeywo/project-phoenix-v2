@@ -41,6 +41,7 @@
 pub struct PaneIdentity {
     token: String,
     name: String,
+    assigned_station: Option<String>,
 }
 
 /// Why an identity was refused.
@@ -92,6 +93,7 @@ impl PaneIdentity {
         Self {
             token: uuid::Uuid::new_v4().to_string(),
             name: name.into(),
+            assigned_station: None,
         }
     }
 
@@ -114,12 +116,23 @@ impl PaneIdentity {
         Ok(Self {
             token,
             name: name.into(),
+            assigned_station: None,
         })
     }
 
     /// The session token this pane presents at `Identify`.
     pub fn token(&self) -> &str {
         &self.token
+    }
+
+    pub fn for_station(station: &str) -> Self {
+        let mut identity = Self::mint(station);
+        identity.assigned_station = Some(station.to_owned());
+        identity
+    }
+
+    pub fn assigned_station(&self) -> Option<&str> {
+        self.assigned_station.as_deref()
     }
 
     /// The participant name this pane joins under.

@@ -128,6 +128,8 @@ struct BusState {
     /// [`record_recreation_within_budget`](PaneBus::record_recreation_within_budget)
     /// and [`super::recovery::MAX_RECREATIONS_PER_WINDOW`].
     recreations: BTreeMap<String, Vec<Instant>>,
+    /// Retained until the host's Off action, independent of view liveness.
+    console_identities: BTreeMap<String, PaneIdentity>,
 }
 
 impl BusState {
@@ -516,6 +518,13 @@ impl PaneBus {
             return None;
         }
         let identity = closed.identity().clone();
+        if let Some(station) = identity.assigned_station() {
+            if state.console_identities.get(station) != Some(&identity) {
+                // A queued fault after the host pressed Off cannot resurrect
+                // an assignment that no longer belongs to this identity.
+                return None;
+            }
+        }
         Some(Self::open_with_document(&mut state, identity))
     }
 
@@ -531,21 +540,55 @@ impl PaneBus {
     /// drains once a frame — because "a pane that has to appear after init" is
     /// one problem, and issue #1125 already solved it for the crash case.
     ///
-    /// What it does **not** share is the identity: a recreation clones a closed
-    /// pane's token so the human reconnects as the same participant, and a
-    /// console the operator just opened has no participant yet. It mints a
-    /// fresh ordinary session token, exactly as a phone's browser tab does, so
-    /// admission cannot tell the console from a phone — which is the whole crew
-    /// symmetry criterion. `name` is the **station id**: the pane naming and
-    /// the layout share one namespace (issue #1327), which is what lets the
-    /// display watcher and the layout resolve the same console by the same key.
+    /// Its first open mints an ordinary session token and binds it to this
+    /// station. A reopen after display loss or exhausted recovery retains that
+    /// identity until the host explicitly releases the console. Commands still
+    /// use the ordinary tenure gate; the additional native reservation prevents
+    /// station changes or other clients claiming it while its view is absent.
+    /// `name` is the station id, shared with the bridge layout.
     ///
     /// The URL is empty when the bus was never armed (a test with no HTTP
     /// server); the pane still opens, because the session token a seam-level
     /// test needs is minted regardless.
     pub fn open_console(&self, name: &str) -> (PaneId, String) {
         let mut state = self.lock();
-        Self::open_with_document(&mut state, PaneIdentity::mint(name))
+        let identity = state
+            .console_identities
+            .entry(name.to_owned())
+            .or_insert_with(|| PaneIdentity::for_station(name))
+            .clone();
+        Self::open_with_document(&mut state, identity)
+    }
+
+    /// Reserve a screen's identity before the next fixed-tick client claims,
+    /// while leaving view creation to the display follower after its slot exists.
+    pub fn reserve_console(&self, station: &str) {
+        self.lock()
+            .console_identities
+            .entry(station.to_owned())
+            .or_insert_with(|| PaneIdentity::for_station(station));
+    }
+
+    /// Close a logical screen assignment, independently of its current view.
+    pub fn release_console(&self, station: &str) {
+        let pane = self.open_pane_for_name(station);
+        if let Some(pane) = pane {
+            self.close(pane);
+        }
+        self.lock().console_identities.remove(station);
+    }
+
+    pub fn console_assignments(&self) -> Vec<(String, crate::core::messages::StationId)> {
+        self.lock()
+            .console_identities
+            .iter()
+            .map(|(station, identity)| {
+                (
+                    identity.token().to_owned(),
+                    crate::core::messages::StationId(station.clone()),
+                )
+            })
+            .collect()
     }
 
     /// Open a pane on `identity`, publish it a document at a fresh nonce, and

@@ -2831,3 +2831,91 @@ fn return_to_lobby_clears_all_pending_ratings() {
 
     assert!(sessions.pending_ratings().is_empty());
 }
+
+#[test]
+fn native_screen_assignment_blocks_switch_release_spectate_and_other_claims() {
+    let mut sessions = sessions_with("screen", "Helm screen");
+    sessions.register("phone".into(), "Ada".into()).unwrap();
+    let station = StationId("helm".into());
+    sessions.set_native_station_assignments([("screen".into(), station.clone())]);
+    pm_stations(
+        "screen",
+        &ClientMessage::SelectStation {
+            station: "Helm".into(),
+        },
+        &mut sessions,
+        GamePhase::Lobby,
+        None,
+    );
+    assert_eq!(sessions.station_for_token("screen"), Some(&station));
+    for message in [
+        ClientMessage::SelectStation {
+            station: "Captain".into(),
+        },
+        ClientMessage::ReleaseStation,
+        ClientMessage::SetSpectator { spectator: true },
+    ] {
+        let result = pm_stations(
+            "screen",
+            &message,
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+        );
+        assert!(result.outbound.is_empty());
+        assert_eq!(sessions.station_for_token("screen"), Some(&station));
+    }
+    sessions.disconnect("screen");
+    assert!(
+        sessions.holder_for_station(&station).is_none(),
+        "AI sees disconnected tenure as Backfill"
+    );
+    pm_stations(
+        "phone",
+        &ClientMessage::SelectStation {
+            station: "Helm".into(),
+        },
+        &mut sessions,
+        GamePhase::InProgress,
+        None,
+    );
+    assert!(
+        sessions.station_for_token("phone").is_none(),
+        "a rebuilding screen keeps its reservation"
+    );
+    sessions.set_native_station_assignments([]);
+    pm_stations(
+        "phone",
+        &ClientMessage::SelectStation {
+            station: "Helm".into(),
+        },
+        &mut sessions,
+        GamePhase::InProgress,
+        None,
+    );
+    assert_eq!(
+        sessions.station_for_token("phone"),
+        Some(&station),
+        "host Off frees the station"
+    );
+}
+
+#[test]
+fn native_reservation_refuses_an_old_phone_reconnect_before_screen_identifies() {
+    let mut sessions = sessions_with("phone", "Ada");
+    let station = StationId("helm".into());
+    sessions.set_station("phone", Some(station.clone()));
+    sessions.disconnect("phone");
+    sessions.set_native_station_assignments([("screen".into(), station)]);
+    pm_stations(
+        "phone",
+        &ClientMessage::Identify {
+            token: "phone".into(),
+            name: "Ada".into(),
+        },
+        &mut sessions,
+        GamePhase::InProgress,
+        None,
+    );
+    assert!(sessions.station_for_token("phone").is_none());
+}

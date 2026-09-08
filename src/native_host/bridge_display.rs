@@ -374,13 +374,18 @@ pub struct BridgeDisplaySet;
 impl Plugin for BridgeDisplayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingConsoleClaims>();
+        app.init_resource::<super::console_assignment::ConsoleAssignments>();
         // Native auto-claim: seat each console's station once its session
         // registers. Gated on the lobby inbound stream so a host built without
         // it (a bare display test) stands the plugin up without the writer
         // panicking on a missing `Messages` resource.
         app.add_systems(
             Update,
-            apply_pending_console_claims
+            (
+                apply_pending_console_claims,
+                super::console_assignment::sync_console_assignments,
+            )
+                .chain()
                 // A removed seat cancels its pending claim before a late
                 // registration can turn that old intent into a command.
                 .after(BridgeDisplaySet)
@@ -411,6 +416,7 @@ impl Plugin for BridgeDisplayPlugin {
                 // it first would leave that console open for a frame on a
                 // display that is gone.
                 follow_layout_stations.run_if(resource_exists::<BridgeDisplayApplied>),
+                super::console_assignment::remember_console_assignments,
                 // And LAST of all: the applier above says what should be on
                 // screen, this checks that it is. Ordered after it so a console
                 // opened this frame is never judged before it exists — the
@@ -432,8 +438,9 @@ impl Plugin for BridgeDisplayPlugin {
 /// (`transport::PaneBus::open_console`), and a claim can only name a session the
 /// lobby has already registered — so [`reconcile_seated_consoles`] records the
 /// intent here at open, and [`apply_pending_console_claims`] emits the
-/// `SelectStation` the frame that session appears. Nothing here is a reserved
-/// token, so admission still cannot tell the console from a phone.
+/// `SelectStation` the frame that session appears. The native assignment is
+/// already reserved to that ordinary token; command authority still requires
+/// connected station tenure through the same gate a phone uses.
 #[derive(Resource, Default)]
 struct PendingConsoleClaims(Vec<PendingConsoleClaim>);
 
@@ -1815,15 +1822,16 @@ const CONSOLE_MISSING_GRACE_FRAMES: u32 = DISPLAY_LOSS_DEBOUNCE_FRAMES;
 /// [`PaneBus::record_recreation_within_budget`](crate::native_host::panes::transport::PaneBus::record_recreation_within_budget),
 /// so a console that cannot be built does not flap forever.
 ///
-/// # And when the budget is spent, the seat is given back
+/// # Exhausted recovery frees the physical screen and retains the assignment
 ///
 /// The bound has to end somewhere, and "leave it closed for the operator" —
 /// which is the right answer for a `--pane` — would here leave the LAW still
 /// seating a station whose card claims a screen it is not on. So the seat is
 /// surrendered through the law itself (`UnassignStation`), which frees the
-/// screen everywhere at once: the row draws it as free, the Station window
-/// closes, the viewscreen may move onto it, and the station is on `Backfill`
-/// honestly rather than by accident. The operator is told with a
+/// physical screen: the Station window closes and the viewscreen may move onto
+/// it. `ConsoleAssignments` retains the station reservation and its identity,
+/// while `Backfill` operates during disconnection. The row keeps Off and move
+/// available and explains that the console is unavailable. The operator sees a
 /// [`LayoutNotice`] the row renders — the same channel an unplugged viewscreen
 /// reports through — because a console that silently never appeared is exactly
 /// the failure this whole slice exists to make impossible.
@@ -3301,6 +3309,18 @@ mod tests {
 
     /// Close a station's console, as the row's off button does.
     fn unseat(app: &mut App, station_id: &str) {
+        // Mirror the host Off action's logical release as well as its physical
+        // layout edit. Hardware reconciliation alone intentionally keeps this.
+        if let Some(bus) = app
+            .world()
+            .get_resource::<crate::native_host::panes::PaneBusResource>()
+        {
+            bus.0.release_console(station_id);
+        }
+        app.world_mut()
+            .resource_mut::<super::super::console_assignment::ConsoleAssignments>()
+            .0
+            .remove(&station(station_id));
         let closed = app
             .world()
             .resource::<BridgeLayoutResource>()
@@ -3465,6 +3485,115 @@ mod tests {
             .is_none());
         assert_eq!(bus.open_count(), 0, "the console closed");
         assert!(surfaces(&app).is_empty(), "and the screen was given back");
+    }
+
+    #[test]
+    fn native_screen_reservation_survives_monitor_loss_move_and_ends_only_at_off() {
+        use super::super::console_assignment::ConsoleAssignments;
+        use crate::native_host::host_lobby::{
+            drain_surface_records, pump_host_lobby, HostLobbyBridge, HostLobbyBridgeResource,
+        };
+        use crate::native_host::panes::RecordingSurface;
+        let (mut app, bus) = console_host();
+        app.add_message::<crate::lobby::InboundMessage>();
+        app.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ));
+        let bridge = HostLobbyBridge::new();
+        app.insert_resource(HostLobbyBridgeResource(bridge.clone()));
+        app.add_systems(PreUpdate, drain_surface_records);
+        let mut surface = RecordingSurface::ready();
+        surface.queue_record(
+            r#"{"kind":"assign-station","station":"helm","monitor":"BenQ EX@1920x1080"}"#,
+        );
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+        let token = bus.token_of(pane).unwrap();
+        assert_eq!(
+            app.world()
+                .resource::<crate::lobby::Sessions>()
+                .0
+                .native_station_for_token(&token),
+            Some(&station("helm"))
+        );
+        let monitor = app
+            .world_mut()
+            .query::<(Entity, &Monitor)>()
+            .iter(app.world())
+            .find(|(_, m)| m.name.as_deref() == Some("BenQ EX"))
+            .unwrap()
+            .0;
+        app.world_mut().entity_mut(monitor).despawn();
+        for _ in 0..=DISPLAY_LOSS_DEBOUNCE_FRAMES {
+            app.update();
+        }
+        assert!(bus.open_pane_for_name("helm").is_none());
+        assert_eq!(
+            app.world()
+                .resource::<ConsoleAssignments>()
+                .0
+                .get(&station("helm")),
+            Some(&MonitorIdentity::new(BENQ))
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::lobby::Sessions>()
+                .0
+                .native_station_for_token(&token),
+            Some(&station("helm"))
+        );
+        surface.queue_record(
+            r#"{"kind":"assign-station","station":"helm","monitor":"ACME 1080@1920x1080"}"#,
+        );
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert_eq!(
+            bus.token_of(bus.open_pane_for_name("helm").unwrap())
+                .as_deref(),
+            Some(token.as_str())
+        );
+        surface.queue_record(r#"{"kind":"unassign-station","station":"helm"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert!(bus.open_pane_for_name("helm").is_none());
+        assert!(bus.console_assignments().is_empty());
+        assert!(app.world().resource::<ConsoleAssignments>().0.is_empty());
+        assert!(app
+            .world()
+            .resource::<crate::lobby::Sessions>()
+            .0
+            .native_station_for_token(&token)
+            .is_none());
+        assert!(
+            bus.recreate(pane).is_none(),
+            "a stale fault cannot resurrect an Off screen"
+        );
+    }
+
+    #[test]
+    fn native_screen_assignment_refuses_to_displace_a_connected_phone() {
+        use crate::native_host::host_lobby::{
+            drain_surface_records, pump_host_lobby, HostLobbyBridge, HostLobbyBridgeResource,
+        };
+        let (mut app, bus) = console_host();
+        app.add_message::<crate::lobby::InboundMessage>();
+        let mut sessions = crate::lobby::session::SessionManager::new();
+        sessions.register("phone".into(), "Ada".into()).unwrap();
+        sessions.set_station("phone", Some(station("helm")));
+        app.insert_resource(crate::lobby::Sessions(sessions));
+        let bridge = HostLobbyBridge::new();
+        app.insert_resource(HostLobbyBridgeResource(bridge.clone()));
+        app.add_systems(PreUpdate, drain_surface_records);
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(
+            r#"{"kind":"assign-station","station":"helm","monitor":"BenQ EX@1920x1080"}"#,
+        );
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert_eq!(bus.open_count(), 0);
+        assert!(app.world().resource::<BridgeLayoutResource>().notices.iter().any(|notice|
+            matches!(notice, LayoutNotice::StationHeld { holder, .. } if holder == "Ada")));
     }
 
     #[test]

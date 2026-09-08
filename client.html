@@ -1335,6 +1335,9 @@
     /* Station list */
     #station-list { flex: 1; overflow-y: auto; display: flex;
       flex-direction: column; gap: var(--space-3); }
+    #claimed-station-help { flex: 1; min-height: 0; min-width: 0; overflow-y: auto;
+      padding: var(--space-3); }
+    #claimed-station-help[hidden] { display: none; }
 
     /* ── Station roster ──────────────────────────────────────────────────
        The artboard's `.st` row. Every value is the rung issue #1357's mapping
@@ -2081,6 +2084,7 @@
       <div id="lobby-body">
         <!-- Station list -->
         <div id="station-list"></div>
+        <section id="claimed-station-help" class="settings-documentation" hidden></section>
 
         <div id="lobby-side">
           <!-- At-your-station detail panel -->
@@ -3544,6 +3548,10 @@
         // Which label the release controls wear. The latch itself stays here:
         // it is page state the handler below mutates.
         releaseArmed,
+        assignedStation: window.__PHOENIX_ASSIGNED_STATION__ || null,
+        helpActions: window.currentGamepadHelpActions?.() || [],
+        gamepadConnected: window.currentGamepadState?.().connected === true,
+        gamepadContext: window.currentGamepadState?.().context || null,
       });
       // Detail-panel console auto-select (and clear on release) is part of
       // the view model.
@@ -3597,6 +3605,8 @@
       uiState.countdownSecs = window.lobbyState ? window.lobbyState.countdownSecs : 0;
       scheduleRender();
     }
+
+    window.refreshClaimedStationHelp = () => renderLobby(uiState);
 
     // Repair UI (issue #462): the full repair affordance is owned by the
     // Repair console iframe (gui/repair-console.html), which renders the hull

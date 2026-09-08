@@ -446,8 +446,10 @@ function renderStationScreens(doc, card, row, t) {
     note.className = 'station-screens-message';
     note.textContent = t(row.message.id, row.message.params);
     strip.appendChild(note);
-    card.appendChild(strip);
-    return;
+    if (!row.off) {
+      card.appendChild(strip);
+      return;
+    }
   }
 
   const button = (screen, selected, disabled, text, reason) => {

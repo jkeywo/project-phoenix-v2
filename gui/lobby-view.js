@@ -104,6 +104,7 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
     ? ((s.stations || []).find(st => st.holder_token === myToken) || null)
     : null;
   const hasStation = !!myStation;
+  const assignedStation = opts.assignedStation || null;
   const selectedConsole = nextLobbyConsole(lobbyConsole, myStation);
 
   // #771 AC3/AC4: the armed confirm exists ONLY mid-round. Outside InProgress
@@ -176,6 +177,7 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
       // 'release' (mine) | 'taken' (someone else's) | 'claim' (free) |
       // 'ineligible' (free but incompatible with this player's assist profile)
       button,
+      actionHidden: !!assignedStation,
       ...actionFor(button),
       // Anonymous eligibility + the PRIVATE functional reason (local-only).
       eligible,
@@ -216,7 +218,8 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
         // The detail panel's LEAVE control is the SAME arm→confirm as the
         // row's RELEASE (they share one handler); only the resting label
         // differs, which is why both ids are decided in one place.
-        releaseLabel: { id: confirming ? 'client.release_confirm' : 'client.leave' },
+        releaseLabel: assignedStation ? null
+          : { id: confirming ? 'client.release_confirm' : 'client.change_station' },
         ratings: hasRatingChoice
           ? {
               list: myStation.ratings.map(r => ({
@@ -279,7 +282,7 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
   // 'join' when already spectating (sends SetSpectator{false}), else 'spectate'
   // (sends SetSpectator{true}). A spectator can't ready, so readyBtn stays
   // hidden for them (hasStation is false → the branch above already hides it).
-  const spectateBtn = myPlayer
+  const spectateBtn = myPlayer && !assignedStation
     ? {
         visible: true,
         mode: isSpectator ? 'join' : 'spectate',
@@ -308,6 +311,11 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
 
   return {
     hasStation,
+    showRoster: !hasStation && !assignedStation,
+    showStationHelp: hasStation,
+    helpActions: Array.isArray(opts.helpActions) ? opts.helpActions : [],
+    gamepadConnected: !!opts.gamepadConnected,
+    gamepadContext: opts.gamepadContext || selectedConsole,
     isSpectator,
     myStation,
     selectedConsole,

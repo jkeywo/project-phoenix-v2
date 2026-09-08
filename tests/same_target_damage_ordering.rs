@@ -387,24 +387,25 @@ fn prepare(pinned: bool, lethal: bool) -> Fixture {
         .bank_slot_mut(&bank)
         .unwrap()
         .damage_accumulator = 0.999;
-    let mut blasters = app
-        .world_mut()
-        .get_mut::<BlasterSystemResource>(shooter)
-        .unwrap();
-    for bank in &mut blasters.0 {
-        let p = bank.in_flight.first_mut().unwrap();
-        assert_eq!(p.source_uuid, SHOOTER);
-        if bank.config.id == "port" {
-            p.x = X;
-            p.z = -p.speed * period.as_secs_f32();
-            p.heading = std::f32::consts::PI;
-        } else {
-            p.x = X + 10.0;
-            p.z = 0.0;
-            p.heading = 0.0;
+    {
+        let mut blasters = app
+            .world_mut()
+            .get_mut::<BlasterSystemResource>(shooter)
+            .unwrap();
+        for bank in &mut blasters.0 {
+            let p = bank.in_flight.first_mut().unwrap();
+            assert_eq!(p.source_uuid, SHOOTER);
+            if bank.config.id == "port" {
+                p.x = X;
+                p.z = -p.speed * period.as_secs_f32();
+                p.heading = std::f32::consts::PI;
+            } else {
+                p.x = X + 10.0;
+                p.z = 0.0;
+                p.heading = 0.0;
+            }
         }
     }
-    drop(blasters);
     for facing in &mut app
         .world_mut()
         .get_mut::<ShipShields>(victim)

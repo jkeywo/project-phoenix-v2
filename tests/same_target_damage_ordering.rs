@@ -142,7 +142,7 @@ fn observe(
     let wire_rows: Vec<_> = wire.read(world.resource::<Messages<OutboundMessage>>()).filter_map(|row| {
         let message = serde_json::to_value(&row.msg).unwrap();
         let kind = message.get("type").and_then(Value::as_str).unwrap_or("");
-        matches!(kind, "DamageTaken" | "ShipDestroyed" | "BlasterHit" | "GameOver" | "EntityDespawned" | "ShieldArcOffline" | "SystemDamage").then(|| json!({"target":format!("{:?}",row.target),"delivery":format!("{:?}",row.delivery),"message":message}))
+        matches!(kind, "DamageTaken" | "ShipDestroyed" | "BlasterHit" | "GameOver" | "EntityDespawned" | "ShieldArcOffline" | "SystemDamage" | "ObjectiveSummary").then(|| json!({"target":format!("{:?}",row.target),"delivery":format!("{:?}",row.delivery),"message":message}))
     }).collect();
     let ships: Vec<_> = [shooter, victim].into_iter().map(|entity| {
         let p = world.get::<ShipPhysics>(entity).unwrap();
@@ -795,38 +795,50 @@ fn same_target_damage_baseline_child() {
         "\n{PREFIX}{}",
         json!({"schema":1,"role":role,"case":case,"world":WORLD,"hull":HULL,"seed":SEED,"pool_workers":bevy::tasks::ComputeTaskPool::get().thread_num(),"executor":format!("{:?}",f.app.get_schedule(FixedUpdate).unwrap().get_executor_kind()),"period_nanos":f.period.as_nanos(),"checkpoint_digest":format!("{checkpoint_digest:016x}"),"prepared":f.prepared,"before":before,"expected_restore_refresh":expected_restore_refresh,"baseline":baseline,"restored":restored})
     );
-    // Restore deliberately dirties the objective projection. Retain its full
-    // raw observation above. In play this one entry drains on the next tick;
-    // after GameOver the InProgress dispatcher stops, so the SAME entry remains
-    // pending. Assert its exact payload/cardinality/position in every row, then
-    // compare every other pending message and observation unchanged.
+    // Restore deliberately dirties the objective projection. The publisher is
+    // ordered before Sim dispatch, so its exact refresh drains in this impact
+    // tick, before the fixed StateTransition can enter GameOver. Retain that
+    // wire observation above, prove its payload/cardinality/position, then
+    // compare every other message and observation unchanged.
+    let expected_restore_wire = json!({
+        "target": "All",
+        "delivery": "Reliable",
+        "message": &expected_restore_refresh[1],
+    });
     let mut comparable_restored = restored.clone();
-    let mut original_refresh_position = None;
     for (index, row) in comparable_restored.iter_mut().enumerate() {
-        let terminal = case == "near-lethal";
-        if terminal {
+        if case == "near-lethal" {
             assert_eq!(row["phase"], "GameOver");
         }
-        let pending = row["pending_outbox"].as_array_mut().unwrap();
-        let refresh_positions: Vec<_> = pending
+        assert!(
+            row["pending_outbox"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|entry| entry != &expected_restore_refresh),
+            "the restore refresh must not remain queued after the impact tick at row {index}"
+        );
+        let wire = row["wire"].as_array_mut().unwrap();
+        let refresh_positions: Vec<_> = wire
             .iter()
             .enumerate()
-            .filter_map(|(i, entry)| (entry == &expected_restore_refresh).then_some(i))
+            .filter_map(|(i, entry)| (entry == &expected_restore_wire).then_some(i))
             .collect();
-        let expected_count = usize::from(index == 0 || terminal);
+        let expected_count = usize::from(index == 0);
         assert_eq!(refresh_positions.len(), expected_count,
-            "the exact restore refresh drains in play or remains once in the terminal queue at row {index}");
+            "the exact reliable restore refresh is delivered once on the impact tick at row {index}");
         if expected_count == 1 {
             let position = refresh_positions[0];
-            if let Some(original) = original_refresh_position {
-                assert_eq!(
-                    position, original,
-                    "the undrained terminal entry stays in place"
-                );
-            } else {
-                original_refresh_position = Some(position);
-            }
-            assert_eq!(pending.remove(position), expected_restore_refresh);
+            let original_wire = baseline[index]["wire"].as_array().unwrap();
+            let expected_position = original_wire
+                .iter()
+                .position(|entry| entry["message"]["type"] == "GameOver")
+                .unwrap_or(original_wire.len());
+            assert_eq!(
+                position, expected_position,
+                "the refresh follows impact publications and precedes the terminal transition"
+            );
+            assert_eq!(wire.remove(position), expected_restore_wire);
         }
     }
     assert_eq!(

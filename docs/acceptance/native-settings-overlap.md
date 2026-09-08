@@ -81,3 +81,42 @@ Escape in Lobby and after F9 reveal during a mission/ending. Reopen it and check
 Tab plus Enter/Space and backdrop dismissal; Ctrl+Tab must still move pane focus
 and F9 must still toggle chrome. Check Escape while another Station has focus
 to confirm it is delivered to that page, not broadcast to every dialog.
+
+## SDK DOM Escape representation follow-up
+
+The r4 diagnostic run (`key-diagnostic-r4-01`, runtime inventory
+`9B18BD786A9EC4C9F710BAD11B38C16B2A9E277EC9CFBC4FD598CFB8F301DDC7`)
+observed actual Escape keydowns at a focused `native-settings-control`, both
+before and after Ctrl+Tab. Their named key was `Unidentified`, their code was
+empty, and `keyIdentifier=U+001B`, `keyCode=27`, `which=27`. The Rust route had
+delivered the event; the shared focus trap recognised only named Escape/Esc.
+Tab arrived named and moved the active element into the Settings controls.
+The persistent blue Gameplay category was not evidence that Tab failed.
+
+The shared focus trap now checks legacy Escape fields only when the named key
+is absent or `Unidentified`. Normal Escape/Esc and Tab behavior remain, and a
+valid different named key wins over conflicting legacy fields. There is no
+native Settings command, additional key listener or SDK remapping.
+
+The captured fields are retained in `tests/fixtures/native-escape-keydown.json`.
+The new regression mounts the real Settings component in a connected document,
+opens it through its cog, focuses a real control and dispatches that event.
+It checks dismissal, default cancellation, restoration of focus/expanded state
+and no unrelated action. After correcting an initial fixture that used a
+document without a browsing context, this test failed on the unchanged focus
+trap because Settings stayed open, then passed with the narrow fallback.
+
+Focused validation against parent `7691ddb1ef6cdf246e3cad8a3300e8ee2c3a9e7b`:
+`node C:/Coding/project-phoenix-v2/node_modules/vitest/vitest.mjs run tests/client/focus-trap.test.js tests/client/native-settings.test.js`
+passed all 41 tests. This includes Escape/Esc, legacy forms, valid other keys,
+unknown non-Escape, Tab traversal and the real Settings event boundary.
+No Cargo, Trunk, browser or native launch was performed in this isolated work.
+The integrator still owns adoption and a fresh native Settings Escape pass;
+JavaScript regression success is not an on-screen acceptance result.
+
+Independent read-only source/test review passed. PASM `validate`, `scan` and
+`traceability` each exited 0 through the existing installed checker; validation
+reported OK with informational warnings. Its Python trampoline initially hit
+a sandbox permission error, so the same checker ran with approved escalation,
+without dependency setup. `git diff --check`, all 56 wiki source paths, eight
+local Markdown links and the index entry passed. These are static checks only.

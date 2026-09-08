@@ -1,0 +1,12 @@
+{
+  "source": "Native Ultralight key-diagnostic-r4-01; actual Settings keydown observed before and after Ctrl+Tab",
+  "runtimeManifestHash": "9B18BD786A9EC4C9F710BAD11B38C16B2A9E277EC9CFBC4FD598CFB8F301DDC7",
+  "documentHasFocus": true,
+  "event": {
+    "key": "Unidentified",
+    "code": "",
+    "keyIdentifier": "U+001B",
+    "keyCode": 27,
+    "which": 27
+  }
+}

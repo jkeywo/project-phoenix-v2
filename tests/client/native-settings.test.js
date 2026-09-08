@@ -37,6 +37,7 @@ import { TABS, visibleTabs } from '../../gui/settings-tabs.js';
 import { readStripped, colourLiterals, fontSizeLiterals, GUI } from './css-scan.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const NATIVE_ESCAPE = JSON.parse(fs.readFileSync(path.join(HERE, '../fixtures/native-escape-keydown.json'), 'utf8'));
 const CSS = fs.readFileSync(path.join(HERE, '../../gui/native-settings.css'), 'utf-8');
 /** The same sheet with its comments removed, as the enforcing suite reads it. */
 const CSS_STRIPPED = readStripped(path.join(GUI, 'native-settings.css'));
@@ -189,6 +190,34 @@ describe('mountNativeSettings', () => {
     panel.open();
     doc.getElementById(NATIVE_SETTINGS_OVERLAY_ID).click();
     expect(panel.isOpen()).toBe(false);
+  });
+
+  it('dismisses through the shared trap using the actual native SDK Escape event', () => {
+    // Use the connected document: createHTMLDocument has no browsing context
+    // and therefore cannot establish actual focus for this event-boundary test.
+    const doc = document;
+    doc.body.innerHTML = '';
+    const actions = [];
+    const panel = mountNativeSettings(doc, { run: action => actions.push(action) }, { t });
+    const btn = doc.getElementById(NATIVE_SETTINGS_BUTTON_ID);
+    btn.focus();
+    btn.click();
+    const control = doc.querySelector('.native-settings-control');
+    control.focus();
+    expect(doc.activeElement).toBe(control);
+    const event = new KeyboardEvent('keydown', { ...NATIVE_ESCAPE.event, bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'keyIdentifier', { value: NATIVE_ESCAPE.event.keyIdentifier });
+    try {
+      control.dispatchEvent(event);
+      expect(panel.isOpen()).toBe(false);
+      expect(event.defaultPrevented).toBe(true);
+      expect(doc.activeElement).toBe(btn);
+      expect(btn.getAttribute('aria-expanded')).toBe('false');
+      expect(actions).toEqual([]);
+    } finally {
+      panel.close();
+      doc.body.innerHTML = '';
+    }
   });
 });
 

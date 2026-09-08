@@ -148,15 +148,56 @@ describe('createFocusTrap — Tab and Shift+Tab cycle within the modal', () => {
 });
 
 describe('createFocusTrap — Escape closes', () => {
-  it('invokes onEscape when Escape is pressed inside the modal', () => {
+  it.each(['Escape', 'Esc'])('invokes onEscape when %s is pressed inside the modal', (key) => {
     const s = scene();
     s.trigger.focus();
     let closed = 0;
     const trap = makeTrap(s.modal, { onEscape: () => { closed += 1; trap.release(); } });
     trap.activate();
-    const event = press('Escape');
+    const event = press(key);
     expect(closed).toBe(1);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it.each([
+    { key: 'Unidentified', keyCode: 27 },
+    { key: '', which: 27 },
+    { keyIdentifier: 'U+001B' },
+  ])('accepts unnamed legacy Escape events: %j', (fields) => {
+    const s = scene();
+    s.trigger.focus();
+    let closed = 0;
+    const trap = makeTrap(s.modal, { onEscape: () => { closed += 1; trap.release(); } });
+    trap.activate();
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...fields });
+    if (fields.keyIdentifier) Object.defineProperty(event, 'keyIdentifier', { value: fields.keyIdentifier });
+    s.first.dispatchEvent(event);
+    expect(closed).toBe(1);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(s.trigger);
+  });
+
+  it.each(['Enter', 'Tab', 'a', 'F9'])('does not override a named %s with conflicting legacy Escape fields', (key) => {
+    const s = scene();
+    let closed = 0;
+    const trap = makeTrap(s.modal, { onEscape: () => { closed += 1; } });
+    trap.activate();
+    const event = new KeyboardEvent('keydown', { key, keyCode: 27, which: 27, bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'keyIdentifier', { value: 'U+001B' });
+    s.first.dispatchEvent(event);
+    expect(closed).toBe(0);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('leaves an unidentified non-Escape key alone', () => {
+    const s = scene();
+    let closed = 0;
+    const trap = makeTrap(s.modal, { onEscape: () => { closed += 1; } });
+    trap.activate();
+    const event = new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 37, which: 37, bubbles: true, cancelable: true });
+    s.first.dispatchEvent(event);
+    expect(closed).toBe(0);
+    expect(event.defaultPrevented).toBe(false);
   });
 });
 

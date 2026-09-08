@@ -291,17 +291,21 @@ pub struct GmProjectionPlugin;
 
 impl Plugin for GmProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<StationPuppets>()
-            .init_resource::<crate::gm_puppet::StationPuppetActivity>()
-            .init_resource::<GmActionLog>()
-            .init_resource::<LocalGmActionRefusals>()
-            .add_message::<GmEntityProjectionChanged>()
-            .add_message::<GmStationProjectionChanged>()
-            .add_systems(
-                FixedLast,
-                (publish_local_projection, publish_station_projection)
-                    .run_if(gm_presentation_active),
-            );
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<NativeGmPresentation>(
+            StateClass::Presentation,
+            "native-local-gm-workspace",
+        )
+        .init_resource::<StationPuppets>()
+        .init_resource::<crate::gm_puppet::StationPuppetActivity>()
+        .init_resource::<GmActionLog>()
+        .init_resource::<LocalGmActionRefusals>()
+        .add_message::<GmEntityProjectionChanged>()
+        .add_message::<GmStationProjectionChanged>()
+        .add_systems(
+            FixedLast,
+            (publish_local_projection, publish_station_projection).run_if(gm_presentation_active),
+        );
     }
 }
 

@@ -398,8 +398,9 @@ pub struct BridgeLayout {
     monitors: Vec<MonitorIdentity>,
     /// The ship class's claimable stations. Deduplicated.
     roster: Vec<StationId>,
-    /// Index into `monitors` of the monitor showing the viewscreen.
-    viewscreen: usize,
+    /// Desired viewscreen monitor. It may be absent when every remaining screen
+    /// is reserved for the GM; the native window stays hidden until one returns.
+    viewscreen: MonitorIdentity,
     /// Parallel to `monitors`: the stations seated on each, in seat order. The
     /// viewscreen's entry is always empty — that is rule 2, held as an invariant
     /// rather than re-derived.
@@ -548,11 +549,11 @@ impl BridgeLayout {
     ) -> Result<Self, LayoutRefusal> {
         let monitors = dedup(monitors);
         let roster = dedup(roster);
-        let Some(index) = monitors.iter().position(|m| m == viewscreen) else {
+        if !monitors.contains(viewscreen) {
             return Err(LayoutRefusal::UnknownMonitor {
                 monitor: viewscreen.clone(),
             });
-        };
+        }
         let seats = vec![Vec::new(); monitors.len()];
         let reserved = vec![Vec::new(); monitors.len()];
         let splits = vec![LAYOUT_SPLIT; monitors.len()];
@@ -560,7 +561,7 @@ impl BridgeLayout {
             gm_monitor: None,
             monitors,
             roster,
-            viewscreen: index,
+            viewscreen: viewscreen.clone(),
             seats,
             splits,
             reserved,
@@ -601,9 +602,10 @@ impl BridgeLayout {
         &self.roster
     }
 
-    /// The monitor showing the shared viewscreen.
+    /// The desired shared viewscreen monitor, which can be temporarily absent
+    /// when the only physical screen belongs to the GM.
     pub fn viewscreen(&self) -> &MonitorIdentity {
-        &self.monitors[self.viewscreen]
+        &self.viewscreen
     }
 
     /// The monitor `station`'s console is open on, if any.
@@ -724,6 +726,17 @@ impl BridgeLayout {
         }
         let mut next = self.clone();
         next.gm_monitor = monitor.cloned();
+        if monitor.is_none() && !next.monitors.contains(next.viewscreen()) {
+            // Explicit prelaunch Off makes the old GM screen available to the
+            // viewscreen immediately, without requiring another monitor event.
+            if let Some(available) = next
+                .monitors
+                .iter()
+                .find(|id| next.occupants_on(id).is_empty())
+            {
+                next.viewscreen = available.clone();
+            }
+        }
         Ok(next)
     }
 
@@ -734,7 +747,7 @@ impl BridgeLayout {
                 monitor: monitor.clone(),
             });
         }
-        if index == self.viewscreen {
+        if monitor == self.viewscreen() {
             return Ok(self.clone());
         }
         // Rule 2's mirror: no silent eviction. A monitor holding consoles keeps
@@ -750,7 +763,7 @@ impl BridgeLayout {
             });
         }
         let mut next = self.clone();
-        next.viewscreen = index;
+        next.viewscreen = monitor.clone();
         Ok(next)
     }
 
@@ -768,7 +781,7 @@ impl BridgeLayout {
                 monitor: monitor.clone(),
             });
         }
-        if index == self.viewscreen {
+        if monitor == self.viewscreen() {
             return Err(LayoutRefusal::StationOnViewscreenMonitor {
                 station: station.clone(),
                 monitor: monitor.clone(),
@@ -924,7 +937,7 @@ impl BridgeLayout {
     }
 
     fn occupancy_at(&self, index: usize) -> MonitorOccupancy {
-        let is_viewscreen = index == self.viewscreen;
+        let is_viewscreen = &self.monitors[index] == self.viewscreen();
         MonitorOccupancy {
             monitor: self.monitors[index].clone(),
             is_viewscreen,
@@ -961,7 +974,7 @@ impl BridgeLayout {
                     monitor: self.monitors[i].clone(),
                     choice: if seat == Some(i) {
                         MonitorChoice::Selected
-                    } else if i == self.viewscreen {
+                    } else if &self.monitors[i] == self.viewscreen() {
                         MonitorChoice::Excluded(ExclusionReason::IsViewscreen)
                     } else if self.gm_monitor.as_ref() == Some(&self.monitors[i]) {
                         MonitorChoice::Excluded(ExclusionReason::GameMaster)
@@ -1205,7 +1218,7 @@ impl BridgeLayout {
             gm_monitor: None,
             monitors: self.monitors.clone(),
             roster: self.roster.clone(),
-            viewscreen: self.viewscreen,
+            viewscreen: self.viewscreen.clone(),
             seats: vec![Vec::new(); self.monitors.len()],
             // Replaced along with the seating: adoption is "this arrangement",
             // and a profile that no longer authors a screen no longer carves it
@@ -1214,6 +1227,11 @@ impl BridgeLayout {
             reserved: vec![Vec::new(); self.monitors.len()],
         };
 
+        let gm_monitor = profile
+            .displays
+            .iter()
+            .find(|d| d.role == DisplayRole::GameMaster)
+            .map(|d| d.identity.clone());
         // The viewscreen first: every seat below is judged against it, so
         // adopting the stations before the viewscreen moved would refuse the
         // ones that are lawful under the profile's own arrangement.
@@ -1224,6 +1242,26 @@ impl BridgeLayout {
         {
             match next.set_viewscreen(&entry.identity) {
                 Ok(moved) => next = moved,
+                Err(refusal) if gm_monitor.as_ref() == Some(next.viewscreen()) => {
+                    // A restart with only the saved GM monitor must not erase
+                    // that role because the OS seeded the viewscreen on it.
+                    next.viewscreen = next
+                        .monitors
+                        .iter()
+                        .find(|m| gm_monitor.as_ref() != Some(*m))
+                        .cloned()
+                        .unwrap_or_else(|| entry.identity.clone());
+                    if next.monitors.contains(next.viewscreen()) {
+                        notes.push(LayoutAdoption::ViewscreenRefused {
+                            monitor: entry.identity.clone(),
+                            refusal,
+                        });
+                    } else {
+                        notes.push(LayoutAdoption::ViewscreenWaitingForMonitor {
+                            monitor: entry.identity.clone(),
+                        });
+                    }
+                }
                 Err(refusal) => notes.push(LayoutAdoption::ViewscreenRefused {
                     monitor: entry.identity.clone(),
                     refusal,
@@ -1231,12 +1269,7 @@ impl BridgeLayout {
             }
         }
 
-        next.gm_monitor = profile
-            .displays
-            .iter()
-            .find(|d| d.role == DisplayRole::GameMaster)
-            .map(|d| d.identity.clone())
-            .filter(|gm| gm != next.viewscreen());
+        next.gm_monitor = gm_monitor;
         let mut seated: Vec<StationId> = Vec::new();
         for display in &profile.displays {
             let DisplayRole::Station { panes, split } = &display.role else {
@@ -1350,12 +1383,12 @@ impl BridgeLayout {
         let identities = dedup(monitors.iter().map(|d| d.identity.clone()));
         let roster = dedup(roster);
 
-        let Some(first) = identities.first() else {
+        if identities.is_empty() {
             notes.push(LayoutAdoption::NoMonitorsReported {
                 kept: self.monitors.clone(),
             });
             return (self.clone(), notes);
-        };
+        }
 
         // The viewscreen first, as in adoption: every seat below is judged
         // against it.
@@ -1377,15 +1410,31 @@ impl BridgeLayout {
                 .filter(|m| free(m))
                 .or_else(|| identities.iter().find(|m| free(m)))
                 .cloned()
-                // Nowhere free at all. The shared view still has to be
-                // somewhere — a bridge is at least one screen — so the plain
-                // primary-else-first fallback stands, and what it covers is
-                // named below instead of being covered in silence.
-                .unwrap_or_else(|| primary.cloned().unwrap_or_else(|| first.clone()));
-            notes.push(LayoutAdoption::ViewscreenMonitorGone {
-                monitor: self.viewscreen().clone(),
-                replacement: replacement.clone(),
-            });
+                // Occupied console screens retain the existing last-resort
+                // fallback. A GM screen remains dedicated even when it is the
+                // only physical screen: keep the missing viewscreen intent.
+                .or_else(|| {
+                    primary
+                        .filter(|m| self.gm_monitor.as_ref() != Some(*m))
+                        .cloned()
+                })
+                .or_else(|| {
+                    identities
+                        .iter()
+                        .find(|m| self.gm_monitor.as_ref() != Some(*m))
+                        .cloned()
+                })
+                .unwrap_or_else(|| self.viewscreen().clone());
+            if replacement == *self.viewscreen() {
+                notes.push(LayoutAdoption::ViewscreenWaitingForMonitor {
+                    monitor: replacement.clone(),
+                });
+            } else {
+                notes.push(LayoutAdoption::ViewscreenMonitorGone {
+                    monitor: self.viewscreen().clone(),
+                    replacement: replacement.clone(),
+                });
+            }
             let occupants = self.occupants_on(&replacement);
             if !occupants.is_empty() {
                 notes.push(LayoutAdoption::ViewscreenCoversOccupants {
@@ -1395,11 +1444,6 @@ impl BridgeLayout {
             }
             replacement
         };
-        let index = identities
-            .iter()
-            .position(|m| m == &viewscreen)
-            .expect("the viewscreen is one of the monitors it was chosen from");
-
         // An authored surface follows its screen: a monitor that is still here
         // is still carrying whatever the profile opened on it, and one that is
         // gone took its surface with it. Carried before the seats below so the
@@ -1417,11 +1461,11 @@ impl BridgeLayout {
             .collect();
         let splits: Vec<PaneSplit> = identities.iter().map(|m| self.split_on(m)).collect();
         let mut next = Self {
-            gm_monitor: self.gm_monitor.clone().filter(|gm| gm != &viewscreen),
+            gm_monitor: self.gm_monitor.clone(),
             seats: vec![Vec::new(); identities.len()],
             monitors: identities,
             roster,
-            viewscreen: index,
+            viewscreen,
             splits,
             reserved,
         };
@@ -1635,6 +1679,9 @@ impl StationEligibility {
 /// took away ([`BridgeLayout::reconcile`]). Reported, never silent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LayoutAdoption {
+    /// The only available screen is dedicated to the GM. The viewscreen keeps
+    /// its missing monitor intent and its OS window is hidden until one returns.
+    ViewscreenWaitingForMonitor { monitor: MonitorIdentity },
     /// The profile's viewscreen monitor could not be used; the layout kept the
     /// one it had.
     ViewscreenRefused {
@@ -1796,6 +1843,9 @@ impl LayoutAdoption {
     /// a separate rendering from [`Display`](std::fmt::Display).
     pub fn string_id(&self) -> &'static str {
         match self {
+            LayoutAdoption::ViewscreenWaitingForMonitor { .. } => {
+                "server.bridge_layout.adopt_viewscreen_waiting"
+            }
             LayoutAdoption::ViewscreenRefused { .. } => {
                 "server.bridge_layout.adopt_viewscreen_refused"
             }
@@ -1832,7 +1882,8 @@ impl LayoutAdoption {
     /// see [`cause`](Self::cause).
     pub fn params(&self) -> Vec<(&'static str, String)> {
         match self {
-            LayoutAdoption::ViewscreenRefused { monitor, .. } => {
+            LayoutAdoption::ViewscreenRefused { monitor, .. }
+            | LayoutAdoption::ViewscreenWaitingForMonitor { monitor } => {
                 vec![("monitor", monitor.as_str().to_string())]
             }
             LayoutAdoption::PaneNamesNoStation { monitor, label } => vec![
@@ -1894,6 +1945,11 @@ impl LayoutAdoption {
 impl std::fmt::Display for LayoutAdoption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            LayoutAdoption::ViewscreenWaitingForMonitor { monitor } => write!(
+                f,
+                "viewscreen monitor {monitor} is unavailable; its window stays hidden until a \
+                 non-GM screen is available, preserving the GM's dedicated monitor"
+            ),
             LayoutAdoption::ViewscreenRefused { monitor, refusal } => write!(
                 f,
                 "the saved layout puts the viewscreen on monitor {monitor}, which this bridge \

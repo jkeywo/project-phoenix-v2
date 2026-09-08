@@ -871,6 +871,12 @@ pub fn register_lockstep(app: &mut App) {
                 StateClass::Folded,
                 "gm-action-state",
             )
+            // The shared reducer registers this optional private transport
+            // capability even on hosts that have no native surface installed.
+            .declare_state::<crate::gm_action::NativeGmAuthority>(
+                StateClass::Timer,
+                "native-local-gm-workspace",
+            )
             .declare_state::<crate::gm_puppet::StationPuppets>(
                 StateClass::Folded,
                 "gm-action-state",

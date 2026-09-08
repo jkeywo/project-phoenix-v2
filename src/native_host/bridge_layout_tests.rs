@@ -2242,3 +2242,60 @@ fn gm_monitor_loss_retains_assignment_without_covering_the_viewscreen() {
         })
         .is_err());
 }
+
+#[test]
+fn the_only_remaining_gm_monitor_keeps_both_saved_roles_and_waits_for_a_viewscreen() {
+    let seated = bridge()
+        .apply(&LayoutAction::SetGameMaster {
+            monitor: Some(m(LEFT)),
+        })
+        .unwrap();
+    let remaining = vec![discovered(LEFT, true)];
+    let (waiting, notes) = seated.reconcile(&remaining, roster());
+    assert_eq!(waiting.viewscreen(), &m(TV));
+    assert_eq!(waiting.monitors(), &[m(LEFT)]);
+    assert_eq!(waiting.game_master_monitor(), Some(&m(LEFT)));
+    assert_eq!(
+        notes,
+        vec![LayoutAdoption::ViewscreenWaitingForMonitor { monitor: m(TV) }]
+    );
+    assert!(waiting
+        .apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+        .is_err());
+    let saved = waiting
+        .to_profile()
+        .validate()
+        .expect("both roles remain separately saved");
+    let rebooted = BridgeLayout::from_discovered(&remaining, roster())
+        .unwrap()
+        .adopt_profile(&saved)
+        .0;
+    assert_eq!(
+        rebooted, waiting,
+        "a restart before mission launch retains the GM role too"
+    );
+    let restored = waiting
+        .reconcile(
+            &[discovered(LEFT, true), discovered(RIGHT, false)],
+            roster(),
+        )
+        .0;
+    assert_eq!(
+        restored.viewscreen(),
+        &m(RIGHT),
+        "a newly available non-GM monitor restores the shared view"
+    );
+    assert_eq!(restored.game_master_monitor(), Some(&m(LEFT)));
+    let original_returned = waiting.reconcile(&all_three(), roster()).0;
+    assert_eq!(original_returned.viewscreen(), &m(TV));
+    assert_eq!(original_returned.game_master_monitor(), Some(&m(LEFT)));
+    let disabled = waiting
+        .apply(&LayoutAction::SetGameMaster { monitor: None })
+        .unwrap();
+    assert_eq!(
+        disabled.viewscreen(),
+        &m(LEFT),
+        "explicit prelaunch Off frees a viewscreen immediately"
+    );
+    assert!(disabled.game_master_monitor().is_none());
+}

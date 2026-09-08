@@ -1048,10 +1048,11 @@ pub fn apply_bridge_profile(world: &mut World) {
 /// [`BridgeDisplayApplied`] recorded.** Every frame of every host that nobody
 /// has touched takes the first `return` below.
 ///
-/// A layout naming a monitor that is not present *this frame* is left alone
-/// rather than retried into a loop: that only happens in the window between a
-/// display going away and [`watch_runtime_displays`] believing it, and the
-/// reconcile at the end of that window is what moves the layout somewhere real.
+/// A missing target normally waits for the monitor watcher's fallback. If a GM
+/// role exists, hide the old window while it waits so winit cannot park the
+/// viewscreen over the dedicated GM. A returning lawful target unhides and
+/// reanchors it, including a replacement Monitor entity at the same geometry.
+#[allow(clippy::too_many_arguments)]
 fn follow_layout_viewscreen(
     monitors: Query<(Entity, &Monitor, Has<PrimaryMonitor>)>,
     layout: Option<Res<BridgeLayoutResource>>,
@@ -1059,15 +1060,13 @@ fn follow_layout_viewscreen(
     mut primary: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
+    mut hidden_for_gm: Local<bool>,
+    mut anchored_to: Local<Option<Entity>>,
 ) {
     let Some(layout) = layout else {
         return;
     };
     let wanted = layout.layout.viewscreen().clone();
-    if applied.viewscreen.as_ref() == Some(&wanted) {
-        return;
-    }
-
     // Resolved against the identities the LAYOUT knows, not against freshly
     // derived ones: a display whose identity was carried across a roster change
     // answers to the key the row published and the press named, and re-deriving
@@ -1081,12 +1080,34 @@ fn follow_layout_viewscreen(
         &layout.monitors,
     );
     let Some((monitor_entity, _, _)) = present.iter().find(|(_, d, _)| d.identity == wanted) else {
+        // winit can park a disconnected fullscreen window on another monitor.
+        // Hide it while its only lawful alternative is the dedicated GM screen.
+        // The law keeps the absent identity, so a later non-GM monitor restores
+        // the viewscreen without enabling/disabling either role.
+        if layout.layout.game_master_monitor().is_some() {
+            if let Ok((_, mut window)) = primary.single_mut() {
+                window.visible = false;
+                *hidden_for_gm = true;
+            }
+        }
         return;
     };
+    if applied.viewscreen.as_ref() == Some(&wanted)
+        && !*hidden_for_gm
+        && anchored_to.is_none_or(|entity| entity == *monitor_entity)
+    {
+        *anchored_to = Some(*monitor_entity);
+        return;
+    }
     let Ok((window_entity, mut window)) = primary.single_mut() else {
         return;
     };
     window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Entity(*monitor_entity));
+    if *hidden_for_gm {
+        window.visible = true;
+        *hidden_for_gm = false;
+    }
+    *anchored_to = Some(*monitor_entity);
     commands.entity(window_entity).insert(BridgeSurface {
         identity: wanted.as_str().to_string(),
         role: DisplayRole::Viewscreen.summary(),
@@ -3118,6 +3139,55 @@ mod tests {
                 .identity,
             DELL,
             "and the window followed the layout onto the surviving display"
+        );
+    }
+
+    #[test]
+    fn a_gm_only_monitor_keeps_its_role_and_the_viewscreen_hides_until_a_screen_returns() {
+        let (mut app, window) = booted(None);
+        let mut layout = app.world_mut().resource_mut::<BridgeLayoutResource>();
+        layout.layout = layout
+            .layout
+            .apply(&super::super::bridge_layout::LayoutAction::SetGameMaster {
+                monitor: Some(MonitorIdentity::new(BENQ)),
+            })
+            .unwrap();
+        app.update();
+        let lost = monitor_entity(&mut app, "DELL U2720Q", 0);
+        app.world_mut().entity_mut(lost).despawn();
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES + 1 {
+            app.update();
+        }
+        let layout = app.world().resource::<BridgeLayoutResource>();
+        assert_eq!(layout.layout.viewscreen().as_str(), DELL);
+        assert_eq!(
+            layout
+                .layout
+                .game_master_monitor()
+                .map(MonitorIdentity::as_str),
+            Some(BENQ)
+        );
+        assert!(!app.world().entity(window).get::<Window>().unwrap().visible);
+        let returned = app
+            .world_mut()
+            .spawn((monitor("DELL U2720Q", 3840, 2160, 0, 0), PrimaryMonitor))
+            .id();
+        for _ in 0..DISPLAY_LOSS_DEBOUNCE_FRAMES + 1 {
+            app.update();
+        }
+        let primary = app.world().entity(window).get::<Window>().unwrap();
+        assert!(primary.visible);
+        assert_eq!(
+            primary.mode,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Entity(returned))
+        );
+        assert_eq!(
+            app.world()
+                .resource::<BridgeLayoutResource>()
+                .layout
+                .game_master_monitor()
+                .map(MonitorIdentity::as_str),
+            Some(BENQ)
         );
     }
 

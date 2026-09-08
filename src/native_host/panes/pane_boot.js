@@ -77,6 +77,55 @@
     return window.__phoenixGamepads;
   };
 
+  // Preferences travel over a host-local record handled before ClientMessage
+  // decoding. The host chooses the hull/console filename; the page cannot name
+  // a path or another console. Only the existing versioned operator JSON goes
+  // to disk, never sessionStorage or this pane's transport credentials.
+  var profileKey = 'phoenix-operator-profile-v1';
+  var profileJson = null;
+  var profileLoaded = false;
+  function operatorRecord(operation, data) {
+    window.phoenixPaneOut.send(JSON.stringify(Object.assign({
+      type: 'NativeOperator', operation: operation,
+    }, data || {})));
+  }
+  window.PhoenixNativeGamepad = {
+    select: function (index) { operatorRecord('select', { index: index }); },
+  };
+  window.PhoenixOperatorStorage = {
+    getItem: function (key) { return key === profileKey ? profileJson : null; },
+    setItem: function (key, json) {
+      if (key !== profileKey || !profileLoaded) throw new Error('Operator profile is still loading');
+      profileJson = String(json);
+      operatorRecord('save', { profile: profileJson });
+    },
+  };
+  window.__phoenixOperatorReply = function (reply) {
+    if (reply.operation === 'load') {
+      // No selected hull yet is transient; don't save world-less defaults over
+      // the eventual hull's profile. A corrupt file falls back once, visibly.
+      if (reply.error === 'Profile storage is unavailable') return;
+      profileLoaded = true;
+      profileJson = typeof reply.profile === 'string' ? reply.profile : null;
+      window.dispatchEvent(new Event('phoenix-operator-profile-loaded'));
+    }
+    if (reply.operation === 'load' || reply.operation === 'save') {
+      window.PhoenixOperatorStorageStatus = reply.status === 'error' ? reply : null;
+      window.dispatchEvent(new Event('phoenix-operator-storage-status'));
+    }
+  };
+  function loadOperatorProfile() {
+    if (profileLoaded) return;
+    operatorRecord('load');
+    setTimeout(loadOperatorProfile, 1000);
+  }
+  window.__phoenixOperatorReload = function () {
+    profileLoaded = false;
+    profileJson = null;
+    loadOperatorProfile();
+  };
+  loadOperatorProfile();
+
   // ── requestAnimationFrame, off a timer ─────────────────────────────────────
   //
   // NOT a nicety, and not about smoothness. An offscreen Ultralight view

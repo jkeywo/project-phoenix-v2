@@ -579,7 +579,7 @@ fn reservations(layout: &BridgeLayout) -> Vec<String> {
 /// rename does leave one, because nothing runs at all — that is what
 /// [`LayoutStore::sweep_temporaries`] is for, and why the claim above is about
 /// an ordinary failure rather than about every one.
-fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(dir)?;
     let stem = path

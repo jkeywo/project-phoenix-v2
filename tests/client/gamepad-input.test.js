@@ -471,15 +471,15 @@ describe('explicit connection ownership and discrete edges', () => {
     expect(activate).not.toHaveBeenCalled();
 
     // A new connection reuses index zero. The old generation owns nothing.
-    snapshot = [pad(0, { pressed: [0] }), pad(1, { pressed: [0] })];
+    snapshot = [{ ...pad(0, { pressed: [0] }), id: 'replacement device' }, pad(1, { pressed: [0] })];
     expect(runtime.poll(snapshot).status).toBe('disconnected');
     runtime.select(0);
     runtime.poll(snapshot);
     expect(runtime.state().status).toBe('neutral');
     expect(activate).not.toHaveBeenCalled();
-    snapshot = [pad(0), pad(1, { pressed: [0] })];
+    snapshot = [{ ...pad(0), id: 'replacement device' }, pad(1, { pressed: [0] })];
     runtime.poll(snapshot);
-    snapshot = [pad(0, { pressed: [0] }), pad(1, { pressed: [0] })];
+    snapshot = [{ ...pad(0, { pressed: [0] }), id: 'replacement device' }, pad(1, { pressed: [0] })];
     runtime.poll(snapshot);
     expect(activate).toHaveBeenCalledOnce();
   });

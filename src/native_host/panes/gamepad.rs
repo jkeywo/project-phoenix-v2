@@ -30,6 +30,8 @@ pub const STANDARD_AXES: usize = 4;
 /// the W3C axis convention (Y positive is DOWN). Bevy-free so the wire shape is
 /// tested without gilrs.
 pub struct PadReading {
+    /// Hardware descriptor for preference matching; identical devices remain ambiguous.
+    pub id: String,
     /// The browser slot this pad occupies — the value the page's per-station
     /// selection setting stores, kept stable across frames by the adapter so a
     /// plugged-in pad keeps its slot for the session.
@@ -48,6 +50,7 @@ struct WireButton {
 
 #[derive(Serialize)]
 struct WirePad {
+    id: String,
     index: usize,
     mapping: &'static str,
     connected: bool,
@@ -69,6 +72,7 @@ pub fn gamepad_snapshot_json(pads: &[PadReading]) -> String {
     let mut slots: Vec<Option<WirePad>> = (0..=max_slot).map(|_| None).collect();
     for pad in pads {
         slots[pad.slot] = Some(WirePad {
+            id: pad.id.clone(),
             index: pad.slot,
             mapping: "standard",
             connected: true,
@@ -107,6 +111,7 @@ mod tests {
 
     fn pad(slot: usize) -> PadReading {
         PadReading {
+            id: "Test controller".into(),
             slot,
             buttons: [(false, 0.0); STANDARD_BUTTONS],
             axes: [0.0; STANDARD_AXES],

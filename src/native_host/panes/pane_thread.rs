@@ -1249,7 +1249,12 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 }
                 self.hud_script = script;
             }
-            PaneCommand::SetGamepadScript(script) => self.gamepad_script = script,
+            PaneCommand::SetGamepadScript(script) => {
+                if let (Some(bus), Some(script)) = (&self.bus, &script) {
+                    bus.observe_gamepads(script);
+                }
+                self.gamepad_script = script;
+            }
             PaneCommand::Shutdown => return LoopControl::Stop,
         }
         LoopControl::Continue
@@ -1295,7 +1300,13 @@ impl<R: PaneRuntime> PaneLoop<R> {
             for pane in panes.iter_mut() {
                 if matches!(pane.kind, PaneKind::Console) && pane.view.is_ready() {
                     let started = observer.as_ref().map(|_| Instant::now());
-                    let applied = pane.view.push(script).is_ok();
+                    let filtered = bus
+                        .as_ref()
+                        .map(|bus| bus.gamepads_for_pane(pane.id, script));
+                    let applied = pane
+                        .view
+                        .push(filtered.as_deref().unwrap_or(script))
+                        .is_ok();
                     if let Some(observer) = &observer {
                         observer.record(
                             Some(pane.identity()),

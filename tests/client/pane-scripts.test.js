@@ -70,10 +70,12 @@ const fragment = (token, name) => `#${PANE_JOIN_CODE}&token=${token}&name=${name
  * Evaluate the boot script the way the document does: a classic script, in the
  * page's global scope, with `location.hash` already set.
  */
-function runBoot(hash) {
+function runBoot(hash, loadProfile = true) {
   window.location.hash = hash;
+  installOutQueue(); // document.rs installs queue_shim before PANE_BOOT_JS.
   // eslint-disable-next-line no-new-func
   new Function(BOOT)();
+  if (loadProfile) window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });
 }
 
 /**
@@ -159,6 +161,20 @@ afterEach(() => {
 });
 
 describe('pane_boot.js — the identity comes out of the fragment', () => {
+  it('loads and saves only operator preferences over the private host bridge', () => {
+    runBoot(fragment('secret-token', 'Ada'), false);
+    const sent = installOutQueue();
+    const key = 'phoenix-operator-profile-v1';
+    expect(() => window.PhoenixOperatorStorage.setItem(key, '{}')).toThrow(/loading/);
+    window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: '{"version":1}' });
+    expect(window.PhoenixOperatorStorage.getItem(key)).toBe('{"version":1}');
+    expect(window.PhoenixOperatorStorage.getItem('session-token')).toBeNull();
+    window.PhoenixOperatorStorage.setItem(key, '{"version":1,"gamepad":{}}');
+    expect(JSON.parse(sent[0])).toEqual({ type: 'NativeOperator', operation: 'save', profile: '{"version":1,"gamepad":{}}' });
+    expect(sent[0]).not.toContain('secret-token');
+    window.PhoenixNativeGamepad.select(2);
+    expect(JSON.parse(sent[1])).toEqual({ type: 'NativeOperator', operation: 'select', index: 2 });
+  });
   it('declares native capability gaps before the shared client profile loads', () => {
     // Gamepad is DECLARED here, and that is the newer rule: the native host
     // feeds a standard-mapped snapshot of every connected pad into

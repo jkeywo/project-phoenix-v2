@@ -1488,7 +1488,7 @@ struct GamepadSlots {
 /// — buttons in W3C order, and the stick Y axes negated to the W3C convention
 /// (positive is DOWN, where Bevy's stick Y is positive UP).
 fn read_pads(
-    pads: &Query<(Entity, &Gamepad)>,
+    pads: &Query<(Entity, &Gamepad, Option<&Name>)>,
     slots: &mut GamepadSlots,
 ) -> Vec<super::gamepad::PadReading> {
     const W3C_BUTTONS: [GamepadButton; super::gamepad::STANDARD_BUTTONS] = [
@@ -1510,7 +1510,7 @@ fn read_pads(
         GamepadButton::DPadRight,
     ];
     let mut out = Vec::new();
-    for (entity, pad) in pads.iter() {
+    for (entity, pad, name) in pads.iter() {
         let slot = match slots.map.get(&entity) {
             Some(slot) => *slot,
             None => {
@@ -1531,6 +1531,12 @@ fn read_pads(
             -pad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
         ];
         out.push(super::gamepad::PadReading {
+            id: format!(
+                "{}:{:?}:{:?}",
+                name.map(Name::as_str).unwrap_or("Gamepad"),
+                pad.vendor_id(),
+                pad.product_id()
+            ),
             slot,
             buttons,
             axes,
@@ -1552,12 +1558,17 @@ fn read_pads(
 /// before Renderer::update, where the page's animation callbacks poll it.
 fn push_gamepads_to_panes(
     host: Option<ResMut<PaneHost>>,
-    pads: Query<(Entity, &Gamepad)>,
+    pads: Query<(Entity, &Gamepad, Option<&Name>)>,
+    bus: Option<Res<super::PaneBusResource>>,
+    hull: Option<Res<crate::lobby::SelectedShipResource>>,
     mut slots: Local<GamepadSlots>,
 ) {
     let Some(mut host) = host else {
         return;
     };
+    if let (Some(bus), Some(hull)) = (bus, hull) {
+        bus.0.set_operator_scope(&hull.0);
+    }
     let readings = read_pads(&pads, &mut slots);
     let Some(script) = super::gamepad::held_gamepad_script(&readings, &mut slots.had_any) else {
         return;

@@ -87,6 +87,7 @@ impl std::error::Error for PaneInputRefusal {}
 
 #[derive(Default)]
 struct BusState {
+    operators: super::operator::NativeOperators,
     registry: PaneRegistry,
     connections: ConnectionLeg,
     connection_ids: BTreeMap<PaneId, ConnectionId>,
@@ -141,6 +142,7 @@ impl BusState {
         let registry = self.connections.shared.lock();
         for (&id, &connection) in &self.connection_ids {
             if registry.is_superseded(connection) && self.superseded.insert(id) {
+                self.operators.close(id);
                 if let Some(pane) = self.registry.get_mut(id) {
                     pane.supersede();
                 }
@@ -221,6 +223,7 @@ impl PaneBus {
     /// otherwise accumulate one dead document per closed pane.
     pub fn close(&self, id: PaneId) {
         let mut state = self.lock();
+        state.operators.close(id);
         if let Some((_token, pending)) = state.registry.close(id) {
             let connection = state.connection_ids[&id];
             for msg in pending {
@@ -269,6 +272,60 @@ impl PaneBus {
     /// The session token a pane presents, if it is open.
     pub fn token_of(&self, id: PaneId) -> Option<String> {
         self.lock().registry.get(id).map(|p| p.token().to_string())
+    }
+
+    /// Set the private filing scope from the authoritative selected hull.
+    pub fn set_operator_scope(&self, hull: &str) {
+        let mut state = self.lock();
+        if state.operators.configure(hull) {
+            let ids: Vec<_> = state.registry.open_panes().map(|pane| pane.id()).collect();
+            for id in ids {
+                state
+                    .operators
+                    .replies
+                    .insert(id, vec!["window.__phoenixOperatorReload()".into()]);
+            }
+        }
+    }
+
+    /// A surface-only preference record, never a ClientMessage or a peer frame.
+    pub fn submit_operator_record(&self, id: PaneId, record: &str) -> bool {
+        if !record.contains("\"NativeOperator\"") {
+            return false;
+        }
+        let mut state = self.lock();
+        let Some(pane) = state.registry.get(id).filter(|pane| {
+            matches!(
+                pane.lifecycle(),
+                PaneLifecycle::Loading | PaneLifecycle::Live
+            )
+        }) else {
+            return false;
+        };
+        let name = pane.identity().name().to_owned();
+        state.operators.handle(id, &name, record)
+    }
+
+    pub fn take_operator_replies(&self, id: PaneId) -> Vec<String> {
+        self.lock()
+            .operators
+            .replies
+            .remove(&id)
+            .unwrap_or_default()
+    }
+
+    pub fn requeue_operator_replies(&self, id: PaneId, mut replies: Vec<String>) {
+        let mut state = self.lock();
+        replies.extend(state.operators.replies.remove(&id).unwrap_or_default());
+        state.operators.replies.insert(id, replies);
+    }
+
+    pub fn observe_gamepads(&self, script: &str) {
+        self.lock().operators.observe(script);
+    }
+
+    pub fn gamepads_for_pane(&self, id: PaneId, script: &str) -> String {
+        self.lock().operators.snapshot_for(script, id)
     }
 
     /// Every open pane's handle, in the order they were opened.

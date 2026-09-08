@@ -89,6 +89,7 @@ pub mod identity;
 #[cfg(any(feature = "ultralight", test))]
 mod keyboard;
 pub mod mirror;
+mod operator;
 pub mod os_prefs;
 pub mod pane_thread;
 pub mod placement;

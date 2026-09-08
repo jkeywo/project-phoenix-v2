@@ -140,6 +140,16 @@ pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> Pa
     }
     bus.mark_live(id);
 
+    let replies = bus.take_operator_replies(id);
+    for (index, reply) in replies.iter().enumerate() {
+        if let Err(error) = surface.push(reply) {
+            bus.requeue_operator_replies(id, replies[index..].to_vec());
+            report.push_failure = Some(error);
+            break;
+        }
+        report.pushed += 1;
+    }
+
     let batch = bus.take_outbound(id);
     let mut deferred: Vec<PaneDispatch> = Vec::new();
     for (index, dispatch) in batch.iter().enumerate() {
@@ -163,6 +173,9 @@ pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> Pa
     }
 
     for record in surface.drain() {
+        if bus.submit_operator_record(id, &record) {
+            continue;
+        }
         match bus.submit_json(id, &record) {
             Ok(()) => report.accepted += 1,
             Err(refusal) => report.refusals.push(refusal),

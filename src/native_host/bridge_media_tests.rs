@@ -599,3 +599,21 @@ fn a_completed_empty_output_scan_reports_missing_outputs_not_an_absent_backend()
     assert!(!report.contains("assigned camera"));
     assert!(!report.contains("assigned microphone"));
 }
+
+#[test]
+fn a_partial_scan_does_not_claim_unqueried_camera_assignments_match() {
+    let profile = report_profile(vec![entry(
+        "comms",
+        Some("camera:BRIO"),
+        &["mic:Yeti"],
+        &[],
+    )]);
+    let devices = identify_media(&[mic("Yeti")]);
+    let report = render_available_setup_report(&devices, Some(&profile), &[MediaKind::Microphone]);
+    assert!(report.contains("Assignments for enumerated device classes match"));
+    assert!(!report.contains("Media assignments match"));
+    assert!(!report.contains("not connected"));
+    let empty = render_available_setup_report(&[], Some(&profile), &[MediaKind::Microphone]);
+    assert!(empty.contains("not connected"));
+    assert!(!empty.contains("assigned camera"));
+}

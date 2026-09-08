@@ -18,43 +18,40 @@ microphones + 2 audio outputs** to hand. It has two parts:
   is the closable half: it exercises the whole pure model against your *real*
   device names, confirms every refusal fires, and confirms the assignment reloads
   and can be changed.
-- **Part B — live enumeration, preview/test, and real capture/play.** Written and
-  ready, but **verified only when the OS media backend exists** — this repository
-  carries no native camera/microphone/output crate yet (see "The backend gap"
-  below). This is a sanctioned deviation, exactly like #1124's touch half: the
-  automated tests already cover the assignment/validation/resolution *logic*, and
-  the steps below stand ready for whoever first wires the backend. **Do not tick
-  acceptance criterion 3 until Part B has actually been run.**
+- **Part B — live enumeration, preview/meter/test and teardown.** The native
+  adapter is implemented; the multi-device human run remains NOT RUN.
+  **Do not tick criterion 3 until the relevant hardware steps pass.**
 
----
+## Native adapter and test commands
 
-## The backend gap — read this first
+Build with `--features host`. Audio enumeration/testing uses CPAL; Windows camera
+preview uses safe WinRT MediaCapture APIs. `--setup` lists exact identities.
+Paste those keys into the existing `[[media]]` profile and reload to reassign.
+Camera keys always include the OS interface ID; do not invent them from a name.
+Duplicate or unnamed audio endpoints are refused by the test commands: give each
+endpoint a unique OS name and enumerate again. No default device is substituted.
 
-The display profile (#1123) gets its real enumeration for free from Bevy's
-`Monitor` component, so `--setup` lists monitors on any machine. **There is no
-equivalent already-present source for media devices**, and this repository
-carries no native media crate. Wiring one — `cpal` for microphones and audio
-outputs, a camera crate such as `nokhwa` (or Windows Media Foundation directly)
-for cameras — behind the `host`/`ultralight` feature seam is the winit-adapter
-analogue of #1126, deliberately out of the CI default build exactly as the
-real-monitor surface is behind the `#[ignore]`d display integration test.
+With `bridge-media.toml` assigning the relevant named surface:
 
-Two consequences for this kit:
+```
+phoenix-host --setup --profile bridge-media.toml --preview-camera viewscreen
+phoenix-host --setup --profile bridge-media.toml --meter-microphone comms
+phoenix-host --setup --profile bridge-media.toml --test-output comms
+```
 
-- **`--setup` does not yet list live devices.** It prints the media section, says
-  no backend is compiled in, and validates whatever `[[media]]` you authored by
-  hand. So in Part A you discover your device names from Windows (Settings ▸
-  System ▸ Sound for microphones and outputs; Device Manager ▸ Cameras for the
-  camera) and type them into the profile as `camera:<name>` / `mic:<name>` /
-  `output:<name>` identities.
-- **The host cannot yet capture or play media.** Ultralight ships no media
-  backend either, so Part B's preview/meter/test and real capture/play are what
-  the backend crate unlocks. Everything Part B needs is designed and named; it is
-  a dependency, not a redesign.
+The camera opens a local preview window, closes on Escape/window close or after
+30 seconds, and retains only its latest bounded frame. The microphone prints
+peak levels for five seconds per assigned input and discards samples. Output
+plays a quiet one-second tone per assigned endpoint. Each action tears down its
+OS handles before returning. Only one action is accepted per invocation.
+Sharing requires the existing explicit consent and prints contention warnings.
+Missing, denied, disconnected and stalled devices produce diagnostic failures;
+these setup processes do not start or stop a Station or a mission.
+No continuous in-play capture, recording or inter-ship calls are introduced.
 
-If you are running this **after** the backend lands, `--setup` will list your real
-devices with their exact identities — paste those instead of hand-authoring, and
-run Part B for real.
+The camera is Windows-only. A failed enumeration reports the unavailable class
+rather than falsely declaring its unqueried assignments missing. Actual permission
+changes, unplugging and audible/visible correctness remain hardware checks.
 
 ---
 
@@ -73,17 +70,9 @@ run Part B for real.
       ./target/release/phoenix-host --setup
       ```
 
-      The display half lists your monitors as before. The **Media devices**
-      section either lists your devices (backend present) or prints that no
-      backend is compiled in (the current state). In the latter case, note your
-      device names from Windows and form each identity as `kind:name`:
-
-      - camera → `camera:Logitech BRIO`
-      - microphone → `mic:Blue Yeti`, `mic:Headset Boom`
-      - audio output → `output:Bridge Speakers`, `output:Comms Headset`
-
-      Use the name **exactly** as Windows shows it; the kind tag is one of
-      `camera`, `mic`, `output`.
+      The display half lists monitors; **Media devices** lists the successfully
+      enumerated device classes and exact profile keys. An unavailable backend
+      is named explicitly. Copy keys exactly, including a camera's interface ID.
 
 ---
 
@@ -101,7 +90,7 @@ version = 1
 
 [[media]]
 surface = "viewscreen"
-camera = "camera:Logitech BRIO"      # paste your camera's identity
+camera = "camera:Logitech BRIO#<paste-interface-id>"      # paste your camera's identity
 microphone = ["mic:Blue Yeti"]        # your first microphone
 output = ["output:Bridge Speakers"]   # your first output
 
@@ -190,8 +179,7 @@ bridge-media.toml`, confirm the refusal, then undo it:
       `output:Bridge Speakers`. Re-run A1's `--setup --profile` and A4's launch.
 
       **PASS:** the report and boot log show the swapped assignment — the change
-      is picked up on reload, not cached from the previous run. (Once the backend
-      lands, Part B confirms audio actually follows the swap.)
+      is picked up on reload, not cached from the previous run. (Part B confirms audio actually follows the swap.)
 
 **Part A passes** when every box above is ticked with your real device names.
 That exercises acceptance criteria 1 (assignment), 2 (explicit sharing +
@@ -200,20 +188,16 @@ real multi-device hardware — everything that does not require live capture.
 
 ---
 
-## Part B — live enumeration, preview/test, and real capture/play (verified-when-backend-exists)
+## Part B — live enumeration, preview/meter/test and teardown
 
-> **Run this only once the OS media backend is wired** (see "The backend gap").
-> Until then these steps are unrun. The assignment, validation, sharing and
-> resolution *logic* is already covered by the automated tests; what is left is
-> the one thing only the backend + real hardware can show — that Windows hands
-> over the devices this model names, that a surface captures and plays through
-> them, and that a missing/denied device degrades without breaking the Station.
-
-Set up as in Part A, with the real devices connected.
+Run the commands above separately for each assigned surface. These are explicit
+setup diagnostics with a named surface, not persistent in-play media streams.
+The operator judges image/audio correspondence and tests actual unplug/denial.
 
 - [ ] **Live enumeration lists your real devices.** `--setup` prints each camera,
-      microphone and output with an identity you can paste verbatim, marks the OS
-      default of each kind, and marks any device whose access is denied.
+      microphone and output with an identity you can paste verbatim. Test commands
+      use the explicit assignment and report OS access errors when opening it;
+      enumeration alone does not establish capture permission.
       **PASS:** all 5 of your devices appear under the right kind, with correct
       names.
 - [ ] **Camera preview on the viewscreen surface.** Before entering play, the
@@ -237,10 +221,9 @@ Set up as in Part A, with the real devices connected.
       contention/capability message — **never** a crash. **PASS:** the behaviour
       matches the warning; note exactly what the OS did.
 - [ ] **Missing device is reported, not fatal (acceptance criterion 4).** Unplug
-      the viewscreen's camera mid-session. The host reports the camera missing and
-      leaves that slot empty; **the Station keeps running** with its mic and
-      output, and every other surface is untouched. **PASS:** a "not connected"
-      report, no crash, the mission continues.
+      the camera during its preview. The diagnostic reports the failure and
+      closes its handles. **PASS:** a useful failure, no crash, and an independently
+      running Station remains usable. Re-enumeration reports the absent endpoint.
 - [ ] **Denied device is reported, not fatal.** In Windows privacy settings, deny
       microphone access, then launch. The assigned mic resolves as denied and is
       reported; the surface stays usable for its camera and output. **PASS:** a
@@ -267,9 +250,7 @@ Add a dated note to the issue #1126 thread (or the batch's acceptance log):
 - for any failure, the operator log around it (`--log info`) and a screenshot for
   a visual issue.
 
-If Part B is deferred for want of the backend, say so explicitly and leave
-criterion 3 unticked — that is the expected state until the media backend crate is
-wired.
+If Part B has not been run, record NOT RUN and leave its criteria unticked.
 
 ---
 
@@ -302,7 +283,7 @@ The pure media model in `src/native_host/bridge_media.rs` is tested by
   assignments even with no backend, and surfaces a missing device and a contention
   warning when devices are present.
 
-The real OS media backend (enumeration, camera preview, mic metering, output
-tone-test, and the actual per-surface capture and play) is the feature-gated
-winit-adapter analogue this repository does not yet carry a crate for — see
-`bridge_media::enumerate_note`. It is what this kit's Part B exercises by hand.
+The host-gated adapters are `media_camera.rs`, `media_microphone.rs` and
+`media_output.rs`. Their tests cover explicit selection, missing/ambiguous
+preflight, bounded samples, camera identity, refusal before native window
+creation and terminal failure preservation. Hardware behavior remains Part B.

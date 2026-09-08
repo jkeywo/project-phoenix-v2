@@ -111,6 +111,10 @@ pub mod layout_store;
 /// accepted lobby change back to it, both gated off for a run an operator gave
 /// an explicit `--profile`.
 pub mod layout_store_systems;
+#[cfg(all(feature = "host", target_os = "windows"))]
+pub mod media_camera;
+#[cfg(feature = "host")]
+pub mod media_microphone;
 #[cfg(feature = "host")]
 pub mod media_output;
 /// The **mod-pack shelf** (issue #1366) — pure, Bevy-free, and filesystem-free

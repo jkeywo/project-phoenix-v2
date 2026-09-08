@@ -65,6 +65,8 @@ fn args() -> HostArgs {
         sim: None,
         setup: false,
         test_output: None,
+        meter_microphone: None,
+        preview_camera: None,
         profile: None,
     }
 }

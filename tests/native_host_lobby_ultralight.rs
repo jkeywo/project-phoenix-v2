@@ -156,6 +156,8 @@ impl Delivery {
             sim: None,
             setup: false,
             test_output: None,
+            meter_microphone: None,
+            preview_camera: None,
             profile: None,
         };
         let server = HostServer::bind(&args).expect("the delivery host binds");

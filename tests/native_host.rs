@@ -48,6 +48,8 @@ fn args(manifest: &str) -> HostArgs {
         // `src/native_host/bridge_profile.rs`'s cover `--setup`/`--profile`.
         setup: false,
         test_output: None,
+        meter_microphone: None,
+        preview_camera: None,
         profile: None,
     }
 }

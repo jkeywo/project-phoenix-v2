@@ -52,6 +52,8 @@ impl Delivery {
             sim: None,
             setup: false,
             test_output: None,
+            meter_microphone: None,
+            preview_camera: None,
             profile: None,
         })
         .expect("the local delivery host binds");

@@ -804,7 +804,7 @@ pub fn render_media_setup_report(
     discovered: &[DiscoveredMediaDevice],
     profile: Option<&super::bridge_profile::BridgeProfile>,
 ) -> String {
-    render_media_setup_report_inner(discovered, profile, !discovered.is_empty(), false)
+    render_media_setup_report_inner(discovered, profile, !discovered.is_empty(), None)
 }
 
 /// A completed output scan can be empty. Camera/mic support is explicitly absent
@@ -815,16 +815,28 @@ pub fn render_output_setup_report(
 ) -> String {
     let mut out = "\nOutput backend: CPAL. Camera preview and microphone metering are not implemented.\nUnnamed/duplicate output names cannot be tested safely; assign unique OS names.\n".to_string();
     out.push_str(&render_media_setup_report_inner(
-        discovered, profile, true, true,
+        discovered,
+        profile,
+        true,
+        Some(&[MediaKind::Output]),
     ));
     out
+}
+
+/// Resolve only device classes whose enumeration completed successfully.
+pub fn render_available_setup_report(
+    discovered: &[DiscoveredMediaDevice],
+    profile: Option<&super::bridge_profile::BridgeProfile>,
+    supported: &[MediaKind],
+) -> String {
+    render_media_setup_report_inner(discovered, profile, !supported.is_empty(), Some(supported))
 }
 
 fn render_media_setup_report_inner(
     discovered: &[DiscoveredMediaDevice],
     profile: Option<&super::bridge_profile::BridgeProfile>,
     scan_completed: bool,
-    output_only: bool,
+    supported: Option<&[MediaKind]>,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -836,7 +848,7 @@ fn render_media_setup_report_inner(
         out.push('\n');
     } else {
         for kind in [MediaKind::Camera, MediaKind::Microphone, MediaKind::Output] {
-            if output_only && kind != MediaKind::Output {
+            if supported.is_some_and(|kinds| !kinds.contains(&kind)) {
                 continue;
             }
             let of_kind: Vec<&DiscoveredMediaDevice> =
@@ -881,16 +893,25 @@ fn render_media_setup_report_inner(
                 out.push_str(&format!("  - warning: {warning}\n"));
             }
             if scan_completed {
-                if output_only {
+                if let Some(kinds) = supported {
                     for surface in &mut validated.surfaces {
-                        surface.camera = None;
-                        surface.microphones.clear();
+                        if !kinds.contains(&MediaKind::Camera) {
+                            surface.camera = None;
+                        }
+                        if !kinds.contains(&MediaKind::Microphone) {
+                            surface.microphones.clear();
+                        }
+                        if !kinds.contains(&MediaKind::Output) {
+                            surface.outputs.clear();
+                        }
                     }
                 }
                 let resolved = resolve_media(&validated, discovered);
                 if resolved.problems.is_empty() {
-                    out.push_str(if output_only {
+                    out.push_str(if supported == Some(&[MediaKind::Output][..]) {
                         "Output assignments match the connected outputs.\n"
+                    } else if supported.is_some() {
+                        "Assignments for enumerated device classes match the connected devices.\n"
                     } else {
                         "Media assignments match the connected devices.\n"
                     });

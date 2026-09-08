@@ -1188,20 +1188,19 @@ forced share on a one-device box so the generated default validates.
 
 ### The setup surface, and the backend gap
 
-`--setup` gains a media section (`render_media_setup_report`): it lists devices by
-kind and validates the profile's assignments, reporting missing/denied devices and
-contention. But **there is no OS media backend in the tree.** The display profile
-gets its real enumeration free from Bevy's `Monitor`; there is no equivalent
-already-present source for cameras, microphones and outputs, and no native media
-crate is a dependency here. So `--setup`'s media half validates hand-authored
-assignments and prints that no backend is compiled in (`enumerate_note`). Wiring a
-real backend — `cpal` for microphones/outputs, a camera crate such as `nokhwa` (or
-Windows Media Foundation) for cameras — behind the `host`/`ultralight` feature
-seam is the winit-adapter analogue, out of the CI default build exactly as the
-real-monitor surface is. Live enumeration, camera preview, mic metering, output
-tone-test and real capture/play are the acceptance kit's Part B — deferred until
-that backend lands, so acceptance criterion 3 stays parked there, the way #1124's
-touch criterion 6 stays parked on real touch hardware.
+`--setup` enumerates audio endpoints through host-gated CPAL and Windows cameras
+through an asynchronous WinRT scan on the native UI thread. The report resolves
+only successfully scanned device classes and preserves unavailable diagnostics.
+`media_output.rs`, `media_microphone.rs` and Windows-only `media_camera.rs` own
+local setup tests: `--test-output`, `--meter-microphone` and `--preview-camera`
+require `--setup --profile` plus the surface name. Retained handles and explicit
+identities prevent default substitution; ambiguous audio names are refused and
+camera keys always include the OS interface ID. Explicit sharing still requires
+the pure model's consent and prints its warning. The camera keeps one bounded
+CPU frame, the microphone reduces samples to a peak, and all three tear down
+before exit. No recording, ongoing mission capture or inter-ship calls are added.
+The real multi-device acceptance remains in `docs/acceptance/1126-media.md`;
+automated tests cannot establish audible/visible correspondence or unplug behavior.
 
 This profile is **still not** the private per-player Accessibility profile
 (#1127): it is shared operator configuration of the physical room, carrying

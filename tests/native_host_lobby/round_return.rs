@@ -1,7 +1,10 @@
 //! A retained native world returns its existing crew to a usable lobby.
 use super::*;
+use project_phoenix::core::codec::{JsonCodec, MessageCodec};
 use project_phoenix::core::messages::DeliveryClass;
 use project_phoenix::lobby::{stations_config::ShipStations, SelectedShipResource, Sessions};
+use project_phoenix::native_host::panes::{identity::PaneIdentity, PaneBus};
+use project_phoenix::native_host::transport::PairedTransport;
 
 const CREW: [&str; 2] = [
     "3f1a6c2e-0a11-4b3c-9d55-000000000071",
@@ -263,4 +266,177 @@ fn selected_lobby_return_rewelcomes_existing_crew_before_they_reclaim_and_ready(
 #[test]
 fn retained_world_host_abort_also_rewelcomes_existing_crew() {
     assert_retained_return(false, true);
+}
+
+fn assert_game_over_pane_reconnect(deferred: bool) {
+    let (mut app, handle, seats) = retained_host(deferred);
+    let bus = PaneBus::default();
+    let pane = bus.open(PaneIdentity::adopt(CREW[1], "Moved crew").unwrap());
+    bus.mark_live(pane);
+    app.insert_resource(NativeTransportLink::new(PairedTransport::new(
+        handle.transport(),
+        bus.transport(),
+    )));
+    bus.submit(
+        pane,
+        ClientMessage::Identify {
+            token: CREW[1].into(),
+            name: "Moved crew".into(),
+        },
+    )
+    .unwrap();
+    pump(&mut app, 4);
+    bus.take_outbound(pane);
+    app.world_mut()
+        .resource_mut::<NextState<GamePhase>>()
+        .set(GamePhase::GameOver);
+    pump(&mut app, 2);
+    bus.take_outbound(pane);
+
+    // The real move/resize path closes the old document and recreates it on
+    // the same identity. Its replacement page identifies while the ending is
+    // still visible, not after ReturnToLobby releases the station controls.
+    bus.close(pane);
+    let (recreated, _) = bus.recreate(pane).expect("closed pane recreates");
+    bus.mark_live(recreated);
+    assert_ne!(recreated, pane);
+    assert_eq!(bus.token_of(recreated).as_deref(), Some(CREW[1]));
+    pump(&mut app, 4);
+    assert!(
+        !app.world()
+            .resource::<Sessions>()
+            .0
+            .players()
+            .iter()
+            .find(|p| p.token == CREW[1])
+            .unwrap()
+            .connected
+    );
+    bus.submit(
+        recreated,
+        ClientMessage::Identify {
+            token: CREW[1].into(),
+            name: "Moved crew".into(),
+        },
+    )
+    .unwrap();
+    // Several real frame/fixed updates expose a phase-gated reader that loses
+    // this one-time Identify, rather than keeping it until the return frame.
+    pump(&mut app, 8);
+    let terminal_messages: Vec<_> = bus
+        .take_outbound(recreated)
+        .into_iter()
+        .map(|pending| JsonCodec.decode_server(&pending.json).unwrap())
+        .collect();
+
+    // Identity can reconnect at the ending; station actions remain gated.
+    bus.submit(recreated, ClientMessage::ReleaseStation)
+        .unwrap();
+    bus.submit(recreated, ClientMessage::SetReady { ready: true })
+        .unwrap();
+    pump(&mut app, 4);
+    let player = app
+        .world()
+        .resource::<Sessions>()
+        .0
+        .players()
+        .iter()
+        .find(|p| p.token == CREW[1])
+        .unwrap();
+    assert_eq!(player.station.as_ref().map(|id| &id.0), Some(&seats[1]));
+    assert!(!player.ready);
+    bus.take_outbound(recreated);
+
+    handle.send(CREW[0], ClientMessage::ReturnToLobby);
+    pump(&mut app, 4);
+    let returned_messages: Vec<_> = bus
+        .take_outbound(recreated)
+        .into_iter()
+        .map(|pending| JsonCodec.decode_server(&pending.json).unwrap())
+        .collect();
+    assert!(returned_messages
+        .iter()
+        .any(|msg| matches!(msg, ServerMessage::ReturnedToLobby)));
+    bus.submit(
+        recreated,
+        ClientMessage::SelectStation {
+            station: seats[1].clone(),
+        },
+    )
+    .unwrap();
+    pump(&mut app, 4);
+    let claimed: Vec<_> = bus
+        .take_outbound(recreated)
+        .into_iter()
+        .map(|pending| JsonCodec.decode_server(&pending.json).unwrap())
+        .collect();
+    assert!(
+        claimed.iter().any(|msg| matches!(msg,
+            ServerMessage::StationAssigned { token, station_id: Some(id), .. }
+            if token == CREW[1] && id.0 == seats[1]
+        )),
+        "the actual pane receives the positive claim assignment"
+    );
+    let player = app
+        .world()
+        .resource::<Sessions>()
+        .0
+        .players()
+        .iter()
+        .find(|p| p.token == CREW[1])
+        .unwrap();
+    assert!(player.connected,
+        "a positive StationAssigned is insufficient: disconnected holders remain CLAIM in the client roster");
+    assert_eq!(player.station.as_ref().map(|id| &id.0), Some(&seats[1]));
+    assert_eq!(
+        app.world().resource::<Sessions>().0.holder_for_station(
+            &project_phoenix::core::messages::StationId(seats[1].clone())
+        ),
+        Some(CREW[1])
+    );
+    for (messages, phase, station) in [
+        (&terminal_messages, GamePhase::GameOver, Some(&seats[1])),
+        (&returned_messages, GamePhase::Lobby, None),
+    ] {
+        let state = messages
+            .iter()
+            .find_map(|msg| match msg {
+                ServerMessage::Welcome { state, .. } if state.phase == phase => Some(state),
+                _ => None,
+            })
+            .expect("the recreated pane receives its current lifecycle Welcome");
+        let player = state.players.iter().find(|p| p.token == CREW[1]).unwrap();
+        assert!(
+            player.connected,
+            "the actual client projection must include a connected holder"
+        );
+        assert_eq!(player.station.as_ref().map(|id| &id.0), station);
+        assert!(!player.ready);
+    }
+    bus.submit(recreated, ClientMessage::SetReady { ready: true })
+        .unwrap();
+    pump(&mut app, 4);
+    assert!(bus.take_outbound(recreated).iter().any(|pending| matches!(
+        JsonCodec.decode_server(&pending.json).unwrap(),
+        ServerMessage::ReadyChanged { token, ready: true } if token == CREW[1]
+    )));
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby
+    );
+    assert_eq!(
+        bus.open_pane_for_name("Moved crew"),
+        Some(recreated),
+        "return, claim and Ready require no second page recreation or Identify"
+    );
+}
+
+#[test]
+fn retained_world_pane_recreated_during_game_over_can_reclaim_after_return() {
+    assert_game_over_pane_reconnect(false);
+}
+
+#[test]
+fn selected_lobby_pane_recreated_during_game_over_can_reclaim_after_return() {
+    assert_game_over_pane_reconnect(true);
 }

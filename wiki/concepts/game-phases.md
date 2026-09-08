@@ -3,7 +3,7 @@ title: Game Phases
 type: concept
 tags: [phases, lobby, loading, in-progress, game-over, reconnect]
 sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/core/messages.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, src/native_host/world_load.rs, tests/native_host_lobby.rs, tests/native_host_lobby/round_return.rs, tests/client/native-retained-lobby.test.js]
-updated: 2026-09-07
+updated: 2026-09-08
 ---
 
 # Game Phases
@@ -87,6 +87,17 @@ native App regression in `tests/native_host_lobby.rs` covers both transport
 delivery and the final HUD through their production registrations.
 The game-over UI can issue `ReturnToLobby`; the server resets round readiness
 and returns to the lobby through the authoritative lobby handler.
+
+`LobbyPlugin` keeps `Identify` active in every phase, ordered after disconnect
+processing and before countdown evaluation. A pane moved, resized or recreated
+while the ending is visible therefore reconnects its existing Session before
+returning to Lobby. Station actions keep their Lobby/Loading/InProgress gate.
+The regressions in `tests/native_host_lobby/round_return.rs` drive an actual
+`PaneBus` close/recreate and handshake through the registered schedules, then
+check connected Welcome membership, claim delivery and readiness after return.
+`tests/client/native-retained-lobby.test.js` pins the corresponding roster rule:
+a positive station assignment alone cannot turn a disconnected Session into a
+live holder.
 
 Native hosts retain their selected World on return, whether selected by `--world`
 or from `--lobby`. `NativeWorldLoadPlugin` registers the actual GameOver/InProgress

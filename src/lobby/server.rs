@@ -454,12 +454,21 @@ impl Plugin for LobbyPlugin {
             // `tick_countdown`. They carry different phase gates, so they are
             // registered per matching gate:
             //
-            // Identify + the four station systems gate on
-            // Lobby/Loading/InProgress (claim/release/toggle + mid-game reconnect).
+            // Identify is a lifecycle handshake in every phase. A pane moved
+            // or recreated during GameOver must reconnect before the retained
+            // lobby returns; otherwise its one-time Identify expires while the
+            // Session remains disconnected, even if a later claim is assigned.
+            .add_systems(
+                FixedUpdate,
+                handle_identify_system
+                    .in_set(LobbySystemSet)
+                    .after(handle_disconnect)
+                    .before(tick_countdown),
+            )
+            // Station actions retain their Lobby/Loading/InProgress gate.
             .add_systems(
                 FixedUpdate,
                 (
-                    handle_identify_system,
                     handle_select_station_system,
                     handle_release_station_system,
                     handle_set_ready_system,
@@ -1043,8 +1052,8 @@ pub fn update_game_state_cache(
 // ── Systems ────────────────────────────────────────────────────────────────
 
 /// Per-variant system for `ClientMessage::Identify` (issue #734) — the reconnect
-/// handshake. Gated on Lobby/Loading/InProgress so a browser refresh mid-game
-/// still receives its `Welcome` and has its seat restored. Every parameter is
+/// handshake. Runs in every phase so a page recreated during GameOver still
+/// receives its `Welcome` and reconnects its Session before return. Every parameter is
 /// sourced exactly as the former `process_lobby` Identify path did:
 /// `world` from `WorldResource`, `ship_stations` with a `default()` fallback,
 /// `ship_config` from `ShipClientConfigResource`, and the ratings SNAPSHOT from

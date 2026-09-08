@@ -130,4 +130,39 @@ describe('retained native lobby completion through the shared crew projection', 
     expect(page.lobby.waitingForScenario).toBe(false);
     expect(page.ui.phase).toBe('Lobby');
   });
+
+  it('requires the returned Welcome to reconnect a moved pane before its positive claim becomes a live seat', () => {
+    const page = crewPage();
+    const cleared = [
+      { ...players[0], connected: false, station: null, ready: false },
+      { ...players[1], station: 'helm', ready: false },
+    ];
+    page.receive(welcome(cleared));
+    page.receive({ type: 'StationAssigned', data: { token: MY, station: 'Tactical', station_id: 'tactical' } });
+    page.paint();
+    // The observed failure was a positive assignment on a Session whose
+    // GameOver-time Identify never ran. The ordinary roster rightly keeps a
+    // disconnected holder's seat claimable; an assignment is not a handshake.
+    expect(page.lobby.playerStation(MY)).toBe('tactical');
+    expect(page.ui.players.find(player => player.token === MY).connected).toBe(false);
+    expect(document.querySelector(`[${STATION_ROW_ATTR}="tactical"] .claim-btn`)).not.toBeNull();
+    expect(document.querySelector('#crew-display').textContent).toBe('1/2');
+
+    // With the lifecycle Identify accepted, the retained-return projection
+    // carries the existing identity as connected and its station cleared.
+    page.receive(welcome(cleared.map(player => ({ ...player, connected: true }))));
+    page.paint();
+    document.querySelector(`[${STATION_ROW_ATTR}="tactical"] .claim-btn`).click();
+    expect(page.sent).toEqual([{ type: 'SelectStation', data: { station: 'Tactical' } }]);
+    page.receive({ type: 'StationAssigned', data: { token: MY, station: 'Tactical', station_id: 'tactical' } });
+    page.paint();
+    expect(document.querySelector(`[${STATION_ROW_ATTR}="tactical"] .mine-btn`)).not.toBeNull();
+    expect(document.querySelector('#crew-display').textContent).toBe('2/2');
+    const ready = document.querySelector('#ready-btn');
+    expect(ready.style.display).toBe('block');
+    expect(ready.disabled).toBe(false);
+    ready.click();
+    expect(page.sent[1]).toEqual({ type: 'SetReady', data: { ready: true } });
+    expect(page.ui.phase).toBe('Lobby');
+  });
 });

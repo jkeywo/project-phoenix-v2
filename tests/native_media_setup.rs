@@ -9,6 +9,7 @@ use std::{
 
 #[test]
 #[ignore = "opens a native diagnostic window; needs a Windows display"]
+#[allow(clippy::disallowed_methods)] // Random temporary filename, never simulation identity.
 fn absent_capture_devices_refuse_without_panicking_or_substituting() {
     let profile = std::env::temp_dir().join(format!("phoenix-media-{}.toml", uuid::Uuid::new_v4()));
     std::fs::write(&profile, "version = 1\n[[media]]\nsurface = 'comms'\ncamera = 'camera:phoenix-deliberately-absent'\nmicrophone = ['mic:phoenix-deliberately-absent']\n").unwrap();

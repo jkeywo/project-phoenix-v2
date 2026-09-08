@@ -212,7 +212,7 @@ impl CameraPreview {
                             && info
                                 .DeviceInformation()
                                 .and_then(|device| device.Id())
-                                .is_ok_and(|id| id.to_string() == self.device_id)
+                                .is_ok_and(|id| id == self.device_id)
                         {
                             selected = Some(source);
                             break;

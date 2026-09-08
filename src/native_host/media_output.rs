@@ -134,7 +134,7 @@ fn tone_sample(frame: u32, rate: u32) -> f32 {
     let envelope = (frame as f32 / fade)
         .min((rate - frame) as f32 / fade)
         .min(1.0);
-    (frame as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 0.04 * envelope
+    crate::simmath::sin(frame as f32 * 440.0 * std::f32::consts::TAU / rate as f32) * 0.04 * envelope
 }
 
 fn play_samples<T: cpal::SizedSample + cpal::FromSample<f32>>(

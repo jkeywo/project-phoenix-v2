@@ -84,6 +84,8 @@ pub mod document;
 pub mod frame_stats;
 pub mod gamepad;
 #[cfg(any(feature = "ultralight", test))]
+mod gamepad_discovery;
+#[cfg(any(feature = "ultralight", test))]
 mod hud;
 pub mod identity;
 #[cfg(any(feature = "ultralight", test))]

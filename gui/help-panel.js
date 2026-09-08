@@ -72,7 +72,10 @@ export function renderStationHelp(root, stationId, semanticActions = [], {
 
   const matchingActions = (Array.isArray(semanticActions) ? semanticActions : [])
     .filter((action) => Array.isArray(action.contexts) && (action.contexts.includes(stationId)
-      || (gamepadConnected && action.contexts.includes(gamepadContext))));
+      || (gamepadConnected && action.contexts.includes(gamepadContext))))
+    .filter((action) => (action.bindings || []).some((binding) => binding
+      && (binding.type === 'gamepad' ? gamepadConnected && action.contexts.includes(gamepadContext)
+        : action.contexts.includes(stationId))));
   if (matchingActions.length > 0) {
     const bindingsHeading = doc.createElement('div');
     bindingsHeading.className = 'station-help-section-title';

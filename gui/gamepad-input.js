@@ -343,6 +343,7 @@ export function createGamepadInputRuntime(options = {}) {
     if (preferredDevice && !selectedPad()) {
       const match = matchPreferredGamepad(latestSnapshot, preferredDevice);
       restoreStatus = match.status;
+      if (match.status === 'ambiguous') selection = null;
       if (match.status === 'matched') {
         flushContinuous();
         flushDiscreteHolds();

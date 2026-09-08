@@ -781,6 +781,7 @@ pub struct PaneDisplayPlugin;
 
 impl Plugin for PaneDisplayPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(super::gamepad_discovery::GamepadDiscoveryPlugin);
         app.init_resource::<ViewscreenHudLatest>();
         app.add_systems(PostUpdate, stop_pane_host_on_exit);
         // Idempotent, and belt-and-braces: `PaneUploadPlugin` (registered

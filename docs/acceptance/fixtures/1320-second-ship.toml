@@ -1,0 +1,8 @@
+# Appended to the prepared Combat Test only by prepare-gm-live-event.mjs.
+# The first authored hull is at [400, 0, 200]; both start inside Starbase
+# Alpha's ordinary Comms range without occupying the same position.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "gm-live-event-player-2"
+transform = { position = [400.0, 0.0, 250.0] }
+spawn_on = "game_start"

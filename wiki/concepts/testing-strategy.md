@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs]
+sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md]
 updated: 2026-09-07
 ---
 
@@ -77,6 +77,13 @@ pushes run the core smoke tier; nightly/manual runs and PRs labelled
 keep their nightly/manual schedules. The Cruiser balance matrix gates its job;
 regular performance comparisons report warnings rather than blocking deployment.
 PASM retains its independent validation, scan and traceability job.
+
+The #1320 human GM event has an opt-in preparation tool,
+`scripts/prepare-gm-live-event.mjs`. It derives an ordinary two-slot world and
+curated manifest from integrated Combat Test authoring without changing the
+single-player source. The acceptance kit requires generated-asset hashes,
+two live Fleet hulls proven on the integrated build, and the human event's
+separate decision; generation alone establishes none of those runtime results.
 
 During implementation, use targeted tests. Run the documented final gates once
 before pushing, including the additional native configurations when verifying

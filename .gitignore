@@ -51,6 +51,10 @@ tests/smoke/test-results-full.json
 # balance-runs.mjs --out dir (example config uses .balance-out)
 .balance-out/
 
+# Opt-in #1320 event assets, derived from integrated Combat Test before building.
+/assets/worlds/prepared/gm_live_event_two_ship.toml
+/assets/scenarios.gm-live-event.toml
+
 # Python
 # Byte-compiled / optimized / DLL files
 __pycache__/

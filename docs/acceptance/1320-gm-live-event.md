@@ -25,7 +25,42 @@ Before inviting the crew, fill this readiness table. Missing content or evidence
 | Directing choices | Authored event and spawn choices, a removable target, Objective choice, supported NPC doctrine, scoped System/effect targets, compatible player/NPC Stations |
 | Evidence capture | Recorder, destination, a demonstrated read-only command/result and same-tick digest capture method from #1316, snapshot/export method and review owner |
 
-The #1317 `assets/worlds/probe_gm_comms.toml` demonstrates two routing modes and a complete authored hail. It is a narrow Comms probe, with no authored role presets or full M2 directing palette. It does **not** supply this complete event by itself. The integrated scenario must provide the entries above before the run; this kit adds no scenario or product code.
+The event uses the generated `assets/worlds/prepared/gm_live_event_two_ship.toml` with two Alliance Cruiser hulls. Ordinary `assets/worlds/combat_test.toml` has only one GameStart ship slot. Its additive GM authoring from #1316/#1317 must first be present in the integrated checkout. Prepare the two-slot variant there, before building the event bundle:
+
+```sh
+node scripts/prepare-gm-live-event.mjs
+node scripts/prepare-gm-live-event.mjs --check
+```
+
+Keep the command's source, slot and output hashes with the event record. The tool preserves Combat Test's comments and complete eight-wave script, appends the authored second-ship fixture, and binds the authored hail to the generated world's own setup script. It leaves the ordinary world and base catalogue unchanged. The generated world and `assets/scenarios.gm-live-event.toml` are local preparation outputs, excluded from Git; regenerate them after source authoring changes. Generation verifies content shape, not the simulation or human workflow.
+
+Build and serve the integrated bundle using the normal Trunk/client path after generation; Trunk copies these ordinary assets. Open both hosts at `/?manifest=assets/scenarios.gm-live-event.toml` on that bundle's origin and choose the offered scenario. The manifest selects Alliance Cruiser hulls. Before inviting the human crew, verify the served generated world/manifest match the recorded hashes, run the queued two-host runtime proof, and record **two distinct live Fleet hulls** with their own identities and crew projections. A second joined host alone does not satisfy that precheck. Missing build/runtime evidence keeps the event unready.
+
+Run the opt-in native topology precheck on that integrated source, with local Cargo work coordinated sequentially:
+
+```sh
+cargo test --features headless --test gm_live_event_precheck prepared_event_has_two_authored_fleet_hulls_and_equal_peer_digests -- --ignored --exact --nocapture
+```
+
+Record a true exit 0 and **one passing test**, not a zero-match or normal ignored result. It boots the generated world on two ordinary headless peers, compares their shared digests, and checks the two authored spawns and different LocalShip projections. It deliberately uses Backfill crews: served browser/crew checks and the real human Comms exercise remain separate prerequisites.
+
+Retain the `GM_LIVE_EVENT_PRECHECK` JSON line printed only after those assertions pass. It records the actual per-peer initial spawn identities/positions, LocalShip, final tick/digest, comparison-round count and loaded hail binding alongside the source/generated asset hashes. A queued command or prepared JSON schema is not execution evidence.
+
+Use these actual choices when filling the readiness table:
+
+| Exercise | Combat Test choice |
+| --- | --- |
+| Role presets | `directing` and `observer`; switch to All when a required panel is hidden |
+| Fictional speaker and routes | Starbase Alpha; `starbase-selected` for one ship and `starbase-fleet` for both |
+| Authored hail | `defence-briefing` on `starbase-selected`; acknowledge through the crew's Comms interface and observe the follow-up |
+| Spawn/removal | `relief-cruiser`, variant `removable` |
+| Optional Objectives | `gm-relief-rendezvous` and `gm-relief-cover` |
+| NPC doctrine | `raider-regroup` and `raider-assault` for a live named wave ship |
+| Events | `release_wave_1` through `release_wave_8` expose Fire and Pause; `report_wave_2` also exposes Skip |
+
+Keep both player ships within Starbase Alpha's ordinary Comms range for the routing comparison. The wave releases retain the scenario's eight-wave victory accounting; only the second-wave report can be skipped. Choose a live wave contact for the knowledge comparison and restore Normal afterward. Record the actual target identities and translated labels rather than assuming an entity index remains valid.
+
+The #1317 `assets/worlds/probe_gm_comms.toml` remains useful for a separate Comms diagnostic. It has no complete M2 directing palette and does not substitute for this event. Prepared authoring and a runbook do not establish that the combined build or human event has passed.
 
 Keep one scenario and seed for the event. A separate diagnostic probe can explain a defect, but record it separately and do not substitute its result for an uncompleted event step. If the integrated build changes, record the new revision and identify which observations require another run.
 
@@ -177,4 +212,4 @@ Defect dispositions and required human reruns:
 - [Private confirmation controller](../../gui/gm-confirmation.js)
 - [Save catalogue UI](../../gui/save-slots.js), [export format](../../src/snapshot.rs) and [headless replay arguments](../../src/headless/args.rs)
 
-After #1317 is integrated, use `docs/gm-comms-authoring.md` and `assets/worlds/probe_gm_comms.toml` for the exact route and authored hail contract. These paths are integration prerequisites, not delivered by this documentation commit.
+After #1317 and the #1316 scenario preparation are integrated, use `docs/gm-comms-authoring.md` for the route and authored hail contract and the generated two-ship world for this event's choices. The generation inputs are [the preparation tool](../../scripts/prepare-gm-live-event.mjs), [second-ship fixture](fixtures/1320-second-ship.toml), and the integrated `assets/worlds/combat_test.toml`. Integrated runtime evidence and human acceptance remain prerequisites; this kit does not supply them.

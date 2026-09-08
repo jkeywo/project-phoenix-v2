@@ -150,8 +150,7 @@ export function scenarioCatalogView(catalog, preSelection, locked) {
  *   packs?: Array<{id: string, name?: string, version?: string, file_count?: number}>,
  *   conflicts?: Array<{path: string, winner: string, losers?: string[]}>,
  * }|null|undefined} report `wasm_active_pack_manifest()`'s return value — the
- *   SAME call both the host list and the phone's `active_packs` wire payload
- *   read, so host and phones never derive two different answers.
+ *   same overlay stack the typed catalogue snapshot publishes to phones.
  * @returns {{
  *   visible: boolean,
  *   packs: Array<{id: string, name: string, version: string, fileCount: number, canMoveUp: boolean, canMoveDown: boolean}>,

@@ -2,12 +2,17 @@
  * gui/destroyer/engineering.console.js — the alliance destroyer's Engineering
  * seat (issue #1235).
  *
- * The Shields + Power + Repair core, plus a bespoke tail for three panels the
- * cruiser's Engineering seat does not mount: Tractor beam (issue #1156),
- * Transfer umbilical (issue #1160) and External repair-team dispatch (issue
- * #1161, `[repair.external_dispatch]`). Each panel hides itself entirely when
- * this hull's payload carries no matching system view, so a hull without one
- * stays unchanged.
+ * The Shields + Power + Repair core, plus a bespoke tail of three panels:
+ * Tractor beam (issue #1156), Transfer umbilical (issue #1160) and External
+ * repair-team dispatch (issue #1161, `[repair.external_dispatch]`). Each panel
+ * hides itself entirely when this hull's payload carries no matching system
+ * view, so a hull without one stays unchanged.
+ *
+ * The first two are SHARED with the cruiser, which mounts the same pair since
+ * #1390: their bodies are `renderTractorPanel` / `renderUmbilicalPanel` in
+ * gui/stations/engineering-console.js rather than a copy here, so the two hulls
+ * cannot drift apart. The dispatch panel stays local — this is the only player
+ * hull that authors `[repair.external_dispatch]`.
  *
  * Every panel here toggles one button between two admitted commands (engage/
  * release, start/stop, dispatch/recall) — human and AI both issue the SAME
@@ -15,10 +20,13 @@
  * click handlers live in `engineering.html` (they call `sendAction`, which
  * only exists after `initConsole` runs) and read the "which one" off the
  * button's own `.engaged` class rather than a variable threaded back out of
- * `render` — the class is set here on every render, so it is never stale.
+ * `render` — the class is set on every render, so it is never stale.
  */
-import { makeEngineeringRender } from '../stations/engineering-console.js';
-import { familySystemId, familyView } from '../console-payload.js';
+import {
+  makeEngineeringRender,
+  renderTractorPanel,
+  renderUmbilicalPanel,
+} from '../stations/engineering-console.js';
 
 export const renderStation = makeEngineeringRender({
   ids: {
@@ -33,67 +41,9 @@ export const renderStation = makeEngineeringRender({
     autoBadge: 'engineering-auto-badge',
   },
   tail: (s, views, doc, t) => {
-    // ── Tractor beam (issue #1156) ─────────────────────────────────────
-    const panel = doc.getElementById('tractor-panel');
-    const tr = familyView(s, 'tractor');
-    const tractorSystemId = tr.system_id || familySystemId(s, 'tractor');
-    if (panel) {
-      if (!tractorSystemId) {
-        panel.hidden = true;
-      } else {
-        panel.hidden = false;
-        const engaged = !!tr.engaged;
-        const btn = doc.getElementById('tractor-btn');
-        if (btn) {
-          btn.classList.toggle('engaged', engaged);
-          btn.textContent = t(engaged ? 'console.tractor.release' : 'console.tractor.engage');
-        }
-        const status = doc.getElementById('tractor-status');
-        if (status) {
-          status.textContent = engaged
-            ? t('console.tractor.holding') + (tr.coupled_target_name ? ' · ' + t(tr.coupled_target_name) : '')
-            : t('console.tractor.idle') + ' · ' + t('console.tractor.range') + ' ' + Math.round(tr.range || 0);
-        }
-        const refusal = doc.getElementById('tractor-refusal');
-        if (refusal) {
-          if (tr.refusal) { refusal.hidden = false; refusal.textContent = t(tr.refusal); }
-          else { refusal.hidden = true; refusal.textContent = ''; }
-        }
-      }
-    }
-
-    // ── Transfer umbilical (issue #1160) ───────────────────────────────
-    const uPanel = doc.getElementById('umbilical-panel');
-    const um = familyView(s, 'umbilical');
-    const umbilicalSystemId = um.system_id || familySystemId(s, 'umbilical');
-    if (uPanel) {
-      if (!umbilicalSystemId) {
-        uPanel.hidden = true;
-      } else {
-        uPanel.hidden = false;
-        const running = !!um.running;
-        const uBtn = doc.getElementById('umbilical-btn');
-        if (uBtn) {
-          uBtn.classList.toggle('engaged', running);
-          uBtn.textContent = t(running ? 'console.umbilical.stop' : 'console.umbilical.start');
-        }
-        // Both ends' levels — operator then partner — with a '—' where a
-        // ledger is absent (undocked, or a partner that carries no such
-        // capacity).
-        const lvl = (v) => (v == null) ? '—' : Math.round(v);
-        const uStatus = doc.getElementById('umbilical-status');
-        if (uStatus) {
-          uStatus.textContent = t(running ? 'console.umbilical.flowing' : 'console.umbilical.idle')
-            + ' · ' + t('console.umbilical.rate') + ' ' + Math.round(um.rate || 0)
-            + ' · ' + t('console.umbilical.levels') + ' ' + lvl(um.operator_level) + ' → ' + lvl(um.partner_level);
-        }
-        const uRefusal = doc.getElementById('umbilical-refusal');
-        if (uRefusal) {
-          if (um.refusal) { uRefusal.hidden = false; uRefusal.textContent = t(um.refusal); }
-          else { uRefusal.hidden = true; uRefusal.textContent = ''; }
-        }
-      }
-    }
+    // ── Operations: tractor beam (#1156) and transfer umbilical (#1160) ──
+    renderTractorPanel(s, doc, t);
+    renderUmbilicalPanel(s, doc, t);
 
     // ── External repair-team dispatch (issue #1161) ────────────────────
     // On this hull the repair system is engineering-owned, so the dispatch

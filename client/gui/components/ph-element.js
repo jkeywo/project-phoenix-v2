@@ -51,6 +51,9 @@
  * the rule, not merely "use onTemplate instead of a field initialiser".
  */
 
+// Run before subclass registration can upgrade parsed elements and queue rAF.
+// This only changes scheduling inside a native pane's Station iframe.
+import '../native-pane-raf.js';
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 // Node-safe base: this module — and therefore every PhElement subclass,

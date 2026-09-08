@@ -70,8 +70,17 @@ export const CONSOLE_SPECS = Object.freeze({
   // and the console embeds `<ph-security-teams>`, so the seat spans two
   // families and takes the system-id-keyed payload. This is the entry that says
   // so — and the reason `tactical.console.js` reads its weapons view through
-  // `familyView` rather than treating the payload as flat.
+  // `familyView` rather than treating the payload as flat. Issue #1393 added
+  // the Intel overlay (`<ph-dossier-panel>`) beside Security, but the family
+  // list below is unchanged: `dossiers` rides every system-keyed payload
+  // directly (issue #1378), not through a Console Family, so Intel is not a
+  // family this map tracks any more than it was on the destroyer's own entry
+  // below.
   'gui/cruiser/tactical.html': Object.freeze({ families: Object.freeze(['tactical', 'security']) }),
+  // Power + Repair only (issue #1393) — no Shields, Tractor or Umbilical on
+  // this hull's Engineering seat (verified against
+  // `gui/cruiser/engineering.console.js`).
+  'gui/cruiser/engineering.html': Object.freeze({ families: Object.freeze(['power', 'repair']) }),
 });
 
 /**

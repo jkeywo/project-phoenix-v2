@@ -1263,31 +1263,13 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-45af734ecb997e7.js" crossorigin="anonymous" integrity="sha384-NaJ3XOX0DZN0WXPOGFTu1iVjYt1CANvWvX/ikrRXT9MjTk3XFUmLSJd9pbq9A2+R"><link rel="preload" href="./project-phoenix-45af734ecb997e7_bg.wasm" crossorigin="anonymous" integrity="sha384-bLRRdLqLtv63SQhyzK6UFgLDAHzbNzbH6XfbsVcwrqMvHAlX5BIQpnHgcg8uHyyN" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-3dea5fbfd57f83ce.js" crossorigin="anonymous" integrity="sha384-Gd5uqdI65vCceRICGZyl/OrPQ3vjcRdPq4pR7/eFssjDHbAwnhQzSiUcwDS5mqZ2"><link rel="preload" href="./project-phoenix-3dea5fbfd57f83ce_bg.wasm" crossorigin="anonymous" integrity="sha384-BlOu+ICi5I//ZcyGYCddwmAsUvBWCPdZbLIBG53f23WVPugCqrkao3IfwKT6ehm2" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
     // Session token for actions from the host page's own consoles. Must match
     // console_bridge::LOCAL_CONSOLE_TOKEN in Rust (src/console_bridge.rs).
     var LOCAL_CONSOLE_TOKEN = '__local_console__';
-
-    // Token prefix reserved for AI operators. Must match the `ai:` prefix
-    // `command_admission` routes on (src/command_admission/ai_emit.rs).
-    var AI_TOKEN_PREFIX = 'ai:';
-
-    // True when a PEER may identify under `token`. A peer's token is
-    // self-declared, so the two host-runtime shapes above have to be refused
-    // here: both carry admission authority no phone is entitled to (god mode
-    // and the other simulation overrides via LOCAL_CONSOLE_TOKEN, NPC command
-    // routing via `ai:`). Defined in an earlier classic script, so it is a
-    // global before the transport's connection handlers are even parsed — no
-    // module load order can leave the check absent.
-    function isPeerTokenAllowed(token) {
-      if (typeof token !== 'string' || token.length === 0) return false;
-      if (token === LOCAL_CONSOLE_TOKEN) return false;
-      if (token.startsWith(AI_TOKEN_PREFIX)) return false;
-      return true;
-    }
 
     // The one save slot the host page uses. Must satisfy `vellum_save::is_slot`
     // (lowercase, digits, `_`, `-`), which the storage backend checks rather
@@ -2064,8 +2046,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-45af734ecb997e7.js';
-const wasm = await init({ module_or_path: './project-phoenix-45af734ecb997e7_bg.wasm' });
+import init, * as bindings from './project-phoenix-3dea5fbfd57f83ce.js';
+const wasm = await init({ module_or_path: './project-phoenix-3dea5fbfd57f83ce_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2476,17 +2458,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     window.__hostChannelReady(hostChannelDispatch);
   </script>
 
-  <!-- Host peer routing (issue #1230): the pure target ⇒ connection-list
-       resolution behind routeOutbound() (the `set_message_callback` Rust's
-       outbound flush calls) lives in gui/host-peer-routing.js so vitest can
-       exercise the 'all'/'token:'/'except:' targeting and the snapshot→
-       reliable per-token fallback with plain Map fixtures instead of live
-       WebRTC channels. Publishes window.hostPeerRouting; routeOutbound
-       itself, and the `tokenConns`/`tokenSnapshotConns` Maps it reads, stay
-       inline below — this module never touches either Map, only resolves
-       which entries of them to send on. No queue/latch needed: routeOutbound
-       is only ever invoked from an async WASM callback registered near the
-       bottom of this page, long after every module island here has loaded. -->
+  <!-- Physical crew connections and channel readiness. The WASM registry
+       owns tokens and recipients before transport registration, independently
+       of starting an ECS App or selecting a World. -->
   <script type="module" src="gui/host-peer-routing.js"></script>
 
   <!-- Typed join codes and the Phoenix crew transport (issues
@@ -3088,13 +3062,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // the 32-hex peer id that used to be the join URL's fragment were retired
     // in #1112, and the fragment now carries the structured join code instead.
 
-    // rendezvous peer id → session token (resolved once Identify arrives)
-    const peerTokens = new Map();
-    // session token → reliable connection (for routing server→client messages)
-    const tokenConns = new Map();
-    // session token → snapshot DataChannel (unordered, no retransmit)
-    const tokenSnapshotConns = new Map();
-    // messages queued before WASM is ready
+    let hostConnections = null;
+    let hostConnectionsReady = null;
+    // Messages queued before the ECS bridge is installed retain the physical
+    // incarnation, so disconnected or replaced devices cannot boot ghost Sessions.
     const msgQueue = [];
 
     // Which rendezvous service this page load uses. `?rendezvous=<url>` points
@@ -3274,8 +3245,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // A multi-ship session has ONE privileged server code. This host either
     // mints it (the fleet lead) or types somebody else's; either way the fleet
     // is a SECOND rendezvous registration in a different namespace, entirely
-    // beside the crew code above. Nothing here touches `peerTokens`,
-    // `tokenConns` or `wasm_receive_message`: a ship host is not a console, and
+    // beside the crew code above. Nothing here touches crew connection ownership
+    // or `wasm_receive_message`: a ship host is not a console, and
     // each crew star stays on its own host because the fleet link is a
     // different socket carrying a different protocol.
     //
@@ -5092,45 +5063,55 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         return;
       }
 
-      // Everything a client connection does AFTER the compatibility handshake
-      // has admitted it: the Identify gate, the reserved-token refusal, the
-      // duplicate-token dance, the host-intercepted message types, the
-      // per-token snapshot channel and the disconnect guard. `conn` is the
-      // adapter gui/rendezvous-transport.js hands over — `peer`, `open`,
-      // `send`, `close`, `snapshotChannel` and `on('data'|'close'|'snapshot')`.
+      // Construct the shared Rust owner once, after exports load but before
+      // the host can register/accept crew. This never waits for PhoenixReady:
+      // phones must be able to choose a World before an ECS App exists.
+      try {
+        hostConnectionsReady ||= window.hostPeerRouting.hostConnectionRegistryReady(window);
+        const registry = await hostConnectionsReady;
+        hostConnections ||= window.hostPeerRouting.createHostConnections(registry, {
+          onIdentified: sendCatalogTo,
+          onDeparture: (token) => {
+            // Before finishInit no Session has consumed the queued Identify.
+            // Its stale queue entries are filtered by incarnation at flush.
+            if (typeof wasm_receive_message === 'function') {
+              wasmBindings.wasm_player_disconnected(token);
+            }
+          },
+          onMessage: (token, json, handle) => {
+            const parsed = JSON.parse(json);
+            if (parsed.type === 'ToggleQrCode') {
+              if (joinPanelBlockedByLanding()) return;
+              if (window.hostQr) window.hostQr.toggleQr(document);
+              return;
+            }
+            // Pre-World picks use the same accepted identity gate as gameplay.
+            // The page arbiter must run before there is any ECS App to consume them.
+            if (parsed.type === 'SelectScenario') {
+              arbiterSelectScenario(parsed.data && parsed.data.scenario_id);
+              return;
+            }
+            if (parsed.type === 'SelectPlayerShip') {
+              arbiterSelectShip(parsed.data && parsed.data.template_path);
+              return;
+            }
+            dispatchToWasm(handle, json);
+          },
+        });
+      } catch (error) {
+        console.error('[host] connection registry unavailable — no crew can join', error);
+        rendezvousFault = 'unreachable';
+        rendezvousRetrying = false;
+        setConnectionStatus('error');
+        renderConnDiag();
+        return;
+      }
+
+      // Role/build admission is still the transport's handshake. This callback
+      // attaches only accepted links; ICE diagnostics remain page-owned.
       function attachHostConn(conn) {
         const shortId = String(conn.peer).slice(0, 8);
-
-        // The lossy channel negotiated alongside the reliable one, kept in the
-        // per-token map routeOutbound reads. It can finish negotiating either
-        // BEFORE or AFTER Identify names the token, so both transitions run the
-        // same rebind rather than one registering and the other assuming.
-        //
-        // Both halves are guarded on connection identity, the same discipline
-        // the `close` handler below applies. On a fast reconnect (same token,
-        // new peer id) two connections briefly exist for one token: the new one
-        // has already claimed `tokenConns`, and the old one is then torn down —
-        // which fires its own 'snapshot' transition. Unguarded, that stale
-        // event deleted the LIVE connection's lossy channel from the map, and
-        // every snapshot for that player silently fell back to the reliable
-        // path for the rest of the mission.
-        let boundSnapshot = null;
-        function bindSnapshot() {
-          const token = peerTokens.get(conn.peer);
-          if (!token) return;
-          // Only the live connection for this token may write its entries.
-          if (tokenConns.get(token) !== conn) return;
-          const chan = conn.snapshotChannel;
-          if (chan) {
-            tokenSnapshotConns.set(token, chan);
-            boundSnapshot = chan;
-          } else if (boundSnapshot && tokenSnapshotConns.get(token) === boundSnapshot) {
-            // Delete only the channel THIS connection put there.
-            tokenSnapshotConns.delete(token);
-            boundSnapshot = null;
-          }
-        }
-        conn.on('snapshot', bindSnapshot);
+        hostConnections.attach(conn);
 
         // Log the winning ICE candidate type (host = direct, srflx = STUN,
         // relay = TURN). Field diagnostics only — a session that works over a
@@ -5150,117 +5131,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           }, 1500);
         }
 
-        conn.on('data', (raw) => {
-          const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
-          let token = peerTokens.get(conn.peer);
-
-          // First message from this peer must be Identify — extract the token
-          if (!token) {
-            try {
-              const msg = JSON.parse(json);
-              if (msg.type === 'Identify') {
-                const claimed = msg.data && msg.data.token;
-                // A peer's token is self-declared, and two token shapes are
-                // RESERVED for the host runtime: LOCAL_CONSOLE_TOKEN, which
-                // command admission grants a blanket bypass
-                // (`src/command_admission/policy.rs`) and which the settings
-                // cog's mid-mission exit-to-lobby is keyed on (issue #939), and
-                // the `ai:` prefix, which routes commands to an NPC's own
-                // entity (`admit_system_commands`). A phone that simply typed
-                // one of those into its Identify would inherit host authority,
-                // so refuse the connection outright rather than dispatch a
-                // single message under it. `handle_identify` refuses the same
-                // shapes server-side; this is the gate that matters, because
-                // every LATER message from this peer is dispatched under the
-                // token recorded here.
-                if (!isPeerTokenAllowed(claimed)) {
-                  console.warn(
-                    `[host] REJECTED ${shortId}… — Identify claimed the reserved ` +
-                    `token "${String(claimed).slice(0, 24)}", which only the host ` +
-                    `runtime may use. Closing the connection.`,
-                  );
-                  conn.close();
-                  return;
-                }
-                token = claimed;
-                // Duplicate-token detection. If another open connection already
-                // claims this token, update tokenConns to the new connection
-                // first (so the old close handler's guard prevents a spurious
-                // wasm_player_disconnected), then close the prior connection.
-                // The old device becomes a ghost — its WebRTC link is severed
-                // so it can't receive further state updates.
-                const prior = tokenConns.get(token);
-                peerTokens.set(conn.peer, token);
-                tokenConns.set(token, conn);
-                bindSnapshot();
-                if (prior && prior !== conn && (prior.open || prior.readyState === 'open')) {
-                  console.warn(
-                    `[host] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
-                    `identified with a token already held by an open connection. ` +
-                    `Closing the earlier connection — the old device will become a ghost.`,
-                  );
-                  prior.close();
-                }
-                console.log(`[host] ${shortId}… identified as token ${token.slice(0, 8)}…`);
-                // Deliver the QR-first scenario catalog to a phone that
-                // connects before the world is loaded (issue #755). Once a
-                // world is loading, phones get Welcome instead (guarded inside).
-                sendCatalogTo(conn);
-              }
-            } catch (_) { return; }
-          }
-
-          if (token) {
-            // Intercept ToggleQrCode — purely visual, and this page owns the
-            // panel, so the message stops here and never reaches wasm. (A
-            // NATIVE host has no page in front of its simulation, so there the
-            // same message decodes into `ClientMessage::ToggleQrCode` and
-            // crosses the host-lobby bridge instead — issue #1329. Same phone,
-            // same button, two hosts.)
-            try {
-              const parsed = JSON.parse(json);
-              if (parsed.type === 'ToggleQrCode') {
-                // Same refusal as the cog's, and it has to be here rather than
-                // on a control: a phone's press arrives as a message, so
-                // hiding a button would leave this path open.
-                if (joinPanelBlockedByLanding()) return;
-                if (window.hostQr) window.hostQr.toggleQr(document);
-                return;
-              }
-              // QR-first pre-scenario selections (issue #755): phones send these
-              // over the datachannel before any world is loaded, so Bevy isn't
-              // running to consume them — feed the host-runtime arbiter directly.
-              // No token gate: a phone can make the first valid selection.
-              if (parsed.type === 'SelectScenario') {
-                arbiterSelectScenario(parsed.data && parsed.data.scenario_id);
-                return;
-              }
-              if (parsed.type === 'SelectPlayerShip') {
-                arbiterSelectShip(parsed.data && parsed.data.template_path);
-                return;
-              }
-            } catch (_) {}
-            dispatchToWasm(token, json);
-          }
-        });
-
         conn.on('close', () => {
           clientIceStages.delete(shortId);
           clientRelayShed.delete(shortId);
           renderConnDiag();
-          const token = peerTokens.get(conn.peer);
-          console.log(`[host] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
-          peerTokens.delete(conn.peer);
-          if (!token) return;
-          // On a browser refresh the new page may have already reconnected
-          // (same token, new peer id) before this stale connection's close
-          // arrives. Only tear the token down if THIS conn is still the live
-          // one — otherwise we'd disconnect the freshly-restored session and
-          // delete the new routing entry.
-          if (tokenConns.get(token) !== conn) return;
-          tokenSnapshotConns.delete(token);
-          wasmBindings.wasm_player_disconnected(token);
-          tokenConns.delete(token);
+          console.log(`[host] connection closed — ${shortId}…`);
         });
       }
 
@@ -5896,42 +5771,24 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // The wire shape
     // matches serde `{ type, data }` so the phone's lobby-state applies it
     // exactly like a Rust-emitted message.
-    // The applied mod packs, in {id,name,version} form for the phone's "Mods
-    // active" list (issue #990). Read from wasm_active_pack_manifest() — the
-    // SAME call renderModPackList() renders the host's own list from, so host
-    // and phones show one source of truth, not two derivations of it.
-    function activePacksForWire() {
-      let report;
-      try { report = wasmBindings.wasm_active_pack_manifest(); } catch (_) { return []; }
-      const packs = (report && report.packs) ? Array.from(report.packs) : [];
-      return packs.map(function (p) {
-        return { id: p.id, name: p.name, version: p.version };
-      });
-    }
+    // Rust owns the complete wire projection, including source and the active
+    // pack roster. Pass the current picker snapshot so late hull enrichment
+    // and curated catalogues stay identical on the viewscreen and phones.
     function scenarioCatalogMessage() {
-      return {
-        type: 'ScenarioCatalog',
-        data: {
-          scenarios: _scenarioCatalog,
-          locked_scenario: _preSelection.scenario_id,
-          locked_ship: _preSelection.template_path,
-          // Rides on both the pre-load broadcast and the locked-catalog
-          // "selection done" broadcast (broadcastSelectionComplete), so the
-          // list survives world load for an already-connected phone (#990).
-          active_packs: activePacksForWire(),
-        },
-      };
+      return JSON.parse(wasmBindings.wasm_scenario_catalog_message(
+        JSON.stringify(_scenarioCatalog),
+        _preSelection.scenario_id,
+        _preSelection.template_path,
+      ));
     }
     function sendCatalogTo(conn) {
-      if (!_catalogBuilt || _worldLoadStarted) return;
+      if (!_catalogBuilt) return;
       try { conn.send(JSON.stringify(scenarioCatalogMessage())); } catch (_) {}
     }
     function broadcastScenarioCatalog() {
       if (_worldLoadStarted) return;
       const json = JSON.stringify(scenarioCatalogMessage());
-      for (const [, c] of tokenConns) {
-        if (c.open || c.readyState === 'open') { try { c.send(json); } catch (_) {} }
-      }
+      routeOutbound('all', json, 'reliable');
     }
     // Second-round resume signal (issue #756): broadcast the fully-locked
     // catalog even after _worldLoadStarted latches. lobby-state.js treats a
@@ -5940,9 +5797,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // for already-connected phones reusing the loaded world.
     function broadcastSelectionComplete() {
       const json = JSON.stringify(scenarioCatalogMessage());
-      for (const [, c] of tokenConns) {
-        if (c.open || c.readyState === 'open') { try { c.send(json); } catch (_) {} }
-      }
+      routeOutbound('all', json, 'reliable');
     }
 
     // ── Arbiter entry points (first-valid-wins) ───────────────────────────
@@ -6644,11 +6499,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // ── WASM dispatch ─────────────────────────────────────────────────────
 
-    function dispatchToWasm(token, json) {
+    function dispatchToWasm(handle, json) {
+      const token = hostConnections?.sender(handle);
+      if (token == null) return;
       if (typeof wasm_receive_message === 'function') {
         wasm_receive_message(token, json);
       } else {
-        msgQueue.push([token, json]);
+        msgQueue.push([handle, json]);
       }
     }
 
@@ -6665,9 +6522,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // island assigns the window.__audioConfig/etc. globals directly.
 
     function routeOutbound(target, payload, deliveryClass) {
-      // Pure target ⇒ connection-list resolution lives in
-      // gui/host-peer-routing.js (issue #1230); this is now purely the
-      // `.send(payload)` glue over the live tokenConns/tokenSnapshotConns Maps.
+      // Rust resolves current recipients; the physical adapter chooses a
+      // ready snapshot channel or its per-connection reliable fallback.
       //
       // Per-connection try/catch, because this runs inside the callback Rust's
       // outbound flush invokes: one phone whose channel died between the map
@@ -6683,7 +6539,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // here is a dead link or a bug rather than an ordinary payload — and if
       // one ever does cross the ceiling, ONE client loses that frame instead
       // of the whole bridge losing the flush.
-      const conns = window.hostPeerRouting.outboundTargets(target, deliveryClass, { tokenConns, tokenSnapshotConns });
+      const conns = hostConnections?.targets(target, deliveryClass) || [];
       for (const c of conns) {
         try {
           c.send(payload);
@@ -7323,7 +7179,7 @@ async function startServer() {
   
   // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
   // throwing, so any code after wasm_init() never executes.
-  for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
+  for (const [handle, json] of msgQueue.splice(0)) dispatchToWasm(handle, json);
 
   // Signal smoke tests (and any other listeners) that wasm_receive_message is
   // now set and the msgQueue has been flushed.  We dispatch PhoenixReady BEFORE

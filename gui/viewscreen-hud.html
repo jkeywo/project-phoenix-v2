@@ -280,15 +280,19 @@
       // ── The DOM plumbing, shared by both renderers ──────────────────────
       // Kept here rather than in the module so the fallback below and the
       // localising renderer write the overlay through exactly the same calls;
-      // what differs between them is only which text they choose.
+      // what differs between them is only which text they choose. Lifecycle
+      // refreshes may repeat the same state; avoid dirtying unchanged DOM.
       hud.setText = function (id, value) {
         var el = document.getElementById(id);
-        if (el) el.textContent = value;
+        var text = value == null ? '' : String(value);
+        if (el && el.textContent !== text) el.textContent = text;
       };
 
       hud.setAlert = function (on) {
         var overlay = document.getElementById('hud-overlay');
-        if (overlay) overlay.classList.toggle('alert-on', !!on);
+        if (overlay && overlay.classList.contains('alert-on') !== !!on) {
+          overlay.classList.toggle('alert-on', !!on);
+        }
       };
 
       // The game-over screen: revealed with the closing message when the host
@@ -299,10 +303,10 @@
         var msg = document.getElementById('game-over-message');
         if (!overlay || !msg) return;
         if (message != null) {
-          msg.textContent = message;
-          overlay.style.display = 'flex';
+          hud.setText('game-over-message', message);
+          if (overlay.style.display !== 'flex') overlay.style.display = 'flex';
         } else {
-          overlay.style.display = 'none';
+          if (overlay.style.display !== 'none') overlay.style.display = 'none';
         }
       };
 

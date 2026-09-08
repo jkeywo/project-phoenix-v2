@@ -8,29 +8,37 @@
   <style>
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
-    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; position: relative; }
+    /* FORE/AFT phasers and the target card left, the scope, three tubes
+       right (issue #1393), reusing the shared `.scope-row`/`.scope-cell`
+       two-rail pattern (issue #1375) exactly as gui/destroyer/tactical.html and
+       gui/cruiser/science.html already do. This hull mounts no blaster bank, so
+       the start rail carries only the phaser column — narrower than the
+       destroyer's phaser+blaster rail needs to be. The end rail carries the
+       three tubes at the existing rail width.
+
+       `--scope-rail-min` is 176px, the same floor the destroyer's own comment
+       derives (both rails already wrap their rows well above this width — see
+       the components' own `flex-wrap` rules — so the floor costs nothing a
+       phone landscape window wasn't already doing). Measured at 650x450 (the
+       stress size `tests/smoke/scope-responsive.spec.js` checks): 200/230/176
+       leaves the scope 220px square, clear of both rails' content, with room
+       to spare over that spec's 150px floor. */
+    .console-body { --scope-rail-start: 200px; --scope-rail-end: 230px; --scope-rail-min: 176px; }
+    .console-body .ctrl-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
+    ph-phasers-controls, ph-torpedo-controls, ph-target-lock-card, .tube-column, .phaser-column { flex-shrink: 0; }
     /* The scope is square by gui/console.css's one `.scope-cell` rule
        (issue #1375): side = min(free width, free height), so it fills the
-       width in this stacked column and the column's height in landscape. The
-       per-orientation aspect-ratio pair this document used to carry said the
-       same thing in two places and had to be re-derived every time the chrome
-       above it changed. */
-    ph-phasers-controls, ph-torpedo-controls { flex-shrink: 0; }
-    /* The Security overlay (issue #1389). A full-frame panel over the console,
-       selected from the shell's Station Bar and closed by its own Back button —
-       the convention gui/console-overlays.js documents, and the same block
-       gui/destroyer/tactical.html carries. It lives in this document rather
-       than gui/console.css because the two Tactical seats are the only consoles
-       in the fleet that author overlay panels at all; if a third ever does, the
-       block belongs in the shared stylesheet rather than in a third copy. */
+       rail's-worth of remaining width in landscape and the full width in
+       portrait. */
     .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
     .overlay-panel.open { display: flex; }
     .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    .overlay-panel ph-security-teams { flex: 1; min-height: 0; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .overlay-panel { padding: 8px; } }
+    .overlay-panel ph-dossier-panel, .overlay-panel ph-security-teams { flex: 1; min-height: 0; }
+    @media (orientation: landscape) and (max-height: 500px) { .panel-inner { padding: 8px; gap: 8px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body .ctrl-col { padding: 8px; } .overlay-panel { padding: 8px; } }
   </style>
 </head>
 <body>
@@ -38,20 +46,31 @@
     <div class="panel"></div>
     <div class="panel-inner">
       <!-- No title row and no footer (issue #1374): the shell's Station Bar
-           names this seat and its selected tab opens the per-system damage
-           popup the footer's `ph-station-damage` used to. The locked target
-           the footer named heads the weapons group it belongs to. -->
-      <div class="console-body">
-        <div class="readout">
-          <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
-          <span class="spacer"></span>
-          <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+           names this seat, offers Security and Intel as tabs of its own (issue
+           #1373 — the panels below declare them), and opens the per-system
+           damage popup on its selected tab. The target card owns the lock facts. -->
+      <!-- FORE/AFT phasers and target left, scope centre, three tubes right
+           (issue #1393). The target lock card is fed by
+           `renderTargetCard` in gui/stations/tactical-console.js, off the SAME
+           Tactical lock the radar and weapon panels already read — never the
+           Sensors selection. -->
+      <div class="console-body scope-row tactical-scope-row">
+        <div class="ctrl-col weapons-col">
+          <div class="phaser-column">
+            <div class="readout">
+              <span class="spacer"></span>
+              <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+            </div>
+            <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
+          </div>
+          <ph-target-lock-card id="target-lock-card" portrait-strip></ph-target-lock-card>
         </div>
-        <div class="scope-cell">
+        <div class="radar-col scope-cell">
           <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
         </div>
-        <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
-        <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
+        <div class="ctrl-col torpedo-col">
+          <div class="tube-column"><ph-torpedo-controls id="torpedo-controls" compact-rail></ph-torpedo-controls></div>
+        </div>
       </div>
     </div>
     <!-- Security teams (issue #1389): the team list, their assignments and
@@ -71,11 +90,23 @@
       <h2 data-i18n="console.tactical.security">Security</h2>
       <ph-security-teams id="security-teams"></ph-security-teams>
     </div>
+    <!-- Intelligence files (issue #1393). Independent of Comms, which is its
+         own hero-bar console (issue #1098) rather than a toggle here — the
+         same block gui/destroyer/tactical.html carries. -->
+    <div class="overlay-panel" id="intel-overlay"
+         data-tab-code="console.tactical.intel.code"
+         data-tab-name="console.tactical.intel">
+      <button class="overlay-back" id="intel-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
+      <h2 data-i18n="console.tactical.intel">Intel</h2>
+      <ph-dossier-panel id="dossier-panel"></ph-dossier-panel>
+    </div>
   </div>
   <script type="module">
     import '../components/ph-tactical-radar.js';
     import '../components/ph-phasers-controls.js';
     import '../components/ph-torpedo-controls.js';
+    import '../components/ph-target-lock-card.js';
+    import '../components/ph-dossier-panel.js';
     import '../components/ph-security-teams.js';
     import { initConsole } from '../console-core.js';
     import { initConsoleOverlays } from '../console-overlays.js';

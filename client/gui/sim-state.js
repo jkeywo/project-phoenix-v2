@@ -206,6 +206,7 @@ export class ClientSimState {
     this.navChartSelects = [];
     /** Fire-arc configs from server ship_config, populated on Welcome. */
     this.phaserArcConfigs = [];
+    this.blasterBankConfigs = [];
     this.torpedoArcConfigs = [];
     /** RGBA 0-1 fill for the helm radar's red-alert hostile weapon-arc overlay
      *  (issue #874). Authored per hull in `[helm_console] hostile_arc_color`;
@@ -413,6 +414,7 @@ export class ClientSimState {
         this.navChartShows        = sc.nav_chart_shows        || [];
         this.navChartSelects      = sc.nav_chart_selects      || [];
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
+        this.blasterBankConfigs = sc.blaster_banks      ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
         this.hostileArcColor   = sc.hostile_arc_color   ?? this.hostileArcColor;
         this.stationTutorials  = sc.station_tutorials   || {};

@@ -29,6 +29,26 @@
        instead of running out past the rail and over the scope. */
     .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
     .btn-row > * { flex: 1 1 6rem; }
+    /* Contextual dock control (issue #1388) — destroyer/helm's rules verbatim,
+       because it is the same control on the same rail: shown only while a berth
+       is in range or a dock is held, so the rail is unchanged for the whole of a
+       flight that never docks. */
+    .dock-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; }
+    .dock-panel[hidden] { display: none; }
+    .dock-row { display: flex; align-items: center; gap: 10px; }
+    .dock-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
+    .dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
+    .dock-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .dock-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
+    /* Under-tow-load indicator (issue #1157, mounted here by #1390 now that this
+       hull mounts a tractor): shown only while this ship's beam holds a target,
+       so the rail is unchanged for the whole of a flight that never tows.
+       The same banner as Destroyer Helm, compacted here because the Cruiser's
+       movement rail can carry Dock and tow status at the same time. */
+    .tow-load-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 4px; margin-top: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .tow-load-panel[hidden] { display: none; }
+    .tow-load-label { flex: 0 0 auto; white-space: nowrap; font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
+    .tow-load-target { max-width: 100%; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     /* Portrait (issue #1376, John's 2026-09-06 decision): nothing scrolls.
        Same fix as destroyer/helm's, for the same measured overflow: stacking
        the scope, the joystick's 240px column and the lateral pad plus
@@ -43,10 +63,18 @@
        properties; inert here. `overflow-y: auto` stays as the safety net
        #1375 established — proved by screenshot (issue #1376 commit) never to
        trigger at 375x812 or 390x844. */
+    /* A phone landscape rail also carries the contextual Dock control.
+       Use the mockup's compact frame spacing so it stays above the fold. */
+    @media (orientation: landscape) and (max-height: 500px) {
+      .panel-inner { padding: 8px; gap: 8px; }
+      .console-body .ctrl-col { padding: 8px; gap: 8px; }
+      .console-body .movement-col { padding-block: 4px; gap: 4px; }
+    }
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }
       .console-body { overflow-y: auto; }
       .console-body .ctrl-col { padding: 8px; }
+      .console-body .movement-col { gap: 4px; }
     }
   </style>
 </head>
@@ -71,6 +99,25 @@
             <ph-impulse-btn id="impulse-btn"></ph-impulse-btn>
             <ph-boost-btn id="boost-btn"></ph-boost-btn>
           </div>
+          <!-- Contextual dock control (issue #1388): this hull's helm owns a
+               `dock` system, so it publishes a `dock` blackboard and this panel
+               appears exactly while a berth is in range or a dock is held. -->
+          <div class="dock-panel" id="dock-panel" hidden>
+            <div class="dock-row">
+              <button id="dock-btn" class="dock-btn" data-i18n="console.dock.dock">Dock</button>
+              <span id="dock-status" class="dock-status">—</span>
+            </div>
+            <div id="dock-refusal" class="dock-refusal" hidden></div>
+          </div>
+          <!-- Under-tow-load indicator (issue #1157, mounted here by #1390):
+               shown only while this ship's tractor holds a target, so the helm
+               can see it is under load and why. The tractor is Engineering's
+               control on this hull, but the mass penalty lands on THIS seat, so
+               this is where it has to be said. Hidden the rest of the time. -->
+          <div class="tow-load-panel" id="tow-load-panel" hidden>
+            <span class="tow-load-label" data-i18n="console.helm.under_tow">Under tow load</span>
+            <span id="tow-load-target" class="tow-load-target"></span>
+          </div>
         </div>
         <div class="radar-col scope-cell">
           <ph-helm-radar id="helm-radar"></ph-helm-radar>
@@ -88,13 +135,25 @@
     import '../components/ph-impulse-btn.js';
     import '../components/ph-boost-btn.js';
     import { initConsole } from '../console-core.js';
+    import { HELM_ACTION_CONTEXT, HELM_DOCK_ACTION_ID } from '../stations/helm-actions.js';
     // The render lives in gui/cruiser/helm.console.js (issue #1235): the
     // shared Helm renderer + this hull's variant (lateral joystick, glyph +
-    // zero-fallback footer, no bespoke tail). s is a HelmConsolePayload — see
-    // the @typedef in gui/console-state.js. The vitest suite imports the same
-    // renderStation.
+    // zero-fallback footer, plus a bespoke Dock tail since #1388). s is a
+    // HelmConsolePayload — see the @typedef in gui/console-state.js. The
+    // vitest suite imports the same renderStation.
     import { renderStation } from './helm.console.js';
+
     initConsole({ name: 'helm', render: renderStation });
+
+    // The one dock button toggles dock/undock through the action map, which
+    // sends the same admitted command a dock AI would (issues #1159, #1251).
+    // The semantic adapter reads the current authoritative dock view, so the
+    // contextual ship variant cannot dispatch a stale system id or verb.
+    document.getElementById('dock-btn').addEventListener('click', function() {
+      window.activateSemanticAction(HELM_DOCK_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control',
+      });
+    });
   </script>
 </body>
 </html>

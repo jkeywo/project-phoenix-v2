@@ -197,7 +197,11 @@ export function createFocusTrap(modal, options = {}) {
 
   function onKeyDown(event) {
     if (!active || !event) return;
-    if (event.key === 'Escape' || event.key === 'Esc') {
+    // Ultralight reports Escape as Unidentified with legacy code 27/U+001B.
+    // Only fall back when the named key is absent; a valid other key wins.
+    const legacyEscape = (!event.key || event.key === 'Unidentified')
+      && (event.keyCode === 27 || event.which === 27 || event.keyIdentifier === 'U+001B');
+    if (event.key === 'Escape' || event.key === 'Esc' || legacyEscape) {
       if (typeof event.preventDefault === 'function') event.preventDefault();
       if (onEscape) onEscape();
       return;

@@ -753,3 +753,23 @@ body .frame { height: 100dvh; }
    Mirrors the old Bevy help overlay: dark ~90% alpha backdrop,
    cyan heading, "HELP — tap to dismiss". Mounted by
    gui/console-core.js via gui/help-panel.js. */
+
+/* Cruiser Tactical's authored portrait composition: scope, two bounded weapon
+   rails, then a full-width target strip. Only the weapon rails scroll. */
+@media (orientation: portrait) {
+  .tactical-scope-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: min-content minmax(0, 1fr) min-content;
+  }
+  .tactical-scope-row > .scope-cell { grid-column: 1 / -1; grid-row: 1; width: 100%; }
+  .tactical-scope-row .phaser-column { grid-column: 1; grid-row: 2; }
+  .scope-row.tactical-scope-row > .ctrl-col { display: contents; }
+  .tactical-scope-row .tube-column { grid-column: 2; grid-row: 2; }
+  .tactical-scope-row .tube-column, .tactical-scope-row .phaser-column {
+    min-height: 0; min-width: 0;
+    overflow: auto; padding: 8px;
+    background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge);
+  }
+  .tactical-scope-row ph-target-lock-card { grid-column: 1 / -1; grid-row: 3; }
+}

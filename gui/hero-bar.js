@@ -226,8 +226,8 @@ export function heroBarKeyTarget(ids, current, key) {
   const index = Math.max(0, ids.indexOf(current));
   if (key === 'Home') return ids[0];
   if (key === 'End') return ids[ids.length - 1];
-  if (key === 'ArrowRight') return ids[(index + 1) % ids.length];
-  if (key === 'ArrowLeft') return ids[(index - 1 + ids.length) % ids.length];
+  if (key === 'ArrowRight' || key === 'ArrowDown') return ids[(index + 1) % ids.length];
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return ids[(index - 1 + ids.length) % ids.length];
   return null;
 }
 

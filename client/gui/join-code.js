@@ -353,7 +353,7 @@ export function mintSuffix(data, isTaken, randomInt, maxAttempts = 64) {
  *      shipped unmapped underneath a green test;
  *   3. the HOST's authoritative compatibility verdict, whose codes are Rust's
  *      `StampMismatch::code()` (src/delivery/stamp.rs) plus the native host's
- *      `RESERVED_TOKEN_CODE` (src/native_host/relay_transport.rs), relayed
+ *      token refusal codes (src/native_host/relay_transport.rs), relayed
  *      verbatim through `JoinRefused`. tests/client/join-code.test.js pins that
  *      list too, so adding a variant there without a row here fails the
  *      editor-test job.
@@ -425,6 +425,7 @@ const REASON_STRING_IDS = {
   // Not a StampMismatch: the native host refuses a peer that claims a token
   // only the host runtime may use (`__local_console__`, the `ai:` prefix).
   'reserved-token': 'client.join.error_reserved_token',
+  'invalid-token': 'client.join.error_invalid_token',
 };
 
 /** The two surfaces a refusal can be read on. */

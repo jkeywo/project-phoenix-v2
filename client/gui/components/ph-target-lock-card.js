@@ -54,6 +54,22 @@ export class PhTargetLockCard extends PhElement {
       :host { gap: 0.3rem; }
       .card { padding: 0.35rem; }
       .name { font-size: var(--text-md); }
+      :host([portrait-strip]) .card {
+        display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        column-gap: 0.5rem;
+      }
+      :host([portrait-strip]) .name { grid-column: 1; overflow-wrap: anywhere; }
+      :host([portrait-strip]) .badges { grid-column: 1; }
+      :host([portrait-strip]) .pos-row {
+        grid-column: 2; grid-row: 1 / 3; flex-direction: column;
+        margin: 0; padding: 0; border: 0; gap: 0.2rem;
+      }
+      :host([portrait-strip]) .scan-data {
+        grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 0.2rem 0.65rem;
+      }
+      :host([portrait-strip]) .scan-row { gap: 0.4rem; border: 0; padding: 0; }
+      :host([portrait-strip]) .scan-row .v { text-align: right; overflow-wrap: anywhere; }
+
     }
   </style>
   <div class="header">${t('component.target_lock_card.title')}</div>

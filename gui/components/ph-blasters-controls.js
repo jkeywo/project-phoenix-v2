@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
+import { cooldownRemainingPercent } from '../weapon-cooldown.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
 import {
@@ -204,8 +205,8 @@ export class PhBlastersControls extends PhElement {
       // Wire type BlasterBankState (core/messages.rs): fire_ready / on_cooldown
       // / cooldown_remaining / charge_progress / has_charge / pending_volley.
       // There is no per-bank `state`, `_pct`, or `auto` field — derive display
-      // state from these. cooldown_remaining has no wire denominator, so the
-      // cooldown bar shows full while cooling (mirrors ph-phasers-controls).
+      // state from these. The console projection supplies cooldown_secs from
+      // Welcome's authored bank config for the remaining-time fraction.
       row.querySelector('.auto-badge').style.display = 'none';
 
       const isCooling = !!bank.on_cooldown;
@@ -250,7 +251,7 @@ export class PhBlastersControls extends PhElement {
         cooldownFill.style.display = 'none';
         row.querySelector('.bar-label').textContent = t('component.blasters.charge');
       } else if (isCooling) {
-        cooldownFill.style.width = '100%';
+        cooldownFill.style.width = (cooldownRemainingPercent(bank) ?? 100) + '%';
         cooldownFill.className = 'bar-fill cooldown';
         cooldownFill.style.display = 'block';
         chargeFill.style.display = 'none';

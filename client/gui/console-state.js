@@ -85,6 +85,7 @@
  * @param {{ x?: number, position?: number[] }} e
  */
 import { t } from './strings.js';
+import { withWeaponCooldowns } from './weapon-cooldown.js';
 import { buildTutorialState, migrateTutorialProgressForHull } from './tutorial-state.js';
 
 /**
@@ -744,7 +745,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   const tacRadarBb = blackboardOfKind(state, 'TacticalRadar', systemIds)?.data || {};
   const targetUuid   = tacRadarBb.selected_target ?? bb.target_uuid ?? state.weaponsTarget ?? null;
   const targetName   = bb.target_name   ?? state.weaponsTargetName   ?? null;
-  const banks        = bb.banks         ?? state.weaponsBanks        ?? [];
+  const bankStates   = bb.banks         ?? state.weaponsBanks        ?? [];
   const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
   const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
   const torpedoMagBb = blackboardOfKind(state, 'TorpedoMagazine', systemIds)?.data || {};
@@ -753,7 +754,12 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   const regions      = tacRadarBb.regions ?? [];
   const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
-  const blasters     = bb.blasters      ?? state.blasterBanks        ?? [];
+  // The shared Tactical renderer passes these banks unchanged to both weapon
+  // components. Carry the existing authored durations alongside the remaining
+  // times so flat and system-keyed consoles use the same cooldown fraction.
+  const banks = withWeaponCooldowns(bankStates, phaserArcs);
+  const blasters = withWeaponCooldowns(bb.blasters ?? state.blasterBanks ?? [],
+    state.blasterBankConfigs ?? []);
 
   // Tactical's AUTO cue reports the phaser-bank automation supplied by the
   // Simplified rating. Select those systems through their authoritative
@@ -1627,6 +1633,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
         range:       bb.external_dispatch_range,
         target:      bb.external_dispatch_target ?? null,
         target_name: bb.external_dispatch_target_name ?? null,
+        candidate_name: bb.external_dispatch_candidate_name ?? null,
+        candidate_refusal: bb.external_dispatch_candidate_refusal ?? null,
         refusal:     bb.external_dispatch_refusal ?? null,
         // WHICH team is abroad, and how the target it is working is doing
         // (issue #1386). The team index is authoritative — the console used to

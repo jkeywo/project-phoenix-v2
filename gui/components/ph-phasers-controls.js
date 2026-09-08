@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
+import { cooldownRemainingPercent } from '../weapon-cooldown.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
 import {
@@ -181,7 +182,10 @@ export class PhPhasersControls extends PhElement {
       const onCooldown = !!bank.on_cooldown;
       const fireReady = !!bank.fire_ready;
       const fill = row.querySelector('.cooldown-fill');
-      fill.style.width = (onCooldown ? 100 : (fireReady ? 100 : 0)) + '%';
+      // A legacy payload without an authored duration keeps the binary cue;
+      // otherwise the existing CSS transition follows each server fraction.
+      fill.style.width = (onCooldown ? (cooldownRemainingPercent(bank) ?? 100)
+        : (fireReady ? 100 : 0)) + '%';
       fill.className = 'cooldown-fill' + (onCooldown ? ' cooling' : '');
 
       row.querySelector('.auto-badge').style.display = 'none';

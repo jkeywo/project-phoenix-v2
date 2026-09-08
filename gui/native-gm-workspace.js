@@ -25,6 +25,7 @@ const ACTIONS = Object.freeze({
 export function mountNativeGmWorkspace({ bridge, win = window, doc = win.document }) {
   let metadata = { phase: 'Lobby', gms: [] };
   let disposed = false;
+  let lastStartResult = null;
   const getOperator = () => {
     const operator = bridge.getOperator();
     return operator && operator.connected !== false && typeof operator.id === 'string'
@@ -76,6 +77,15 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
           ready: metadata.start_policy.ready_total,
           connected: metadata.start_policy.connected_total,
         }) : t('server.gm.start.waiting_policy');
+    const start = metadata.start_result;
+    if (result && start?.grant_id && start.grant_id !== lastStartResult) {
+      lastStartResult = start.grant_id;
+      const key = start.status === 'applied' ? 'server.gm.start.force_applied'
+        : start.status === 'no-op' ? 'server.gm.start.already_started'
+        : start.reason === 'validation-failed' ? 'server.gm.start.validation_failed'
+        : 'server.gm.start.force_refused';
+      result.textContent = t(key, { name: win.__hostGmName(start.operator_id) });
+    }
   }
   function setReady() {
     const operator = getOperator();

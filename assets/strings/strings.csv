@@ -2810,6 +2810,7 @@ server.gm_monitor_row.before_launch,Native GM screen lifecycle explanation in lo
 server.gm_monitor_row.during_mission,Native GM screen lifecycle explanation in mission,[The GM screen can move; its role stays enabled until the mission ends.]
 server.bridge_layout.gm_monitor_occupied,Native GM screen assignment refused; {monitor},[Screen {monitor} is already in use.]
 server.bridge_layout.gm_role_frozen,Native GM role changed after launch,[Enable or disable the GM screen before launching the mission.]
+server.bridge_layout.adopt_viewscreen_waiting,Native saved layout notice when only the dedicated GM monitor remains. {monitor} is the missing viewscreen identity,[Viewscreen monitor {monitor} is unavailable. Its window is hidden until another screen is available; the GM keeps its dedicated screen.]
 settings.controls.gamepad.hide_touch,Controller preference beside gamepad selection,Hide touch controls when using a controller
 settings.controls.gamepad.device_assigned,Controller held by another native console; {slot} {owner},[Controller {slot} — assigned to {owner}]
 settings.controls.gamepad.status_assigned,Controller is owned by another native console,[This controller is assigned to another console.]

@@ -86,4 +86,26 @@ describe('native GM workspace over the shared GM presenters', () => {
     app.view.dispose();
     expect(window.__hostSetSessionPaused(false, 'closed-screen')).toBe(false);
   });
+
+  it('shows native readiness totals and attributed authoritative start outcomes', () => {
+    const app = mount();
+    const metadata = { phase: 'Lobby',
+      gms: [{ id: 'native-gm', name: 'GM', connected: true, ready: false }],
+      start_policy: { ready_total: 1, connected_total: 3 } };
+    app.receive('metadata', { ...metadata, start_result: {
+      grant_id: 'start-1', operator_id: 'native-gm', status: 'refused',
+      reason: 'validation-failed', tick: 0,
+    } });
+    expect(document.getElementById('gm-start-policy').textContent).toBe(
+      t('server.gm.start.summary', { ready: 1, connected: 3 }));
+    expect(document.getElementById('gm-start-result').textContent).toBe(
+      t('server.gm.start.validation_failed'));
+    app.receive('metadata', { ...metadata, phase: 'InProgress', start_result: {
+      grant_id: 'start-2', operator_id: 'native-gm', status: 'applied',
+      reason: null, tick: 4,
+    } });
+    expect(document.getElementById('gm-start-result').textContent).toBe(
+      t('server.gm.start.force_applied', { name: 'GM' }));
+    app.view.dispose();
+  });
 });

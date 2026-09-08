@@ -123,3 +123,31 @@ No publish, cache purge, worker or dashboard mutation was performed.
 
 Public release/playtest decisions, compatibility evidence, the deployed cache
 failure, and the remaining #1449 work packages are still outstanding.
+
+
+### Deployed identity and compatibility inspection
+
+The 8 September read-only probe found content identity `phoenix-base`, epoch 1
+in both served scenario catalogues (SHA-256
+`5fffa9c7bcb9891a490c41e050b2297e769231d9ac8d15077f08138543ea40a4`).
+The served `/client/` page has no `phoenix-client-stamp` metadata; its SHA-256 is
+`1c0cc08ee6df36c31ece2955c46f682c573bc73712ad6d9b9db75f105753c03f`.
+This is a compatibility evidence gap, not a successful mixed-version join.
+Current native stamp-policy tests passed 11/11, including unstamped refusal,
+protocol/content mismatch and startup pinning. That tests current policy, not
+the deployed client. Raw probe: `target/issue-1449/deployed-identity.json`.
+The live cache failure and missing stamp need deployment-owner action; this
+issue expressly forbids silently reconfiguring or publishing the deployment.
+
+## E2: current manual scenario suite
+
+At revision `18013e6b`, with `RUST_TEST_THREADS=2`:
+`cargo test -p project-phoenix --features falling-skyway-sim-tests --test headless_runner falling_skyway_`
+finished with exit 0: **94 passed, 0 failed, 0 ignored, 110 filtered out**,
+1349.80 seconds execution. Both
+`falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band` and
+`falling_skyway_the_lift_runs_out_and_the_third_claimant_is_never_offered_one`
+passed. The log is `target/issue-1449/falling-skyway-manual.log`.
+No authored values, expected outcomes or test selection were weakened.
+The command filters Falling Skyway tests; unrelated demolition-engine tests
+remain part of the ordinary suite. This does not replace human crew acceptance.

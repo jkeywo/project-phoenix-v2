@@ -401,7 +401,7 @@ mod tests {
                 _ => {
                     app.insert_resource(crate::lockstep::FleetLockstep(
                         crate::lockstep::LockstepSession::new(
-                            crate::lockstep::HostSlot::SOLO,
+                            crate::command_admission::HostSlot::SOLO,
                             [],
                             0,
                         ),

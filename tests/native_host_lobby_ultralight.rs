@@ -214,6 +214,7 @@ fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
         // fixture renders the lobby surface, so empty/default values are fine.
         readiness: Default::default(),
         presentation_ready: false,
+        station_ratings: Default::default(),
         gms: vec![],
         stations: vec![
             station("helm", "Helm", "HLM", "Lieutenant", holder),

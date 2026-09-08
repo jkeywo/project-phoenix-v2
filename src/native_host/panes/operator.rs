@@ -294,6 +294,7 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Random UUIDs isolate host-local temporary test directories.
 mod tests {
     use super::*;
     struct Scratch(PathBuf);

@@ -178,7 +178,12 @@ pub struct BridgeLayoutStorePlugin;
 
 impl Plugin for BridgeLayoutStorePlugin {
     fn build(&self, app: &mut App) {
+        use crate::authoritative::{DeclareState, StateClass};
         app.init_resource::<PendingLayoutSave>();
+        app.declare_state::<PendingLayoutSave>(
+            StateClass::Timer,
+            "native-assigned-station-reservation",
+        );
         app.add_systems(
             Update,
             (
@@ -319,10 +324,25 @@ fn adopt_remembered_layout(
         crate::pwarn!(log, LogCat::Lobby, "bridge layouts: {note}");
     }
 
-    // 2. The saved file, through the law's own door.
+    // 2. The saved file, through the law's own door. A missing display removes
+    // only the physical seat, not the saved station assignment behind it.
+    let mut desired = std::collections::HashMap::new();
     let next = match store.store.load(&class) {
         Ok(Some(profile)) => {
             let (adopted, notes) = reconciled.adopt_profile(&profile);
+            for display in &profile.displays {
+                if adopted.monitors().contains(&display.identity) {
+                    continue;
+                }
+                if let super::bridge_profile::DisplayRole::Station { panes, .. } = &display.role {
+                    for station in panes.iter().filter_map(|pane| pane.station.as_ref()) {
+                        let station = crate::core::messages::StationId(station.clone());
+                        if adopted.roster().contains(&station) {
+                            desired.insert(station, display.identity.clone());
+                        }
+                    }
+                }
+            }
             for note in &notes {
                 crate::pwarn!(log, LogCat::Lobby, "bridge layouts: {note}");
             }
@@ -372,6 +392,11 @@ fn adopt_remembered_layout(
             reconciled
         }
     };
+    for station in next.roster() {
+        if let Some(monitor) = next.monitor_of(station) {
+            desired.insert(station.clone(), monitor.clone());
+        }
+    }
 
     // A selected class replaces logical screen intent too. In particular a
     // same-id station saved Off on this hull cannot inherit the old hull's
@@ -379,14 +404,14 @@ fn adopt_remembered_layout(
     // reconcile does not run this path; only an explicit class adoption does.
     if let Some(bus) = &bus {
         for (_, station) in bus.0.console_assignments() {
-            if next.monitor_of(&station).is_none() {
+            if !desired.contains_key(&station) {
                 bus.0.release_console(&station.0);
             }
         }
         // This adapter runs after the display follower. Reserve adopted seats
         // now, before the next FixedUpdate can accept a competing phone claim.
         for station in next.roster() {
-            if next.monitor_of(station).is_some() {
+            if desired.contains_key(station) {
                 bus.0.reserve_console(&station.0);
             }
         }
@@ -397,12 +422,7 @@ fn adopt_remembered_layout(
         }
     }
     if let Some(assignments) = assignments.as_mut() {
-        assignments.0.clear();
-        for station in next.roster() {
-            if let Some(monitor) = next.monitor_of(station) {
-                assignments.0.insert(station.clone(), monitor.clone());
-            }
-        }
+        assignments.0 = desired;
     }
 
     // Written through a value compare so the frame this runs on a `--world`

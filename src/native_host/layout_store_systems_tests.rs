@@ -348,6 +348,69 @@ fn adopted_screens_reserve_their_station_before_the_next_display_pass() {
 }
 
 #[test]
+fn saved_screen_on_a_missing_boot_monitor_stays_reserved_until_off() {
+    use crate::native_host::console_assignment::ConsoleAssignments;
+    use crate::native_host::host_lobby::{
+        drain_surface_records, pump_host_lobby, HostLobbyBridge, HostLobbyBridgeResource,
+    };
+    use crate::native_host::panes::{transport::PaneBus, PaneBusResource, RecordingSurface};
+
+    let scratch = Scratch::new("missing-boot-monitor-reservation");
+    {
+        let mut arranged = booted(&scratch, DESTROYER);
+        press(
+            &mut arranged,
+            LayoutAction::AssignStation {
+                station: station("helm"),
+                monitor: m(BENQ),
+            },
+        );
+    }
+    let mut app = host(&scratch, None);
+    let bus = PaneBus::default();
+    app.insert_resource(PaneBusResource(bus.clone()));
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    app.add_message::<crate::lobby::InboundMessage>();
+    let bridge = HostLobbyBridge::new();
+    app.insert_resource(HostLobbyBridgeResource(bridge.clone()));
+    app.add_systems(PreUpdate, drain_surface_records);
+    let absent = app
+        .world_mut()
+        .query::<(Entity, &Monitor)>()
+        .iter(app.world())
+        .find(|(_, monitor)| monitor.name.as_deref() == Some("BenQ EX"))
+        .unwrap()
+        .0;
+    app.world_mut().entity_mut(absent).despawn();
+    fly(&mut app, DESTROYER);
+    app.update();
+    app.update();
+    assert!(live(&app).monitor_of(&station("helm")).is_none());
+    assert!(bus.open_pane_for_name("helm").is_none());
+    assert_eq!(
+        app.world()
+            .resource::<ConsoleAssignments>()
+            .0
+            .get(&station("helm")),
+        Some(&m(BENQ))
+    );
+    let sessions = &app.world().resource::<crate::lobby::Sessions>().0;
+    assert!(!sessions.station_claim_allowed("phone", &station("helm")));
+    assert_eq!(bus.console_assignments().len(), 1);
+    let mut surface = RecordingSurface::ready();
+    surface.queue_record(r#"{"kind":"unassign-station","station":"helm"}"#);
+    pump_host_lobby(&bridge, &mut surface);
+    app.update();
+    assert!(app.world().resource::<ConsoleAssignments>().0.is_empty());
+    assert!(bus.console_assignments().is_empty());
+    assert!(saved(&scratch, DESTROYER)
+        .monitor_of(&station("helm"))
+        .is_none());
+}
+
+#[test]
 fn off_after_monitor_loss_releases_the_saved_assignment_too() {
     use crate::native_host::host_lobby::{
         drain_surface_records, pump_host_lobby, HostLobbyBridge, HostLobbyBridgeResource,

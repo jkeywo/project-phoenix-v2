@@ -373,8 +373,13 @@ pub struct BridgeDisplaySet;
 
 impl Plugin for BridgeDisplayPlugin {
     fn build(&self, app: &mut App) {
+        use crate::authoritative::{DeclareState, StateClass};
         app.init_resource::<PendingConsoleClaims>();
         app.init_resource::<super::console_assignment::ConsoleAssignments>();
+        app.declare_state::<super::console_assignment::ConsoleAssignments>(
+            StateClass::Timer,
+            "native-assigned-station-reservation",
+        );
         // Native auto-claim: seat each console's station once its session
         // registers. Gated on the lobby inbound stream so a host built without
         // it (a bare display test) stands the plugin up without the writer

@@ -759,6 +759,6 @@ describe('GM activity transport separation', () => {
     expect(outbound).not.toContain('GmActivityFeed');
     expect(outbound).not.toContain('GM_ACTIVITY');
     expect(bridge).toContain('host_channels::GM_ACTIVITY');
-    expect(read('server.html')).toContain('gm_activity:  function(p) { gmActivity.update(p); }');
+    expect(read('gui/gm-workspace.js')).toContain('gm_activity:  function(p) { gmActivity.update(p); }');
   });
 });

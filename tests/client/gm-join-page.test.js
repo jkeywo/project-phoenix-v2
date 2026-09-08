@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SERVER_HTML = readFileSync(path.join(root, 'server.html'), 'utf8');
+const WORKSPACE = readFileSync(new URL('../../gui/gm-workspace.js', import.meta.url), 'utf8');
 
 describe('first-time GM join host surface (issue #1293)', () => {
   it('puts visible Accept Reject and pause state on the shared host-class page', () => {
@@ -103,10 +104,10 @@ describe('presentation-only GM role presets (issue #1319)', () => {
   });
 
   it('wires the pure module into the GM page and exposes its state for tests/wiring', () => {
-    expect(SERVER_HTML).toContain("import { createGmRolePresets } from './gui/gm-role-presets.js'");
-    expect(SERVER_HTML).toContain('window.__hostGmRolePresetsSetAvailable = gmRolePresets.setAvailablePresets');
-    expect(SERVER_HTML).toContain('window.__hostGmRolePresetsRestore = gmRolePresets.restore');
-    expect(SERVER_HTML).toContain('window.__hostGmRolePresetsState = gmRolePresets.state');
+    expect(WORKSPACE).toContain("import { createGmRolePresets } from './gm-role-presets.js'");
+    expect(WORKSPACE).toContain('win.__hostGmRolePresetsSetAvailable = gmRolePresets.setAvailablePresets');
+    expect(WORKSPACE).toContain('win.__hostGmRolePresetsRestore = gmRolePresets.restore');
+    expect(WORKSPACE).toContain('win.__hostGmRolePresetsState = gmRolePresets.state');
     expect(SERVER_HTML).toContain('id="gm-role-preset-select"');
   });
 });

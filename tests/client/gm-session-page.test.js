@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 const SERVER_HTML = readFileSync(new URL('../../server.html', import.meta.url), 'utf8');
+const WORKSPACE = readFileSync(new URL('../../gui/gm-workspace.js', import.meta.url), 'utf8');
 
 function compileClassicSeam({ localGm, wasmSubmit }) {
   const marker = 'window.__hostSetSessionPaused = function(active, correlation) {';
@@ -58,11 +59,11 @@ describe('server GM session page seam', () => {
   });
 
   it('wires the gm_session Host Channel into accessible page controls', () => {
-    expect(SERVER_HTML).toContain("import { createGmSessionControls } from './gui/gm-session-controls.js'");
-    expect(SERVER_HTML).toMatch(/gm_session:\s+function\(p\) \{ gmSessionControls\.update\(p\); \}/);
-    expect(SERVER_HTML).toContain('window.__hostSemanticActions = hostSemanticActions');
-    expect(SERVER_HTML).toContain('window.__hostActionFeedback = hostActionFeedback');
-    expect(SERVER_HTML).toContain('window.__hostGmSessionReset = gmSessionControls.reset');
+    expect(WORKSPACE).toContain("import { createGmSessionControls } from './gm-session-controls.js'");
+    expect(WORKSPACE).toMatch(/gm_session:\s+function\(p\) \{ gmSessionControls\.update\(p\); \}/);
+    expect(WORKSPACE).toContain('win.__hostSemanticActions = hostSemanticActions');
+    expect(WORKSPACE).toContain('win.__hostActionFeedback = hostActionFeedback');
+    expect(WORKSPACE).toContain('win.__hostGmSessionReset = gmSessionControls.reset');
     expect(SERVER_HTML).toMatch(/s\.phase === 'Lobby'[\s\S]+window\.__hostGmSessionReset\(\)/);
     expect(SERVER_HTML).toContain('window.wasm_submit_gm_action = wasmBindings.wasm_submit_gm_action');
     expect(SERVER_HTML).toMatch(/id="gm-session-controls" role="region"/);

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 const SERVER_HTML = readFileSync(new URL('../../server.html', import.meta.url), 'utf8');
+const WORKSPACE = readFileSync(new URL('../../gui/gm-workspace.js', import.meta.url), 'utf8');
 
 /** Compile the classic-page Fire seam out of server.html, as #1292's twin does. */
 function compileFireSeam({ localGm, wasmSubmit, marker = 'window.__hostFireGmEvent = function(request) {' }) {
@@ -73,16 +74,16 @@ describe('server GM mission page seam', () => {
   });
 
   it('wires the gm_mission Host Channel into accessible page controls', () => {
-    expect(SERVER_HTML).toContain("import { createGmMissionPanel } from './gui/gm-mission-panel.js'");
+    expect(WORKSPACE).toContain("import { createGmMissionPanel } from './gm-mission-panel.js'");
     const gmMissionPanel = { update: vi.fn(), reset: vi.fn(), refreshAdmission: vi.fn() };
     const gmObjectivePanel = { update: vi.fn(), reset: vi.fn(), refreshAdmission: vi.fn() };
-    const handler = SERVER_HTML.match(/gm_mission:\s+(function\(p\)\s*\{[^\r\n]+\})/)[1];
+    const handler = WORKSPACE.match(/gm_mission:\s+(function\(p\)\s*\{[^\r\n]+\})/)[1];
     const compile = source => new Function('gmMissionPanel', 'gmObjectivePanel', `return (${source});`)(gmMissionPanel, gmObjectivePanel);
     const payload = { events: [], results: [], objective_palette: [], objectives: [], objective_results: [] };
     compile(handler)(payload);
     for (const panel of [gmMissionPanel, gmObjectivePanel]) expect(panel.update).toHaveBeenCalledWith(payload);
     for (const [binding, method] of [['Reset', 'reset'], ['Refresh', 'refreshAdmission']]) {
-      const source = SERVER_HTML.match(new RegExp(`window\\.__hostGmMission${binding} = ([^\\r\\n]+);`))[1];
+      const source = WORKSPACE.match(new RegExp(`win\\.__hostGmMission${binding} = ([^\\r\\n]+);`))[1];
       compile(source)();
       for (const panel of [gmMissionPanel, gmObjectivePanel]) expect(panel[method]).toHaveBeenCalledOnce();
     }

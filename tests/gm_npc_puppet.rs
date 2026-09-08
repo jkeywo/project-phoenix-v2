@@ -19,7 +19,13 @@ fn args() -> phoenix::headless::HeadlessArgs {
     }
 }
 fn seeded() -> App {
+    seeded_with(|_| {})
+}
+fn seeded_with(configure: impl FnOnce(&mut App)) -> App {
     let mut app = phoenix::headless::build_headless_app(&args()).unwrap();
+    configure(&mut app);
+    app.finish();
+    app.cleanup();
     for _ in 0..180 {
         app.update();
     }
@@ -81,10 +87,11 @@ fn digest(app: &App) -> u64 {
 
 #[test]
 fn npc_capability_is_shared_fail_closed_and_resolves_instance_overrides() {
-    let mut app = seeded();
+    let mut app = seeded_with(|app| {
+        app.add_plugins(phoenix::gm_projection::GmProjectionPlugin);
+    });
     let (entity, uuid) = npc(&mut app);
-    app.insert_resource(phoenix::gm_projection::BrowserGameMaster)
-        .add_plugins(phoenix::gm_projection::GmProjectionPlugin);
+    app.insert_resource(phoenix::gm_projection::BrowserGameMaster);
     app.world_mut().run_schedule(FixedLast);
     let projections: Vec<_> = app
         .world_mut()

@@ -153,6 +153,8 @@ fn seeded() -> (App, String, String) {
         ..Default::default()
     };
     let mut app = phoenix::headless::build_headless_app(&args).unwrap();
+    app.finish();
+    app.cleanup();
     for _ in 0..180 {
         app.update();
     }

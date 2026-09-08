@@ -45,7 +45,9 @@ fn lobby_start_and_reconnect_trace_is_repeatable() {
         );
         bevy::ecs::schedule::ExecutorKind::MultiThreaded
     };
-    for app in &apps {
+    for app in &mut apps {
+        app.finish();
+        app.cleanup();
         assert_eq!(
             app.get_schedule(FixedUpdate).unwrap().get_executor_kind(),
             expected_executor

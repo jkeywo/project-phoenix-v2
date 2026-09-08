@@ -27,6 +27,8 @@ fn seeded(local: u32) -> App {
         (1..=3).map(|slot| FleetShip::new(HostSlot(slot))).collect(),
         HostSlot(local),
     ));
+    app.finish();
+    app.cleanup();
     advance(&mut app, 90);
     app
 }

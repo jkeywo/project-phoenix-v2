@@ -6878,6 +6878,8 @@ fn a_hull_never_ends_a_tick_inside_a_huge_asteroid() {
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("app should build");
+    app.finish();
+    app.cleanup();
 
     // The belt, read once: these are `[[entity]]` placements, so they never move
     // and never stream in or out.

@@ -1,7 +1,7 @@
-//! The one-time allowance is the reviewed first census, not a fresh capture of
-//! whatever debt a candidate branch has accumulated. Later trusted Git ledgers
-//! use the ordinary access-subset/multiplicity ratchet in the parent test.
-use project_phoenix::headless::determinism_audit::Ambiguity;
+//! The immutable first census bounds the allowance when the trusted Git base
+//! predates its introduction. The live allowance may already have shrunk within
+//! that same batch. Later trusted Git ledgers retain the ordinary subset ratchet.
+use project_phoenix::headless::determinism_audit::{parse_census, uncovered, Ambiguity};
 use std::{
     io::Write,
     path::Path,
@@ -14,9 +14,31 @@ use std::{
 // The Git blob is over those bytes: no BOM/newline, filters or deduplication.
 const INITIAL_ROWS: usize = 1_968;
 const INITIAL_BLOB: &str = "a3a15b158431852c9b3c3bf890dbe8929e9e02ec";
+const INITIAL_CAPTURE: &str =
+    include_str!("../fixtures/determinism/fixed-update-ambiguities.initial.json");
 
 pub(super) fn enforce_first_allowance(root: &Path, rows: &[Ambiguity]) -> Result<(), String> {
-    require_fingerprint(root, rows, INITIAL_ROWS, INITIAL_BLOB)
+    let initial = parse_census(INITIAL_CAPTURE)?;
+    require_pinned_allowance(root, rows, &initial, INITIAL_ROWS, INITIAL_BLOB)
+}
+
+fn require_pinned_allowance(
+    root: &Path,
+    allowed: &[Ambiguity],
+    initial: &[Ambiguity],
+    expected_rows: usize,
+    expected_blob: &str,
+) -> Result<(), String> {
+    // Validate the independent capture first. Replacing both JSON files cannot
+    // silently authorize new access or an extra instance of an existing pair.
+    require_fingerprint(root, initial, expected_rows, expected_blob)?;
+    let growth = uncovered(allowed, initial);
+    if !growth.is_empty() {
+        return Err(format!(
+            "first allowance grew beyond the reviewed capture:\n{growth:#?}"
+        ));
+    }
+    Ok(())
 }
 
 fn require_fingerprint(
@@ -27,7 +49,7 @@ fn require_fingerprint(
 ) -> Result<(), String> {
     if rows.len() != expected_rows {
         return Err(format!(
-            "first allowance must retain the reviewed {expected_rows} rows, found {}",
+            "initial capture must retain the reviewed {expected_rows} rows, found {}",
             rows.len()
         ));
     }
@@ -59,7 +81,7 @@ fn require_fingerprint(
     let observed = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
     if observed.trim() != expected_blob {
         return Err(format!(
-            "first allowance differs from the reviewed capture: expected {expected_blob}, found {}",
+            "initial capture differs from the reviewed fingerprint: expected {expected_blob}, found {}",
             observed.trim()
         ));
     }
@@ -121,9 +143,39 @@ mod tests {
         assert_eq!(replaced_instance.len(), original.len());
         assert!(check(&replaced_instance).is_err());
 
-        // Initial introduction is exact; subsequent shrinkage is handled by
-        // the trusted-base branch, not by changing this first-capture pin.
+        // The capture itself remains exact; the live allowance may shrink.
         assert!(check(&original[..2]).is_err());
+    }
+
+    #[test]
+    fn first_introduction_allows_shrinkage_without_replacing_the_capture() {
+        let original = fixture();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for allowance in [&original[..], &original[..2], &original[..0]] {
+            require_pinned_allowance(root, allowance, &original, 3, FIXTURE_BLOB).unwrap();
+        }
+
+        let mut new_access = original.clone();
+        new_access[0].access.push("Z".into());
+        new_access.sort();
+        assert!(require_pinned_allowance(root, &new_access, &original, 3, FIXTURE_BLOB).is_err());
+        // A replacement capture cannot bless that same new access.
+        assert!(require_pinned_allowance(root, &new_access, &new_access, 3, FIXTURE_BLOB).is_err());
+
+        let mut extra_instance = original.clone();
+        extra_instance.push(original[0].clone());
+        extra_instance.sort();
+        assert!(
+            require_pinned_allowance(root, &extra_instance, &original, 3, FIXTURE_BLOB).is_err()
+        );
+    }
+
+    #[test]
+    fn first_introduction_keeps_the_actual_reviewed_capture_independent() {
+        let original = parse_census(INITIAL_CAPTURE).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        enforce_first_allowance(root, &original).unwrap();
+        enforce_first_allowance(root, &original[..original.len() - 1]).unwrap();
     }
 
     #[test]

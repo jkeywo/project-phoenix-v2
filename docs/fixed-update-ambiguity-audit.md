@@ -60,23 +60,28 @@ original capture. When the trusted base lacks
 the ledger, the gate requires complete local history and checks every reachable
 history branch for that path. Any prior occurrence fails as deletion followed
 by reintroduction; only a path never present in trusted history is a first
-introduction. That branch also checks the reviewed first count and fingerprint,
-because a PR base predating the entire batch cannot ratchet against an earlier
-commit inside the same PR. `tests/fixed_update_ambiguities/bootstrap.rs` encodes
-the parsed rows with the production `Ambiguity` serializer through
+introduction. That branch checks the independent original capture in
+`tests/fixtures/determinism/fixed-update-ambiguities.initial.json` against its
+reviewed first count and fingerprint, then bounds the current allowance with
+the same access-subset/multiplicity law. A PR base predating the entire batch
+cannot ratchet against an earlier commit inside the same PR.
+`tests/fixed_update_ambiguities/bootstrap.rs` encodes the initial capture's
+parsed rows with the production `Ambiguity` serializer through
 `serde_json::to_vec`: compact UTF-8, no BOM or trailing newline, retaining every
 row and access entry. Git's read-only `hash-object --stdin` must report blob
 `a3a15b158431852c9b3c3bf890dbe8929e9e02ec` for those 437,412 bytes. It writes no
 object, applies no clean filter and performs no network operation. Pretty-print
 whitespace and checkout line endings therefore do not affect the check.
 
-Keep the first 1,968 allowance unchanged through its initial introduction while
-live conflicts shrink. Once the trusted base contains that ledger, the ordinary
-access-subset/multiplicity comparison allows the checked-in allowance to shrink.
-No repository variable or external approval setting is needed. Neither an empty
-placeholder, a hand-authored list nor the 1,973 capture substitutes for the first
-allowance, and a missing current ledger fails. Complete-history and no-delete
-checks remain mandatory even when the fingerprint matches.
+Keep the independent 1,968-row initial capture unchanged. The current allowance
+may shrink within the same introduction: its rows, access and instance quotas
+must remain covered by that capture, and every live conflict must still fit the
+current allowance. Replacing both JSON files cannot authorize growth because
+the original fingerprint is checked first. An empty current allowance requires
+zero live debt and the strict Bevy check; an empty initial capture fails its pin.
+Once the trusted base contains a ledger, that trusted version remains the bound.
+No repository variable or external approval setting is needed. A missing current
+ledger fails, and complete-history and no-delete checks remain mandatory.
 
 The initial ledger retains the original duplicate record as well as complete
 vectors. The immutable 17-expansion regression fixture tests every newly exposed
@@ -120,4 +125,4 @@ exemption or production order follows automatically from this output.
 
 ## Verified resolution boundary
 
-The initialized post-split graph reports 1,929 rows. Full name/access/multiplicity comparison finds zero added rows and 39 removed rows against the original 1,968 capture. The real Rust bootstrap serializer produces the pinned fingerprint, and the ordinary live-subset/history gate passes. Preserve the original allowance through first introduction; do not replace it with this smaller capture inside the same introduction. Typed stream/namespace ownership and the baseline-preserving Projectile edge carry their own restore and default/pinned behavior tests. Final integration remains the integrator's responsibility.
+The initialized post-split graph reports 1,929 rows. Full name/access/multiplicity comparison finds zero added rows and 39 removed rows against the original 1,968 capture. The real Rust bootstrap serializer produces the pinned fingerprint, and the ordinary live-subset/history gate passes. The independent initial capture retains the original fingerprint while the current allowance may shrink under the checked subset law. The later bootstrap correction passed six focused tests and the actual live/history gate against the unchanged pre-introduction local main in the SDK-enabled configuration; final combined validation remains separate. Typed stream/namespace ownership and the baseline-preserving Projectile edge carry their own restore and default/pinned behavior tests. Final integration remains the integrator's responsibility.

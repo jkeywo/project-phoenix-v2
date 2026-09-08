@@ -78,7 +78,7 @@ loaded content digest. A pre-scenario catalogue may defer only the content
 answer until the row's scenario has loaded; damaged records and format/rules
 movement are hard refusals immediately.
 
-Current snapshot format 16 also requires a `BootIdentity`: the selected hull,
+The snapshot envelope also requires a `BootIdentity`: the selected hull,
 the frozen `FleetRoster`, and the authored-order UUID identity of every entity
 that actually spawned at `GameStart`. Startup validates the scenario and hull,
 checks the saved fleet against any already-staged fleet, and verifies that each

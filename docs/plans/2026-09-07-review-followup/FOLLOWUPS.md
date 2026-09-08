@@ -2,7 +2,7 @@
 
 The follow-up removes the measured Combat Test streaming stalls, restores claimable native consoles after return to the lobby, and keeps revealed Settings above the mission HUD. The opt-in `scale2` experiment reduces Ultralight render cost and improves pane-thread cadence in a three-console workload; it does not establish a main-frame improvement or justify changing the default resolution.
 
-This record supplements the historical [results](RESULTS.md) and [execution ledger](PROGRESS.md). It preserves the original measurements rather than replacing their baselines. T2 owns the combined integration, its final gates and publication. The original full architecture/reuse branch remains preserved separately; these performance measurements do not establish that its complete history is included in T2's narrower assembly.
+This record supplements the historical [results](RESULTS.md) and [execution ledger](PROGRESS.md). It preserves the original measurements rather than replacing their baselines. The full reviewed architecture/reuse batch and six later fixes have been rebased for the requested local-main merge; the [integration record](MERGE.md) gives the exact scope, validation and unpublished dependency prerequisite. T2 retains ownership of its separate unfinished GM/scheduler batch and any later combined publication gate.
 
 ## Frozen sources and validation
 

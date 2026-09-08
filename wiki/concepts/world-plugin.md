@@ -85,7 +85,7 @@ A separate `PostStartup` system, `apply_world_ambient_light` (`src/server/render
 
 ## Trigger conditions
 
-Triggers registered from a world's `[script]` block are matched against `WorldEvent`s by `evaluate_single_trigger` / `evaluate_triggers_with_flags` in `src/world/content.rs`. All conditions are single-shot (set `TriggerState.fired = true` once dispatched). The full list:
+Triggers registered from a world's `[script]` block are matched against `WorldEvent`s by `evaluate_single_trigger` / `evaluate_triggers_with_flags` in `src/world/content.rs`. Triggers are single-shot by default. A trigger with `repeat = true` can fire again, subject to any authored `cooldown_secs` interval. The full list:
 
 | `condition = ` | Required fields | Fires on |
 |---|---|---|

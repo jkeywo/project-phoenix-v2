@@ -8,8 +8,8 @@ import {
 } from './fixtures';
 import { ts } from './strings';
 
-async function installFabricatedGamepads(page) {
-  await page.addInitScript(() => {
+async function installFabricatedGamepads(page, startup = {}) {
+  await page.addInitScript(({ pads: initialPads = [], profile = null }) => {
     let pads = [];
     Object.defineProperty(navigator, 'getGamepads', {
       configurable: true,
@@ -35,7 +35,15 @@ async function installFabricatedGamepads(page) {
         };
       }
     };
-  });
+    // One init callback owns setup and its seed: Playwright does not promise
+    // ordering between independently registered init scripts.
+    if (window === window.parent) {
+      window.__setFabricatedGamepads(initialPads);
+      if (profile) {
+        localStorage.setItem('phoenix-operator-profile-v1', JSON.stringify(profile));
+      }
+    }
+  }, startup);
 }
 
 async function setPads(page, specs) {
@@ -214,14 +222,12 @@ test('@core saved controller restores at startup, updates help and hides only us
   await waitForWasmReady(serverPage);
   const hostId = await readHostPeerId(serverPage);
   const helm = await context.newPage();
-  await installFabricatedGamepads(helm);
-  await helm.addInitScript(() => {
-    if (window !== window.parent) return;
-    window.__setFabricatedGamepads([{ index: 2, id: 'saved controller' }]);
-    localStorage.setItem('phoenix-operator-profile-v1', JSON.stringify({
+  await installFabricatedGamepads(helm, {
+    pads: [{ index: 2, id: 'saved controller' }],
+    profile: {
       kind: 'project-phoenix/operator-profile', version: 1,
       gamepad: { preferredSlot: 0, preferredDevice: { id: 'saved controller', mapping: 'standard' } },
-    }));
+    },
   });
   await helm.goto(`/client/#${hostId}`, { waitUntil: 'domcontentloaded' });
   await helm.waitForSelector('#station-list .station-row', { timeout: 15_000 });
@@ -241,9 +247,9 @@ test('@core saved controller restores at startup, updates help and hides only us
   await expect(frame.locator('ph-helm-joystick')).toBeVisible();
   await helm.locator('[data-control="gamepad-hide-touch"]').check();
   await helm.click('.settings-tab[data-tab="station-help"]');
-  await expect(helm.locator('.settings-documentation')).toContainText(ts('input.gamepad.left_stick_x'));
+  await expect(helm.locator('#settings-overlay .settings-documentation')).toContainText(ts('input.gamepad.left_stick_x'));
   await setPads(helm, []);
-  await expect(helm.locator('.settings-documentation')).not.toContainText(ts('input.gamepad.left_stick_x'));
+  await expect(helm.locator('#settings-overlay .settings-documentation')).not.toContainText(ts('input.gamepad.left_stick_x'));
   await helm.keyboard.press('Escape');
   await expect(frame.locator('ph-helm-joystick')).toBeVisible();
   await expect(frame.locator('ph-lateral-thrust-joystick')).toBeVisible();

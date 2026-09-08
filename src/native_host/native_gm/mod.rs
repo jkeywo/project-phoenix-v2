@@ -71,10 +71,14 @@ impl Plugin for NativeGmPlugin {
             ))
             .add_systems(
                 PreUpdate,
-                (sync_lobby_role_intent, drain_records)
+                // Ready/Unready and a surface failure must reach the roster and
+                // pause authority before this frame's fixed tick can launch or
+                // advance the simulation. PostUpdate still catches display work.
+                (sync_lobby_role_intent, drain_records, sync_presence)
                     .chain()
                     .after(super::host_lobby::drain_surface_records)
-                    .before(crate::gm_action::apply_due_actions),
+                    .before(crate::gm_action::apply_due_actions)
+                    .run_if(resource_exists::<NativeGmSurface>),
             )
             .add_systems(
                 PostUpdate,
@@ -88,6 +92,247 @@ impl Plugin for NativeGmPlugin {
                     .run_if(resource_exists::<NativeGmSurface>),
             );
     }
+}
+
+/// Commit a lobby role change before the fixed tick evaluates readiness. The
+/// surface itself is created later in Update, so every new placement first
+/// enters the roster as unready. Keeping this separate from full presence
+/// publication also lets the first Loaded record see the enabled role.
+fn sync_lobby_role_intent(
+    layout: Option<Res<BridgeLayoutResource>>,
+    phase: Res<State<GamePhase>>,
+    mut state: ResMut<NativeGmLifecycle>,
+    mut authority: ResMut<NativeGmAuthority>,
+    mut roster: ResMut<GmRoster>,
+    mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
+) {
+    if *phase.get() != GamePhase::Lobby {
+        return;
+    }
+    let assigned = layout
+        .as_ref()
+        .and_then(|layout| layout.layout.game_master_monitor());
+    if state.enabled == assigned.is_some() && state.desired_monitor.as_ref() == assigned {
+        return;
+    }
+    state.enabled = assigned.is_some();
+    state.desired_monitor = assigned.cloned();
+    state.ready = false;
+    authority.connected = false;
+    let mut rows: Vec<_> = roster
+        .operators()
+        .iter()
+        .filter(|gm| gm.id != NATIVE_GM_OPERATOR_ID)
+        .cloned()
+        .collect();
+    if state.enabled {
+        rows.push(GmOperator {
+            id: NATIVE_GM_OPERATOR_ID.into(),
+            name: "GM".into(),
+            connected: false,
+            ready: false,
+        });
+    }
+    let Ok(replacement) = GmRoster::try_new(rows) else {
+        return;
+    };
+    if *roster != replacement {
+        outbound.write(crate::lobby::OutboundMessage {
+            target: crate::lobby::Target::All,
+            delivery: crate::core::messages::DeliveryClass::Reliable,
+            msg: crate::core::messages::ServerMessage::GmRosterChanged {
+                gms: replacement.projection(),
+            },
+        });
+        *roster = replacement;
+    }
+}
+
+fn drain_records(world: &mut World) {
+    let Some(surface) = world.get_resource::<NativeGmSurface>().cloned() else {
+        return;
+    };
+    for json in surface.bridge.take_records() {
+        let Some(record) = codec::decode_native_gm_record(&json) else {
+            continue;
+        };
+        if !world.resource::<NativeGmLifecycle>().enabled {
+            continue;
+        }
+        match record {
+            NativeGmRecord::RecoveryHostLobby => {
+                recovery::request(world);
+            }
+            NativeGmRecord::SurfaceFault => {
+                surface.bridge.fault();
+                break;
+            }
+            NativeGmRecord::Loaded => surface.bridge.mark_live(),
+            NativeGmRecord::Ready { ready }
+                if world.resource::<State<GamePhase>>().get() == &GamePhase::Lobby =>
+            {
+                world.resource_mut::<NativeGmLifecycle>().ready = ready;
+            }
+            NativeGmRecord::ForceStart
+                if surface.bridge.live()
+                    && world.resource::<State<GamePhase>>().get() == &GamePhase::Lobby =>
+            {
+                world
+                    .resource_mut::<start::NativeGmStartRequests>()
+                    .request();
+            }
+            NativeGmRecord::Action { request } => {
+                let Some(request) = codec::decode_gm_action_request(&request) else {
+                    continue;
+                };
+                if let Err(reason) = crate::gm_action::submit_native(world, request.clone()) {
+                    let tick = world.resource::<crate::sim_tick::SimTick>().0;
+                    world
+                        .resource_mut::<crate::gm_action::LocalGmActionRefusals>()
+                        .push(crate::gm_action::LoggedGmAction::refused_request(
+                            &request, tick, reason,
+                        ));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sync_presence(
+    surface: Res<NativeGmSurface>,
+    layout: Option<Res<BridgeLayoutResource>>,
+    phase: Res<State<GamePhase>>,
+    mut state: ResMut<NativeGmLifecycle>,
+    mut authority: ResMut<NativeGmAuthority>,
+    mut roster: ResMut<GmRoster>,
+    mut commands: Commands,
+    mut paused: ResMut<crate::gm_action::SimulationPaused>,
+    config: Option<Res<crate::world::config::WorldConfig>>,
+    mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
+    starts: Option<Res<start::NativeGmStartRequests>>,
+) {
+    let assigned = layout.as_ref().and_then(|l| l.layout.game_master_monitor());
+    if *phase.get() == GamePhase::Lobby {
+        state.enabled = assigned.is_some();
+        state.desired_monitor = assigned.cloned();
+        authority.screen_pause = false;
+        state.lost = false;
+    } else if assigned.is_some() {
+        // An explicit --solo launch may enter its mission before the display
+        // adapter adopts the saved bridge layout on its first rendered frame.
+        state.enabled = true;
+        state.desired_monitor = assigned.cloned();
+    }
+    let present = assigned.is_some_and(|id| {
+        layout
+            .as_ref()
+            .is_some_and(|l| l.monitors.iter().any(|m| &m.identity == id))
+    });
+    let failed = surface.bridge.take_failure();
+    let connected = state.enabled && present && surface.bridge.live() && !surface.bridge.failed();
+    if state.enabled {
+        commands.insert_resource(crate::gm_projection::NativeGmPresentation);
+    } else {
+        commands.remove_resource::<crate::gm_projection::NativeGmPresentation>();
+    }
+    if !connected || failed {
+        state.ready = false;
+    }
+    if state.enabled
+        && (!present || failed || surface.bridge.failed())
+        && *phase.get() == GamePhase::InProgress
+        && !state.lost
+    {
+        paused.0 = true;
+        authority.screen_pause = true;
+        state.lost = true;
+    }
+    if connected {
+        state.lost = false;
+    }
+    authority.connected = connected;
+    let mut rows: Vec<_> = roster
+        .operators()
+        .iter()
+        .filter(|gm| gm.id != NATIVE_GM_OPERATOR_ID)
+        .cloned()
+        .collect();
+    if state.enabled {
+        rows.push(GmOperator {
+            id: NATIVE_GM_OPERATOR_ID.into(),
+            name: "GM".into(),
+            connected,
+            ready: state.ready,
+        });
+    }
+    let Ok(replacement) = GmRoster::try_new(rows) else {
+        authority.connected = false;
+        return;
+    };
+    if *roster != replacement {
+        outbound.write(crate::lobby::OutboundMessage {
+            target: crate::lobby::Target::All,
+            delivery: crate::core::messages::DeliveryClass::Reliable,
+            msg: crate::core::messages::ServerMessage::GmRosterChanged {
+                gms: replacement.projection(),
+            },
+        });
+        *roster = replacement;
+    }
+    if let Ok(json) = codec::encode_native_gm_metadata(&NativeGmMetadata {
+        phase: phase.get().clone(),
+        host_lobby_unavailable: recovery::host_lobby_unavailable(
+            phase.get(),
+            state.enabled,
+            layout.as_deref(),
+        ),
+        role_presets: config
+            .as_ref()
+            .map(|c| c.gm_role_presets.clone())
+            .unwrap_or_default(),
+        gms: roster.projection(),
+        start_policy: start::readiness_totals(
+            sessions
+                .as_deref()
+                .map_or_else(Default::default, |s| s.0.readiness_tally()),
+            &roster,
+        ),
+        start_result: starts.as_deref().and_then(|s| s.last_result().cloned()),
+    }) {
+        surface.bridge.publish("metadata", json);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn feed_projections(
+    surface: Res<NativeGmSurface>,
+    mut entity: MessageReader<GmEntityProjectionChanged>,
+    mut activity: MessageReader<GmActivityFeedChanged>,
+    mut station: MessageReader<GmStationProjectionChanged>,
+    mut session: MessageReader<GmSessionChanged>,
+    mut mission: MessageReader<GmMissionChanged>,
+    mut spawn: MessageReader<GmSpawnChanged>,
+    mut comms: MessageReader<GmCommsChanged>,
+) {
+    macro_rules! feed {
+        ($reader:ident, $channel:literal, $encode:ident) => {
+            if let Some(message) = $reader.read().last() {
+                if let Ok(json) = codec::$encode(&message.payload) {
+                    surface.bridge.publish($channel, json);
+                }
+            }
+        };
+    }
+    feed!(entity, "gm_entity", encode_gm_entity_projection);
+    feed!(activity, "gm_activity", encode_gm_activity_feed);
+    feed!(station, "gm_station", encode_gm_station_projection);
+    feed!(session, "gm_session", encode_gm_session_projection);
+    feed!(mission, "gm_mission", encode_gm_mission_projection);
+    feed!(spawn, "gm_spawn", encode_gm_spawn_projection);
+    feed!(comms, "gm_comms", encode_gm_comms_projection);
 }
 
 #[cfg(test)]
@@ -270,7 +515,13 @@ mod tests {
             .init_resource::<crate::world::config::WorldConfig>()
             .add_systems(
                 PreUpdate,
-                (drain_surface_records, sync_lobby_role_intent, drain_records).chain(),
+                (
+                    drain_surface_records,
+                    sync_lobby_role_intent,
+                    drain_records,
+                    sync_presence,
+                )
+                    .chain(),
             )
             .add_systems(PostUpdate, sync_presence);
         crate::sim_tick::register_sim_tick(&mut app);
@@ -321,245 +572,108 @@ mod tests {
         );
         assert!(!gm.ready);
     }
-}
 
-/// Commit a lobby role change before the fixed tick evaluates readiness. The
-/// surface itself is created later in Update, so every new placement first
-/// enters the roster as unready. Keeping this separate from full presence
-/// publication also lets the first Loaded record see the enabled role.
-fn sync_lobby_role_intent(
-    layout: Option<Res<BridgeLayoutResource>>,
-    phase: Res<State<GamePhase>>,
-    mut state: ResMut<NativeGmLifecycle>,
-    mut authority: ResMut<NativeGmAuthority>,
-    mut roster: ResMut<GmRoster>,
-    mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
-) {
-    if *phase.get() != GamePhase::Lobby {
-        return;
-    }
-    let assigned = layout
-        .as_ref()
-        .and_then(|layout| layout.layout.game_master_monitor());
-    if state.enabled == assigned.is_some() && state.desired_monitor.as_ref() == assigned {
-        return;
-    }
-    state.enabled = assigned.is_some();
-    state.desired_monitor = assigned.cloned();
-    state.ready = false;
-    authority.connected = false;
-    let mut rows: Vec<_> = roster
-        .operators()
-        .iter()
-        .filter(|gm| gm.id != NATIVE_GM_OPERATOR_ID)
-        .cloned()
-        .collect();
-    if state.enabled {
-        rows.push(GmOperator {
-            id: NATIVE_GM_OPERATOR_ID.into(),
-            name: "GM".into(),
-            connected: false,
-            ready: false,
-        });
-    }
-    let Ok(replacement) = GmRoster::try_new(rows) else {
-        return;
-    };
-    if *roster != replacement {
-        outbound.write(crate::lobby::OutboundMessage {
-            target: crate::lobby::Target::All,
-            delivery: crate::core::messages::DeliveryClass::Reliable,
-            msg: crate::core::messages::ServerMessage::GmRosterChanged {
-                gms: replacement.projection(),
-            },
-        });
-        *roster = replacement;
-    }
-}
+    #[test]
+    fn unready_or_surface_loss_on_the_final_countdown_tick_cancels_launch() {
+        use crate::native_host::panes::RecordingSurface;
 
-fn drain_records(world: &mut World) {
-    let Some(surface) = world.get_resource::<NativeGmSurface>().cloned() else {
-        return;
-    };
-    for json in surface.bridge.take_records() {
-        let Some(record) = codec::decode_native_gm_record(&json) else {
-            continue;
-        };
-        if !world.resource::<NativeGmLifecycle>().enabled {
-            continue;
-        }
-        match record {
-            NativeGmRecord::RecoveryHostLobby => {
-                recovery::request(world);
-            }
-            NativeGmRecord::SurfaceFault => {
-                surface.bridge.fault();
-                break;
-            }
-            NativeGmRecord::Loaded => surface.bridge.mark_live(),
-            NativeGmRecord::Ready { ready }
-                if world.resource::<State<GamePhase>>().get() == &GamePhase::Lobby =>
+        for event in [
+            "unready",
+            "surface-fault",
+            "worker-fault",
+            "recovered-fault",
+            "monitor-loss",
+        ] {
+            let mut configured = fixture();
+            let layout = configured
+                .remove_resource::<BridgeLayoutResource>()
+                .unwrap();
+            let surface = configured.remove_resource::<NativeGmSurface>().unwrap();
+            let bridge = surface.bridge.clone();
+            bridge.activate(PaneId(7));
+            bridge.mark_live();
+            let mut app = App::new();
+            app.add_plugins((crate::lobby::LobbyPlugin, bevy::time::TimePlugin))
+                .insert_resource(layout)
+                .insert_resource(surface)
+                .init_resource::<NativeGmLifecycle>()
+                .init_resource::<NativeGmAuthority>()
+                .init_resource::<crate::gm_action::SimulationPaused>()
+                .init_resource::<crate::world::config::WorldConfig>()
+                .add_systems(
+                    PreUpdate,
+                    (sync_lobby_role_intent, drain_records, sync_presence).chain(),
+                )
+                .add_systems(PostUpdate, sync_presence);
+            crate::sim_tick::register_sim_tick(&mut app);
+            crate::ship::test_support::drive_one_fixed_step_per_update(
+                &mut app,
+                std::time::Duration::from_secs(1),
+            );
+            app.update();
             {
-                world.resource_mut::<NativeGmLifecycle>().ready = ready;
+                let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+                sessions.0.register("crew".into(), "Ada".into()).unwrap();
+                sessions.0.set_ready("crew", true);
             }
-            NativeGmRecord::ForceStart
-                if surface.bridge.live()
-                    && world.resource::<State<GamePhase>>().get() == &GamePhase::Lobby =>
+            app.world_mut().resource_mut::<NativeGmLifecycle>().ready = true;
+            app.world_mut().run_system_once(sync_presence).unwrap();
+            assert!(app.world().resource::<GmRoster>().operators()[0].ready);
             {
-                world
-                    .resource_mut::<start::NativeGmStartRequests>()
-                    .request();
+                let mut countdown = app
+                    .world_mut()
+                    .resource_mut::<crate::lobby::CountdownTimer>();
+                countdown.remaining_secs = 0.001;
+                countdown.pending_phase = Some(GamePhase::InProgress);
             }
-            NativeGmRecord::Action { request } => {
-                let Some(request) = codec::decode_gm_action_request(&request) else {
-                    continue;
-                };
-                if let Err(reason) = crate::gm_action::submit_native(world, request.clone()) {
-                    let tick = world.resource::<crate::sim_tick::SimTick>().0;
-                    world
-                        .resource_mut::<crate::gm_action::LocalGmActionRefusals>()
-                        .push(crate::gm_action::LoggedGmAction::refused_request(
-                            &request, tick, reason,
-                        ));
+            match event {
+                "unready" | "surface-fault" => {
+                    let mut page = RecordingSurface::ready();
+                    page.queue_record(if event == "unready" {
+                        r#"{"kind":"ready","ready":false}"#
+                    } else {
+                        r#"{"kind":"surface-fault"}"#
+                    });
+                    bridge.pump(PaneId(7), &mut page);
                 }
+                "worker-fault" => bridge.fault(),
+                "recovered-fault" => {
+                    bridge.fault();
+                    bridge.activate(PaneId(8));
+                    bridge.mark_live();
+                }
+                "monitor-loss" => {
+                    app.world_mut()
+                        .resource_mut::<BridgeLayoutResource>()
+                        .monitors
+                        .pop();
+                }
+                _ => unreachable!(),
             }
-            _ => {}
+            app.update();
+
+            assert_eq!(
+                app.world().resource::<State<GamePhase>>().get(),
+                &GamePhase::Lobby,
+                "{event} must cancel before launch"
+            );
+            assert!(
+                matches!(
+                    app.world().resource::<NextState<GamePhase>>(),
+                    NextState::Unchanged
+                ),
+                "{event} must not leave a mission transition queued"
+            );
+            let countdown = app.world().resource::<crate::lobby::CountdownTimer>();
+            assert_eq!(countdown.remaining_secs, 0.0, "{event}");
+            assert!(countdown.pending_phase.is_none(), "{event}");
+            let gm = &app.world().resource::<GmRoster>().operators()[0];
+            assert!(!gm.ready, "{event}");
+            assert_eq!(
+                gm.connected,
+                matches!(event, "unready" | "recovered-fault"),
+                "{event}"
+            );
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn sync_presence(
-    surface: Res<NativeGmSurface>,
-    layout: Option<Res<BridgeLayoutResource>>,
-    phase: Res<State<GamePhase>>,
-    mut state: ResMut<NativeGmLifecycle>,
-    mut authority: ResMut<NativeGmAuthority>,
-    mut roster: ResMut<GmRoster>,
-    mut commands: Commands,
-    mut paused: ResMut<crate::gm_action::SimulationPaused>,
-    config: Option<Res<crate::world::config::WorldConfig>>,
-    mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
-    sessions: Option<Res<crate::lobby::Sessions>>,
-    starts: Option<Res<start::NativeGmStartRequests>>,
-) {
-    let assigned = layout.as_ref().and_then(|l| l.layout.game_master_monitor());
-    if *phase.get() == GamePhase::Lobby {
-        state.enabled = assigned.is_some();
-        state.desired_monitor = assigned.cloned();
-        authority.screen_pause = false;
-        state.lost = false;
-    } else if assigned.is_some() {
-        // An explicit --solo launch may enter its mission before the display
-        // adapter adopts the saved bridge layout on its first rendered frame.
-        state.enabled = true;
-        state.desired_monitor = assigned.cloned();
-    }
-    let present = assigned.is_some_and(|id| {
-        layout
-            .as_ref()
-            .is_some_and(|l| l.monitors.iter().any(|m| &m.identity == id))
-    });
-    let failed = surface.bridge.take_failure();
-    let connected = state.enabled && present && surface.bridge.live() && !surface.bridge.failed();
-    if state.enabled {
-        commands.insert_resource(crate::gm_projection::NativeGmPresentation);
-    } else {
-        commands.remove_resource::<crate::gm_projection::NativeGmPresentation>();
-    }
-    if !connected {
-        state.ready = false;
-    }
-    if state.enabled
-        && (!present || failed || surface.bridge.failed())
-        && *phase.get() == GamePhase::InProgress
-        && !state.lost
-    {
-        paused.0 = true;
-        authority.screen_pause = true;
-        state.lost = true;
-    }
-    if connected {
-        state.lost = false;
-    }
-    authority.connected = connected;
-    let mut rows: Vec<_> = roster
-        .operators()
-        .iter()
-        .filter(|gm| gm.id != NATIVE_GM_OPERATOR_ID)
-        .cloned()
-        .collect();
-    if state.enabled {
-        rows.push(GmOperator {
-            id: NATIVE_GM_OPERATOR_ID.into(),
-            name: "GM".into(),
-            connected,
-            ready: state.ready,
-        });
-    }
-    let Ok(replacement) = GmRoster::try_new(rows) else {
-        authority.connected = false;
-        return;
-    };
-    if *roster != replacement {
-        outbound.write(crate::lobby::OutboundMessage {
-            target: crate::lobby::Target::All,
-            delivery: crate::core::messages::DeliveryClass::Reliable,
-            msg: crate::core::messages::ServerMessage::GmRosterChanged {
-                gms: replacement.projection(),
-            },
-        });
-        *roster = replacement;
-    }
-    if let Ok(json) = codec::encode_native_gm_metadata(&NativeGmMetadata {
-        phase: phase.get().clone(),
-        host_lobby_unavailable: recovery::host_lobby_unavailable(
-            phase.get(),
-            state.enabled,
-            layout.as_deref(),
-        ),
-        role_presets: config
-            .as_ref()
-            .map(|c| c.gm_role_presets.clone())
-            .unwrap_or_default(),
-        gms: roster.projection(),
-        start_policy: start::readiness_totals(
-            sessions
-                .as_deref()
-                .map_or_else(Default::default, |s| s.0.readiness_tally()),
-            &roster,
-        ),
-        start_result: starts.as_deref().and_then(|s| s.last_result().cloned()),
-    }) {
-        surface.bridge.publish("metadata", json);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn feed_projections(
-    surface: Res<NativeGmSurface>,
-    mut entity: MessageReader<GmEntityProjectionChanged>,
-    mut activity: MessageReader<GmActivityFeedChanged>,
-    mut station: MessageReader<GmStationProjectionChanged>,
-    mut session: MessageReader<GmSessionChanged>,
-    mut mission: MessageReader<GmMissionChanged>,
-    mut spawn: MessageReader<GmSpawnChanged>,
-    mut comms: MessageReader<GmCommsChanged>,
-) {
-    macro_rules! feed {
-        ($reader:ident, $channel:literal, $encode:ident) => {
-            if let Some(message) = $reader.read().last() {
-                if let Ok(json) = codec::$encode(&message.payload) {
-                    surface.bridge.publish($channel, json);
-                }
-            }
-        };
-    }
-    feed!(entity, "gm_entity", encode_gm_entity_projection);
-    feed!(activity, "gm_activity", encode_gm_activity_feed);
-    feed!(station, "gm_station", encode_gm_station_projection);
-    feed!(session, "gm_session", encode_gm_session_projection);
-    feed!(mission, "gm_mission", encode_gm_mission_projection);
-    feed!(spawn, "gm_spawn", encode_gm_spawn_projection);
-    feed!(comms, "gm_comms", encode_gm_comms_projection);
 }

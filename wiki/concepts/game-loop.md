@@ -2,7 +2,7 @@
 title: Game Loop
 type: concept
 tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
-sources: [src/headless/determinism_audit.rs, tests/fixed_update_ambiguities.rs, tests/registration_order_determinism.rs, docs/fixed-update-ambiguity-audit.md, src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/gm_action.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md, src/boot/mod.rs, tests/fixed_executor_policy.rs, src/headless/args.rs, src/native_host/app.rs, tests/pool_equivalence.rs, docs/pool-equivalence-proof.md]
+sources: [src/headless/determinism_audit.rs, tests/fixed_update_ambiguities.rs, tests/tactical_target_ordering.rs, tests/tactical_target_ordering/order_proof.rs, src/console/weapons/server.rs, tests/registration_order_determinism.rs, docs/fixed-update-ambiguity-audit.md, src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/gm_action.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md, src/boot/mod.rs, tests/fixed_executor_policy.rs, src/headless/args.rs, src/native_host/app.rs, tests/pool_equivalence.rs, docs/pool-equivalence-proof.md]
 updated: 2026-09-07
 ---
 
@@ -31,6 +31,19 @@ preserved #1400 worker source, the typed stream/namespace changes and evidenced
 Projectile order produced 1,929 rows: no additions and 39 removals. This is
 worker-source evidence; the integrator owns the census check on the combined
 candidate. Retained debt is not a claim that every unordered pair is commutative.
+
+The Tactical target selector/applier and phaser/blaster deciders declare only
+five scoped commutative Input pairs in `src/console/weapons/server.rs`. They keep
+their real Bevy access incompatibilities, so shared command and blackboard
+storage remains serialized. Fire reads the prior published Viewscreen lock;
+selection writes Weapons intent and emits through the sole target applier.
+The focused Tactical test checks exact raw overlap vectors, unique instances,
+external-conflict preservation, actual opposed paths and per-target command
+subsequences. Its original nine-process baseline and the annotated candidate's
+nine ordinary plus eighteen opposed-order runs passed. Every observed gameplay
+tick, digest and per-target subsequence agrees across these boundaries; the
+combined integration census remains separate. The audit document records the
+scope and validation.
 
 Deterministic native/headless boot uses `BootPlan::single_threaded` in
 `src/boot/mod.rs` to select Bevy's actual `SingleThreaded` executor on

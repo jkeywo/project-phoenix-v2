@@ -193,8 +193,19 @@ impl Plugin for WeaponsPlugin {
                     // `Input` so it keeps reading pre-physics `Transform`s.
                     // Gated on the ONE shared AI cadence (issue #889): before
                     // it, this ran once per rendered frame.
+                    // #1400: these exact five Input pairs commute logically.
+                    // Fire reads the prior published Viewscreen combat_lock;
+                    // selection writes Weapons intent. Their admitted commands
+                    // have distinct consumers whose target subsequences remain
+                    // ordered. Bevy still serializes the real Vec/map accesses.
+                    // tests/tactical_target_ordering.rs pins raw access vectors,
+                    // unique instances and opposed full-App orders; expanding a
+                    // shared access requires a new proof, not another exemption.
                     ai_phaser_auto_fire
                         .in_set(crate::sim_sets::SimSet::Input)
+                        .ambiguous_with(handle_set_target)
+                        .ambiguous_with(ai_target_selection)
+                        .ambiguous_with(tick_blaster_auto_fire)
                         .run_if(crate::ai::cadence::ai_tick_ready),
                     // Weapons DOCTRINE decide (issue #956): resolves the
                     // ship's authored arc-bearing rank ladder and asks Helm to
@@ -248,6 +259,8 @@ impl Plugin for WeaponsPlugin {
                     // Stays in `Input` so it reads pre-physics `Transform`s.
                     tick_blaster_auto_fire
                         .in_set(crate::sim_sets::SimSet::Input)
+                        .ambiguous_with(handle_set_target)
+                        .ambiguous_with(ai_target_selection)
                         .run_if(crate::ai::cadence::ai_tick_ready),
                 ),
             )
@@ -1307,28 +1320,13 @@ fn arc_request_sender_system(
 // ── Tactical AI ───────────────────────────────────────────────────────────
 //
 // `ai_target_selection` is the whole of the Tactical AI's targeting path
-// (issues #697, #700). It reads the world, the ship's own objective
+// (issues #697, #700, #887). It reads the world, the ship's own objective
 // blackboard, and its last attacker; it publishes the chosen target to
-// `WeaponsBlackboard.locked_target` as observable intent, and applies that
-// same choice to the authoritative `TacticalRadarSelection` component (truth) in the
-// same system.
-//
-// It began (#697) as a decide/integrate pair — `ai_target_selection` →
-// `operate_tactical_ai` — mirroring the decide/apply shape the other console
-// AIs used at the time (e.g. the pre-#826 shields pair). #700 folded the integrator
-// back in, because unlike those pairs the two halves could not be separated by
-// a sim set: at the time every `WeaponsTarget` reader ran in `SimSet::Input`, so the
-// write had to stay in `Input` too, which left the "pair" as two systems in the same
-// set held together by an explicit `.before` edge and an `Option<Option<_>>`
-// to distinguish "the decider never ran" from "the decider chose nothing".
-// (Post-#829 the only `Input` readers of the selection component are its two
-// writers — `handle_set_target` and `ai_target_selection`; cross-system consumers
-// read the frozen viewscreen `combat_lock` — but the writer/writer `.before` edge
-// still keeps a human lock atomic against the AI decider within the tick.)
-//
-// Folding them back makes read-seed-decide-write atomic with respect to the
-// other `Input` writer of `TacticalRadarSelection` (`handle_set_target`), which is what
-// the `.before` edge existed to enforce. See `WeaponsPlugin::build`.
+// `WeaponsBlackboard.locked_target` as observable intent and emits an admitted
+// SetTarget. `handle_set_target` is the sole writer of TacticalRadarSelection;
+// the selection→applier edge keeps that result in the same Input tick. Fire
+// deciders read the previous PublishAggregate Viewscreen combat_lock instead.
+// Selecting before a fire decider therefore does not give fire a new lock.
 //
 // This system does not fire weapons. Issue #846 migrated the decide/integrate
 // pair off private intent components: `ai_phaser_auto_fire` /
@@ -1340,8 +1338,8 @@ fn arc_request_sender_system(
 /// the Weapons entry if the ship has none yet.
 ///
 /// This is observability, not a control channel: nothing reads `locked_target`
-/// back to drive behaviour — `ai_target_selection` applies its own decision to
-/// `TacticalRadarSelection` directly. The field is what lets a client (or a human
+/// back to drive behaviour — the admitted SetTarget reaches the ordinary
+/// `handle_set_target` applier. The field is what lets a client (or a human
 /// watching a backfilled console) see *why* the ship's lock is what it is, and
 /// it is what distinguishes AI intent from a human's lock on the wire.
 ///

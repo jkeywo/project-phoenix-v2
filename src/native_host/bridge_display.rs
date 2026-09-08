@@ -380,9 +380,13 @@ impl Plugin for BridgeDisplayPlugin {
         // panicking on a missing `Messages` resource.
         app.add_systems(
             Update,
-            apply_pending_console_claims.run_if(
-                resource_exists::<bevy::ecs::message::Messages<crate::lobby::InboundMessage>>,
-            ),
+            apply_pending_console_claims
+                // A removed seat cancels its pending claim before a late
+                // registration can turn that old intent into a command.
+                .after(BridgeDisplaySet)
+                .run_if(
+                    resource_exists::<bevy::ecs::message::Messages<crate::lobby::InboundMessage>>,
+                ),
         );
         app.add_systems(
             Update,
@@ -1298,6 +1302,9 @@ fn follow_layout_stations(
     mut pass_due: Local<bool>,
     // The monitor identities this pass last placed against.
     mut placed_against: Local<Vec<String>>,
+    // The last roster this pass actually applied. A removed Station is absent
+    // from the current roster but still owes its old console a close.
+    mut applied_roster: Local<Vec<crate::core::messages::StationId>>,
 ) {
     for window in pending_close.drain(..) {
         commands.entity(window).try_despawn();
@@ -1578,15 +1585,17 @@ fn follow_layout_stations(
 
     // ── close what the layout no longer seats ───────────────────────────────
     //
-    // Asked of the BUS ∩ the LAW — every station on this bridge's roster that
-    // the layout does not seat, whose console the bus still has open — rather
+    // Asked of the BUS ∩ the LAW — every station on the current or last-applied
+    // roster that the layout does not seat, whose console the bus still has open — rather
     // than of `carried`, which is this adapter's own bookkeeping and can have
     // been emptied by the retain above before the reconcile got round to
     // unseating what was on it. A console outliving its seat is the one failure
     // with no way back: the pane never closes, so its station never flips to
     // `Backfill`, and the open sweep below finds a pane already open and never
     // rebuilds a view for it. Asking the two sources of truth directly cannot
-    // miss it.
+    // miss it. Retaining the last applied roster also covers a Station the new
+    // hull removed entirely. The no-monitor/no-bus returns above leave that
+    // history untouched, so a deferred pass cannot forget the close it owes.
     //
     // (The roster is the layout's, so a `--pane <NAME>` participant is out of
     // scope by construction — a hand-authored label that shadowed a station id
@@ -1598,12 +1607,17 @@ fn follow_layout_stations(
         .iter()
         .flat_map(|m| layout.layout.stations_on(m))
         .collect();
-    for station in layout
-        .layout
-        .roster()
-        .iter()
-        .filter(|s| !seated.contains(s))
-    {
+    let current_roster = layout.layout.roster().to_vec();
+    let mut known_stations = std::mem::replace(&mut *applied_roster, current_roster.clone());
+    for station in current_roster {
+        if !known_stations.contains(&station) {
+            known_stations.push(station);
+        }
+    }
+    for station in known_stations.iter().filter(|s| !seated.contains(s)) {
+        if let Some(claims) = auto_claims.as_mut() {
+            claims.0.retain(|claim| claim.station != station.0);
+        }
         let Some(pane) = bus.0.open_pane_for_name(&station.0) else {
             continue;
         };

@@ -165,6 +165,15 @@ fn selected_roster_completes_authored_order_once_without_overwriting_live_choice
 
 #[test]
 fn selected_roster_removes_invalid_seats_and_never_retries_deferred_intent() {
+    for monitor_blip in [false, true] {
+        roster_removal_closes_only_its_console(monitor_blip);
+    }
+}
+
+fn roster_removal_closes_only_its_console(monitor_blip: bool) {
+    use crate::native_host::panes::PaneIdentity;
+    use crate::native_host::transport::{NativeTransport, TransportEvent};
+
     let (mut app, bus) = host(Some(profile(true)));
     app.insert_resource(hull(&["tactical", "science"]));
     app.update();
@@ -185,8 +194,54 @@ fn selected_roster_removes_invalid_seats_and_never_retries_deferred_intent() {
         },
     );
     app.update();
+    let tactical = bus.open_pane_for_name("tactical").unwrap();
+    let tactical_token = bus.token_of(tactical).unwrap();
+    crate::native_host::panes::transport::identify_test_pane(&bus, tactical);
+    let science = bus.open_pane_for_name("science").unwrap();
+    let ada = bus.open(PaneIdentity::mint("Ada"));
+    let mut transport = bus.transport();
+    transport.poll();
+    bus.take_pending_views();
+    assert!(app
+        .world()
+        .resource::<PendingConsoleClaims>()
+        .0
+        .iter()
+        .any(|claim| claim.token == tactical_token));
+
+    let monitor_entities: Vec<_> = if monitor_blip {
+        app.world_mut()
+            .query::<(Entity, &Monitor)>()
+            .iter(app.world())
+            .map(|(entity, _)| entity)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let hidden_monitors: Vec<_> = monitor_entities
+        .into_iter()
+        .map(|entity| {
+            let monitor = app
+                .world_mut()
+                .entity_mut(entity)
+                .take::<Monitor>()
+                .unwrap();
+            (entity, monitor)
+        })
+        .collect();
     app.insert_resource(hull(&["science", "helm"]));
     app.update();
+    if monitor_blip {
+        assert_eq!(bus.open_pane_for_name("tactical"), Some(tactical));
+        assert!(
+            transport.poll().is_empty(),
+            "an empty monitor frame defers closure"
+        );
+        for (entity, monitor) in hidden_monitors {
+            app.world_mut().entity_mut(entity).insert(monitor);
+        }
+        app.update();
+    }
     let layout = app.world().resource::<BridgeLayoutResource>();
     assert_eq!(layout.layout.roster(), &[id("science"), id("helm")]);
     assert_eq!(
@@ -201,8 +256,53 @@ fn selected_roster_removes_invalid_seats_and_never_retries_deferred_intent() {
     assert!(layout.notices.iter().any(|n| matches!(n,
         LayoutNotice::Adopted(LayoutAdoption::StationOffRoster { station, .. }) if station == &id("tactical"))));
     assert!(bus.open_pane_for_name("tactical").is_none());
-    assert!(bus.open_pane_for_name("science").is_some());
+    assert_eq!(bus.open_pane_for_name("science"), Some(science));
+    assert_eq!(bus.open_pane_for_name("Ada"), Some(ada));
     assert!(bus.open_pane_for_name("helm").is_none());
+    assert!(!app
+        .world()
+        .resource::<PendingConsoleClaims>()
+        .0
+        .iter()
+        .any(|claim| claim.token == tactical_token));
+    assert_eq!(
+        transport.poll(),
+        vec![TransportEvent::Disconnected {
+            token: tactical_token.clone(),
+        }],
+        "the removed console takes the ordinary disconnect path exactly once"
+    );
+    assert!(
+        bus.take_pending_views().is_empty(),
+        "closure must not recreate a view"
+    );
+
+    // A late registration cannot revive the canceled auto-claim. The remaining
+    // seated console still follows the installed ordinary claim dispatcher.
+    let mut sessions = crate::lobby::session::SessionManager::new();
+    sessions
+        .register(tactical_token, "tactical".into())
+        .unwrap();
+    let science_token = bus.token_of(science).unwrap();
+    sessions
+        .register(science_token.clone(), "science".into())
+        .unwrap();
+    app.insert_resource(crate::lobby::Sessions(sessions));
+    app.add_message::<crate::lobby::InboundMessage>();
+    app.update();
+    let messages = app
+        .world()
+        .resource::<Messages<crate::lobby::InboundMessage>>();
+    let mut cursor = messages.get_cursor();
+    let emitted: Vec<_> = cursor.read(messages).collect();
+    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted[0].token, science_token);
+    assert!(matches!(&emitted[0].msg,
+        crate::core::messages::ClientMessage::SelectStation { station } if station == "science"));
+    assert!(
+        transport.poll().is_empty(),
+        "closure stays settled on later frames"
+    );
 }
 
 #[test]

@@ -1730,9 +1730,12 @@ construction. A frame reporting *no* monitors at all does nothing and leaves the
 pass owed. The applier also follows **both** of its inputs, the layout and the
 monitors, because a display that left and came back has to get its Station window
 rebuilt for a console the layout never stopped seating. And the close sweep asks
-the bus ∩ the law — every rostered station the layout does not seat whose console
-is still open — rather than the surfaces it has just rewritten, because a console
-outliving its seat is the one failure with no way back.
+the bus ∩ the law — every Station from the current or last-applied roster that
+the layout does not seat whose console is still open — rather than the surfaces
+it has just rewritten. The prior roster survives a deferred monitor pass, so a
+Station removed by hull selection still closes exactly once. Closure also
+cancels its pending auto-claim before the claim dispatcher runs; the surviving
+Station consoles and authored participant panes keep their identities.
 
 Rebuilding that window means **re-anchoring** it. `bevy_winit` despawns a
 `Monitor` entity when a display stops being reported and spawns a *new* one when

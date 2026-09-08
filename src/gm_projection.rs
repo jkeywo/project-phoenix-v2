@@ -40,6 +40,17 @@ use crate::world::server::WorldContentRuntime;
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct BrowserGameMaster;
 
+/// Requests GM projections alongside a native ship without changing its boot identity.
+#[derive(Resource, Default)]
+pub struct NativeGmPresentation;
+
+pub fn gm_presentation_active(
+    browser: Option<Res<BrowserGameMaster>>,
+    native: Option<Res<NativeGmPresentation>>,
+) -> bool {
+    browser.is_some() || native.is_some()
+}
+
 /// Semantic map classification projected without exposing ECS marker names.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -289,7 +300,7 @@ impl Plugin for GmProjectionPlugin {
             .add_systems(
                 FixedLast,
                 (publish_local_projection, publish_station_projection)
-                    .run_if(resource_exists::<BrowserGameMaster>),
+                    .run_if(gm_presentation_active),
             );
     }
 }

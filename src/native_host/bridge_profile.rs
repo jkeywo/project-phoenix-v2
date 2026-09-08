@@ -562,6 +562,8 @@ pub fn pane_rects(geometry: &MonitorGeometry, split: PaneSplit, count: usize) ->
 /// has to re-check it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DisplayRole {
+    /// A dedicated host-local Game Master surface.
+    GameMaster,
     /// The shared 3-D viewscreen the whole crew watches.
     Viewscreen,
     /// A crew Station showing one or two console panes.
@@ -575,6 +577,7 @@ impl DisplayRole {
     /// A one-line human summary for the setup report and logs.
     pub fn summary(&self) -> String {
         match self {
+            DisplayRole::GameMaster => "GM".to_string(),
             DisplayRole::Viewscreen => "viewscreen".to_string(),
             DisplayRole::Station { panes, split } => {
                 let each = if panes.len() == 1 { "pane" } else { "panes" };
@@ -745,6 +748,7 @@ impl BridgeProfile {
         // it would just silently keep the last surface it saw and leave every
         // other configured monitor black with no diagnostic at all.
         let mut viewscreen_id: Option<&str> = None;
+        let mut gm_seen = false;
         for entry in &self.displays {
             if !seen.insert(entry.id.as_str()) {
                 return Err(ProfileError::DuplicateId {
@@ -752,6 +756,18 @@ impl BridgeProfile {
                 });
             }
             let role = match entry.role.as_str() {
+                "gm" => {
+                    if gm_seen {
+                        return Err(ProfileError::MultipleGameMasters);
+                    }
+                    if !entry.panes.is_empty() {
+                        return Err(ProfileError::GameMasterHasPanes {
+                            id: entry.id.clone(),
+                        });
+                    }
+                    gm_seen = true;
+                    DisplayRole::GameMaster
+                }
                 ROLE_VIEWSCREEN => {
                     if !entry.panes.is_empty() {
                         return Err(ProfileError::ViewscreenHasPanes {
@@ -864,8 +880,12 @@ pub enum ProfileError {
     Version { found: u32 },
     /// A Station names a number of panes outside one-or-two — the density rule.
     Density { id: String, count: usize },
-    /// A display's `role` word is neither `viewscreen` nor `station`.
+    /// A display's `role` word is not `viewscreen`, `station`, or `gm`.
     UnknownRole { id: String, role: String },
+    /// Only one local GM role is supported.
+    MultipleGameMasters,
+    /// The GM needs a dedicated monitor.
+    GameMasterHasPanes { id: String },
     /// A viewscreen display carries pane assignments, which only a Station may.
     ViewscreenHasPanes { id: String },
     /// Two `[[display]]` entries name the same monitor id.
@@ -920,8 +940,15 @@ impl std::fmt::Display for ProfileError {
             ),
             ProfileError::UnknownRole { id, role } => write!(
                 f,
-                "monitor {id:?} has role {role:?}, which is neither {ROLE_VIEWSCREEN:?} nor \
-                 {ROLE_STATION:?}"
+                "monitor {id:?} has unknown role {role:?}; expected {ROLE_VIEWSCREEN:?}, \
+                 {ROLE_STATION:?}, or gm"
+            ),
+            ProfileError::MultipleGameMasters => {
+                write!(f, "the bridge supports one local GM monitor")
+            }
+            ProfileError::GameMasterHasPanes { id } => write!(
+                f,
+                "GM monitor {id:?} must be dedicated and cannot hold console panes"
             ),
             ProfileError::ViewscreenHasPanes { id } => write!(
                 f,
@@ -1209,7 +1236,7 @@ impl ValidatedProfile {
 /// guard refuses on cannot come to disagree about what a participant pane is.
 fn participant_labels(role: &DisplayRole) -> Vec<String> {
     match role {
-        DisplayRole::Viewscreen => Vec::new(),
+        DisplayRole::Viewscreen | DisplayRole::GameMaster => Vec::new(),
         DisplayRole::Station { panes, .. } => panes
             .iter()
             .filter(|p| p.station.is_none())
@@ -1253,6 +1280,13 @@ impl std::fmt::Display for RuntimeDisplayLoss {
     /// disconnects because of it.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.role {
+            DisplayRole::GameMaster => write!(
+                f,
+                "the GM monitor {} was lost; the GM surface lifecycle retains its operator \
+                 identity and pauses an active simulation until the surface is available and \
+                 the GM explicitly resumes",
+                self.identity
+            ),
             DisplayRole::Viewscreen => write!(
                 f,
                 "the {} monitor {} was connected and has been lost mid-mission; the shared 3-D \

@@ -194,6 +194,13 @@ pub struct StationRowPayload {
     pub monitors: Vec<StationScreenPayload>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameMasterRowPayload {
+    pub assigned_to: Option<String>,
+    pub role_mutable: bool,
+    pub monitors: Vec<StationScreenPayload>,
+}
+
 /// The whole bridge layout, as the surface receives it: the monitor row and
 /// every station's screen row.
 ///
@@ -201,6 +208,8 @@ pub struct StationRowPayload {
 /// and an older one has nothing to add.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BridgeLayoutPayload {
+    #[serde(default)]
+    pub gm: Option<GameMasterRowPayload>,
     /// One entry per monitor this bridge has, in discovery order.
     pub monitors: Vec<MonitorButtonPayload>,
     /// One entry per claimable station on this ship, in roster order
@@ -327,6 +336,28 @@ pub fn bridge_layout_payload(
         })
         .collect();
     BridgeLayoutPayload {
+        gm: Some(GameMasterRowPayload {
+            assigned_to: layout.game_master_monitor().map(|m| m.as_str().to_string()),
+            role_mutable: true,
+            monitors: monitors
+                .iter()
+                .map(|m| {
+                    let id = MonitorIdentity::new(&m.identity);
+                    StationScreenPayload {
+                        identity: m.identity.clone(),
+                        choice: if layout.game_master_monitor() == Some(&id) {
+                            "selected"
+                        } else if layout.game_master_eligible(&id) {
+                            "eligible"
+                        } else {
+                            "excluded"
+                        }
+                        .into(),
+                        excluded: (!layout.game_master_eligible(&id)).then(|| "occupied".into()),
+                    }
+                })
+                .collect(),
+        }),
         monitors,
         stations,
         notices: notices.iter().flat_map(LayoutNotice::payloads).collect(),
@@ -351,7 +382,7 @@ fn choice_token(choice: MonitorChoice) -> &'static str {
 /// the two the law has — a third would otherwise reach `gui/` as a token
 /// nothing renders, and the button would grey with no reason beside it.
 const _: fn(ExclusionReason) = |reason| match reason {
-    ExclusionReason::IsViewscreen | ExclusionReason::Full => {}
+    ExclusionReason::IsViewscreen | ExclusionReason::Full | ExclusionReason::GameMaster => {}
 };
 
 /// The layout action a

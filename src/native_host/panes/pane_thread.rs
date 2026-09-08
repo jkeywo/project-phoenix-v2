@@ -93,6 +93,8 @@ use crate::native_host::host_lobby::{pump_host_lobby, HostLobbyBridge};
 /// incoherent (a transparent lobby, a permanent console).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PaneKind {
+    /// Privileged local GM; uses a private bridge and no crew session.
+    GameMaster,
     /// A participant's console: an entry on the pane bus, an identity, a station
     /// it can lose to Backfill.
     Console,
@@ -598,6 +600,7 @@ pub const PANE_STAGING_CAP: usize = 4;
 pub struct PaneThreadConfig {
     pub bus: Option<PaneBus>,
     pub lobby: Option<HostLobbyBridge>,
+    pub gm: Option<crate::native_host::native_gm::bridge::NativeGmBridge>,
     pub period: Duration,
     pub buffers_per_pane: usize,
     pub measure: bool,
@@ -611,6 +614,7 @@ impl Default for PaneThreadConfig {
         Self {
             bus: None,
             lobby: None,
+            gm: None,
             period: Duration::from_millis(16),
             buffers_per_pane: PANE_STAGING_BUFFERS,
             measure: false,
@@ -861,6 +865,7 @@ where
                 let mut driver = PaneLoop::new(runtime);
                 driver.set_bus(config.bus);
                 driver.set_lobby(config.lobby);
+                driver.gm = config.gm;
                 driver.set_measure(config.measure);
                 driver.set_observer(config.observer);
                 let mut sink = PooledFrames::new(config.buffers_per_pane);
@@ -984,6 +989,7 @@ impl<V> LoopPane<V> {
             id: self.id.0,
             epoch: self.epoch,
             kind: match self.kind {
+                PaneKind::GameMaster => "gm",
                 PaneKind::Console => "console",
                 PaneKind::Lobby => "lobby",
                 PaneKind::Hud => "hud",
@@ -1027,6 +1033,7 @@ pub struct PaneLoop<R: PaneRuntime> {
     /// the lobby says is a participant's `ClientMessage`, so nothing it says may
     /// reach the bus.
     lobby: Option<HostLobbyBridge>,
+    gm: Option<crate::native_host::native_gm::bridge::NativeGmBridge>,
     /// The newest HUD readout, retained for changed revisions and lifecycle
     /// reapplication — a latest-wins slot, see the module note.
     hud_script: Option<String>,
@@ -1048,6 +1055,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
             panes: Vec::new(),
             bus: None,
             lobby: None,
+            gm: None,
             hud_script: None,
             hud_revision: 0,
             gamepad_script: None,
@@ -1268,6 +1276,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
             panes,
             bus,
             lobby,
+            gm,
             hud_script,
             hud_revision,
             gamepad_script,
@@ -1345,6 +1354,13 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 out.push(PaneEvent::Loaded(pane.id));
             }
             match pane.kind {
+                PaneKind::GameMaster => {
+                    if let Some(bridge) = &*gm {
+                        let count = bridge.pump(pane.id, &mut pane.view);
+                        pane.pushed_this_iteration = count > 0;
+                        applied = count as u64;
+                    }
+                }
                 // The HUD overlay is driven by the host's own readout, held in
                 // the slot until replaced. Apply a revision once successfully
                 // per loaded view, or again when its lifecycle owes a refresh.

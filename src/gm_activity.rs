@@ -16,7 +16,9 @@ use crate::console_bridge::GmActivityFeedChanged;
 use crate::core::balance::{BalanceEvent, VictimKind};
 use crate::core::messages::{GamePhase, ObjectiveStatus};
 use crate::entities::spawner::{EntityName, EntityUuid};
-use crate::gm_projection::{BrowserGameMaster, GmEntityReference};
+#[cfg(test)]
+use crate::gm_projection::BrowserGameMaster;
+use crate::gm_projection::GmEntityReference;
 use crate::server_app::AsteroidUuid;
 
 /// Complete M1 category vocabulary in canonical display order.
@@ -738,21 +740,21 @@ impl Plugin for GmActivityPlugin {
                 FixedUpdate,
                 cache_identity_directory
                     .before(crate::sim_sets::SimSet::Input)
-                    .run_if(resource_exists::<BrowserGameMaster>),
+                    .run_if(crate::gm_projection::gm_presentation_active),
             )
             .add_systems(
                 FixedLast,
                 collect_fixed_activity
                     .before(crate::sim_tick::advance_sim_tick)
-                    .run_if(resource_exists::<BrowserGameMaster>),
+                    .run_if(crate::gm_projection::gm_presentation_active),
             )
             .add_systems(
                 PostUpdate,
-                publish_frame_activity.run_if(resource_exists::<BrowserGameMaster>),
+                publish_frame_activity.run_if(crate::gm_projection::gm_presentation_active),
             )
             .add_systems(
                 OnEnter(GamePhase::Lobby),
-                reset_on_lobby.run_if(resource_exists::<BrowserGameMaster>),
+                reset_on_lobby.run_if(crate::gm_projection::gm_presentation_active),
             );
     }
 }

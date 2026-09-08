@@ -121,6 +121,8 @@ pub const LAYOUT_SPLIT: PaneSplit = PaneSplit::SideBySide;
 /// pick the wrong verb.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LayoutAction {
+    /// Assign the dedicated GM display, or disable it while in the lobby.
+    SetGameMaster { monitor: Option<MonitorIdentity> },
     /// Make `monitor` the viewscreen. Refused while it is holding stations.
     SetViewscreen { monitor: MonitorIdentity },
     /// Open (or re-seat) `station`'s console on `monitor`.
@@ -139,11 +141,19 @@ pub enum LayoutAction {
 /// satisfy it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LayoutRefusal {
+    GameMasterMonitorOccupied {
+        monitor: MonitorIdentity,
+    },
+    GameMasterRoleFrozen,
     /// The action names a monitor this bridge does not have — a stale button, or
     /// a display unplugged between the click and the apply.
-    UnknownMonitor { monitor: MonitorIdentity },
+    UnknownMonitor {
+        monitor: MonitorIdentity,
+    },
     /// The action names a station that is not on this ship's roster.
-    UnknownStation { station: StationId },
+    UnknownStation {
+        station: StationId,
+    },
     /// A station's console would open on the monitor showing the viewscreen,
     /// covering the one surface the whole bridge watches.
     StationOnViewscreenMonitor {
@@ -182,6 +192,13 @@ pub enum LayoutRefusal {
 impl std::fmt::Display for LayoutRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            LayoutRefusal::GameMasterMonitorOccupied { monitor } => {
+                write!(f, "monitor {monitor} must be dedicated to the GM")
+            }
+            LayoutRefusal::GameMasterRoleFrozen => write!(
+                f,
+                "the GM role may only be enabled or disabled in the lobby"
+            ),
             LayoutRefusal::UnknownMonitor { monitor } => write!(
                 f,
                 "monitor {monitor} is not one of this bridge's displays; it may have been \
@@ -240,6 +257,10 @@ impl LayoutRefusal {
     /// other's fallback.
     pub fn string_id(&self) -> &'static str {
         match self {
+            LayoutRefusal::GameMasterMonitorOccupied { .. } => {
+                "server.bridge_layout.gm_monitor_occupied"
+            }
+            LayoutRefusal::GameMasterRoleFrozen => "server.bridge_layout.gm_role_frozen",
             LayoutRefusal::UnknownMonitor { .. } => "server.bridge_layout.unknown_monitor",
             LayoutRefusal::UnknownStation { .. } => "server.bridge_layout.unknown_station",
             LayoutRefusal::StationOnViewscreenMonitor { .. } => {
@@ -256,6 +277,10 @@ impl LayoutRefusal {
     /// interpolates, in a fixed order.
     pub fn params(&self) -> Vec<(&'static str, String)> {
         match self {
+            LayoutRefusal::GameMasterMonitorOccupied { monitor } => {
+                vec![("monitor", monitor.as_str().to_string())]
+            }
+            LayoutRefusal::GameMasterRoleFrozen => Vec::new(),
             LayoutRefusal::UnknownMonitor { monitor } => {
                 vec![("monitor", monitor.as_str().to_string())]
             }
@@ -367,6 +392,8 @@ struct Reservation {
 /// rearrangement behind their back, so the order is left exactly as they made it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BridgeLayout {
+    /// Desired dedicated GM monitor, retained through monitor loss.
+    gm_monitor: Option<MonitorIdentity>,
     /// This bridge's monitors, in discovery order. Deduplicated.
     monitors: Vec<MonitorIdentity>,
     /// The ship class's claimable stations. Deduplicated.
@@ -530,6 +557,7 @@ impl BridgeLayout {
         let reserved = vec![Vec::new(); monitors.len()];
         let splits = vec![LAYOUT_SPLIT; monitors.len()];
         Ok(Self {
+            gm_monitor: None,
             monitors,
             roster,
             viewscreen: index,
@@ -667,14 +695,45 @@ impl BridgeLayout {
     /// stale button rather than a settled state.
     pub fn apply(&self, action: &LayoutAction) -> Result<Self, LayoutRefusal> {
         match action {
+            LayoutAction::SetGameMaster { monitor } => self.set_game_master(monitor.as_ref()),
             LayoutAction::SetViewscreen { monitor } => self.set_viewscreen(monitor),
             LayoutAction::AssignStation { station, monitor } => self.assign(station, monitor),
             LayoutAction::UnassignStation { station } => self.unassign(station),
         }
     }
 
+    pub fn game_master_monitor(&self) -> Option<&MonitorIdentity> {
+        self.gm_monitor.as_ref()
+    }
+
+    pub fn game_master_eligible(&self, monitor: &MonitorIdentity) -> bool {
+        self.monitors.contains(monitor)
+            && monitor != self.viewscreen()
+            && self.stations_on(monitor).is_empty()
+            && self.reserved_on(monitor).is_empty()
+    }
+
+    fn set_game_master(&self, monitor: Option<&MonitorIdentity>) -> Result<Self, LayoutRefusal> {
+        if let Some(monitor) = monitor {
+            self.require_monitor(monitor)?;
+            if !self.game_master_eligible(monitor) {
+                return Err(LayoutRefusal::GameMasterMonitorOccupied {
+                    monitor: monitor.clone(),
+                });
+            }
+        }
+        let mut next = self.clone();
+        next.gm_monitor = monitor.cloned();
+        Ok(next)
+    }
+
     fn set_viewscreen(&self, monitor: &MonitorIdentity) -> Result<Self, LayoutRefusal> {
         let index = self.require_monitor(monitor)?;
+        if self.gm_monitor.as_ref() == Some(monitor) {
+            return Err(LayoutRefusal::GameMasterMonitorOccupied {
+                monitor: monitor.clone(),
+            });
+        }
         if index == self.viewscreen {
             return Ok(self.clone());
         }
@@ -704,6 +763,11 @@ impl BridgeLayout {
         // does not have is refused as that, whatever monitor it also named.
         self.require_station(station)?;
         let index = self.require_monitor(monitor)?;
+        if self.gm_monitor.as_ref() == Some(monitor) {
+            return Err(LayoutRefusal::GameMasterMonitorOccupied {
+                monitor: monitor.clone(),
+            });
+        }
         if index == self.viewscreen {
             return Err(LayoutRefusal::StationOnViewscreenMonitor {
                 station: station.clone(),
@@ -866,7 +930,7 @@ impl BridgeLayout {
             is_viewscreen,
             stations: self.seats[index].clone(),
             reserved: self.reserved_labels(index),
-            free_slots: (!is_viewscreen)
+            free_slots: (!is_viewscreen && self.gm_monitor.as_ref() != Some(&self.monitors[index]))
                 .then(|| MAX_STATIONS_PER_MONITOR.saturating_sub(self.occupant_count(index))),
         }
     }
@@ -899,6 +963,8 @@ impl BridgeLayout {
                         MonitorChoice::Selected
                     } else if i == self.viewscreen {
                         MonitorChoice::Excluded(ExclusionReason::IsViewscreen)
+                    } else if self.gm_monitor.as_ref() == Some(&self.monitors[i]) {
+                        MonitorChoice::Excluded(ExclusionReason::GameMaster)
                     } else if self.is_full(i) {
                         MonitorChoice::Excluded(ExclusionReason::Full)
                     } else {
@@ -1043,6 +1109,14 @@ impl BridgeLayout {
                     .collect(),
             });
         }
+        if let Some(gm) = &self.gm_monitor {
+            displays.push(DisplayEntry {
+                id: gm.as_str().to_string(),
+                role: "gm".into(),
+                split: None,
+                panes: Vec::new(),
+            });
+        }
         profile.displays = displays;
     }
 
@@ -1128,6 +1202,7 @@ impl BridgeLayout {
     pub fn adopt_profile(&self, profile: &ValidatedProfile) -> (Self, Vec<LayoutAdoption>) {
         let mut notes = Vec::new();
         let mut next = Self {
+            gm_monitor: None,
             monitors: self.monitors.clone(),
             roster: self.roster.clone(),
             viewscreen: self.viewscreen,
@@ -1156,6 +1231,12 @@ impl BridgeLayout {
             }
         }
 
+        next.gm_monitor = profile
+            .displays
+            .iter()
+            .find(|d| d.role == DisplayRole::GameMaster)
+            .map(|d| d.identity.clone())
+            .filter(|gm| gm != next.viewscreen());
         let mut seated: Vec<StationId> = Vec::new();
         for display in &profile.displays {
             let DisplayRole::Station { panes, split } = &display.role else {
@@ -1288,7 +1369,9 @@ impl BridgeLayout {
             // because nothing here can move it out from under afterwards. So a
             // screen holding NOTHING is preferred: the primary when it is free,
             // else the first free one in monitor order.
-            let free = |m: &MonitorIdentity| self.occupants_on(m).is_empty();
+            let free = |m: &MonitorIdentity| {
+                self.occupants_on(m).is_empty() && self.gm_monitor.as_ref() != Some(m)
+            };
             let primary = monitors.iter().find(|d| d.primary).map(|d| &d.identity);
             let replacement = primary
                 .filter(|m| free(m))
@@ -1334,6 +1417,7 @@ impl BridgeLayout {
             .collect();
         let splits: Vec<PaneSplit> = identities.iter().map(|m| self.split_on(m)).collect();
         let mut next = Self {
+            gm_monitor: self.gm_monitor.clone().filter(|gm| gm != &viewscreen),
             seats: vec![Vec::new(); identities.len()],
             monitors: identities,
             roster,
@@ -1458,6 +1542,7 @@ pub struct MonitorOccupancy {
 /// Why a monitor is not offered for a station's console.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExclusionReason {
+    GameMaster,
     /// It is showing the shared viewscreen; a console never covers it.
     IsViewscreen,
     /// It already holds [`MAX_STATIONS_PER_MONITOR`] consoles — the stations
@@ -1469,6 +1554,7 @@ impl ExclusionReason {
     /// A stable machine-readable token, for a log line or a UI state attribute.
     pub fn as_str(&self) -> &'static str {
         match self {
+            ExclusionReason::GameMaster => "game-master",
             ExclusionReason::IsViewscreen => "is-viewscreen",
             ExclusionReason::Full => "full",
         }
@@ -1619,8 +1705,8 @@ pub enum LayoutAdoption {
         monitor: MonitorIdentity,
     },
     /// A station was seated, but its console could not be put on screen and the
-    /// bounded rebuild budget is spent, so the seat was **given back**
-    /// (issue #1331).
+    /// bounded rebuild budget is spent. The physical screen is freed, while
+    /// native assignment authority reserves the station until host Off.
     ///
     /// Raised by `bridge_display::reconcile_seated_consoles` rather than by
     /// [`reconcile`](BridgeLayout::reconcile) or
@@ -1646,10 +1732,10 @@ pub enum LayoutAdoption {
     /// rectangle changes cannot be re-placed — it goes through `close` +
     /// `recreate` on the **same session token**, and the page reloads. Whoever
     /// was at that console therefore spends a page load disconnected, their
-    /// station on `Backfill`, and their seat is claimable by somebody else for
-    /// exactly that long. The reconnect restores it (`handle_identify`'s
-    /// reconnect-yield) *if* nobody took it in the gap — and if somebody did,
-    /// the station stays on AI control for the person who was at it.
+    /// station on `Backfill`. Lobby-assigned consoles retain their station
+    /// reservation throughout. An ordinary authored participant reconnects
+    /// through `handle_identify`'s reconnect-yield only if nobody claimed the
+    /// station during the page load.
     ///
     /// For the console the operator **moved**, that is the cost of the move and
     /// it needs no announcement. For its *neighbour* — a person who pressed
@@ -1868,25 +1954,25 @@ impl std::fmt::Display for LayoutAdoption {
             ),
             LayoutAdoption::ConsoleCouldNotOpen { station, monitor } => write!(
                 f,
-                "station {:?}'s console could not be put on monitor {monitor}, so its seat is \
-                 given back and the screen is free again; open it on another screen, or try \
-                 that one again",
+                "station {:?}'s console could not be put on monitor {monitor}; the screen is \
+                 free again and the station remains reserved on AI Backfill until host Off. \
+                 Move it to another screen, or retry that one",
                 station.0
             ),
             LayoutAdoption::ConsoleRetiling { console, monitor } => write!(
                 f,
                 "monitor {monitor}'s split changed, so {console:?}'s console — which nobody asked \
                  to move — is rebuilt at its new half; whoever is at it reconnects on the same \
-                 identity once the page loads, and their station is on AI control until it does \
-                 — and stays there if somebody else claimed it in the meantime",
+                 identity once the page loads. An assigned station remains reserved on AI \
+                 Backfill; an ordinary participant regains it only if it is still available",
             ),
             LayoutAdoption::ConsoleResized { console, monitor } => write!(
                 f,
                 "monitor {monitor} changed size, so {console:?}'s console — which nobody asked to \
                  move, and which kept the same neighbours — is rebuilt to fit it; whoever is at \
-                 it reconnects on the same identity once the page loads, and their station is on \
-                 AI control until it does — and stays there if somebody else claimed it in the \
-                 meantime",
+                 it reconnects on the same identity once the page loads. An assigned station \
+                 remains reserved on AI Backfill; an ordinary participant regains it only if it \
+                 is still available",
             ),
             LayoutAdoption::NoMonitorsReported { kept } => write!(
                 f,

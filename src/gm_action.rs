@@ -2340,16 +2340,20 @@ pub fn apply_due_actions(
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
-    (removal_targets, mut objective_control): (
+    (removal_targets, mut objective_control, mut native_authority): (
         crate::gm_despawn::RemovalQuery,
         crate::gm_objective::ObjectiveControl,
+        Option<ResMut<NativeGmAuthority>>,
     ),
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
     // local host pause surface. Replay and restored saves deliberately carry a
     // non-empty journal and still use this exact production reducer without a
     // synthetic fleet.
-    if session.is_none() && journal.is_empty() {
+    if session.is_none()
+        && journal.is_empty()
+        && !native_authority.as_deref().is_some_and(|a| a.screen_pause)
+    {
         return;
     }
     let now = tick.as_deref().map_or(0, |tick| tick.0);
@@ -2851,10 +2855,24 @@ pub fn apply_due_actions(
                     }
                 }
             }
+            GmAction::SetSessionPaused { active: false }
+                if grant.operator_id == NATIVE_GM_OPERATOR_ID
+                    && native_authority.as_deref().is_some_and(|a| !a.connected) =>
+            {
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::NotGameMaster),
+                )
+            }
             GmAction::SetSessionPaused { active } if paused.0 == *active => {
                 (GmActionOutcome::NoOp, None)
             }
             GmAction::SetSessionPaused { active } => {
+                if !*active && grant.operator_id == NATIVE_GM_OPERATOR_ID {
+                    if let Some(authority) = native_authority.as_deref_mut() {
+                        authority.screen_pause = false;
+                    }
+                }
                 paused.0 = *active;
                 (GmActionOutcome::Applied, None)
             }
@@ -3084,7 +3102,7 @@ pub fn apply_due_actions(
     let join_paused = join_hold
         .as_deref_mut()
         .is_some_and(|hold| hold.retain_until_explicit_resume(&journal));
-    paused.0 |= join_paused;
+    paused.0 |= join_paused || native_authority.as_deref().is_some_and(|a| a.screen_pause);
     if let Some(virtual_time) = virtual_time.as_deref_mut() {
         if paused.0 {
             virtual_time.pause();
@@ -3252,11 +3270,53 @@ pub(crate) fn insert_replicated_grant(
     journal.insert(grant).map(|_| ())
 }
 
+/// The native GM's public identity; unrelated to the ship host or a crew token.
+pub const NATIVE_GM_OPERATOR_ID: &str = "native-gm";
+
+/// Installed only by the host-local GM bridge. Never inferred from a request.
+#[derive(Resource, Default)]
+pub struct NativeGmAuthority {
+    pub connected: bool,
+    pub screen_pause: bool,
+}
+
 /// Privileged local admission. Identity comes from the frozen private slot
 /// binding; the request's operator id is only a claim checked against it.
 pub fn submit_local(
     world: &mut World,
     request: GmActionRequest,
+) -> Result<GmActionSubmission, GmActionRefusalReason> {
+    submit_bound(world, request, false)
+}
+
+/// Private native surface admission; no crew or network caller has this authority.
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub(crate) fn submit_native(
+    world: &mut World,
+    request: GmActionRequest,
+) -> Result<GmActionSubmission, GmActionRefusalReason> {
+    // Native local-GM and fleet admission are distinct boot capabilities. A
+    // malformed composition must never bypass a real fleet's ordering owner.
+    if world
+        .get_resource::<crate::lockstep::FleetRoster>()
+        .is_some_and(|roster| !roster.is_solo() || !roster.gms().is_empty())
+        || world.contains_resource::<crate::lockstep::FleetLockstep>()
+    {
+        return Err(GmActionRefusalReason::NotGameMaster);
+    }
+    if !world
+        .get_resource::<NativeGmAuthority>()
+        .is_some_and(|a| a.connected)
+    {
+        return Err(GmActionRefusalReason::NotGameMaster);
+    }
+    submit_bound(world, request, true)
+}
+
+fn submit_bound(
+    world: &mut World,
+    request: GmActionRequest,
+    native: bool,
 ) -> Result<GmActionSubmission, GmActionRefusalReason> {
     let now = world
         .get_resource::<crate::sim_tick::SimTick>()
@@ -3279,15 +3339,19 @@ pub fn submit_local(
     {
         return Err(GmActionRefusalReason::WrongPhase);
     }
-    let (local, bound) = world
-        .get_resource::<crate::lockstep::FleetRoster>()
-        .map(|roster| {
-            (
-                roster.local(),
-                roster.gm_operator(roster.local()).map(str::to_string),
-            )
-        })
-        .ok_or(GmActionRefusalReason::NotInFleet)?;
+    let (local, bound) = if native {
+        (HostSlot::SOLO, Some(NATIVE_GM_OPERATOR_ID.to_string()))
+    } else {
+        world
+            .get_resource::<crate::lockstep::FleetRoster>()
+            .map(|roster| {
+                (
+                    roster.local(),
+                    roster.gm_operator(roster.local()).map(str::to_string),
+                )
+            })
+            .ok_or(GmActionRefusalReason::NotInFleet)?
+    };
     let bound = bound.ok_or(GmActionRefusalReason::NotGameMaster)?;
     if bound != request.operator_id {
         return Err(GmActionRefusalReason::OperatorMismatch);
@@ -3324,8 +3388,15 @@ pub fn submit_local(
         .is_some_and(|paused| paused.0);
     let technical_join_hold = world
         .get_resource::<crate::gm_join::GmJoinPauseHold>()
-        .is_some_and(crate::gm_join::GmJoinPauseHold::active);
-    let owner = world.resource::<crate::lockstep::FleetRoster>().owner();
+        .is_some_and(crate::gm_join::GmJoinPauseHold::active)
+        || world
+            .get_resource::<NativeGmAuthority>()
+            .is_some_and(|a| a.screen_pause);
+    let owner = if native {
+        local
+    } else {
+        world.resource::<crate::lockstep::FleetRoster>().owner()
+    };
     let proposal = GmActionProposal {
         from: local,
         operator_id: bound,
@@ -3368,17 +3439,19 @@ pub fn submit_local(
             world
                 .resource_mut::<LocalGmActionRefusals>()
                 .push(refusal.logged());
-            world.resource_mut::<crate::lockstep::MeshOutbox>().push(
-                crate::lockstep::MeshFrame::GmAction(GmActionFrame::Refused(refusal.clone())),
-            );
+            if !native {
+                world.resource_mut::<crate::lockstep::MeshOutbox>().push(
+                    crate::lockstep::MeshFrame::GmAction(GmActionFrame::Refused(refusal.clone())),
+                );
+            }
             return Ok(GmActionSubmission::Refused(refusal));
         }
     };
-    world
-        .resource_mut::<crate::lockstep::MeshOutbox>()
-        .push(crate::lockstep::MeshFrame::GmAction(
-            GmActionFrame::Granted(grant.clone()),
-        ));
+    if !native {
+        world.resource_mut::<crate::lockstep::MeshOutbox>().push(
+            crate::lockstep::MeshFrame::GmAction(GmActionFrame::Granted(grant.clone())),
+        );
+    }
     Ok(GmActionSubmission::Granted(grant))
 }
 
@@ -5553,6 +5626,122 @@ station = "helm"
             .expect("retried old fact is pinned into the bounded projection");
         assert_eq!(exact.tick, 1);
         assert_eq!(exact.outcome, GmActionOutcome::Applied);
+    }
+
+    #[test]
+    #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+    fn native_gm_admission_is_private_attributed_and_never_creates_a_fleet_peer() {
+        let mut world = admitted_world();
+        world.insert_resource(crate::lockstep::FleetRoster::default());
+        world.remove_resource::<crate::lockstep::FleetLockstep>();
+        world.insert_resource(NativeGmAuthority {
+            connected: true,
+            screen_pause: false,
+        });
+        world.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator::new(
+                NATIVE_GM_OPERATOR_ID.into(),
+                "GM".into(),
+                true,
+            )])
+            .unwrap(),
+        );
+        let request = GmActionRequest {
+            operator_id: NATIVE_GM_OPERATOR_ID.into(),
+            correlation: GmActionId::new("native-pause").unwrap(),
+            action: GmAction::SetSessionPaused { active: true },
+        };
+        assert_eq!(
+            submit_local(&mut world, request.clone()),
+            Err(GmActionRefusalReason::NotGameMaster)
+        );
+        let GmActionSubmission::Granted(grant) =
+            submit_native(&mut world, request.clone()).unwrap()
+        else {
+            panic!("native request must be sequenced");
+        };
+        assert_eq!(grant.operator_id, NATIVE_GM_OPERATOR_ID);
+        assert_eq!(grant.apply_tick, 10);
+        assert!(matches!(
+            submit_native(&mut world, request.clone()),
+            Ok(GmActionSubmission::Replayed(_))
+        ));
+        assert!(world
+            .resource_mut::<crate::lockstep::MeshOutbox>()
+            .drain()
+            .is_empty());
+        assert!(world.resource::<crate::lockstep::FleetRoster>().is_solo());
+        assert!(world
+            .resource::<crate::lockstep::FleetRoster>()
+            .gms()
+            .is_empty());
+        assert!(!world.contains_resource::<crate::lockstep::FleetLockstep>());
+        let mut spoof = request.clone();
+        spoof.operator_id = "crew".into();
+        assert_eq!(
+            submit_native(&mut world, spoof),
+            Err(GmActionRefusalReason::OperatorMismatch)
+        );
+        world.resource_mut::<NativeGmAuthority>().connected = false;
+        assert_eq!(
+            submit_native(&mut world, request),
+            Err(GmActionRefusalReason::NotGameMaster)
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+    fn native_screen_hold_stops_an_empty_lane_and_requires_connected_explicit_resume() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = admitted_world();
+        world.insert_resource(crate::lockstep::FleetRoster::default());
+        world.remove_resource::<crate::lockstep::FleetLockstep>();
+        world.insert_resource(NativeGmAuthority {
+            connected: false,
+            screen_pause: true,
+        });
+        world.insert_resource(Time::<Virtual>::default());
+        world.insert_resource(Time::<Fixed>::default());
+        world.resource_mut::<SimulationPaused>().0 = true;
+        world.run_system_once(apply_due_actions).unwrap();
+        assert!(world.resource::<Time<Virtual>>().is_paused());
+        world.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator::new(
+                NATIVE_GM_OPERATOR_ID.into(),
+                "GM".into(),
+                true,
+            )])
+            .unwrap(),
+        );
+        let resume = GmActionRequest {
+            operator_id: NATIVE_GM_OPERATOR_ID.into(),
+            correlation: GmActionId::new("explicit-native-resume").unwrap(),
+            action: GmAction::SetSessionPaused { active: false },
+        };
+        assert_eq!(
+            submit_native(&mut world, resume.clone()),
+            Err(GmActionRefusalReason::NotGameMaster)
+        );
+        world.resource_mut::<NativeGmAuthority>().connected = true;
+        world.run_system_once(apply_due_actions).unwrap();
+        assert!(
+            world.resource::<SimulationPaused>().0,
+            "availability alone cannot resume"
+        );
+        let GmActionSubmission::Granted(grant) = submit_native(&mut world, resume).unwrap() else {
+            panic!("connected private GM sequences explicit resume");
+        };
+        assert_eq!(
+            grant.apply_tick, 10,
+            "Resume uses the stopped logical boundary"
+        );
+        world.run_system_once(apply_due_actions).unwrap();
+        assert!(!world.resource::<SimulationPaused>().0);
+        assert!(!world.resource::<NativeGmAuthority>().screen_pause);
+        assert!(!world.resource::<Time<Virtual>>().is_paused());
+        let fact = &world.resource::<GmActionLog>().entries()[0];
+        assert_eq!(fact.operator_id, NATIVE_GM_OPERATOR_ID);
+        assert_eq!(fact.outcome, GmActionOutcome::Applied);
     }
 
     fn admitted_world() -> World {

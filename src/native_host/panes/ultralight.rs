@@ -86,7 +86,9 @@ use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::render::camera::CameraRenderGraph;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::window::{PrimaryWindow, WindowRef};
+use bevy::window::{
+    Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, WindowMode, WindowRef,
+};
 
 use vellum_ultralight::runtime::{
     KeyEventType, Modifiers, MouseButton as UlMouseButton, PaneSession, PaneSpec, RuntimeOptions,
@@ -516,6 +518,11 @@ impl PaneRuntime for UltralightHost {
         // The lobby drains its OWN queue — the one place the two surfaces differ
         // below the URL.
         let mut surface = match kind {
+            PaneKind::GameMaster => {
+                let mut surface = UltralightPaneSurface::with_transparency(view, false);
+                surface.drain_script = crate::native_host::native_gm::document::drain_script();
+                surface
+            }
             PaneKind::Lobby => UltralightPaneSurface::for_host_lobby(view),
             PaneKind::Console | PaneKind::Hud => {
                 UltralightPaneSurface::with_transparency(view, kind.transparent())
@@ -783,6 +790,14 @@ impl Plugin for PaneDisplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(super::gamepad_discovery::GamepadDiscoveryPlugin);
         app.init_resource::<ViewscreenHudLatest>();
+        app.init_resource::<NativeGmDisplayState>();
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<NativeGmDisplayState>(
+                StateClass::Presentation,
+                "native-local-gm-workspace",
+            );
+        }
         app.add_systems(PostUpdate, stop_pane_host_on_exit);
         // Idempotent, and belt-and-braces: `PaneUploadPlugin` (registered
         // unconditionally in `native_host::app`) already puts this in, but
@@ -824,6 +839,10 @@ impl Plugin for PaneDisplayPlugin {
                 // Contract host — which has neither input nor gilrs — skips it.
                 push_gamepads_to_panes.run_if(resource_exists::<ButtonInput<MouseButton>>),
                 drive_pane_host.run_if(resource_exists::<Assets<Image>>),
+                follow_gm_display
+                    .after(crate::native_host::bridge_display::BridgeDisplaySet)
+                    .run_if(resource_exists::<Assets<Image>>)
+                    .run_if(resource_exists::<crate::native_host::native_gm::NativeGmSurface>),
             )
                 .chain(),
         );
@@ -1034,6 +1053,9 @@ fn init_pane_host(world: &mut World) {
     // exist. Phase two waits for the explicit Started handshake.
     if world.get_resource::<PaneHostStarting>().is_none() {
         let config = PaneThreadConfig {
+            gm: world
+                .get_resource::<crate::native_host::native_gm::NativeGmSurface>()
+                .map(|gm| gm.bridge.clone()),
             bus: world.get_resource::<PaneBusResource>().map(|b| b.0.clone()),
             lobby: world
                 .get_resource::<HostLobbyBridgeResource>()
@@ -2075,8 +2097,12 @@ fn drive_pane_host(
     // to measure, in which case the five phases below are stamped and recorded.
     mut stats: Option<ResMut<PaneFrameStats>>,
     observer: Option<Res<SurfaceObserver>>,
+    gm: Option<Res<crate::native_host::native_gm::NativeGmSurface>>,
 ) {
     if failed.is_some() {
+        if let Some(gm) = &gm {
+            gm.bridge.fault();
+        }
         if let Some(bus) = &bus {
             close_after_thread_failure(&bus.0);
         }
@@ -2086,6 +2112,9 @@ fn drive_pane_host(
         return;
     };
     if host.thread.is_none() {
+        if let Some(gm) = &gm {
+            gm.bridge.fault();
+        }
         // A dead renderer is terminal, including consoles opened by the screen
         // reconciler after the failure. Never spend the per-seat rebuild budget.
         if let Some(bus) = &bus {
@@ -2149,6 +2178,11 @@ fn drive_pane_host(
                     LogCat::Lobby,
                     "pane host: could not build {id}: {reason}"
                 );
+                if pane.kind == PaneKind::GameMaster {
+                    if let Some(gm) = &gm {
+                        gm.bridge.fault();
+                    }
+                }
                 if !pane.kind.permanent() {
                     if let Some(bus) = &bus {
                         bus.0.fault(id, PaneFault::ViewCrashed);
@@ -2174,6 +2208,15 @@ fn drive_pane_host(
                 crate::pwarn!(log, LogCat::Lobby,
                     "pane host: {id} frame copy failed ({consecutive}/{VIEW_CRASH_COPY_FAILURES}): {reason}");
                 if let Some(fault) = host.mirror.record_copy_failure(id, consecutive) {
+                    if host
+                        .mirror
+                        .get(id)
+                        .is_some_and(|p| p.kind == PaneKind::GameMaster)
+                    {
+                        if let Some(gm) = &gm {
+                            gm.bridge.fault();
+                        }
+                    }
                     if let Some(bus) = &bus {
                         bus.0.fault(id, fault);
                     }
@@ -2428,7 +2471,15 @@ fn open_pending_views(
             }
         };
         let on_station = placement.station_camera.is_some();
-        let window = make_pane_view(host, images, commands, new_id, &url, placement);
+        let window = make_pane_view(
+            host,
+            images,
+            commands,
+            new_id,
+            &url,
+            PaneKind::Console,
+            placement,
+        );
         host.mirror.insert(new_id, PaneKind::Console, true, window);
         recreated_any = true;
         crate::pinfo!(
@@ -2447,6 +2498,152 @@ fn open_pending_views(
     if recreated_any {
         host.rebuild_layout();
     }
+}
+
+struct NativeGmWindow {
+    pane: PaneId,
+    window: Entity,
+    monitor_entity: Entity,
+    monitor: crate::native_host::bridge_profile::MonitorIdentity,
+    geometry: crate::native_host::bridge_profile::MonitorGeometry,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct NativeGmDisplayState {
+    current: Option<NativeGmWindow>,
+    serial: u32,
+    retries: u32,
+    loading_frames: u32,
+    wanted: Option<crate::native_host::bridge_profile::MonitorIdentity>,
+}
+
+/// The GM has its own window and bridge, but shares the one renderer and input
+/// routing path with station consoles. A failed view gets three bounded retries.
+#[allow(clippy::too_many_arguments)]
+fn follow_gm_display(
+    host: Option<ResMut<PaneHost>>,
+    gm: Option<Res<crate::native_host::native_gm::NativeGmSurface>>,
+    layout: Option<Res<BridgeLayoutResource>>,
+    mut state: ResMut<NativeGmDisplayState>,
+    monitors: Query<(Entity, &Monitor, Has<PrimaryMonitor>)>,
+    windows: Query<&Window>,
+    mut images: ResMut<Assets<Image>>,
+    mut commands: Commands,
+) {
+    let (Some(mut host), Some(gm), Some(layout)) = (host, gm, layout) else {
+        return;
+    };
+    let wanted = layout.layout.game_master_monitor().cloned();
+    if state.wanted != wanted {
+        state.wanted = wanted.clone();
+        state.retries = 0;
+    }
+    let present = crate::native_host::bridge_display::identify_present(
+        monitors
+            .iter()
+            .map(|(e, m, primary)| {
+                (
+                    e,
+                    crate::native_host::bridge_display::raw_from_monitor(m, primary),
+                    crate::native_host::bridge_display::geometry_of(m),
+                )
+            })
+            .collect(),
+        &layout.monitors,
+    );
+    let desired = wanted
+        .as_ref()
+        .and_then(|wanted| present.iter().find(|(_, d, _)| &d.identity == wanted))
+        .filter(|(_, d, _)| &d.identity != layout.layout.viewscreen());
+    if state.current.is_some() && !gm.bridge.live() {
+        state.loading_frames += 1;
+    }
+    if state.loading_frames >= 600 {
+        gm.bridge.fault();
+    }
+    if state.current.as_ref().is_some_and(|current| {
+        desired.is_none()
+            || windows.get(current.window).is_err()
+            || host.mirror.get(current.pane).is_none()
+    }) {
+        gm.bridge.fault();
+    }
+    let needs_rebuild = match (&state.current, desired) {
+        (Some(current), Some((monitor_entity, found, actual))) => {
+            current.monitor_entity != *monitor_entity
+                || current.monitor != found.identity
+                || &current.geometry != actual
+                || gm.bridge.failed()
+        }
+        (Some(_), None) => true,
+        _ => false,
+    };
+    if needs_rebuild {
+        if gm.bridge.failed() && desired.is_some() {
+            state.retries += 1;
+        }
+        if let Some(current) = state.current.take() {
+            host.send(PaneCommand::Close(current.pane));
+            if let Some(pane) = host.mirror.remove(current.pane) {
+                commands.entity(pane.canvas).try_despawn();
+            }
+            release_pane_capture(&mut host, current.pane);
+            commands.entity(current.window).try_despawn();
+            sweep_station_cameras(&mut host, &mut commands);
+            host.rebuild_layout();
+        }
+        gm.bridge.close();
+    }
+    let Some((monitor_entity, found, geometry)) = desired else {
+        return;
+    };
+    if state.current.is_some() || state.retries > 3 || host.thread.is_none() {
+        return;
+    }
+    state.serial = state.serial.saturating_add(1);
+    let id = PaneId(u32::MAX - 1 - state.serial);
+    let window = commands
+        .spawn((
+            Window {
+                title: format!("{} — GM", crate::native_host::WINDOW_TITLE),
+                name: Some("phoenix-gm".into()),
+                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Entity(*monitor_entity)),
+                ..default()
+            },
+            crate::native_host::bridge_display::BridgeSurface {
+                identity: found.identity.as_str().to_string(),
+                role: "GM".into(),
+            },
+        ))
+        .id();
+    let camera = station_camera(&mut host, &mut commands, window).0;
+    gm.bridge.activate(id);
+    let canvas = make_pane_view(
+        &host,
+        &mut images,
+        &mut commands,
+        id,
+        &gm.url,
+        PaneKind::GameMaster,
+        PaneSeat {
+            window,
+            station_camera: Some(camera),
+            origin: (0, 0),
+            size: (geometry.physical_width, geometry.physical_height),
+            scale: geometry.scale_factor,
+            window_origin: (geometry.position_x, geometry.position_y),
+        },
+    );
+    host.mirror.insert(id, PaneKind::GameMaster, true, canvas);
+    host.rebuild_layout();
+    state.current = Some(NativeGmWindow {
+        pane: id,
+        window,
+        monitor_entity: *monitor_entity,
+        monitor: found.identity.clone(),
+        geometry: geometry.clone(),
+    });
+    state.loading_frames = 0;
 }
 
 /// Where one pane's view is built: which window, which rectangle on it, and
@@ -2524,6 +2721,7 @@ fn make_pane_view(
     commands: &mut Commands,
     id: PaneId,
     url: &str,
+    kind: PaneKind,
     placement: PaneSeat,
 ) -> PaneCanvasData {
     let PaneSeat {
@@ -2538,7 +2736,7 @@ fn make_pane_view(
     let raster = render_scale.geometry(size, scale);
     host.send(PaneCommand::Create {
         id,
-        kind: PaneKind::Console,
+        kind,
         spec: PaneSpecOwned {
             width: raster.size.0,
             height: raster.size.1,
@@ -2625,7 +2823,12 @@ fn retire_closed_panes(
     // the life of the host, so neither is a candidate for retirement in either
     // test below. Missing the HUD here retired it the instant the bus went active
     // at InProgress, which is exactly when its frame should appear.
-    let survives = |w: &PaneWindow| open.contains(&w.id) || w.is_host_lobby() || w.is_hud_overlay();
+    let survives = |w: &PaneWindow| {
+        open.contains(&w.id)
+            || w.kind == PaneKind::GameMaster
+            || w.is_host_lobby()
+            || w.is_hud_overlay()
+    };
     if host.mirror.iter().all(survives) {
         return;
     }

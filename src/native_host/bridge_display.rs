@@ -494,7 +494,7 @@ fn apply_pending_console_claims(
 }
 
 /// Lift one Bevy [`Monitor`](bevy::window::Monitor) into a [`RawMonitor`].
-fn raw_from_monitor(monitor: &Monitor, primary: bool) -> RawMonitor {
+pub(crate) fn raw_from_monitor(monitor: &Monitor, primary: bool) -> RawMonitor {
     RawMonitor {
         name: monitor.name.clone(),
         physical_width: monitor.physical_width,
@@ -508,7 +508,7 @@ fn raw_from_monitor(monitor: &Monitor, primary: bool) -> RawMonitor {
 
 /// The winit geometry to spawn a Station window with — a [`MonitorGeometry`] the
 /// pane rects are computed against.
-fn geometry_of(monitor: &Monitor) -> MonitorGeometry {
+pub(crate) fn geometry_of(monitor: &Monitor) -> MonitorGeometry {
     MonitorGeometry {
         physical_width: monitor.physical_width,
         physical_height: monitor.physical_height,
@@ -532,7 +532,7 @@ fn geometry_of(monitor: &Monitor) -> MonitorGeometry {
 /// plugged in keeps the identity it was known by rather than being re-derived
 /// out from under itself; see [`identify_stable`]. Pass an empty slice at boot,
 /// when nothing is known yet, which makes this exactly [`identify`].
-fn identify_present(
+pub(crate) fn identify_present(
     mut monitors: Vec<(Entity, RawMonitor, MonitorGeometry)>,
     known: &[DiscoveredMonitor],
 ) -> Vec<(Entity, DiscoveredMonitor, MonitorGeometry)> {

@@ -113,6 +113,8 @@ impl ScenarioPanelPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HostLobbyRecord {
+    #[serde(rename = "set-game-master")]
+    SetGameMaster { monitor: Option<String> },
     /// The operator picked a scenario.
     SelectScenario { scenario_id: String },
     /// The operator picked a hull (or the single-hull auto-resolve did).

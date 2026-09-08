@@ -182,6 +182,7 @@ pub fn drain_client_pause(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
     fleet: Option<Res<crate::lockstep::FleetLockstep>>,
+    native_gm: Option<Res<crate::gm_action::NativeGmAuthority>>,
     mut paused: ResMut<SimulationPaused>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
@@ -196,7 +197,7 @@ pub fn drain_client_pause(
     // Pause is a raw peer-local clock mutation, not an admitted/tick-stamped
     // command. Consume but refuse it once a participant wait-set exists; the
     // lockstep barrier is then the sole owner of `Time<Virtual>` pauses.
-    if fleet.is_some() {
+    if fleet.is_some() || native_gm.is_some_and(|gm| gm.screen_pause) {
         return;
     }
 

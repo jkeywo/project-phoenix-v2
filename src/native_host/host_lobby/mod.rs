@@ -308,6 +308,7 @@ impl HostLobbyJoinResource {
 pub struct LocalHostLobby {
     /// The bridge the surface and the simulation both hold.
     pub bridge: HostLobbyBridge,
+    pub gm_bridge: super::native_gm::bridge::NativeGmBridge,
     /// This surface's document path segment, minted per run.
     pub nonce: String,
     /// `host:port` the surface's view should **connect** to.
@@ -336,6 +337,7 @@ impl LocalHostLobby {
         let bound = host_addr.as_ref();
         Self {
             bridge: HostLobbyBridge::new(),
+            gm_bridge: super::native_gm::bridge::NativeGmBridge::default(),
             nonce: mint_document_nonce(),
             host_addr: connectable_host_addr(bound),
             join_base: join::join_page_base(&join::shareable_host_addr(
@@ -399,6 +401,10 @@ impl LocalHostLobby {
             &prefs,
         );
         documents.publish(self.path(), body);
+        documents.publish(
+            super::native_gm::document::document_path(&self.nonce),
+            super::native_gm::document::build_document(host_index_html),
+        );
         Ok(())
     }
 
@@ -409,6 +415,7 @@ impl LocalHostLobby {
     /// driving is empty rather than merely short.
     pub fn withdraw(&self, documents: &HostedDocuments) {
         documents.withdraw(&self.path());
+        documents.withdraw(&super::native_gm::document::document_path(&self.nonce));
     }
 }
 
@@ -936,6 +943,8 @@ fn apply_mod_pack_choice(
 /// drained either way, so a surface talking to a host that cannot answer it does
 /// not sit on a queue for the whole mission.
 pub(crate) fn drain_surface_records(
+    native_gm: Option<Res<super::native_gm::NativeGmLifecycle>>,
+    phase: Option<Res<State<GamePhase>>>,
     bridge: Option<Res<HostLobbyBridgeResource>>,
     mut inbound: MessageWriter<crate::lobby::InboundMessage>,
     force_start: Option<ResMut<crate::server::bridge::PendingForceStart>>,
@@ -1104,6 +1113,11 @@ pub(crate) fn drain_surface_records(
                 }
                 continue;
             }
+            HostLobbyRecord::SetGameMaster { monitor } => {
+                crate::native_host::bridge_layout::LayoutAction::SetGameMaster {
+                    monitor: monitor.map(crate::native_host::bridge_profile::MonitorIdentity::new),
+                }
+            }
             HostLobbyRecord::SetViewscreen { monitor } => layout::set_viewscreen_action(monitor),
             HostLobbyRecord::AssignStation { station, monitor } => {
                 layout::assign_station_action(station, monitor)
@@ -1122,7 +1136,16 @@ pub(crate) fn drain_surface_records(
             continue;
         };
         let notices = layout_notices.get_or_insert_with(Vec::new);
-        match layout.layout.apply(&action) {
+        let result = if matches!(&action, crate::native_host::bridge_layout::LayoutAction::SetGameMaster { monitor } if monitor.is_some() != native_gm.as_ref().map_or(layout.layout.game_master_monitor().is_some(), |gm| gm.enabled))
+            && phase
+                .as_ref()
+                .is_some_and(|phase| phase.get() != &GamePhase::Lobby)
+        {
+            Err(crate::native_host::bridge_layout::LayoutRefusal::GameMasterRoleFrozen)
+        } else {
+            layout.layout.apply(&action)
+        };
+        match result {
             Ok(next) => {
                 crate::pinfo!(
                     log,
@@ -1272,6 +1295,9 @@ fn applied(
 ) -> String {
     use crate::native_host::bridge_layout::LayoutAction;
     match action {
+        LayoutAction::SetGameMaster { .. } => {
+            format!("GM display: {:?}", next.game_master_monitor())
+        }
         LayoutAction::SetViewscreen { .. } => {
             format!("viewscreen now on monitor {}", next.viewscreen())
         }
@@ -1316,6 +1342,8 @@ fn applied(
 /// within two frames. Nothing else reads this list, so skipping the change tick
 /// hides nothing from anyone.
 fn publish_bridge_layout(
+    native_gm: Option<Res<super::native_gm::NativeGmLifecycle>>,
+    phase: Option<Res<State<GamePhase>>>,
     bridge: Option<Res<HostLobbyBridgeResource>>,
     layout: Option<ResMut<BridgeLayoutResource>>,
     log: Option<Res<LogFilterConfig>>,
@@ -1323,10 +1351,21 @@ fn publish_bridge_layout(
     let (Some(bridge), Some(mut layout)) = (bridge, layout) else {
         return;
     };
-    if !layout.is_changed() {
+    if !layout.is_changed() && !phase.as_ref().is_some_and(|p| p.is_changed()) {
         return;
     }
-    let payload = bridge_layout_payload(&layout.layout, &layout.monitors, &layout.notices);
+    let mut payload = bridge_layout_payload(&layout.layout, &layout.monitors, &layout.notices);
+    if let Some(gm) = &mut payload.gm {
+        gm.role_mutable = phase
+            .as_ref()
+            .is_none_or(|phase| phase.get() == &GamePhase::Lobby);
+        if !gm.role_mutable && gm.assigned_to.is_none() {
+            gm.assigned_to = native_gm
+                .as_ref()
+                .and_then(|g| g.desired_monitor.as_ref())
+                .map(|id| id.as_str().to_string());
+        }
+    }
     match crate::core::codec::encode_bridge_layout(&payload) {
         Ok(json) => {
             bridge.0.push_layout(json);

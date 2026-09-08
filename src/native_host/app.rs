@@ -818,6 +818,15 @@ pub fn build_native_host_app(
             lobby.bridge.clone(),
         ));
         app.add_plugins(crate::native_host::host_lobby::HostLobbyPlugin);
+        app.insert_resource(crate::native_host::native_gm::NativeGmSurface {
+            bridge: lobby.gm_bridge.clone(),
+            url: format!(
+                "http://{}{}",
+                lobby.host_addr,
+                crate::native_host::native_gm::document::document_path(&lobby.nonce)
+            ),
+        });
+        app.add_plugins(crate::native_host::native_gm::NativeGmPlugin);
         // The mod-pack shelf (issue #1366), inserted only when the operator
         // named a folder. Beside the bridge rather than outside this block on
         // purpose: the shelf is a stage of the LANDING, and the landing only

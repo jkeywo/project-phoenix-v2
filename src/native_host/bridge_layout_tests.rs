@@ -11,6 +11,49 @@ use super::*;
 
 use crate::native_host::bridge_profile::{identify, RawMonitor, TouchMapping, ValidatedDisplay};
 
+#[test]
+fn gm_display_is_exclusive_and_round_trips_with_the_saved_layout() {
+    let seated = bridge()
+        .apply(&LayoutAction::SetGameMaster {
+            monitor: Some(m(LEFT)),
+        })
+        .unwrap();
+    assert!(seated
+        .apply(&LayoutAction::AssignStation {
+            station: s("helm"),
+            monitor: m(LEFT)
+        })
+        .is_err());
+    assert!(seated
+        .apply(&LayoutAction::SetViewscreen { monitor: m(LEFT) })
+        .is_err());
+    assert_eq!(
+        seated.eligibility_of(&s("helm")).unwrap().monitors[1].choice,
+        MonitorChoice::Excluded(ExclusionReason::GameMaster)
+    );
+    let profile = BridgeProfile::from_toml(&seated.to_profile().to_toml().unwrap())
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(bridge().adopt_profile(&profile).0, seated);
+    let moved = seated
+        .apply(&LayoutAction::SetGameMaster {
+            monitor: Some(m(RIGHT)),
+        })
+        .unwrap();
+    assert!(moved
+        .apply(&LayoutAction::AssignStation {
+            station: s("helm"),
+            monitor: m(LEFT)
+        })
+        .is_ok());
+    assert!(assign(&bridge(), "helm", LEFT)
+        .apply(&LayoutAction::SetGameMaster {
+            monitor: Some(m(LEFT))
+        })
+        .is_err());
+}
+
 // ── fixtures ────────────────────────────────────────────────────────────────
 
 const TV: &str = "BRAVIA@3840x2160";
@@ -2177,4 +2220,25 @@ fn a_note_carrying_a_refusal_reports_it_beside_itself_rather_than_inside_itself(
         .cause(),
         None
     );
+}
+
+#[test]
+fn gm_monitor_loss_retains_assignment_without_covering_the_viewscreen() {
+    let seated = bridge()
+        .apply(&LayoutAction::SetGameMaster {
+            monitor: Some(m(LEFT)),
+        })
+        .unwrap();
+    let (missing, _) =
+        seated.reconcile(&[discovered(TV, true), discovered(RIGHT, false)], roster());
+    assert_eq!(missing.game_master_monitor(), Some(&m(LEFT)));
+    assert_eq!(missing.viewscreen(), &m(TV));
+    let restored = missing.reconcile(&all_three(), roster()).0;
+    assert_eq!(restored.game_master_monitor(), Some(&m(LEFT)));
+    assert!(restored
+        .apply(&LayoutAction::AssignStation {
+            station: s("helm"),
+            monitor: m(LEFT)
+        })
+        .is_err());
 }

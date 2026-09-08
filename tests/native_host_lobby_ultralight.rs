@@ -250,6 +250,7 @@ fn monitor_row(
             reserved: Vec::new(),
         };
     codec::encode_bridge_layout(&BridgeLayoutPayload {
+        gm: None,
         monitors: vec![
             monitor(
                 "BRAVIA@3840x2160",

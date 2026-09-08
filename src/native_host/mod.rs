@@ -120,6 +120,7 @@ pub mod layout_store_systems;
 /// [`crate::entities::config_cache`] overlay, reached through
 /// [`host_lobby::packs`].
 pub mod mod_packs;
+pub mod native_gm;
 pub mod panes;
 /// The real WebSocket behind [`relay_transport`]. Behind the `host` feature
 /// because it is the only thing here that needs `tungstenite`; the protocol it

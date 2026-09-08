@@ -5974,6 +5974,17 @@ fn restore_collisions(world: &mut World, snapshot: &PhoenixSnapshot) {
 /// not have.
 fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut RestoreReport) {
     let restored_at = fixed_elapsed_secs(world).unwrap_or_default();
+    // Alert, attacker and stored stances are replaced together, not changed by
+    // a Captain command. Consume any bootstrap alert edge, including one no
+    // reader has seen yet. Bevy clamps both ages to MAX_CHANGE_AGE and compares
+    // them strictly, so this rollback baseline is old for every reader, even
+    // across tick wrap. A subsequent real write still stamps the current tick.
+    let restored_alert_tick = bevy::ecs::change_detection::Tick::new(
+        world
+            .read_change_tick()
+            .get()
+            .wrapping_sub(bevy::ecs::change_detection::MAX_CHANGE_AGE),
+    );
     let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
         return;
     };
@@ -6104,7 +6115,8 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         }
         if let Some(active) = row.red_alert {
             if let Some(mut alert) = entity_mut.get_mut::<ShipRedAlert>() {
-                alert.0 = active;
+                alert.bypass_change_detection().0 = active;
+                alert.set_last_changed(restored_alert_tick);
             }
         }
         // Issues #1107–#1109. The per-ship Command stance map IS folded into the

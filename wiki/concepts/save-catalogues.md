@@ -2,7 +2,7 @@
 title: Peer-Local Save Catalogues
 type: concept
 tags: [save, snapshot, persistence, autosave, browser, native, catalogue]
-sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/snapshot.rs, src/core/collision_history.rs, tests/collision_history.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/headless/replay/recorded_gm.rs, tests/recorded_gm_exports.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
+sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/snapshot.rs, src/core/collision_history.rs, tests/collision_history.rs, tests/same_target_damage_ordering.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/headless/replay/recorded_gm.rs, tests/recorded_gm_exports.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
 updated: 2026-09-08
 ---
 
@@ -94,6 +94,19 @@ checks the saved fleet against any already-staged fleet, and verifies that each
 saved authored index still names a `GameStart` row before those UUIDs are used
 to build the fresh world. Restore then proceeds through the ordinary snapshot
 roster/layer readiness and digest checks.
+
+Restore replaces captured `ShipRedAlert`, attacker attribution and stored
+Station stances together. It rebases only the alert component's change marker
+to an already-consumed tick, including when the bootstrap value differs or its
+insertion has not yet been read. Restoration therefore cannot manufacture a
+Captain alert command that clears the captured attacker or changes a captured
+stance. Subsequent ordinary Captain commands still update neutral stances and
+clear attribution on stand-down. Separately, restoring objective records marks
+their presentation dirty, producing one exact `ObjectiveSummary` refresh even
+when authoritative objective state is unchanged. The damage continuation
+fixture retains that raw message and checks its payload and count separately:
+it drains during play, but remains unchanged in the undrained GameOver queue.
+All other state, attribution, events and pending messages must compare equal.
 
 The same format preserves the session-pause bit, complete canonical GM action
 journal, and exact `applied_grants` reducer frontier. That frontier cannot be

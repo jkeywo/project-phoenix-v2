@@ -238,7 +238,10 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
     });
     let delivery = Delivery::start();
 
-    let panes = LocalPanes::open(&["Ada".to_string(), "Grace".to_string()], &delivery.addr);
+    // A distinctive name keeps the privacy assertion independent of bundle
+    // identifiers such as OperatorSurfaceAdapter, which happen to contain Ada.
+    const ADA_NAME: &str = "Ada-private-pane-fixture";
+    let panes = LocalPanes::open(&[ADA_NAME.to_string(), "Grace".to_string()], &delivery.addr);
     let bus = panes.bus.clone();
     let ada = panes.opened[0].id;
     let ada_token = panes.opened[0].identity.token().to_string();
@@ -260,7 +263,7 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
         "a pane's session token must not appear in a body this host serves"
     );
     assert!(
-        !served.contains("Ada"),
+        !served.contains(ADA_NAME),
         "nor must the participant name it joins under"
     );
     assert!(
@@ -387,7 +390,7 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
                 "the page identifies with the token the HOST minted — which it read out of the \
                  URL fragment, not out of the document"
             );
-            assert_eq!(name, "Ada", "and under the name the operator gave");
+            assert_eq!(name, ADA_NAME, "and under the name the operator gave");
         }
         other => panic!("expected an Identify, got {other:?}"),
     }

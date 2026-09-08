@@ -152,12 +152,12 @@ fn fleet_roster(local: HostSlot) -> FleetRoster {
             FleetShip {
                 host: HostSlot(1),
                 ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
-                crew: vec![(StationId("helm".into()), "Standard".into())],
+                crew: vec![(StationId("helm".into()), "Std".into())],
             },
             FleetShip {
                 host: HostSlot(2),
                 ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
-                crew: vec![(StationId("weapons".into()), "Standard".into())],
+                crew: vec![(StationId("tactical".into()), "Std".into())],
             },
         ],
         local,
@@ -183,7 +183,22 @@ fn build_connected_fleet_peer(local: HostSlot, store: RecordingStore) -> App {
             Some(CAPTURE_INTERVAL_TICKS)
         );
     }
-    join_fleet(app.world_mut(), fleet_roster(local), 2);
+    // Fleet admission validates the frozen seats against each preloaded hull.
+    // Headless startup reads from disk; supply the same real template that a
+    // native/browser host preloads before accepting this explicit fleet roster.
+    const HULL: &str = "assets/entities/alliance_cruiser.toml";
+    let hull = project_phoenix::entities::include_resolve::load_entity_config(HULL)
+        .expect("the saved fleet's authored cruiser template resolves");
+    project_phoenix::entities::config_cache::insert_native_config(HULL.into(), hull);
+    let roster = fleet_roster(local);
+    assert!(
+        project_phoenix::lockstep::crew::roster_crew_matches_hulls(app.world(), &roster),
+        "the saved fleet's frozen stations and ratings must match its loaded hulls"
+    );
+    assert!(
+        join_fleet(app.world_mut(), roster, 2),
+        "the save fixture must join the fleet before exercising peer-local recovery"
+    );
     let remote = if local == HostSlot(1) {
         HostSlot(2)
     } else {

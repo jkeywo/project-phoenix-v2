@@ -22,6 +22,8 @@
     const batch = records;
     records = [];
     bytes = 0;
-    return JSON.stringify(batch);
+    // UltralightPaneSurface uses vellum's one-record-per-line drain framing.
+    // Each record is already JSON encoded, including any nested newlines.
+    return batch.join('\n');
   };
 })();

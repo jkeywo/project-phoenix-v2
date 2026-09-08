@@ -179,7 +179,7 @@ pub struct WorldContentRuntime {
     /// The scenario-authored GM spawn palette, copied from `WorldConfig` at
     /// load (issue #1305).
     ///
-    /// AUTHORED CONTENT, not run state: it lives here for `trigger_states`'
+    /// AUTHORED CONTENT, not run state: it lives here for `triggers`'
     /// reason — the deterministic apply-tick reducer and the trigger pipeline
     /// both need it, and neither holds `WorldConfig` — and, like a trigger's
     /// authored condition, it is answered for by `snapshot::content_digest`
@@ -2507,7 +2507,7 @@ pub(crate) fn tick_trigger_pipeline(
             })
             .fold(0.0_f32, |max_e, e| e.max(max_e));
         // All conditions read the live stores before any fired effect lands.
-        let fired = runtime.triggers.evaluate(
+        let mut fired = runtime.triggers.evaluate_filtered(
             &current_events,
             &name_to_uuid,
             &runtime.entity_groups,
@@ -2519,6 +2519,16 @@ pub(crate) fn tick_trigger_pipeline(
                     world_layers.layer_map.as_deref(),
                 )
             },
+            (
+                |state| {
+                    !crate::gm_event::state_event_id(state)
+                        .is_some_and(|id| runtime.paused_gm_events.contains(&id))
+                },
+                |state| {
+                    !crate::gm_event::state_event_id(state)
+                        .is_some_and(|id| runtime.pending_gm_event_skips.remove(&id))
+                },
+            ),
         );
 
         // An armed Skip whose event no longer exists cannot ever be honoured,
@@ -2528,7 +2538,7 @@ pub(crate) fn tick_trigger_pipeline(
         // `reset_trigger`, and a `when` that reads false is a moment, not an
         // answer.
         if pass == 1 && !runtime.pending_gm_event_skips.is_empty() {
-            let live = crate::gm_event::live_event_ids(&runtime.trigger_states);
+            let live = crate::gm_event::live_event_ids(&runtime.triggers);
             runtime
                 .pending_gm_event_skips
                 .retain(|id| live.contains(id));
@@ -2538,7 +2548,7 @@ pub(crate) fn tick_trigger_pipeline(
         // one authored occurrence, and letting it re-enter a chaining pass
         // would let one press run a repeatable handler several times in a tick.
         //
-        // Iterated over `trigger_states` in table order rather than over the
+        // Iterated over `triggers` in table order rather than over the
         // pending set, so the intra-tick order of a manual fire is the same
         // authored order an automatic one has, on every peer. Entries leave the
         // set when they are consumed by an actual firing, or when the event
@@ -2548,39 +2558,14 @@ pub(crate) fn tick_trigger_pipeline(
         // KEEPS the arm, so a Fire during a suppressed moment lands when the
         // moment arrives instead of being silently dropped.
         if pass == 1 && !runtime.pending_gm_event_fires.is_empty() {
-            let mut consumed: Vec<String> = Vec::new();
-            for (idx, origin) in trigger_origins.iter().enumerate() {
-                let Some(event_id) = crate::gm_event::state_event_id(&runtime.trigger_states[idx])
-                else {
-                    continue;
-                };
-                if !runtime.pending_gm_event_fires.contains(&event_id) {
-                    continue;
-                }
-                if !crate::world::content::manual_fire_is_still_live(&runtime.trigger_states[idx]) {
-                    consumed.push(event_id);
-                    continue;
-                }
-                let (flag_chain, _) = layered_flag_chain_with_paths(
-                    origin.as_deref(),
-                    &runtime.flags,
-                    world_layers.layer_map.as_deref(),
-                );
-                if let Some(ft) = crate::world::content::fire_manual_trigger(
-                    &mut runtime.trigger_states[idx],
-                    &flag_chain,
-                    current_elapsed,
-                ) {
-                    consumed.push(event_id);
-                    fired.push((idx, ft));
-                }
-            }
-            // An armed id that names no live trigger at all cannot ever be
-            // honoured, and authoritative state must not accumulate it.
-            let live = crate::gm_event::live_event_ids(&runtime.trigger_states);
-            runtime
-                .pending_gm_event_fires
-                .retain(|id| live.contains(id) && !consumed.contains(id));
+            fired.extend(runtime.triggers.fire_manual(
+                &mut runtime.pending_gm_event_fires,
+                current_elapsed,
+                crate::gm_event::state_event_id,
+                |origin| {
+                    layered_flag_chain(origin, &runtime.flags, world_layers.layer_map.as_deref())
+                },
+            ));
         }
 
         if fired.is_empty() {
@@ -5267,7 +5252,7 @@ fn apply_world_layer_changes(
                 }
 
                 // Retraction pairs rows even in fixtures with no script runtime.
-                let removed = runtime.triggers.remove_layer(&path);
+                let removed = remove_layer_triggers(&mut runtime, &path);
                 if removed > 0 {
                     bevy::log::debug!(target: "world",
                         "apply_world_layer_changes: unloaded {path} retracted {removed} trigger(s)");
@@ -5368,6 +5353,21 @@ fn load_scenario_toml_text(path: &str) -> Option<String> {
             None
         })
     }
+}
+
+/// Remove paired trigger entries and only their exact GM Pause identities.
+fn remove_layer_triggers(runtime: &mut WorldContentRuntime, path: &str) -> usize {
+    let removed_ids: Vec<_> = runtime
+        .triggers
+        .iter()
+        .filter(|state| state.origin_layer.as_deref() == Some(path))
+        .filter_map(crate::gm_event::state_event_id)
+        .collect();
+    let removed = runtime.triggers.remove_layer(path);
+    for id in removed_ids {
+        runtime.paused_gm_events.remove(&id);
+    }
+    removed
 }
 
 #[cfg(test)]

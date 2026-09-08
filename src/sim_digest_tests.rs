@@ -1309,15 +1309,19 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
     };
 
     let mut world = scenario_world();
-    world.resource_mut::<WorldContentRuntime>().trigger_states =
-        vec![gm_event("breach"), gm_event("sweep")];
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(vec![gm_event("breach"), gm_event("sweep")]);
     let idle = world_digest(&world);
 
     // An empty pending set folds nothing at all: a world that authors GM events
     // but has none armed digests exactly as it would have before this issue.
     let mut plain = scenario_world();
-    plain.resource_mut::<WorldContentRuntime>().trigger_states =
-        vec![gm_event("breach"), gm_event("sweep")];
+    plain
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(vec![gm_event("breach"), gm_event("sweep")]);
     plain
         .resource_mut::<WorldContentRuntime>()
         .pending_gm_event_fires
@@ -1334,8 +1338,10 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
     // WHICH event is armed is part of it: two peers holding one arm each on
     // different events are about to run different missions.
     let mut other = scenario_world();
-    other.resource_mut::<WorldContentRuntime>().trigger_states =
-        vec![gm_event("breach"), gm_event("sweep")];
+    other
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(vec![gm_event("breach"), gm_event("sweep")]);
     other
         .resource_mut::<WorldContentRuntime>()
         .pending_gm_event_fires
@@ -1347,8 +1353,10 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
     let mut swapped = scenario_world();
     let mut automatic = gm_event("breach");
     automatic.trigger.condition = TriggerCondition::OnWorldLoaded;
-    swapped.resource_mut::<WorldContentRuntime>().trigger_states =
-        vec![automatic, gm_event("sweep")];
+    swapped
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(vec![automatic, gm_event("sweep")]);
     assert_ne!(idle, world_digest(&swapped));
 
     // Issue #1302: an ORDINARY condition-bearing event declaring the same
@@ -1364,7 +1372,8 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
     };
     ordinary
         .resource_mut::<WorldContentRuntime>()
-        .trigger_states = vec![evac];
+        .triggers
+        .replace_declarative(vec![evac]);
     let ordinary_idle = world_digest(&ordinary);
     ordinary
         .resource_mut::<WorldContentRuntime>()
@@ -1467,8 +1476,10 @@ fn a_paused_gm_event_moves_the_digest_and_an_empty_set_leaves_it_alone() {
         state
     };
     let table = |world: &mut World| {
-        world.resource_mut::<WorldContentRuntime>().trigger_states =
-            vec![pausable("breach"), pausable("sweep")];
+        world
+            .resource_mut::<WorldContentRuntime>()
+            .triggers
+            .replace_declarative(vec![pausable("breach"), pausable("sweep")]);
     };
 
     let mut world = scenario_world();
@@ -1540,7 +1551,8 @@ fn an_armed_gm_skip_moves_the_digest_and_never_collapses_onto_an_armed_fire() {
     let mut idle_world = scenario_world();
     idle_world
         .resource_mut::<WorldContentRuntime>()
-        .trigger_states = table();
+        .triggers
+        .replace_declarative(table());
     idle_world
         .resource_mut::<WorldContentRuntime>()
         .pending_gm_event_fires
@@ -1548,7 +1560,10 @@ fn an_armed_gm_skip_moves_the_digest_and_never_collapses_onto_an_armed_fire() {
     let idle = world_digest(&idle_world);
 
     let mut skipped = scenario_world();
-    skipped.resource_mut::<WorldContentRuntime>().trigger_states = table();
+    skipped
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(table());
     skipped
         .resource_mut::<WorldContentRuntime>()
         .pending_gm_event_fires
@@ -1565,7 +1580,10 @@ fn an_armed_gm_skip_moves_the_digest_and_never_collapses_onto_an_armed_fire() {
 
     // WHICH event, exactly as for a Fire.
     let mut other = scenario_world();
-    other.resource_mut::<WorldContentRuntime>().trigger_states = table();
+    other
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(table());
     other
         .resource_mut::<WorldContentRuntime>()
         .pending_gm_event_fires
@@ -1578,7 +1596,10 @@ fn an_armed_gm_skip_moves_the_digest_and_never_collapses_onto_an_armed_fire() {
 
     // And WHICH LEVER: the same id armed for Fire is a different world.
     let mut fired = scenario_world();
-    fired.resource_mut::<WorldContentRuntime>().trigger_states = table();
+    fired
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(table());
     fired
         .resource_mut::<WorldContentRuntime>()
         .pending_gm_event_fires

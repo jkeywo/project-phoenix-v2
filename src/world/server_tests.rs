@@ -1631,7 +1631,7 @@ fn gm_event_app(world_toml: &str) -> App {
         );
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.clear();
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1753,10 +1753,7 @@ fn gm_outcomes(app: &App) -> Vec<crate::gm_action::GmActionOutcome> {
 fn a_gm_fire_runs_the_ordinary_handler_exactly_once() {
     let mut app = gm_event_app(SCRIPT_GM_EVENTS);
     assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len(),
+        app.world().resource::<WorldContentRuntime>().triggers.len(),
         2
     );
 
@@ -1772,7 +1769,7 @@ fn a_gm_fire_runs_the_ordinary_handler_exactly_once() {
             runtime.pending_gm_event_fires.is_empty(),
             "the arm is consumed by the firing it caused"
         );
-        assert!(runtime.trigger_states[0].fired, "the one-shot latch is set");
+        assert!(runtime.triggers[0].fired, "the one-shot latch is set");
     }
 
     // A SECOND Fire, with its own correlation, is not a retry — and must still
@@ -1907,10 +1904,7 @@ fn destroy_named(app: &mut App, name: &str) {
 fn a_gm_fire_bypasses_an_unmet_condition_and_spends_the_automatic_occurrence() {
     let mut app = gm_event_app(SCRIPT_GM_AUTOMATIC_EVENTS);
     assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len(),
+        app.world().resource::<WorldContentRuntime>().triggers.len(),
         3
     );
 
@@ -1925,7 +1919,7 @@ fn a_gm_fire_bypasses_an_unmet_condition_and_spends_the_automatic_occurrence() {
             "Fire bypasses the automatic condition and runs the ordinary handler"
         );
         assert!(
-            runtime.trigger_states[0].fired,
+            runtime.triggers[0].fired,
             "and consumes the ordinary one-shot latch"
         );
         assert!(runtime.pending_gm_event_fires.is_empty());
@@ -1996,10 +1990,7 @@ fn an_automatic_event_that_already_fired_refuses_to_fire_again_for_a_gm() {
 fn a_paused_event_evaluates_nothing_and_banks_no_missed_edge() {
     let mut app = gm_event_app(SCRIPT_GM_PAUSABLE_EVENTS);
     assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len(),
+        app.world().resource::<WorldContentRuntime>().triggers.len(),
         3
     );
 
@@ -2024,9 +2015,9 @@ fn a_paused_event_evaluates_nothing_and_banks_no_missed_edge() {
             0,
             "a paused event runs nothing"
         );
-        assert!(!runtime.trigger_states[1].fired);
+        assert!(!runtime.triggers[1].fired);
         assert!(
-            runtime.trigger_states[1].seen_destroyed.is_empty(),
+            runtime.triggers[1].seen_destroyed.is_empty(),
             "a paused condition is not evaluated, so it banks no missed edge"
         );
     }
@@ -2086,10 +2077,7 @@ fn fire_still_works_while_the_event_is_paused() {
             1,
             "a paused event still honours an explicit Fire"
         );
-        assert!(
-            runtime.trigger_states[0].fired,
-            "through the ordinary latch"
-        );
+        assert!(runtime.triggers[0].fired, "through the ordinary latch");
         assert!(runtime.pending_gm_event_fires.is_empty());
         assert!(
             runtime.paused_gm_events.contains("base-world::evac"),
@@ -2133,7 +2121,7 @@ fn only_a_declared_pause_control_is_toggleable_and_the_projection_says_so() {
     set_gm_event_paused(&mut app, "pause-2", "base-world::evac", true);
     let runtime = app.world().resource::<WorldContentRuntime>();
     let events = crate::gm_event::controllable_events(
-        &runtime.trigger_states,
+        &runtime.triggers,
         &runtime.pending_gm_event_fires,
         &runtime.paused_gm_events,
         &runtime.pending_gm_event_skips,
@@ -2168,10 +2156,7 @@ fn only_a_declared_pause_control_is_toggleable_and_the_projection_says_so() {
 fn an_armed_skip_spends_one_occurrence_and_runs_no_handler() {
     let mut app = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
     assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len(),
+        app.world().resource::<WorldContentRuntime>().triggers.len(),
         3
     );
 
@@ -2203,11 +2188,11 @@ fn an_armed_skip_spends_one_occurrence_and_runs_no_handler() {
             "the skipped occurrence ran no handler"
         );
         assert!(
-            runtime.trigger_states[0].fired,
+            runtime.triggers[0].fired,
             "but it advanced the ordinary lifecycle exactly as a firing does"
         );
         assert!(
-            runtime.trigger_states[0].last_fired_elapsed.is_some(),
+            runtime.triggers[0].last_fired_elapsed.is_some(),
             "including the cooldown stamp a repeat trigger measures from"
         );
         assert_eq!(
@@ -2248,7 +2233,7 @@ fn an_armed_skip_spends_one_occurrence_and_runs_no_handler() {
     // And the once-only one is spent for good: its occurrence is gone.
     assert!(
         crate::gm_event::controllable_events(
-            &app.world().resource::<WorldContentRuntime>().trigger_states,
+            &app.world().resource::<WorldContentRuntime>().triggers,
             &Default::default(),
             &Default::default(),
             &Default::default(),
@@ -2496,7 +2481,7 @@ fn an_armed_skip_is_identical_across_same_seed_runs_and_across_a_resume() {
         let runtime = app.world().resource::<WorldContentRuntime>();
         (
             runtime
-                .trigger_states
+                .triggers
                 .iter()
                 .map(|state| {
                     (
@@ -2562,7 +2547,7 @@ fn an_automatic_event_without_controls_is_invisible_and_unfireable() {
     let listed: Vec<String> = {
         let runtime = app.world().resource::<WorldContentRuntime>();
         crate::gm_event::controllable_events(
-            &runtime.trigger_states,
+            &runtime.triggers,
             &runtime.pending_gm_event_fires,
             &runtime.paused_gm_events,
             &runtime.pending_gm_event_skips,
@@ -6893,10 +6878,7 @@ fn unloading_a_layer_releases_the_gm_pauses_on_its_own_events() {
     runtime.paused_gm_events.insert("base-world::alarm".into());
     runtime.paused_gm_events.insert("l1.toml::alarm".into());
 
-    assert_eq!(
-        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "l1.toml"),
-        1
-    );
+    assert_eq!(remove_layer_triggers(&mut runtime, "l1.toml"), 1);
     assert_eq!(
         runtime.paused_gm_events.iter().cloned().collect::<Vec<_>>(),
         vec!["base-world::alarm".to_string()],
@@ -6904,10 +6886,7 @@ fn unloading_a_layer_releases_the_gm_pauses_on_its_own_events() {
     );
 
     // And an unload that contributed nothing takes nothing.
-    assert_eq!(
-        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "never_loaded.toml"),
-        0
-    );
+    assert_eq!(remove_layer_triggers(&mut runtime, "never_loaded.toml"), 0);
     assert_eq!(runtime.paused_gm_events.len(), 1);
 }
 

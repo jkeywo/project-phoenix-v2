@@ -2356,15 +2356,13 @@ fn a_fireless_run_still_republishes_the_mission_panel_after_a_lobby_round_trip()
         "world.gm.event.breach_alarm".to_string(),
     ));
     let mut runtime = crate::world::server::WorldContentRuntime::default();
-    runtime
-        .trigger_states
-        .push(crate::world::content::TriggerState {
-            trigger,
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: Default::default(),
-            last_fired_elapsed: None,
-        });
+    runtime.triggers.push(crate::world::content::TriggerState {
+        trigger,
+        fired: false,
+        origin_layer: None,
+        seen_destroyed: Default::default(),
+        last_fired_elapsed: None,
+    });
     app.insert_resource(runtime)
         .init_resource::<crate::gm_action::GmActionLog>()
         .init_resource::<crate::gm_action::LocalGmActionRefusals>()
@@ -2442,15 +2440,13 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
     controls.pause = true;
     trigger.gm_controls = Some(controls);
     let mut runtime = crate::world::server::WorldContentRuntime::default();
-    runtime
-        .trigger_states
-        .push(crate::world::content::TriggerState {
-            trigger,
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: Default::default(),
-            last_fired_elapsed: None,
-        });
+    runtime.triggers.push(crate::world::content::TriggerState {
+        trigger,
+        fired: false,
+        origin_layer: None,
+        seen_destroyed: Default::default(),
+        last_fired_elapsed: None,
+    });
     runtime.pending_gm_event_fires.insert(EVENT.to_string());
     runtime.paused_gm_events.insert(EVENT.to_string());
     app.insert_resource(runtime)
@@ -2552,15 +2548,13 @@ fn a_lobby_round_trip_disarms_a_waiting_gm_skip() {
     controls.skip = true;
     trigger.gm_controls = Some(controls);
     let mut runtime = crate::world::server::WorldContentRuntime::default();
-    runtime
-        .trigger_states
-        .push(crate::world::content::TriggerState {
-            trigger,
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: Default::default(),
-            last_fired_elapsed: None,
-        });
+    runtime.triggers.push(crate::world::content::TriggerState {
+        trigger,
+        fired: false,
+        origin_layer: None,
+        seen_destroyed: Default::default(),
+        last_fired_elapsed: None,
+    });
     runtime.pending_gm_event_skips.insert(EVENT.to_string());
     app.insert_resource(runtime)
         .init_resource::<crate::gm_action::GmActionLog>()

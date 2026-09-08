@@ -65,6 +65,35 @@ pub struct WorldTriggerRegistry {
     generation: u64,
 }
 
+/// Immutable ordered access without exposing mutable entries or handlers.
+pub struct TriggerStates<'a>(std::slice::Iter<'a, TriggerEntry>);
+
+impl<'a> Iterator for TriggerStates<'a> {
+    type Item = &'a TriggerState;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|entry| &entry.state)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+impl ExactSizeIterator for TriggerStates<'_> {}
+impl<'a> IntoIterator for &'a WorldTriggerRegistry {
+    type Item = &'a TriggerState;
+    type IntoIter = TriggerStates<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl From<Vec<TriggerState>> for WorldTriggerRegistry {
+    fn from(states: Vec<TriggerState>) -> Self {
+        let mut registry = Self::default();
+        registry.replace_declarative(states);
+        registry
+    }
+}
+
 impl WorldTriggerRegistry {
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -80,8 +109,8 @@ impl WorldTriggerRegistry {
     }
 
     /// Ordered, immutable state for observers and the authoritative digest walk.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &TriggerState> {
-        self.entries.iter().map(|entry| &entry.state)
+    pub fn iter(&self) -> TriggerStates<'_> {
+        TriggerStates(self.entries.iter())
     }
 
     pub fn handler(&self, index: usize) -> Option<&ScriptHandlerRef> {
@@ -169,10 +198,38 @@ impl WorldTriggerRegistry {
         name_to_uuid: &HashMap<String, String>,
         entity_groups: &HashMap<String, HashSet<String>>,
         elapsed: f32,
-        mut chains: impl FnMut(Option<&str>) -> (Vec<&'a FlagStore>, Vec<Option<String>>),
+        chains: impl FnMut(Option<&str>) -> (Vec<&'a FlagStore>, Vec<Option<String>>),
     ) -> Vec<FiredWorldTrigger> {
+        self.evaluate_filtered(
+            events,
+            name_to_uuid,
+            entity_groups,
+            elapsed,
+            chains,
+            (|_| true, |_| true),
+        )
+    }
+
+    /// Pause is checked before any condition state changes; dispatch filtering
+    /// runs only after an occurrence has advanced its ordinary latch/cooldown.
+    pub fn evaluate_filtered<'a>(
+        &mut self,
+        events: &[WorldEvent],
+        name_to_uuid: &HashMap<String, String>,
+        entity_groups: &HashMap<String, HashSet<String>>,
+        elapsed: f32,
+        mut chains: impl FnMut(Option<&str>) -> (Vec<&'a FlagStore>, Vec<Option<String>>),
+        filters: (
+            impl FnMut(&TriggerState) -> bool,
+            impl FnMut(&TriggerState) -> bool,
+        ),
+    ) -> Vec<FiredWorldTrigger> {
+        let (mut should_evaluate, mut should_dispatch) = filters;
         let mut fired = Vec::new();
         for entry in &mut self.entries {
+            if !should_evaluate(&entry.state) {
+                continue;
+            }
             let (flags, layers) = chains(entry.state.origin_layer.as_deref());
             if let Some(context) = evaluate_single_trigger(
                 &mut entry.state,
@@ -183,6 +240,9 @@ impl WorldTriggerRegistry {
                 entity_groups,
                 elapsed,
             ) {
+                if !should_dispatch(&entry.state) {
+                    continue;
+                }
                 fired.push(FiredWorldTrigger {
                     trigger_id: entry.state.trigger.id.clone(),
                     handler: entry.handler.clone(),
@@ -190,6 +250,46 @@ impl WorldTriggerRegistry {
                 });
             }
         }
+        fired
+    }
+
+    /// Attempt selected manual occurrences in authored order. Neither automatic
+    /// Pause nor Skip applies here. Suppressed predicates/cooldowns retain arms;
+    /// spent and missing identities are removed. Returned handlers stay paired.
+    pub fn fire_manual<'a>(
+        &mut self,
+        pending: &mut std::collections::BTreeSet<String>,
+        elapsed: f32,
+        mut identity: impl FnMut(&TriggerState) -> Option<String>,
+        mut chains: impl FnMut(Option<&str>) -> Vec<&'a FlagStore>,
+    ) -> Vec<FiredWorldTrigger> {
+        let mut live = std::collections::BTreeSet::new();
+        let mut fired = Vec::new();
+        for entry in &mut self.entries {
+            let Some(id) = identity(&entry.state) else {
+                continue;
+            };
+            live.insert(id.clone());
+            if !pending.contains(&id) {
+                continue;
+            }
+            if !super::content::manual_fire_is_still_live(&entry.state) {
+                pending.remove(&id);
+                continue;
+            }
+            let flags = chains(entry.state.origin_layer.as_deref());
+            if let Some(context) =
+                super::content::fire_manual_trigger(&mut entry.state, &flags, elapsed)
+            {
+                pending.remove(&id);
+                fired.push(FiredWorldTrigger {
+                    trigger_id: entry.state.trigger.id.clone(),
+                    handler: entry.handler.clone(),
+                    context,
+                });
+            }
+        }
+        pending.retain(|id| live.contains(id));
         fired
     }
 

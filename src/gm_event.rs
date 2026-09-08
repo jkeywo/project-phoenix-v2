@@ -77,7 +77,7 @@
 //!
 //! # Determinism
 //!
-//! Everything here reads `WorldContentRuntime::trigger_states`, whose order is
+//! Everything here reads `WorldContentRuntime::triggers`, whose order is
 //! a deterministic replay of the same load on every peer, and the pending-fire
 //! set is a `BTreeSet`. No map iteration order, no wall clock and no
 //! host-local gating reaches the projection or the pending set.
@@ -187,20 +187,20 @@ pub struct GmMissionProjection {
 }
 
 /// The complete controllable-event registry for one live world, in
-/// `trigger_states` order.
+/// `triggers` order.
 ///
 /// A duplicate qualified id cannot reach here: the load-time validation pass
 /// refuses a world that authors one within a layer, and the layer prefix
 /// separates the rest. If one somehow did, [`find_event`] would resolve the
 /// FIRST — deterministic on every peer rather than arbitrary.
-pub fn controllable_events(
-    states: &[TriggerState],
+pub fn controllable_events<'a>(
+    states: impl IntoIterator<Item = &'a TriggerState>,
     pending_fires: &std::collections::BTreeSet<String>,
     paused_events: &std::collections::BTreeSet<String>,
     pending_skips: &std::collections::BTreeSet<String>,
 ) -> Vec<GmMissionEvent> {
     states
-        .iter()
+        .into_iter()
         .filter_map(|state| {
             let controls = state.trigger.gm_controls.as_ref()?;
             let id = qualified_event_id(state.origin_layer.as_deref(), &controls.id);
@@ -229,14 +229,19 @@ pub fn controllable_events(
 /// honoured" set, shared by the Fire and Skip cleanups in
 /// [`crate::world::server::tick_trigger_pipeline`] so the two levers can never
 /// disagree about which ids a layer unload took with it.
-pub fn live_event_ids(states: &[TriggerState]) -> std::collections::BTreeSet<String> {
-    states.iter().filter_map(state_event_id).collect()
+pub fn live_event_ids<'a>(
+    states: impl IntoIterator<Item = &'a TriggerState>,
+) -> std::collections::BTreeSet<String> {
+    states.into_iter().filter_map(state_event_id).collect()
 }
 
-/// Resolve one qualified id to its `trigger_states` index.
-pub fn find_event(states: &[TriggerState], qualified: &str) -> Option<usize> {
+/// Resolve one qualified id to its `triggers` index.
+pub fn find_event<'a>(
+    states: impl IntoIterator<Item = &'a TriggerState>,
+    qualified: &str,
+) -> Option<usize> {
     states
-        .iter()
+        .into_iter()
         .position(|state| state_event_id(state).as_deref() == Some(qualified))
 }
 
@@ -245,9 +250,15 @@ pub fn find_event(states: &[TriggerState], qualified: &str) -> Option<usize> {
 /// This is the revalidation `apply_due_actions` performs at the agreed apply
 /// tick rather than at request time: a layer carrying the event can be unloaded
 /// between the two, and the answer must be the same on every peer.
-pub fn fireable_index(states: &[TriggerState], qualified: &str) -> Option<usize> {
-    let index = find_event(states, qualified)?;
-    states[index]
+pub fn fireable_index<'a>(
+    states: impl IntoIterator<Item = &'a TriggerState>,
+    qualified: &str,
+) -> Option<usize> {
+    let (index, state) = states
+        .into_iter()
+        .enumerate()
+        .find(|(_, state)| state_event_id(state).as_deref() == Some(qualified))?;
+    state
         .trigger
         .gm_controls
         .as_ref()
@@ -265,9 +276,15 @@ pub fn fireable_index(states: &[TriggerState], qualified: &str) -> Option<usize>
 /// condition is evaluated at all and a spent trigger is simply one whose
 /// evaluation would decline anyway; making it a refusal would give the GM a
 /// toggle that silently stops answering.
-pub fn pausable_index(states: &[TriggerState], qualified: &str) -> Option<usize> {
-    let index = find_event(states, qualified)?;
-    states[index]
+pub fn pausable_index<'a>(
+    states: impl IntoIterator<Item = &'a TriggerState>,
+    qualified: &str,
+) -> Option<usize> {
+    let (index, state) = states
+        .into_iter()
+        .enumerate()
+        .find(|(_, state)| state_event_id(state).as_deref() == Some(qualified))?;
+    state
         .trigger
         .gm_controls
         .as_ref()
@@ -283,9 +300,15 @@ pub fn pausable_index(states: &[TriggerState], qualified: &str) -> Option<usize>
 /// levers are read separately rather than through one "is operable" predicate
 /// because an author may declare either without the other, and a GM who presses
 /// a button a scenario never authored must get a refusal, not the other lever.
-pub fn skippable_index(states: &[TriggerState], qualified: &str) -> Option<usize> {
-    let index = find_event(states, qualified)?;
-    states[index]
+pub fn skippable_index<'a>(
+    states: impl IntoIterator<Item = &'a TriggerState>,
+    qualified: &str,
+) -> Option<usize> {
+    let (index, state) = states
+        .into_iter()
+        .enumerate()
+        .find(|(_, state)| state_event_id(state).as_deref() == Some(qualified))?;
+    state
         .trigger
         .gm_controls
         .as_ref()
@@ -299,8 +322,8 @@ pub fn skippable_index(states: &[TriggerState], qualified: &str) -> Option<usize
 pub struct LastGmMissionProjection(Option<GmMissionProjection>);
 
 /// Build the absolute projection from live authoritative state.
-pub fn projection(
-    states: &[TriggerState],
+pub fn projection<'a>(
+    states: impl IntoIterator<Item = &'a TriggerState>,
     pending_fires: &std::collections::BTreeSet<String>,
     paused_events: &std::collections::BTreeSet<String>,
     pending_skips: &std::collections::BTreeSet<String>,
@@ -335,16 +358,16 @@ pub fn publish_mission_projection(
     mut last: ResMut<LastGmMissionProjection>,
     mut writer: MessageWriter<crate::console_bridge::GmMissionChanged>,
 ) {
-    let empty_states: Vec<TriggerState> = Vec::new();
+    let empty_states = crate::world::trigger_registry::WorldTriggerRegistry::default();
     let empty_ids = std::collections::BTreeSet::new();
     let (states, fires, paused, skips) = match runtime.as_deref() {
         Some(runtime) => (
-            runtime.trigger_states.as_slice(),
+            &runtime.triggers,
             &runtime.pending_gm_event_fires,
             &runtime.paused_gm_events,
             &runtime.pending_gm_event_skips,
         ),
-        None => (empty_states.as_slice(), &empty_ids, &empty_ids, &empty_ids),
+        None => (&empty_states, &empty_ids, &empty_ids, &empty_ids),
     };
     let mut next = projection(states, fires, paused, skips, &log, &refusals);
     let live: Vec<String> = ships.iter().map(|uuid| uuid.0.clone()).collect();

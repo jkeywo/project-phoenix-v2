@@ -300,7 +300,7 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
     // capture that started reading `Trigger::condition` would break here.
     fn table() -> crate::world::server::WorldContentRuntime {
         crate::world::server::WorldContentRuntime {
-            trigger_states: vec![
+            triggers: vec![
                 gm_event("breach", crate::world::config::TriggerCondition::Manual),
                 gm_event(
                     "sweep",
@@ -308,7 +308,8 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
                         entity_name: "courier".to_string(),
                     },
                 ),
-            ],
+            ]
+            .into(),
             ..Default::default()
         }
     }
@@ -495,7 +496,7 @@ fn paused_gm_events_round_trip_with_their_authored_trigger_table() {
     }
     fn table() -> crate::world::server::WorldContentRuntime {
         crate::world::server::WorldContentRuntime {
-            trigger_states: vec![
+            triggers: vec![
                 pausable("breach", crate::world::config::TriggerCondition::Manual),
                 pausable(
                     "sweep",
@@ -503,7 +504,8 @@ fn paused_gm_events_round_trip_with_their_authored_trigger_table() {
                         entity_name: "courier".to_string(),
                     },
                 ),
-            ],
+            ]
+            .into(),
             ..Default::default()
         }
     }
@@ -602,7 +604,7 @@ fn an_armed_gm_event_skip_round_trips_beside_an_armed_fire() {
     }
     fn table() -> crate::world::server::WorldContentRuntime {
         crate::world::server::WorldContentRuntime {
-            trigger_states: vec![gm_event("breach"), gm_event("evac"), gm_event("sweep")],
+            triggers: vec![gm_event("breach"), gm_event("evac"), gm_event("sweep")].into(),
             ..Default::default()
         }
     }

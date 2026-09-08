@@ -1234,13 +1234,14 @@ mod tests {
             "world.gm.event.breach_alarm".into(),
         ));
         let runtime = crate::world::server::WorldContentRuntime {
-            trigger_states: vec![crate::world::content::TriggerState {
+            triggers: vec![crate::world::content::TriggerState {
                 trigger,
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: Default::default(),
                 last_fired_elapsed: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
 
@@ -1326,13 +1327,14 @@ mod tests {
         controls.skip = true;
         trigger.gm_controls = Some(controls);
         let runtime = crate::world::server::WorldContentRuntime {
-            trigger_states: vec![crate::world::content::TriggerState {
+            triggers: vec![crate::world::content::TriggerState {
                 trigger,
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: Default::default(),
                 last_fired_elapsed: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
 
@@ -1745,13 +1747,14 @@ station = "tactical"
         controls.pause = true;
         trigger.gm_controls = Some(controls);
         let runtime = crate::world::server::WorldContentRuntime {
-            trigger_states: vec![crate::world::content::TriggerState {
+            triggers: vec![crate::world::content::TriggerState {
                 trigger,
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: Default::default(),
                 last_fired_elapsed: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
 

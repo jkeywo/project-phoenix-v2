@@ -2591,7 +2591,7 @@ pub fn apply_due_actions(
             GmAction::FireGmEvent { event } => {
                 let states_and_pending = content
                     .as_deref_mut()
-                    .map(|content| (&content.trigger_states, &mut content.pending_gm_event_fires));
+                    .map(|content| (&content.triggers, &mut content.pending_gm_event_fires));
                 match states_and_pending {
                     // No world at all: nothing is operable, which is the same
                     // answer a GM gets for an id that names no live event.
@@ -2776,7 +2776,7 @@ pub fn apply_due_actions(
                         Some(GmActionRefusalReason::UnknownGmEvent),
                     ),
                     Some(content) => {
-                        match crate::gm_event::pausable_index(&content.trigger_states, event) {
+                        match crate::gm_event::pausable_index(&content.triggers, event) {
                             None => (
                                 GmActionOutcome::Refused,
                                 Some(GmActionRefusalReason::UnknownGmEvent),
@@ -2809,7 +2809,7 @@ pub fn apply_due_actions(
             GmAction::ArmGmEventSkip { event } => {
                 let states_and_pending = content
                     .as_deref_mut()
-                    .map(|content| (&content.trigger_states, &mut content.pending_gm_event_skips));
+                    .map(|content| (&content.triggers, &mut content.pending_gm_event_skips));
                 match states_and_pending {
                     // No world at all: nothing is operable, which is the same
                     // answer a GM gets for an id that names no live event.
@@ -3569,10 +3569,8 @@ station = "helm"
         for grant in grants {
             journal.insert(grant).unwrap();
         }
-        let runtime = crate::world::server::WorldContentRuntime {
-            trigger_states: states,
-            ..Default::default()
-        };
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.triggers.replace_declarative(states);
         let mut app = App::new();
         app.insert_resource(crate::sim_tick::SimTick(tick))
             .insert_resource(SimulationPaused(false))

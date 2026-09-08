@@ -180,3 +180,146 @@ fn continuation_row_preserves_the_existing_ron_shape() {
         "(index:0,fired:false)"
     );
 }
+
+#[test]
+fn filtered_evaluation_pauses_before_state_and_skips_after_latching() {
+    let staged = ["paused", "skipped", "ordinary"].map(|id| {
+        let mut row = scripted(id);
+        row.trigger.id = Some(id.into());
+        row
+    });
+    let mut registry = WorldTriggerRegistry::default();
+    registry.append_scripted(staged, None);
+    let flags = FlagStore::default();
+    let mut skipped = false;
+    let fired = registry.evaluate_filtered(
+        &[WorldEvent::WorldLoaded],
+        &HashMap::new(),
+        &HashMap::new(),
+        3.0,
+        |_| (vec![&flags], vec![None]),
+        (
+            |state| state.trigger.id.as_deref() != Some("paused"),
+            |state| {
+                if state.trigger.id.as_deref() == Some("skipped") {
+                    skipped = true;
+                    false
+                } else {
+                    true
+                }
+            },
+        ),
+    );
+    assert!(skipped);
+    assert!(!registry[0].fired);
+    assert_eq!(registry[0].last_fired_elapsed, None);
+    assert!(registry[1].fired);
+    assert_eq!(registry[1].last_fired_elapsed, Some(3.0));
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].handler.as_ref().unwrap().script_path, "ordinary");
+    assert_eq!(fired[0].trigger_id.as_deref(), Some("ordinary"));
+}
+
+#[test]
+fn manual_after_middle_layer_replacement_keeps_owned_handlers_and_authored_order() {
+    let mut registry = WorldTriggerRegistry::default();
+    for (owner, function) in [("a", "alpha"), ("b", "old_beta"), ("c", "gamma")] {
+        let mut row = scripted("shared.rhai");
+        row.handler = function.into();
+        row.trigger.id = Some(owner.into());
+        registry.append_scripted([row], Some(owner));
+    }
+    registry.remove_layer("b");
+    let mut replacement = scripted("shared.rhai");
+    replacement.handler = "new_beta".into();
+    replacement.trigger.id = Some("b".into());
+    registry.append_scripted([replacement], Some("b"));
+    let flags = FlagStore::default();
+    let mut pending = ["b", "a", "c", "missing"]
+        .map(str::to_owned)
+        .into_iter()
+        .collect();
+    let fired = registry.fire_manual(
+        &mut pending,
+        5.0,
+        |state| state.trigger.id.clone(),
+        |_| vec![&flags],
+    );
+    assert!(pending.is_empty());
+    assert_eq!(
+        fired
+            .iter()
+            .map(|row| (
+                row.trigger_id.as_deref().unwrap(),
+                row.handler.as_ref().unwrap().fn_name.as_str(),
+                row.context.origin_layer.as_deref().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("a", "alpha", "a"),
+            ("c", "gamma", "c"),
+            ("b", "new_beta", "b")
+        ]
+    );
+    // Removing the live table cannot change the already-selected handler pair.
+    registry.clear();
+    assert_eq!(fired[2].handler.as_ref().unwrap().fn_name, "new_beta");
+}
+
+#[test]
+fn manual_cooldown_retains_arm_and_restore_resumes_the_same_paired_handler() {
+    let mut row = scripted("repeat.rhai");
+    row.trigger.id = Some("repeat".into());
+    row.trigger.repeat = true;
+    row.trigger.cooldown_secs = Some(10.0);
+    let mut registry = WorldTriggerRegistry::default();
+    registry.append_scripted([row.clone()], Some("layer"));
+    let flags = FlagStore::default();
+    let mut pending = ["repeat".to_string()].into_iter().collect();
+    assert_eq!(
+        registry
+            .fire_manual(
+                &mut pending,
+                5.0,
+                |state| state.trigger.id.clone(),
+                |_| vec![&flags]
+            )
+            .len(),
+        1
+    );
+    let saved = registry.capture();
+    let mut restored = WorldTriggerRegistry::default();
+    restored.append_scripted([row], Some("layer"));
+    restored.restore(&saved).unwrap();
+    assert_eq!(restored.capture(), saved);
+    // The same elapsed stamp cannot create a second occurrence in this tick.
+    pending.insert("repeat".into());
+    let first = registry.fire_manual(
+        &mut pending.clone(),
+        5.0,
+        |state| state.trigger.id.clone(),
+        |_| vec![&flags],
+    );
+    let resumed = restored.fire_manual(
+        &mut pending,
+        5.0,
+        |state| state.trigger.id.clone(),
+        |_| vec![&flags],
+    );
+    assert!(first.is_empty());
+    assert!(resumed.is_empty());
+    assert!(pending.contains("repeat"));
+    assert_eq!(restored.capture(), registry.capture());
+    let resumed = restored.fire_manual(
+        &mut pending,
+        15.0,
+        |state| state.trigger.id.clone(),
+        |_| vec![&flags],
+    );
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(
+        resumed[0].handler.as_ref().unwrap().script_path,
+        "repeat.rhai"
+    );
+    assert!(pending.is_empty());
+}

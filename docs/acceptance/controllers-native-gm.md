@@ -20,6 +20,9 @@ for exclusive-assignment checks; include identical models if available.
 - [ ] Change a binding, tuning and the hide-touch-controls preference. Move the
       console to another monitor, then quit and relaunch the host with the same
       hull. Confirm all preferences and an unambiguous device selection return.
+- [ ] While a console reloads after a move or a changed screen split, its
+      controller remains unavailable to other consoles. Turning the console Off
+      releases that controller for another console to select.
 - [ ] Change controller enumeration order across restarts. Verify a different
       device never inherits control from a saved slot number. Where identical
       controllers cannot be distinguished, verify selection is required.
@@ -67,6 +70,9 @@ for exclusive-assignment checks; include identical models if available.
 - [ ] Return to the lobby, change the arrangement, quit and relaunch. The GM
       placement restores with the saved bridge layout; missing hardware is
       explained and can be reassigned before launch.
+- [ ] Before launch, disconnect every monitor except the GM's. The viewscreen
+      does not overlap it. Use Return to host lobby on the GM screen; the GM
+      role turns Off and the lobby becomes available on the remaining monitor.
 
 An actual embedded-view crash needs a reproducible runtime fault or diagnostic
 harness. Record that case separately from unplug testing; automated recovery

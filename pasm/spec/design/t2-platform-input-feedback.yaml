@@ -35,7 +35,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Standard Gamepad Inputs with Explicit Device Ownership
-      summary: "T2 uses the browser standard gamepad mapping, including face and D-pad buttons, Select, Start and both stick buttons. Discrete actions may bind buttons or an axis direction crossing an authored threshold; continuous actions may bind analogue axes with inversion and deadzone. Multi-button controller chords are out of scope. A private profile names the preferred connected gamepad. When several exist the user selects explicitly; disconnect stops its input and warns rather than transferring control, keyboard remains available, and reconnect resumes only after neutral-input detection."
+      summary: "T2 uses the browser standard gamepad mapping, including face and D-pad buttons, Select, Start and both stick buttons. Discrete actions may bind buttons or an axis direction crossing an authored threshold; continuous actions may bind analogue axes with inversion and deadzone. Multi-button controller chords are out of scope. A private profile names the preferred connected gamepad. An unambiguous preferred device restores automatically; ambiguous matches or several devices without a saved match require explicit selection. Disconnect stops its input and warns rather than transferring control, keyboard remains available, and reconnect resumes only after neutral-input detection."
       rationale:
         - "Explicit device ownership prevents a newly connected or drifting controller from silently taking a live Station."
     architecture:

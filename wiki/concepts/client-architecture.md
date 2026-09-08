@@ -240,10 +240,10 @@ the resulting valid candidate is stored and atomically applied. The old
 a corrupt current record yields authored defaults rather than silently
 resurrecting the old value.
 
-`gui/gamepad-presentation.js` derives controller help from the semantic registry
+`gui/help-panel.js` derives controller help from the semantic registry
 and current remaps. Settings and the claimed-station lobby guide share that
-content and refresh it for the active console context. Helm joystick and lateral
-thrust visibility are evaluated independently against connected hardware and
+content and refresh it for the active console context. `gui/gamepad-presentation.js`
+evaluates Helm joystick and lateral thrust visibility independently against connected hardware and
 usable bindings; disconnect or missing bindings restores the corresponding
 control. Ordinary clients use Change station through release confirmation;
 host-assigned native screens retain their console tabs without release controls.

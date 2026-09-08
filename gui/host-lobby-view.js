@@ -385,6 +385,7 @@ export function hostLobbyViewModel(s, prevPhase, layout, surface) {
     hint,
     aiLaunchVisible,
     monitorRow: hostLobbyMonitorRow(layout),
+    gmRow: hostLobbyGmRow(layout),
   };
 }
 
@@ -425,6 +426,8 @@ export function hostLobbyMonitorRow(layout) {
     const marks = [];
     if (m.viewscreen) marks.push({ id: 'server.monitor_row.viewscreen', params: {} });
     if (m.primary) marks.push({ id: 'server.monitor_row.primary', params: {} });
+    const gameMaster = layout.gm?.assigned_to === m.identity;
+    if (gameMaster) marks.push({ id: 'server.gm_monitor_row.label', params: {} });
     // The consoles this monitor holds. A press onto one of these is refused by
     // the layout law (no silent eviction), and the row says so up front rather
     // than only after the press — which is what `occupants` is for. Kept
@@ -446,12 +449,37 @@ export function hostLobbyMonitorRow(layout) {
       primary: !!m.primary,
       stations,
       occupants,
+      ...(gameMaster ? { disabled: true } : {}),
     };
   });
 
   return {
     buttons,
     notices: (layout.notices || []).map((n) => ({ id: n.id, params: n.params || {} })),
+  };
+}
+
+/** The host's own GM eligibility verdict, including its lobby-only Off action. */
+export function hostLobbyGmRow(layout) {
+  if (!layout?.gm) return null;
+  const gm = layout.gm;
+  const monitors = new Map((layout.monitors || []).map(m => [m.identity, m]));
+  const buttons = (gm.monitors || []).flatMap(screen => {
+    const monitor = monitors.get(screen.identity);
+    if (!monitor) return [];
+    return [{
+      identity: screen.identity,
+      label: monitorLabel(monitor),
+      selected: screen.choice === 'selected',
+      disabled: screen.choice === 'excluded' || (!gm.role_mutable && !gm.assigned_to),
+      reason: screen.excluded === 'occupied'
+        ? { id: 'server.gm_monitor_row.occupied', params: {} } : null,
+    }];
+  });
+  return {
+    off: { selected: !gm.assigned_to, disabled: !gm.role_mutable },
+    buttons,
+    message: { id: gm.role_mutable ? 'server.gm_monitor_row.before_launch' : 'server.gm_monitor_row.during_mission', params: {} },
   };
 }
 
@@ -549,6 +577,9 @@ export function hostLobbyStationRows(layout) {
       // an unassign that does not exist.
       const authored = monitor.reserved || [];
       let reason = null;
+      if (screen.excluded === 'game-master') {
+        reason = { id: 'server.gm_monitor_row.label', params: {} };
+      }
       if (screen.excluded === 'full') {
         // Joined here rather than in the string table, for `occupants`' reason:
         // `t()` interpolates values, and a comma is punctuation rather than

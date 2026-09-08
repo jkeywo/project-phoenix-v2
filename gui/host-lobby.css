@@ -813,6 +813,8 @@
   cursor: pointer;
 }
 .monitor-button:hover { border-color: var(--edge-bright); }
+.monitor-row[hidden] { display: none; }
+.monitor-button:disabled { opacity: .55; cursor: default; }
 .monitor-button.viewscreen {
   border-color: var(--cyan);
   background: var(--cyan-deep);

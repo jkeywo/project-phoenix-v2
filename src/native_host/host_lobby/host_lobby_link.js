@@ -47,6 +47,7 @@ import {
 import {
   renderHostLobby,
   MONITOR_BUTTON_ATTR,
+  GM_MONITOR_BUTTON_ATTR,
   STATION_BUTTON_ATTR,
   STATION_SCREEN_ATTR,
 } from './gui/host-lobby-render.js';
@@ -597,8 +598,14 @@ document.addEventListener('click', (ev) => {
     return;
   }
 
+  const gm = closest(GM_MONITOR_BUTTON_ATTR);
+  if (gm) {
+    if (!gm.disabled) send({ kind: 'set-game-master', monitor: gm.getAttribute(GM_MONITOR_BUTTON_ATTR) || null });
+    return;
+  }
+
   const target = closest(MONITOR_BUTTON_ATTR);
-  if (!target) return;
+  if (!target || target.disabled) return;
   const monitor = target.getAttribute(MONITOR_BUTTON_ATTR);
   if (!monitor) return;
   send({ kind: 'set-viewscreen', monitor });

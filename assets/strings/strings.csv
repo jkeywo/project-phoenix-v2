@@ -2803,3 +2803,10 @@ world.combat_test.gm.comms.briefing,Combat Test optional GM-authored hail,[Defen
 world.combat_test.gm.comms.briefing_message,Combat Test optional Starbase Alpha briefing,[Starbase Alpha to defence ships. Keep the approaches clear and report when your ship is ready.]
 world.combat_test.gm.comms.acknowledge,Combat Test crew response to the optional briefing,[Our ship is ready.]
 world.combat_test.gm.comms.acknowledged,Combat Test Starbase Alpha briefing follow-up,[Acknowledged. Hold your assigned approach and await further orders.]
+
+server.gm_monitor_row.label,Native lobby dedicated GM screen row,[Game Master]
+server.gm_monitor_row.occupied,Native GM monitor unavailable because another surface occupies it,[Screen already in use]
+server.gm_monitor_row.before_launch,Native GM screen lifecycle explanation in lobby,[Choose a dedicated screen before launch.]
+server.gm_monitor_row.during_mission,Native GM screen lifecycle explanation in mission,[The GM screen can move; its role stays enabled until the mission ends.]
+server.bridge_layout.gm_monitor_occupied,Native GM screen assignment refused; {monitor},[Screen {monitor} is already in use.]
+server.bridge_layout.gm_role_frozen,Native GM role changed after launch,[Enable or disable the GM screen before launching the mission.]

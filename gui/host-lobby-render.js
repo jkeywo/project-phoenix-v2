@@ -62,6 +62,7 @@
  * not have.
  */
 export const MONITOR_BUTTON_ATTR = 'data-monitor';
+export const GM_MONITOR_BUTTON_ATTR = 'data-gm-monitor';
 
 /**
  * The attributes a station's screen button carries (issue #1331).
@@ -319,6 +320,7 @@ export function renderHostLobby(doc, vm, t, opts) {
         // legible only to somebody who can tell two blues apart (WCAG 1.4.1).
         // The mark below says the same thing in words for the same reason.
         el.setAttribute('aria-pressed', b.viewscreen ? 'true' : 'false');
+        el.disabled = !!b.disabled;
 
         const name = doc.createElement('span');
         name.className = 'monitor-button-name';
@@ -358,6 +360,49 @@ export function renderHostLobby(doc, vm, t, opts) {
         line.textContent = t(n.id, n.params);
         notices.appendChild(line);
       }
+    }
+  }
+
+  let gmRow = doc.getElementById('gm-monitor-row');
+  if (!gmRow && vm.gmRow && row) {
+    gmRow = doc.createElement('div');
+    gmRow.id = 'gm-monitor-row';
+    gmRow.className = 'monitor-row';
+    row.after(gmRow);
+  }
+  if (gmRow) {
+    gmRow.hidden = !vm.gmRow;
+    gmRow.innerHTML = '';
+    if (vm.gmRow) {
+      const label = doc.createElement('span');
+      label.id = 'gm-monitor-row-label';
+      label.textContent = t('server.gm_monitor_row.label');
+      gmRow.appendChild(label);
+      const buttons = doc.createElement('div');
+      buttons.className = 'monitor-row-buttons';
+      buttons.setAttribute('role', 'group');
+      buttons.setAttribute('aria-labelledby', label.id);
+      for (const b of [{ identity: '', label: { id: 'server.station_row.off', params: {} }, ...vm.gmRow.off }, ...vm.gmRow.buttons]) {
+        const button = doc.createElement('button');
+        button.type = 'button';
+        button.className = 'monitor-button' + (b.selected ? ' viewscreen' : '');
+        button.setAttribute(GM_MONITOR_BUTTON_ATTR, b.identity);
+        button.setAttribute('aria-pressed', b.selected ? 'true' : 'false');
+        button.disabled = !!b.disabled;
+        button.textContent = t(b.label.id, b.label.params);
+        if (b.reason) {
+          const reason = doc.createElement('span');
+          reason.className = 'monitor-button-stations';
+          reason.textContent = t(b.reason.id, b.reason.params);
+          button.appendChild(reason);
+        }
+        buttons.appendChild(button);
+      }
+      gmRow.appendChild(buttons);
+      const message = doc.createElement('span');
+      message.className = 'monitor-row-notice';
+      message.textContent = t(vm.gmRow.message.id, vm.gmRow.message.params);
+      gmRow.appendChild(message);
     }
   }
 
@@ -449,6 +494,7 @@ if (typeof window !== 'undefined') {
   window.hostLobbyRender = {
     renderHostLobby,
     MONITOR_BUTTON_ATTR,
+    GM_MONITOR_BUTTON_ATTR,
     STATION_BUTTON_ATTR,
     STATION_SCREEN_ATTR,
   };

@@ -1399,7 +1399,10 @@ fn publish_bridge_layout(
     let (Some(bridge), Some(mut layout)) = (bridge, layout) else {
         return;
     };
-    if !layout.is_changed() && !phase.as_ref().is_some_and(|p| p.is_changed()) && !assignments.as_ref().is_some_and(|a| a.is_changed()) {
+    if !layout.is_changed()
+        && !phase.as_ref().is_some_and(|p| p.is_changed())
+        && !assignments.as_ref().is_some_and(|a| a.is_changed())
+    {
         return;
     }
     let mut payload = bridge_layout_payload(&layout.layout, &layout.monitors, &layout.notices);

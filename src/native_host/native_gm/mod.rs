@@ -1,6 +1,7 @@
 //! A local GM beside the ship in the same authoritative native simulation.
 pub mod bridge;
 pub mod document;
+pub mod start;
 
 use super::bridge_display::BridgeLayoutResource;
 use crate::console_bridge::*;
@@ -40,6 +41,8 @@ pub struct NativeGmMetadata {
     pub phase: GamePhase,
     pub role_presets: Vec<crate::world::config::GmRolePresetEntry>,
     pub gms: Vec<GmOperator>,
+    pub start_policy: start::NativeGmReadinessTotals,
+    pub start_result: Option<crate::lobby::start_policy::StartGrantResult>,
 }
 
 pub struct NativeGmPlugin;
@@ -59,6 +62,7 @@ impl Plugin for NativeGmPlugin {
             .init_resource::<NativeGmAuthority>()
             .init_resource::<GmRoster>()
             .add_plugins((
+                start::NativeGmStartPlugin,
                 crate::gm_projection::GmProjectionPlugin,
                 crate::gm_activity::GmActivityPlugin,
             ))
@@ -232,8 +236,8 @@ fn drain_records(world: &mut World) {
                     && world.resource::<State<GamePhase>>().get() == &GamePhase::Lobby =>
             {
                 world
-                    .resource_mut::<crate::server::bridge::PendingForceStart>()
-                    .0 = true;
+                    .resource_mut::<start::NativeGmStartRequests>()
+                    .request();
             }
             NativeGmRecord::Action { request } => {
                 let Some(request) = codec::decode_gm_action_request(&request) else {
@@ -265,6 +269,8 @@ fn sync_presence(
     mut paused: ResMut<crate::gm_action::SimulationPaused>,
     config: Option<Res<crate::world::config::WorldConfig>>,
     mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
+    starts: Option<Res<start::NativeGmStartRequests>>,
 ) {
     let assigned = layout.as_ref().and_then(|l| l.layout.game_master_monitor());
     if *phase.get() == GamePhase::Lobby {
@@ -341,6 +347,13 @@ fn sync_presence(
             .map(|c| c.gm_role_presets.clone())
             .unwrap_or_default(),
         gms: roster.projection(),
+        start_policy: start::readiness_totals(
+            sessions
+                .as_deref()
+                .map_or_else(Default::default, |s| s.0.readiness_tally()),
+            &roster,
+        ),
+        start_result: starts.as_deref().and_then(|s| s.last_result().cloned()),
     }) {
         surface.bridge.publish("metadata", json);
     }

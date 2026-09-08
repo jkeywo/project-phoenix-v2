@@ -2,9 +2,8 @@
  * gui/gamepad-input.js — one explicitly-owned standard gamepad.
  *
  * Bindings name portable controls from the W3C "standard" mapping. Hardware
- * ids never enter a binding or selection: the browser slot is the local
- * preference, while an ephemeral generation prevents a new connection which
- * reuses that slot from inheriting the old connection's ownership.
+ * ids describe the preferred device, while an ephemeral generation prevents a
+ * replacement in the same browser slot inheriting a connection's ownership.
  *
  * This module is DOM-free. Fabricated Gamepad snapshots drive the same poller
  * used by client.html, including selection, capture, edges and neutral gates.
@@ -172,9 +171,37 @@ export function gamepadBindingPressed(value, gamepad) {
 export function enumerateGamepads(snapshot) {
   return Array.from(snapshot || [])
     .filter(Boolean)
-    .map((pad) => ({ index: Number(pad.index), supported: pad.mapping === 'standard' }))
+    .map((pad) => ({ index: Number(pad.index), supported: pad.mapping === 'standard',
+      ...(pad.assignedTo ? { assignedTo: pad.assignedTo } : {}),
+      ...(pad.available === false ? { available: false } : {}),
+    }))
     .filter((pad) => Number.isInteger(pad.index) && pad.index >= 0)
     .sort((a, b) => a.index - b.index);
+}
+
+export function gamepadDevicePreference(pad) {
+  return pad && typeof pad.id === 'string' && pad.id.trim() && pad.mapping === 'standard'
+    ? { id: pad.id, mapping: 'standard' } : null;
+}
+
+export function usableGamepadControls(pad) {
+  if (!pad || pad.mapping !== 'standard') return [];
+  return CONTROL_ENTRIES.filter(([, control]) => control.negativeIndex != null
+    ? pad.buttons?.[control.negativeIndex] != null && pad.buttons?.[control.positiveIndex] != null
+    : control.input === 'axis' ? Number.isFinite(pad.axes?.[control.index])
+      : pad.buttons?.[control.index] != null).map(([id]) => id);
+}
+
+/** Identical controllers have no portable serial number: never guess between them. */
+export function matchPreferredGamepad(snapshot, preference) {
+  if (!preference?.id || preference.mapping !== 'standard') return { status: 'none' };
+  const matches = Array.from(snapshot || []).filter((pad) => pad
+    && pad.id === preference.id && pad.mapping === preference.mapping);
+  if (matches.length > 1) return { status: 'ambiguous' };
+  if (!matches.length) return { status: 'disconnected' };
+  const pad = matches[0];
+  return pad.available === false ? { status: 'assigned' }
+    : { status: 'matched', index: Number(pad.index) };
 }
 
 function firstCaptureBinding(gamepad, options = {}) {
@@ -276,6 +303,8 @@ export function createGamepadInputRuntime(options = {}) {
   const connections = new Map();
   let devices = [];
   let selection = null;
+  let preferredDevice = null;
+  let restoreStatus = 'none';
   let captureTarget = null;
   let previousPressed = new Set();
   const continuousOutputs = new Map();
@@ -300,15 +329,30 @@ export function createGamepadInputRuntime(options = {}) {
     for (const device of enumerateGamepads(latestSnapshot)) {
       present.add(device.index);
       const record = connection(device.index);
-      if (!record.connected) {
+      const identity = latestSnapshot[device.index]?.id || '';
+      if (!record.connected || record.identity !== identity) {
         record.connected = true;
         record.generation += 1;
+        record.identity = identity;
       }
     }
     for (const [index, record] of connections) {
       if (record.connected && !present.has(index)) record.connected = false;
     }
     devices = enumerateGamepads(latestSnapshot);
+    if (preferredDevice && !selectedPad()) {
+      const match = matchPreferredGamepad(latestSnapshot, preferredDevice);
+      restoreStatus = match.status;
+      if (match.status === 'ambiguous') selection = null;
+      if (match.status === 'matched') {
+        flushContinuous();
+        flushDiscreteHolds();
+        selection = { index: match.index, generation: connection(match.index).generation };
+        previousPressed.clear();
+        neutralGate = true;
+        options.requestSelection?.(match.index);
+      }
+    }
   }
 
   function selectedPad() {
@@ -316,7 +360,7 @@ export function createGamepadInputRuntime(options = {}) {
     const record = connection(selection.index);
     if (!record.connected || record.generation !== selection.generation) return null;
     const pad = latestSnapshot[selection.index];
-    return pad && Number(pad.index) === selection.index ? pad : null;
+    return pad && Number(pad.index) === selection.index && pad.available !== false ? pad : null;
   }
 
   function readActions(context) {
@@ -407,10 +451,13 @@ export function createGamepadInputRuntime(options = {}) {
   }
 
   function status() {
-    if (!selection) return 'none';
+    if (restoreStatus === 'ambiguous' && !selectedPad()) return 'ambiguous';
+    if (restoreStatus === 'assigned' && !selectedPad()) return 'assigned';
+    if (!selection) return preferredDevice ? 'disconnected' : 'none';
     const pad = selectedPad();
     if (!pad) return 'disconnected';
     if (pad.mapping !== 'standard') return 'unsupported';
+    if (pad.nativeOwned === false) return 'pending';
     if (neutralGate) return 'neutral';
     return 'ready';
   }
@@ -419,6 +466,10 @@ export function createGamepadInputRuntime(options = {}) {
     return {
       devices: devices.map((device) => ({ ...device })),
       selectedIndex: selection ? selection.index : null,
+      preferredDevice,
+      connected: selectedPad()?.mapping === 'standard' && selectedPad().nativeOwned !== false,
+      controls: usableGamepadControls(selectedPad()),
+      context: lastContext,
       status: status(),
       capturing: captureTarget ? { ...captureTarget } : null,
     };
@@ -445,6 +496,9 @@ export function createGamepadInputRuntime(options = {}) {
       flushContinuous();
       flushDiscreteHolds();
       selection = null;
+      preferredDevice = null;
+      restoreStatus = 'none';
+      options.requestSelection?.(null);
       captureTarget = null;
       previousPressed.clear();
       neutralGate = false;
@@ -459,10 +513,22 @@ export function createGamepadInputRuntime(options = {}) {
       notify();
       return { status: pad ? 'unsupported' : 'disconnected' };
     }
+    if (pad.available === false) return { status: 'assigned' };
     selection = { index: slot, generation: record.generation };
+    preferredDevice = gamepadDevicePreference(pad);
+    restoreStatus = 'none';
+    options.requestSelection?.(slot);
     captureTarget = null;
     neutralize();
     return { status: 'selected', index: slot };
+  }
+
+  function restoreDevice(preference) {
+    select(null);
+    preferredDevice = preference?.id && preference.mapping === 'standard' ? { ...preference } : null;
+    observe(getGamepads());
+    notify();
+    return state();
   }
 
   /**
@@ -635,7 +701,7 @@ export function createGamepadInputRuntime(options = {}) {
       return state();
     }
     const pad = selectedPad();
-    if (!pad || pad.mapping !== 'standard') {
+    if (!pad || pad.mapping !== 'standard' || pad.nativeOwned === false) {
       flushContinuous(timestamp);
       flushDiscreteHolds();
       previousPressed.clear();
@@ -786,7 +852,7 @@ export function createGamepadInputRuntime(options = {}) {
   }
 
   return {
-    poll, start, state, select, restorePreferred, beginCapture, endCapture, neutralize,
+    poll, start, state, select, restorePreferred, restoreDevice, beginCapture, endCapture, neutralize,
     noteConnected, noteDisconnected,
   };
 }

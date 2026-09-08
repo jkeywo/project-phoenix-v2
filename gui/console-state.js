@@ -228,10 +228,11 @@ export function repairCoreAndTargets(systemHull, stationSystems, damageableSyste
 
 function withObjectiveTargets(entities, objectives) {
   const targets = activeObjectiveTargetNames(objectives);
-  if (targets.size === 0) return entities || [];
   return (entities || []).map(e => {
-    if (!entityMatchesObjectiveTarget(e, targets)) return e;
-    return { ...e, objective_target: true };
+    // WorldSetup / EntitySpawned / reconnect metadata can contain another
+    // ship's global hint, or a stale one after resolution. Only this ship's
+    // ObjectiveSummary grants an annotation; never mutate the shared input.
+    return { ...e, objective_target: entityMatchesObjectiveTarget(e, targets) };
   });
 }
 
@@ -244,6 +245,8 @@ export function buildRadarRegions(entities, objectives = []) {
       // shape geometry still comes from the entity's own [shape]/
       // [asteroid_field] fields.
       if (!e || !e.region_colour) return null;
+      const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
+      if (tags.includes('objective_marker') && !e.objective_target) return null;
       const shape = e.shape
         ? String(e.shape).toLowerCase()
         : ((e.inner_radius || 0) > 0 ? 'torus' : 'sphere');
@@ -333,6 +336,7 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
     if (!a || !a.radar_icon) return null;
 
     const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+    if (tags.includes('objective_marker') && !a.objective_target) return null;
     if (shows.length > 0 && !tags.some(t => shows.includes(t)) && !a.objective_target) return null;
 
     const ax = entityX(a), az = entityZ(a);
@@ -796,7 +800,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   }
   if (blips.length === 0) {
     blips = buildBlips(
-      state.asteroids || [],
+      withObjectiveTargets(state.asteroids, state.objectives),
       state.shipX || 0,
       state.shipZ || 0,
       state.shipYaw || 0,
@@ -1189,7 +1193,7 @@ export function buildHelmConsoleState(state, systemIds = []) {
   // damage — see `apply_radar_damage_modifiers`) over the static ship config.
   const range = bb.radar_range ?? state.helmRadarRange ?? HELM_RADAR_RANGE;
   // Exclude objective_marker entities — objectives only show on the nav chart.
-  const helmEntities = (state.asteroids || []).filter(e => {
+  const helmEntities = withObjectiveTargets(state.asteroids, state.objectives).filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
     return !tags.includes('objective_marker');
   });
@@ -1870,13 +1874,19 @@ function scanPayload(state) {
  */
 export function buildSensorsConsoleState(state, systemIds = []) {
   const bb = blackboardOfKind(state, 'Sensors', systemIds)?.data;
+  const overrides = bb?.contact_overrides || {};
+  const originalEntities = state.asteroids || [];
+  const ordinary = originalEntities.filter(entity => overrides[entity.uuid] !== 'conceal');
+  const selectedMode = overrides[state.sensorsTarget] || 'normal';
+  state = { ...state, asteroids: ordinary,
+    sensorsTarget: selectedMode === 'conceal' ? null : state.sensorsTarget };
   const range = bb ? (bb.radar_range ?? SENSORS_RADAR_RANGE)
                    : (state.sensorsRadarRange ?? SENSORS_RADAR_RANGE);
   const radarShows   = bb ? (bb.radar_shows   ?? state.sensorsRadarShows)
                           : state.sensorsRadarShows;
   const radarSelects = bb ? (bb.radar_selects ?? state.sensorsRadarSelects)
                           : state.sensorsRadarSelects;
-  const entities = state.asteroids;
+  const entities = withObjectiveTargets(state.asteroids, state.objectives);
   const blips = buildBlips(
     entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range,
@@ -1893,11 +1903,32 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     }
   );
 
+  // Reveal guarantees one position-only contact, including beyond ordinary range.
+  // The fixed neutral marker never copies authored icon, size, tags or identity.
+  const basicContacts = new Set();
+  for (const entity of originalEntities) {
+    if (overrides[entity.uuid] !== 'reveal' || blips.some(blip => blip.uuid === entity.uuid)) continue;
+    basicContacts.add(entity.uuid);
+    const blip = buildTargetBlip(entity.uuid, [entity], state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+      range, { rotate: true, edgeClamp: true, kind: 'contact', icon: 'contact', label: t('console.sensors.basic_contact') });
+    if (blip) { blip.icon = null; blip.basic_contact = true; blip.selectable = true; blips.push(blip); }
+  }
+
   // Target identity/tactical facts (issue #1378): shared with the Weapons
   // builder's own target lock card through the one helper, so the two never
   // derive these fields two different ways. `range` is passed for symmetry
   // with that caller and unused here, same as there.
-  const facts = targetFactsFor(state, state.sensorsTarget, range);
+  const selectedBasic = basicContacts.has(state.sensorsTarget);
+  const facts = targetFactsFor(selectedBasic ? { ...state, asteroids: [] } : state, state.sensorsTarget, range);
+  if (selectedBasic) {
+    const target = originalEntities.find(entity => entity.uuid === state.sensorsTarget);
+    if (target) {
+      facts.target_name = t('console.sensors.basic_contact');
+      const dx = entityX(target) - (state.shipX || 0), dz = entityZ(target) - (state.shipZ || 0);
+      facts.target_bearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+      facts.target_range = Math.hypot(dx, dz);
+    }
+  }
 
   // Target-relative offset for the trajectory projection below — sensors-only
   // (targetFactsFor deliberately does not expose it), so this is the one
@@ -1916,7 +1947,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   // so the intelligence stays confined to the Sensors scan surface. The host
   // publishes `Some(bool)` only for a Red-Alert-capable ship it has selected;
   // absent field (non-ship/incapable/no selection) reads as `null` → no row.
-  const sensorRadarBb = blackboardOfKind(state, 'SensorRadar', systemIds)?.data;
+  const sensorRadarBb = selectedMode !== 'conceal' && !selectedBasic ? blackboardOfKind(state, 'SensorRadar', systemIds)?.data : null;
   const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
 
   // Selected-target weapons power (issue #1397). Same authoritative path and
@@ -1952,7 +1983,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   );
   if (tacMarker) blips.push(tacMarker);
   const waypoint = buildWaypointBlip(
-    state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
+    overrides[state.navigationWaypoint?.source_uuid] === 'conceal' ? null : state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
@@ -1966,8 +1997,8 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
-    regions:                 state.regions || projectRadarRegions(
-      buildRadarRegions(entities, []),
+    regions:                 state.regions ? state.regions.filter(region => overrides[region.uuid] !== 'conceal') : projectRadarRegions(
+      buildRadarRegions(entities, state.objectives || []),
       shipX,
       shipZ,
       shipYaw,
@@ -1998,7 +2029,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     target_projection:  targetProjection,
     // The last scan reading (issue #1032) — a blackboard of its own, so it is
     // read from its own channel key rather than off the sensors one.
-    scan:               scanPayload(state),
+    scan:               (() => { const scan = scanPayload(state); return scan.reading && overrides[scan.reading.subject_uuid] === 'conceal' ? { ...scan, reading: null } : scan; })(),
     own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
     sensors_auto: systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')

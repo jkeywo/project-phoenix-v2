@@ -26,7 +26,7 @@
        REQUIRES the field: an un-built checkout leaves it empty and a host
        refuses the join with `client-stamp-missing` rather than admitting it,
        because every client that can reach a Phoenix host is a built bundle. -->
-  <meta name="phoenix-client-stamp" content="3/phoenix-base/1" />
+  <meta name="phoenix-client-stamp" content="4/phoenix-base/1" />
   <title data-i18n="client.doc_title">Project Phoenix — Console</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico" />
 <!-- The shared design vocabulary (PRD #1023 module 1): colours, edges, ink,
@@ -121,6 +121,7 @@
        realm. Logical bindings are copied to console iframes, but only the
        action's owning iframe receives semantic activation. -->
   <script type="module" src="gui/gamepad-input.js"></script>
+  <script type="module" src="gui/gamepad-presentation.js"></script>
   <script type="module" src="gui/composite-action-routing.js"></script>
   <!-- Parent-realm semantic action metadata + live private binding profile. The
        active console iframe owns its own registry instance and receives this
@@ -213,13 +214,15 @@
     #conn-diag-copy { pointer-events: auto; flex: 0 0 auto;
       font-size: var(--text-xs); color: var(--edge-strong); background: transparent;
       border: 1px solid var(--edge-strong); border-radius: 3px; padding: 0.1rem 0.4rem; }
-    #gamepad-input-alert { position: fixed; left: 50%; bottom: 3.5rem;
+    #gamepad-input-alert, #native-operator-profile-error { position: fixed; left: 50%; bottom: 3.5rem;
       transform: translateX(-50%); z-index: 26; max-width: min(32rem, 88vw);
       padding: 0.55rem 0.75rem; border: 1px solid var(--warning);
       border-radius: 3px; background: var(--surface-panel); color: var(--warning);
       font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm);
       line-height: 1.35; text-align: center; }
     #gamepad-input-alert[hidden] { display: none; }
+    #native-operator-profile-error { bottom: 6.5rem; }
+    #native-operator-profile-error[hidden] { display: none; }
     /* Typed join entry (issue #1111). Shown only when this page was opened
        with no host in its fragment — the case that until now was a dead end
        reading "no host id in URL". The field takes either the code
@@ -1332,6 +1335,9 @@
     /* Station list */
     #station-list { flex: 1; overflow-y: auto; display: flex;
       flex-direction: column; gap: var(--space-3); }
+    #claimed-station-help { flex: 1; min-height: 0; min-width: 0; overflow-y: auto;
+      padding: var(--space-3); }
+    #claimed-station-help[hidden] { display: none; }
 
     /* ── Station roster ──────────────────────────────────────────────────
        The artboard's `.st` row. Every value is the rung issue #1357's mapping
@@ -2078,6 +2084,7 @@
       <div id="lobby-body">
         <!-- Station list -->
         <div id="station-list"></div>
+        <section id="claimed-station-help" class="settings-documentation" hidden></section>
 
         <div id="lobby-side">
           <!-- At-your-station detail panel -->
@@ -2159,6 +2166,7 @@
        so a lost selected pad is visible and announced while the modal is shut. -->
   <div id="gamepad-input-alert" role="alert" aria-live="assertive"
        aria-atomic="true" hidden></div>
+  <div id="native-operator-profile-error" role="alert" aria-live="assertive" hidden></div>
   <div id="status" data-i18n="client.connecting">Connecting…</div>
   <!-- The readout and the control that copies it, in one left-anchored row so
        neither can reach the corner the lobby's READY button lives in. -->
@@ -3540,6 +3548,10 @@
         // Which label the release controls wear. The latch itself stays here:
         // it is page state the handler below mutates.
         releaseArmed,
+        assignedStation: window.__PHOENIX_ASSIGNED_STATION__ || null,
+        helpActions: window.currentGamepadHelpActions?.() || [],
+        gamepadConnected: window.currentGamepadState?.().connected === true,
+        gamepadContext: window.currentGamepadState?.().context || null,
       });
       // Detail-panel console auto-select (and clear on release) is part of
       // the view model.
@@ -3593,6 +3605,8 @@
       uiState.countdownSecs = window.lobbyState ? window.lobbyState.countdownSecs : 0;
       scheduleRender();
     }
+
+    window.refreshClaimedStationHelp = () => renderLobby(uiState);
 
     // Repair UI (issue #462): the full repair affordance is owned by the
     // Repair console iframe (gui/repair-console.html), which renders the hull
@@ -3768,6 +3782,7 @@
           updateFeedback(activeFeedbackPreferences);
         }
       } catch (_) { /* a cross-origin or not-yet-loaded frame is retried on load */ }
+      refreshGamepadPresentation();
     }
 
     function pushSemanticBindingsToConsoles() {
@@ -3780,6 +3795,7 @@
     }
 
     function operatorProfileStorage() {
+      if (window.PhoenixOperatorStorage) return window.PhoenixOperatorStorage;
       try { return window.localStorage; } catch (_) { return null; }
     }
 
@@ -3790,6 +3806,9 @@
         accessibility: window.simState ? window.simState.accessibilityProfile : null,
         bindings: semanticActionRegistry ? semanticActionRegistry.bindingProfile() : {},
         preferredGamepadSlot,
+        preferredGamepadDevice: gamepadInputRuntime?.state().preferredDevice
+          ?? operatorProfile?.gamepad?.preferredDevice,
+        hideTouchControls: operatorProfile?.gamepad?.hideTouchControls,
         tuning: semanticActionRegistry ? semanticActionRegistry.tuningProfile() : {},
         feedback: operatorProfile && operatorProfile.feedback,
         gmConfirmations: operatorProfile && operatorProfile.gmConfirmations,
@@ -3809,6 +3828,34 @@
     // accessibility-profile.js calls this after either Accessibility reducer.
     // Keeping the hook local avoids turning a private choice into a wire path.
     window.persistOperatorProfile = persistOperatorProfile;
+
+    window.currentGamepadState = () => gamepadInputRuntime?.state() || { connected: false };
+    window.currentGamepadHelpActions = () => semanticActionRegistry?.list() || [];
+    function refreshGamepadPresentation(state = window.currentGamepadState()) {
+      const api = window.GamepadPresentation;
+      if (api && semanticActionRegistry) {
+        const visibility = api.helmTouchVisibility(semanticActionRegistry.list('helm'), state,
+          operatorProfile?.gamepad?.hideTouchControls !== false);
+        for (const iframe of document.querySelectorAll('iframe')) {
+          try { api.applyHelmTouchVisibility(iframe.contentDocument, visibility); } catch (_) {}
+        }
+      }
+      window.refreshClaimedStationHelp?.();
+    }
+    window.addEventListener('phoenix-operator-profile-loaded', () => {
+      if (!semanticActionRegistry || !window.OperatorProfile) return;
+      applyPreparedOperatorProfile(window.OperatorProfile.loadOperatorProfile(
+        operatorProfileStorage(), { registry: semanticActionRegistry }));
+      settingsPanel?.rebuildContent?.();
+      refreshGamepadPresentation();
+    });
+    function updateNativeProfileStatus() {
+      const message = $('native-operator-profile-error');
+      if (!message) return;
+      message.hidden = !window.PhoenixOperatorStorageStatus;
+      message.textContent = message.hidden ? '' : t('settings.controls.profile.native_storage_error');
+    }
+    window.addEventListener('phoenix-operator-storage-status', updateNativeProfileStatus);
 
     function applyPreparedOperatorProfile(prepared) {
       const api = window.OperatorProfile;
@@ -3831,7 +3878,7 @@
       }
       if (gamepadInputRuntime
           && typeof gamepadInputRuntime.restorePreferred === 'function') {
-        gamepadInputRuntime.restorePreferred(applied.active.preferredGamepadSlot);
+        gamepadInputRuntime.restoreDevice(operatorProfile.gamepad.preferredDevice);
       }
       pushSemanticBindingsToConsoles();
       if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
@@ -4589,6 +4636,7 @@
         : null;
 
       if (window.OperatorProfile && semanticActionRegistry) {
+        updateNativeProfileStatus();
         const loadedProfile = window.OperatorProfile.loadOperatorProfile(
           operatorProfileStorage(),
           { registry: semanticActionRegistry },
@@ -4603,6 +4651,7 @@
       gamepadInputRuntime = (!operatorSurfaceCapabilities || operatorSurfaceCapabilities.gamepad)
         && typeof window.createGamepadInputRuntime === 'function'
         ? window.createGamepadInputRuntime({
+            requestSelection: (index) => window.PhoenixNativeGamepad?.select(index),
             getContext: () => window.CompositeActionRouting
               ? window.CompositeActionRouting.semanticContextForIframe(
                   activeConsoleIframe(), activeConsole,
@@ -4651,6 +4700,7 @@
             },
             onStateChange: (state) => {
               updateGamepadClientWarning(state);
+              refreshGamepadPresentation(state);
               if (settingsPanel
                   && typeof settingsPanel.updateGamepadState === 'function') {
                 settingsPanel.updateGamepadState(state);
@@ -4660,7 +4710,7 @@
         : null;
       if (gamepadInputRuntime
           && typeof gamepadInputRuntime.restorePreferred === 'function') {
-        gamepadInputRuntime.restorePreferred(preferredGamepadSlot);
+        gamepadInputRuntime.restoreDevice(operatorProfile?.gamepad?.preferredDevice);
       }
 
       installConsoleKeyRelay();
@@ -4718,6 +4768,7 @@
                 const result = gamepadInputRuntime.select(index);
                 if (result.status === 'selected' || result.status === 'none') {
                   preferredGamepadSlot = result.status === 'selected' ? result.index : null;
+                  operatorProfile.gamepad.preferredDevice = gamepadInputRuntime.state().preferredDevice;
                   persistOperatorProfile();
                 }
                 return result;
@@ -4727,6 +4778,12 @@
             if (!gamepadInputRuntime) return;
             if (active) gamepadInputRuntime.beginCapture(actionId, slot);
             else gamepadInputRuntime.endCapture(actionId, slot);
+          },
+          getHideTouchControls: () => operatorProfile?.gamepad?.hideTouchControls !== false,
+          onHideTouchControls: (hide) => {
+            operatorProfile.gamepad.hideTouchControls = hide;
+            persistOperatorProfile();
+            refreshGamepadPresentation();
           },
           onOperatorProfileExport: () => exportOperatorProfileJson(),
           onOperatorProfileImport: (json) => importOperatorProfileJson(json),

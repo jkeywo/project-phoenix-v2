@@ -55,6 +55,7 @@ import {
   createHostActionRegistry,
 } from './host-actions.js';
 import { GM_ACTION_CONTEXT } from './gm-session-actions.js';
+import { renderGmConfirmationSettings } from './gm-confirmation-settings.js';
 import { createGamepadInputRuntime } from './gamepad-input.js';
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import {
@@ -655,6 +656,12 @@ export function mountServerSettings(opts = {}) {
   }
 
   function buildControlsTab(body) {
+    if (currentHostActionContext() === GM_ACTION_CONTEXT && bindings.__hostGmConfirmationProfile) {
+      renderGmConfirmationSettings({ doc, target: body, t,
+        profile: bindings.__hostGmConfirmationProfile,
+        onImport: () => bindings.__hostGmConfirmations?.cancel(),
+      });
+    }
     const gamepadState = gamepad.state();
     semanticControls.render(body, {
       // One page-scoped catalogue means GM remaps use the same two-slot

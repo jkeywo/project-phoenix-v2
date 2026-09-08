@@ -35,6 +35,15 @@ export class PhNavigationMap extends PhElement {
   #selectedBlip = null;
   #toastTimer = null;
   #picking = false;
+  // GM placement mode (issue #1305): press/tap picks the position, dragging
+  // away from it picks the heading, and the keyboard path moves the same
+  // cursor and turns the same heading. All three commit through
+  // `#commitPlacement`, so mouse, touch and keyboard resolve ONE world
+  // placement rather than three near-identical ones.
+  #placementArmed = false;
+  #placementAnchor = null;
+  #placementHeadingDeg = 0;
+  #placementPointer = false;
   #keyboardCursorX = Number.NaN;
   #keyboardCursorY = Number.NaN;
   #keyboardCursorVisible = false;
@@ -64,7 +73,7 @@ export class PhNavigationMap extends PhElement {
       ':host { display: block; position: relative; touch-action: none; }',
       'canvas { display: block; width: 100%; height: 100%; touch-action: none; }',
       'canvas.picking { cursor: crosshair; }',
-      '#overlay {',
+      '#contact-overlay {',
       '  position: absolute; bottom: 0; left: 0; right: 0;',
       '  padding: 10px 14px 14px;',
       '  background: linear-gradient(0deg, rgba(var(--rgb-deep), 0.95) 0%, rgba(var(--rgb-deep), 0.7) 70%, transparent 100%);',
@@ -72,9 +81,9 @@ export class PhNavigationMap extends PhElement {
       '  font-family: "JetBrains Mono", monospace;',
       '  pointer-events: none; display: none;',
       '}',
-      '#overlay.show { display: block; }',
-      '#overlay .ov-name { font-size: var(--text-lg); color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
-      '#overlay .ov-detail { font-size: var(--text-xs); color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
+      '#contact-overlay.show { display: block; }',
+      '#contact-overlay .ov-name { font-size: var(--text-lg); color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
+      '#contact-overlay .ov-detail { font-size: var(--text-xs); color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
       '.st-hostile { color: var(--fire-hot); }',
       '.st-friendly { color: var(--loaded); }',
       '.st-neutral { color: var(--ink-dim); }',
@@ -129,7 +138,13 @@ export class PhNavigationMap extends PhElement {
       '    <button type="button" class="wp-btn" id="btn-clear-waypoint">' + t('console.navigation.clear_waypoint') + '</button>',
       '  </div>',
       '  <div class="toast" id="toast" role="status"></div>',
-      '  <div id="overlay">',
+      // Named "contact-overlay", not the generic "overlay", because Playwright's
+      // locators pierce open shadow roots (unlike getElementById/querySelector in
+      // real page code): a bare "#overlay" here collided with server.html's own
+      // page-level #overlay (the join/loading QR panel) and made every
+      // `page.locator('#overlay')` a strict-mode violation once this component
+      // sat anywhere in the GM console's DOM (issue #1319 gate finding).
+      '  <div id="contact-overlay">',
       '    <div class="ov-name" id="ov-name"></div>',
       '    <div class="ov-detail">',
       '      <span id="ov-kind"></span>',
@@ -146,7 +161,7 @@ export class PhNavigationMap extends PhElement {
     this.needsRender = true;
     this.rafId = null;
     this.resizeObserver = null;
-    this.overlay = this.shadowRoot.getElementById('overlay');
+    this.overlay = this.shadowRoot.getElementById('contact-overlay');
     this.toast = this.shadowRoot.getElementById('toast');
     this.btnSetWaypoint = this.shadowRoot.getElementById('btn-set-waypoint');
     this.btnSetSelected = this.shadowRoot.getElementById('btn-set-selected');
@@ -239,18 +254,26 @@ export class PhNavigationMap extends PhElement {
     return this.#selectedBlip && this.#selectedBlip.uuid || null;
   }
 
-  /** Return the free world position under the local keyboard cursor. */
-  navigationPlacement() {
+  /**
+   * The free world position under one CANVAS-BUFFER point.
+   *
+   * The single pixel-to-world conversion every placement path goes through —
+   * the pointer gesture, the touch gesture and the keyboard cursor alike — so
+   * "mouse and touch resolve the same world position independent of screen
+   * pixels" is true because there is one conversion, not three that agree.
+   * Buffer coordinates already divide out device pixel ratio and CSS size
+   * (`#eventBufPos`), and the result is metres.
+   */
+  #placementWorldAt(bufX, bufY) {
     if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return null;
-    this.#ensureKeyboardCursor();
     const state = this.#state || {};
     const range = state.range || 50000;
     const rangeClamped = range > 0 ? range : 50000;
     const R = Math.min(this.canvas.width, this.canvas.height) / 2;
     const scale = R / rangeClamped;
     const [x, z] = this.#screenToWorld(
-      this.#keyboardCursorX,
-      this.#keyboardCursorY,
+      bufX,
+      bufY,
       0,
       0,
       0,
@@ -259,6 +282,129 @@ export class PhNavigationMap extends PhElement {
       this.canvas.height / 2,
     );
     return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : null;
+  }
+
+  /** Return the free world position under the local keyboard cursor. */
+  navigationPlacement() {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return null;
+    this.#ensureKeyboardCursor();
+    return this.#placementWorldAt(this.#keyboardCursorX, this.#keyboardCursorY);
+  }
+
+  /**
+   * Arm GM placement mode (issue #1305).
+   *
+   * Armed, a press/tap on the chart picks a world position instead of panning,
+   * and dragging away from it picks a heading; the keyboard cursor and the
+   * bracket keys do the same without any pointer at all. Committing dispatches
+   * ONE `navplace` event carrying resolved world `{x, z, heading}` in metres
+   * and degrees — never pixels, and never an entity the caller has to resolve.
+   */
+  navigationBeginPlacement() {
+    if (!this.canvas) return false;
+    this.#placementArmed = true;
+    this.#placementPointer = false;
+    this.#placementAnchor = null;
+    this.#placementHeadingDeg = 0;
+    this.#ensureKeyboardCursor();
+    this.#keyboardCursorVisible = true;
+    this.canvas.classList.add('picking');
+    this.toggleAttribute('data-placement-armed', true);
+    this.needsRender = true;
+    this.#revealForGesture();
+    this.#showToast(t('component.navigation_map.place_prompt'), 4000);
+    return true;
+  }
+
+  /**
+   * Bring this chart to the operator who just armed a gesture on it.
+   *
+   * Arming a chart the operator cannot reach is the same as not arming it. The
+   * GM console is one long scrolling page and the placement panel sits ABOVE
+   * the workspace that holds the chart, so on an ordinary laptop viewport
+   * pressing PLACE armed a chart that was entirely below the fold: a press-and-
+   * drag landed on whatever was on screen instead, and nothing whatsoever
+   * happened. Scrolling into view fixes the pointer gesture; taking the focus
+   * fixes the keyboard one, which otherwise needs the operator to Tab to a
+   * chart they cannot see before the arrows do anything. `#beginPick` already
+   * takes the focus for the waypoint gesture, for the same reason.
+   *
+   * Guarded because `scrollIntoView` is layout the test DOM does not implement;
+   * the focus alone still arms usefully there.
+   */
+  #revealForGesture() {
+    if (typeof this.scrollIntoView === 'function') {
+      try {
+        this.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      } catch (_) {
+        this.scrollIntoView();
+      }
+    }
+    if (typeof this.focus === 'function') this.focus();
+  }
+
+  /** Disarm placement mode without committing anything. */
+  navigationCancelPlacement() {
+    if (!this.#placementArmed) return false;
+    this.#disarmPlacement();
+    this.#dispatch('navplacecancel', null);
+    return true;
+  }
+
+  /** Whether a placement gesture is currently armed. */
+  navigationPlacementArmed() {
+    return this.#placementArmed;
+  }
+
+  #disarmPlacement() {
+    this.#placementArmed = false;
+    this.#placementPointer = false;
+    this.#placementAnchor = null;
+    this.#placementHeadingDeg = 0;
+    if (this.canvas) this.canvas.classList.remove('picking');
+    this.toggleAttribute('data-placement-armed', false);
+    this.needsRender = true;
+  }
+
+  /**
+   * The world bearing from the placement anchor to one chart point, in the
+   * simulation's own convention (`atan2(dx, -dz)`: 0 faces -Z, 90 faces +X),
+   * normalised to [0, 360).
+   *
+   * A drag shorter than the tap threshold is not a heading: a plain click or
+   * tap places facing 0 rather than snapping to whatever sub-pixel jitter the
+   * pointer reported.
+   */
+  #placementHeadingTo(bufX, bufY, movedPixels) {
+    if (!this.#placementAnchor || movedPixels <= 5) return 0;
+    const point = this.#placementWorldAt(bufX, bufY);
+    if (!point) return 0;
+    const dx = point.x - this.#placementAnchor.x;
+    const dz = point.z - this.#placementAnchor.z;
+    if (dx === 0 && dz === 0) return 0;
+    const degrees = Math.atan2(dx, -dz) * 180 / Math.PI;
+    return ((degrees % 360) + 360) % 360;
+  }
+
+  #commitPlacement(anchor, headingDeg) {
+    if (!anchor) {
+      // A gesture that resolved no world point still has to say so. Disarming
+      // in silence leaves the panel that armed this chart believing it is
+      // still armed while the chart is not, and leaves the operator with a
+      // press that did nothing and no way to tell why. Cancelling is the
+      // honest report: the panel clears its arming and the row un-highlights.
+      this.#disarmPlacement();
+      this.#dispatch('navplacecancel', null);
+      return false;
+    }
+    const detail = {
+      x: anchor.x,
+      z: anchor.z,
+      heading: ((headingDeg % 360) + 360) % 360,
+    };
+    this.#disarmPlacement();
+    this.#dispatch('navplace', detail);
+    return true;
   }
 
   /** Apply one local contact-selection semantic operation. */
@@ -533,6 +679,9 @@ export class PhNavigationMap extends PhElement {
     }
 
     if (this.#keyboardCursorVisible) this.#drawKeyboardCursor(octx, W, H, px);
+    if (this.#placementArmed) {
+      this.#drawPlacement(octx, cx, cy, scale, px);
+    }
 
     if (this.#offscreen) {
       this.ctx.drawImage(this.#offscreen, 0, 0);
@@ -661,6 +810,58 @@ export class PhNavigationMap extends PhElement {
     octx.moveTo(x - radius, y); octx.lineTo(x + radius, y);
     octx.moveTo(x, y - radius); octx.lineTo(x, y + radius);
     octx.stroke();
+    octx.restore();
+  }
+
+  /**
+   * The armed placement: a ring at the picked position and an arm pointing the
+   * way the hull will face.
+   *
+   * Drawn from the SAME world values the commit will send, converted back
+   * through `#worldToScreen`, so what the operator sees is what the typed
+   * action carries rather than a second rendering of the raw gesture.
+   *
+   * That only holds if the marker uses the chart's own projection. This chart
+   * is world-absolute — the grid, the ship glyph and every blip project with
+   * `(0, 0, 0)`, and `#placementWorldAt` inverts with `(0, 0, 0)` — so the
+   * marker does too. Projecting it through `state.ship_pos`/`ship_heading`
+   * (which exist only to place and rotate the ship glyph, and which the crew
+   * nav charts do supply) would translate and rotate the ring away from the
+   * world position the `navplace` event actually carries.
+   */
+  #drawPlacement(octx, cx, cy, scale, px) {
+    const anchor = this.#placementAnchor
+      || (this.#keyboardCursorVisible ? this.navigationPlacement() : null);
+    if (!anchor) return;
+    const [sx, sy] = this.#worldToScreen(anchor.x, anchor.z, 0, 0, 0, scale, cx, cy);
+    const radius = 12 * px;
+    const rad = this.#placementHeadingDeg * Math.PI / 180;
+    octx.save();
+    octx.strokeStyle = phColor(this, 'var(--tactical)');
+    octx.lineWidth = Math.max(1, 2 * px);
+    octx.beginPath();
+    octx.arc(sx, sy, radius, 0, Math.PI * 2);
+    octx.stroke();
+    // The arm is the world point one arm-length along the heading, projected
+    // with the SAME `#worldToScreen` the ring used. Spelling the rotation a
+    // second time in screen trig is how the two drift apart; going through the
+    // projection makes the arm agree with the grid, the blips and the
+    // `navplace` payload by construction. (A bearing of θ is the world
+    // direction (sin θ, -cos θ), which this projection lands on screen as
+    // (+sin θ, +cos θ) — screen +y is world -z.)
+    const denom = scale * this.#zoom;
+    if (denom > 0) {
+      const armMetres = (radius * 2.2) / denom;
+      const [ax, ay] = this.#worldToScreen(
+        anchor.x + Math.sin(rad) * armMetres,
+        anchor.z - Math.cos(rad) * armMetres,
+        0, 0, 0, scale, cx, cy,
+      );
+      octx.beginPath();
+      octx.moveTo(sx, sy);
+      octx.lineTo(ax, ay);
+      octx.stroke();
+    }
     octx.restore();
   }
 
@@ -1120,10 +1321,34 @@ export class PhNavigationMap extends PhElement {
     // cursor and commit through the same semantic placement adapter. Holding
     // Shift exposes/moves that cursor outside pick mode, so a remapped Place
     // binding can use an arbitrary chart coordinate without any drag gesture.
-    if (cursorDelta && (this.#picking || event.shiftKey)) {
+    if (cursorDelta && (this.#picking || this.#placementArmed || event.shiftKey)) {
       event.preventDefault();
       this.#moveKeyboardCursor(cursorDelta[0], cursorDelta[1]);
       return;
+    }
+    // The accessible placement path (issue #1305), and deliberately the SAME
+    // state the pointer gesture writes: the arrows above move the cursor that
+    // becomes the position, and these turn the heading a drag would have set.
+    // No pointer, no drag, one `navplace`.
+    if (this.#placementArmed) {
+      if (key === 'Escape') {
+        event.preventDefault();
+        this.navigationCancelPlacement();
+        return;
+      }
+      const turn = key === '[' || key === ',' ? -15 : key === ']' || key === '.' ? 15 : 0;
+      if (turn !== 0) {
+        event.preventDefault();
+        this.#placementHeadingDeg = ((this.#placementHeadingDeg + turn) % 360 + 360) % 360;
+        this.needsRender = true;
+        return;
+      }
+      if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
+        if (event.composedPath()[0] !== this) return;
+        event.preventDefault();
+        this.#commitPlacement(this.navigationPlacement(), this.#placementHeadingDeg);
+        return;
+      }
     }
     if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
       // Only the HOST's own Enter/Space commits the selection as a waypoint.
@@ -1219,6 +1444,17 @@ export class PhNavigationMap extends PhElement {
   #boundMouseDown = (e) => {
     if (this.#touchActive) return;
     const cpos = this.#eventBufPos(e);
+    if (this.#placementArmed) {
+      // Placement owns the gesture: the press picks the position, so the pan
+      // that a press would ordinarily start is deliberately not begun.
+      this.#placementPointer = true;
+      this.#placementAnchor = this.#placementWorldAt(cpos.x, cpos.y);
+      this.#placementHeadingDeg = 0;
+      this.#dragStartX = cpos.x;
+      this.#dragStartY = cpos.y;
+      this.needsRender = true;
+      return;
+    }
     this.#isDragging = true;
     this.#tapMoved = false;
     this.#dragStartX = cpos.x;
@@ -1228,6 +1464,13 @@ export class PhNavigationMap extends PhElement {
   };
 
   #boundMouseMove = (e) => {
+    if (this.#placementPointer) {
+      const cpos = this.#eventBufPos(e);
+      const moved = Math.hypot(cpos.x - this.#dragStartX, cpos.y - this.#dragStartY);
+      this.#placementHeadingDeg = this.#placementHeadingTo(cpos.x, cpos.y, moved);
+      this.needsRender = true;
+      return;
+    }
     if (!this.#isDragging) return;
     const cpos = this.#eventBufPos(e);
     const dx = cpos.x - this.#dragStartX;
@@ -1239,6 +1482,11 @@ export class PhNavigationMap extends PhElement {
   };
 
   #boundMouseUp = (e) => {
+    if (this.#placementPointer) {
+      this.#placementPointer = false;
+      this.#commitPlacement(this.#placementAnchor, this.#placementHeadingDeg);
+      return;
+    }
     if (!this.#isDragging) return;
     this.#isDragging = false;
     if (!this.#tapMoved) {
@@ -1255,6 +1503,24 @@ export class PhNavigationMap extends PhElement {
 
   #boundTouchStart = (e) => {
     this.#touchActive = true;
+    if (this.#placementArmed && e.touches.length === 1) {
+      // The same branch the mouse takes, reading the same buffer coordinates
+      // through `#eventBufPos`, so a touch resolves the identical world point.
+      const cpos = this.#eventBufPos(e);
+      this.#placementPointer = true;
+      this.#placementAnchor = this.#placementWorldAt(cpos.x, cpos.y);
+      this.#placementHeadingDeg = 0;
+      this.#dragStartX = cpos.x;
+      this.#dragStartY = cpos.y;
+      this.needsRender = true;
+      return;
+    }
+    if (this.#placementArmed && e.touches.length === 2) {
+      // A pinch is a zoom, not a placement: abandon the gesture but stay armed
+      // so the operator can place after framing the shot.
+      this.#placementPointer = false;
+      this.#placementAnchor = null;
+    }
     if (e.touches.length === 1) {
       const cpos = this.#eventBufPos(e);
       this.#isDragging = true;
@@ -1278,6 +1544,13 @@ export class PhNavigationMap extends PhElement {
 
   #boundTouchMove = (e) => {
     e.preventDefault();
+    if (this.#placementPointer && e.touches.length === 1) {
+      const cpos = this.#eventBufPos(e);
+      const moved = Math.hypot(cpos.x - this.#dragStartX, cpos.y - this.#dragStartY);
+      this.#placementHeadingDeg = this.#placementHeadingTo(cpos.x, cpos.y, moved);
+      this.needsRender = true;
+      return;
+    }
     if (e.touches.length === 2 && this.#lastPinchDist > 0) {
       const t0 = e.touches[0], t1 = e.touches[1];
       const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
@@ -1296,6 +1569,12 @@ export class PhNavigationMap extends PhElement {
   };
 
   #boundTouchEnd = (e) => {
+    if (this.#placementPointer) {
+      this.#placementPointer = false;
+      this.#commitPlacement(this.#placementAnchor, this.#placementHeadingDeg);
+      if (e.touches.length === 0) this.#touchActive = false;
+      return;
+    }
     if (this.#lastPinchDist > 0) {
       this.#lastPinchDist = 0;
     }

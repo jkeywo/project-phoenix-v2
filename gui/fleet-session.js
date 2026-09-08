@@ -126,6 +126,7 @@ import {
   rosterOf,
   simulationRosterOf,
   setCrewReadiness as updateCrewReadiness,
+  canonicalStationRatings,
   setGmReady as updateGmReady,
   setAdmission,
   setStartValidation as updateStartValidation,
@@ -623,7 +624,8 @@ export function createFleetOwner(opts) {
       // The authenticated connection decides the role. A ship cannot claim a
       // GM vote, and member-supplied role/operator fields are never inspected.
       if (Object.prototype.hasOwnProperty.call(body, 'crew')) {
-        const result = updateCrewReadiness(fleet, slot.id, body.crew);
+        const result = updateCrewReadiness(fleet, slot.id, body.crew, body.station_ratings);
+        if (!result.ok) return;
         if (result.ok) {
           fleet = result.fleet;
           changed = true;
@@ -983,9 +985,9 @@ export function createFleetOwner(opts) {
     },
 
     /** Replace this ship host's spectator-free connected/ready player tally. */
-    setCrewReadiness(tally) {
+    setCrewReadiness(tally, stationRatings = []) {
       if (ownerGm) return false;
-      const result = updateCrewReadiness(fleet, fleet.owner, tally);
+      const result = updateCrewReadiness(fleet, fleet.owner, tally, stationRatings);
       if (!result.ok) return false;
       fleet = result.fleet;
       publish();
@@ -1106,6 +1108,7 @@ export function createFleetMember(opts) {
   let gmJoinCandidate = false;
   let announced = { ship, name };
   let localCrewReadiness = { connected: 0, ready: 0 };
+  let localStationRatings = [];
   let localGmReady = false;
   let localStartValidation = false;
   let closed = false;
@@ -1204,7 +1207,7 @@ export function createFleetMember(opts) {
     if (!mine || closed || !joiner) return false;
     const body = acceptedRole === HOST_ROLE_GM
       ? { gm_ready: localGmReady, validation: localStartValidation }
-      : { crew: localCrewReadiness, validation: localStartValidation };
+      : { crew: localCrewReadiness, station_ratings: localStationRatings, validation: localStartValidation };
     joiner.sendFrame(encodeHostFrame(startStateFrame(body)));
     return true;
   };
@@ -1442,8 +1445,11 @@ export function createFleetMember(opts) {
     },
 
     /** Cache/send this ship host's spectator-free player readiness tally. */
-    setCrewReadiness(tally = {}) {
+    setCrewReadiness(tally = {}, stationRatings = []) {
       if (acceptedRole !== HOST_ROLE_SHIP || closed || (roster && roster.frozen)) return false;
+      const ratings = canonicalStationRatings(stationRatings);
+      if (ratings === null) return false;
+      localStationRatings = ratings;
       localCrewReadiness = {
         connected: tally && tally.connected,
         ready: tally && tally.ready,

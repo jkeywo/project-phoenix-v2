@@ -111,10 +111,9 @@
       <div class="console-body">
         <!-- Navigation view: on screen only while this document is mounted
              as the cruiser's auxiliary "navigation" Station. Which view is
-             visible is decided in comms.console.js from which family the
-             received payload actually carries (issue #1379) — never a
-             client-local toggle, because a single-family payload never
-             carries both at once (see buildConsoleStateInner). Starts
+             visible is decided in comms.console.js from the authored System
+             ids and their projected families. Visiting family data does not
+             change which Station this document represents. Starts
              hidden — "comms" is this document's primary identity (the
              non-auxiliary Station row) — the first real push settles it
              either way before the operator sees the placeholder. -->

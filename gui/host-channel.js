@@ -34,11 +34,17 @@
  * the scenario buttons were fixed (issue #949): two call sites found, and no
  * reason to think a third would not appear.
  *
- * `gm_entity` and `gm_activity` are deliberate exceptions. They are strict domain DTOs whose
- * String Table display ids must remain raw through parsing and state; only the
- * map and inspector resolve its known display fields at presentation. Recursive
- * localisation here could otherwise mutate opaque strings before strict DTO
- * validation, including a value that happens to equal a String Table key.
+ * `gm_entity`, `gm_activity`, `gm_mission`, `gm_spawn` and `gm_comms` are deliberate
+ * exceptions. They are strict domain DTOs whose String Table display ids must
+ * remain raw through parsing and state; only the map, inspector, mission panel
+ * and spawn panel resolve their known display fields at presentation.
+ * Recursive localisation here could otherwise mutate opaque strings before
+ * strict DTO validation, including a value that happens to equal a String
+ * Table key — `gm_mission` carries authored event labels and `gm_spawn`
+ * carries an authored palette's `label` ids alongside the palette/variant
+ * `id`s the typed spawn action puts on the wire, so a substitution here would
+ * both double-resolve the label and rewrite an identity. `gm_comms` also
+ * retains exact operator-authored text, even when it matches a String Table id.
  *
  * For every other channel, use the same rule as localiseTree: substitute only
  * what the table actually holds.
@@ -98,8 +104,10 @@ export function createHostChannel({ handlers, strings }) {
       // GM DTOs are parsed by strict adapters and localised only at their
       // explicit presentation sites. Preserve UUIDs, weapon/System ids, and
       // raw String Table display ids exactly as Rust sent them.
-      handler(name === 'gm_entity' || name === 'gm_activity'
-        ? payload : localiseHostPayload(payload, strings));
+      handler(
+        name === 'gm_entity' || name === 'gm_activity' || name === 'gm_mission' || name === 'gm_spawn' || name === 'gm_comms'
+          ? payload : localiseHostPayload(payload, strings),
+      );
     } else {
       console.warn('[Phoenix] unhandled host channel:', name);
     }

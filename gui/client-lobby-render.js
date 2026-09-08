@@ -63,6 +63,8 @@
  * press reaches the seat; `data-console` and `data-rating` are on their own
  * controls inside the detail panel.
  */
+import { renderStationHelp } from './help-panel.js';
+
 export const STATION_ROW_ATTR = 'data-station';
 export const CONSOLE_CHIP_ATTR = 'data-console';
 export const RATING_BUTTON_ATTR = 'data-rating';
@@ -94,6 +96,7 @@ export function renderClientLobby(doc, vm, t, handlers) {
   const on = handlers || {};
   renderGmPresence(doc, vm, t);
   renderRoster(doc, vm, t, on);
+  renderClaimedStationHelp(doc, vm);
   renderDetail(doc, vm, t, on);
   renderHeader(doc, vm, t);
   renderReadyButton(doc, vm, t, on);
@@ -133,8 +136,7 @@ function renderGmPresence(doc, vm, t) {
 function renderRoster(doc, vm, t, on) {
   const list = doc.getElementById('station-list');
   if (!list) return;
-  // Station help lives in Settings; keep the lobby roster visible.
-  list.style.display = '';
+  list.style.display = vm.showRoster === false ? 'none' : '';
   list.innerHTML = '';
 
   for (const row of vm.rows) {
@@ -201,6 +203,7 @@ function renderRoster(doc, vm, t, on) {
     }
     rowEl.appendChild(info);
 
+    if (row.actionHidden) { list.appendChild(rowEl); continue; }
     const action = doc.createElement('div');
     action.className = 'action';
     const btn = doc.createElement('button');
@@ -216,6 +219,22 @@ function renderRoster(doc, vm, t, on) {
     action.appendChild(btn);
     rowEl.appendChild(action);
     list.appendChild(rowEl);
+  }
+}
+
+/** The claimed station uses exactly the reference rendered in Settings. */
+export function renderClaimedStationHelp(doc, vm) {
+  const root = doc.getElementById('claimed-station-help');
+  if (!root) return;
+  root.hidden = !vm.showStationHelp;
+  root.innerHTML = '';
+  if (!vm.showStationHelp || !vm.selectedConsole) return;
+  if (!renderStationHelp(root, vm.selectedConsole, vm.helpActions, {
+    gamepadConnected: vm.gamepadConnected,
+    gamepadContext: vm.gamepadContext,
+  })) {
+    // Authored stations without a built-in guide retain their own description.
+    root.textContent = vm.detail.stationDescription || vm.detail.stationName || '';
   }
 }
 

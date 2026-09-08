@@ -311,6 +311,10 @@ function normalizeDefinition(definition) {
       throw new TypeError('semantic action confirmation category must be a stable id');
     }
   }
+  if (id.startsWith('gm.') && (!confirmationCategory
+      || !['immediate', 'confirm', 'confirm-preview'].includes(definition.confirmationDefault))) {
+    throw new TypeError('GM semantic actions require confirmation category and default metadata');
+  }
   const feedback = definition.feedback === 'local'
     ? 'local'
     : definition.authoritativeFeedback === true
@@ -330,6 +334,7 @@ function normalizeDefinition(definition) {
     labelId,
     accessibilityLabelId,
     ...(confirmationCategory ? { confirmationCategory } : {}),
+    ...(definition.confirmationDefault ? { confirmationDefault: definition.confirmationDefault } : {}),
     authoritativeFeedback: definition.authoritativeFeedback === true,
     feedback,
     hold,
@@ -348,6 +353,7 @@ function copySlots(slots) {
 
 /** Create an isolated registry. No mutable singleton is shared across frames. */
 export function createSemanticActionRegistry(options = {}) {
+  let confirmationHandler = null;
   const definitions = new Map();
   const adapters = new Map();
   const authoredDefaults = new Map();
@@ -705,6 +711,21 @@ export function createSemanticActionRegistry(options = {}) {
         return { claimed: true, actionId: id, handled: false };
       }
     }
+    if (confirmationHandler && definition.confirmationCategory) {
+      let completed = null;
+      const handled = confirmationHandler({ definition, activation: options,
+        accept: () => {
+          completed = activateNow(id, definition, options, continuousValue);
+          return completed.handled;
+        },
+      }) !== false;
+      return completed || { claimed: true, actionId: id, handled, awaitingConfirmation: handled };
+    }
+    return activateNow(id, definition, options, continuousValue);
+  }
+
+  function activateNow(id, definition, options, continuousValue) {
+    const context = options.context;
     const adapter = adapters.get(id);
     const feedback = definition.feedback && actionFeedback
       && typeof actionFeedback.press === 'function'
@@ -871,6 +892,7 @@ export function createSemanticActionRegistry(options = {}) {
     resetAllBindings,
     bindingProfile,
     validateProfile,
+    setConfirmationHandler: (handler) => { confirmationHandler = handler; },
     replaceProfile,
     updateBindings,
     tuningProfile,

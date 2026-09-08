@@ -119,6 +119,13 @@ function normalizePreferredSlot(value, diagnostics) {
   return null;
 }
 
+/** A device description, never a session slot or transport identity. */
+export function normalizePreferredDevice(value) {
+  if (!ownRecord(value) || typeof value.id !== 'string' || !value.id.trim()
+      || value.id.length > 512 || value.mapping !== 'standard') return null;
+  return { id: value.id, mapping: 'standard' };
+}
+
 function normalizeFeedback(value, diagnostics) {
   if (!ownRecord(value)) {
     if (value != null) diagnostics.push(diagnostic('feedback-normalized'));
@@ -172,6 +179,8 @@ export function createDefaultOperatorProfile(registry = null) {
     bindings: copyBindings(defaults.bindings),
     gamepad: {
       preferredSlot: null,
+      preferredDevice: null,
+      hideTouchControls: true,
       tuning: copyTuning(defaults.tuning),
     },
     feedback: { ...FEEDBACK_PREFERENCE_DEFAULTS },
@@ -187,6 +196,8 @@ export function createOperatorProfileSnapshot({
   accessibility,
   bindings,
   preferredGamepadSlot,
+  preferredGamepadDevice,
+  hideTouchControls = true,
   tuning,
   feedback,
   gmConfirmations,
@@ -199,6 +210,8 @@ export function createOperatorProfileSnapshot({
     bindings: copyBindings(bindings),
     gamepad: {
       preferredSlot: normalizePreferredSlot(preferredGamepadSlot, diagnostics),
+      preferredDevice: normalizePreferredDevice(preferredGamepadDevice),
+      hideTouchControls: hideTouchControls !== false,
       tuning: copyTuning(tuning),
     },
     feedback: normalizeFeedback(feedback, diagnostics),
@@ -298,6 +311,8 @@ export function prepareOperatorProfileImport(text, { registry } = {}) {
     bindings: copyBindings(controls.profile.bindings),
     gamepad: {
       preferredSlot: normalizePreferredSlot(rawGamepad.preferredSlot, diagnostics),
+      preferredDevice: normalizePreferredDevice(rawGamepad.preferredDevice),
+      hideTouchControls: rawGamepad.hideTouchControls !== false,
       tuning: copyTuning(controls.profile.tuning),
     },
     feedback: normalizeFeedback(legacy ? null : raw.feedback, diagnostics),
@@ -334,6 +349,8 @@ export function serializeOperatorProfile(profile) {
     accessibility: profile && profile.accessibility,
     bindings: profile && profile.bindings,
     preferredGamepadSlot: profile && profile.gamepad && profile.gamepad.preferredSlot,
+    preferredGamepadDevice: profile?.gamepad?.preferredDevice,
+    hideTouchControls: profile?.gamepad?.hideTouchControls,
     tuning: profile && profile.gamepad && profile.gamepad.tuning,
     feedback: profile && profile.feedback,
     gmConfirmations: profile && profile.gmConfirmations,

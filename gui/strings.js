@@ -289,6 +289,13 @@ function localiseTreeValue(value, actionFeedbackData) {
   if (value !== null && typeof value === 'object') {
     const out = {};
     for (const key of Object.keys(value)) {
+      // A literal Comms transmission is authored at runtime. Even text equal
+      // to a real String Table id (or containing interpolation syntax) must
+      // reach the crew unchanged, including its inbox subject/preview source.
+      if (value.literal_body === true && (key === 'body' || key === 'subject')) {
+        out[key] = value[key];
+        continue;
+      }
       if (actionFeedbackData && key === 'correlation') {
         out[key] = value[key];
         continue;

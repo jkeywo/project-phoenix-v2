@@ -302,6 +302,7 @@ export function buildSettingsState(opts = {}) {
       devices: [], selectedIndex: null, status: 'none', capturing: null,
     },
     stationId,
+    assignedStation: opts.assignedStation || null,
     afk,
     ratings,
     // The private Accessibility profile (issue #1102), reflected as the
@@ -460,6 +461,8 @@ export function mountSettings({
   onSemanticTuning: _onSemanticTuning,
   getGamepadState: _getGamepadState,
   onGamepadSelection: _onGamepadSelection,
+  getHideTouchControls: _getHideTouchControls,
+  onHideTouchControls: _onHideTouchControls,
   onSemanticCapture: _onSemanticCapture,
   onOperatorProfileExport: _onOperatorProfileExport,
   onOperatorProfileImport: _onOperatorProfileImport,
@@ -897,6 +900,17 @@ export function mountSettings({
         });
         gamepadLabel.appendChild(selector);
         gamepadSection.appendChild(gamepadLabel);
+        const hideLabel = doc.createElement('label');
+        const hide = doc.createElement('input');
+        hide.type = 'checkbox';
+        hide.setAttribute('data-control', 'gamepad-hide-touch');
+        hide.checked = typeof _getHideTouchControls !== 'function' || _getHideTouchControls() !== false;
+        hide.addEventListener('change', () => _onHideTouchControls?.(hide.checked));
+        hideLabel.appendChild(hide);
+        const hideText = doc.createElement('span');
+        hideText.textContent = t('settings.controls.gamepad.hide_touch');
+        hideLabel.appendChild(hideText);
+        gamepadSection.appendChild(hideLabel);
 
         const status = doc.createElement('div');
         status.className = 'settings-section-hint settings-gamepad-status';
@@ -981,7 +995,7 @@ export function mountSettings({
       body.appendChild(afkSection);
     }
 
-    if (view.stationId) {
+    if (view.stationId && !view.assignedStation) {
       const leaveSection = section('settings.station');
       leaveSection.appendChild(
         action(t('settings.leave_station'), 'settings-leave-btn', () => {
@@ -996,7 +1010,9 @@ export function mountSettings({
   function buildStationHelpTab(body, view) {
     const host = doc.createElement('div');
     host.className = 'settings-documentation';
-    if (!view.stationId || !renderStationHelp(host, view.stationId, view.semanticActions)) {
+    if (!view.stationId || !renderStationHelp(host, view.stationId, view.semanticActions,
+      { gamepadConnected: view.gamepad?.connected === true,
+        gamepadContext: view.gamepad?.context || view.stationId })) {
       const unavailable = doc.createElement('div');
       unavailable.className = 'settings-section-hint';
       unavailable.textContent = t('settings.station_help.unavailable');
@@ -1024,6 +1040,7 @@ export function mountSettings({
     const view = buildSettingsState({
       state: getState ? getState() : {},
       myToken,
+      assignedStation: doc.defaultView?.__PHOENIX_ASSIGNED_STATION__ || null,
       demo: !!isDemo(),
       activeTab,
       semanticActions: typeof _getSemanticActions === 'function'
@@ -1088,7 +1105,12 @@ export function mountSettings({
         : 'settings.controls.gamepad.device_unsupported', {
         slot: String(Number(device.index) + 1),
       });
-      option.disabled = !device.supported;
+      option.disabled = !device.supported || device.available === false;
+      if (device.available === false && device.assignedTo) {
+        option.textContent = t('settings.controls.gamepad.device_assigned', {
+          slot: String(Number(device.index) + 1), owner: device.assignedTo,
+        });
+      }
       selector.appendChild(option);
       seen.add(Number(device.index));
     }
@@ -1128,6 +1150,10 @@ export function mountSettings({
   // would detach that exact input, losing keyboard/gamepad capture and making
   // blur unreliable as the disarm boundary.
   function updateGamepadState(gamepad) {
+    if (shell.isOpen() && activeTab === 'station-help') {
+      buildContent();
+      return;
+    }
     if (!shell.isOpen() || activeTab !== 'controls') return;
     updateGamepadSelector(
       overlay.querySelector('[data-control="semantic-gamepad-select"]'),

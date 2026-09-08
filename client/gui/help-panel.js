@@ -39,7 +39,9 @@ export function hasHelp(stationId) {
  *
  * @returns {boolean} whether help content was rendered
  */
-export function renderStationHelp(root, stationId, semanticActions = []) {
+export function renderStationHelp(root, stationId, semanticActions = [], {
+  gamepadConnected = false, gamepadContext = stationId,
+} = {}) {
   if (!root) return false;
   const doc = root.ownerDocument || (typeof document !== 'undefined' ? document : null);
   if (!doc || !hasHelp(stationId)) return false;
@@ -69,7 +71,11 @@ export function renderStationHelp(root, stationId, semanticActions = []) {
   group.appendChild(sections);
 
   const matchingActions = (Array.isArray(semanticActions) ? semanticActions : [])
-    .filter((action) => Array.isArray(action.contexts) && action.contexts.includes(stationId));
+    .filter((action) => Array.isArray(action.contexts) && (action.contexts.includes(stationId)
+      || (gamepadConnected && action.contexts.includes(gamepadContext))))
+    .filter((action) => (action.bindings || []).some((binding) => binding
+      && (binding.type === 'gamepad' ? gamepadConnected && action.contexts.includes(gamepadContext)
+        : action.contexts.includes(stationId))));
   if (matchingActions.length > 0) {
     const bindingsHeading = doc.createElement('div');
     bindingsHeading.className = 'station-help-section-title';
@@ -92,10 +98,13 @@ export function renderStationHelp(root, stationId, semanticActions = []) {
 
       const slots = doc.createElement('div');
       slots.className = 'station-help-section-body station-help-bindings';
-      slots.textContent = (action.bindings || []).map((binding, index) => t(
+      slots.textContent = (action.bindings || []).map((binding, index) => (
+        (!binding || (binding.type !== 'gamepad' ? action.contexts.includes(stationId)
+          : gamepadConnected && action.contexts.includes(gamepadContext))) ? t(
         'settings.controls.slot_value',
         { slot: String(index + 1), binding: formatSemanticBinding(binding, t) },
-      )).join(t('input.binding.slots_separator'));
+      ) : null)).filter(Boolean).join(t('input.binding.slots_separator'));
+      if (!slots.textContent) continue;
       section.appendChild(slots);
       sections.appendChild(section);
     }

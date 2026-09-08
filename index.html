@@ -77,6 +77,7 @@
      sizes. Defined once and consumed by this page, the host viewscreen, and
      every console document (which reaches it through gui/console.css). -->
 <link rel="stylesheet" href="gui/tokens.css" />
+<link rel="stylesheet" href="gui/gm-confirmation.css" />
 <!-- The lobby panel's stylesheet (issue #1325), lifted out of the inline
      <style> below so that this page and the host-lobby document the NATIVE
      host assembles in memory load the same one. Linked here, before that
@@ -325,14 +326,128 @@
     .gm-session-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
     .gm-session-log-entry[data-outcome="refused"],
     .gm-session-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
+    /* The mission panel (issue #1301). Same control ladder as the session
+       block above and for its reason: a filled control on --surface-panel-up
+       takes --edge-bright, which is the rung that clears 3:1 against it. */
+    #gm-mission-panel {
+      max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
+      display: grid; gap: .9rem;
+    }
+    #gm-mission-events { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
+    #gm-objective-list { margin: 0; padding: 0; list-style: none; display: grid; gap: .75rem; }
+    .gm-objective-row { border-top: 1px solid var(--edge-control); padding-top: .5rem; }
+    #gm-objective-panel button {
+      min-height: 2.75rem; padding: .5rem .9rem; margin: .25rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright); font: inherit; cursor: pointer;
+    }
+    #gm-objective-panel button:disabled { opacity: .45; cursor: default; }
+    #gm-objective-results { max-height: 12rem; overflow-y: auto; }
+    .gm-mission-event {
+      display: flex; flex-wrap: wrap; align-items: center; gap: .75rem;
+    }
+    .gm-mission-event-label { flex: 1 1 12rem; }
+    .gm-mission-event-state, .gm-mission-event-skip-state { color: var(--ink-muted); }
+    .gm-mission-event[data-skip-armed="true"] .gm-mission-event-skip-state { color: var(--fire-bright); }
+    .gm-mission-event[data-spent="true"] .gm-mission-event-state { color: var(--fire-bright); }
+    /* A standing GM Pause (issue #1303) reads at a glance, because it changes
+       what every other line on the row means: a "Ready" event whose condition
+       is not being evaluated would be a lie by omission. Distinct from the
+       spent colour above -- spent is what the mission did, paused is what the
+       operator did and can undo. */
+    .gm-mission-event[data-paused="true"] .gm-mission-event-state { color: var(--ink-primary); }
+    .gm-mission-event[data-paused="true"] { border-left: 2px solid var(--edge-bright); padding-left: .5rem; }
+    .gm-mission-event button {
+      min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+      font: inherit; cursor: pointer;
+    }
+    .gm-mission-event button:disabled { opacity: .45; cursor: default; }
+    #gm-mission-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-mission-log { margin: 0; padding-left: 1.5rem; max-height: 12rem; overflow-y: auto; }
+    .gm-mission-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
+    .gm-mission-log-entry[data-outcome="refused"],
+    .gm-mission-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
+    /* Direct damage/repair on the selected entity (issue #1310). */
+    #gm-effect-panel {
+      border-top: 1px solid var(--edge-control); padding-top: .9rem;
+      display: grid; gap: .6rem; min-width: 0;
+    }
+    #gm-effect-controls { display: grid; gap: .6rem; }
+    /* The id selector above outranks the UA `[hidden]{display:none}` default,
+       so the block the panel hides that way needs its own rule -- the same
+       pattern `#gm-map-panel[hidden]` and friends below follow. */
+    #gm-effect-controls[hidden] { display: none; }
+    #gm-effect-amount-label,
+    #gm-effect-scope-label { display: flex; align-items: center; gap: .5rem; }
+    #gm-effect-scope { flex: 1 1 auto; min-width: 0; font: inherit; padding: .3rem .4rem; }
+    #gm-effect-warning[data-emptied="true"] { color: var(--fire-bright); }
+    #gm-effect-amount { width: 7rem; font: inherit; padding: .3rem .4rem; }
+    #gm-effect-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+    #gm-effect-actions button {
+      min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+      font: inherit; cursor: pointer;
+    }
+    #gm-effect-actions button:disabled { opacity: .45; cursor: default; }
+    #gm-effect-warning[data-lethal="true"] { color: var(--fire-bright); }
+    #gm-effect-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-effect-log { margin: 0; padding-left: 1.5rem; max-height: 10rem; overflow-y: auto; }
+    .gm-effect-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
+    .gm-effect-log-entry[data-outcome="refused"],
+    .gm-effect-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
+    /* The placement panel (issue #1305), sharing the mission panel's control
+       ladder for its reason: one filled-control rung across the GM page. */
+    #gm-comms-panel { padding: 1rem; display: grid; gap: .6rem; }
+    #gm-comms-panel label { display: grid; gap: .3rem; }
+    #gm-comms-panel textarea { min-height: 8rem; }
+    #gm-comms-log { max-height: 18rem; overflow: auto; }
+    #gm-comms-log pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #gm-comms-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel, #gm-system-panel, #gm-npc-panel {
+      max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
+      display: grid; gap: .9rem;
+    }
+    #gm-spawn-palette { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
+    .gm-spawn-entry { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+    .gm-spawn-entry-label { flex: 1 1 12rem; }
+    .gm-spawn-entry-variant, #gm-spawn-exact-form input {
+      padding: .4rem .5rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+    }
+    #gm-spawn-exact-form input { width: 6rem; }
+    #gm-spawn-exact-form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+    #gm-spawn-exact-form label { display: grid; gap: .25rem; color: var(--ink-muted); }
+    .gm-spawn-entry button, #gm-spawn-exact, #gm-npc-apply, #gm-npc-choice {
+      min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+      font: inherit; cursor: pointer;
+    }
+    .gm-spawn-entry button[data-arming="true"] { border-color: var(--gold); color: var(--gold); }
+    .gm-spawn-entry button:disabled, #gm-spawn-exact:disabled, #gm-npc-apply:disabled { opacity: .45; cursor: default; }
+    #gm-npc-results { max-height: 12rem; overflow-y: auto; }
+    #gm-spawn-hint { color: var(--ink-muted); margin: 0; }
+    #gm-spawn-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-spawn-log { margin: 0; padding-left: 1.5rem; max-height: 12rem; overflow-y: auto; }
+    .gm-spawn-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
+    .gm-spawn-log-entry[data-outcome="refused"],
+    .gm-spawn-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     #gm-workspace {
       display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(18rem, 1fr);
-      gap: 1rem; min-height: 28rem;
+      gap: 1rem; min-height: 28rem; flex-shrink: 0;
+      /* The outer GM column scrolls. Keep the grid's full content height so
+         a long inspector cannot paint its action controls under the Station
+         section that follows it. */
     }
     #gm-map-panel, #gm-inspector, #gm-activity {
       min-width: 0; padding: 1rem; border: 1px solid var(--edge-control);
       background: var(--surface-panel-down); display: flex; flex-direction: column; gap: .75rem;
     }
+    /* A role preset (issue #1319) may hide one of these three via the
+       `hidden` attribute (gui/gm-role-presets.js). Their own `display: flex`
+       above outranks the UA `[hidden]{display:none}` default, so — same
+       pattern as `#gm-station-controls[hidden]` below — it needs its own
+       override here or toggling `hidden` would be a visual no-op. */
+    #gm-map-panel[hidden], #gm-inspector[hidden], #gm-activity[hidden] { display: none; }
     #gm-activity { grid-column: 1 / -1; }
     #gm-activity-filters { display: flex; flex-wrap: wrap; gap: .75rem 1rem; }
     .gm-activity-filter { display: grid; gap: .3rem; color: var(--ink-muted); }
@@ -380,7 +495,21 @@
       #gm-entity-map { height: 24rem; }
     }
     #gm-station-controls {
-      width: min(76rem, 100%); min-height: 0; padding: 1.25rem;
+      /* NOT `min-height: 0` (issue #1318 gate pass, finding 2): this section
+         is a flex item of `#gm-console` (flex-direction: column), and an
+         explicit `min-height: 0` discards a flex item's automatic minimum
+         size — its own content's min-content height — in favour of letting
+         the item shrink to nothing. `#gm-console` scrolls its overflow
+         (`overflow-y: auto`) rather than needing its children to shrink to
+         fit, so nothing here wants that: once `#gm-knowledge-panel` gave
+         `#gm-console` genuinely overflowing content for the first time, this
+         section (holding the multi-hundred-pixel `#gm-station-frame` iframe)
+         collapsed to a sliver while its content kept painting past that box,
+         landing UNDER the next section in normal flow — `#gm-station-toggle`
+         intercepted by `#gm-knowledge-panel`'s own subtree
+         (tests/smoke/gm-m1-exit.spec.js). Default `min-height: auto` sizes
+         this section to its content like every sibling section already does. */
+      width: min(76rem, 100%); padding: 1.25rem;
       box-sizing: border-box; border: 1px solid var(--edge-control);
       display: grid; grid-template-columns: minmax(13rem, 20rem) 1fr;
       grid-template-rows: auto auto auto auto;
@@ -402,11 +531,34 @@
     }
     #gm-station-activity-heading, #gm-station-activity { grid-column: 1 / -1; }
     #gm-station-activity { margin: 0; max-height: 10rem; overflow-y: auto; }
+    /* Truth / Crew Knowledge / Difference comparison (issue #1318). One
+       identity-keyed table per category; the Difference column is always a
+       text label (never colour alone — the T2 device floor requires
+       non-colour state, see gm-t2-device-and-milestone-boundaries). */
+    #gm-knowledge-panel {
+      width: min(76rem, 100%); box-sizing: border-box; padding: 1.25rem;
+      border: 1px solid var(--edge-control); display: grid; gap: .9rem;
+    }
+    #gm-knowledge-panel[hidden] { display: none; }
+    #gm-knowledge-select {
+      min-height: 2.75rem; padding: .55rem .75rem; color: var(--ink);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+      font: inherit;
+    }
+    #gm-knowledge-hint { color: var(--ink-dim); margin: 0; }
+    .gm-knowledge-category { display: grid; gap: .4rem; }
+    .gm-knowledge-summary { color: var(--ink-dim); margin: 0; }
+    .gm-knowledge-category table { width: 100%; border-collapse: collapse; }
+    .gm-knowledge-category th, .gm-knowledge-category td {
+      text-align: left; padding: .35rem .6rem; border-bottom: 1px solid var(--edge-faint);
+      vertical-align: top;
+    }
     @media (max-height: 800px) {
       #gm-console { gap: .9rem; }
-      #gm-session-controls, #gm-entity-card { padding: 1rem; }
+      #gm-session-controls, #gm-mission-panel, #gm-spawn-panel, #gm-entity-card, #gm-effect-panel, #gm-despawn-panel { padding: 1rem; }
       #gm-station-controls { padding: 1rem; }
       #gm-station-frame { height: clamp(20rem, 55vh, 32rem); }
+      #gm-knowledge-panel { padding: 1rem; }
     }
     /* The fleet panel (issue #1114). Below the crew QR, deliberately quieter
        than it: the code above admits PLAYERS and is read across a room, this
@@ -1263,7 +1415,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-3dea5fbfd57f83ce.js" crossorigin="anonymous" integrity="sha384-Gd5uqdI65vCceRICGZyl/OrPQ3vjcRdPq4pR7/eFssjDHbAwnhQzSiUcwDS5mqZ2"><link rel="preload" href="./project-phoenix-3dea5fbfd57f83ce_bg.wasm" crossorigin="anonymous" integrity="sha384-BlOu+ICi5I//ZcyGYCddwmAsUvBWCPdZbLIBG53f23WVPugCqrkao3IfwKT6ehm2" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-78a5cffa8d3f8454.js" crossorigin="anonymous" integrity="sha384-puexoP6QYRrkEh90QkwP8jLs6egjEy/Koeyb53xYRb9izFJZmYixhs3JnjsT63O9"><link rel="preload" href="./project-phoenix-78a5cffa8d3f8454_bg.wasm" crossorigin="anonymous" integrity="sha384-6Fa+aMd3HC1xRsjJof2WcqftAaCSTgQ6yYKVg1lmtaNJSVZD+f/JH0uumTfbemjg" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1811,6 +1963,16 @@
         <header>
           <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
           <p data-i18n="server.gm.console.local_truth"></p>
+          <!-- Presentation-only role preset (issue #1319): filters which
+               panels/quick actions THIS browser shows. Never authority --
+               see gui/gm-role-presets.js. Defaults to the built-in All, which
+               is the only option when the scenario authors none. -->
+          <label id="gm-role-preset-label" class="gm-activity-filter" for="gm-role-preset-select">
+            <span data-i18n="server.gm.role_preset.heading"></span>
+            <select id="gm-role-preset-select">
+              <option value="all" data-i18n="server.gm.role_preset.option.all"></option>
+            </select>
+          </label>
         </header>
         <section id="gm-session-controls" role="region" aria-labelledby="gm-session-heading">
           <h2 id="gm-session-heading" data-i18n="server.gm.session.heading"></h2>
@@ -1824,6 +1986,128 @@
           <p id="gm-session-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
           <h3 id="gm-session-log-heading" data-i18n="server.gm.session.log_heading"></h3>
           <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <!-- The mission panel (issues #1301, #1303 and #1304): every
+             GM-operable authored event the loaded scenario declares, with the
+             levers it declared. Rows and their Fire / Pause / Skip-next
+             controls are built by gui/gm-mission-panel.js from the absolute
+             `gm_mission` Host Channel projection, so an empty scenario renders
+             the empty sentence and nothing else, and an event that declares
+             one lever gets one button. -->
+        <section id="gm-mission-panel" role="region" aria-labelledby="gm-mission-heading">
+          <h2 id="gm-mission-heading" data-i18n="server.gm.mission.heading"></h2>
+          <section id="gm-objective-panel" aria-labelledby="gm-objective-heading">
+            <h3 id="gm-objective-heading" data-i18n="server.gm.objective.heading"></h3>
+            <ul id="gm-objective-list"></ul>
+            <p id="gm-objective-empty" data-i18n="server.gm.objective.empty"></p>
+            <div id="gm-objective-confirmation" hidden role="group" aria-labelledby="gm-objective-consequence">
+              <p id="gm-objective-consequence"></p>
+              <button id="gm-objective-confirm" type="button" data-i18n="server.gm.objective.confirm"></button>
+              <button id="gm-objective-cancel" type="button" data-i18n="server.gm.objective.cancel"></button>
+            </div>
+            <p id="gm-objective-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+            <h4 id="gm-objective-results-heading" data-i18n="server.gm.objective.results_heading"></h4>
+            <ol id="gm-objective-results" role="log" aria-labelledby="gm-objective-results-heading" aria-live="polite"></ol>
+          </section>
+          <ul id="gm-mission-events" role="list"></ul>
+          <p id="gm-mission-empty" role="status" aria-live="polite"
+            data-i18n="server.gm.mission.empty"></p>
+          <p id="gm-mission-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-mission-log-heading" data-i18n="server.gm.mission.log_heading"></h3>
+          <ol id="gm-mission-log" role="log" aria-labelledby="gm-mission-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <!-- The placement panel (issue #1305): the scenario's authored GM spawn
+             palette, and the two ways to place one. PLACE arms the map gesture
+             (click/press picks the position, drag picks the heading, and the
+             chart's own keyboard cursor does both without a pointer); the typed
+             form below is the same command with the coordinates read out of the
+             inputs. Rows come from the absolute `gm_spawn` Host Channel
+             projection, so a scenario with no palette renders the empty
+             sentence and offers nothing placeable. -->
+        <section id="gm-system-panel" role="region" aria-labelledby="gm-system-heading">
+          <h2 id="gm-system-heading" data-i18n="server.gm.system.heading"></h2>
+          <p data-i18n="server.gm.system.explanation"></p>
+          <p id="gm-system-target"></p>
+          <label for="gm-system-select" data-i18n="server.gm.system.choose"></label>
+          <select id="gm-system-select"></select>
+          <p id="gm-system-state" role="status"></p>
+          <button id="gm-system-disable" type="button" disabled data-i18n="server.gm.system.disable"></button>
+          <button id="gm-system-restore" type="button" disabled data-i18n="server.gm.system.restore"></button>
+          <p id="gm-system-feedback" role="status" aria-live="polite"></p>
+        </section>
+        <section id="gm-contact-panel" role="region" aria-labelledby="gm-contact-heading">
+          <h2 id="gm-contact-heading" data-i18n="server.gm.contact.heading"></h2>
+          <p data-i18n="server.gm.contact.explanation"></p>
+          <label for="gm-contact-observer" data-i18n="server.gm.contact.observer"></label>
+          <select id="gm-contact-observer"></select>
+          <p id="gm-contact-target" role="status"></p>
+          <p id="gm-contact-mode" role="status"></p>
+          <button id="gm-contact-reveal" type="button" disabled data-i18n="server.gm.contact.reveal"></button>
+          <button id="gm-contact-conceal" type="button" disabled data-i18n="server.gm.contact.conceal"></button>
+          <button id="gm-contact-normal" type="button" disabled data-i18n="server.gm.contact.normal"></button>
+          <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-contact-results"></ol>
+        </section>
+        <section id="gm-npc-panel" role="region" aria-labelledby="gm-npc-heading">
+          <h2 id="gm-npc-heading" data-i18n="server.gm.npc.heading"></h2>
+          <p id="gm-npc-target" role="status"></p>
+          <dl><dt data-i18n="server.gm.npc.current"></dt><dd id="gm-npc-current"></dd>
+            <dt data-i18n="server.gm.npc.intent"></dt><dd id="gm-npc-intent"></dd></dl>
+          <label for="gm-npc-choice" data-i18n="server.gm.npc.choice"></label>
+          <select id="gm-npc-choice"></select>
+          <p id="gm-npc-empty" data-i18n="server.gm.npc.empty"></p>
+          <button id="gm-npc-apply" type="button" disabled data-i18n="server.gm.npc.apply"></button>
+          <p id="gm-npc-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-npc-results" aria-live="polite"></ol>
+        </section>
+        <section id="gm-despawn-panel" role="region" aria-labelledby="gm-despawn-heading">
+          <h2 id="gm-despawn-heading" data-i18n="server.gm.despawn.heading"></h2>
+          <p id="gm-despawn-target" role="status"></p>
+          <button id="gm-despawn-preview" type="button" disabled data-i18n="server.gm.despawn.preview"></button>
+          <div id="gm-despawn-confirmation" hidden role="group" aria-labelledby="gm-despawn-consequence">
+            <p id="gm-despawn-consequence"></p>
+            <button id="gm-despawn-confirm" type="button" data-i18n="server.gm.despawn.confirm"></button>
+            <button id="gm-despawn-cancel" type="button" data-i18n="server.gm.despawn.cancel"></button>
+          </div>
+          <p id="gm-despawn-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-despawn-results" aria-live="polite"></ol>
+        </section>
+        <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
+          <h2 id="gm-comms-heading" data-i18n="server.gm.comms.heading"></h2>
+          <p id="gm-comms-empty" role="status" data-i18n="server.gm.comms.empty"></p>
+          <label><span data-i18n="server.gm.comms.route"></span><select id="gm-comms-route"></select></label>
+          <label><span data-i18n="server.gm.comms.sender"></span><select id="gm-comms-sender"></select></label>
+          <label><span data-i18n="server.gm.comms.recipients"></span><select id="gm-comms-recipients" multiple size="4"></select></label>
+          <label><span data-i18n="server.gm.comms.text"></span><textarea id="gm-comms-text" aria-describedby="gm-comms-count"></textarea></label>
+          <p id="gm-comms-count"></p>
+          <button type="button" id="gm-comms-send" data-i18n="server.gm.comms.send"></button>
+          <label><span data-i18n="server.gm.comms.hail"></span><select id="gm-comms-hail"></select></label>
+          <button type="button" id="gm-comms-start-hail" data-i18n="server.gm.comms.start_hail"></button>
+          <p id="gm-comms-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <ol id="gm-comms-log" role="log" aria-label="" data-i18n-aria-label="server.gm.comms.history"></ol>
+        </section>
+        <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
+          <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
+          <ul id="gm-spawn-palette" role="list"></ul>
+          <p id="gm-spawn-empty" role="status" aria-live="polite"
+            data-i18n="server.gm.spawn.empty"></p>
+          <p id="gm-spawn-hint" data-i18n="server.gm.spawn.hint"></p>
+          <h3 id="gm-spawn-exact-heading" data-i18n="server.gm.spawn.exact_heading"></h3>
+          <div id="gm-spawn-exact-form" role="group" aria-labelledby="gm-spawn-exact-heading">
+            <label for="gm-spawn-x"><span data-i18n="server.gm.spawn.exact_x"></span>
+              <input id="gm-spawn-x" type="number" step="1" value="0"></label>
+            <label for="gm-spawn-z"><span data-i18n="server.gm.spawn.exact_z"></span>
+              <input id="gm-spawn-z" type="number" step="1" value="0"></label>
+            <label for="gm-spawn-facing"><span data-i18n="server.gm.spawn.exact_facing"></span>
+              <input id="gm-spawn-facing" type="number" step="1" value="0"></label>
+            <button type="button" id="gm-spawn-exact"
+              data-i18n="server.gm.spawn.exact_submit"></button>
+          </div>
+          <p id="gm-spawn-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-spawn-log-heading" data-i18n="server.gm.spawn.log_heading"></h3>
+          <ol id="gm-spawn-log" role="log" aria-labelledby="gm-spawn-log-heading"
             aria-live="polite" aria-relevant="additions text"></ol>
         </section>
         <div id="gm-workspace">
@@ -1849,6 +2133,47 @@
               <meter id="gm-entity-hull" min="0" max="100" value="0"
                 aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
             </article>
+            <!-- Direct damage and repair on the selected entity (issue #1310).
+                 The controls are built by gui/gm-direct-effect-panel.js from the
+                 same absolute `gm_entity` projection the inspector above reads,
+                 so the thing a GM aims at and the thing it reports about are
+                 one selection. Amounts are hull POINTS here and milli-HP
+                 everywhere below the input. -->
+            <section id="gm-effect-panel" role="region" aria-labelledby="gm-effect-heading">
+              <h3 id="gm-effect-heading" data-i18n="server.gm.effect.heading"></h3>
+              <p id="gm-effect-empty" role="status" aria-live="polite"
+                data-i18n="server.gm.effect.empty"></p>
+              <div id="gm-effect-controls" hidden>
+                <p id="gm-effect-target"></p>
+                <!-- Scope narrows the SAME press to one Station's authored
+                     Systems or to one System (issue #1311). Its options are
+                     built from the per-System breakdown the `gm_entity`
+                     projection publishes, so the page never composes a
+                     ship-local authoring key of its own. -->
+                <label id="gm-effect-scope-label" for="gm-effect-scope">
+                  <span data-i18n="server.gm.effect.scope_label"></span>
+                  <select id="gm-effect-scope"></select>
+                </label>
+                <p id="gm-effect-hull"></p>
+                <label id="gm-effect-amount-label" for="gm-effect-amount">
+                  <span data-i18n="server.gm.effect.amount_label"></span>
+                  <input id="gm-effect-amount" type="number" min="0" step="1" value="10">
+                </label>
+                <div id="gm-effect-actions">
+                  <button id="gm-effect-damage" type="button"
+                    data-i18n="server.gm.effect.damage"></button>
+                  <button id="gm-effect-heal" type="button"
+                    data-i18n="server.gm.effect.heal"></button>
+                </div>
+                <p id="gm-effect-warning" role="status" aria-live="polite"
+                  aria-atomic="true"></p>
+              </div>
+              <p id="gm-effect-feedback" role="status" aria-live="polite"
+                aria-atomic="true"></p>
+              <h4 id="gm-effect-log-heading" data-i18n="server.gm.effect.log_heading"></h4>
+              <ol id="gm-effect-log" role="log" aria-labelledby="gm-effect-log-heading"
+                aria-live="polite" aria-relevant="additions text"></ol>
+            </section>
           </section>
           <section id="gm-activity" role="region" aria-labelledby="gm-activity-heading">
             <h2 id="gm-activity-heading" data-i18n="server.gm.activity.heading"></h2>
@@ -1889,6 +2214,74 @@
           <h3 id="gm-station-activity-heading" data-i18n="server.gm.station.activity_heading"></h3>
           <ol id="gm-station-activity" role="log" aria-labelledby="gm-station-activity-heading"
             aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <!-- Truth / Crew Knowledge / Difference comparison for one selected
+             ship (issue #1318). Selection here is independent of the Station
+             takeover control above: comparing a ship never opens its Station
+             iframe (AC #2 — Station-private detail stays absent unless the
+             GM opens that authentic interface instead). -->
+        <p id="gm-knowledge-pending" role="status" data-i18n="server.gm.knowledge.pending"></p>
+        <section id="gm-knowledge-panel" hidden role="region" aria-labelledby="gm-knowledge-heading">
+          <h2 id="gm-knowledge-heading" data-i18n="server.gm.knowledge.heading"></h2>
+          <p id="gm-knowledge-hint" data-i18n="server.gm.knowledge.hint"></p>
+          <label for="gm-knowledge-select" data-i18n="server.gm.knowledge.select_label"></label>
+          <select id="gm-knowledge-select"></select>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-contacts-heading">
+            <h3 id="gm-knowledge-contacts-heading" data-i18n="server.gm.knowledge.contacts_heading"></h3>
+            <p id="gm-knowledge-contacts-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-contacts-empty" data-i18n="server.gm.knowledge.contacts_empty"></p>
+            <table id="gm-knowledge-contacts-table" hidden aria-labelledby="gm-knowledge-contacts-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-contacts-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-objectives-heading">
+            <h3 id="gm-knowledge-objectives-heading" data-i18n="server.gm.knowledge.objectives_heading"></h3>
+            <p id="gm-knowledge-objectives-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-objectives-empty" data-i18n="server.gm.knowledge.objectives_empty"></p>
+            <table id="gm-knowledge-objectives-table" hidden aria-labelledby="gm-knowledge-objectives-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-objectives-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-comms-messages-heading">
+            <h3 id="gm-knowledge-comms-messages-heading" data-i18n="server.gm.knowledge.comms_messages_heading"></h3>
+            <p id="gm-knowledge-comms-messages-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-comms-messages-empty" data-i18n="server.gm.knowledge.comms_empty"></p>
+            <table id="gm-knowledge-comms-messages-table" hidden aria-labelledby="gm-knowledge-comms-messages-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-comms-messages-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-comms-contacts-heading">
+            <h3 id="gm-knowledge-comms-contacts-heading" data-i18n="server.gm.knowledge.comms_contacts_heading"></h3>
+            <p id="gm-knowledge-comms-contacts-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-comms-contacts-empty" data-i18n="server.gm.knowledge.comms_empty"></p>
+            <table id="gm-knowledge-comms-contacts-table" hidden aria-labelledby="gm-knowledge-comms-contacts-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-comms-contacts-rows"></tbody>
+            </table>
+          </section>
         </section>
       </main>
 
@@ -2046,8 +2439,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-3dea5fbfd57f83ce.js';
-const wasm = await init({ module_or_path: './project-phoenix-3dea5fbfd57f83ce_bg.wasm' });
+import init, * as bindings from './project-phoenix-78a5cffa8d3f8454.js';
+const wasm = await init({ module_or_path: './project-phoenix-78a5cffa8d3f8454_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2375,68 +2768,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
        set_host_channel_callback further down for the other half of that. -->
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
-    import './gui/components/ph-navigation-map.js';
-    import { createGmActivityFeed } from './gui/gm-activity-feed.js';
-    import { createGmLocalProjection } from './gui/gm-local-projection.js';
-    import { createGmSessionControls } from './gui/gm-session-controls.js';
-    import { createGmStationPuppet } from './gui/gm-station-puppet.js';
-    import {
-      ActionFeedbackLifecycle,
-      emitActionFeedbackTransition,
-    } from './gui/action-feedback.js';
-    import { createHostActionRegistry } from './gui/host-actions.js';
+    import { mountGmWorkspace } from './gui/gm-workspace.js';
     import { t, has, localiseTree } from './gui/strings.js';
-    const gmProjection = createGmLocalProjection({ doc: document, t });
-    const gmActivity = createGmActivityFeed({
-      doc: document,
-      t,
-      containsEntity: (id) => gmProjection.contains(id),
-      selectEntity: (id) => gmProjection.select(id),
-    });
-    const hostActionFeedback = new ActionFeedbackLifecycle({
-      onTransition: (value) => emitActionFeedbackTransition(window, value),
-    });
-    const hostSemanticActions = createHostActionRegistry({
-      actionFeedback: hostActionFeedback,
-      // Resolve at activation time: the classic page seam binds after this
-      // module island, while the registry itself is page-scoped from boot.
-      toggleQrCode: () => typeof window.__hostToggleQrCode === 'function'
-        ? window.__hostToggleQrCode() : false,
-    });
-    const gmSessionControls = createGmSessionControls({
-      doc: document,
-      t,
-      actions: hostSemanticActions,
-      actionFeedback: hostActionFeedback,
-      submitSessionPaused: (active, correlation) =>
-        typeof window.__hostSetSessionPaused === 'function'
-          && window.__hostSetSessionPaused(active, correlation),
-      getOperator: () => typeof window.__hostLocalGm === 'function'
-        ? window.__hostLocalGm() : null,
-      getOperatorName: (id) => typeof window.__hostGmName === 'function'
-        ? window.__hostGmName(id) : id,
-    });
-    window.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
-    window.__hostGmSessionReset = gmSessionControls.reset;
-    window.__hostGmSessionState = gmSessionControls.state;
-    window.__hostGmActivityState = gmActivity.state;
-    const gmStationPuppet = createGmStationPuppet({
-      doc: document,
-      win: window,
-      t,
-      getOperator: () => typeof window.__hostLocalGm === 'function'
-        ? window.__hostLocalGm() : null,
-      submitStationPuppet: (request) =>
-        typeof window.__hostSetStationPuppet === 'function'
-          && window.__hostSetStationPuppet(request),
-      submitStationCommand: (request) =>
-        typeof window.__hostIssueStationCommand === 'function'
-          && window.__hostIssueStationCommand(request),
-    });
-    window.__hostGmStationRefresh = gmStationPuppet.refresh;
-    window.__hostGmStationState = gmStationPuppet.state;
-    window.__hostSemanticActions = hostSemanticActions;
-    window.__hostActionFeedback = hostActionFeedback;
+    const gmWorkspace = mountGmWorkspace({ win: window, doc: document });
     const hostChannelDispatch = createHostChannel({
       handlers: {
         hud:          function(p) { window.__updateHud(p); },
@@ -2446,12 +2780,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         audio_cue:    function(p) { window.__audioCue(p); },
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
-        gm_entity:    function(p) {
-          if (gmProjection.update(p)) gmActivity.reconcileAvailability();
-        },
-        gm_activity:  function(p) { gmActivity.update(p); },
-        gm_station:   function(p) { gmStationPuppet.update(p); },
-        gm_session:   function(p) { gmSessionControls.update(p); },
+        ...gmWorkspace.handlers,
       },
       strings: { t, has, localiseTree },
     });
@@ -2822,6 +3151,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     if (s.phase === 'Lobby' && _lobbyPrevPhase !== 'Lobby'
         && typeof window.__hostGmSessionReset === 'function') {
       window.__hostGmSessionReset();
+      // The mission panel shares that run boundary: its local Pending presses
+      // and its event list both belong to the run that just ended (#1301).
+      if (typeof window.__hostGmMissionReset === 'function') {
+        window.__hostGmMissionReset();
+      }
+      // So does the direct-effect panel (#1310): a pending press belongs to
+      // the run whose grant would have authorised it.
+      if (typeof window.__hostGmEffectReset === 'function') {
+        window.__hostGmEffectReset();
+      }
+      window.__hostGmCommsReset?.();
+      if (typeof window.__hostGmSpawnReset === 'function') {
+        window.__hostGmSpawnReset();
+      }
     }
     // Manual capture is a running-World affordance. Drive it from Rust's
     // authoritative phase before any optional view-model module can defer the
@@ -3283,6 +3626,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     let fleetStartPolicy = null;
     /** Latest local lobby tally; Rust has already excluded spectators. */
     let fleetLobbyReadiness = { connected: 0, ready: 0 };
+    let fleetLobbyStationRatings = [];
     let fleetLobbyPhase = 'Lobby';
     /** Rust-owned render/preload terminal fact from the latest lobby payload. */
     let fleetPresentationReady = false;
@@ -3317,6 +3661,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     const FLEET_GM_IDENTITY_KEY = 'phoenix.fleet.gm-identity.v1';
     let fleetIdentityStorage = null;
     try { fleetIdentityStorage = window.localStorage; } catch (_) {}
+    /**
+     * The stored-identity key this GM's live role-preset switches persist
+     * under (issue #1319) — set alongside the reconnect flow's own
+     * `identityCode`, `null` outside of it (an owner GM mints no
+     * reconnectable identity, same as `reconnectCredential`).
+     */
+    let gmRolePresetIdentityCode = null;
     /**
      * The hull `wasm_select_ship` was last called with, as a fleet ship — see
      * `lockPlayerHull`. Held here rather than read back out of Rust because the
@@ -3527,6 +3878,214 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
     };
 
+    /**
+     * Submit one attributed Fire of an authored GM-operable event (#1301).
+     *
+     * `event` is the layer-qualified id the mission panel read out of the
+     * authoritative projection; this seam never composes one, so the GM cannot
+     * name an event the simulation did not publish.
+     */
+    window.__hostFireGmEvent = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.event !== 'string' || !request.event
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'fire_gm_event',
+          event: request.event,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /**
+     * Submit one attributed Skip-next arm on an authored GM event (#1304).
+     *
+     * The Fire seam's twin, and deliberately a separate wire verb: the two
+     * levers do opposite things to the same event, so a page that means to fire
+     * must not be able to arm a skip by getting one field wrong. `event` is
+     * still the layer-qualified id read out of the authoritative projection.
+     */
+    window.__hostArmGmEventSkip = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.event !== 'string' || !request.event
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'arm_gm_event_skip',
+          event: request.event,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /**
+     * Submit one attributed direct damage or repair effect (issue #1310).
+     *
+     * `entity` is the stable identity the GM selected out of the authoritative
+     * map projection; this seam never composes one, so a GM cannot name a
+     * target the simulation did not publish. The amount crosses as milli-HP so
+     * the journal never has to round a float typed into a box.
+     *
+     * `scope`/`scope_id` narrow the same press to one Station or System (issue
+     * #1311). They are checked here to the same standard the entity is, and
+     * both are ALWAYS sent — `scope_id` null for the whole entity — because the
+     * typed ingress guards an exact field set rather than accepting two shapes.
+     */
+    window.__hostApplyDirectEffect = function(request) {
+      const gm = localGm();
+      const scope = request && request.scope;
+      const scopeId = request && request.scope_id;
+      const scopedShape = (scope === 'entity' && scopeId === null)
+        || ((scope === 'station' || scope === 'system')
+            && typeof scopeId === 'string' && scopeId.length > 0);
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.entity !== 'string' || !request.entity
+          || (request.effect !== 'damage' && request.effect !== 'heal')
+          || !Number.isSafeInteger(request.amount_milli_hp) || request.amount_milli_hp <= 0
+          || typeof request.correlation !== 'string' || !request.correlation
+          || !scopedShape
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'apply_direct_effect',
+          entity: request.entity,
+          effect: request.effect,
+          amount_milli_hp: request.amount_milli_hp,
+          scope,
+          scope_id: scopeId,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /**
+     * Submit one attributed placement of an authored palette entry (#1305).
+     *
+     * `palette`/`variant` are ids the placement panel read out of the
+     * authoritative projection, and `position_mm`/`heading_mdeg` are the
+     * resolved world placement the chart gesture (or the typed form) produced.
+     * This seam composes neither, so a GM can neither name a template the
+     * simulation did not publish nor submit screen pixels.
+     */
+    window.__hostObjectiveAction = function(request) {
+      const gm = localGm();
+      if (!gm || !request || request.operator_id !== gm.id
+          || typeof request.objective !== 'string' || !request.objective
+          || !['activate', 'complete', 'fail'].includes(request.verb)
+          || !Array.isArray(request.recipients)
+          || !request.recipients.every(id => typeof id === 'string' && id)
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({ action: 'objective_action',
+          operator_id: gm.id, correlation: request.correlation, objective: request.objective,
+          verb: request.verb, recipients: request.recipients })) !== false;
+      } catch (_) { return false; }
+    };
+    window.__hostSetSystemDisabled = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof request.target !== 'string'
+          || typeof request.system !== 'string' || typeof request.disabled !== 'boolean'
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
+        action: 'set_system_disabled', target: request.target, system: request.system, disabled: request.disabled }));
+    };
+    window.__hostSetContactOverride = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
+          || typeof request.target !== 'string' || !['reveal', 'conceal', 'normal'].includes(request.mode)
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
+        action: 'set_contact_override', ship: request.ship, target: request.target, mode: request.mode }));
+    };
+    window.__hostSetNpcDoctrine = function(request) {
+      const operator = window.__hostLocalGm();
+      if (!operator || !request || request.operator_id !== operator.id
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine', operator_id: operator.id,
+        correlation: request.correlation, target: request.target, doctrine: request.doctrine })) !== false;
+    };
+    window.__hostDespawnEntity = function(request) {
+      const operator = localGm();
+      if (!operator || !request || typeof request.target !== 'string'
+          || request.operator_id !== operator.id || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
+        correlation: request.correlation, action: 'despawn_entity', target: request.target }));
+    };
+    window.__hostTransmitComms = function(request) {
+      const gm = window.__hostLocalGm?.();
+      if (!gm || gm.id !== request?.operator_id || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try { return window.wasm_submit_gm_action(JSON.stringify({ ...request, action: 'transmit_comms' })) === true; }
+      catch { return false; }
+    };
+    window.__hostSpawnPaletteEntity = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.palette !== 'string' || !request.palette
+          || !(request.variant === null || typeof request.variant === 'string')
+          || !Array.isArray(request.position_mm) || request.position_mm.length !== 3
+          || !request.position_mm.every(Number.isSafeInteger)
+          || !Number.isSafeInteger(request.heading_mdeg)
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'spawn_palette_entity',
+          palette: request.palette,
+          variant: request.variant === undefined ? null : request.variant,
+          position_mm: request.position_mm,
+          heading_mdeg: request.heading_mdeg,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /**
+     * Submit one attributed absolute Pause state for an authored GM event
+     * (#1303).
+     *
+     * `event` is the layer-qualified id the mission panel read out of the
+     * authoritative projection, exactly as the Fire seam above; `active` is the
+     * absolute state requested, so two GMs pressing at once cannot depend on
+     * arrival order for where the toggle ends up.
+     */
+    window.__hostSetGmEventPaused = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.event !== 'string' || !request.event
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof request.active !== 'boolean'
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'set_event_paused',
+          event: request.event,
+          active: request.active,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
     /** Submit one absolute Station takeover membership assignment. */
     window.__hostSetStationPuppet = function(request) {
       const gm = localGm();
@@ -3656,6 +4215,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         // complete. Only Rust's explicit terminal fact can open this latch.
         fleetPresentationReady = s.presentation_ready === true;
         const tally = s.readiness;
+        fleetLobbyStationRatings = window.hostMesh.canonicalStationRatings(s.station_ratings);
         if (tally && Number.isInteger(tally.connected) && Number.isInteger(tally.ready)) {
           fleetLobbyReadiness = {
             connected: Math.max(0, tally.connected),
@@ -3672,10 +4232,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         }
       }
       if (!fleetHandle) return;
-      const valid = fleetStartValidation();
+      const valid = fleetStartValidation() && fleetLobbyStationRatings !== null;
       const role = normaliseFleetRole(fleetHandle.role || fleetRole);
       const stateKey = `${role}|${fleetLobbyReadiness.connected}|${fleetLobbyReadiness.ready}`
-        + `|${fleetPresentationReady}|${valid}`;
+        + `|${JSON.stringify(fleetLobbyStationRatings)}|${fleetPresentationReady}|${valid}`;
       if (stateKey !== fleetLastPublishedStartState) {
         // Both fleet setters synchronously publish a new roster, whose
         // `onRoster` callback re-enters this function. Latch the projection
@@ -3690,7 +4250,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           // default zero-player tally and could auto-start before its real
           // connected/unready crew count arrived.
           if (role === 'ship') {
-            fleetHandle.setCrewReadiness(fleetLobbyReadiness);
+            fleetHandle.setCrewReadiness(fleetLobbyReadiness, fleetLobbyStationRatings);
           }
           fleetHandle.setStartValidation(valid);
         } catch (e) {
@@ -3981,8 +4541,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (typeof window.__hostGmSessionRefresh === 'function') {
         window.__hostGmSessionRefresh();
       }
+      if (typeof window.__hostGmMissionRefresh === 'function') {
+        window.__hostGmMissionRefresh();
+      }
+      window.__hostGmCommsRefresh?.();
+      if (typeof window.__hostGmSpawnRefresh === 'function') {
+        window.__hostGmSpawnRefresh();
+      }
       if (typeof window.__hostGmStationRefresh === 'function') {
         window.__hostGmStationRefresh();
+      }
+      if (typeof window.__hostGmEffectRefresh === 'function') {
+        window.__hostGmEffectRefresh();
       }
       if (!controls || !readyBtn || !forceBtn) return;
       const gm = localGm();
@@ -4050,15 +4620,49 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (!fleetIdentityStorage || !code) return null;
       try {
         const value = JSON.parse(fleetIdentityStorage.getItem(FLEET_GM_IDENTITY_KEY) || 'null');
+        // `rolePreset` (issue #1319) is the operator's own last explicit role
+        // preset choice, or `null` for a GM that never opened the selector
+        // (or a stored blob written before this issue). It is presentation
+        // only -- see gui/gm-role-presets.js -- and is returned VERBATIM
+        // here rather than forced to null: forcing it was #1294's deliberate
+        // placeholder, and #1319 is what lifts it.
         return value && value.code === String(code)
           && typeof value.reconnectCredential === 'string'
           && value.reconnectCredential
-          ? { ...value, rolePreset: null }
+          ? { ...value, rolePreset: typeof value.rolePreset === 'string' ? value.rolePreset : null }
           : null;
       } catch (_) {
         return null;
       }
     }
+
+    /** This browser's own current role-preset choice (issue #1319), or
+     * `null` before the module island above has constructed the controller —
+     * the boot ordering `finishInit()` documents elsewhere never assumes
+     * either side runs first. */
+    function currentGmRolePresetId() {
+      if (typeof window.__hostGmRolePresetsState !== 'function') return null;
+      try { return window.__hostGmRolePresetsState().desiredId; } catch (_) { return null; }
+    }
+
+    /**
+     * The operator's own live role-preset switch (issue #1319), wired as the
+     * `gm-role-presets.js` controller's `onSelect`. Persists only when this
+     * browser holds a reconnectable GM identity for the fleet it is
+     * currently in (the join/reconnect path only — an owner GM has none,
+     * same as `reconnectCredential`); otherwise the switch is still applied
+     * to this session's own panels, it simply has nothing to survive a
+     * reload with.
+     */
+    window.__hostGmRolePresetChanged = function(presetId) {
+      if (!fleetHandle || fleetHandle.role !== 'gm' || !gmRolePresetIdentityCode) return;
+      rememberGmIdentity(gmRolePresetIdentityCode, {
+        role: 'gm',
+        operatorId: fleetHandle.operatorId,
+        reconnectCredential: fleetHandle.reconnectCredential,
+        rolePreset: presetId,
+      });
+    };
 
     function rememberGmIdentity(code, identity) {
       if (!fleetIdentityStorage || !code || !identity || identity.role !== 'gm'
@@ -4069,7 +4673,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           code: String(code),
           operatorId: identity.operatorId || null,
           reconnectCredential: identity.reconnectCredential,
-          rolePreset: null,
+          rolePreset: typeof identity.rolePreset === 'string' ? identity.rolePreset : null,
         }));
       } catch (_) {}
     }
@@ -4078,6 +4682,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     function publishGmRoster(roster) {
       if (typeof window.wasm_set_gm_roster !== 'function') return;
       const gms = roster && Array.isArray(roster.gms) ? roster.gms : [];
+      window.__hostGmShellMetadata?.({ gms });
       try {
         const refusal = window.wasm_set_gm_roster(JSON.stringify(gms));
         if (refusal) console.warn(`[fleet] GM roster refused: ${refusal}`);
@@ -4666,6 +5271,19 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         ? storedGmIdentity(identityCode)
         : null;
       if (priorIdentity) fleetRole = 'gm';
+      // Seed the role-preset selector from storage BEFORE the identity even
+      // reconnects (issue #1319), and key live switches to this code so a
+      // later selection change persists under the same stored identity. Only
+      // when there is an actual stored choice to restore -- otherwise (no
+      // stored identity at all: a mistyped/unparsed code, joining a different
+      // fleet, or a crew-role join on the host page) this would silently
+      // reset the operator's own already-live selection back to All, and a
+      // join that then gets refused below never undoes that reset.
+      gmRolePresetIdentityCode = identityCode;
+      if (priorIdentity && typeof priorIdentity.rolePreset === 'string'
+          && typeof window.__hostGmRolePresetsRestore === 'function') {
+        window.__hostGmRolePresetsRestore(priorIdentity.rolePreset);
+      }
       handle = window.fleetSession.createFleetMember({
         base: rendezvousBase,
         data,
@@ -4679,7 +5297,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         ship: fleetShip(),
         onIdentity: (identity) => {
           fleetRole = normaliseFleetRole(identity && identity.role);
-          rememberGmIdentity(identityCode, identity);
+          // `identity.rolePreset` is fleet-session.js's own unaware `null`
+          // placeholder (issue #1294) — merge in this browser's OWN current
+          // selection (already seeded from storage above) rather than let
+          // this automatic re-emission stomp a just-restored value back to
+          // null (issue #1319).
+          rememberGmIdentity(identityCode, { ...identity, rolePreset: currentGmRolePresetId() });
           publishFleetLobbyState();
           paintGmStartControls();
         },
@@ -4732,7 +5355,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         role: handle.role,
         operatorId: handle.operatorId,
         reconnectCredential: handle.reconnectCredential,
-        rolePreset: null,
+        rolePreset: currentGmRolePresetId(),
       });
       fleetSuffix = handle.code ? handle.code.suffix : null;
       paintFleetPanel();
@@ -4803,13 +5426,24 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     });
 
     document.getElementById('gm-force-start-btn')?.addEventListener('click', () => {
-      if (!localGm() || !fleetHandle || typeof fleetHandle.forceStart !== 'function'
-          || !fleetHandle.forceStart()) {
-        fleetStartResultView = {
-          id: 'server.gm.start.force_refused', params: {}, refused: true,
-        };
-        paintGmStartControls();
-      }
+      const gm = localGm();
+      const requestedFleet = fleetHandle;
+      if (!gm) return;
+      window.__hostGmConfirmations.request({ category: 'session.force-start',
+        description: t('server.gm.start.force'),
+        preview: () => t('server.gm.start.force'),
+        accept: () => {
+          if (localGm()?.id !== gm.id || fleetHandle !== requestedFleet
+              || typeof requestedFleet?.forceStart !== 'function' || !requestedFleet.forceStart()) {
+            fleetStartResultView = {
+              id: 'server.gm.start.force_refused', params: {}, refused: true,
+            };
+            paintGmStartControls();
+            return false;
+          }
+          return true;
+        },
+      });
     });
 
     /**
@@ -6945,12 +7579,22 @@ function finishInit() {
   // ── Available ships from world config (issue #623) ──────────────────────
   window.wasm_get_available_ships = wasmBindings.wasm_get_available_ships;
   window.wasm_select_ship = wasmBindings.wasm_select_ship;
+  // Scenario-authored GM role presets (issue #1319) — presentation only, see
+  // gui/gm-role-presets.js.
+  window.wasm_get_gm_role_presets = wasmBindings.wasm_get_gm_role_presets;
 
   // The explicit GM profile owns no selected/local ship. It still follows the
   // ordinary world preload and startServer path, including the runtime sidecar
   // fetch callback installed there.
   if (window.__phoenixGmPage) {
     window.wasm_prepare_game_master();
+    if (typeof window.__hostGmRolePresetsSetAvailable === 'function') {
+      window.__hostGmRolePresetsSetAvailable(
+        typeof window.wasm_get_gm_role_presets === 'function'
+          ? window.wasm_get_gm_role_presets()
+          : '[]',
+      );
+    }
     startServer();
     return;
   }

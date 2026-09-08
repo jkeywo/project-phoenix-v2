@@ -472,6 +472,85 @@ template_path = "assets/entities/station_axiom.toml"
 name = "world.entity.starbase_alpha.name"
 transform = { position = [500.0, 0.0, 100.0] }
 
+# Optional GM authoring for the M2 directing run. With no GM intervention the
+# original wave timers, handlers, hulls and victory conditions stay in force.
+[[gm_palette]]
+id = "relief-cruiser"
+label = "world.combat_test.gm.relief_cruiser"
+template_path = "assets/entities/alliance_cruiser.toml"
+name_prefix = "gm_relief"
+[[gm_palette.variant]]
+id = "removable"
+label = "world.combat_test.gm.relief_cruiser"
+overrides = { name = "world.combat_test.gm.relief_cruiser", display_name = "world.combat_test.gm.relief_cruiser", tags = ["ship", "gm_removable"] }
+
+[[gm_objective_palette]]
+id = "gm-relief-rendezvous"
+label = "world.combat_test.gm.objective.rendezvous"
+text = "world.combat_test.gm.objective.rendezvous"
+mandatory = false
+[[gm_objective_palette]]
+id = "gm-relief-cover"
+label = "world.combat_test.gm.objective.cover"
+text = "world.combat_test.gm.objective.cover"
+mandatory = false
+
+# Explicitly named wave hulls are eligible; a fleet's player ships never are.
+[[gm_npc_doctrine_palette]]
+id = "raider-regroup"
+label = "world.combat_test.gm.doctrine.regroup"
+targets = ["wave_1", "wave_2", "wave_3", "wave_4", "wave_5", "wave_6", "wave_7", "wave_8"]
+[[gm_npc_doctrine_palette.doctrine]]
+id = "regroup"
+text = "world.combat_test.gm.doctrine.regroup"
+directive_kind = "Reach"
+directive_anchor = "enemy_e_far"
+base_priority = 100.0
+target_speed = 0.4
+use_impulse = false
+
+[[gm_npc_doctrine_palette]]
+id = "raider-assault"
+label = "world.combat_test.gm.doctrine.assault"
+targets = ["wave_1", "wave_2", "wave_3", "wave_4", "wave_5", "wave_6", "wave_7", "wave_8"]
+[[gm_npc_doctrine_palette.doctrine]]
+id = "assault-starbase"
+text = "world.combat_test.gm.doctrine.assault"
+directive_kind = "Destroy"
+directive_target = "world.entity.starbase_alpha.name"
+base_priority = 100.0
+
+[[gm_role_preset]]
+id = "directing"
+label = "world.combat_test.gm.role.directing"
+panels = ["gm-map-panel", "gm-inspector", "gm-activity"]
+quick_actions = ["gm-session-pause", "gm-session-resume"]
+[[gm_role_preset]]
+id = "observer"
+label = "world.combat_test.gm.role.observer"
+panels = ["gm-map-panel", "gm-activity"]
+quick_actions = ["gm-session-pause"]
+
+# M3's human acceptance uses the same live scenario as M2. These routes borrow
+# the real station's fictional identity and normal Comms range/eligibility.
+# The briefing runs only when a GM explicitly starts its authored hail.
+[[gm_comms_route]]
+id = "starbase-selected"
+label = "world.combat_test.gm.comms.selected"
+visibility = "selected_ships"
+senders = ["world.entity.starbase_alpha.name"]
+[[gm_comms_route.hail]]
+id = "defence-briefing"
+label = "world.combat_test.gm.comms.briefing"
+script_path = "assets/worlds/combat_test.toml#script.setup"
+root_fn = "gm_defence_briefing"
+
+[[gm_comms_route]]
+id = "starbase-fleet"
+label = "world.combat_test.gm.comms.fleet"
+visibility = "fleet"
+senders = ["world.entity.starbase_alpha.name"]
+
 # ── Script ───────────────────────────────────────────────────────────────────
 #
 # Issue #984 (Rhai M6). This world's twenty `[[trigger]]` blocks and its twelve
@@ -526,14 +605,14 @@ setup = """
 // ── Triggers, in authored order ──
 on_world_loaded("arm_the_scenario");
 
-on_timer(0, "release_wave_1");
-on_timer(45, "release_wave_2");
-on_timer(90, "release_wave_3");
-on_timer(135, "release_wave_4");
-on_timer(180, "release_wave_5");
-on_timer(225, "release_wave_6");
-on_timer(270, "release_wave_7");
-on_timer(315, "release_wave_8");
+on_timer(0, "release_wave_1").gm_controls("release_wave_1", "world.combat_test.gm.wave.1").pauseable();
+on_timer(45, "release_wave_2").gm_controls("release_wave_2", "world.combat_test.gm.wave.2").pauseable();
+on_timer(90, "release_wave_3").gm_controls("release_wave_3", "world.combat_test.gm.wave.3").pauseable();
+on_timer(135, "release_wave_4").gm_controls("release_wave_4", "world.combat_test.gm.wave.4").pauseable();
+on_timer(180, "release_wave_5").gm_controls("release_wave_5", "world.combat_test.gm.wave.5").pauseable();
+on_timer(225, "release_wave_6").gm_controls("release_wave_6", "world.combat_test.gm.wave.6").pauseable();
+on_timer(270, "release_wave_7").gm_controls("release_wave_7", "world.combat_test.gm.wave.7").pauseable();
+on_timer(315, "release_wave_8").gm_controls("release_wave_8", "world.combat_test.gm.wave.8").pauseable();
 
 on_all_destroyed("wave_1", "wave_1_cleared");
 on_all_destroyed("wave_2", "wave_2_cleared");
@@ -552,7 +631,7 @@ on_world_loaded("add_standing_mission");
 on_world_loaded("send_brief");
 
 on_timer(0, "report_wave_1");
-on_timer(45, "report_wave_2");
+on_timer(45, "report_wave_2").gm_controls("report_wave_2", "world.combat_test.gm.report.2").pauseable().skip();
 on_timer(90, "report_wave_3");
 on_timer(135, "report_wave_4");
 on_timer(180, "report_wave_5");
@@ -1043,4 +1122,14 @@ fn report_hull_10(ctx) {
                               node_fn: "hull_10", urgent: true });
 }
 fn hull_10(ctx) { #{ message: "world.combat_test.comms.11.message", responses: [] } }
+
+fn gm_defence_briefing(ctx) {
+    #{ message: "world.combat_test.gm.comms.briefing_message", responses: [
+        #{ text: "world.combat_test.gm.comms.acknowledge", on_pick: "gm_acknowledge_defence", ai_weight: 0 }
+    ] }
+}
+fn gm_acknowledge_defence(ctx) {
+    ctx.flags.increment("gm_defence_acknowledgements", 1);
+    #{ message: "world.combat_test.gm.comms.acknowledged", responses: [] }
+}
 """

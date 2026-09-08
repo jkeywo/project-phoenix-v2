@@ -2951,7 +2951,7 @@ pub fn wasm_snapshot_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_resume(slot: String) -> String {
-    let Some((_, _toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
+    let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
         // No world means no content digest, so there is nothing to check the
         // save against. Refusing beats guessing.
         return "the scenario has not been loaded yet".to_string();
@@ -2960,7 +2960,14 @@ pub fn wasm_prepare_resume(slot: String) -> String {
         return "the scenario has not been loaded yet".to_string();
     };
     let store = browser_save_store();
-    let versions = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
+    let versions = match browser_resume_versions(
+        &path,
+        &toml,
+        &crate::entities::config_cache::production_script_resolver(),
+    ) {
+        Ok(versions) => versions,
+        Err(refusal) => return refusal,
+    };
     let selected_ship = SELECTED_SHIP_TEMPLATE_PATH
         .with(|selected| selected.borrow().clone())
         .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
@@ -2982,6 +2989,45 @@ pub fn wasm_prepare_resume(slot: String) -> String {
             refusal.to_string()
         }
     }
+}
+
+/// Complete the root's declared content before the browser's early full version
+/// gate. A running capture includes Startup's script record; pre-init has only
+/// loaded the world/templates so far. Lift the same sources and declare their
+/// record without compiling or executing them, leaving Startup's validation and
+/// freeze intact. The production resolver also records exact sibling/overlay
+/// bodies, so take the ledger snapshot only after resolving them.
+#[cfg(any(target_arch = "wasm32", test))]
+fn browser_resume_versions(
+    path: &str,
+    world_toml: &str,
+    resolver: &dyn crate::world::script::load::ScriptResolver,
+) -> Result<vellum_save::Versions, String> {
+    if !crate::content_ledger::is_frozen() {
+        let raw: toml::Value = toml::from_str(world_toml)
+            .map_err(|error| format!("the scenario could not be prepared: {error}"))?;
+        let (sources, findings) =
+            crate::world::script::load::lift_world_scripts(path, &raw, resolver);
+        if crate::world::validate::has_error(&findings) {
+            let messages: Vec<_> = findings
+                .iter()
+                .filter(|finding| finding.is_error())
+                .map(|finding| finding.message.as_str())
+                .collect();
+            return Err(format!(
+                "the scenario's scripts could not be prepared: {}",
+                messages.join("; ")
+            ));
+        }
+        if let Some(digest) =
+            crate::world::script::load::script_source_ledger_digest(path, &sources)
+        {
+            digest.apply();
+        }
+    }
+    Ok(crate::snapshot::versions(
+        &crate::content_ledger::frozen_or_live(),
+    ))
 }
 
 /// Read, parse and fully version-gate a selected row after that row's scenario
@@ -3198,15 +3244,22 @@ pub fn wasm_import_save_slot(text: String, display_name: String) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_import(text: String) -> String {
-    if SNAPSHOT_WORLD.with(|w| w.borrow().is_none()) {
+    let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
         // Same guard as `wasm_prepare_resume`: no world means no content digest,
         // so there is nothing to check the save against.
         return format!("damaged\t{}", "the scenario has not been loaded yet");
-    }
+    };
     let Some(world_config) = crate::entities::config_cache::get_world_config() else {
         return format!("damaged\t{}", "the scenario has not been loaded yet");
     };
-    let versions = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
+    let versions = match browser_resume_versions(
+        &path,
+        &toml,
+        &crate::entities::config_cache::production_script_resolver(),
+    ) {
+        Ok(versions) => versions,
+        Err(refusal) => return format!("incompatible\t{refusal}"),
+    };
     let selected_ship = SELECTED_SHIP_TEMPLATE_PATH
         .with(|selected| selected.borrow().clone())
         .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
@@ -4986,6 +5039,10 @@ fn flush_host_channels(
 // The Debug Surface adapter behavior stays native-testable even though the
 // host export is WASM-only; the bridge test below feeds the same canonical
 // identities the phone drain collects through the catalogue applier.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "bridge_resume_content_tests.rs"]
+mod resume_content_tests;
+
 #[cfg(test)]
 mod tests {
     use super::{

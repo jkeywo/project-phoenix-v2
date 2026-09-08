@@ -313,6 +313,25 @@ pub fn script_ledger_key(world_path: &str) -> String {
     format!("{world_path}#scripts")
 }
 
+/// The root script-content record, without compiling or running any source.
+/// Browser resume/import must declare this same record before their pre-init
+/// version gate; Startup still owns compilation, validation and activation.
+/// Empty source sets contribute no record, exactly as a script-free load does.
+pub(crate) fn script_source_ledger_digest(
+    world_path: &str,
+    sources: &[ScriptSource],
+) -> Option<crate::content_ledger::LedgerDigest> {
+    if sources.is_empty() {
+        return None;
+    }
+    let mut sorted = sources.to_vec();
+    sorted.sort_by(|a, b| a.path.cmp(&b.path));
+    Some(crate::content_ledger::LedgerDigest {
+        key: script_ledger_key(world_path),
+        digest: vellum_script::content_hash(&sorted),
+    })
+}
+
 /// The full load path for one world: lift → compile → cross-reference validate,
 /// folding every finding into one [`CompiledScripts`]. No caller wires this into
 /// activation in M1 (no shipped world authors scripts yet); it exists so the
@@ -350,10 +369,7 @@ pub fn load_world_scripts(
     // freeze_host_preloaded_content seals the ledger; reader-based native boot
     // applies it from the load plan before its own freeze. The loader itself
     // remains side-effect-free in both paths.
-    compiled.ledger_digest = (!sources.is_empty()).then(|| crate::content_ledger::LedgerDigest {
-        key: script_ledger_key(world_path),
-        digest: compiled.content_hash,
-    });
+    compiled.ledger_digest = script_source_ledger_digest(world_path, &sources);
     // Cross-reference every handler name against the defined-function set: the
     // generic `on(..)` registrations, the Rhai trigger front-end
     // (`on_destroyed`, …). Every unresolved name is an error finding, so the
@@ -425,6 +441,31 @@ mod tests {
 
     fn toml_of(src: &str) -> toml::Value {
         toml::from_str(src).expect("valid toml")
+    }
+
+    #[test]
+    fn source_ledger_record_matches_compiled_hash_without_mutating_content() {
+        let sources = vec![
+            ScriptSource {
+                path: "world.toml#script.zeta".into(),
+                source: "fn zeta(ctx) {}".into(),
+            },
+            ScriptSource {
+                path: "world.toml#script.alpha".into(),
+                source: "fn alpha(ctx) {}".into(),
+            },
+        ];
+        let before = crate::content_ledger::snapshot();
+        let record = script_source_ledger_digest("world.toml", &sources).unwrap();
+        assert_eq!(record.key, "world.toml#scripts");
+        assert_eq!(record.digest, compile_scripts(&sources).content_hash);
+        let reversed: Vec<_> = sources.into_iter().rev().collect();
+        assert_eq!(
+            Some(record),
+            script_source_ledger_digest("world.toml", &reversed)
+        );
+        assert!(script_source_ledger_digest("world.toml", &[]).is_none());
+        assert_eq!(crate::content_ledger::snapshot(), before);
     }
 
     #[test]

@@ -68,3 +68,17 @@ Focused JavaScript tests passed 151 tests before the final visible-hint case;
 the affected settings-panel file then passed all 100 tests including that case.
 The strict String Table check passed with 2,841 strings, zero errors/warnings.
 Independent source review passed. Final integration and rig acceptance remain.
+
+On 8-9 September, the current client bundle passed four existing real-browser
+checks: contrast round trip, reduced-motion round trip, and Station Bar keyboard
+roving at 390x844 and 844x390 (port 3164, exit 0, 4.4 seconds). A new explicit
+native-default-layer browser check passed on port 3165 (one passed, exit 0,
+2.8 seconds): two isolated players receive 150%/contrast/reduced-motion defaults,
+one player's overrides persist after reload, reset restores follow-system, and
+the other player's profile is unchanged. This tests the ordinary rendered client
+consumer and persistence seam, not Ultralight or live OS preference changes.
+
+`native_bridge_accessibility` was explicitly run with `--features host --ignored
+--nocapture`: process exit 0, one test reported passed, but its actual verdict
+was **SKIPPED: needs two displays**. This machine has one 1920x1080 display.
+No lawful two-pane Station layout was exercised and no multi-monitor PASS is claimed.

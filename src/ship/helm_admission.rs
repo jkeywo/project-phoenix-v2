@@ -118,6 +118,7 @@ pub(crate) fn process_helm_inputs(
         Option<&mut VerticalThrustInput>,
         Option<&mut ImpulseCommand>,
         Option<&mut BoostCommand>,
+        Option<&mut crate::ship::helm::DriveCommandWrites>,
         Option<&BoostConfigResource>,
         Option<&ShipBoost>,
         Option<&crate::ship::components::ShipConfigComponent>,
@@ -138,6 +139,7 @@ pub(crate) fn process_helm_inputs(
         mut vertical_in,
         mut impulse_cmd,
         mut boost_cmd,
+        mut drive_writes,
         boost_cfg,
         ship_boost,
         ship_config,
@@ -325,25 +327,22 @@ pub(crate) fn process_helm_inputs(
                     let outcome = if !blocked {
                         if let Some(ic) = impulse_cmd.as_deref_mut() {
                             ic.0 = crate::ship::impulse::ImpulsePhase::Charging;
-                            // Zero the LocalShip's cached helm input the moment a
-                            // charge is commanded, so a stale steering/thrust
-                            // value can't resurface when impulse cancels or the
-                            // autopilot disengages (the pre-#824 phase-edge
-                            // detection, applied at the command rather than one
-                            // tick later at the observed transition). A Set*
-                            // admitted later in this same tick still overrides —
-                            // the loop applies commands in admission order.
-                            if is_local {
-                                if let Some(li) = last_input.as_deref_mut() {
-                                    li.thrust = 0.0;
-                                    li.steering = 0.0;
-                                }
-                                if let Some(ti) = thrust_in.as_deref_mut() {
-                                    ti.0 = 0.0;
-                                }
-                                if let Some(si) = steering_in.as_deref_mut() {
-                                    si.0 = 0.0;
-                                }
+                            if let Some(writes) = drive_writes.as_deref_mut() {
+                                writes.impulse = true;
+                            }
+                            // Clear authoritative actuator latches on EVERY
+                            // ship, so remote peers cannot retain old AI inputs
+                            // during charge. Only the display cache is local.
+                            // A later admitted Set* still overrides in order.
+                            if let Some(li) = last_input.as_deref_mut() {
+                                li.thrust = 0.0;
+                                li.steering = 0.0;
+                            }
+                            if let Some(ti) = thrust_in.as_deref_mut() {
+                                ti.0 = 0.0;
+                            }
+                            if let Some(si) = steering_in.as_deref_mut() {
+                                si.0 = 0.0;
                             }
                             ActionFeedbackOutcome::Applied
                         } else {
@@ -363,6 +362,9 @@ pub(crate) fn process_helm_inputs(
                 {
                     let outcome = if let Some(ic) = impulse_cmd.as_deref_mut() {
                         ic.0 = crate::ship::impulse::ImpulsePhase::Idle;
+                        if let Some(writes) = drive_writes.as_deref_mut() {
+                            writes.impulse = true;
+                        }
                         ActionFeedbackOutcome::Applied
                     } else {
                         ActionFeedbackOutcome::Refused
@@ -411,6 +413,9 @@ pub(crate) fn process_helm_inputs(
         if let Some(active) = desired_boost {
             if let Some(bc) = boost_cmd.as_deref_mut() {
                 bc.0 = active;
+                if let Some(writes) = drive_writes.as_deref_mut() {
+                    writes.boost = true;
+                }
             }
         }
     }
@@ -732,6 +737,51 @@ mod tests {
             assert_eq!(feedback_count(&feedback, correlation), 1);
             if with_owner {
                 assert!(app.world().get::<BoostCommand>(entity).unwrap().0);
+            }
+        }
+    }
+
+    #[test]
+    fn impulse_charge_clears_actuator_latches_on_local_and_remote_ships() {
+        for local in [false, true] {
+            for later_steering in [None, Some(0.25)] {
+                let mut app = App::new();
+                app.add_systems(Update, process_helm_inputs);
+                let mut commands = vec![correlated_command(
+                    crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
+                    SystemControlPayload::StartImpulseCharge,
+                    "charge",
+                )];
+                if let Some(value) = later_steering {
+                    commands.push(correlated_command(
+                        crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
+                        SystemControlPayload::SetSteering { value },
+                        "steer",
+                    ));
+                }
+                let entity = app
+                    .world_mut()
+                    .spawn((
+                        AdmittedCommands(commands),
+                        ThrustInput(0.8),
+                        SteeringInput(-0.6),
+                        ImpulseCommand::default(),
+                    ))
+                    .id();
+                if local {
+                    app.world_mut().entity_mut(entity).insert(LocalShip);
+                }
+                app.update();
+                assert_eq!(
+                    app.world().get::<ThrustInput>(entity).unwrap().0,
+                    0.0,
+                    "charging clears thrust regardless of ownership (local={local})"
+                );
+                assert_eq!(
+                    app.world().get::<SteeringInput>(entity).unwrap().0,
+                    later_steering.unwrap_or(0.0),
+                    "charging clears steering; a later command still wins (local={local})"
+                );
             }
         }
     }

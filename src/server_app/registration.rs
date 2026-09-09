@@ -231,6 +231,16 @@ fn register_physics(app: &mut App) {
         substeps: 1,
     })
     .add_plugins(RapierPhysicsPlugin::<()>::default().in_fixed_schedule())
+    // Rapier 0.33 propagates transforms without Bevy 0.18's dirty-tree
+    // marking pass. A ship with visual children can otherwise retain an old
+    // global pose and contact different geometry from a rendererless peer.
+    .add_systems(
+        FixedUpdate,
+        bevy::transform::systems::mark_dirty_trees
+            .in_set(PhysicsSet::SyncBackend)
+            .after(bevy_rapier3d::plugin::systems::update_character_controls)
+            .before(bevy_rapier3d::plugin::RapierTransformPropagateSet),
+    )
     .configure_sets(
         FixedUpdate,
         (
@@ -780,6 +790,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             )
             .declare_state::<ShipBoost>(StateClass::DeferredFold, "boost-drive-state")
             .declare_state::<ShipImpulse>(StateClass::DeferredFold, "impulse-drive-state")
+            .declare_state::<crate::server_app::ImpulseHullHistory>(
+                StateClass::DeferredFold,
+                "impulse-drive-state",
+            )
             .declare_state::<TrackedEntities>(
                 StateClass::DeferredFold,
                 "runtime-entity-projection-state",
@@ -857,6 +871,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .declare_state::<crate::ship::helm::BoostCommand>(
             StateClass::DeferredFold,
             "helm-actuator-input-state",
+        )
+        .declare_state::<crate::ship::helm::DriveCommandWrites>(
+            StateClass::ClearedAtFold,
+            "digest-exclusion-classes",
         )
         .declare_state::<crate::ship::helm::ImpulseCommand>(
             StateClass::DeferredFold,
@@ -1190,24 +1208,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .in_set(crate::sim_sets::SimSet::Input),
     );
 
-    // Crew-rating replication across the fleet (issue #1119): the same ownerless
-    // synthetic-system pattern as God Mode above. The ship host injects an
-    // `AssignStationRating` when its own ship's `ActiveStationRatings` changes so
-    // every peer makes the same Backfill<->Human transition on the agreed tick;
-    // without it a stationless GM keeps the frozen roster's Backfill and its AI
-    // overwrites what a reconnected human just did. The consumer registration
-    // keeps the unrouted-command lint quiet, exactly as God Mode's does.
-    app.init_resource::<crate::lobby::crew_replication::LastReplicatedRatings>();
+    // Local crew intents use ordinary admission; only the agreed-tick consumer
+    // changes authoritative ratings, on the originating host and every peer.
     {
-        use crate::authoritative::{DeclareState, StateClass};
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        // A one-directional delta-suppression mirror of `ActiveStationRatings`
-        // (which is the truth it diffs against) — the census's Cache class,
-        // verbatim.
-        app.declare_state::<crate::lobby::crew_replication::LastReplicatedRatings>(
-            StateClass::Cache,
-            "digest-exclusion-classes",
-        );
         app.register_admitted_consumer(ConsumerMatcher::undeclared_exact(
             crate::ship::system_registry::ASSIGN_STATION_RATING_SYSTEM_ID,
         ));
@@ -1215,7 +1219,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.add_systems(
         FixedUpdate,
         (
-            // After the lobby handlers have written the change and before
+            // After the lobby handlers have queued the intent and before
             // admission reads the injected command, so it is stamped and staged
             // to the mesh on the tick the change happened.
             crate::lobby::crew_replication::replicate_local_crew_ratings
@@ -1499,5 +1503,103 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // app and the default one are the same simulation.
     if opts.physics_last {
         register_physics(app);
+    }
+}
+
+#[cfg(test)]
+mod physics_boundary_tests {
+    use super::*;
+
+    #[derive(Component)]
+    struct MovingProbe;
+
+    #[derive(Resource, Default)]
+    struct Observations(Vec<(f32, f32, bool)>);
+
+    fn move_probes(mut probes: Query<&mut Transform, With<MovingProbe>>) {
+        for mut transform in &mut probes {
+            transform.translation.x += 2.0;
+        }
+    }
+
+    fn observe_probes(
+        context: ReadRapierContext,
+        probes: Query<(Entity, &Transform, &GlobalTransform), With<MovingProbe>>,
+        mut observations: ResMut<Observations>,
+    ) {
+        let context = context.single().unwrap();
+        for (entity, local, global) in &probes {
+            observations.0.push((
+                local.translation.x,
+                global.translation().x,
+                context
+                    .contact_pairs_with(entity)
+                    .any(|pair| pair.has_any_active_contact()),
+            ));
+        }
+    }
+
+    #[test]
+    fn physics_propagates_roots_with_visual_children_on_every_fixed_step() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin));
+        app.add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>();
+        app.insert_resource(bevy::transform::systems::StaticTransformOptimizations::enabled());
+        register_physics(&mut app);
+        app.init_resource::<Observations>()
+            .add_systems(
+                FixedUpdate,
+                move_probes.in_set(crate::sim_sets::SimSet::Physics),
+            )
+            .add_systems(FixedUpdate, observe_probes.after(PhysicsSet::Writeback));
+        for (y, child) in [(0.0, false), (10.0, true)] {
+            let root = app
+                .world_mut()
+                .spawn((
+                    MovingProbe,
+                    Transform::from_xyz(0.0, y, 0.0),
+                    RigidBody::KinematicPositionBased,
+                    Collider::ball(1.0),
+                    ActiveCollisionTypes::KINEMATIC_STATIC,
+                ))
+                .id();
+            if child {
+                app.world_mut().spawn((Transform::default(), ChildOf(root)));
+            }
+            app.world_mut().spawn((
+                Transform::from_xyz(10.0, y, 0.0),
+                RigidBody::Fixed,
+                Collider::ball(1.0),
+            ));
+        }
+        let period = std::time::Duration::from_millis(10);
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::ZERO,
+        ));
+        app.update();
+        // Multiple complete fixed steps between rendered frames expose stale
+        // tree markers. A visual child must not change collision authority.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 6));
+        app.update();
+        let observations = &app.world().resource::<Observations>().0;
+        assert_eq!(observations.len(), 12);
+        for pair in observations.chunks_exact(2) {
+            for &(local, global, _) in pair {
+                assert_eq!(local, global, "Rapier must receive this fixed step's pose");
+            }
+            assert_eq!(
+                pair[0].2, pair[1].2,
+                "a visual child cannot change contacts"
+            );
+        }
+        assert!(
+            observations.iter().any(|row| row.2),
+            "the probe must actually collide"
+        );
     }
 }

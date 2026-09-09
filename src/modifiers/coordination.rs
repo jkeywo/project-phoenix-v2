@@ -13,7 +13,7 @@ use crate::modifiers::{Modifier, ShipModifiers};
 use crate::regions::effects::RegionEffectKind;
 use crate::regions::server::{RegionEntered, RegionExited, RegionMembership};
 use crate::server_app::ShipImpulse;
-use crate::ship::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
+use crate::ship::impulse::{ImpulseState, IMPULSE_SPEED_MULTIPLIER};
 use crate::ship::power::{PowerMultiplierResource, ShipPowerSystem};
 use crate::ship_plugin::ImpulseConfigResource;
 
@@ -377,7 +377,7 @@ pub fn apply_region_effects(
 /// Apply impulse-drive modifiers to `modifiers` based on the current
 /// `ImpulseState`.
 ///
-/// When the impulse drive is active (`ImpulsePhase::Active`) it registers a
+/// When the impulse drive is active (`Active`) it registers a
 /// `MaxSpeed` modifier with `ModifierSource::ImpulseDrive` and a bonus that
 /// yields `speed_multiplier` × max speed.
 ///
@@ -401,31 +401,25 @@ pub fn apply_impulse_to(
 
 /// Impulse → modifier translator system.
 ///
-/// Reads `ShipImpulse` each frame and updates `ShipModifiers` via
-/// `apply_impulse_to`. Change-detects the impulse phase so it only writes
-/// to the modifier table on transitions, avoiding redundant events.
-///
-/// This is the single routing point for impulse-side modifier writes.
+/// Derives every ship's keyed speed contribution from its own phase and
+/// configuration. Reapplying is event-idempotent and also repairs a cache
+/// replaced during snapshot adoption without depending on a phase transition.
+/// LocalShip selects presentation and must not select authoritative modifiers.
 pub fn translate_impulse_modifiers(
-    impulse_q: Query<&ShipImpulse, With<crate::server_app::LocalShip>>,
-    impulse_cfg_q: Query<&ImpulseConfigResource, With<crate::server_app::LocalShip>>,
-    mut modifiers_q: Query<&mut ShipModifiers, With<crate::server_app::LocalShip>>,
-    mut prev_phase: Local<Option<ImpulsePhase>>,
+    mut ships: Query<
+        (
+            &ShipImpulse,
+            Option<&ImpulseConfigResource>,
+            &mut ShipModifiers,
+        ),
+        With<crate::server_app::Ship>,
+    >,
 ) {
-    let Some(impulse_state) = impulse_q.single().ok().map(|i| i.0) else {
-        return;
-    };
-    let current = impulse_state.phase;
-    if Some(current) != *prev_phase {
-        *prev_phase = Some(current);
-        let speed_multiplier = impulse_cfg_q
-            .single()
-            .ok()
+    for (impulse, config, mut modifiers) in &mut ships {
+        let speed_multiplier = config
             .map(|c| c.speed_multiplier)
             .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
-        if let Some(mut mods_comp) = modifiers_q.iter_mut().next() {
-            apply_impulse_to(&mut mods_comp, &impulse_state, speed_multiplier);
-        }
+        apply_impulse_to(&mut modifiers, &impulse.0, speed_multiplier);
     }
 }
 
@@ -1228,6 +1222,81 @@ mod tests {
         assert!(
             (max_speed - IMPULSE_SPEED_MULTIPLIER).abs() > 0.5,
             "MaxSpeed must not fall back to IMPULSE_SPEED_MULTIPLIER const"
+        );
+    }
+
+    #[test]
+    fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
+        use crate::ship::impulse::ImpulsePhase;
+        let mut app = App::new();
+        app.add_systems(Update, translate_impulse_modifiers);
+        let ships: Vec<_> = [true, false]
+            .into_iter()
+            .map(|local| {
+                let mut entity = app.world_mut().spawn((
+                    crate::server_app::Ship,
+                    ShipImpulse(ImpulseState {
+                        phase: ImpulsePhase::Active,
+                        charge_progress: 1.0,
+                    }),
+                    ShipModifiers::new(),
+                    ImpulseConfigResource {
+                        speed_multiplier: 6.0,
+                        ..Default::default()
+                    },
+                ));
+                if local {
+                    entity.insert(crate::server_app::LocalShip);
+                }
+                entity.id()
+            })
+            .collect();
+        app.update();
+        for &ship in &ships {
+            assert_eq!(
+                app.world()
+                    .get::<ShipModifiers>(ship)
+                    .unwrap()
+                    .get(&ModifierSlot::MaxSpeed),
+                6.0
+            );
+        }
+        // Snapshot adoption can replace the derived cache without changing phase.
+        for &ship in &ships {
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(ShipModifiers::new());
+        }
+        app.update();
+        for &ship in &ships {
+            assert_eq!(
+                app.world()
+                    .get::<ShipModifiers>(ship)
+                    .unwrap()
+                    .get(&ModifierSlot::MaxSpeed),
+                6.0
+            );
+        }
+        // A remote drive cancels independently of the locally projected drive.
+        app.world_mut()
+            .get_mut::<ShipImpulse>(ships[1])
+            .unwrap()
+            .0
+            .cancel_charge();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<ShipModifiers>(ships[0])
+                .unwrap()
+                .get(&ModifierSlot::MaxSpeed),
+            6.0
+        );
+        assert_eq!(
+            app.world()
+                .get::<ShipModifiers>(ships[1])
+                .unwrap()
+                .get(&ModifierSlot::MaxSpeed),
+            1.0
         );
     }
 

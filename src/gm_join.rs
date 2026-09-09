@@ -1152,6 +1152,19 @@ fn commit_roster(world: &mut World, commit: &GmJoinCommit) -> Result<(), GmJoinR
             session.depart(loss.slot);
         }
     }
+    // Private candidates never called join_fleet, so their default diagnostic
+    // ledger still has sampling disabled. Arm it only once Commit admits them.
+    // Preserve existing checkpoints/disagreements and a fixture's active cadence.
+    if world
+        .get_resource::<crate::lockstep::FleetLockstep>()
+        .is_some_and(|session| !session.is_alone())
+    {
+        world.init_resource::<crate::lockstep::MeshAgreement>();
+        let mut agreement = world.resource_mut::<crate::lockstep::MeshAgreement>();
+        if agreement.local.interval == 0 {
+            agreement.local.interval = crate::lockstep::DIGEST_INTERVAL_TICKS;
+        }
+    }
     // The whole-record permission is transaction-scoped. Once Commit installs
     // the proven wait-set, no later snapshot frame may reuse this join arm to
     // overwrite an admitted host.
@@ -1816,6 +1829,17 @@ mod tests {
         world.insert_resource(crate::lockstep::FleetLockstep(session));
         world.insert_resource(GmJoinPendingHostLoss::default());
         world.insert_resource(GmJoinPauseHold::default());
+        let mut agreement = crate::lockstep::MeshAgreement::new(60);
+        agreement.local.record(60, 123);
+        agreement
+            .disagreements
+            .push(crate::lockstep::MeshDisagreement {
+                tick: 60,
+                peer: HostSlot(2),
+                local_digest: 123,
+                peer_digest: 456,
+            });
+        world.insert_resource(agreement);
         let commit = GmJoinCommit {
             id: GmJoinId(8),
             kind: GmJoinKind::Reconnect,
@@ -1832,6 +1856,14 @@ mod tests {
         assert!(!session.has_departed(HostSlot(2)));
         assert_eq!(session.watermark_of(HostSlot(2)), Some(84));
         assert_eq!(session.peers().collect::<Vec<_>>(), vec![HostSlot(2)]);
+        let agreement = world.resource::<crate::lockstep::MeshAgreement>();
+        assert_eq!(agreement.local.interval, 60);
+        assert_eq!(agreement.local.digest_at(60), Some(123));
+        assert_eq!(
+            agreement.disagreements.len(),
+            1,
+            "joining cannot erase an existing disagreement"
+        );
     }
 
     #[test]
@@ -1842,10 +1874,18 @@ mod tests {
         world.insert_resource(crate::lockstep::MeshOutbox::default());
         world.insert_resource(GmJoinPendingHostLoss::default());
         world.insert_resource(GmJoinPauseHold::default());
+        world.init_resource::<crate::lockstep::MeshAgreement>();
 
         prepare_candidate_bootstrap(&mut world, provisional.clone()).unwrap();
         assert!(!world.contains_resource::<FleetRoster>());
         assert!(!world.contains_resource::<crate::lockstep::FleetLockstep>());
+        assert_eq!(
+            world
+                .resource::<crate::lockstep::MeshAgreement>()
+                .local
+                .interval,
+            0
+        );
 
         let commit = GmJoinCommit {
             id: GmJoinId(8),
@@ -1858,6 +1898,13 @@ mod tests {
         commit_roster(&mut world, &commit).unwrap();
 
         assert_eq!(world.resource::<FleetRoster>(), &provisional);
+        assert_eq!(
+            world
+                .resource::<crate::lockstep::MeshAgreement>()
+                .local
+                .interval,
+            crate::lockstep::DIGEST_INTERVAL_TICKS
+        );
         assert_eq!(world.resource::<FleetRoster>().gms().len(), 1);
         assert_eq!(
             world.resource::<FleetRoster>().gm_operator(HostSlot(2)),
@@ -2109,6 +2156,13 @@ mod tests {
         };
         commit_roster(&mut world, &commit).unwrap();
         assert_eq!(world.resource::<FleetRoster>().local(), HostSlot(3));
+        assert_eq!(
+            world
+                .resource::<crate::lockstep::MeshAgreement>()
+                .local
+                .interval,
+            crate::lockstep::DIGEST_INTERVAL_TICKS
+        );
         assert!(world.resource::<FleetRoster>().is_member(HostSlot(3)));
         assert!(world.contains_resource::<crate::lockstep::FleetLockstep>());
         assert!(!world.contains_resource::<GmJoinBootstrap>());

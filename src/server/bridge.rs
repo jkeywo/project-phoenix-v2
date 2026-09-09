@@ -58,7 +58,7 @@ use {
         GmEntityProjectionChanged, GmMissionChanged, GmSessionChanged, GmSpawnChanged,
         GmStationProjectionChanged, HudStateChanged, LobbyStateChanged,
     },
-    crate::core::codec::{self, JsonCodec, MessageCodec},
+    crate::core::codec::{self, JsonCodec},
     crate::core::messages::{self, DeliveryClass},
     crate::entities::config_cache::ConfigCachePlugin,
     crate::gm_activity::GmActivityPlugin,
@@ -76,7 +76,6 @@ use {
     crate::world::WorldPlugin,
     bevy::{log::LogPlugin, prelude::*},
     js_sys::{Array, Function, Object, Reflect},
-    std::cell::RefCell,
     wasm_bindgen::prelude::*,
 };
 
@@ -127,6 +126,12 @@ pub fn drain_client_debug_flags(
     });
 }
 
+#[cfg(target_arch = "wasm32")]
+#[path = "browser_edge.rs"]
+mod browser_edge;
+#[cfg(target_arch = "wasm32")]
+use browser_edge as edge;
+
 // ── De-globalised bridge state (issue #1181) ────────────────────────────────
 //
 // These typed Bevy Resources hold the STATE that simulation systems read or
@@ -134,7 +139,7 @@ pub fn drain_client_debug_flags(
 // scheduler and the seam logic is unit-testable on native without a JS host.
 //
 // The wasm edge KEEPS a minimal thread-local inbox/outbox (see the big comment
-// on the `thread_local!` block): a JS call arrives synchronously, outside Bevy's
+// in `browser_edge`): a JS call arrives synchronously, outside Bevy's
 // schedule and with no `World` handle, so the value it carries has nowhere to
 // live but a thread-local until a `PreUpdate` seam system can drain it into one
 // of these Resources; symmetrically a value the sim produced has to be mirrored
@@ -228,46 +233,10 @@ pub(crate) const fn raw_host_control_allowed(fleet_active: bool) -> bool {
 // glue (thread-local, `wasm_bindgen` export, the Bevy drain system) stays here,
 // gated below, and calls into it.
 
-// ── The wasm edge: minimal thread-local inbox/outbox (issue #1181) ──────────
-//
-// WASM is single-threaded, so `RefCell` is safe here. Everything that remains a
-// thread-local is EDGE-ONLY by necessity, not by preference: a `#[wasm_bindgen]`
-// export is called synchronously by JS, outside Bevy's schedule and with no
-// `World` handle, so the value it carries (or is asked for) has nowhere to live
-// but a thread-local. The durable, simulation-visible state these used to also
-// hold moved into typed Resources — `crate::server_app::Instagib` and
-// `crate::world::server::BridgeWorldSource` (relocated sim-side in issue #1194),
-// plus `crate::startup_restore` — drained into / mirrored back
-// from here by the seam systems each frame. What is left falls into four edge
-// categories, and
-// each MUST stay a thread-local for the stated reason:
-//
-//  1. INBOX queues — JS pushes, a `PreUpdate` seam system drains into the sim.
-//     `INBOUND_QUEUE`, `DISCONNECT_QUEUE`, `PENDING_BROWSER_SAVES`, diagnostic pending state,
-//     `PENDING_FORCE_START`, `PENDING_TELEPORT_TO_WAYPOINT`,
-//     `PENDING_GOD_MODE_TOGGLES`, `PENDING_INSTAGIB_TOGGLES`. The JS caller has
-//     no `World`, so it cannot write a Resource; the drain does that a tick later.
-//
-//  2. OUTBOX mirrors — a `PostUpdate` seam system copies a Resource/query result
-//     out, a JS getter reads it back. `SIM_PAUSED`, `SIM_TICK_COUNT`,
-//     `HAS_NAVIGATION_WAYPOINT`, `GOD_MODE_MIRROR`, `INSTAGIB_MIRROR`,
-//     `RESUME_PENDING_MIRROR`, the seven debug-JSON strings, `EXPORTED_ARTIFACT`,
-//     `SNAPSHOT_STATUS`. The authoritative value is a Resource/query; this is
-//     only the frame-lagged cache a `World`-less getter can reach.
-//
-//  3. JS callbacks — `OUTBOUND_CB`, `HOST_CHANNEL_CB` are `js_sys::Function`,
-//     which is `!Send`, so they can never be a `Send + Sync` Bevy Resource.
-//
-//  4. PRE-INIT stashes — set by JS BEFORE `wasm_init` builds the app, consumed
-//     while it is built (there is no `World` yet). `SHIP_STATIONS`, `SHIP_CONFIG`,
-//     `LOG_SPEC`, `LOG_ENTITY`, `SELECTED_SHIP_TEMPLATE_PATH`,
-//     `REDUCED_MOTION`, `SNAPSHOT_WORLD`,
-//     `PENDING_RESTORE_STAGED`. Their durable half is a Resource `wasm_init`
-//     inserts from the stash; the stash is just the pre-`World` transport.
-//
-// `SHAKE_OFFSET` / `FORCEFIELD_LEVEL` / `LAST_SENT_FORCEFIELD` are per-frame
-// value taps a render/audio system writes for `flush_host_channels`; they are a
-// specialised outbox and stay edge-local for the same reason as category 2.
+// Browser storage belongs to browser_edge. This module exposes synchronous JS
+// exports and scheduled Bevy drains/publications; it holds no ambient cells.
+// Browser callbacks and pre-App staging cannot be Bevy Resources. Their typed
+// adapter operations return owned data and never retain a World handle.
 
 /// What the browser should do with a fixed-tick manual capture once it reaches
 /// the peer-local outbox. This is storage/presentation intent only; the sim sees
@@ -478,406 +447,7 @@ fn rebind_fleet_lobby_projections(
 
 #[cfg(target_arch = "wasm32")]
 fn queue_fleet_lobby_input(input: FleetLobbyInput) -> bool {
-    let generation = FLEET_JOIN_GENERATION.with(|counter| *counter.borrow());
-    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
-        queue_fleet_lobby_input_bounded(
-            &mut pending.borrow_mut(),
-            generation,
-            input,
-            MAX_FLEET_LOBBY_INPUTS,
-        )
-    })
-}
-
-#[cfg(target_arch = "wasm32")]
-thread_local! {
-    /// Messages received from JS peers, waiting to be injected into Bevy.
-    /// Each entry is (sender_token, json_payload).
-    static INBOUND_QUEUE: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
-
-    /// Disconnect tokens queued by JS, waiting to be injected into Bevy.
-    static DISCONNECT_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-
-    /// Host-mesh simulation frames received from another SHIP HOST, waiting to
-    /// be handed to `lockstep` (issue #1116). A separate queue from
-    /// `INBOUND_QUEUE` because it carries a separate protocol on a separate
-    /// socket: a fleet member never identifies, holds no station, and nothing it
-    /// says is a `ClientMessage`. Mixing them would make "each crew star belongs
-    /// to one host" a filtering rule rather than a fact about the wires.
-    /// Each entry is `(authenticated_slot, json_payload)`: the fleet slot the
-    /// delivering connection was bound to at join (issue #1120), and the encoded
-    /// frame. `0` (never a real fleet slot, which start at `slot-1`) means the page
-    /// could not authenticate the connection, so the frame is trusted as before.
-    static MESH_INBOUND: RefCell<Vec<(u32, String)>> = const { RefCell::new(Vec::new()) };
-
-    /// Host-mesh frames this host has produced and JS has not sent yet.
-    /// Drained by `wasm_take_mesh_frames` rather than pushed through a callback,
-    /// because the fleet link is polled by the page's own frame loop and a
-    /// callback would deliver a tick frame at whatever moment the simulation
-    /// happened to seal it.
-    static MESH_OUTBOUND: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-
-    /// Fleet slots whose ship HOST closed its link, queued by JS for the next
-    /// frame (issue #1119). The twin of `DISCONNECT_QUEUE`, but for a peer HOST
-    /// rather than a crew member: a crew disconnect flips one station on this
-    /// host's own ship, while a host loss flips a whole PEER ship to Backfill at
-    /// an agreed tick every survivor derives the same. Kept as bare slot ordinals
-    /// — `drain_mesh_inbound` turns each into a `HostLoss` observation whose
-    /// agreed tick the simulation derives from the lost host's own watermark, so
-    /// the page never has to know a tick.
-    static HOST_LOSS_QUEUE: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
-
-    /// Disconnected fixed slots a replacement machine has validly claimed, queued
-    /// by the OWNER page for the next frame (issue #1120). The owner is the only
-    /// host that admits claims (the star centre), so it is the only minter of the
-    /// monotonic `claim_seq` — `SLOT_CLAIM_SEQ` — that makes the race resolution
-    /// deterministic. `drain_mesh_inbound` turns each into a granted
-    /// `SlotClaimFrame` stamped with the owner's own slot, the next seq and the
-    /// current tick, records it in this host's own resolver, and broadcasts it.
-    static SLOT_CLAIM_QUEUE: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
-
-    /// The owner's monotonic claim sequence — the deterministic tiebreak between
-    /// racing claims (issue #1120). Minted here, in the arrival order the owner
-    /// received the claims, so the first claim gets the lowest seq and wins.
-    static SLOT_CLAIM_SEQ: RefCell<u64> = const { RefCell::new(0) };
-
-    /// The fleet status mirror `wasm_mesh_status` answers from, written each
-    /// frame by `publish_mesh_status`. A mirror rather than a `World` read for
-    /// the same reason `SIM_PAUSED` is one: the settings cog asks between
-    /// frames, when there is no world handle to ask.
-    static MESH_STATUS: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// A fleet the page has joined but Bevy has not adopted yet: the encoded
-    /// roster, applied once on the next frame. Deferred for the same reason
-    /// every other JS→Bevy handoff here is — `wasm_join_fleet` is called from a
-    /// socket callback, which holds no `World`.
-    static PENDING_FLEET_ADOPTIONS: RefCell<VecDeque<PendingFleetAdoption>> =
-        const { RefCell::new(VecDeque::new()) };
-    static FLEET_JOIN_GENERATION: RefCell<u64> = const { RefCell::new(0) };
-    static FLEET_JOIN_STATUS: RefCell<crate::lockstep::FleetJoinStatus> = const {
-        RefCell::new(crate::lockstep::FleetJoinStatus {
-            generation: 0,
-            status: crate::lockstep::FleetJoinStatusKind::Idle,
-            reason: None,
-        })
-    };
-
-    /// A validated crew-public GM roster waiting for its full replacement in
-    /// Bevy (issue #1289). Decoded at the WASM boundary so no `serde_json`
-    /// escapes `core::codec`; latched here because the JS call has no `World`.
-    static PENDING_GM_ROSTER: RefCell<Option<crate::gm_roster::GmRoster>> =
-        const { RefCell::new(None) };
-
-    /// Validated privileged GM requests waiting for the next frame-driven
-    /// admission pass. This lane remains live while FixedUpdate is paused.
-    static PENDING_GM_ACTIONS: RefCell<VecDeque<crate::gm_action::GmActionRequest>> =
-        const { RefCell::new(VecDeque::new()) };
-
-    /// Accepted GM join transactions waiting for the deterministic sequencer.
-    /// First-time decisions came from a visible peer; reconnects came from the
-    /// exact private capability. Kept separate from GM actions in both cases.
-    static PENDING_GM_JOINS: RefCell<VecDeque<PendingGmJoin>> =
-        const { RefCell::new(VecDeque::new()) };
-    /// Read-only progress mirror polled by every server-page surface.
-    static GM_JOIN_STATUS: RefCell<crate::gm_join::GmJoinProgress> =
-        const { RefCell::new(crate::gm_join::GmJoinProgress::Idle) };
-
-    /// Explicit production GM-page boot request. This is set by the page before
-    /// `wasm_init` and takes precedence over the WebDriver probe.
-    static GM_HOST_BOOT_REQUESTED: RefCell<bool> = const { RefCell::new(false) };
-    /// Read-only browser smoke/diagnostic mirror of the profile actually used.
-    static ACTIVE_BOOT_PROFILE: RefCell<&'static str> = const { RefCell::new("not-started") };
-
-    /// Ordered, edge-only coordinated-lobby input waiting for the next
-    /// `PreUpdate` drain (issue #1290). One FIFO is essential: a same-frame
-    /// leave(false) -> reopen(true) -> start-1 sequence must not collapse its
-    /// teardown generation or let a pre-teardown grant cross into the new
-    /// fleet.
-    static PENDING_FLEET_LOBBY_INPUTS: RefCell<VecDeque<PendingFleetLobbyInput>> =
-        const { RefCell::new(VecDeque::new()) };
-    /// Latest absolute projections are rebound onto a newly allocated join
-    /// generation. The page commonly publishes managed/validation immediately
-    /// before calling `wasm_join_fleet`; without these mirrors those samples
-    /// would still carry generation zero and be discarded after adoption.
-    static LATEST_FLEET_MANAGED: RefCell<Option<bool>> = const { RefCell::new(None) };
-    static LATEST_FLEET_VALIDATION: RefCell<Option<bool>> = const { RefCell::new(None) };
-
-    /// Fixed-tick start outcomes mirrored back to the World-less JS poller.
-    static START_GRANT_RESULTS: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
-
-    /// JS callback registered by the host page to receive outbound messages.
-    /// Signature: callback(target: string, payload: string)
-    static OUTBOUND_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// Validated ShipStations config, stored by wasm_validate_stations() so
-    /// wasm_init() can insert it as a Bevy resource.
-    static SHIP_STATIONS: RefCell<Option<ShipStations>> = const { RefCell::new(None) };
-
-    /// Validated ShipConfig, stored by wasm_validate_stations() so
-    /// wasm_init() can insert it as a ShipConfigResource before LobbyPlugin
-    /// tries to init_resource it (panicking in WASM via std::fs::read_to_string).
-    static SHIP_CONFIG: RefCell<Option<ShipConfig>> = const { RefCell::new(None) };
-
-    /// Whether the host page's reduced-motion preference
-    /// (`prefers-reduced-motion: reduce`) is active, forwarded by
-    /// [`wasm_set_reduced_motion`] (issue #1173). Drained each frame into the
-    /// `ViewscreenMotion` resource by `viewscreen_border::sync_reduced_motion`.
-    /// Read continuously, so an OS-level change of the preference takes effect
-    /// without a page reload.
-    #[cfg(target_arch = "wasm32")]
-    static REDUCED_MOTION: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Mirror of the `SimulationPaused` resource, written by
-    /// `drain_host_controls` so `wasm_is_paused()` can answer without a Bevy
-    /// world handle. The host settings menu's Gameplay tab reads it each frame
-    /// to render its pause/resume affordance (issue #939).
-    static SIM_PAUSED: RefCell<bool> = const { RefCell::new(false) };
-
-    /// `?log=` — a category/level spec such as `info,ai=debug,admit=trace`.
-    /// Set by JS via `wasm_set_log_spec()` before `wasm_init()`. Parsed by
-    /// `crate::logging::parse_log_spec`, the same parser the headless runner's
-    /// `--log` flag uses, so the two front ends cannot drift.
-    static LOG_SPEC: RefCell<Option<String>> = const { RefCell::new(None) };
-
-    /// `?log_entity=` — comma-separated entity display names to restrict
-    /// logging to. Set by JS via `wasm_set_log_entity()` before `wasm_init()`.
-    static LOG_ENTITY: RefCell<Option<String>> = const { RefCell::new(None) };
-
-    /// Pending absolute states queued by the host's one generic diagnostic
-    /// mutation export. The key is the canonical Debug Surface identity; a
-    /// second request for the same surface replaces the first before the next
-    /// drain. Absent entirely from a public-demo binary.
-    #[cfg(not(phoenix_demo_build))]
-    static PENDING_DEBUG_SURFACE_STATES: RefCell<HashMap<DebugSurface, bool>> =
-        RefCell::new(HashMap::new());
-
-    /// Pending host pause toggle. Separate from diagnostic identity and present
-    /// in every build because host pause is a Gameplay control.
-    static PENDING_PAUSE: RefCell<bool> = const { RefCell::new(false) };
-
-    /// The world this session loaded: `(path, TOML text)`, recorded by
-    /// `wasm_load_world`. The snapshot boundary (issue #862) needs both — the
-    /// path is `Run::scenario`, and the text is what `snapshot::content_digest`
-    /// hashes to produce the content version. Kept here rather than reached for
-    /// through `config_cache` so the save path has one obvious source.
-    static SNAPSHOT_WORLD: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
-
-    /// The private LocalStorage namespace chosen for this browser host. The JS
-    /// identity installer runs before the first catalogue call, and this cache
-    /// then makes every later API/capture use exactly that namespace even if a
-    /// script tampers with sessionStorage mid-session.
-    static BROWSER_SAVE_NAMESPACE: RefCell<Option<String>> = const { RefCell::new(None) };
-
-    /// Opaque capture tokens plus their peer-local storage intents, queued by
-    /// synchronous save exports and drained into
-    /// [`crate::save_slots_lifecycle::ManualSaveRequests`] in `PreUpdate`.
-    ///
-    /// Every token is distinct and FIFO, so two clicks before the next frame
-    /// cannot overwrite one another. The destination/name stays in the same
-    /// bounded structure until the fixed-tick capture reaches the local outbox.
-    /// Nothing here enters the digest or mesh; the fixed schedule sees only the
-    /// token.
-    static PENDING_BROWSER_SAVES: RefCell<PendingBrowserSaves<BrowserSaveIntent>> =
-        const { RefCell::new(PendingBrowserSaves::new()) };
-
-    /// The text of an exported save, waiting for the host page to collect it
-    /// (issue #866).
-    ///
-    /// Parked rather than returned, for [`PENDING_BROWSER_SAVES`]'s reason turned around:
-    /// the capture happens on a tick boundary, so the click that
-    /// asked for it is long over by the time there is a string to hand back.
-    /// Taken exactly once by `wasm_take_exported_snapshot`, which is what turns
-    /// it into a download.
-    static EXPORTED_ARTIFACT: RefCell<Option<String>> = const { RefCell::new(None) };
-
-    /// FIFO host-visible outcomes of saves and resumes, each
-    /// `(succeeded, source, message)` and **drained** by
-    /// `wasm_snapshot_status()`.
-    ///
-    /// Drained rather than latched because the host page polls it: a status
-    /// that stayed set would be re-shown every poll, and one that was cleared
-    /// on a timer could be missed entirely. Taking it means each outcome is
-    /// reported exactly once, whoever asks first. The finite ring drops the
-    /// oldest status when an inactive poller has already filled it, keeping the
-    /// newest local refusal visible.
-    static SNAPSHOT_STATUS: RefCell<BoundedFifo<(bool, String, String), MAX_BROWSER_SAVE_STATUSES>> =
-        const { RefCell::new(BoundedFifo::new()) };
-
-    /// PRE-INIT stash for a save that passed the version gate, set by
-    /// `wasm_prepare_resume` / `wasm_prepare_import` BEFORE `wasm_init` (a resume
-    /// is a page reload, so it runs before there is a `World`). `wasm_init` hands
-    /// it off to [`crate::startup_restore`], which owns the complete lifecycle.
-    /// Category 4 above.
-    static PENDING_RESTORE_STAGED: RefCell<Option<crate::snapshot::StoredRun>> =
-        const { RefCell::new(None) };
-
-    /// OUTBOX mirror of whether a restore is still staged, read back by
-    /// `wasm_resume_pending()` (issue #1181). Set `true` when a save is staged
-    /// pre-init; refreshed each frame by `drain_snapshot_restore` from the
-    /// shared driver's pending state. Category 2 above.
-    static RESUME_PENDING_MIRROR: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Modifier debug payload as JSON (issue #1150), written by
-    /// `debug::modifiers::publish_modifier_debug` each `PostUpdate` frame when
-    /// the surface is enabled. Read by `wasm_get_debug_state()` from JS; the dock
-    /// parses it and renders the three modifier sections rather than printing it.
-    static DEBUG_STATE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// Damage-log debug payload as JSON (issue #1150), written by
-    /// `debug::damage::publish_damage_debug` each `PostUpdate` frame when the
-    /// surface is enabled. Read by `wasm_get_damage_log()` from JS; the dock
-    /// parses and renders it.
-    static DAMAGE_LOG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// Entity-behavior debug payload as JSON (issue #1150), written by
-    /// `debug::entities::publish_entity_behavior_debug` each `PostUpdate` frame
-    /// when the surface is enabled. Read by `wasm_get_entity_debug_state()` from
-    /// JS; the dock parses and renders it.
-    static ENTITY_DEBUG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// Entity-inspector debug payload as JSON (issue #1150), written by
-    /// `debug::inspector::publish_entity_inspector_debug` each `PostUpdate` frame
-    /// when the surface is enabled. Read by `wasm_get_entity_inspector()` from
-    /// JS; the dock parses and renders it.
-    static ENTITY_INSPECTOR_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// The station-activity debug payload as JSON (issue #1145), written by
-    /// `debug::station_activity::publish_station_activity` each tick while the
-    /// station-activity flag is on. Read by `wasm_get_station_activity()` from
-    /// JS. Unlike its neighbours this is structured JSON, not pre-formatted text
-    /// — the dock parses it and draws a chart (`gui/station-activity-chart.js`).
-    static STATION_ACTIVITY_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// The AI doctrine-pool debug payload as JSON (issue #1149), written by
-    /// `debug::ai_state::publish_ai_doctrine` each tick while the AI-doctrine flag
-    /// is on. Read by `wasm_get_ai_doctrine()` from JS. Structured JSON, not
-    /// pre-formatted text — the dock parses it and draws a per-ship panel
-    /// (`gui/ai-doctrine-panel.js`).
-    static AI_DOCTRINE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// The scenario-state debug payload as JSON (issue #1148), written by
-    /// `debug::scenario::publish_scenario_state` each tick while the
-    /// scenario-state flag is on. Read by `wasm_get_scenario_state()` from JS.
-    /// Like station activity this is structured JSON, not pre-formatted text —
-    /// the dock parses it and draws a panel (`gui/scenario-state-panel.js`).
-    static SCENARIO_STATE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// The console input-to-feedback latency payload as JSON (issue #1169),
-    /// written by `debug::console_latency::publish_console_latency` each tick
-    /// while the console-latency flag is on. Read by `wasm_get_console_latency()`
-    /// from JS. Structured JSON like its two neighbours above; the dock parses it
-    /// and draws a per-action table (`gui/console-latency-panel.js`).
-    static CONSOLE_LATENCY_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// The debug-flag read-back as JSON (issue #1169), mirrored by
-    /// `debug_overlay::report_debug_state` — the one system that already computes
-    /// this set for `ServerMessage::DebugState`. Read by `wasm_get_debug_flags()`
-    /// so the host cog paints from the simulation's own answer rather than from
-    /// its memory of what it last clicked; a connected phone can flip the same
-    /// flags, and for console latency a stale button meant the operator saw a
-    /// live surface that was measuring nothing.
-    static DEBUG_FLAGS_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// Pending force-start request from `wasm_force_start()`. Drained by
-    /// `drain_force_start_input` each `PreUpdate` frame into the
-    /// `PendingForceStart` resource; `apply_force_start` (in `FixedUpdate`,
-    /// issue #907) is what actually transitions to `InProgress` without any
-    /// connected players (fully AI-crewed ship).
-    static PENDING_FORCE_START: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Pending host teleport-to-waypoint request from
-    /// `wasm_teleport_to_waypoint()` (issue #770). Drained by
-    /// `drain_teleport_to_waypoint` each `PreUpdate` frame: a deliberate
-    /// host-only simulation override that snaps the LocalShip's authoritative
-    /// position to the shared Navigation waypoint. NOT routed through command
-    /// admission — this is a direct sim mutation, the point of the control.
-    static PENDING_TELEPORT_TO_WAYPOINT: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Whether the LocalShip currently has a shared Navigation waypoint set.
-    /// Written each tick by `publish_waypoint_existence`, read back by
-    /// `wasm_has_navigation_waypoint()` so the host Debug panel can disable the
-    /// teleport control when there is nowhere to teleport to (issue #770, AC2).
-    static HAS_NAVIGATION_WAYPOINT: RefCell<bool> = const { RefCell::new(false) };
-
-    /// The logical simulation tick count (issue #895), mirrored each frame by
-    /// `publish_sim_tick` and read back by `wasm_sim_tick()` so the smoke
-    /// tests can observe the fixed tick advancing independently of the frame
-    /// rate — the Rust suite cannot see the browser's frame loop.
-    static SIM_TICK_COUNT: RefCell<u64> = const { RefCell::new(0) };
-
-    /// The single Host Channel callback registered by the host page (issue
-    /// #818). Signature: `callback(name: string, payload: any)` where `name`
-    /// is one of [`host_channels::ALL`] and `payload` is a JSON string for the
-    /// message-drained channels, a bare number for `audio_level`, and a
-    /// two-element `[x, y]` array for `shake`. Replaces the eight per-channel
-    /// callback slots + `set_*_callback` exports.
-    static HOST_CHANNEL_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// Latest screen shake offset (x, y) in CSS pixels, written by
-    /// [`viewscreen_border::apply_camera_shake`] each frame and read by
-    /// [`flush_host_channels`] for the JS callback.
-    static SHAKE_OFFSET: RefCell<(f32, f32)> = const { RefCell::new((0.0, 0.0)) };
-
-    /// Latest forcefield SFX volume, written by
-    /// [`server::audio::drive_forcefield_level`] each frame and read by
-    /// [`flush_host_channels`].
-    static FORCEFIELD_LEVEL: RefCell<f32> = const { RefCell::new(0.0) };
-
-    /// Last forcefield level handed to the `audio_level` host channel. Unlike
-    /// the shake offset (which fires unconditionally so JS can reset its
-    /// transform), a `.volume` write that changes nothing is pure overhead at
-    /// 60 Hz — so [`flush_host_channels`] emits `audio_level` only when the
-    /// level actually moves. Starts at a sentinel no real level can equal, so
-    /// the first flush always fires.
-    static LAST_SENT_FORCEFIELD: RefCell<f32> = const { RefCell::new(-1.0) };
-
-    /// Template path of the player ship selected by the host. Set by
-    /// `wasm_select_ship()` before `wasm_init()`. When absent, defaults
-    /// to `"assets/entities/alliance_cruiser.toml"`.
-    static SELECTED_SHIP_TEMPLATE_PATH: RefCell<Option<String>> =
-        const { RefCell::new(None) };
-
-    /// INBOX: instagib-toggle requests from `wasm_toggle_instagib()`, drained by
-    /// `drain_instagib_toggle` each `PreUpdate` into the [`crate::server_app::Instagib`] Resource
-    /// (issue #1181). A count (not a bool) so two clicks in one frame flip twice,
-    /// matching the God Mode queue; parity is applied by `apply_instagib_toggles`.
-    static PENDING_INSTAGIB_TOGGLES: RefCell<u32> = const { RefCell::new(0) };
-
-    /// OUTBOX mirror of the [`crate::server_app::Instagib`] Resource, refreshed each frame by
-    /// `publish_instagib` so `wasm_get_instagib()` can read it back without a
-    /// `World` handle (issue #1181). Same pattern as `GOD_MODE_MIRROR`.
-    static INSTAGIB_MIRROR: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Pending God Mode toggle requests from `wasm_toggle_god_mode()` (issue
-    /// #900). Drained by `drain_god_mode_toggle` each `PreUpdate` frame, which
-    /// turns each one into a `ToggleGodMode` `InboundMessage` under
-    /// `LOCAL_CONSOLE_TOKEN` — the same command-admission boundary every other
-    /// host command crosses — rather than writing a bool directly. A count
-    /// (not a single bool) so two clicks in one frame toggle twice, matching
-    /// what two separate admitted commands on two different ticks would do.
-    static PENDING_GOD_MODE_TOGGLES: RefCell<u32> = const { RefCell::new(0) };
-
-    /// Mirrors the authoritative `GodMode` resource each frame so
-    /// `wasm_get_god_mode()` can read it back without touching the Bevy World
-    /// from outside a system (issue #900). Written by `publish_god_mode`. Same
-    /// pattern as `SIM_TICK_COUNT`/`HAS_NAVIGATION_WAYPOINT`.
-    static GOD_MODE_MIRROR: RefCell<bool> = const { RefCell::new(false) };
-}
-
-// Keep the #1293 edge queues separate from the long-lived bridge macro above.
-// Besides making their distinct private/terminal roles visible, this prevents
-// the wasm target's `thread_local!` expansion from exceeding Rust's default
-// macro recursion depth as new bridge seams are added.
-#[cfg(target_arch = "wasm32")]
-thread_local! {
-    /// Candidate-private topology bootstrap. This deliberately does not enter
-    /// `PENDING_FLEET_ADOPTIONS`: it may prepare entities for restore, but only
-    /// the typed Commit may install the authoritative roster/wait-set.
-    static PENDING_GM_JOIN_BOOTSTRAPS: RefCell<VecDeque<PendingGmJoinBootstrap>> =
-        const { RefCell::new(VecDeque::new()) };
-    /// Owner-sequenced terminal transport losses after visible acceptance.
-    static PENDING_GM_JOIN_REFUSALS: RefCell<VecDeque<PendingGmJoinRefusal>> =
-        const { RefCell::new(VecDeque::new()) };
+    edge::queue_fleet_lobby_input(input)
 }
 
 /// Resolve and cache the private browser Store namespace.
@@ -888,54 +458,7 @@ thread_local! {
 /// isolated too. It does not enter simulation state or a peer message.
 #[cfg(target_arch = "wasm32")]
 fn browser_save_namespace() -> String {
-    BROWSER_SAVE_NAMESPACE.with(|cached| {
-        if let Some(namespace) = cached.borrow().as_ref() {
-            return namespace.clone();
-        }
-
-        let window = web_sys::window();
-        let from_property = window.as_ref().and_then(|window| {
-            Reflect::get(
-                window.as_ref(),
-                &JsValue::from_str(BROWSER_SAVE_IDENTITY_PROPERTY),
-            )
-            .ok()
-            .and_then(|value| value.as_string())
-        });
-        let from_session = window.as_ref().and_then(|window| {
-            window
-                .session_storage()
-                .ok()
-                .flatten()
-                .and_then(|storage| storage.get_item(BROWSER_SAVE_IDENTITY_KEY).ok().flatten())
-        });
-        let mut identity = from_property
-            .or(from_session)
-            .filter(|identity| scoped_browser_save_namespace(identity).is_some())
-            .unwrap_or_else(mint_fallback_browser_save_identity);
-
-        // A valid identity is the only input accepted by the namespace helper.
-        // The fallback minter is defined to produce the same 32-lower-hex shape.
-        let namespace = scoped_browser_save_namespace(&identity).unwrap_or_else(|| {
-            identity = mint_fallback_browser_save_identity();
-            scoped_browser_save_namespace(&identity)
-                .expect("the browser save identity minter must produce 32 lowercase hex digits")
-        });
-
-        if let Some(window) = window {
-            let _ = Reflect::set(
-                window.as_ref(),
-                &JsValue::from_str(BROWSER_SAVE_IDENTITY_PROPERTY),
-                &JsValue::from_str(&identity),
-            );
-            if let Ok(Some(storage)) = window.session_storage() {
-                let _ = storage.set_item(BROWSER_SAVE_IDENTITY_KEY, &identity);
-            }
-        }
-
-        *cached.borrow_mut() = Some(namespace.clone());
-        namespace
-    })
+    edge::browser_save_namespace()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1035,14 +558,14 @@ pub mod host_channels {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_game_master() {
-    GM_HOST_BOOT_REQUESTED.with(|requested| *requested.borrow_mut() = true);
+    edge::publish_gm_host_boot_requested(true);
 }
 
 /// Read-only identity of the profile actually composed by [`wasm_init`].
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_boot_profile() -> String {
-    ACTIVE_BOOT_PROFILE.with(|active| active.borrow().to_string())
+    edge::boot_profile()
 }
 
 // ── Instagib helper (issue #900 context, de-globalised in #1181) ────────────
@@ -1062,7 +585,7 @@ pub fn wasm_boot_profile() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_god_mode() {
-    PENDING_GOD_MODE_TOGGLES.with(|v| *v.borrow_mut() += 1);
+    edge::increment_pending_god_mode_toggles();
 }
 
 /// Called by JS to read the LocalShip's current God Mode state (issue #900),
@@ -1073,7 +596,7 @@ pub fn wasm_toggle_god_mode() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_god_mode() -> bool {
-    GOD_MODE_MIRROR.with(|v| *v.borrow())
+    edge::read_god_mode_mirror()
 }
 
 /// Called by JS (settings cog Debug/Cheat tab) to request an instagib flip.
@@ -1085,7 +608,7 @@ pub fn wasm_get_god_mode() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_instagib() {
-    PENDING_INSTAGIB_TOGGLES.with(|v| *v.borrow_mut() += 1);
+    edge::increment_pending_instagib_toggles();
 }
 
 /// Called by JS each frame to read back the instagib flag for the cog button
@@ -1096,7 +619,7 @@ pub fn wasm_toggle_instagib() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_instagib() -> bool {
-    INSTAGIB_MIRROR.with(|v| *v.borrow())
+    edge::read_instagib_mirror()
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -1187,12 +710,8 @@ pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsV
     let ship_config =
         validate_ship_stations(template_path, toml_str).map_err(|e| JsValue::from_str(&e))?;
     let stations = crate::lobby::stations_config::stations_from_ship_config(&ship_config);
-    SHIP_STATIONS.with(|slot| {
-        *slot.borrow_mut() = Some(stations);
-    });
-    SHIP_CONFIG.with(|slot| {
-        *slot.borrow_mut() = Some(ship_config);
-    });
+    edge::publish_ship_stations(Some(stations));
+    edge::publish_ship_config(Some(ship_config));
     Ok(JsValue::UNDEFINED)
 }
 
@@ -1215,6 +734,12 @@ pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsV
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
+    if !crate::entities::config_cache::wasm_is_preload_complete() {
+        web_sys::console::error_1(&JsValue::from_str(
+            "Content preload is incomplete; refusing to initialise",
+        ));
+        return;
+    }
     // Route Rust panics through console.error with a useful message + location.
     // Without this, a panic in any Bevy system traps the wasm instance and
     // every subsequent JS→WASM call surfaces as a bare "RuntimeError: memory
@@ -1234,7 +759,7 @@ pub fn wasm_init() {
                 .and_then(|v| v.as_bool())
         })
         .unwrap_or(false);
-    let is_browser_gm = GM_HOST_BOOT_REQUESTED.with(|requested| *requested.borrow());
+    let is_browser_gm = edge::read_gm_host_boot_requested();
 
     // Boot clock starts here, before any plugin is added, and stops when the
     // app is handed to the frame loop (issue #868). `is_automation` is passed
@@ -1271,13 +796,11 @@ pub fn wasm_init() {
     } else {
         BootProfile::BrowserHost
     };
-    ACTIVE_BOOT_PROFILE.with(|active| {
-        *active.borrow_mut() = match profile {
-            BootProfile::BrowserGameMaster => "browser-game-master",
-            BootProfile::BrowserAutomation => "browser-automation",
-            BootProfile::BrowserHost => "browser-host",
-            _ => unreachable!("wasm_init selects only browser profiles"),
-        };
+    edge::publish_active_boot_profile(match profile {
+        BootProfile::BrowserGameMaster => "browser-game-master",
+        BootProfile::BrowserAutomation => "browser-automation",
+        BootProfile::BrowserHost => "browser-host",
+        _ => unreachable!("wasm_init selects only browser profiles"),
     });
     let plan = BootPlan {
         profile,
@@ -1287,8 +810,7 @@ pub fn wasm_init() {
         // here — this is `wasm_init` building the app, itself an edge call with
         // no `World` yet. Systems that need it get the `BridgeWorldSource`
         // Resource inserted below instead (issue #1181).
-        world_path: SNAPSHOT_WORLD
-            .with(|w| w.borrow().clone())
+        world_path: edge::read_snapshot_world()
             .map(|(path, _)| path)
             .unwrap_or_default(),
         reader: Box::new(WasmReader),
@@ -1320,11 +842,9 @@ pub fn wasm_init() {
     // Insert ShipConfigResource before LobbyPlugin so its
     // .init_resource::<ShipConfigResource>() is a no-op (the default
     // calls load_ship_config_from_disk which uses std::fs — panics in WASM).
-    SHIP_CONFIG.with(|slot| {
-        if let Some(config) = slot.borrow_mut().take() {
-            app.insert_resource(PendingShipConfig(config));
-        }
-    });
+    if let Some(config) = edge::take_ship_config() {
+        app.insert_resource(PendingShipConfig(config));
+    };
     app.add_plugins(LobbyPlugin)
         .add_plugins(crate::lobby::lobby_outbox_broadcaster());
     // Keep simulation registration on the same renderer axis as boot. The
@@ -1342,8 +862,7 @@ pub fn wasm_init() {
     // Insert the selected ship resource (set by wasm_select_ship before
     // wasm_init was called). Falls back to the legacy default path.
     if !is_browser_gm {
-        let ship_path = SELECTED_SHIP_TEMPLATE_PATH
-            .with(|slot| slot.borrow().clone())
+        let ship_path = edge::read_selected_ship_template_path()
             .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
         app.insert_resource(SelectedShipResource(ship_path));
     }
@@ -1354,13 +873,7 @@ pub fn wasm_init() {
     // recreate the old FleetLockstep wait set: this peer's local ship can be
     // claimed afresh and the other saved ships begin on AI backfill.
     // `wasm_prepare_resume` has already rejected a different selected hull.
-    if let Some(boot) = PENDING_RESTORE_STAGED.with(|pending| {
-        pending
-            .borrow()
-            .as_ref()
-            .and_then(|run| run.snapshot.as_ref())
-            .and_then(|snapshot| snapshot.state.boot_identity.clone())
-    }) {
+    if let Some(boot) = edge::restore_boot_identity() {
         crate::server_app::stage_resume_game_start_entity_uuids(app.world_mut(), &boot);
         crate::lockstep::start_saved_fleet_standalone(app.world_mut(), boot.fleet);
     }
@@ -1484,11 +997,9 @@ pub fn wasm_init() {
     );
 
     // Insert the validated ShipStations resource if it was pre-validated.
-    SHIP_STATIONS.with(|slot| {
-        if let Some(stations) = slot.borrow().clone() {
-            app.insert_resource(stations);
-        }
-    });
+    if let Some(stations) = edge::read_ship_stations() {
+        app.insert_resource(stations);
+    };
 
     // Hand the loaded world's raw `(path, TOML)` source into the World as a
     // Resource (issue #1181), so `world::server::insert_raw_world_source_resource`
@@ -1496,7 +1007,7 @@ pub fn wasm_init() {
     // free function. Inserted only when a world was actually loaded — the
     // browser always loads one before `wasm_init`, but the absent case leaves
     // the resource off exactly as the old `get_raw_world_source() == None` did.
-    if let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) {
+    if let Some((path, toml)) = edge::read_snapshot_world() {
         app.insert_resource(crate::world::server::BridgeWorldSource { path, toml });
     }
 
@@ -1515,7 +1026,7 @@ pub fn wasm_init() {
     // A compatible record was staged before this App existed. Install the
     // lifecycle gate before `run` can execute even one fixed step, preventing
     // the fresh bootstrap's automatic saves from overwriting that record.
-    if let Some(run) = PENDING_RESTORE_STAGED.with(|p| p.borrow_mut().take()) {
+    if let Some(run) = edge::take_pending_restore_staged() {
         crate::startup_restore::stage(app.world_mut(), run);
     }
 
@@ -1532,10 +1043,7 @@ pub fn wasm_init() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_receive_message(sender_token: &str, json: &str) {
-    INBOUND_QUEUE.with(|q| {
-        q.borrow_mut()
-            .push((sender_token.to_string(), json.to_string()));
-    });
+    edge::enqueue_inbound_queue((sender_token.to_string(), json.to_string()));
 }
 
 /// Called by JS with one host-mesh frame from another ship host (issue #1116),
@@ -1557,7 +1065,7 @@ pub fn wasm_receive_message(sender_token: &str, json: &str) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_receive_mesh_frame(authenticated_slot: u32, json: &str) {
-    MESH_INBOUND.with(|q| q.borrow_mut().push((authenticated_slot, json.to_string())));
+    edge::enqueue_mesh_inbound((authenticated_slot, json.to_string()));
 }
 
 /// The fleet slot a host-mesh frame declares it came from, for the OWNER to
@@ -1591,7 +1099,7 @@ pub fn wasm_mesh_frame_from(json: &str) -> i32 {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_claim_slot(slot: u32) {
-    SLOT_CLAIM_QUEUE.with(|q| q.borrow_mut().push(slot));
+    edge::enqueue_slot_claim_queue(slot);
 }
 
 /// Everything this host wants to say to its fleet, as a JSON array of encoded
@@ -1604,10 +1112,7 @@ pub fn wasm_claim_slot(slot: u32) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_take_mesh_frames() -> String {
-    MESH_OUTBOUND.with(|q| {
-        let frames = std::mem::take(&mut *q.borrow_mut());
-        format!("[{}]", frames.join(","))
-    })
+    edge::take_mesh_frames()
 }
 
 /// Called by JS when the fleet roster freezes and the mission starts.
@@ -1624,61 +1129,7 @@ pub fn wasm_take_mesh_frames() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_join_fleet(roster_json: &str) -> String {
-    let generation = FLEET_JOIN_GENERATION.with(|counter| {
-        let mut counter = counter.borrow_mut();
-        *counter = counter.wrapping_add(1).max(1);
-        *counter
-    });
-    if crate::core::codec::decode_fleet_roster(roster_json).is_none() {
-        PENDING_FLEET_ADOPTIONS.with(|pending| {
-            let mut pending = pending.borrow_mut();
-            if matches!(pending.back(), Some(PendingFleetAdoption::Join(_))) {
-                pending.pop_back();
-            }
-        });
-        FLEET_JOIN_STATUS.with(|status| {
-            *status.borrow_mut() = crate::lockstep::FleetJoinStatus {
-                generation,
-                status: crate::lockstep::FleetJoinStatusKind::Refused,
-                reason: Some("fleet-roster-unreadable".to_string()),
-            };
-        });
-        return "fleet-roster-unreadable".to_string();
-    }
-    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        // This join supersedes any not-yet-drained control projection from the
-        // previous generation. Rebind the latest absolute values so the common
-        // setters→join ordering cannot leave the freshly adopted World at its
-        // unmanaged/fail-closed defaults.
-        rebind_fleet_lobby_projections(
-            &mut pending,
-            generation,
-            LATEST_FLEET_MANAGED.with(|latest| *latest.borrow()),
-            LATEST_FLEET_VALIDATION.with(|latest| *latest.borrow()),
-        );
-    });
-    PENDING_FLEET_ADOPTIONS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        // A newer join cancels an older join that Bevy has not adopted yet.
-        // Preserve a preceding Leave: leave→reopen→join in one animation frame
-        // must tear down the old generation before installing the new one.
-        if matches!(pending.back(), Some(PendingFleetAdoption::Join(_))) {
-            pending.pop_back();
-        }
-        pending.push_back(PendingFleetAdoption::Join(PendingFleetJoin {
-            generation,
-            roster_json: roster_json.to_string(),
-        }));
-    });
-    FLEET_JOIN_STATUS.with(|status| {
-        *status.borrow_mut() = crate::lockstep::FleetJoinStatus {
-            generation,
-            status: crate::lockstep::FleetJoinStatusKind::Pending,
-            reason: None,
-        };
-    });
-    generation.to_string()
+    edge::join_fleet(roster_json)
 }
 
 /// Leave the currently installed fleet at the next safe Bevy-world drain.
@@ -1691,24 +1142,7 @@ pub fn wasm_join_fleet(roster_json: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_leave_fleet() -> String {
-    let generation = FLEET_JOIN_GENERATION.with(|counter| {
-        let mut counter = counter.borrow_mut();
-        *counter = counter.wrapping_add(1).max(1);
-        *counter
-    });
-    PENDING_FLEET_ADOPTIONS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        pending.clear();
-        pending.push_back(PendingFleetAdoption::Leave { generation });
-    });
-    FLEET_JOIN_STATUS.with(|status| {
-        *status.borrow_mut() = crate::lockstep::FleetJoinStatus {
-            generation,
-            status: crate::lockstep::FleetJoinStatusKind::Pending,
-            reason: None,
-        };
-    });
-    generation.to_string()
+    edge::leave_fleet()
 }
 
 /// Poll the latest roster adoption attempt.
@@ -1718,9 +1152,7 @@ pub fn wasm_leave_fleet() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_fleet_join_status() -> String {
-    FLEET_JOIN_STATUS.with(|status| {
-        crate::core::codec::encode_fleet_join_status(&status.borrow()).unwrap_or_default()
-    })
+    edge::fleet_join_status()
 }
 
 /// Replace the crew-public Game Master roster on the next frame (issue #1289).
@@ -1735,7 +1167,7 @@ pub fn wasm_fleet_join_status() -> String {
 pub fn wasm_set_gm_roster(roster_json: &str) -> String {
     match crate::core::codec::decode_gm_roster(roster_json) {
         Some(roster) => {
-            PENDING_GM_ROSTER.with(|pending| *pending.borrow_mut() = Some(roster));
+            edge::publish_pending_gm_roster(Some(roster));
             String::new()
         }
         None => "gm-roster-unreadable".to_string(),
@@ -1747,18 +1179,7 @@ pub fn wasm_set_gm_roster(roster_json: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_submit_gm_action(request_json: &str) -> bool {
-    const LIMIT: usize = 64;
-    let Some(request) = crate::core::codec::decode_gm_action_request(request_json) else {
-        return false;
-    };
-    PENDING_GM_ACTIONS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        if pending.len() >= LIMIT {
-            return false;
-        }
-        pending.push_back(request);
-        true
-    })
+    edge::submit_gm_action(request_json)
 }
 
 /// Queue one GM paused-transfer transaction for owner sequencing (#1293/#1294).
@@ -1775,43 +1196,14 @@ pub fn wasm_begin_gm_join(
     scenario: &str,
     join_kind: &str,
 ) -> bool {
-    const LIMIT: usize = 4;
-    if join_id == 0
-        || approved_by == 0
-        || candidate_host == 0
-        || operator_id.is_empty()
-        || operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
-        || scenario.is_empty()
-        || scenario.len() > 4096
-    {
-        return false;
-    }
-    let kind = match join_kind {
-        "first-time" => crate::gm_join::GmJoinKind::FirstTime,
-        "reconnect" => crate::gm_join::GmJoinKind::Reconnect,
-        _ => return false,
-    };
-    let request = PendingGmJoin {
-        id: crate::gm_join::GmJoinId(join_id),
-        kind,
-        approved_by: crate::command_admission::HostSlot(approved_by),
-        candidate: crate::gm_join::GmJoinCandidate {
-            host: crate::command_admission::HostSlot(candidate_host),
-            operator_id: operator_id.to_string(),
-        },
-        scenario: scenario.to_string(),
-    };
-    PENDING_GM_JOINS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        if let Some(existing) = pending.iter().find(|existing| existing.id == request.id) {
-            return existing == &request;
-        }
-        if pending.len() >= LIMIT {
-            return false;
-        }
-        pending.push_back(request);
-        true
-    })
+    edge::begin_gm_join(
+        join_id,
+        approved_by,
+        candidate_host,
+        operator_id,
+        scenario,
+        join_kind,
+    )
 }
 
 /// Prepare a candidate's world topology without admitting it to the
@@ -1820,61 +1212,21 @@ pub fn wasm_begin_gm_join(
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_gm_join_candidate(join_id: u64, roster_json: &str) -> bool {
-    const LIMIT: usize = 2;
-    if join_id == 0 {
-        return false;
-    }
-    let Some((provisional, _)) = crate::core::codec::decode_fleet_roster(roster_json) else {
-        return false;
-    };
-    if crate::gm_join::GmJoinBootstrap::from_provisional(provisional.clone()).is_err() {
-        return false;
-    }
-    let request = PendingGmJoinBootstrap {
-        id: crate::gm_join::GmJoinId(join_id),
-        provisional,
-    };
-    PENDING_GM_JOIN_BOOTSTRAPS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        if let Some(existing) = pending.iter().find(|existing| existing.id == request.id) {
-            return existing == &request;
-        }
-        if pending.len() >= LIMIT {
-            return false;
-        }
-        pending.push_back(request);
-        true
-    })
+    edge::prepare_gm_join_candidate(join_id, roster_json)
 }
 
 /// Queue the owner's terminal answer when an accepted candidate disconnects.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_refuse_gm_join(join_id: u64, reason: &str) -> bool {
-    const LIMIT: usize = 4;
-    if join_id == 0 || reason != "candidate-disconnected" {
-        return false;
-    }
-    PENDING_GM_JOIN_REFUSALS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        if pending.len() >= LIMIT {
-            return false;
-        }
-        pending.push_back(PendingGmJoinRefusal {
-            id: crate::gm_join::GmJoinId(join_id),
-            reason: crate::gm_join::GmJoinRefusal::CandidateDisconnected,
-        });
-        true
-    })
+    edge::refuse_gm_join(join_id, reason)
 }
 
 /// Read-only absolute join progress for transport/public roster commit.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_gm_join_status() -> String {
-    GM_JOIN_STATUS.with(|status| {
-        crate::core::codec::encode_gm_join_progress(&status.borrow()).unwrap_or_default()
-    })
+    edge::gm_join_status()
 }
 
 /// Enable or disable browser-mesh ownership of collective lobby start.
@@ -1883,7 +1235,7 @@ pub fn wasm_gm_join_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_set_fleet_managed_lobby(enabled: bool) -> String {
-    LATEST_FLEET_MANAGED.with(|latest| *latest.borrow_mut() = Some(enabled));
+    edge::publish_latest_fleet_managed(Some(enabled));
     if queue_fleet_lobby_input(FleetLobbyInput::Managed(enabled)) {
         String::new()
     } else {
@@ -1897,7 +1249,7 @@ pub fn wasm_set_fleet_managed_lobby(enabled: bool) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_set_fleet_start_validation(valid: bool) -> String {
-    LATEST_FLEET_VALIDATION.with(|latest| *latest.borrow_mut() = Some(valid));
+    edge::publish_latest_fleet_validation(Some(valid));
     if queue_fleet_lobby_input(FleetLobbyInput::Validation(valid)) {
         String::new()
     } else {
@@ -1924,7 +1276,7 @@ pub fn wasm_apply_start_grant(grant_json: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_take_start_result() -> String {
-    START_GRANT_RESULTS.with(|results| results.borrow_mut().pop_front().unwrap_or_default())
+    edge::take_start_result()
 }
 
 /// What this host's fleet link looks like from the simulation's side (issue
@@ -1943,7 +1295,7 @@ pub fn wasm_take_start_result() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_mesh_status() -> String {
-    MESH_STATUS.with(|s| s.borrow().clone())
+    edge::read_mesh_status()
 }
 
 /// Called by JS when a peer connection closes.
@@ -1953,9 +1305,7 @@ pub fn wasm_mesh_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_player_disconnected(token: &str) {
-    DISCONNECT_QUEUE.with(|q| {
-        q.borrow_mut().push(token.to_string());
-    });
+    edge::enqueue_disconnect_queue(token.to_string());
 }
 
 /// Called by JS when a peer SHIP HOST's link closes, or when a survivor relays a
@@ -1974,7 +1324,7 @@ pub fn wasm_player_disconnected(token: &str) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_host_departed(slot: u32) {
-    HOST_LOSS_QUEUE.with(|q| q.borrow_mut().push(slot));
+    edge::enqueue_host_loss_queue(slot);
 }
 
 /// Adopt a fleet the page joined, and hand the simulation everything its peers
@@ -1985,22 +1335,21 @@ pub fn wasm_host_departed(slot: u32) {
 /// per FRAME and the simulation consumes per TICK, so the handoff has to happen
 /// once, before any of the frame's fixed steps.
 #[cfg(target_arch = "wasm32")]
-fn clear_fleet_bridge_latches() {
-    MESH_INBOUND.with(|pending| pending.borrow_mut().clear());
-    MESH_OUTBOUND.with(|pending| pending.borrow_mut().clear());
-    HOST_LOSS_QUEUE.with(|pending| pending.borrow_mut().clear());
-    SLOT_CLAIM_QUEUE.with(|pending| pending.borrow_mut().clear());
-    SLOT_CLAIM_SEQ.with(|sequence| *sequence.borrow_mut() = 0);
-    START_GRANT_RESULTS.with(|pending| pending.borrow_mut().clear());
-    MESH_STATUS.with(|status| status.borrow_mut().clear());
+fn clear_fleet_bridge_latches(world: &mut World) {
+    edge::clear_mesh_inbound();
+    edge::clear_mesh_outbound();
+    edge::clear_host_loss_queue();
+    edge::clear_slot_claim_queue();
+    world
+        .resource_mut::<crate::lockstep::SlotClaimSequence>()
+        .reset();
+    edge::clear_start_grant_results();
+    edge::clear_mesh_status();
 }
 
 #[cfg(target_arch = "wasm32")]
 fn drain_mesh_inbound(world: &mut World) {
-    let bootstraps = PENDING_GM_JOIN_BOOTSTRAPS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        pending.drain(..).collect::<Vec<_>>()
-    });
+    let bootstraps = edge::drain_pending_gm_join_bootstraps();
     for pending in bootstraps {
         if let Err(reason) =
             crate::gm_join::prepare_candidate_bootstrap(world, pending.provisional.clone())
@@ -2017,7 +1366,7 @@ fn drain_mesh_inbound(world: &mut World) {
             );
         }
     }
-    let adoptions = PENDING_FLEET_ADOPTIONS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    let adoptions = edge::take_pending_fleet_adoptions();
     for adoption in adoptions {
         let (generation, accepted, refusal) = match adoption {
             PendingFleetAdoption::Join(pending) => {
@@ -2037,41 +1386,25 @@ fn drain_mesh_inbound(world: &mut World) {
             PendingFleetAdoption::Leave { generation } => {
                 let accepted = crate::lockstep::leave_fleet(world).is_ok();
                 if accepted {
-                    clear_fleet_bridge_latches();
+                    clear_fleet_bridge_latches(world);
                 }
                 (generation, accepted, "fleet-leave-not-lobby")
             }
         };
-        FLEET_JOIN_STATUS.with(|status| {
-            let mut status = status.borrow_mut();
-            // A cancelled older action can still precede the latest generation
-            // in this same drain (leave→join). Never let its completion regress
-            // the poller to a stale generation.
-            if status.generation == generation {
-                *status = crate::lockstep::FleetJoinStatus {
-                    generation,
-                    status: if accepted {
-                        crate::lockstep::FleetJoinStatusKind::Accepted
-                    } else {
-                        crate::lockstep::FleetJoinStatusKind::Refused
-                    },
-                    reason: (!accepted).then(|| refusal.to_string()),
-                };
-            }
-        });
+        edge::complete_fleet_adoption(generation, accepted, refusal);
     }
     // A granted slot claim the owner admitted (issue #1120): mint the next
     // deterministic `claim_seq`, stamp the current tick, and build the fleet-wide
     // `SlotClaimFrame`. Done here — not in `wasm_claim_slot` — because it needs the
     // world's `SimTick` and this host's own slot, which a socket callback has no
     // handle to.
-    let claimed = SLOT_CLAIM_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
-    let frames = MESH_INBOUND.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    let claimed = edge::take_slot_claim_queue();
+    let frames = edge::take_mesh_inbound();
     // Slots whose HOST link closed on this machine. Each becomes a self-reported
     // `HostLoss` with tick 0; `apply_mesh_inbox` derives the real agreed tick
     // from the lost host's own last watermark, so the page hands over only the
     // fact of the loss, never a tick it has no way to know.
-    let departed = HOST_LOSS_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    let departed = edge::take_host_loss_queue();
     if frames.is_empty() && departed.is_empty() && claimed.is_empty() {
         return;
     }
@@ -2088,11 +1421,9 @@ fn drain_mesh_inbound(world: &mut World) {
             .get_resource::<crate::sim_tick::SimTick>()
             .map_or(0, |t| t.0);
         for slot in claimed {
-            let claim_seq = SLOT_CLAIM_SEQ.with(|s| {
-                let mut s = s.borrow_mut();
-                *s += 1;
-                *s
-            });
+            let claim_seq = world
+                .resource_mut::<crate::lockstep::SlotClaimSequence>()
+                .next_claim();
             let frame = crate::lockstep::MeshFrame::SlotClaim(crate::lockstep::SlotClaimFrame {
                 from: owner,
                 slot: crate::command_admission::HostSlot(slot),
@@ -2178,7 +1509,7 @@ fn apply_gm_roster_replacement(
 /// Drain the validated host-page latch into the authoritative public resource.
 #[cfg(target_arch = "wasm32")]
 fn drain_gm_roster(world: &mut World) {
-    if let Some(replacement) = PENDING_GM_ROSTER.with(|pending| pending.borrow_mut().take()) {
+    if let Some(replacement) = edge::take_pending_gm_roster() {
         apply_gm_roster_replacement(world, replacement);
     }
 }
@@ -2189,10 +1520,7 @@ fn drain_gm_roster(world: &mut World) {
 /// boundary therefore takes effect before this frame can spend a fixed step.
 #[cfg(target_arch = "wasm32")]
 fn drain_gm_action_input(world: &mut World) {
-    let requests = PENDING_GM_ACTIONS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        pending.drain(..).collect::<Vec<_>>()
-    });
+    let requests = edge::drain_pending_gm_actions();
     for request in requests {
         // `submit_local` consumes the request, so the refusal is built from a
         // retained copy rather than from hand-picked fields: an ingress refusal
@@ -2216,17 +1544,11 @@ fn drain_gm_action_input(world: &mut World) {
 /// pause agreement.
 #[cfg(target_arch = "wasm32")]
 fn drain_gm_join_input(world: &mut World) {
-    let refusals = PENDING_GM_JOIN_REFUSALS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        pending.drain(..).collect::<Vec<_>>()
-    });
+    let refusals = edge::drain_pending_gm_join_refusals();
     for refusal in refusals {
         let _ = crate::gm_join::refuse_join(world, refusal.id, refusal.reason);
     }
-    let requests = PENDING_GM_JOINS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        pending.drain(..).collect::<Vec<_>>()
-    });
+    let requests = edge::drain_pending_gm_joins();
     for request in requests {
         let id = request.id;
         let result = match request.kind {
@@ -2251,7 +1573,7 @@ fn drain_gm_join_input(world: &mut World) {
 
 #[cfg(target_arch = "wasm32")]
 fn publish_gm_join_status(runtime: Res<crate::gm_join::GmJoinRuntime>) {
-    GM_JOIN_STATUS.with(|status| *status.borrow_mut() = runtime.progress().clone());
+    edge::publish_gm_join_status(runtime.progress().clone());
 }
 
 /// Drain the browser mesh's edge-only lobby state into typed Bevy resources.
@@ -2262,63 +1584,30 @@ fn drain_fleet_lobby_input(
     mut tracker: ResMut<crate::lobby::server::StartGrantTracker>,
     mut results: ResMut<StartGrantResults>,
 ) {
-    let adoption = FLEET_JOIN_STATUS.with(|status| status.borrow().clone());
-    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
-        let mut wrapped = pending.borrow_mut();
-        let mut inputs = VecDeque::new();
-        while let Some(row) = wrapped.pop_front() {
-            if row.generation == adoption.generation {
-                inputs.push_back(row.input);
-            }
-        }
-        if adoption.status == crate::lockstep::FleetJoinStatusKind::Pending {
-            for input in inputs.into_iter().rev() {
-                wrapped.push_front(PendingFleetLobbyInput {
-                    generation: adoption.generation,
-                    input,
-                });
-            }
-            return;
-        }
-        if adoption.status == crate::lockstep::FleetJoinStatusKind::Refused {
-            return;
-        }
-        if crate::lobby::apply_fleet_lobby_inputs(
-            &mut inputs,
-            &mut managed,
-            &mut grants,
-            &mut tracker,
-            &mut results,
-        ) {
-            START_GRANT_RESULTS.with(|outbox| outbox.borrow_mut().clear());
-        }
-        // A full fixed-tick grant queue leaves the blocking grant and later
-        // ordered edges in `inputs`. Keep their generation while retrying next
-        // frame; otherwise a queue-pressure retry could cross a fleet reopen.
-        for input in inputs.into_iter().rev() {
-            wrapped.push_front(PendingFleetLobbyInput {
-                generation: adoption.generation,
-                input,
-            });
-        }
-    });
+    let adoption = edge::read_fleet_join_status();
+    let Some(mut inputs) = edge::take_fleet_lobby_inputs(&adoption) else {
+        return;
+    };
+    if crate::lobby::apply_fleet_lobby_inputs(
+        &mut inputs,
+        &mut managed,
+        &mut grants,
+        &mut tracker,
+        &mut results,
+    ) {
+        edge::clear_start_grant_results();
+    }
+    edge::retry_fleet_lobby_inputs(adoption.generation, inputs);
 }
 
 /// Mirror fixed-tick grant outcomes into the bounded JS-facing FIFO.
 #[cfg(target_arch = "wasm32")]
 fn flush_start_grant_results(mut results: ResMut<StartGrantResults>) {
-    START_GRANT_RESULTS.with(|outbox| {
-        let mut outbox = outbox.borrow_mut();
-        for result in results.drain() {
-            let Ok(encoded) = crate::core::codec::encode_start_grant_result(&result) else {
-                continue;
-            };
-            if outbox.len() == crate::lobby::server::MAX_START_GRANT_RESULTS {
-                outbox.pop_front();
-            }
-            outbox.push_back(encoded);
+    for result in results.drain() {
+        if let Ok(encoded) = crate::core::codec::encode_start_grant_result(&result) {
+            edge::publish_start_result(encoded);
         }
-    });
+    }
 }
 
 /// Encode everything the simulation wants to say to its fleet, for the page to
@@ -2329,19 +1618,7 @@ fn flush_mesh_outbound(mut outbox: ResMut<crate::lockstep::MeshOutbox>) {
     if frames.is_empty() {
         return;
     }
-    MESH_OUTBOUND.with(|q| {
-        let mut q = q.borrow_mut();
-        for frame in &frames {
-            match crate::core::codec::encode_mesh_frame(frame) {
-                Ok(json) => q.push(json),
-                // A frame that will not encode is dropped with a warning rather
-                // than panicking the host: the fleet will stall on the missing
-                // watermark and SAY so, which is a better failure than a dead
-                // page.
-                Err(e) => warn!("dropping an unencodable host-mesh frame: {e}"),
-            }
-        }
-    });
+    edge::publish_mesh_frames(&frames);
 }
 
 /// Keep the fleet-status mirror honest, each frame.
@@ -2375,7 +1652,7 @@ fn publish_mesh_status(
             &[],
         ),
     };
-    MESH_STATUS.with(|s| *s.borrow_mut() = status);
+    edge::publish_mesh_status(status);
 }
 
 /// Called by JS to register the outbound message callback.
@@ -2388,9 +1665,7 @@ fn publish_mesh_status(
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_message_callback(callback: Function) {
-    OUTBOUND_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
+    edge::publish_outbound_cb(Some(callback));
 }
 
 /// Called by JS once to register the single Host Channel callback (issue
@@ -2409,27 +1684,21 @@ pub fn set_message_callback(callback: Function) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_host_channel_callback(callback: Function) {
-    HOST_CHANNEL_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
+    edge::publish_host_channel_cb(Some(callback));
 }
 
 /// Called by [`viewscreen_border::apply_camera_shake`] (WASM builds only) to
 /// store the current frame's screen-shake offset for JS.
 #[cfg(target_arch = "wasm32")]
 pub fn set_shake_offset(x: f32, y: f32) {
-    SHAKE_OFFSET.with(|slot| {
-        *slot.borrow_mut() = (x, y);
-    });
+    edge::publish_shake_offset((x, y));
 }
 
 /// Called by [`crate::server::audio::drive_forcefield_level`] (WASM builds
 /// only) to store the current frame's forcefield SFX volume for JS.
 #[cfg(target_arch = "wasm32")]
 pub fn set_forcefield_level(level: f32) {
-    FORCEFIELD_LEVEL.with(|slot| {
-        *slot.borrow_mut() = level;
-    });
+    edge::publish_forcefield_level(level);
 }
 
 /// Called by the host page to forward its reduced-motion preference
@@ -2442,7 +1711,7 @@ pub fn set_forcefield_level(level: f32) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_set_reduced_motion(enabled: bool) {
-    REDUCED_MOTION.with(|v| *v.borrow_mut() = enabled);
+    edge::publish_reduced_motion(enabled);
 }
 
 /// Called by JS (or the viewscreen reduced-motion smoke) to query the
@@ -2451,14 +1720,14 @@ pub fn wasm_set_reduced_motion(enabled: bool) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_is_reduced_motion() -> bool {
-    REDUCED_MOTION.with(|v| *v.borrow())
+    edge::read_reduced_motion()
 }
 
 /// Read the current reduced-motion request for `sync_reduced_motion` to drain
 /// into the `ViewscreenMotion` resource each frame (issue #1173).
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn reduced_motion_requested() -> bool {
-    REDUCED_MOTION.with(|v| *v.borrow())
+    edge::read_reduced_motion()
 }
 
 /// Native: the host's reduced-motion preference, read from the
@@ -2489,7 +1758,7 @@ pub(crate) fn native_reduced_motion() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_set_log_spec(spec: &str) {
-    LOG_SPEC.with(|v| *v.borrow_mut() = Some(spec.to_string()));
+    edge::publish_log_spec(Some(spec.to_string()));
 }
 
 /// Called by JS to restrict logging to named entities, from `?log_entity=`.
@@ -2500,7 +1769,7 @@ pub fn wasm_set_log_spec(spec: &str) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_set_log_entity(names: &str) {
-    LOG_ENTITY.with(|v| *v.borrow_mut() = Some(names.to_string()));
+    edge::publish_log_entity(Some(names.to_string()));
 }
 
 /// Build the [`LogFilterConfig`] for this page from the `?log=` / `?log_entity=`
@@ -2511,7 +1780,7 @@ pub fn wasm_set_log_entity(names: &str) {
 /// startup — a typo in a debug URL parameter should not stop the game booting.
 #[cfg(target_arch = "wasm32")]
 fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
-    let spec = LOG_SPEC.with(|v| v.borrow().clone()).unwrap_or_default();
+    let spec = edge::read_log_spec().unwrap_or_default();
     let mut config = match crate::logging::parse_log_spec(&spec) {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -2519,7 +1788,7 @@ fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
             crate::logging::LogFilterConfig::default()
         }
     };
-    if let Some(names) = LOG_ENTITY.with(|v| v.borrow().clone()) {
+    if let Some(names) = edge::read_log_entity() {
         config.entity_filter = crate::logging::parse_log_entities(&names);
     }
     (config, spec)
@@ -2553,20 +1822,7 @@ fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
 /// intent until the captured run reaches `PostUpdate`.
 #[cfg(target_arch = "wasm32")]
 fn queue_browser_save(intent: BrowserSaveIntent) -> Option<String> {
-    let source = intent_source(&intent);
-    let token = crate::save_slots::new_manual_slot_id();
-    let accepted = PENDING_BROWSER_SAVES
-        .with(|pending| pending.borrow_mut().try_push(token.clone(), intent).is_ok());
-    if accepted {
-        Some(token)
-    } else {
-        set_snapshot_status(
-            false,
-            source,
-            "too many local save requests are pending; try again after one finishes",
-        );
-        None
-    }
+    edge::queue_browser_save(intent)
 }
 
 /// Queue a save of the running session into `slot`.
@@ -2613,7 +1869,7 @@ pub fn wasm_create_save_slot(display_name: String) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_take_exported_snapshot() -> String {
-    EXPORTED_ARTIFACT.with(|a| a.borrow_mut().take().unwrap_or_default())
+    edge::take_exported_snapshot()
 }
 
 /// The file name a host is offered for an exported save.
@@ -2640,12 +1896,7 @@ pub fn wasm_list_save_slots() -> Result<Array, JsValue> {
     )
     .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
     let loaded_scenario = if crate::content_ledger::is_frozen() {
-        SNAPSHOT_WORLD.with(|world| {
-            world
-                .borrow()
-                .as_ref()
-                .map(|(scenario, _)| scenario.clone())
-        })
+        edge::snapshot_scenario()
     } else {
         None
     };
@@ -2863,7 +2114,7 @@ pub fn wasm_export_save_slot(slot_id: String) -> String {
     let store = browser_save_store();
     match crate::save_slots::export_slot(&store, &slot_id) {
         Ok(text) => {
-            EXPORTED_ARTIFACT.with(|artifact| *artifact.borrow_mut() = Some(text));
+            edge::publish_exported_artifact(Some(text));
             String::new()
         }
         Err(refusal) => refusal.to_string(),
@@ -2909,11 +2160,7 @@ const SNAPSHOT_EXPORT: &str = "export";
 /// Record a host-visible outcome for the next [`wasm_snapshot_status`] poll.
 #[cfg(target_arch = "wasm32")]
 fn set_snapshot_status(ok: bool, source: &str, message: impl Into<String>) {
-    SNAPSHOT_STATUS.with(|statuses| {
-        statuses
-            .borrow_mut()
-            .push_back((ok, source.to_string(), message.into()));
-    });
+    edge::set_snapshot_status(ok, source, message)
 }
 
 /// Take the oldest retained host-visible save or resume outcome. Each retained
@@ -2933,13 +2180,7 @@ fn set_snapshot_status(ok: bool, source: &str, message: impl Into<String>) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_snapshot_status() -> String {
-    SNAPSHOT_STATUS.with(|s| {
-        s.borrow_mut()
-            .pop_front()
-            .map_or_else(String::new, |(ok, source, message)| {
-                format!("{}\t{source}\t{message}", if ok { "ok" } else { "error" })
-            })
-    })
+    edge::snapshot_status()
 }
 
 /// Read `slot`, put it through the version gate, and hold it for the boot that
@@ -2951,7 +2192,10 @@ pub fn wasm_snapshot_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_resume(slot: String) -> String {
-    let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
+    if !crate::entities::config_cache::wasm_is_preload_complete() {
+        return "scenario content preload is incomplete".to_string();
+    }
+    let Some((path, toml)) = edge::read_snapshot_world() else {
         // No world means no content digest, so there is nothing to check the
         // save against. Refusing beats guessing.
         return "the scenario has not been loaded yet".to_string();
@@ -2968,8 +2212,7 @@ pub fn wasm_prepare_resume(slot: String) -> String {
         Ok(versions) => versions,
         Err(refusal) => return refusal,
     };
-    let selected_ship = SELECTED_SHIP_TEMPLATE_PATH
-        .with(|selected| selected.borrow().clone())
+    let selected_ship = edge::read_selected_ship_template_path()
         .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
     match load_resume_after_scenario(&store, &slot, &versions, &selected_ship, &world_config) {
         Ok(run) => {
@@ -2977,9 +2220,9 @@ pub fn wasm_prepare_resume(slot: String) -> String {
             // driver with a fresh patience budget, and the mirror
             // makes `wasm_resume_pending()` answer true until the drain clears it
             // (issue #1181).
-            PENDING_RESTORE_STAGED.with(|p| *p.borrow_mut() = Some(run));
-            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
-            SNAPSHOT_STATUS.with(|s| s.borrow_mut().clear());
+            edge::publish_pending_restore_staged(Some(run));
+            edge::publish_resume_pending_mirror(true);
+            edge::clear_snapshot_status();
             String::new()
         }
         Err(refusal) => {
@@ -3169,7 +2412,7 @@ impl std::fmt::Display for BrowserResumeRefusal {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_resume_pending() -> bool {
-    RESUME_PENDING_MIRROR.with(|m| *m.borrow())
+    edge::read_resume_pending_mirror()
 }
 
 /// Which scenario an imported file belongs to, BEFORE any world is loaded on its
@@ -3241,7 +2484,10 @@ pub fn wasm_import_save_slot(text: String, display_name: String) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_import(text: String) -> String {
-    let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
+    if !crate::entities::config_cache::wasm_is_preload_complete() {
+        return "incompatible\tscenario content preload is incomplete".to_string();
+    }
+    let Some((path, toml)) = edge::read_snapshot_world() else {
         // Same guard as `wasm_prepare_resume`: no world means no content digest,
         // so there is nothing to check the save against.
         return format!("damaged\t{}", "the scenario has not been loaded yet");
@@ -3257,15 +2503,14 @@ pub fn wasm_prepare_import(text: String) -> String {
         Ok(versions) => versions,
         Err(refusal) => return format!("incompatible\t{refusal}"),
     };
-    let selected_ship = SELECTED_SHIP_TEMPLATE_PATH
-        .with(|selected| selected.borrow().clone())
+    let selected_ship = edge::read_selected_ship_template_path()
         .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
     match import_resume_after_scenario(&text, &versions, &selected_ship, &world_config) {
         Ok(run) => {
             // Same pre-init hand-off as `wasm_prepare_resume` (issue #1181).
-            PENDING_RESTORE_STAGED.with(|p| *p.borrow_mut() = Some(run));
-            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
-            SNAPSHOT_STATUS.with(|s| s.borrow_mut().clear());
+            edge::publish_pending_restore_staged(Some(run));
+            edge::publish_resume_pending_mirror(true);
+            edge::clear_snapshot_status();
             String::new()
         }
         // The classification is `LoadRefusal`'s own, not a re-reading of the
@@ -3288,7 +2533,7 @@ pub fn wasm_prepare_import(text: String) -> String {
 /// `FixedLast`; an invalid phase refuses them without taking a snapshot.
 #[cfg(target_arch = "wasm32")]
 fn drain_snapshot_requests(world: &mut World) {
-    let requests = PENDING_BROWSER_SAVES.with(|pending| pending.borrow_mut().take_requests());
+    let requests = edge::take_save_requests();
     if requests.is_empty() {
         return;
     }
@@ -3305,8 +2550,7 @@ fn drain_snapshot_requests(world: &mut World) {
             crate::save_slots_lifecycle::request_manual_save(world, token);
             continue;
         }
-        let intent =
-            PENDING_BROWSER_SAVES.with(|pending| pending.borrow_mut().remove_intent(&token));
+        let intent = edge::complete_save_intent(&token);
         let source = intent.as_ref().map_or(SNAPSHOT_SAVE, intent_source);
         set_snapshot_status(false, source, "there is no run in progress to save");
     }
@@ -3337,8 +2581,7 @@ fn drain_lifecycle_saves(world: &mut World) {
         let Some(refusal) = refusal else {
             break;
         };
-        let intent = PENDING_BROWSER_SAVES
-            .with(|pending| pending.borrow_mut().remove_intent(&refusal.slot_id));
+        let intent = edge::complete_save_intent(&refusal.slot_id);
         let Some(intent) = intent else {
             continue;
         };
@@ -3374,8 +2617,7 @@ fn drain_lifecycle_saves(world: &mut World) {
                 }
             }
             crate::save_slots::CaptureSlot::Manual(token) => {
-                let intent = PENDING_BROWSER_SAVES
-                    .with(|pending| pending.borrow_mut().remove_intent(&token));
+                let intent = edge::complete_save_intent(&token);
                 let intent = intent.unwrap_or(BrowserSaveIntent::LegacySlot(token));
                 let source = intent_source(&intent);
                 let written = match intent {
@@ -3400,7 +2642,7 @@ fn drain_lifecycle_saves(world: &mut World) {
                     .map_err(|error| format!("{error:?}")),
                     BrowserSaveIntent::ExportCurrent => {
                         crate::snapshot::export_artifact(&pending.run).map(|text| {
-                            EXPORTED_ARTIFACT.with(|artifact| *artifact.borrow_mut() = Some(text));
+                            edge::publish_exported_artifact(Some(text));
                         })
                     }
                 };
@@ -3427,9 +2669,7 @@ fn drain_snapshot_restore(world: &mut World) {
     use crate::startup_restore::{RestoreFailure, RestoreOutcome};
 
     let outcome = crate::startup_restore::advance(world);
-    RESUME_PENDING_MIRROR.with(|m| {
-        *m.borrow_mut() = crate::startup_restore::is_pending(world);
-    });
+    edge::publish_resume_pending_mirror(crate::startup_restore::is_pending(world));
     let Some(outcome) = outcome else {
         return;
     };
@@ -3470,9 +2710,7 @@ pub fn wasm_set_debug_surface(wire_name: String, enabled: bool) -> bool {
     let Some(surface) = DebugSurface::from_wire_name(&wire_name) else {
         return false;
     };
-    PENDING_DEBUG_SURFACE_STATES.with(|pending| {
-        pending.borrow_mut().insert(surface, enabled);
-    });
+    edge::request_debug_surface(surface, enabled);
     true
 }
 
@@ -3488,7 +2726,7 @@ pub fn wasm_set_debug_surface(wire_name: String, enabled: bool) -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_pause() {
-    PENDING_PAUSE.with(|pending| *pending.borrow_mut() = true);
+    edge::publish_pending_pause(true);
 }
 
 /// Called by JS each frame to read back whether the simulation clock is
@@ -3500,7 +2738,7 @@ pub fn wasm_toggle_pause() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_is_paused() -> bool {
-    SIM_PAUSED.with(|v| *v.borrow())
+    edge::read_sim_paused()
 }
 
 /// Called by JS to ask whether this page was built by the public demo deploy
@@ -3521,14 +2759,14 @@ pub fn wasm_is_demo_build() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_debug_state() -> String {
-    DEBUG_STATE_STRING.with(|v| v.borrow().clone())
+    edge::read_debug_state_string()
 }
 
 /// Called by the Bevy `debug::modifiers::publish_modifier_debug` system to update
 /// the modifier debug JSON that JS reads via `wasm_get_debug_state()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_debug_state_string(text: String) {
-    DEBUG_STATE_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_debug_state_string(text);
 }
 
 /// Called by JS each animation frame to read the latest damage-log payload as
@@ -3537,14 +2775,14 @@ pub fn set_debug_state_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_damage_log() -> String {
-    DAMAGE_LOG_STRING.with(|v| v.borrow().clone())
+    edge::read_damage_log_string()
 }
 
 /// Called by the Bevy `debug::damage::publish_damage_debug` system to update the
 /// damage-log JSON that JS reads via `wasm_get_damage_log()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_damage_log_string(text: String) {
-    DAMAGE_LOG_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_damage_log_string(text);
 }
 
 /// Called by JS each animation frame to read the latest entity-behavior payload
@@ -3553,14 +2791,14 @@ pub fn set_damage_log_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_entity_debug_state() -> String {
-    ENTITY_DEBUG_STRING.with(|v| v.borrow().clone())
+    edge::read_entity_debug_string()
 }
 
 /// Called by the Bevy `debug::entities::publish_entity_behavior_debug` system to
 /// update the entity-behavior JSON that JS reads via `wasm_get_entity_debug_state()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_entity_debug_string(text: String) {
-    ENTITY_DEBUG_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_entity_debug_string(text);
 }
 
 /// Called by JS each animation frame to read the latest entity-inspector payload
@@ -3569,14 +2807,14 @@ pub fn set_entity_debug_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_entity_inspector() -> String {
-    ENTITY_INSPECTOR_STRING.with(|v| v.borrow().clone())
+    edge::read_entity_inspector_string()
 }
 
 /// Called by the Bevy `debug::inspector::publish_entity_inspector_debug` system
 /// to update the entity-inspector JSON that JS reads via `wasm_get_entity_inspector()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_entity_inspector_string(text: String) {
-    ENTITY_INSPECTOR_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_entity_inspector_string(text);
 }
 
 /// Called by JS each animation frame to read the latest station-activity payload
@@ -3588,14 +2826,14 @@ pub fn set_entity_inspector_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_station_activity() -> String {
-    STATION_ACTIVITY_STRING.with(|v| v.borrow().clone())
+    edge::read_station_activity_string()
 }
 
 /// Called by the Bevy `publish_station_activity` system to update the
 /// station-activity JSON that JS reads via `wasm_get_station_activity()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_station_activity_string(text: String) {
-    STATION_ACTIVITY_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_station_activity_string(text);
 }
 
 /// Called by JS each animation frame to read the latest AI doctrine-pool payload
@@ -3606,14 +2844,14 @@ pub fn set_station_activity_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_ai_doctrine() -> String {
-    AI_DOCTRINE_STRING.with(|v| v.borrow().clone())
+    edge::read_ai_doctrine_string()
 }
 
 /// Called by the Bevy `publish_ai_doctrine` system to update the AI doctrine-pool
 /// JSON that JS reads via `wasm_get_ai_doctrine()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_ai_doctrine_string(text: String) {
-    AI_DOCTRINE_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_ai_doctrine_string(text);
 }
 
 /// Called by JS each animation frame to read the latest scenario-state payload
@@ -3624,14 +2862,14 @@ pub fn set_ai_doctrine_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_scenario_state() -> String {
-    SCENARIO_STATE_STRING.with(|v| v.borrow().clone())
+    edge::read_scenario_state_string()
 }
 
 /// Called by the Bevy `publish_scenario_state` system to update the
 /// scenario-state JSON that JS reads via `wasm_get_scenario_state()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_scenario_state_string(text: String) {
-    SCENARIO_STATE_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_scenario_state_string(text);
 }
 
 /// Called by JS while the settings cog is open, to read the debug flags the
@@ -3652,14 +2890,14 @@ pub fn set_scenario_state_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_debug_flags() -> String {
-    DEBUG_FLAGS_STRING.with(|v| v.borrow().clone())
+    edge::read_debug_flags_string()
 }
 
 /// Called by the Bevy `report_debug_state` system to mirror the debug-flag
 /// read-back JS reads via [`wasm_get_debug_flags`].
 #[cfg(target_arch = "wasm32")]
 pub fn set_debug_flags_string(text: String) {
-    DEBUG_FLAGS_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_debug_flags_string(text);
 }
 
 /// Called by JS each animation frame to read the latest console-latency payload
@@ -3671,14 +2909,14 @@ pub fn set_debug_flags_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_console_latency() -> String {
-    CONSOLE_LATENCY_STRING.with(|v| v.borrow().clone())
+    edge::read_console_latency_string()
 }
 
 /// Called by the Bevy `publish_console_latency` system to update the
 /// console-latency JSON that JS reads via `wasm_get_console_latency()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_console_latency_string(text: String) {
-    CONSOLE_LATENCY_STRING.with(|v| *v.borrow_mut() = text);
+    edge::publish_console_latency_string(text);
 }
 
 /// Called by JS (lobby "Launch AI Ship" button) to start the game with no
@@ -3692,7 +2930,7 @@ pub fn set_console_latency_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_force_start() {
-    PENDING_FORCE_START.with(|v| *v.borrow_mut() = true);
+    edge::publish_pending_force_start(true);
 }
 
 /// Called by JS (host Debug panel) to teleport the local ship onto the shared
@@ -3704,7 +2942,7 @@ pub fn wasm_force_start() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_teleport_to_waypoint() {
-    PENDING_TELEPORT_TO_WAYPOINT.with(|v| *v.borrow_mut() = true);
+    edge::publish_pending_teleport_to_waypoint(true);
 }
 
 /// Called by JS each animation frame to check whether the LocalShip currently
@@ -3714,7 +2952,7 @@ pub fn wasm_teleport_to_waypoint() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_has_navigation_waypoint() -> bool {
-    HAS_NAVIGATION_WAYPOINT.with(|v| *v.borrow())
+    edge::read_has_navigation_waypoint()
 }
 
 /// The logical simulation tick count (issue #895) — the number of completed
@@ -3728,7 +2966,7 @@ pub fn wasm_has_navigation_waypoint() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_sim_tick() -> f64 {
-    SIM_TICK_COUNT.with(|v| *v.borrow()) as f64
+    edge::read_sim_tick_count() as f64
 }
 
 // ── Config Preload Exports ──────────────────────────────────────────────────
@@ -3794,11 +3032,32 @@ pub fn wasm_load_world(
     // once per world selection, so it is the natural "a new load is starting"
     // boundary — see `content_ledger`'s reset-semantics docs.
     crate::content_ledger::reset();
+    let toml_str = crate::entities::config_cache::mod_pack_overlay_get(&path).unwrap_or(toml_str);
     crate::content_ledger::record(&path, &toml_str);
-    SNAPSHOT_WORLD.with(|slot| {
-        *slot.borrow_mut() = Some((path.clone(), toml_str.clone()));
-    });
+    edge::publish_snapshot_world(Some((path.clone(), toml_str.clone())));
     crate::entities::config_cache::wasm_load_world(path, toml_str, curated_ships)
+}
+
+/// Authoritative resident world source, including pack-only scenarios.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_preload_world_source(path: String) -> Option<String> {
+    match crate::entities::config_cache::world_fetch_state(&path) {
+        crate::entities::config_cache::WorldFetchState::Ready(source) => Some(source),
+        _ => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_preload_error() -> String {
+    crate::entities::config_cache::preload_error()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_fail_preload_fetch(path: String, message: String) {
+    crate::entities::config_cache::fail_preload_fetch(path, message);
 }
 
 /// Register the JS callback used by Rust to request runtime world/script content.
@@ -4296,7 +3555,7 @@ pub fn browser_scenario_catalog_message(
     locked_scenario: Option<String>,
     locked_ship: Option<String>,
 ) -> Result<String, serde_json::Error> {
-    use crate::core::codec::{JsonCodec, MessageCodec};
+    use crate::core::codec::JsonCodec;
     let scenarios = crate::core::codec::decode_scenario_catalog(scenarios_json)?;
     let payload = crate::delivery::payload::catalogue_snapshot(
         scenarios,
@@ -4507,9 +3766,7 @@ pub fn wasm_script_diagnostics(source: String, line_offset: u32) -> Array {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_select_ship(template_path: &str) {
-    SELECTED_SHIP_TEMPLATE_PATH.with(|slot| {
-        *slot.borrow_mut() = Some(template_path.to_string());
-    });
+    edge::publish_selected_ship_template_path(Some(template_path.to_string()));
 }
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────
@@ -4518,7 +3775,7 @@ pub fn wasm_select_ship(template_path: &str) {
 /// Decode failures are logged as warnings with truncated token/payload.
 #[cfg(target_arch = "wasm32")]
 fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
-    let pending: Vec<(String, String)> = INBOUND_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
+    let pending: Vec<(String, String)> = edge::drain_inbound_queue();
     let (successes, failures) = codec::decode_bridge_client_messages(pending);
     for err in &failures {
         bevy::log::warn!(
@@ -4542,12 +3799,11 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
 fn drain_host_controls(world: &mut World) {
     #[cfg(not(phoenix_demo_build))]
     {
-        let pending: Vec<(DebugSurface, bool)> =
-            PENDING_DEBUG_SURFACE_STATES.with(|states| states.borrow_mut().drain().collect());
+        let pending: Vec<(DebugSurface, bool)> = edge::take_debug_surfaces();
         crate::debug::catalogue::apply_pending_states(world, pending);
     }
 
-    let pause_changed = PENDING_PAUSE.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
+    let pause_changed = edge::take_pending_pause();
     if pause_changed
         && raw_host_control_allowed(world.contains_resource::<crate::lockstep::FleetLockstep>())
     {
@@ -4556,7 +3812,7 @@ fn drain_host_controls(world: &mut World) {
             state.0 = !state.0;
             state.0
         };
-        SIM_PAUSED.with(|mirror| *mirror.borrow_mut() = paused);
+        edge::publish_sim_paused(paused);
         let mut virtual_time = world.resource_mut::<Time<bevy::time::Virtual>>();
         if paused {
             // Pausing `Time<Virtual>` starves the fixed accumulator, so
@@ -4578,7 +3834,7 @@ fn drain_host_controls(world: &mut World) {
 /// Drains the disconnect queue each frame and injects lifecycle events into Bevy.
 #[cfg(target_arch = "wasm32")]
 fn drain_disconnects(mut writer: MessageWriter<PlayerDisconnected>) {
-    let pending: Vec<String> = DISCONNECT_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
+    let pending: Vec<String> = edge::drain_disconnect_queue();
     for token in pending {
         writer.write(PlayerDisconnected { token });
     }
@@ -4622,11 +3878,7 @@ fn legacy_force_start_allowed(
 /// schedule.
 #[cfg(target_arch = "wasm32")]
 fn drain_force_start_input(mut pending: ResMut<PendingForceStart>) {
-    let was = PENDING_FORCE_START.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
+    let was = edge::take_pending_force_start();
     if was {
         pending.0 = true;
     }
@@ -4729,11 +3981,7 @@ fn drain_teleport_to_waypoint(
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    let requested = PENDING_TELEPORT_TO_WAYPOINT.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
+    let requested = edge::take_pending_teleport_to_waypoint();
     if !requested || !raw_host_control_allowed(fleet.is_some()) {
         return;
     }
@@ -4747,7 +3995,7 @@ fn drain_teleport_to_waypoint(
 /// effect.
 #[cfg(target_arch = "wasm32")]
 fn publish_sim_tick(tick: Res<crate::sim_tick::SimTick>) {
-    SIM_TICK_COUNT.with(|v| *v.borrow_mut() = tick.0);
+    edge::publish_sim_tick_count(tick.0);
 }
 
 /// Drains pending God Mode toggle requests each frame (issue #900), turning
@@ -4764,11 +4012,7 @@ fn publish_sim_tick(tick: Res<crate::sim_tick::SimTick>) {
 /// to be a thread-local this function would have flipped directly.
 #[cfg(target_arch = "wasm32")]
 fn drain_god_mode_toggle(mut writer: MessageWriter<InboundMessage>) {
-    let pending = PENDING_GOD_MODE_TOGGLES.with(|v| {
-        let n = *v.borrow();
-        *v.borrow_mut() = 0;
-        n
-    });
+    let pending = edge::take_pending_god_mode_toggles();
     for _ in 0..pending {
         writer.write(InboundMessage {
             token: crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
@@ -4790,7 +4034,7 @@ fn drain_god_mode_toggle(mut writer: MessageWriter<InboundMessage>) {
 #[cfg(target_arch = "wasm32")]
 fn publish_god_mode(god_mode: Option<Res<crate::server_app::GodMode>>) {
     let active = god_mode.map(|g| g.0).unwrap_or(false);
-    GOD_MODE_MIRROR.with(|v| *v.borrow_mut() = active);
+    edge::publish_god_mode_mirror(active);
 }
 
 /// Drains the queued instagib toggles each frame into the [`crate::server_app::Instagib`] Resource
@@ -4803,11 +4047,7 @@ fn drain_instagib_toggle(
     fleet: Option<Res<crate::lockstep::FleetLockstep>>,
     mut instagib: ResMut<crate::server_app::Instagib>,
 ) {
-    let count = PENDING_INSTAGIB_TOGGLES.with(|v| {
-        let n = *v.borrow();
-        *v.borrow_mut() = 0;
-        n
-    });
+    let count = edge::take_pending_instagib_toggles();
     if raw_host_control_allowed(fleet.is_some()) {
         apply_instagib_toggles(count, &mut instagib.0);
     } else {
@@ -4822,7 +4062,7 @@ fn drain_instagib_toggle(
 /// (issue #1181). Pure read; the same pattern as `publish_god_mode`.
 #[cfg(target_arch = "wasm32")]
 fn publish_instagib(instagib: Res<crate::server_app::Instagib>) {
-    INSTAGIB_MIRROR.with(|v| *v.borrow_mut() = instagib.0);
+    edge::publish_instagib_mirror(instagib.0);
 }
 
 /// Mirror the pause resource for the host Gameplay control's synchronous
@@ -4830,7 +4070,7 @@ fn publish_instagib(instagib: Res<crate::server_app::Instagib>) {
 /// resource instead.
 #[cfg(target_arch = "wasm32")]
 fn publish_pause_mirror(paused: Res<crate::debug_overlay::SimulationPaused>) {
-    SIM_PAUSED.with(|v| *v.borrow_mut() = paused.0);
+    edge::publish_sim_paused(paused.0);
 }
 
 /// Mirrors the LocalShip's Navigation-waypoint existence into a thread-local
@@ -4844,7 +4084,7 @@ fn publish_waypoint_existence(
     >,
 ) {
     let has = ship_q.iter().next().is_some_and(|w| w.mode().is_some());
-    HAS_NAVIGATION_WAYPOINT.with(|v| *v.borrow_mut() = has);
+    edge::publish_has_navigation_waypoint(has);
 }
 
 /// Reads outbound messages each frame and forwards them to the JS callback.
@@ -4871,18 +4111,16 @@ fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
         return;
     }
 
-    OUTBOUND_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            for (target, payload, class_str) in &dispatches {
-                let _ = cb.call3(
-                    &JsValue::NULL,
-                    &JsValue::from_str(target),
-                    &JsValue::from_str(payload),
-                    &JsValue::from_str(class_str),
-                );
-            }
+    if let Some(cb) = edge::outbound_callback() {
+        for (target, payload, class_str) in &dispatches {
+            let _ = cb.call3(
+                &JsValue::NULL,
+                &JsValue::from_str(target),
+                &JsValue::from_str(payload),
+                &JsValue::from_str(class_str),
+            );
         }
-    });
+    };
 }
 
 /// The Host Channel flush (issue #818): drains every message-drained host
@@ -4992,9 +4230,10 @@ fn flush_host_channels(
         ),
     ];
 
-    HOST_CHANNEL_CB.with(|slot| {
-        let borrowed = slot.borrow();
-        let Some(cb) = borrowed.as_ref() else { return };
+    {
+        let Some(cb) = edge::host_channel_callback() else {
+            return;
+        };
 
         for (name, payloads) in &message_batches {
             for json in payloads {
@@ -5007,7 +4246,7 @@ fn flush_host_channels(
         }
 
         // Per-frame tap: shake, unconditional.
-        let (x, y) = SHAKE_OFFSET.with(|slot| *slot.borrow());
+        let (x, y) = edge::read_shake_offset();
         let offset = Array::of2(&JsValue::from_f64(x as f64), &JsValue::from_f64(y as f64));
         let _ = cb.call2(
             &JsValue::NULL,
@@ -5016,19 +4255,17 @@ fn flush_host_channels(
         );
 
         // Per-frame tap: forcefield level, epsilon-deduped.
-        let current = FORCEFIELD_LEVEL.with(|slot| *slot.borrow());
-        let last = LAST_SENT_FORCEFIELD.with(|slot| *slot.borrow());
+        let current = edge::read_forcefield_level();
+        let last = edge::read_last_sent_forcefield();
         if (current - last).abs() >= 0.001 {
-            LAST_SENT_FORCEFIELD.with(|slot| {
-                *slot.borrow_mut() = current;
-            });
+            edge::publish_last_sent_forcefield(current);
             let _ = cb.call2(
                 &JsValue::NULL,
                 &JsValue::from_str(host_channels::AUDIO_LEVEL),
                 &JsValue::from_f64(current as f64),
             );
         }
-    });
+    };
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

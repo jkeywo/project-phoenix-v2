@@ -1,0 +1,171 @@
+{
+  "base_revision": "349dea207b6a27cec81b696fc84dd1b029aea730",
+  "device": "Windows desktop",
+  "gate_runs": [
+    {
+      "name": "clippy",
+      "exit": 101,
+      "seconds": 72.7235759,
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "revision": "fee746be933d80ade90a24093c538e3babccc087"
+    },
+    {
+      "name": "clippy",
+      "exit": 0,
+      "seconds": 4.7259135,
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "revision": "fee746be933d80ade90a24093c538e3babccc087"
+    },
+    {
+      "name": "native-suite",
+      "exit": 0,
+      "seconds": 837.7591413,
+      "command": "cargo test --workspace --features headless",
+      "revision": "fee746be933d80ade90a24093c538e3babccc087"
+    },
+    {
+      "name": "gm-precheck",
+      "exit": 0,
+      "seconds": 4.9467878999999995,
+      "command": "cargo test --features headless --test gm_live_event_precheck prepared_event_has_two_authored_fleet_hulls_and_equal_peer_digests -- --ignored --exact --nocapture",
+      "revision": "1f8fc0e6debd523034c1dfb5e222e2491c2edc87"
+    },
+    {
+      "name": "viewer-tests",
+      "exit": 0,
+      "seconds": 268.0916716,
+      "command": "cargo test --lib --features viewer viewer::",
+      "revision": "1f8fc0e6debd523034c1dfb5e222e2491c2edc87"
+    },
+    {
+      "name": "demo-tests",
+      "exit": 0,
+      "seconds": 286.8959388,
+      "command": "cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build",
+      "revision": "1f8fc0e6debd523034c1dfb5e222e2491c2edc87"
+    },
+    {
+      "name": "host-build",
+      "exit": 0,
+      "seconds": 136.9623369,
+      "command": "cargo build --features host --bin phoenix-host",
+      "revision": "e683a2e255268e4c0f42988a476139c86a6d69b4"
+    },
+    {
+      "name": "capture-build",
+      "exit": 0,
+      "seconds": 217.2809012,
+      "command": "cargo build --features capture --bins",
+      "revision": "e683a2e255268e4c0f42988a476139c86a6d69b4"
+    },
+    {
+      "name": "debug-surfaces",
+      "exit": 0,
+      "seconds": 0.3248447,
+      "command": "npm.cmd run debug-surfaces:check",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "vitest",
+      "exit": 1,
+      "seconds": 23.3329913,
+      "command": "npx.cmd vitest run",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "strings",
+      "exit": 0,
+      "seconds": 0.4570664,
+      "command": "node.exe scripts/check-strings.mjs --strict",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "lods",
+      "exit": 0,
+      "seconds": 0.6456361,
+      "command": "npm.cmd run lods:check",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "lod-captures",
+      "exit": 0,
+      "seconds": 0.5039968,
+      "command": "npm.cmd run lod-captures:check",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "pasm-validate",
+      "exit": 0,
+      "seconds": 177.2505105,
+      "command": "uv.exe run pasm validate",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "pasm-scan",
+      "exit": 0,
+      "seconds": 83.0846729,
+      "command": "uv.exe run pasm scan",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "pasm-traceability",
+      "exit": 0,
+      "seconds": 70.918176,
+      "command": "uv.exe run pasm traceability",
+      "revision": "b1fb6dae"
+    },
+    {
+      "name": "fmt-final",
+      "exit": 0,
+      "command": "cargo fmt -- --check",
+      "revision": "5df5a85c",
+      "note": "Formatting-only wrapping after the earlier formatter pass."
+    },
+    {
+      "name": "vitest-full-retry",
+      "exit": 0,
+      "command": "npx vitest run",
+      "revision": "ffcf177b",
+      "seconds": 24.78,
+      "files": 310,
+      "passed": 7237,
+      "failed": 0
+    },
+    {
+      "name": "ultralight-pane",
+      "exit": 0,
+      "command": "cargo test --features ultralight --test native_host_pane_ultralight -- --ignored --nocapture",
+      "revision": "5df5a85c",
+      "test_seconds": 13.56,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "pasm-scan-acceptance",
+      "exit": 0,
+      "command": "uv run pasm scan",
+      "revision": "d3745761 plus uncommitted falling-skyway-flow.spec.js",
+      "note": "Covers acceptance additions after initial gate batch. Interrupted by power loss; restarted and completed 9 September."
+    },
+    {
+      "name": "media-final",
+      "exit": 0,
+      "command": "cargo test --lib --features host -- native_host::media native_host::bridge_media",
+      "revision": "d3745761",
+      "passed": 43,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 7324
+    }
+  ],
+  "evidence_notes": [
+    "Initial Vitest failure was an obsolete browser-bridge source assertion; the full suite was rerun after ffcf177b.",
+    "Clippy found owned-string comparison, banned native sin, and test-fixture UUID lint issues. All corrected in 0a4801aa; full Clippy matrix passed.",
+    "Clippy/native-suite revision labels were captured before committing the same working-tree corrections as 0a4801aa.",
+    "Native suite: 8063 passed, 0 failed, 99 ignored over 85 executable/doc-test summaries.",
+    "Viewer:34 passed. Demo:11 passed with PHOENIX_DEMO_BUILD=true, previous value restored.",
+    "Original initial fmt pass and first Clippy failure remain in tool history; PowerShell serialization omitted those records on resume. They are not reconstructed as measured rows.",
+    "All required gates have a passing final result. No runtime changes followed those passes; 5df5a85c is formatting only. The explicit real embedded-pane test also passed. Long browser acceptance is separate."
+  ]
+}

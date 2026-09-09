@@ -502,14 +502,17 @@ describe('GM projection transport separation', () => {
     }
 
     const bridge = read('src/server/bridge.rs');
-    const outbound = bridge.slice(
-      bridge.indexOf('fn flush_outbound('),
-      bridge.indexOf('fn flush_host_channels('),
-    );
+    const outboundStart = bridge.indexOf('fn flush_outbound(');
+    const hostStart = bridge.indexOf('fn flush_host_channels(');
+    expect(outboundStart).toBeGreaterThanOrEqual(0);
+    expect(hostStart).toBeGreaterThan(outboundStart);
+    const outbound = bridge.slice(outboundStart, hostStart);
     expect(outbound).not.toContain('GmEntityProjection');
     expect(outbound).not.toContain('GM_ENTITY');
     expect(outbound).not.toContain('gm_entity');
     expect(bridge).toContain('host_channels::GM_ENTITY');
-    expect(bridge).toContain('HOST_CHANNEL_CB');
+    expect(bridge).toContain('use browser_edge as edge;');
+    expect(bridge).toContain('edge::host_channel_callback()');
+    expect(read('src/server/browser_edge.rs')).toContain('HOST_CHANNEL_CB');
   });
 });

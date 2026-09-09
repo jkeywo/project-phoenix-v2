@@ -148,6 +148,9 @@ impl Delivery {
             // about them; `src/delivery/args.rs`'s own tests and
             // `src/native_host/bridge_profile.rs`'s cover `--setup`/`--profile`.
             setup: false,
+            test_output: None,
+            meter_microphone: None,
+            preview_camera: None,
             profile: None,
         };
         let server = HostServer::bind(&args).expect("the delivery host binds");

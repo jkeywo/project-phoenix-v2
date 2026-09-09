@@ -52,7 +52,7 @@ use std::collections::HashMap;
 
 use crate::core::codec::{
     decode_handshake_frame, decode_rendezvous_frame, encode_handshake_frame,
-    encode_rendezvous_frame, JsonCodec, MessageCodec,
+    encode_rendezvous_frame, JsonCodec,
 };
 use crate::core::messages::{ClientMessage, DeliveryClass};
 use crate::core::rendezvous::{

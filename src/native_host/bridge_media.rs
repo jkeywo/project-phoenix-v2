@@ -804,16 +804,53 @@ pub fn render_media_setup_report(
     discovered: &[DiscoveredMediaDevice],
     profile: Option<&super::bridge_profile::BridgeProfile>,
 ) -> String {
+    render_media_setup_report_inner(discovered, profile, !discovered.is_empty(), None)
+}
+
+/// A completed output scan can be empty. Camera/mic results are explicitly omitted
+/// rather than misreporting those unqueried assignments as disconnected devices.
+pub fn render_output_setup_report(
+    discovered: &[DiscoveredMediaDevice],
+    profile: Option<&super::bridge_profile::BridgeProfile>,
+) -> String {
+    let mut out = "\nOutput backend: CPAL. This report covers outputs only.\nUnnamed/duplicate output names cannot be tested safely; assign unique OS names.\n".to_string();
+    out.push_str(&render_media_setup_report_inner(
+        discovered,
+        profile,
+        true,
+        Some(&[MediaKind::Output]),
+    ));
+    out
+}
+
+/// Resolve only device classes whose enumeration completed successfully.
+pub fn render_available_setup_report(
+    discovered: &[DiscoveredMediaDevice],
+    profile: Option<&super::bridge_profile::BridgeProfile>,
+    supported: &[MediaKind],
+) -> String {
+    render_media_setup_report_inner(discovered, profile, !supported.is_empty(), Some(supported))
+}
+
+fn render_media_setup_report_inner(
+    discovered: &[DiscoveredMediaDevice],
+    profile: Option<&super::bridge_profile::BridgeProfile>,
+    scan_completed: bool,
+    supported: Option<&[MediaKind]>,
+) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "\nMedia devices — discovered {} device(s):\n",
         discovered.len()
     ));
-    if discovered.is_empty() {
+    if !scan_completed {
         out.push_str(enumerate_note());
         out.push('\n');
     } else {
         for kind in [MediaKind::Camera, MediaKind::Microphone, MediaKind::Output] {
+            if supported.is_some_and(|kinds| !kinds.contains(&kind)) {
+                continue;
+            }
             let of_kind: Vec<&DiscoveredMediaDevice> =
                 discovered.iter().filter(|d| d.kind == kind).collect();
             out.push_str(&format!("  {}(s):\n", kind.label()));
@@ -843,7 +880,7 @@ pub fn render_media_setup_report(
     }
 
     match validate_media(media_entries) {
-        Ok(validated) => {
+        Ok(mut validated) => {
             out.push_str("\nMedia assignments:\n");
             for surface in &validated.surfaces {
                 out.push_str(&format!(
@@ -855,10 +892,29 @@ pub fn render_media_setup_report(
             for warning in &validated.warnings {
                 out.push_str(&format!("  - warning: {warning}\n"));
             }
-            if !discovered.is_empty() {
+            if scan_completed {
+                if let Some(kinds) = supported {
+                    for surface in &mut validated.surfaces {
+                        if !kinds.contains(&MediaKind::Camera) {
+                            surface.camera = None;
+                        }
+                        if !kinds.contains(&MediaKind::Microphone) {
+                            surface.microphones.clear();
+                        }
+                        if !kinds.contains(&MediaKind::Output) {
+                            surface.outputs.clear();
+                        }
+                    }
+                }
                 let resolved = resolve_media(&validated, discovered);
                 if resolved.problems.is_empty() {
-                    out.push_str("Media assignments match the connected devices.\n");
+                    out.push_str(if supported == Some(&[MediaKind::Output][..]) {
+                        "Output assignments match the connected outputs.\n"
+                    } else if supported.is_some() {
+                        "Assignments for enumerated device classes match the connected devices.\n"
+                    } else {
+                        "Media assignments match the connected devices.\n"
+                    });
                 } else {
                     out.push_str("Media problems:\n");
                     for problem in &resolved.problems {

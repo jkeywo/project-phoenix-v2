@@ -155,6 +155,9 @@ impl Delivery {
             skip_bundle_check: true,
             sim: None,
             setup: false,
+            test_output: None,
+            meter_microphone: None,
+            preview_camera: None,
             profile: None,
         };
         let server = HostServer::bind(&args).expect("the delivery host binds");

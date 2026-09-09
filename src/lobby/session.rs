@@ -1137,7 +1137,7 @@ mod tests {
     /// station id is nowhere in the wire form.
     #[test]
     fn eligibility_is_absent_from_the_serialized_player() {
-        use crate::core::codec::{JsonCodec, MessageCodec};
+        use crate::core::codec::JsonCodec;
         use crate::core::messages::ServerMessage;
 
         let mut sm = sm();

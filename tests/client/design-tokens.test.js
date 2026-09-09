@@ -465,6 +465,9 @@ const SURFACES = [
  * than a SURFACES edit somebody had to remember to make.
  *
  * server.html needs more than the retint before its entry reaches `[]`.
+ * Issue #1449 finishes the inline <style> retint under explicit permission to
+ * change appearance. Its zero-literal check below is separate from this
+ * allowance, which now covers only JavaScript and style attributes.
  * css-scan.js reads the WHOLE file, not the <style> block — there is no lexer
  * that will hand back "the stylesheet" — and this page carries colour well
  * outside it: the game-over accent table in JS (`const accent = { saved:
@@ -480,38 +483,59 @@ const KNOWN_LITERALS = {
   "gui/host-lobby.css": { colours: [], sizes: [] },
   "gui/host-scenarios.css": { colours: [], sizes: [] },
   "server.html": {
-    colours: [
-      "#05080d", "#334", "#fa4", "#f44", "#4c4", "#cce", "#aae", "#223",
-      "#9ab", "#889", "#08090d", "#cde", "#111", "#445", "#669", "#668",
-      "#ddf", "#733", "#fbb", "#9cf", "#0b0c12", "#18203a", "#eef", "#899",
-      "#7c9", "#bc8", "#d99", "#180d10", "#f99", "#99a", "#bcd", "#558",
-      "#cb8", "#d88", "#ff3344", "#b8c0c8", "#d8c85f", "#ff9a3d", "#4a5a6a",
-      "#88b8c8", "#a0b8c8", "#1e2a39", "#0f0", "#4c8", "#8fc", "#c55", "#9fd",
-      "#6a86a0", "#4fd1ff", "#ffb347", "#24384c", "#4f8f6a", "#24405a",
-      "#ffd", "#ff6b6b", "#223246", "#8ca4c2", "#162131", "#c9d8ea",
-      "#1b2940", "#cfe0f5", "#10171f", "#7f93ab", "#182434", "#1d2c42",
-      "#3d577c", "#dbe8f7", "#63788f", "#55697f", "#5a86bd", "#a77c45",
-      "#d4aa71", "#0d0000", "#ff8888", "#ff4444", "#1a0000", "#550000",
-      "#888", "#6ea4c8", "#d8edff", "#000", "#8ac", "#8af", "#7ad48f",
-      "#e8705a", "#e0c060", "#8a98c4", "rgba(4, 8, 13 …)",
-      "rgba(255, 51, 68 …)", "rgba(6, 12, 16 …)", "rgba(10, 14, 20 …)",
-      "rgba(255, 179, 71 …)", "rgba(6, 11, 18 …)", "rgba(2, 5, 9 …)",
-      "rgba(4,12,22 …)", "rgba(0,0,0 …)", "rgba(140,180,220 …)",
+    "colours": [
+      "#0d0000",
+      "#ff8888",
+      "#ff4444",
+      "#1a0000",
+      "#550000",
+      "#888",
+      "#6ea4c8",
+      "#d8edff",
+      "#000",
+      "#aae",
+      "#cde",
+      "#8ac",
+      "#fa4",
+      "#8af",
+      "#4c4",
+      "#f44",
+      "#7ad48f",
+      "#e8705a",
+      "#e0c060",
+      "#8a98c4",
+      "rgba(4,12,22 …)",
+      "rgba(0,0,0 …)",
+      "rgba(140,180,220 …)"
     ],
-    sizes: [
-      "font-size: 1.1rem", "font-size: 0.9rem", "font-size: 0.72rem",
-      "font-size: 0.7rem", "font-size: 0.68rem", "font-size: 0.62rem",
-      "font-size: 9px", "font-size: 8px", "font-size: 12px",
-      "font-size: 13.5px", "font-size: 10px", "font-size: 18px",
-      "font-size: 0.85rem", "font-size: clamp(0.95rem,2.5vw,1.15rem)",
-      "font-size: clamp(0.85rem,2vw,1rem)", "font-size: 1rem",
-      "font-size: 13px", "font-size: 16px", "font: … 18px",
-    ],
+    "sizes": [
+      "font-size: 0.85rem",
+      "font-size: 1.1rem",
+      "font-size: 0.9rem",
+      "font-size: clamp(0.95rem,2.5vw,1.15rem)",
+      "font-size: clamp(0.85rem,2vw,1rem)",
+      "font-size: 1rem",
+      "font-size: 13px",
+      "font-size: 12px",
+      "font-size: 16px"
+    ]
   },
 };
 
 /** The listed literals for a surface, or none — an unlisted file allows zero. */
 const known = (name, kind) => KNOWN_LITERALS[name]?.[kind] ?? [];
+
+describe('the host inline styles use tokens without legacy exceptions', () => {
+  const styles = [...readStripped(path.join(REPO_ROOT, 'server.html'))
+    .matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]);
+  it('checks a real stylesheet and permits no colour or type-size literals', () => {
+    expect(styles.length).toBeGreaterThan(0);
+    for (const style of styles) {
+      expect(colourLiterals(style)).toEqual([]);
+      expect(fontSizeLiterals(style)).toEqual([]);
+    }
+  });
+});
 
 describe('no stylesheet hardcodes a colour', () => {
   for (const file of SURFACES) {

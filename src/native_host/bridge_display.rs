@@ -2379,6 +2379,8 @@ pub fn run_setup(profile: Option<super::bridge_profile::BridgeProfile>) -> i32 {
     );
     app.insert_resource(SetupProfile(profile));
     app.init_resource::<SetupFrames>();
+    #[cfg(all(feature = "host", target_os = "windows"))]
+    app.insert_non_send_resource(SetupCameraScan::default());
     app.add_systems(Update, setup_enumerate);
     match app.run() {
         AppExit::Success => 0,
@@ -2388,10 +2390,18 @@ pub fn run_setup(profile: Option<super::bridge_profile::BridgeProfile>) -> i32 {
 
 /// Enumerate monitors, print the setup report, and exit. Waits (up to
 /// [`SETUP_FRAME_BUDGET`] frames) for winit to populate the monitor list.
+#[cfg(all(feature = "host", target_os = "windows"))]
+#[derive(Default)]
+struct SetupCameraScan {
+    scan: Option<super::media_camera::CameraScan>,
+    started: Option<std::time::Instant>,
+}
+
 fn setup_enumerate(
     monitors: Query<(&Monitor, Has<PrimaryMonitor>)>,
     profile: Res<SetupProfile>,
     mut frames: ResMut<SetupFrames>,
+    #[cfg(all(feature = "host", target_os = "windows"))] mut cameras: NonSendMut<SetupCameraScan>,
     mut exit: MessageWriter<AppExit>,
 ) {
     frames.0 += 1;
@@ -2404,7 +2414,77 @@ fn setup_enumerate(
         return;
     }
     let discovered = identify(&raws);
+    #[cfg(not(feature = "host"))]
     let report = super::bridge_profile::render_setup_report(&discovered, profile.0.as_ref());
+    #[cfg(feature = "host")]
+    let report = {
+        let mut report =
+            super::bridge_profile::render_display_setup_report(&discovered, profile.0.as_ref());
+        use super::bridge_media::MediaKind;
+        let mut devices = Vec::new();
+        let mut supported = Vec::new();
+        #[cfg(target_os = "windows")]
+        {
+            if cameras.started.is_none() {
+                cameras.started = Some(std::time::Instant::now());
+                match super::media_camera::CameraScan::begin() {
+                    Ok(scan) => cameras.scan = Some(scan),
+                    Err(error) => {
+                        report.push_str(&format!("\nCamera enumeration unavailable: {error}\n"))
+                    }
+                }
+            }
+            if let Some(scan) = &cameras.scan {
+                match scan.poll() {
+                    Ok(Some(found)) => {
+                        devices.extend(super::media_camera::discovered_cameras(&found));
+                        supported.push(MediaKind::Camera);
+                        cameras.scan = None;
+                    }
+                    Ok(None)
+                        if cameras.started.is_some_and(|start| {
+                            start.elapsed() < std::time::Duration::from_secs(10)
+                        }) =>
+                    {
+                        return
+                    }
+                    Ok(None) => {
+                        report.push_str("\nCamera enumeration timed out.\n");
+                        cameras.scan = None;
+                    }
+                    Err(error) => {
+                        report.push_str(&format!("\nCamera enumeration unavailable: {error}\n"));
+                        cameras.scan = None;
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        report.push_str("\nCamera enumeration is supported on Windows only.\n");
+        match super::media_output::OutputDevices::scan() {
+            Ok(outputs) => {
+                devices.extend(outputs.discovered);
+                supported.push(MediaKind::Output);
+            }
+            Err(error) => report.push_str(&format!("\nOutput enumeration unavailable: {error}\n")),
+        }
+        match super::media_microphone::Microphones::scan() {
+            Ok(mics) => {
+                devices.extend(mics.discovered);
+                supported.push(MediaKind::Microphone);
+            }
+            Err(error) => {
+                report.push_str(&format!("\nMicrophone enumeration unavailable: {error}\n"))
+            }
+        }
+        report.push_str("\nMedia tests: --test-output, --meter-microphone, --preview-camera with --setup --profile and a surface name.\nUnnamed/duplicate audio names cannot be tested safely; assign unique OS names.\n");
+        report.push_str(&super::bridge_media::render_available_setup_report(
+            &devices,
+            profile.0.as_ref(),
+            &supported,
+        ));
+        report
+    };
     // The accessibility half of the report (issue #1128): per-pane reflow
     // headroom at the supported scaling extremes, the keyboard-focus order across
     // monitors, and the OS accessibility preferences the panes and reticle start

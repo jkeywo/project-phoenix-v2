@@ -151,6 +151,10 @@ reticle — honouring them too.
 
 Set the machine's OS preferences (Windows Settings → Accessibility):
 
+Quit and relaunch the host after each OS change. Windows defaults are read at
+document creation; the adapter does not subscribe to live preference changes.
+An explicit private profile override still wins until reset to follow system.
+
 - [ ] **High contrast / "prefers-contrast: more".** With contrast on, focus a pane
       (Ctrl+Tab). The reticle frame is **bolder and fully opaque** than with
       contrast off. Compare the two: the high-contrast reticle is visibly thicker.

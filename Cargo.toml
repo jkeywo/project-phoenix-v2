@@ -210,7 +210,7 @@ perf = []
 # now DEPENDS on `server` instead of standing alone: without that dependency
 # `--no-default-features --features host` compiles a `main` that names a module
 # which is not there, a combination CI never builds and nothing would catch.
-host = ["server", "dep:tungstenite"]
+host = ["server", "dep:tungstenite", "dep:windows", "dep:windows-future", "dep:cpal"]
 # Capture feature: builds the `capture-billboard` tool, a native headless
 # renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because
@@ -479,6 +479,7 @@ bevy = { version = "0.18.1", features = ["debug"] }
 # `the_deterministic_build_runs_rapier_serially` in tests/headless_runner.rs is
 # the guard that makes silently re-adding it fail.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cpal = { version = "0.15.3", optional = true }
 # Enable ONLY ECS spans, not bevy/trace's unrelated renderer/logging layers.
 # This is Bevy's already-pinned ECS crate, unified with the ordinary engine.
 bevy_ecs = { version = "0.18.1", default-features = false, features = ["trace"], optional = true }
@@ -524,6 +525,12 @@ vellum-save = { workspace = true, features = ["backend-fs"] }
 # exactly the authored one and the other platforms get their own conventional
 # root for free.
 directories = "6"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Safe WinRT preference reads. Already locked transitively; host-only so the
+# platform adapter adds no API surface to ordinary simulation or WASM builds.
+windows = { version = "0.62.2", optional = true, features = ["UI_ViewManagement", "Devices_Enumeration", "Media_Capture_Frames", "Media_MediaProperties", "Graphics_Imaging", "Storage_Streams"] }
+windows-future = { version = "0.3.2", optional = true }
 
 # WASM: no parallel, uses single-threaded runtime
 # getrandom 0.3+ needs wasm_js feature + cfg(getrandom_backend="js")

@@ -43,6 +43,14 @@ pub struct LateralThrustInput(pub f32);
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct VerticalThrustInput(pub f32);
 
+/// Real writes performed since the last drive consumer pass. Fresh LOD defaults
+/// are not commands. This transient marker is cleared before every fold.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DriveCommandWrites {
+    pub impulse: bool,
+    pub boost: bool,
+}
+
 /// Desired impulse-drive phase transition. Only `Idle` (cancel) and
 /// `Charging` (start) are ever written as commands — `Active` is reached by
 /// natural progression in `tick_impulse`, never commanded directly.
@@ -50,10 +58,12 @@ pub struct VerticalThrustInput(pub f32);
 /// only transitions from `Idle`, and `cancel_charge` resets progress that is
 /// already zero once `Idle`.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+#[require(DriveCommandWrites)]
 pub struct ImpulseCommand(pub ImpulsePhase);
 
 /// Desired boost-drive engagement state.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+#[require(DriveCommandWrites)]
 pub struct BoostCommand(pub bool);
 
 // ── Debug-only helm-path single-writer tracker (issue #699) ─────────────────

@@ -1,0 +1,24 @@
+{
+  "scenario": "assets/worlds/prepared/gm_live_event_two_ship.toml",
+  "worldSha256": "53a0a2632d50d54ea1c33c11c1ae0314fbf7904626fce3bb0b4a72d53abf0bf3",
+  "slots": [
+    1,
+    2
+  ],
+  "recipients": [
+    {
+      "id": "00000000-0000-8000-8000-000800000000",
+      "name": "entity.alliance_cruiser.name",
+      "fleet_slot": 1
+    },
+    {
+      "id": "00000000-0000-8000-8000-000800000001",
+      "name": "entity.alliance_cruiser.name",
+      "fleet_slot": 2
+    }
+  ],
+  "delivered": [
+    "00000000-0000-8000-8000-000800000000",
+    "00000000-0000-8000-8000-000800000001"
+  ]
+}

@@ -619,7 +619,11 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// `31` — #1317 retains per-ship Comms routing, scripted dialogue, literal text,
 /// and the captured audience of durable GM outcomes and refusals.
 /// `32` — #1308 retains scenario-applied NPC doctrine through restoration.
-pub const SNAPSHOT_FORMAT: u32 = 32;
+/// `33` — #1449 carries the previous per-ship impulse hull sample so a
+/// restored damaged hull does not invent or forget a pending drive cancel.
+/// It also carries current token-free mesh crew authority; standalone restores
+/// retain their fresh crew policy.
+pub const SNAPSHOT_FORMAT: u32 = 33;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -661,7 +665,9 @@ pub const SNAPSHOT_FORMAT: u32 = 32;
 /// host before fixed-boundary digests and saves. The old browser omitted that
 /// history and headless collected it after the save boundary. The row schema is
 /// unchanged, but those older authoritative folds cannot continue as this run.
-pub const SIMULATION_RULES: &str = "0.5";
+/// `"0.6"` — #1449 applies impulse speed modifiers and hull-damage cancellation
+/// on every simulation host and preserves the pending damage continuation.
+pub const SIMULATION_RULES: &str = "0.6";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -748,6 +754,10 @@ pub struct EntityState {
     /// byte-identical to a never-commanded ship and folds to the same number.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub station_stances: Vec<(String, String)>,
+    /// Live crew authority carried only into an explicitly requested mesh
+    /// continuation. Standalone restore retains its fresh console policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_crew: Option<MeshCrewState>,
     /// Damage-disabled fine systems in the ship's authoritative control gate.
     ///
     /// This is the mutable half of `ShipSystemControlSources` that cannot be
@@ -1736,6 +1746,9 @@ pub struct DriveState {
     /// `ShipImpulse.phase`: 0 = Idle, 1 = Charging, 2 = Active.
     pub impulse_phase: u8,
     pub impulse_charge_progress: f32,
+    /// Previous Input-phase HP, not current HP: Damage may have run since it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impulse_previous_hull_hp: Option<f32>,
     pub boost_active: bool,
     pub boost_battery: f32,
 }
@@ -3157,15 +3170,18 @@ fn capture_controls(world: &World) -> Vec<(String, ControlState)> {
 }
 
 fn capture_drives(world: &World) -> Vec<(String, DriveState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, Option<&ShipImpulse>, Option<&ShipBoost>)>()
-    else {
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        Option<&ShipImpulse>,
+        Option<&ShipBoost>,
+        Option<&crate::server_app::ImpulseHullHistory>,
+    )>() else {
         return Vec::new();
     };
     let mut rows: Vec<_> = query
         .iter(world)
-        .filter(|(_, impulse, boost)| impulse.is_some() || boost.is_some())
-        .map(|(uuid, impulse, boost)| {
+        .filter(|(_, impulse, boost, _)| impulse.is_some() || boost.is_some())
+        .map(|(uuid, impulse, boost, history)| {
             (
                 uuid.0.clone(),
                 DriveState {
@@ -3175,6 +3191,7 @@ fn capture_drives(world: &World) -> Vec<(String, DriveState)> {
                         ImpulsePhase::Active => 2,
                     }),
                     impulse_charge_progress: impulse.map_or(0.0, |state| state.0.charge_progress),
+                    impulse_previous_hull_hp: history.and_then(|history| history.0),
                     boost_active: boost.is_some_and(|state| state.0.active),
                     boost_battery: boost.map_or(0.0, |state| state.0.battery),
                 },
@@ -4235,6 +4252,7 @@ fn capture_navigation_continuation(world: &World) -> Vec<CapturedNavigationConti
 fn capture_entities(world: &World) -> Vec<EntityState> {
     let ai_fidelity = capture_ai_fidelity(world);
     let controls = capture_controls(world);
+    let mesh_crew = capture_mesh_crew(world);
     let drives = capture_drives(world);
     let navigation = capture_navigation_continuation(world);
     let machines = capture_weapons_and_repair(world);
@@ -4291,6 +4309,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
         .iter(world)
         .map(
             |(uuid, physics, hull, alert, stances, control_sources)| EntityState {
+                mesh_crew: mesh_crew.get(&uuid.0).cloned(),
                 npc_doctrine: npc_doctrines.get(&uuid.0).cloned(),
                 ai_fidelity: ai_fidelity
                     .iter()
@@ -5200,6 +5219,9 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     {
         use bevy::ecs::system::RunSystemOnce;
         let _ = world.run_system_once(crate::modifiers::coordination::apply_radar_damage_modifiers);
+        // Physics precedes the next Modifiers phase. Restore the drive cap now,
+        // including removal of an active bootstrap bonus from an idle save.
+        let _ = world.run_system_once(crate::modifiers::coordination::translate_impulse_modifiers);
     }
     restore_ai_world_snapshot(world, snapshot);
     restore_motion_plans(world, snapshot);
@@ -6184,6 +6206,10 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
             control.restore_into(&mut entity_mut);
         }
         if let Some(drive) = &row.drive {
+            if let Some(mut history) = entity_mut.get_mut::<crate::server_app::ImpulseHullHistory>()
+            {
+                history.0 = drive.impulse_previous_hull_hp;
+            }
             if let Some(mut impulse) = entity_mut.get_mut::<ShipImpulse>() {
                 impulse.0.phase = match drive.impulse_phase {
                     1 => ImpulsePhase::Charging,
@@ -7738,3 +7764,124 @@ fn apply_hull(hull: &mut crate::ship::damage::SystemHull, rows: &[(String, f32, 
 #[cfg(test)]
 #[path = "snapshot_tests.rs"]
 mod tests;
+
+/// Token-free authority frontier for an already-running mesh participant.
+/// Ratings alone omit human-seeking and Station-puppet overrides, so the
+/// resolved source entries travel too. Damage/GM offline latches are already
+/// restored separately and remain additive to these ordinary sources.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MeshCrewState {
+    pub ratings: Vec<(String, String)>,
+    pub sources: Vec<(String, MeshControlSource)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum MeshControlSource {
+    Human,
+    Ai,
+    Offline,
+}
+
+fn capture_mesh_crew(world: &World) -> std::collections::BTreeMap<String, MeshCrewState> {
+    use crate::ship::control_source::ControlSource;
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        &crate::ship_plugin::ActiveStationRatings,
+        &crate::ship_plugin::ShipSystemControlSources,
+    )>() else {
+        return Default::default();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, ratings, sources)| {
+            let mut ratings: Vec<_> = ratings
+                .0
+                .iter()
+                .map(|(station, rating)| (station.0.clone(), rating.clone()))
+                .collect();
+            ratings.sort();
+            let mut sources: Vec<_> = sources
+                .0
+                .entries()
+                .map(|(system, source)| {
+                    (
+                        system.0.clone(),
+                        match source {
+                            ControlSource::Human => MeshControlSource::Human,
+                            ControlSource::Ai => MeshControlSource::Ai,
+                            ControlSource::Offline => MeshControlSource::Offline,
+                        },
+                    )
+                })
+                .collect();
+            sources.sort_by(|a, b| a.0.cmp(&b.0));
+            (uuid.0.clone(), MeshCrewState { ratings, sources })
+        })
+        .collect()
+}
+
+/// Explicit mesh continuation only. Do not call from ordinary save restore:
+/// a standalone resumed game intentionally takes its newly connected crew.
+/// The candidate need not have FleetRoster/FleetLockstep until join Commit.
+pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
+    use crate::core::messages::{StationId, SystemId};
+    use crate::ship::control_source::ControlSource;
+    use crate::ship_plugin::{ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources};
+    let mut query = world.query::<(
+        &EntityUuid,
+        &ShipConfigComponent,
+        &mut ActiveStationRatings,
+        &mut ShipSystemControlSources,
+        Option<&mut crate::console::command::server::LastDirectedControl>,
+    )>();
+    for (uuid, config, mut ratings, mut sources, last) in query.iter_mut(world) {
+        let Some(crew) = snapshot
+            .entities
+            .iter()
+            .find(|row| row.uuid == uuid.0)
+            .and_then(|row| row.mesh_crew.as_ref())
+        else {
+            continue;
+        };
+        let captured_ratings: std::collections::HashMap<_, _> = crew
+            .ratings
+            .iter()
+            .map(|(station, rating)| (StationId(station.clone()), rating.clone()))
+            .collect();
+        // seed_boot_ratings invokes the same apply_rating used by admitted
+        // AssignStationRating, and also restores ownerless ai_only defaults.
+        let (mut restored, _) = crate::ship::rating::seed_boot_ratings(&config.0, |station| {
+            captured_ratings
+                .get(&station.id)
+                .cloned()
+                .unwrap_or_else(|| crate::ship::rating::BACKFILL_RATING.to_string())
+        });
+        for (system, source) in &crew.sources {
+            restored.set(
+                SystemId(system.clone()),
+                match source {
+                    MeshControlSource::Human => ControlSource::Human,
+                    MeshControlSource::Ai => ControlSource::Ai,
+                    MeshControlSource::Offline => ControlSource::Offline,
+                },
+            );
+        }
+        restored.replace_offline_systems(sources.0.offline_entries().cloned());
+        restored.replace_gm_disabled_systems(sources.0.gm_disabled_entries().cloned());
+        ratings.0 = captured_ratings;
+        sources.0 = restored;
+        // Ordinary restore seeded this edge detector against bootstrap crew.
+        // Reseed after the mesh authority frontier replaces that policy.
+        if let Some(mut last) = last {
+            last.0.clear();
+            if let Some(target) = crate::console::command::server::command_station(&config.0)
+                .and_then(|command| command.command_target.clone())
+            {
+                let ai = crate::console::command::server::station_is_ai_controlled(
+                    &config.0, &sources.0, &target,
+                );
+                last.0.insert(target, ai);
+            }
+        }
+    }
+}

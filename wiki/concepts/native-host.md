@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+sources: [src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
 updated: 2026-09-08
 ---
 
@@ -1186,22 +1186,21 @@ is not a problem; a bridge need not use every device it can see.
 chosen: the OS default (else first) of each kind per surface, consenting to the
 forced share on a one-device box so the generated default validates.
 
-### The setup surface, and the backend gap
+### The setup surface and native adapters
 
-`--setup` gains a media section (`render_media_setup_report`): it lists devices by
-kind and validates the profile's assignments, reporting missing/denied devices and
-contention. But **there is no OS media backend in the tree.** The display profile
-gets its real enumeration free from Bevy's `Monitor`; there is no equivalent
-already-present source for cameras, microphones and outputs, and no native media
-crate is a dependency here. So `--setup`'s media half validates hand-authored
-assignments and prints that no backend is compiled in (`enumerate_note`). Wiring a
-real backend — `cpal` for microphones/outputs, a camera crate such as `nokhwa` (or
-Windows Media Foundation) for cameras — behind the `host`/`ultralight` feature
-seam is the winit-adapter analogue, out of the CI default build exactly as the
-real-monitor surface is. Live enumeration, camera preview, mic metering, output
-tone-test and real capture/play are the acceptance kit's Part B — deferred until
-that backend lands, so acceptance criterion 3 stays parked there, the way #1124's
-touch criterion 6 stays parked on real touch hardware.
+`--setup` enumerates audio endpoints through host-gated CPAL and Windows cameras
+through an asynchronous WinRT scan on the native UI thread. The report resolves
+only successfully scanned device classes and preserves unavailable diagnostics.
+`media_output.rs`, `media_microphone.rs` and Windows-only `media_camera.rs` own
+local setup tests: `--test-output`, `--meter-microphone` and `--preview-camera`
+require `--setup --profile` plus the surface name. Retained handles and explicit
+identities prevent default substitution; ambiguous audio names are refused and
+camera keys always include the OS interface ID. Explicit sharing still requires
+the pure model's consent and prints its warning. The camera keeps one bounded
+CPU frame, the microphone reduces samples to a peak, and all three tear down
+before exit. No recording, ongoing mission capture or inter-ship calls are added.
+The real multi-device acceptance remains in `docs/acceptance/1126-media.md`;
+automated tests cannot establish audible/visible correspondence or unplug behavior.
 
 This profile is **still not** the private per-player Accessibility profile
 (#1127): it is shared operator configuration of the physical room, carrying
@@ -2327,14 +2326,14 @@ Three things are **parked in the kit's §9** rather than dropped, following
 
 - **Touch operation of the lobby** — no touch hardware, and PRD #1324 puts it out
   of scope explicitly, parked with #1124's Part B.
-- **`prefers-contrast` / reduced motion reaching the surface.** The CSS is here
-  (`gui/host-lobby.css`) and so is the reticle's Rust response
-  (`FocusReticleStyle::for_os_prefs`), but neither can be driven from Windows
-  today: Ultralight ships no OS-backed `matchMedia`, and
-  `panes::os_prefs::query_os_accessibility_prefs` is a documented stub returning
-  "no preference" on every target, because a live Windows read needs `unsafe` FFI
-  this crate forbids. A sanctioned live read drops into that one function and
-  unparks it.
+- **Windows preference adoption, observed.** Host builds now read text size,
+  contrast and animations through safe WinRT bindings in
+  `src/native_host/panes/os_prefs.rs`. The adapter seeds the existing private
+  default layer, reports each unavailable read, and retains explicit profile
+  precedence. New documents read once; crash recreation retains their defaults.
+  Actual pane/reticle adoption still needs the rig pass in
+  `docs/acceptance/1127-windows-preferences.md`. The shared 200% tracer remains
+  blocked; the native setup contract still declares 100–150% support.
 - **A crashed console's rebuild, observed.** Not constructible by hand — a view
   crash is an internal renderer fault and a borderless-fullscreen Station window
   has nothing to close. The rule is proved instead against a real running bridge

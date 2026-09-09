@@ -11,7 +11,7 @@ use crate::ship::helm::ImpulseCommand;
 use crate::ship::helm_ai::helm_axes_operate_ai;
 
 /// Hull-damage impulse auto-cancel (issue #695, reshaped by #824): writes an
-/// `Idle` `ImpulseCommand` intent when the LocalShip's hull took damage this
+/// `Idle` `ImpulseCommand` intent when a ship's hull took damage this
 /// tick, rather than mutating `ShipImpulse` directly. The shared
 /// `apply_helm_commands` system applies the actual `cancel_charge`
 /// transition.
@@ -24,34 +24,27 @@ use crate::ship::helm_ai::helm_axes_operate_ai;
 /// so an admitted command can still override the hull-damage cancel within
 /// the same tick — matching the old sequential direct-mutation order exactly.
 pub fn handle_impulse_messages(
-    impulse_q: Query<&ShipImpulse, With<LocalShip>>,
-    mut impulse_cmd_q: Query<&mut ImpulseCommand, With<LocalShip>>,
-    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<LocalShip>>,
-    mut last_hull_hp: Local<f32>,
+    mut ships: Query<
+        (
+            &mut crate::server_app::ImpulseHullHistory,
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&mut ImpulseCommand>,
+            Option<&mut crate::ship::helm::DriveCommandWrites>,
+        ),
+        With<ShipImpulse>,
+    >,
 ) {
-    // Guard: only proceed when the LocalShip actually carries `ShipImpulse`
-    // (matches the old direct-mutation code's implicit guard).
-    if impulse_q.iter().next().is_none() {
-        return;
-    }
-    let hull_total = hull_q
-        .single()
-        .map(|h| (h.0.total_current(), h.0.total_max()))
-        .unwrap_or((100.0, 100.0));
-    if *last_hull_hp == 0.0 && (hull_total.0 - hull_total.1).abs() < 1e-6 {
-        *last_hull_hp = hull_total.1;
-    }
-
-    let current_hp = hull_total.0;
-    let mut desired: Option<crate::ship::impulse::ImpulsePhase> = None;
-    if current_hp < *last_hull_hp {
-        desired = Some(crate::ship::impulse::ImpulsePhase::Idle);
-    }
-    *last_hull_hp = current_hp;
-
-    if let Some(phase) = desired {
-        if let Some(mut cmd_comp) = impulse_cmd_q.iter_mut().next() {
-            cmd_comp.0 = phase;
+    for (mut history, hull, command, writes) in &mut ships {
+        let current_hp = hull.map_or(100.0, |hull| hull.0.total_current());
+        let damaged = history.0.is_some_and(|previous| current_hp < previous);
+        history.0 = Some(current_hp);
+        if damaged {
+            if let Some(mut command) = command {
+                command.0 = crate::ship::impulse::ImpulsePhase::Idle;
+                if let Some(mut writes) = writes {
+                    writes.impulse = true;
+                }
+            }
         }
     }
 }
@@ -1052,6 +1045,79 @@ mod tests {
             "post-cancel tick must not autopilot a phantom turn; \
              yaw drifted by {}",
             yaw_after - yaw_before
+        );
+    }
+
+    #[test]
+    fn hull_damage_intent_is_per_ship_and_does_not_repeat() {
+        use crate::core::messages::SystemId;
+        use crate::entities::spawner::EntitySystemHull;
+        use crate::server_app::ImpulseHullHistory;
+        use crate::ship::damage::SystemHull;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        let hull_id = SystemId("test-hull".into());
+        let mut spawn = |local| {
+            let mut entity = world.spawn((
+                ShipImpulse::default(),
+                ImpulseCommand(ImpulsePhase::Charging),
+                EntitySystemHull(SystemHull::from_config(&[(hull_id.clone(), 100.0)])),
+            ));
+            if local {
+                entity.insert(LocalShip);
+            }
+            entity.id()
+        };
+        let local = spawn(true);
+        let remote = spawn(false);
+        world.run_system_once(handle_impulse_messages).unwrap();
+        for entity in [local, remote] {
+            assert_eq!(
+                world.get::<ImpulseHullHistory>(entity).unwrap().0,
+                Some(100.0)
+            );
+            assert_eq!(
+                world.get::<ImpulseCommand>(entity).unwrap().0,
+                ImpulsePhase::Charging
+            );
+            world
+                .get_mut::<EntitySystemHull>(entity)
+                .unwrap()
+                .0
+                .set_hp(&hull_id, 90.0);
+        }
+        world.run_system_once(handle_impulse_messages).unwrap();
+        for entity in [local, remote] {
+            assert_eq!(
+                world.get::<ImpulseCommand>(entity).unwrap().0,
+                ImpulsePhase::Idle
+            );
+            // A later admitted command can override this tick's cancel; an
+            // unchanged HP sample must not reissue that old damage next tick.
+            world.get_mut::<ImpulseCommand>(entity).unwrap().0 = ImpulsePhase::Charging;
+        }
+        world.run_system_once(handle_impulse_messages).unwrap();
+        for entity in [local, remote] {
+            assert_eq!(
+                world.get::<ImpulseCommand>(entity).unwrap().0,
+                ImpulsePhase::Charging
+            );
+        }
+        // A hit on one ship cannot cancel the other ship's drive.
+        world
+            .get_mut::<EntitySystemHull>(remote)
+            .unwrap()
+            .0
+            .set_hp(&hull_id, 80.0);
+        world.run_system_once(handle_impulse_messages).unwrap();
+        assert_eq!(
+            world.get::<ImpulseCommand>(local).unwrap().0,
+            ImpulsePhase::Charging
+        );
+        assert_eq!(
+            world.get::<ImpulseCommand>(remote).unwrap().0,
+            ImpulsePhase::Idle
         );
     }
 }

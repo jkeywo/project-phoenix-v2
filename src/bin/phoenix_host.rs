@@ -149,6 +149,70 @@ fn main() {
     // was given, and exit. A standalone diagnostic — it opens no HTTP listener
     // and runs no world, so it short-circuits here before any content is read.
     if args.setup {
+        if args.test_output.is_some()
+            || args.meter_microphone.is_some()
+            || args.preview_camera.is_some()
+        {
+            if let Some(profile) = bridge_profile.as_ref() {
+                match native_host::bridge_media::validate_media(&profile.media) {
+                    Ok(media) => {
+                        for warning in media.warnings {
+                            eprintln!("Media warning: {warning}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Invalid media assignments: {error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        if let Some(surface) = args.meter_microphone.as_deref() {
+            let result = native_host::media_microphone::Microphones::scan().and_then(|devices| {
+                devices.meter_surface(
+                    bridge_profile.as_ref().expect("parser requires --profile"),
+                    surface,
+                )
+            });
+            if let Err(error) = result {
+                eprintln!("phoenix-host: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        if let Some(surface) = args.preview_camera.as_deref() {
+            #[cfg(target_os = "windows")]
+            std::process::exit(native_host::media_camera::run_preview(
+                bridge_profile.as_ref().expect("parser requires --profile"),
+                surface,
+            ));
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = surface;
+                eprintln!("phoenix-host: camera preview is supported on Windows only");
+                std::process::exit(1);
+            }
+        }
+        if let Some(surface) = args.test_output.as_deref() {
+            let result = native_host::media_output::OutputDevices::scan().and_then(|devices| {
+                devices.test_surface(
+                    bridge_profile.as_ref().expect("parser requires --profile"),
+                    surface,
+                )
+            });
+            match result {
+                Ok(lines) => {
+                    for line in lines {
+                        println!("{line}");
+                    }
+                }
+                Err(error) => {
+                    eprintln!("phoenix-host: {error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
         std::process::exit(native_host::bridge_display::run_setup(bridge_profile));
     }
 

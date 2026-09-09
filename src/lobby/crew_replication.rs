@@ -11,21 +11,10 @@
 //! still holding the frozen Backfill, has its Captain AI overwrite it, and the
 //! folded `ShipRedAlert` splits true/false.
 //!
-//! This closes the gap the way `ToggleGodMode` crosses to peers (issue #900):
-//! when the local ship's `ActiveStationRatings` changes during active lockstep,
-//! the host mints a server-authored [`SystemControlPayload::AssignStationRating`]
-//! under `LOCAL_CONSOLE_TOKEN` at an ownerless synthetic system id. It enters the
-//! ordinary inbound-admission boundary, is stamped for a future tick and staged
-//! to the fleet mesh, and every peer applies the same Backfill<->Human transition
-//! to that ship on the same agreed tick.
-//!
-//! The one imperfection this slice keeps: the LOCAL ship applies the change
-//! immediately (through the lobby handler that produced it) while peers apply it
-//! `command_delay` ticks later, so a bounded transient window can differ. It is a
-//! strict improvement over the previous PERMANENT divergence and never reaches a
-//! join capture — those pause well after a crew change has settled — but a fully
-//! tick-synchronised apply (deferring the local write onto the same command) is a
-//! later refinement this deliberately does not attempt.
+//! Crew changes enter the ordinary admission boundary before they change any
+//! authoritative rating or control source. Every peer, including the originating
+//! host, applies the transition on the same future tick. Applying locally early
+//! is not a bounded transient: those extra AI ticks permanently change physics.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -35,82 +24,70 @@ use crate::lobby::server::InboundMessage;
 use crate::ship::components::ActiveStationRatings;
 use crate::ship::system_registry::ASSIGN_STATION_RATING_SYSTEM_ID;
 
-/// The last per-station ratings the local ship replicated to the fleet.
-///
-/// `None` until the first lockstep tick primes it from the boot ratings — which
-/// every peer already seeded identically from the frozen roster, so priming
-/// emits nothing. Cleared back to `None` whenever no fleet session is present,
-/// so a fresh fleet re-primes rather than replaying a stale delta.
+/// Host-local crew requests not yet submitted to ordinary command admission.
+/// This is ingress bookkeeping, not a second queue of accepted commands.
+/// Preserve arrival order, including A -> B -> A before either applies.
 #[derive(Resource, Default)]
-pub struct LastReplicatedRatings(pub Option<HashMap<StationId, String>>);
+pub struct PendingCrewRatingChanges(Vec<(StationId, String)>);
 
-/// Emit an [`SystemControlPayload::AssignStationRating`] for every station whose
-/// rating changed on the local ship since the last fleet replication (#1119).
-///
-/// Runs only in a fleet. Reads the local ship's authoritative
-/// `ActiveStationRatings` — which every lobby crew handler writes through
-/// `apply_result`, so a select/release/rating/reconnect/disconnect all land here
-/// — diffs it against the last replicated snapshot, and injects one
-/// server-authored command per change under `LOCAL_CONSOLE_TOKEN`. Admission
-/// stamps and stages it to the mesh; [`apply_assigned_station_rating`] lands it
-/// on every peer's copy of this ship.
+impl PendingCrewRatingChanges {
+    pub fn push(&mut self, station: StationId, rating: String) {
+        self.0.push((station, rating));
+    }
+
+    /// Project the crew's latest choice for reconnect/AFK bookkeeping without
+    /// changing simulation state. Call only before admission or after application.
+    pub fn overlay(
+        &self,
+        ratings: &mut HashMap<StationId, String>,
+        pending: Option<&crate::command_admission::PendingCommands>,
+        entity: Entity,
+        uuid: Option<&crate::entities::spawner::EntityUuid>,
+    ) {
+        if let Some(pending) = pending {
+            for command in pending.iter().filter(|command| {
+                uuid.map_or(command.route == entity, |uuid| command.ship.0 == uuid.0)
+                    && command.command.target.0 == ASSIGN_STATION_RATING_SYSTEM_ID
+            }) {
+                if let SystemControlPayload::AssignStationRating { station, rating } =
+                    &command.command.payload
+                {
+                    ratings.insert(station.clone(), rating.clone());
+                }
+            }
+        }
+        for (station, rating) in &self.0 {
+            ratings.insert(station.clone(), rating.clone());
+        }
+    }
+}
+
+pub fn clear_pending_crew_ratings(mut pending: ResMut<PendingCrewRatingChanges>) {
+    pending.0.clear();
+}
+
+/// Submit local intents before admission. Lobby handlers have already run;
+/// mid-game rating requests collected in Input enter on the following tick.
+/// Once drained, accepted intents live only in PendingCommands. Refused ones
+/// leave no shadow, and applied ones are read from ActiveStationRatings.
 pub fn replicate_local_crew_ratings(
     session: Option<Res<crate::lockstep::FleetLockstep>>,
-    local_ratings: Query<&ActiveStationRatings, With<crate::server_app::LocalShip>>,
-    mut last: ResMut<LastReplicatedRatings>,
+    local_ship: Query<(), With<crate::server_app::LocalShip>>,
+    mut pending: ResMut<PendingCrewRatingChanges>,
     mut inbound: MessageWriter<InboundMessage>,
 ) {
-    if session.is_none() {
-        // Single-player never replicates; drop any primed snapshot so a later
-        // fleet starts clean rather than replaying a delta against stale keys.
-        if last.0.is_some() {
-            last.0 = None;
-        }
+    if session.is_none() || local_ship.single().is_err() {
+        pending.0.clear();
         return;
     }
-    // A stationless GM host owns no local ship and has nothing to replicate; a
-    // ship host owns exactly one. Either way `single()` erroring means "not us".
-    let Ok(current) = local_ratings.single() else {
-        return;
-    };
-    match last.0.as_mut() {
-        None => {
-            // Prime from the boot ratings without emitting: every peer seeded
-            // these identically from the frozen roster, so replaying them would
-            // be a redundant Backfill burst on the first tick.
-            last.0 = Some(current.0.clone());
-        }
-        Some(prev) => {
-            // `ActiveStationRatings` is a HashMap, whose iteration order varies
-            // run-to-run. When more than one station changes on the same tick, the
-            // emitted commands admit and fold in emission order, so that order MUST
-            // be deterministic or two same-seed runs (and two peers) diverge.
-            // Sort the changed stations by id before writing.
-            let mut changed: Vec<(&StationId, &String)> = current
-                .0
-                .iter()
-                .filter(|(station, rating)| {
-                    prev.get(*station).map(String::as_str) != Some(rating.as_str())
-                })
-                .collect();
-            changed.sort_by(|(a, _), (b, _)| a.0.cmp(&b.0));
-            for (station, rating) in changed {
-                inbound.write(InboundMessage {
-                    token: crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
-                    msg: ClientMessage::ControlSystem {
-                        target: SystemId(ASSIGN_STATION_RATING_SYSTEM_ID.to_string()),
-                        payload: SystemControlPayload::AssignStationRating {
-                            station: station.clone(),
-                            rating: rating.clone(),
-                        },
-                    },
-                });
-            }
-            // A station is only ever reassigned (Backfill included), never
-            // removed from the map, so an absent-in-current key needs no
-            // revocation; snapshot what we just replicated.
-            prev.clone_from(&current.0);
-        }
+    for (station, rating) in pending.0.drain(..) {
+        inbound.write(InboundMessage {
+            token: crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(ASSIGN_STATION_RATING_SYSTEM_ID.to_string()),
+                payload: SystemControlPayload::AssignStationRating { station, rating },
+            },
+        });
     }
 }
 
@@ -120,8 +97,7 @@ pub fn replicate_local_crew_ratings(
 /// `With<Ship>`, not `With<LocalShip>`: on a remote peer the command names another
 /// host's ship, and the whole point is that this peer makes the same transition
 /// to that ship. Idempotent — `apply_rating` re-derives the station's control
-/// sources from the rating each time, so a duplicate, or the re-apply that lands
-/// on the origin host beside its own immediate lobby write, is a no-op.
+/// sources from the rating each time, so a duplicate is a no-op.
 pub fn apply_assigned_station_rating(
     mut ships: Query<
         (

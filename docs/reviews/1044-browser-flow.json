@@ -1,0 +1,2346 @@
+{
+  "scenario": "assets/worlds/falling_skyway.toml",
+  "worldSha256": "48f89f0f608431ea5c640a3fe1b0f8a5b90bfca6cd14b3edeab7e610b4f87d9f",
+  "milestones": [
+    {
+      "label": "load and Act 1 triage",
+      "tick": 59
+    },
+    {
+      "label": "Act 1 resolved",
+      "tick": 21642
+    },
+    {
+      "label": "storm_front_due",
+      "tick": 24042
+    },
+    {
+      "label": "storm_band_one_due",
+      "tick": 34842
+    },
+    {
+      "label": "storm_band_two_due",
+      "tick": 44442
+    },
+    {
+      "label": "storm_band_three_due",
+      "tick": 54042
+    },
+    {
+      "label": "transfer window opened",
+      "tick": 96042
+    },
+    {
+      "label": "transfer window closed",
+      "tick": 108042
+    },
+    {
+      "label": "visible crew ending",
+      "tick": 110208
+    }
+  ],
+  "errors": [],
+  "ending": {
+    "type": "GameOver",
+    "data": {
+      "reason": "world.falling_skyway.game_over.mission_complete",
+      "outcome": "victory",
+      "report": [
+        {
+          "id": "lyra",
+          "heading": "world.falling_skyway.report.lyra.heading",
+          "outcome": "world.falling_skyway.report.lyra.crew_saved",
+          "state": "saved"
+        },
+        {
+          "id": "picket",
+          "heading": "world.falling_skyway.report.picket.heading",
+          "outcome": "world.falling_skyway.report.picket.unresolved",
+          "state": "neutral"
+        },
+        {
+          "id": "demolition",
+          "heading": "world.falling_skyway.report.demolition.heading",
+          "outcome": "world.falling_skyway.report.demolition.safe",
+          "state": "saved"
+        },
+        {
+          "id": "survey",
+          "heading": "world.falling_skyway.report.survey.heading",
+          "outcome": "world.falling_skyway.report.survey.corroborated",
+          "state": "saved"
+        },
+        {
+          "id": "labour",
+          "heading": "world.falling_skyway.report.labour.heading",
+          "outcome": "world.falling_skyway.report.labour.negotiated",
+          "state": "saved"
+        },
+        {
+          "id": "traffic",
+          "heading": "world.falling_skyway.report.traffic.heading",
+          "outcome": "world.falling_skyway.report.traffic.thinned",
+          "state": "partial"
+        },
+        {
+          "id": "skyhook",
+          "heading": "world.falling_skyway.report.skyhook.heading",
+          "outcome": "world.falling_skyway.report.skyhook.held",
+          "state": "saved"
+        },
+        {
+          "id": "lifts",
+          "heading": "world.falling_skyway.report.lifts.heading",
+          "outcome": "world.falling_skyway.report.lifts.none",
+          "state": "lost"
+        },
+        {
+          "id": "commitments",
+          "heading": "world.falling_skyway.report.commitments.heading",
+          "outcome": "world.falling_skyway.report.commitments.mixed",
+          "state": "partial"
+        }
+      ]
+    }
+  },
+  "objectives": {
+    "obj-a1-corridor": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a1-triage": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a1-survey": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-line": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a1-survey-scan-depot-b": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a1-survey-scan-depot-a": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a1-survey-scan-head": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-corroborate": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a1-head-evacuation": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a1-gallery": [
+      "Active"
+    ],
+    "obj-a1-picket": [
+      "Active"
+    ],
+    "obj-a3-confront": [
+      "Active",
+      "Failed"
+    ],
+    "obj-a1-survey-report": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-shelter": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-rescue": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-storm": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-shelter-meridian": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-shelter-lark": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-shelter-pell": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-approach": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-rescue-scan": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-lee": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a3-head": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a3-standoff": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a3-obstruction": [
+      "Active"
+    ],
+    "obj-a3-window-ready": [
+      "Active",
+      "Failed"
+    ],
+    "obj-a3-debris-scan-near": [
+      "Active"
+    ],
+    "obj-a3-debris-scan-lead": [
+      "Active",
+      "Failed"
+    ],
+    "obj-a3-debris-scan-trail": [
+      "Active",
+      "Failed"
+    ],
+    "obj-a3-tether-1": [
+      "Active",
+      "Failed"
+    ],
+    "obj-a3-tether-2": [
+      "Active",
+      "Completed"
+    ],
+    "obj-a2-traffic-loss-report": [
+      "Active"
+    ],
+    "obj-a3-window": [
+      "Active",
+      "Failed"
+    ],
+    "obj-a3-berth": [
+      "Active",
+      "Failed"
+    ]
+  },
+  "scenarioState": {
+    "schema_version": 1,
+    "flags": [
+      {
+        "name": "a1_lane_open",
+        "value": 1
+      },
+      {
+        "name": "a1_priority_set",
+        "value": 1
+      },
+      {
+        "name": "a2_band_one",
+        "value": 1
+      },
+      {
+        "name": "a2_band_three",
+        "value": 1
+      },
+      {
+        "name": "a2_band_two",
+        "value": 1
+      },
+      {
+        "name": "a2_front_warned",
+        "value": 1
+      },
+      {
+        "name": "a2_lyra_recovered",
+        "value": 1
+      },
+      {
+        "name": "a2_rescue_resolved",
+        "value": 1
+      },
+      {
+        "name": "a2_traffic_lost",
+        "value": 1
+      },
+      {
+        "name": "a3_berth_open",
+        "value": 1
+      },
+      {
+        "name": "a3_convoy_marshalled",
+        "value": 2
+      },
+      {
+        "name": "a3_endings_written",
+        "value": 1
+      },
+      {
+        "name": "a3_head_acknowledged",
+        "value": 3
+      },
+      {
+        "name": "a3_head_evacuated",
+        "value": 1
+      },
+      {
+        "name": "a3_head_held",
+        "value": 1
+      },
+      {
+        "name": "a3_stood_down",
+        "value": 1
+      },
+      {
+        "name": "a3_strain_beats",
+        "value": 25
+      },
+      {
+        "name": "a3_warning_one",
+        "value": 1
+      },
+      {
+        "name": "a3_warning_two",
+        "value": 1
+      },
+      {
+        "name": "a3_watch_open",
+        "value": 1
+      },
+      {
+        "name": "act",
+        "value": 3
+      },
+      {
+        "name": "act1_complete",
+        "value": 1
+      },
+      {
+        "name": "act2_complete",
+        "value": 1
+      },
+      {
+        "name": "act3_complete",
+        "value": 1
+      },
+      {
+        "name": "act3_resolved",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.casualties.storm",
+        "value": 5
+      },
+      {
+        "name": "campaign.skyway.casualties.total",
+        "value": 5
+      },
+      {
+        "name": "campaign.skyway.commitments.broken",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.commitments.kept",
+        "value": 2
+      },
+      {
+        "name": "campaign.skyway.evidence.corroborated",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.evidence.filed",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.passage.berth_only",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.passage.left_committee",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.passage.left_convoy",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.passage.left_havelock",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.picket.unresolved",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.skyhook.held",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.strike.negotiated",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.traffic.corridor_picketed",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.traffic.lark",
+        "value": 1
+      },
+      {
+        "name": "campaign.skyway.traffic.lost",
+        "value": 1
+      },
+      {
+        "name": "commitment.skyway_protect_witness.kept",
+        "value": 1
+      },
+      {
+        "name": "commitment.skyway_safe_passage.broken",
+        "value": 1
+      },
+      {
+        "name": "commitment.skyway_surface_records.kept",
+        "value": 1
+      },
+      {
+        "name": "depot_a_fuel_lift",
+        "value": 40
+      },
+      {
+        "name": "depot_a_pumping",
+        "value": 1
+      },
+      {
+        "name": "depot_a_shelter_berths",
+        "value": 1
+      },
+      {
+        "name": "depot_b_fuel_lift",
+        "value": 12
+      },
+      {
+        "name": "havelock_enforcer_guns_online",
+        "value": 1
+      },
+      {
+        "name": "lark_corridor_cancelled",
+        "value": 1
+      },
+      {
+        "name": "lark_first_hail_sent",
+        "value": 1
+      },
+      {
+        "name": "lark_unsafe_response_unlocked",
+        "value": 1
+      },
+      {
+        "name": "reserve_fuel",
+        "value": 100
+      },
+      {
+        "name": "scan.depot_ladder_a.taken",
+        "value": 1
+      },
+      {
+        "name": "scan.depot_ladder_b.taken",
+        "value": 1
+      },
+      {
+        "name": "scan.lyra_ascending.taken",
+        "value": 1
+      },
+      {
+        "name": "scan.skyhook.taken",
+        "value": 1
+      },
+      {
+        "name": "ship_power",
+        "value": 70
+      },
+      {
+        "name": "skyhook_climber_load",
+        "value": 180
+      },
+      {
+        "name": "skyhook_load_bearing",
+        "value": 1
+      },
+      {
+        "name": "skyhook_station_holding",
+        "value": 1
+      },
+      {
+        "name": "skyhook_tether_stable",
+        "value": 1
+      },
+      {
+        "name": "skyhook_tether_tensioned",
+        "value": 1
+      },
+      {
+        "name": "skyhook_transfer_berths",
+        "value": 2
+      },
+      {
+        "name": "skyway_berth_seen",
+        "value": 2
+      },
+      {
+        "name": "skyway_board_marked",
+        "value": 1
+      },
+      {
+        "name": "skyway_claim_asked_committee",
+        "value": 1
+      },
+      {
+        "name": "skyway_claim_asked_convoy",
+        "value": 1
+      },
+      {
+        "name": "skyway_claim_asked_havelock",
+        "value": 1
+      },
+      {
+        "name": "skyway_claim_committee",
+        "value": 18
+      },
+      {
+        "name": "skyway_claim_convoy",
+        "value": 26
+      },
+      {
+        "name": "skyway_claim_havelock",
+        "value": 22
+      },
+      {
+        "name": "skyway_claims_asked",
+        "value": 3
+      },
+      {
+        "name": "skyway_claims_unanswered",
+        "value": 3
+      },
+      {
+        "name": "skyway_committee_channel_opened",
+        "value": 1
+      },
+      {
+        "name": "skyway_confront_unlocked",
+        "value": 1
+      },
+      {
+        "name": "skyway_debris_lead_resolved",
+        "value": 1
+      },
+      {
+        "name": "skyway_debris_lead_struck",
+        "value": 1
+      },
+      {
+        "name": "skyway_debris_resolved",
+        "value": 2
+      },
+      {
+        "name": "skyway_debris_trail_resolved",
+        "value": 1
+      },
+      {
+        "name": "skyway_debris_trail_struck",
+        "value": 1
+      },
+      {
+        "name": "skyway_evidence_filing_opened",
+        "value": 1
+      },
+      {
+        "name": "skyway_file_requested",
+        "value": 1
+      },
+      {
+        "name": "skyway_file_shown",
+        "value": 1
+      },
+      {
+        "name": "skyway_force_declined",
+        "value": 1
+      },
+      {
+        "name": "skyway_havelock_channel_opened",
+        "value": 1
+      },
+      {
+        "name": "skyway_head_evacuation_assisted",
+        "value": 1
+      },
+      {
+        "name": "skyway_head_told",
+        "value": 1
+      },
+      {
+        "name": "skyway_held_berth",
+        "value": 2
+      },
+      {
+        "name": "skyway_ladder_a_debris_harmed",
+        "value": 1
+      },
+      {
+        "name": "skyway_ladder_b_debris_harmed",
+        "value": 1
+      },
+      {
+        "name": "skyway_left_committee",
+        "value": 1
+      },
+      {
+        "name": "skyway_left_committee_cost",
+        "value": 1
+      },
+      {
+        "name": "skyway_left_convoy",
+        "value": 1
+      },
+      {
+        "name": "skyway_left_convoy_cost",
+        "value": 3
+      },
+      {
+        "name": "skyway_left_havelock",
+        "value": 1
+      },
+      {
+        "name": "skyway_left_havelock_cost",
+        "value": 1
+      },
+      {
+        "name": "skyway_lyra_recovered",
+        "value": 1
+      },
+      {
+        "name": "skyway_lyra_under_control",
+        "value": 1
+      },
+      {
+        "name": "skyway_mission_finalized",
+        "value": 1
+      },
+      {
+        "name": "skyway_mission_resolved",
+        "value": 1
+      },
+      {
+        "name": "skyway_negotiation_opened",
+        "value": 2
+      },
+      {
+        "name": "skyway_obstruction_charges_placed",
+        "value": 1
+      },
+      {
+        "name": "skyway_obstruction_cleared",
+        "value": 1
+      },
+      {
+        "name": "skyway_obstruction_cleared_safe",
+        "value": 1
+      },
+      {
+        "name": "skyway_obstruction_detonated",
+        "value": 1
+      },
+      {
+        "name": "skyway_obstruction_resolved",
+        "value": 1
+      },
+      {
+        "name": "skyway_records_diff_found",
+        "value": 1
+      },
+      {
+        "name": "skyway_records_put",
+        "value": 1
+      },
+      {
+        "name": "skyway_rigger_called",
+        "value": 1
+      },
+      {
+        "name": "skyway_settled_by_negotiation",
+        "value": 1
+      },
+      {
+        "name": "skyway_shelter_only",
+        "value": 1
+      },
+      {
+        "name": "skyway_shelter_supply",
+        "value": 1
+      },
+      {
+        "name": "skyway_skyhook_held",
+        "value": 1
+      },
+      {
+        "name": "skyway_storm_casualties",
+        "value": 5
+      },
+      {
+        "name": "skyway_storm_passed",
+        "value": 1
+      },
+      {
+        "name": "skyway_strike_engaged",
+        "value": 1
+      },
+      {
+        "name": "skyway_strike_hardening",
+        "value": 1
+      },
+      {
+        "name": "skyway_strike_objectives_posted",
+        "value": 1
+      },
+      {
+        "name": "skyway_strike_settled",
+        "value": 1
+      },
+      {
+        "name": "skyway_survey_report_objective_posted",
+        "value": 1
+      },
+      {
+        "name": "skyway_survey_reported",
+        "value": 1
+      },
+      {
+        "name": "skyway_survey_scans_complete",
+        "value": 1
+      },
+      {
+        "name": "skyway_traffic_lost_lark",
+        "value": 1
+      },
+      {
+        "name": "skyway_window_closed",
+        "value": 1
+      },
+      {
+        "name": "skyway_window_demand",
+        "value": 66
+      },
+      {
+        "name": "skyway_window_demand_total",
+        "value": 66
+      },
+      {
+        "name": "skyway_window_shortfall",
+        "value": 66
+      },
+      {
+        "name": "skyway_window_shortfall_at_open",
+        "value": 66
+      },
+      {
+        "name": "skyway_worker_corroboration_obtained",
+        "value": 1
+      },
+      {
+        "name": "strike_resolved",
+        "value": 1
+      },
+      {
+        "name": "tether_slipped",
+        "value": 1
+      },
+      {
+        "name": "workforce.havelock_operations.disposition",
+        "value": 55
+      },
+      {
+        "name": "workforce.skyway_workers.disposition",
+        "value": 60
+      }
+    ],
+    "objectives": [
+      {
+        "id": "obj-a1-corridor",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 0,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a1-triage",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 0,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a1-survey",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 45,
+        "directive": {
+          "kind": "Patrol",
+          "anchors": [
+            "depot_b_berth",
+            "depot_a_berth",
+            "station_keeping"
+          ],
+          "loop_path": false
+        }
+      },
+      {
+        "id": "obj-a2-line",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 50,
+        "directive": {
+          "kind": "Hail",
+          "target": "world.falling_skyway.entity.strike_committee.name"
+        }
+      },
+      {
+        "id": "obj-a2-shelter",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 50,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a2-rescue",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 70,
+        "directive": {
+          "kind": "Tow",
+          "target": "world.falling_skyway.entity.lyra_ascending.name"
+        }
+      },
+      {
+        "id": "obj-a2-storm",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 0,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a2-lee",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 75,
+        "directive": {
+          "kind": "Reach",
+          "anchor": "storm_lee"
+        }
+      },
+      {
+        "id": "obj-a3-head",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 55,
+        "directive": {
+          "kind": "Stabilise",
+          "target": "world.falling_skyway.entity.skyhook.name"
+        }
+      },
+      {
+        "id": "obj-a3-tether-1",
+        "status": "Failed",
+        "mandatory": true,
+        "base_priority": 60,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a3-tether-2",
+        "status": "Completed",
+        "mandatory": true,
+        "base_priority": 70,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a2-traffic-loss-report",
+        "status": "Active",
+        "mandatory": true,
+        "base_priority": 0,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a3-berth",
+        "status": "Failed",
+        "mandatory": true,
+        "base_priority": 66,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a1-survey-scan-depot-b",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 52,
+        "directive": {
+          "kind": "Scan",
+          "target": "world.falling_skyway.entity.depot_ladder_b.name"
+        }
+      },
+      {
+        "id": "obj-a1-survey-scan-depot-a",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 51,
+        "directive": {
+          "kind": "Scan",
+          "target": "world.falling_skyway.entity.depot_ladder_a.name"
+        }
+      },
+      {
+        "id": "obj-a1-survey-scan-head",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 50,
+        "directive": {
+          "kind": "Scan",
+          "target": "world.falling_skyway.entity.skyhook.name"
+        }
+      },
+      {
+        "id": "obj-a2-corroborate",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 25,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a1-head-evacuation",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 70,
+        "directive": {
+          "kind": "Secure",
+          "target": "world.falling_skyway.entity.skyhook.name"
+        }
+      },
+      {
+        "id": "obj-a1-gallery",
+        "status": "Active",
+        "mandatory": false,
+        "base_priority": 30,
+        "directive": {
+          "kind": "Secure",
+          "target": "world.falling_skyway.entity.depot_ladder_b.name"
+        }
+      },
+      {
+        "id": "obj-a1-picket",
+        "status": "Active",
+        "mandatory": false,
+        "base_priority": 40,
+        "directive": {
+          "kind": "Secure",
+          "target": "world.falling_skyway.entity.havelock_enforcer.name"
+        }
+      },
+      {
+        "id": "obj-a3-confront",
+        "status": "Failed",
+        "mandatory": false,
+        "base_priority": 20,
+        "directive": {
+          "kind": "None"
+        }
+      },
+      {
+        "id": "obj-a1-survey-report",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 80,
+        "directive": {
+          "kind": "Hail",
+          "target": "world.falling_skyway.entity.skyway_control.name"
+        }
+      },
+      {
+        "id": "obj-a2-shelter-meridian",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 49,
+        "directive": {
+          "kind": "Order",
+          "target": "world.falling_skyway.entity.convoy_meridian.name",
+          "route": "storm_shelter_run"
+        }
+      },
+      {
+        "id": "obj-a2-shelter-lark",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 49,
+        "directive": {
+          "kind": "Order",
+          "target": "world.falling_skyway.entity.hauler_lark.name",
+          "route": "storm_shelter_run"
+        }
+      },
+      {
+        "id": "obj-a2-shelter-pell",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 49,
+        "directive": {
+          "kind": "Order",
+          "target": "world.falling_skyway.entity.hauler_pell.name",
+          "route": "storm_shelter_run"
+        }
+      },
+      {
+        "id": "obj-a2-approach",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 70,
+        "directive": {
+          "kind": "Reach",
+          "anchor": "lyra_drift"
+        }
+      },
+      {
+        "id": "obj-a2-rescue-scan",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 71,
+        "directive": {
+          "kind": "Scan",
+          "target": "world.falling_skyway.entity.lyra_ascending.name"
+        }
+      },
+      {
+        "id": "obj-a3-standoff",
+        "status": "Completed",
+        "mandatory": false,
+        "base_priority": 55,
+        "directive": {
+          "kind": "Reach",
+          "anchor": "station_keeping"
+        }
+      },
+      {
+        "id": "obj-a3-obstruction",
+        "status": "Active",
+        "mandatory": false,
+        "base_priority": 45,
+        "directive": {
+          "kind": "Stabilise",
+          "target": "world.falling_skyway.entity.corridor_obstruction.name"
+        }
+      },
+      {
+        "id": "obj-a3-window-ready",
+        "status": "Failed",
+        "mandatory": false,
+        "base_priority": 54,
+        "directive": {
+          "kind": "Transfer",
+          "target": "world.falling_skyway.entity.window_transfer_manifold.name"
+        }
+      },
+      {
+        "id": "obj-a3-debris-scan-near",
+        "status": "Active",
+        "mandatory": false,
+        "base_priority": 62,
+        "directive": {
+          "kind": "Scan",
+          "target": "world.falling_skyway.entity.debris_stray.name"
+        }
+      },
+      {
+        "id": "obj-a3-debris-scan-lead",
+        "status": "Failed",
+        "mandatory": false,
+        "base_priority": 61,
+        "directive": {
+          "kind": "Scan",
+          "target": "world.falling_skyway.entity.debris_lead.name"
+        }
+      },
+      {
+        "id": "obj-a3-debris-scan-trail",
+        "status": "Failed",
+        "mandatory": false,
+        "base_priority": 60,
+        "directive": {
+          "kind": "Scan",
+          "target": "world.falling_skyway.entity.debris_trail.name"
+        }
+      },
+      {
+        "id": "obj-a3-window",
+        "status": "Failed",
+        "mandatory": false,
+        "base_priority": 65,
+        "directive": {
+          "kind": "None"
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "condition": "on_world_loaded",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 0,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(scan.skyhook.taken)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 325.13333,
+        "fire_history": [
+          {
+            "fired_secs": 325.13333,
+            "predicate_values": [
+              {
+                "atom": "flag(scan.skyhook.taken)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(scan.depot_ladder_a.taken)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 265.63333,
+        "fire_history": [
+          {
+            "fired_secs": 265.63333,
+            "predicate_values": [
+              {
+                "atom": "flag(scan.depot_ladder_a.taken)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(scan.depot_ladder_b.taken)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 211.93333,
+        "fire_history": [
+          {
+            "fired_secs": 211.93333,
+            "predicate_values": [
+              {
+                "atom": "flag(scan.depot_ladder_b.taken)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.strike_committee.name)",
+        "when": "counter(skyway_strike_hardening) < 1",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": false,
+        "fire_history": []
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.strike_committee.name)",
+        "when": "counter(skyway_strike_hardening) == 1",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 160.01668,
+        "fire_history": [
+          {
+            "fired_secs": 160.01668,
+            "predicate_values": [
+              {
+                "atom": "counter(skyway_strike_hardening)",
+                "value": "1"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.strike_committee.name)",
+        "when": "counter(skyway_strike_hardening) > 1",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": false,
+        "fire_history": []
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.havelock_cutter.name)",
+        "when": "counter(skyway_strike_hardening) < 1",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": false,
+        "fire_history": []
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.havelock_cutter.name)",
+        "when": "counter(skyway_strike_hardening) == 1",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.havelock_cutter.name)",
+        "when": "counter(skyway_strike_hardening) > 1",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": false,
+        "fire_history": []
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.skyway_control.name)",
+        "when": "counter(skyway_survey_scans_complete) < 1",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": false,
+        "fire_history": []
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.skyway_control.name)",
+        "when": "(counter(skyway_survey_scans_complete) > 0 and counter(skyway_survey_reported) < 1)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": false,
+        "last_fired_secs": 325.15,
+        "fire_history": [
+          {
+            "fired_secs": 325.15,
+            "predicate_values": [
+              {
+                "atom": "counter(skyway_survey_scans_complete)",
+                "value": "1"
+              },
+              {
+                "atom": "counter(skyway_survey_reported)",
+                "value": "0"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.skyway_control.name)",
+        "when": "counter(skyway_survey_reported) > 0",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_cleared(skyhook_lift_capable)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 160.01668,
+        "fire_history": [
+          {
+            "fired_secs": 160.01668,
+            "predicate_values": [
+              {
+                "atom": "flag(skyhook_lift_capable)",
+                "value": "false"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_waypoint_reached(world.falling_skyway.entity.hauler_lark.name, waypoint=corridor_gate)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 50.283333,
+        "fire_history": [
+          {
+            "fired_secs": 50.283333,
+            "predicate_values": []
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_strike_settled)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 180.16667,
+        "fire_history": [
+          {
+            "fired_secs": 180.16667,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_strike_settled)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_head_evacuation_assisted)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 360.83334,
+        "fire_history": [
+          {
+            "fired_secs": 360.83334,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_head_evacuation_assisted)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(depot_b_gallery_contained)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(scan.lyra_ascending.taken)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 420.73334,
+        "fire_history": [
+          {
+            "fired_secs": 420.73334,
+            "predicate_values": [
+              {
+                "atom": "flag(scan.lyra_ascending.taken)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_lyra_under_control)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 433.23334,
+        "fire_history": [
+          {
+            "fired_secs": 433.23334,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_lyra_under_control)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.lyra_ascending.name)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 0,
+        "fire_history": [
+          {
+            "fired_secs": 0,
+            "predicate_values": []
+          }
+        ]
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.convoy_meridian.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.hauler_lark.name)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1419.9333,
+        "fire_history": [
+          {
+            "fired_secs": 1419.9333,
+            "predicate_values": []
+          }
+        ]
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.hauler_pell.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.shuttle_wick.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_world_loaded",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 0,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(scan.depot_ladder_b.taken)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 211.93333,
+        "fire_history": [
+          {
+            "fired_secs": 211.93333,
+            "predicate_values": [
+              {
+                "atom": "flag(scan.depot_ladder_b.taken)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_cleared(depot_b_meets_certified_load)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_settled_by_negotiation)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 160.15001,
+        "fire_history": [
+          {
+            "fired_secs": 160.15001,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_settled_by_negotiation)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_records_diff_found)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 0,
+        "fire_history": [
+          {
+            "fired_secs": 0,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_records_diff_found)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_worker_corroboration_obtained)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 211.95001,
+        "fire_history": [
+          {
+            "fired_secs": 211.95001,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_worker_corroboration_obtained)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_hailed(world.falling_skyway.entity.havelock_enforcer.name)",
+        "repeat": true,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_attacked(world.falling_skyway.entity.havelock_enforcer.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_cleared(havelock_enforcer_guns_online)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.havelock_enforcer.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(havelock_enforcer_contained)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(havelock_enforcer_boarded)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(weapons_cold.own_ship)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_storm_passed)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1072.0167,
+        "fire_history": [
+          {
+            "fired_secs": 1072.0167,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_storm_passed)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_cleared(skyhook_load_bearing)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1172.0334,
+        "fire_history": [
+          {
+            "fired_secs": 1172.0334,
+            "predicate_values": [
+              {
+                "atom": "flag(skyhook_load_bearing)",
+                "value": "false"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_cleared(skyhook_tether_tensioned)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1292.0334,
+        "fire_history": [
+          {
+            "fired_secs": 1292.0334,
+            "predicate_values": [
+              {
+                "atom": "flag(skyhook_tether_tensioned)",
+                "value": "false"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_cleared(skyhook_station_holding)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_cleared(skyhook_tether_stable)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyhook_load_bearing)",
+        "when": "counter(skyway_tether_watch) > 0",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": false,
+        "last_fired_secs": 1312.6833,
+        "fire_history": [
+          {
+            "fired_secs": 1312.6833,
+            "predicate_values": [
+              {
+                "atom": "flag(skyhook_load_bearing)",
+                "value": "true"
+              },
+              {
+                "atom": "counter(skyway_tether_watch)",
+                "value": "0"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.skyhook.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_lighter_secured)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_pod_secured)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_storm_passed)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1072.0167,
+        "fire_history": [
+          {
+            "fired_secs": 1072.0167,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_storm_passed)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_window_transfer_primed)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_book_committee)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_book_havelock)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_book_convoy)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_world_loaded",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 0,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_storm_passed)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1072.0167,
+        "fire_history": [
+          {
+            "fired_secs": 1072.0167,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_storm_passed)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_window_open)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1600.0167,
+        "fire_history": [
+          {
+            "fired_secs": 1600.0167,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_window_open)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_window_closed)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1800.0167,
+        "fire_history": [
+          {
+            "fired_secs": 1800.0167,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_window_closed)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.convoy_meridian.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_berth_ask_committee)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_berth_ask_havelock)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_berth_ask_convoy)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_storm_passed)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1072.0167,
+        "fire_history": [
+          {
+            "fired_secs": 1072.0167,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_storm_passed)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_lead_confirmed)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_trail_confirmed)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_lead_urgent)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_trail_urgent)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_lead_struck)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1322.4,
+        "fire_history": [
+          {
+            "fired_secs": 1322.4,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_debris_lead_struck)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_trail_struck)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1462.6334,
+        "fire_history": [
+          {
+            "fired_secs": 1462.6334,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_debris_trail_struck)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_stray_read)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_lead_read)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_debris_trail_read)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.debris_lead.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.debris_trail.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.debris_stray.name)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_obstruction_charges_placed)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 337.96667,
+        "fire_history": [
+          {
+            "fired_secs": 337.96667,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_obstruction_charges_placed)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_obstruction_detonated)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1312.7501,
+        "fire_history": [
+          {
+            "fired_secs": 1312.7501,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_obstruction_detonated)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_obstruction_cleared_safe)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 1312.7501,
+        "fire_history": [
+          {
+            "fired_secs": 1312.7501,
+            "predicate_values": [
+              {
+                "atom": "flag(skyway_obstruction_cleared_safe)",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(skyway_obstruction_cleared_unsupported)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(skyway_obstruction_premature)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_destroyed(world.falling_skyway.entity.corridor_obstruction.name)",
+        "repeat": false,
+        "fired": true,
+        "pending": false,
+        "when_holds": true,
+        "last_fired_secs": 0,
+        "fire_history": [
+          {
+            "fired_secs": 0,
+            "predicate_values": []
+          }
+        ]
+      },
+      {
+        "condition": "on_flag_set(scan.corridor_castaway.taken)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(rescue.corridor_castaway.recovered)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      },
+      {
+        "condition": "on_flag_set(rescue.corridor_castaway.lost)",
+        "repeat": false,
+        "fired": false,
+        "pending": true,
+        "when_holds": true,
+        "fire_history": []
+      }
+    ],
+    "delayed_actions": [],
+    "deadlines": [
+      {
+        "id": "tether_slip",
+        "label": "world.falling_skyway.deadline.tether_slip.label",
+        "visible": true,
+        "due_tick": 9641,
+        "state": "fired"
+      },
+      {
+        "id": "lark_first_hail_due",
+        "label": "world.falling_skyway.deadline.lark_first_hail_due.label",
+        "visible": false,
+        "due_tick": 19841,
+        "state": "fired"
+      },
+      {
+        "id": "skyway_survey_due",
+        "label": "world.falling_skyway.deadline.skyway_survey_due.label",
+        "visible": true,
+        "due_tick": 21641,
+        "state": "fired"
+      },
+      {
+        "id": "lark_final_hail_due",
+        "label": "world.falling_skyway.deadline.lark_final_hail_due.label",
+        "visible": false,
+        "due_tick": 21641,
+        "state": "fired"
+      },
+      {
+        "id": "lark_collision_due",
+        "label": "world.falling_skyway.deadline.lark_collision_due.label",
+        "visible": false,
+        "due_tick": 22841,
+        "state": "cancelled"
+      },
+      {
+        "id": "storm_front_due",
+        "label": "world.falling_skyway.deadline.storm_front.label",
+        "visible": true,
+        "due_tick": 24041,
+        "state": "fired"
+      },
+      {
+        "id": "storm_band_one_due",
+        "label": "world.falling_skyway.deadline.storm_band_one.label",
+        "visible": true,
+        "due_tick": 34841,
+        "state": "fired"
+      },
+      {
+        "id": "storm_band_two_due",
+        "label": "world.falling_skyway.deadline.storm_band_two.label",
+        "visible": true,
+        "due_tick": 44441,
+        "state": "fired"
+      },
+      {
+        "id": "lyra_clear_due",
+        "label": "world.falling_skyway.deadline.lyra_clear.label",
+        "visible": true,
+        "due_tick": 46121,
+        "state": "fired"
+      },
+      {
+        "id": "storm_band_three_due",
+        "label": "world.falling_skyway.deadline.storm_band_three.label",
+        "visible": true,
+        "due_tick": 54041,
+        "state": "fired"
+      },
+      {
+        "id": "storm_passed_due",
+        "label": "world.falling_skyway.deadline.storm_passed.label",
+        "visible": true,
+        "due_tick": 64361,
+        "state": "fired"
+      },
+      {
+        "id": "skyhook_failure_due",
+        "label": "world.falling_skyway.deadline.skyhook_failure.label",
+        "visible": true,
+        "due_tick": 91721,
+        "state": "cancelled"
+      },
+      {
+        "id": "skyway_transfer_window",
+        "label": "world.falling_skyway.deadline.transfer_window.label",
+        "visible": true,
+        "due_tick": 96041,
+        "state": "fired"
+      },
+      {
+        "id": "skyway_window_closes",
+        "label": "world.falling_skyway.deadline.window_closes.label",
+        "visible": true,
+        "due_tick": 108041,
+        "state": "fired"
+      }
+    ],
+    "commitments": [
+      {
+        "id": "skyway_safe_passage",
+        "made_to": "world.falling_skyway.entity.strike_committee.name",
+        "terms": "world.falling_skyway.commitment.safe_passage.terms",
+        "resolves_when": "world.falling_skyway.commitment.safe_passage.resolves",
+        "state": "broken",
+        "made_at_tick": 9644,
+        "resolved_at_tick": 109602
+      },
+      {
+        "id": "skyway_surface_records",
+        "made_to": "world.falling_skyway.entity.strike_committee.name",
+        "terms": "world.falling_skyway.commitment.surface_records.terms",
+        "resolves_when": "world.falling_skyway.commitment.surface_records.resolves",
+        "state": "kept",
+        "made_at_tick": 9646,
+        "resolved_at_tick": 109602
+      },
+      {
+        "id": "skyway_protect_witness",
+        "made_to": "world.falling_skyway.entity.rigger_tacket.name",
+        "terms": "world.falling_skyway.commitment.protect_witness.terms",
+        "resolves_when": "world.falling_skyway.commitment.protect_witness.resolves",
+        "state": "kept",
+        "made_at_tick": 12760,
+        "resolved_at_tick": 109602
+      }
+    ],
+    "dossier": [
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000005",
+        "text": "world.falling_skyway.evidence.ladder_b_record_inspection",
+        "provenance": "briefing",
+        "gathered_at_tick": 41
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000005",
+        "text": "world.falling_skyway.evidence.ladder_b_record_reinforced",
+        "provenance": "briefing",
+        "gathered_at_tick": 41
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000005",
+        "text": "world.falling_skyway.evidence.ladder_b_maintenance_file",
+        "provenance": "records",
+        "gathered_at_tick": 9642
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000005",
+        "text": "world.falling_skyway.evidence.ladder_b_worker_account",
+        "provenance": "dialogue",
+        "gathered_at_tick": 12758
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000006",
+        "text": "world.falling_skyway.evidence.ladder_b_maintenance_file",
+        "provenance": "records",
+        "gathered_at_tick": 18048
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000006",
+        "text": "world.falling_skyway.evidence.ladder_b_worker_account",
+        "provenance": "dialogue",
+        "gathered_at_tick": 18048
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000004",
+        "text": "world.falling_skyway.evidence.debris_strike",
+        "provenance": "scan",
+        "gathered_at_tick": 79385
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-00000000000a",
+        "text": "world.falling_skyway.evidence.traffic_lost_lark",
+        "provenance": "scan",
+        "gathered_at_tick": 85237
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000005",
+        "text": "world.falling_skyway.evidence.debris_strike",
+        "provenance": "scan",
+        "gathered_at_tick": 87799
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000007",
+        "text": "world.falling_skyway.evidence.committee_rode_it_out",
+        "provenance": "dialogue",
+        "gathered_at_tick": 109602
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000008",
+        "text": "world.falling_skyway.evidence.havelock_rode_it_out",
+        "provenance": "dialogue",
+        "gathered_at_tick": 109602
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000009",
+        "text": "world.falling_skyway.evidence.convoy_rode_it_out",
+        "provenance": "dialogue",
+        "gathered_at_tick": 109602
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000006",
+        "text": "world.falling_skyway.evidence.record_filed",
+        "provenance": "records",
+        "gathered_at_tick": 109602
+      },
+      {
+        "subject_uuid": "00000000-0000-8000-8000-000000000006",
+        "text": "world.falling_skyway.evidence.word_broken",
+        "provenance": "dialogue",
+        "gathered_at_tick": 109602
+      }
+    ]
+  }
+}

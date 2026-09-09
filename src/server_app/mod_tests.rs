@@ -4088,6 +4088,12 @@ fn add_modifier_broadcasts_modifier_added_message() {
     use crate::core::messages::{ModifierSlot, ModifierSource};
     use crate::modifiers::Modifier;
 
+    // A world-owned modifier survives simulation translators until its owner
+    // removes it. ImpulseDrive is derived from the drive phase each tick.
+    let source_key = ModifierSource::World {
+        id: "modifier-broadcast-fixture".into(),
+        tag: "speed".into(),
+    };
     let mut app = test_app();
     start_game(&mut app);
     tick(&mut app); // consume startup messages
@@ -4095,7 +4101,7 @@ fn add_modifier_broadcasts_modifier_added_message() {
     // Register a modifier on the ship entity.
     modify_ship_modifiers(&mut app, |mods| {
         mods.add_or_update(Modifier {
-            source: ModifierSource::ImpulseDrive,
+            source: source_key.clone(),
             slot: ModifierSlot::MaxSpeed,
             bonus: 0.5,
         });
@@ -4106,7 +4112,7 @@ fn add_modifier_broadcasts_modifier_added_message() {
         matches!(
             &m.msg,
             ServerMessage::ModifierAdded { source, slot, bonus }
-                if *source == ModifierSource::ImpulseDrive
+                if *source == source_key
                 && *slot == ModifierSlot::MaxSpeed
                 && (*bonus - 0.5).abs() < 1e-6
         )
@@ -4119,12 +4125,18 @@ fn remove_modifier_broadcasts_modifier_removed_message() {
     use crate::core::messages::{ModifierSlot, ModifierSource};
     use crate::modifiers::Modifier;
 
+    // A world-owned modifier survives simulation translators until its owner
+    // removes it. ImpulseDrive is derived from the drive phase each tick.
+    let source_key = ModifierSource::World {
+        id: "modifier-broadcast-fixture".into(),
+        tag: "speed".into(),
+    };
     let mut app = test_app();
     start_game(&mut app);
     // Add first so there's something to remove.
     modify_ship_modifiers(&mut app, |mods| {
         mods.add_or_update(Modifier {
-            source: ModifierSource::ImpulseDrive,
+            source: source_key.clone(),
             slot: ModifierSlot::MaxSpeed,
             bonus: 0.5,
         });
@@ -4133,7 +4145,7 @@ fn remove_modifier_broadcasts_modifier_removed_message() {
 
     // Now remove it.
     modify_ship_modifiers(&mut app, |mods| {
-        mods.remove(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed);
+        mods.remove(&source_key, &ModifierSlot::MaxSpeed);
     });
     let out = tick(&mut app);
 
@@ -4141,7 +4153,7 @@ fn remove_modifier_broadcasts_modifier_removed_message() {
         matches!(
             &m.msg,
             ServerMessage::ModifierRemoved { source, slot }
-                if *source == ModifierSource::ImpulseDrive
+                if *source == source_key
                 && *slot == ModifierSlot::MaxSpeed
         )
     });

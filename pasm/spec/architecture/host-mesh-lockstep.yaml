@@ -12,7 +12,7 @@ entities:
       rationale:
         - "A host may simulate tick T only once every peer is ready through T. Every host declares itself ready through SimTick + CommandDelay each tick — it will never issue anything for a tick at or below that again — so the first delay+1 ticks run unblocked and thereafter a peer may fall delay ticks behind before anybody waits."
         - "[ai] The order is PEER-INDEPENDENT rather than owner-sequenced, and the fleet lead was considered and rejected. An owner-assigned order costs every non-owner a second network hop before its own command is ordered, which doubles the delay the fleet must agree — and the delay is the entire latency budget. It also makes the lead a single point of failure for ORDERING, which #1119's host loss and #1120's slot recovery would then have to arbitrate before doing anything else. CommandOrder needs neither: (origin slot, that slot's own sequence) is a total order computable from the key alone. The lead is still what makes it work, because it minted the slot ids (p2p-delta-identity-is-minted), it simply is not on the critical path of every command."
-        - "[ai] A stall PAUSES Time<Virtual>, which starves the fixed accumulator so the withheld tick never begins. p2p-delta-tick-is-fixedupdate rules out both a second accumulator beside Time<Fixed> and a stall that skips systems inside a tick; this is neither, and it reuses the seam SimulationPaused already uses rather than inventing a second pausing mechanism."
+        - "[ai] A stall pauses Time<Virtual>, clears the current frame delta already calculated by First, and discards whole fixed-step debt while retaining the interpolation remainder. This withholds the tick in the same frame the barrier discovers the stall (#1449); pausing only future frames permits one forbidden step. p2p-delta-tick-is-fixedupdate rules out both a second accumulator beside Time<Fixed> and a stall that skips systems inside a tick; this is neither, and it reuses the seam SimulationPaused already uses rather than inventing a second pausing mechanism."
         - "[ai] Watermarks only move forward, so a reordered or duplicated frame is inert rather than a step backwards. That is cheaper to build in here than to bolt onto #1119, which needs reordered and repeated disconnect observations to converge."
         - "[ai] Peers start ready through `delay`, which is not optimism: a host that has run no ticks has by definition already issued everything it ever will for ticks 0..=delay. Seeding anything lower deadlocks the fleet on tick zero, because no host can send a frame before it has stepped."
         - "[ai] A fleet of one is a real state — the operator opened a fleet and nobody joined — and it behaves exactly as an unfleeted host does: no barrier, no delay, no frames. Otherwise the solo path acquires a stall it can never clear."
@@ -135,6 +135,7 @@ entities:
         mission it is a different ship on each of them. Nothing it gates may reach the
         authoritative digest, and tests/local_ship_neutrality.rs is the standing guard.
       rationale:
+        - "Issue #1449: Rapier SyncBackend marks Bevy transform trees dirty after authoritative motion and character controls, before its propagation pass. Rapier 0.33 omits this Bevy 0.18 prerequisite; otherwise a root with visual children can retain stale global geometry and collide differently from a rendererless peer. Static-tree optimization remains enabled. A real fixed-physics regression compares poses and contact ticks with and without a visual child."
         - "The rule is checkable rather than aspirational: the guard runs the same seeded world twice, moving the marker to a different fleet ship, and compares the fold on every tick of a mission with combat in it."
         - "[ai] Four sites failed it when it was written, and all four were fixed rather than blessed. Visual banking lerped ShipPhysics.roll for the LocalShip alone and the digest folds all eight physics fields. The scenario's objective pool reached only the LocalShip, so each host's mission steered a different hull. A beam hit routed to a shield facing by bearing for the LocalShip and to arc zero for everything else, justified as \"an NPC has one facing\" — a peer's player hull has four. And the helm blackboard's radar range came from the player-only client config for the LocalShip and from the ship's own authored section otherwise: the same number spelled twice, until two hosts spelled it differently for one hull."
         - "[ai] The #[require]s #984 put on LocalShip moved onto the player-ship bundle, where every FLEET ship gets them in the same spawn burst. Requiring them on the marker would have made their PRESENCE follow which ship a host projects, which is the cross-host asymmetry this rule forbids; putting them on the bundle keeps #984's actual property — no mid-run archetype move, no Commands in the resolver."
@@ -150,6 +151,7 @@ entities:
       paths:
         - src/server_app/components.rs
         - src/server_app/world_setup.rs
+        - src/server_app/registration.rs
         - src/ship/physics_systems.rs
         - src/ship/coordination_systems.rs
         - src/server_app/broadcast_publish.rs
@@ -195,6 +197,8 @@ entities:
       confidence: confirmed
       title: Fleet Agreement State
       summary: This host's sampled digest ledger, one ledger per peer, and every tick the fleet is known to have disagreed on.
+      rationale:
+        - "[ai] #1449: compare a checkpoint when either its local or remote half arrives last; network/frame ordering must not leave a known mismatch reported as agreement. Preserve discovery order, duplicate suppression and recovery cleanup. A committed dynamic GM join enables the existing disabled sampler without resetting retained ledgers or disagreements; a private candidate still emits no authoritative digest."
     architecture:
       classification: derived
       owner: fleet-digest-exchange

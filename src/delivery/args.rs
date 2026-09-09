@@ -49,6 +49,10 @@ pub struct HostArgs {
     /// given, and exit (issue #1123). A standalone diagnostic — it needs no
     /// `--world`, and when present it short-circuits the run.
     pub setup: bool,
+    /// Explicit bounded tone on a profile's named media surface, setup only.
+    pub test_output: Option<String>,
+    pub meter_microphone: Option<String>,
+    pub preview_camera: Option<String>,
     /// `--profile <PATH>`: a bridge-display profile (issue #1123), relative to
     /// the working directory. With `--world` the authoritative host applies it
     /// (viewscreen and Station monitors as borderless-fullscreen surfaces); with
@@ -261,6 +265,12 @@ LOCAL STATIONS (requires a build with --features ultralight)
                           loads the client bundle this host serves.
 
 BRIDGE DISPLAYS (issue #1123)
+    --test-output <SURFACE> With --setup --profile, play a quiet one-second tone
+                          on each output assigned to that media surface and exit.
+    --meter-microphone <SURFACE> With --setup --profile, show microphone levels
+                          for five seconds per assigned microphone; no recording.
+    --preview-camera <SURFACE> With --setup --profile, open the assigned camera
+                          preview on Windows. Escape or close stops the preview.
     --setup               Enumerate the connected monitors, print their stable
                           hardware identities, geometry and current assignment,
                           then exit. Validates --profile against them if given.
@@ -352,6 +362,9 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut frame_stats = false;
     let mut mod_pack_dir: Option<String> = None;
     let mut setup = false;
+    let mut test_output = None;
+    let mut meter_microphone = None;
+    let mut preview_camera = None;
     let mut profile: Option<String> = None;
     let mut lobby = false;
 
@@ -365,6 +378,9 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--content-dir" => content_dir = value_for(&arg, &mut it)?,
             "--skip-bundle-check" => skip_bundle_check = true,
             "--setup" => setup = true,
+            "--test-output" => test_output = Some(value_for(&arg, &mut it)?),
+            "--meter-microphone" => meter_microphone = Some(value_for(&arg, &mut it)?),
+            "--preview-camera" => preview_camera = Some(value_for(&arg, &mut it)?),
             "--profile" => profile = Some(value_for(&arg, &mut it)?),
             "--world" => world = Some(value_for(&arg, &mut it)?),
             "--lobby" => lobby = true,
@@ -447,6 +463,29 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     // no-`--world` case. `--profile` is deliberately NOT in this list: it is
     // the one flag `--setup` itself consumes, to validate against the
     // connected displays.
+    if test_output.is_some() && (!setup || profile.is_none()) {
+        return Err("--test-output needs --setup and --profile".to_string());
+    }
+    for (flag, supplied) in [
+        ("--meter-microphone", meter_microphone.is_some()),
+        ("--preview-camera", preview_camera.is_some()),
+    ] {
+        if supplied && (!setup || profile.is_none()) {
+            return Err(format!("{flag} needs --setup and --profile"));
+        }
+    }
+    if [
+        test_output.is_some(),
+        meter_microphone.is_some(),
+        preview_camera.is_some(),
+    ]
+    .into_iter()
+    .filter(|given| *given)
+    .count()
+        > 1
+    {
+        return Err("choose one media test per setup invocation".into());
+    }
     if setup {
         if save_operator_given {
             return Err(
@@ -605,6 +644,9 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         skip_bundle_check,
         sim,
         setup,
+        test_output,
+        meter_microphone,
+        preview_camera,
         profile,
     })))
 }
@@ -1065,6 +1107,55 @@ mod tests {
         let a = run(&["--setup", "--profile", "bridge.toml"]);
         assert!(a.setup);
         assert_eq!(a.profile.as_deref(), Some("bridge.toml"));
+    }
+
+    #[test]
+    fn an_output_test_requires_an_explicit_setup_profile_and_surface() {
+        for args in [
+            vec!["--test-output", "comms"],
+            vec!["--setup", "--test-output", "comms"],
+        ] {
+            assert!(parse(&args)
+                .unwrap_err()
+                .contains("--test-output needs --setup and --profile"));
+        }
+        let args = run(&[
+            "--setup",
+            "--profile",
+            "bridge.toml",
+            "--test-output",
+            "comms",
+        ]);
+        assert_eq!(args.test_output.as_deref(), Some("comms"));
+    }
+
+    #[test]
+    fn capture_tests_require_explicit_setup_profile_and_one_action() {
+        for flag in ["--meter-microphone", "--preview-camera"] {
+            for args in [
+                vec![flag, "comms"],
+                vec!["--setup", flag, "comms"],
+                vec!["--profile", "bridge.toml", flag, "comms"],
+            ] {
+                assert!(parse(&args).is_err(), "{args:?}");
+            }
+            let parsed = run(&["--setup", "--profile", "bridge.toml", flag, "comms"]);
+            assert!(parsed.setup);
+            for other in ["--test-output", "--meter-microphone", "--preview-camera"] {
+                if flag != other {
+                    assert!(parse(&[
+                        "--setup",
+                        "--profile",
+                        "bridge.toml",
+                        flag,
+                        "comms",
+                        other,
+                        "viewscreen"
+                    ])
+                    .is_err());
+                }
+            }
+        }
     }
 
     #[test]

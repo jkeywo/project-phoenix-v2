@@ -568,6 +568,22 @@ impl MeshOrigin {
     }
 }
 
+/// Owner-local sequence used when minting ordered slot claims. The browser
+/// queues slot ordinals; only the scheduled owner mints the tie-break value.
+#[derive(Resource, Default, Debug)]
+pub struct SlotClaimSequence(u64);
+
+impl SlotClaimSequence {
+    pub fn next_claim(&mut self) -> u64 {
+        self.0 += 1;
+        self.0
+    }
+
+    pub fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
 /// Frames a transport has received and this host has not applied yet, each with
 /// the slot the delivering connection authenticated it to (issue #1120).
 #[derive(Resource, Default, Debug)]
@@ -750,6 +766,31 @@ impl MeshAgreement {
     /// The first tick the fleet is known to have disagreed on.
     pub fn first_disagreement(&self) -> Option<MeshDisagreement> {
         self.disagreements.first().copied()
+    }
+
+    /// Compare when either half of a checkpoint arrives last. Discovery order
+    /// and duplicate suppression are shared by inbound and local sampling.
+    fn compare_sample(
+        &mut self,
+        peer: HostSlot,
+        tick: u64,
+        peer_digest: u64,
+    ) -> Option<MeshDisagreement> {
+        let local_digest = self.local.digest_at(tick)?;
+        if local_digest == peer_digest {
+            return None;
+        }
+        let found = MeshDisagreement {
+            tick,
+            peer,
+            local_digest,
+            peer_digest,
+        };
+        if self.disagreements.contains(&found) {
+            return None;
+        }
+        self.disagreements.push(found);
+        Some(found)
     }
 
     /// Forget every sampled checkpoint at or before `tick`, across this host's own
@@ -950,10 +991,12 @@ pub fn register_lockstep(app: &mut App) {
             // and ratings that flip are classified where they already live. The
             // queue is empty on any host that has lost nobody, which is every
             // host in a healthy fleet and every solo run.
-            .declare_state::<host_loss::PendingHostLoss>(StateClass::Timer, "fleet-lockstep-state");
+            .declare_state::<host_loss::PendingHostLoss>(StateClass::Timer, "fleet-lockstep-state")
+            .declare_state::<SlotClaimSequence>(StateClass::Timer, "fleet-lockstep-state");
     }
     app.init_resource::<FleetRoster>()
         .init_resource::<MeshInbox>()
+        .init_resource::<SlotClaimSequence>()
         .init_resource::<MeshOutbox>()
         .init_resource::<MeshDiagnostics>()
         .init_resource::<MeshAgreement>()
@@ -1626,25 +1669,16 @@ pub fn apply_mesh_inbox(
                 if digest.from == session.local() {
                     continue;
                 }
-                if let Some(local) = agreement.local.digest_at(digest.tick) {
-                    if local != digest.digest {
-                        let found = MeshDisagreement {
-                            tick: digest.tick,
-                            peer: digest.from,
-                            local_digest: local,
-                            peer_digest: digest.digest,
-                        };
-                        if !agreement.disagreements.contains(&found) {
-                            crate::perror!(
-                                log,
-                                LogCat::Admit,
-                                "host-mesh divergence — {found}. The fleet's \
+                if let Some(found) =
+                    agreement.compare_sample(digest.from, digest.tick, digest.digest)
+                {
+                    crate::perror!(
+                        log,
+                        LogCat::Admit,
+                        "host-mesh divergence — {found}. The fleet's \
                                  command logs are the first place to look: they \
                                  are byte-identical on hosts that agree.",
-                            );
-                            agreement.disagreements.push(found);
-                        }
-                    }
+                    );
                 }
                 agreement
                     .peers
@@ -1982,6 +2016,7 @@ pub fn gate_lockstep_ticks(
     paused: Option<Res<crate::debug_overlay::SimulationPaused>>,
     model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
     virtual_time: Option<ResMut<Time<Virtual>>>,
+    mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut diagnostics: ResMut<MeshDiagnostics>,
     recovery_hold: Option<Res<recovery::RecoveryHold>>,
     slot_recovery_hold: Option<Res<slot_recovery::SlotRecoveryHold>>,
@@ -2015,8 +2050,8 @@ pub fn gate_lockstep_ticks(
                     LogCat::Assets,
                     "authoritative model-rig hold at tick {next_tick}: waiting for primary sidecar"
                 );
-                virtual_time.pause();
             }
+            withhold_current_fixed_frame(&mut virtual_time, fixed_time.as_deref_mut());
         } else if virtual_time.is_paused() {
             crate::pinfo!(
                 log,
@@ -2064,11 +2099,24 @@ pub fn gate_lockstep_ticks(
                      divergence is healed"
                 ),
             }
-            virtual_time.pause();
         }
+        withhold_current_fixed_frame(&mut virtual_time, fixed_time.as_deref_mut());
     } else if virtual_time.is_paused() {
         crate::pinfo!(log, LogCat::Admit, "host-mesh resumed at tick {next_tick}");
         virtual_time.unpause();
+    }
+}
+
+/// PreUpdate runs after TimePlugin has calculated this frame's delta. Pausing
+/// future frames alone leaves that delta available to the fixed runner now.
+fn withhold_current_fixed_frame(
+    virtual_time: &mut Time<Virtual>,
+    fixed_time: Option<&mut Time<Fixed>>,
+) {
+    virtual_time.pause();
+    virtual_time.advance_by(std::time::Duration::ZERO);
+    if let Some(fixed) = fixed_time {
+        discard_whole_fixed_overstep(fixed);
     }
 }
 
@@ -2233,8 +2281,26 @@ pub fn sample_and_publish_digest(world: &mut World) {
         return;
     }
     let digest = crate::sim_digest::world_digest(world);
+    let mut discovered = Vec::new();
     if let Some(mut agreement) = world.get_resource_mut::<MeshAgreement>() {
         agreement.local.record(tick, digest);
+        // A faster peer may already have sent this checkpoint in PreUpdate.
+        // Compare it now rather than leaving agreement dependent on arrival order.
+        let early: Vec<_> = agreement
+            .peers
+            .iter()
+            .filter_map(|(peer, ledger)| ledger.digest_at(tick).map(|digest| (*peer, digest)))
+            .collect();
+        for (peer, peer_digest) in early {
+            if let Some(found) = agreement.compare_sample(peer, tick, peer_digest) {
+                discovered.push(found);
+            }
+        }
+    }
+    let log = world.get_resource::<crate::logging::LogFilterConfig>();
+    for found in discovered {
+        crate::perror!(log, crate::logging::LogCat::Admit,
+            "host-mesh divergence — {found}. The fleet's command logs are the first place to look: they are byte-identical on hosts that agree.");
     }
     if let Some(mut outbox) = world.get_resource_mut::<MeshOutbox>() {
         outbox.push(MeshFrame::Digest(DigestFrame { from, tick, digest }));
@@ -2263,6 +2329,38 @@ pub fn mesh_command(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn slot_claim_sequence_is_owned_by_the_world_and_resets_for_a_new_fleet() {
+        let mut world = bevy::prelude::World::new();
+        world.init_resource::<super::SlotClaimSequence>();
+        assert_eq!(
+            world
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            1
+        );
+        assert_eq!(
+            world
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            2
+        );
+        world.resource_mut::<super::SlotClaimSequence>().reset();
+        assert_eq!(
+            world
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            1
+        );
+        let mut other = bevy::prelude::World::new();
+        other.init_resource::<super::SlotClaimSequence>();
+        assert_eq!(
+            other
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            1
+        );
+    }
     use super::*;
     use crate::core::messages::{StationId, SystemControlPayload, SystemId};
 
@@ -2679,6 +2777,67 @@ station = "helm"
         assert!(text.contains("slot-2"), "{text}");
     }
 
+    #[test]
+    fn local_sampling_compares_a_peer_checkpoint_received_earlier_once() {
+        let mut world = World::new();
+        world.insert_resource(FleetLockstep(LockstepSession::new(
+            HostSlot(1),
+            [HostSlot(2)],
+            6,
+        )));
+        world.insert_resource(crate::sim_tick::SimTick(300));
+        world.insert_resource(MeshAgreement::new(300));
+        world.init_resource::<MeshOutbox>();
+        let expected = crate::sim_digest::world_digest(&world);
+        let mut remote = crate::sim_digest::DigestLedger::new(300);
+        remote.record(300, expected ^ 1);
+        world
+            .resource_mut::<MeshAgreement>()
+            .peers
+            .insert(HostSlot(2), remote);
+        assert!(world.resource::<MeshAgreement>().agreed());
+        sample_and_publish_digest(&mut world);
+        let found = world
+            .resource::<MeshAgreement>()
+            .first_disagreement()
+            .expect("compare the early peer when local sampling catches up");
+        assert_eq!(
+            found,
+            MeshDisagreement {
+                tick: 300,
+                peer: HostSlot(2),
+                local_digest: expected,
+                peer_digest: expected ^ 1
+            }
+        );
+        sample_and_publish_digest(&mut world);
+        assert_eq!(world.resource::<MeshAgreement>().disagreements.len(), 1);
+        assert_eq!(
+            world.resource_mut::<MeshOutbox>().drain().len(),
+            1,
+            "duplicate sampling cannot republish"
+        );
+    }
+
+    #[test]
+    fn checkpoint_comparison_preserves_discovery_order_and_recovery_cleanup() {
+        let mut agreement = MeshAgreement::new(300);
+        let peer = HostSlot(2);
+        assert!(agreement.compare_sample(peer, 600, 2).is_none());
+        agreement.local.record(300, 1);
+        agreement.local.record(600, 1);
+        assert!(agreement.compare_sample(peer, 600, 1).is_none());
+        assert!(agreement.compare_sample(peer, 600, 2).is_some());
+        assert!(agreement.compare_sample(peer, 600, 2).is_none());
+        assert!(agreement.compare_sample(peer, 300, 2).is_some());
+        assert_eq!(agreement.first_disagreement().unwrap().tick, 600);
+        agreement.forget_through(300);
+        assert_eq!(agreement.disagreements.len(), 1);
+        assert!(agreement.compare_sample(peer, 300, 2).is_none());
+        agreement.local.record(900, 3);
+        assert!(agreement.compare_sample(peer, 900, 3).is_none());
+    }
+
     /// Canonical marker geometry is an authority prerequisite even when no
     /// fleet session exists. A rendererless GM therefore uses the same virtual
     /// clock hold as a rendered host, and releases it as soon as its live
@@ -2908,6 +3067,63 @@ station = "helm"
                 .outcome,
             crate::gm_action::GmActionOutcome::Applied
         );
+    }
+
+    #[test]
+    fn a_new_peer_stall_withholds_the_current_frame_before_fixed_work() {
+        use crate::sim_tick::{register_sim_tick, SimTick};
+
+        let period = std::time::Duration::from_millis(10);
+        let local = HostSlot(1);
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        register_sim_tick(&mut app);
+        app.init_resource::<crate::command_admission::log::PendingCommands>();
+        register_lockstep(&mut app);
+        app.insert_resource(FleetLockstep(LockstepSession::new(
+            local,
+            [local, HostSlot(2)],
+            6,
+        )));
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::ZERO,
+        ));
+        app.update();
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
+        for _ in 0..6 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<SimTick>().0, 6);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            period * 3 / 2,
+        ));
+        app.update();
+        assert_eq!(app.world().resource::<SimTick>().0, 7);
+        app.world_mut().resource_mut::<MeshOutbox>().drain();
+
+        // First has already calculated this delta when PreUpdate discovers
+        // that tick 7 has no peer input. No FixedUpdate system may run yet.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 5));
+        app.update();
+        assert_eq!(app.world().resource::<SimTick>().0, 7);
+        assert!(app
+            .world_mut()
+            .resource_mut::<MeshOutbox>()
+            .drain()
+            .is_empty());
+        assert_eq!(app.world().resource::<Time<Fixed>>().overstep(), period / 2);
+
+        app.world_mut()
+            .resource_mut::<FleetLockstep>()
+            .0
+            .observe(HostSlot(2), 100);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<SimTick>().0, 8);
     }
 
     #[test]

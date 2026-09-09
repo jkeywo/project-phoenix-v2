@@ -424,6 +424,12 @@ pub struct PendingCommands {
 }
 
 impl PendingCommands {
+    /// Accepted commands in their canonical application order. Read-only
+    /// projections may inspect future choices without creating a second queue.
+    pub fn iter(&self) -> impl Iterator<Item = &PendingCommand> {
+        self.queue.values()
+    }
+
     /// Adopt this host's fleet slot, so the commands it admits from its own
     /// crew are ordered under that slot on every host in the fleet.
     ///

@@ -2,7 +2,7 @@
 //! reconnect. Its own process isolates native template and mod-pack caches.
 use bevy::prelude::*;
 use project_phoenix::boot::NativeRenderSurface;
-use project_phoenix::core::codec::{encode_scenario_catalog, JsonCodec, MessageCodec};
+use project_phoenix::core::codec::{encode_scenario_catalog, JsonCodec};
 use project_phoenix::core::messages::{ClientMessage, ScenarioCatalogPayload, ServerMessage};
 use project_phoenix::delivery::serve::ManifestSource;
 use project_phoenix::lobby::handler::Target;

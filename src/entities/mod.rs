@@ -46,3 +46,5 @@ pub mod template_preload;
 /// Fading a visual in or out — the LOD cross-fade window and the mid-mission
 /// arrival flourish built on it (PRD #1023, module 5).
 pub mod visual_fade;
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod world_preload;

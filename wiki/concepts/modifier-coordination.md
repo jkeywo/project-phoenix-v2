@@ -2,8 +2,8 @@
 title: Modifier Coordination
 type: concept
 tags: [modifiers, power, regions, impulse, collision, repair]
-sources: [src/modifiers/cache.rs, src/modifiers/coordination.rs, src/server_app/registration.rs, src/server_app/collision.rs, src/regions/server.rs, src/core/messages.rs]
-updated: 2026-08-27
+sources: [src/modifiers/cache.rs, src/modifiers/coordination.rs, src/server_app/registration.rs, src/server_app/collision.rs, src/regions/server.rs, src/core/messages.rs, src/snapshot.rs]
+updated: 2026-09-09
 ---
 
 # Modifier Coordination
@@ -17,6 +17,8 @@ updated: 2026-08-27
 - reactor allocation produces speed, yaw, phaser-damage, and shield-regeneration modifiers;
 - active impulse produces its authored speed multiplier;
 - region enter/exit observers add or remove radar, speed, and yaw effects.
+
+Impulse translation visits every ship, including ships projected remotely by a GM. It derives the speed modifier from that ship's current drive phase and authored multiplier on each pass; unchanged entries emit no duplicate events. Snapshot restoration rebuilds this derived modifier before the first resumed physics tick, including removal of a stale bootstrap impulse bonus.
 
 Each adapter updates only its own source keys. Removing one effect returns that slot to the product of the remaining sources, not to a hardcoded baseline.
 

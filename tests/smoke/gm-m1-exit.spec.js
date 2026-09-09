@@ -1240,6 +1240,7 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       operatorId,
       { timeout: 30_000 },
     );
+    const finalCrewRequestTick = await ship.evaluate(() => window.__hostMeshStatus().tick);
     helmReturning = await reconnectCrew(context, hostId, helmToken, 'helm');
     await expect(helmReturning.frameLocator('#helm-iframe').locator('#gm-takeover-banner'))
       .toBeHidden({ timeout: 20_000 });
@@ -1298,6 +1299,33 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       { peer: 'gm-1', role: 'gm', operator: 'gm-1', page: gmOne },
       { peer: 'gm-2-reconnect', role: 'gm', operator: 'gm-2', page: gmTwoReturning },
     ];
+    // Require a shared checkpoint after the returning crew's actual command
+    // applies. A null disagreement before sampling proves no comparison.
+    const restoredRating = await ship.waitForFunction((earliest) => {
+      const commands = (window.__gmM1Trace?.frames ?? [])
+        .filter((row) => row.direction === 'outbound' && row.type === 'tick')
+        .flatMap((row) => row.commands ?? []);
+      return commands.findLast((command) => command.tick >= earliest
+        && command.target === 'assign-station-rating'
+        && command.payload?.type === 'AssignStationRating'
+        && command.payload.data?.station === 'helm'
+        && command.payload.data?.rating !== 'Backfill') ?? false;
+    }, finalCrewRequestTick, { timeout: 60_000 });
+    const { tick: finalCrewApplyTick } = await restoredRating.jsonValue();
+    await restoredRating.dispose();
+    const checkpoints = await Promise.all(finalPeers.map(async ({ peer, page }) => {
+      const checkpoint = await page.waitForFunction((afterTick) => (
+        (window.__gmM1Trace?.frames ?? []).find((row) => row.direction === 'outbound'
+          && row.type === 'digest' && row.tick > afterTick
+          && /^[0-9a-f]{16}$/i.test(row.digest)) ?? false
+      ), finalCrewApplyTick, { timeout: 60_000 });
+      const { tick, digest } = await checkpoint.jsonValue();
+      await checkpoint.dispose();
+      return { peer, tick, digest };
+    }));
+    report.roster.postCrewCheckpoint = { finalCrewApplyTick, checkpoints };
+    expect(new Set(checkpoints.map(({ tick }) => tick)).size).toBe(1);
+    expect(new Set(checkpoints.map(({ digest }) => digest)).size).toBe(1);
     const mesh = await Promise.all(finalPeers.map(async ({ page }) => {
       const healthy = await page.waitForFunction(
         () => {
@@ -1419,6 +1447,14 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
           [privateReconnectCredential],
         ));
       }
+    }
+    report.roster.exitPeerMesh = [];
+    for (const { page, label } of tracked) {
+      if (page.isClosed()) continue;
+      try {
+        const status = await page.evaluate(() => window.__hostMeshStatus?.() ?? null);
+        report.roster.exitPeerMesh.push({ peer: label, status });
+      } catch (_) {}
     }
     // The artifact is a diagnostic index, never a save export or bearer-token
     // dump. Deep-redact before serialization, write first so a failing test

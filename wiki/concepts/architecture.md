@@ -2,8 +2,8 @@
 title: Architecture
 type: concept
 tags: [architecture, server, client, wasm, authority, domains]
-sources: [AGENTS.md, src/lib.rs, src/server_app/mod.rs, src/server_app/registration.rs, server.html, client.html, wiki/concepts/client-architecture.md]
-updated: 2026-08-27
+sources: [AGENTS.md, src/lib.rs, src/server_app/mod.rs, src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, src/lockstep/mod.rs, src/entities/config.rs, src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
+updated: 2026-09-08
 ---
 
 # Architecture
@@ -23,12 +23,14 @@ phone clients
 
 - `server.html` loads the Rust/WASM host, registers with the rendezvous service, owns the per-token connections, and displays the shared viewscreen.
 - `client.html` and `gui/` are pure JavaScript; there is no client-side Rust or WASM.
-- `src/server/bridge.rs` is the JavaScript/WASM boundary. Rust never owns sockets.
+- `src/server/bridge.rs` exports the JavaScript/WASM boundary and drains browser inputs into Bevy. Its private `browser_edge.rs` adapter owns pre-app storage, bounded queues, callbacks and readback mirrors behind typed operations. Callbacks are cloned before invocation so synchronous JavaScript replacement cannot retain a storage borrow. Fleet slot-claim sequencing is a `SlotClaimSequence` Resource in `src/lockstep/mod.rs`. Browser sockets remain in JavaScript.
 - `src/server_app/registration.rs` composes the fixed-tick simulation; `src/server_app/mod.rs` is its stable facade.
 
 ## Domain layout
 
 Rust modules are grouped by domain: `lobby`, `ship`, `weapons`, `modifiers`, `asteroids`, `regions`, `entities`, `world`, `ai`, `comms`, and `console`. Pure state/decision code stays beside its Bevy adapter; a pure module never imports Bevy merely to serve an adapter.
+
+`src/entities/config.rs` owns `EntityConfig`, parsing and cross-subsystem validation. Its `config/` leaves hold the individual subsystem schemas; root re-exports preserve their public paths. Visual and LOD definitions live in `config/visual.rs`, with hull, propulsion, weapons, consoles and other subsystem declarations in corresponding leaves.
 
 Cross-domain infrastructure has narrow homes:
 

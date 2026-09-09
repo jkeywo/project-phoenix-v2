@@ -3,9 +3,7 @@
 use super::*;
 use std::sync::{Arc, Mutex};
 
-use project_phoenix::core::codec::{
-    encode_handshake_frame, encode_rendezvous_frame, JsonCodec, MessageCodec,
-};
+use project_phoenix::core::codec::{encode_handshake_frame, encode_rendezvous_frame, JsonCodec};
 use project_phoenix::core::rendezvous::{
     HandshakeData, HandshakeFrame, RendezvousFrame, JOIN_HANDSHAKE,
 };

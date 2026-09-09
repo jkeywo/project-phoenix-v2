@@ -13,8 +13,11 @@ use crate::ship::rating;
 /// System that processes `SetStationRating` messages from players mid-game.
 /// Resolves the sender's station from their held consoles, looks up the
 /// rating in the ship config, and updates `ShipSystemControlSources` and
-/// `ActiveStationRatings` accordingly.
+/// `ActiveStationRatings` accordingly. An active fleet stages the choice for
+/// admission next tick; only the shared command consumer changes live state.
 pub fn handle_station_rating_change(
+    fleet: Option<Res<crate::lockstep::FleetLockstep>>,
+    mut intents: ResMut<crate::lobby::crew_replication::PendingCrewRatingChanges>,
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     mut ship_components: Query<
@@ -39,16 +42,20 @@ pub fn handle_station_rating_change(
                 continue;
             };
 
-            rating::apply_rating(
-                &ship_config.0,
-                &station_id,
-                rating_name,
-                &mut control_sources.0,
-            );
+            if fleet.is_some() {
+                intents.push(station_id.clone(), rating_name.clone());
+            } else {
+                rating::apply_rating(
+                    &ship_config.0,
+                    &station_id,
+                    rating_name,
+                    &mut control_sources.0,
+                );
 
-            active_ratings
-                .0
-                .insert(station_id.clone(), rating_name.clone());
+                active_ratings
+                    .0
+                    .insert(station_id.clone(), rating_name.clone());
+            }
 
             outbox.0.push((
                 crate::lobby::handler::Target::All,

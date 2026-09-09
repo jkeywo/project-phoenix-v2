@@ -1918,6 +1918,18 @@ describe('accessibility tab', () => {
       .flatMap((c) => (c.children && c.children.length ? c.children : [c]))
       .find((c) => c.type === 'range');
 
+  it('shows a native read failure while keeping explicit choices available', () => {
+    const { doc, inst } = openAccessibility();
+    doc.defaultView = { PhoenixOsAccessibilityDefaults: {
+      availability: { contrast: false, reducedMotion: true, textScale: true },
+    } };
+    inst.selectTab('audio');
+    inst.selectTab('accessibility');
+    expect(allText(bodyOf(doc))).toContain(t('settings.accessibility.os_unavailable'));
+    expect(bodyButtons(doc).map(button => button.getAttribute('data-control')))
+      .toContain('a11y-contrast-on');
+  });
+
   it('appears in the phone tab list and opens a body with effect-named controls', () => {
     const { doc } = openAccessibility();
     expect(tabBarOf(doc).children.map((c) => c.getAttribute('data-tab'))).toContain('accessibility');

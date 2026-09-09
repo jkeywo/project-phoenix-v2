@@ -3,40 +3,22 @@ use crate::core::messages::*;
 use std::collections::{BTreeMap, HashMap};
 use strum::IntoEnumIterator;
 
-struct PrettyJsonCodec;
-
-impl MessageCodec for PrettyJsonCodec {
-    type Error = serde_json::Error;
-    fn encode_client(&self, msg: &ClientMessage) -> Result<String, Self::Error> {
-        serde_json::to_string_pretty(msg)
-    }
-    fn decode_client(&self, s: &str) -> Result<ClientMessage, Self::Error> {
-        serde_json::from_str(s)
-    }
-    fn encode_server(&self, msg: &ServerMessage) -> Result<String, Self::Error> {
-        serde_json::to_string_pretty(msg)
-    }
-    fn decode_server(&self, s: &str) -> Result<ServerMessage, Self::Error> {
-        serde_json::from_str(s)
+fn assert_client_roundtrip(msg: ClientMessage) {
+    for encoded in [
+        JsonCodec.encode_client(&msg).unwrap(),
+        serde_json::to_string_pretty(&msg).unwrap(),
+    ] {
+        assert_eq!(msg, JsonCodec.decode_client(&encoded).unwrap());
     }
 }
 
-fn assert_client_roundtrip<C: MessageCodec>(codec: &C, msg: ClientMessage)
-where
-    C::Error: std::fmt::Debug,
-{
-    let encoded = codec.encode_client(&msg).unwrap();
-    let decoded = codec.decode_client(&encoded).unwrap();
-    assert_eq!(msg, decoded);
-}
-
-fn assert_server_roundtrip<C: MessageCodec>(codec: &C, msg: ServerMessage)
-where
-    C::Error: std::fmt::Debug,
-{
-    let encoded = codec.encode_server(&msg).unwrap();
-    let decoded = codec.decode_server(&encoded).unwrap();
-    assert_eq!(msg, decoded);
+fn assert_server_roundtrip(msg: ServerMessage) {
+    for encoded in [
+        JsonCodec.encode_server(&msg).unwrap(),
+        serde_json::to_string_pretty(&msg).unwrap(),
+    ] {
+        assert_eq!(msg, JsonCodec.decode_server(&encoded).unwrap());
+    }
 }
 
 fn station_address(id: &str) -> CoordinationAddress {
@@ -145,7 +127,7 @@ fn a_published_infrastructure_block_round_trips() {
 // `server_message_table_covers_every_variant`) fail with the missing
 // variant's name if a row is forgotten, and the round-trip tests
 // (`client_message_table_round_trips` / `server_message_table_round_trips`)
-// exercise every row through both `JsonCodec` and `PrettyJsonCodec`.
+// exercise every row through compact and pretty JSON with the production decoder.
 //
 // `ClientMessageDiscriminants` / `ServerMessageDiscriminants` come from
 // `#[derive(strum::EnumDiscriminants)]` on the two enums in `messages.rs`:
@@ -933,8 +915,7 @@ fn server_message_table_covers_every_variant() {
 #[test]
 fn client_message_table_round_trips() {
     for (discriminant, msg) in client_message_table() {
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+        assert_client_roundtrip(msg.clone());
         assert_eq!(
             ClientMessageDiscriminants::from(&msg),
             discriminant,
@@ -946,8 +927,7 @@ fn client_message_table_round_trips() {
 #[test]
 fn server_message_table_round_trips() {
     for (discriminant, msg) in server_message_table() {
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+        assert_server_roundtrip(msg.clone());
         assert_eq!(
             ServerMessageDiscriminants::from(&msg),
             discriminant,
@@ -965,21 +945,15 @@ fn server_message_table_round_trips() {
 #[test]
 fn tractor_load_modifier_source_round_trips() {
     for slot in [ModifierSlot::MaxSpeed, ModifierSlot::MaxYawRate] {
-        assert_server_roundtrip(
-            &JsonCodec,
-            ServerMessage::ModifierAdded {
-                source: ModifierSource::TractorLoad,
-                slot: slot.clone(),
-                bonus: -0.37,
-            },
-        );
-        assert_server_roundtrip(
-            &JsonCodec,
-            ServerMessage::ModifierRemoved {
-                source: ModifierSource::TractorLoad,
-                slot,
-            },
-        );
+        assert_server_roundtrip(ServerMessage::ModifierAdded {
+            source: ModifierSource::TractorLoad,
+            slot: slot.clone(),
+            bonus: -0.37,
+        });
+        assert_server_roundtrip(ServerMessage::ModifierRemoved {
+            source: ModifierSource::TractorLoad,
+            slot,
+        });
     }
 }
 
@@ -1305,8 +1279,7 @@ fn fire_blaster_control_system_round_trips() {
         target: SystemId("blaster-fore".into()),
         payload: SystemControlPayload::FireBlaster,
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     // Pin the on-the-wire JSON shape — JS action-map.js depends on this.
     let encoded = JsonCodec.encode_client(&msg).unwrap();
@@ -1422,8 +1395,7 @@ fn charge_blaster_start_control_system_round_trips() {
         target: SystemId("blaster-fore".into()),
         payload: SystemControlPayload::ChargeBlasterStart,
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1439,8 +1411,7 @@ fn charge_blaster_cancel_control_system_round_trips() {
         target: SystemId("blaster-fore".into()),
         payload: SystemControlPayload::ChargeBlasterCancel,
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1457,8 +1428,7 @@ fn fire_phaser_control_system_round_trips() {
         target: SystemId("phaser-fore".into()),
         payload: SystemControlPayload::FirePhaser,
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1478,8 +1448,7 @@ fn set_station_stance_control_system_round_trips() {
             stance: "tactical-weapons-free".into(),
         },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1499,8 +1468,7 @@ fn assign_station_rating_control_system_round_trips() {
             rating: "Human".into(),
         },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1519,8 +1487,7 @@ fn fire_torpedo_control_system_round_trips() {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1537,8 +1504,7 @@ fn load_tube_control_system_round_trips() {
         target: SystemId("torpedo-tube-fore-port".into()),
         payload: SystemControlPayload::LoadTube,
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1555,8 +1521,7 @@ fn unload_tube_control_system_round_trips() {
         target: SystemId("torpedo-tube-aft".into()),
         payload: SystemControlPayload::UnloadTube,
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -1579,8 +1544,7 @@ fn target_designation_coordination_payload_round_trips() {
         },
         presentation: test_coordination_presentation(),
     };
-    assert_client_roundtrip(&JsonCodec, send_msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+    assert_client_roundtrip(send_msg.clone());
 
     let popup_msg = ServerMessage::CoordinationPopup {
         address: station_address("tactical"),
@@ -1592,8 +1556,7 @@ fn target_designation_coordination_payload_round_trips() {
         sender_label: "Sensors".into(),
         to_label: "station.tactical.name".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 }
 
 #[test]
@@ -1660,8 +1623,7 @@ fn arc_bearing_request_coordination_payload_round_trips() {
         },
         presentation: test_coordination_presentation(),
     };
-    assert_client_roundtrip(&JsonCodec, send_msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+    assert_client_roundtrip(send_msg.clone());
 
     let popup_msg = ServerMessage::CoordinationPopup {
         address: station_address("helm"),
@@ -1679,8 +1641,7 @@ fn arc_bearing_request_coordination_payload_round_trips() {
         sender_label: "Weapons".into(),
         to_label: "station.helm.name".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 }
 
 /// `CoordinationPayload::ArcBearingWithdraw` round-trip (issue #932):
@@ -1695,8 +1656,7 @@ fn arc_bearing_withdraw_coordination_payload_round_trips() {
         },
         presentation: test_coordination_presentation(),
     };
-    assert_client_roundtrip(&JsonCodec, send_msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+    assert_client_roundtrip(send_msg.clone());
 
     let popup_msg = ServerMessage::CoordinationPopup {
         address: station_address("helm"),
@@ -1707,8 +1667,7 @@ fn arc_bearing_withdraw_coordination_payload_round_trips() {
         sender_label: "Weapons".into(),
         to_label: "station.helm.name".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 }
 
 /// `CoordinationPayload::PowerBrownout` round-trip, embedded in both
@@ -1724,8 +1683,7 @@ fn power_brownout_coordination_payload_round_trips() {
         },
         presentation: test_coordination_presentation(),
     };
-    assert_client_roundtrip(&JsonCodec, send_msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+    assert_client_roundtrip(send_msg.clone());
 
     let popup_msg = ServerMessage::CoordinationPopup {
         address: station_address("tactical"),
@@ -1738,8 +1696,7 @@ fn power_brownout_coordination_payload_round_trips() {
         sender_label: "Power".into(),
         to_label: "station.tactical.name".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 }
 
 /// `CoordinationPayload::NavigateTo` round-trip, embedded in both
@@ -1768,8 +1725,7 @@ fn navigate_to_coordination_payload_round_trips() {
         },
         presentation: test_coordination_presentation(),
     };
-    assert_client_roundtrip(&JsonCodec, send_msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+    assert_client_roundtrip(send_msg.clone());
 
     let popup_msg = ServerMessage::CoordinationPopup {
         address: station_address("helm"),
@@ -1782,8 +1738,7 @@ fn navigate_to_coordination_payload_round_trips() {
         sender_label: "Navigation".into(),
         to_label: "station.helm.name".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 }
 
 /// `CoordinationPayload::RepairRequest` round-trip (issue #682 — damaged
@@ -1802,8 +1757,7 @@ fn repair_request_coordination_payload_round_trips() {
         presentation: CoordinationPresentation::titled("coordination.repair.title")
             .with_title_param("label", CoordinationParam::text("station.helm.name")),
     };
-    assert_client_roundtrip(&JsonCodec, send_msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+    assert_client_roundtrip(send_msg.clone());
 
     let popup_msg = ServerMessage::CoordinationPopup {
         address: station_address("repair"),
@@ -1821,8 +1775,7 @@ fn repair_request_coordination_payload_round_trips() {
         sender_label: "Helm System".into(),
         to_label: "station.repair.name".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 }
 
 /// `CoordinationPayload::ThreatBearing` round-trip (issue #683 — sensors
@@ -1837,8 +1790,7 @@ fn threat_bearing_coordination_payload_round_trips() {
         },
         presentation: test_coordination_presentation(),
     };
-    assert_client_roundtrip(&JsonCodec, send_msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+    assert_client_roundtrip(send_msg.clone());
 
     let popup_msg = ServerMessage::CoordinationPopup {
         address: station_address("shields"),
@@ -1850,8 +1802,7 @@ fn threat_bearing_coordination_payload_round_trips() {
         sender_label: "Sensors".into(),
         to_label: "station.shields.name".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 }
 
 /// `CoordinationPayload::IntentAdvisory` round-trip (issue #879 — a
@@ -1873,8 +1824,7 @@ fn intent_advisory_coordination_payload_round_trips() {
         sender_label: "Tactical".into(),
         to_label: "chatter.addressee.ship".into(),
     };
-    assert_server_roundtrip(&JsonCodec, popup_msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    assert_server_roundtrip(popup_msg.clone());
 
     // The subject-less kinds, which serialise without the optional field.
     let bare = ServerMessage::CoordinationPopup {
@@ -1888,8 +1838,7 @@ fn intent_advisory_coordination_payload_round_trips() {
         sender_label: "Helm".into(),
         to_label: "chatter.addressee.ship".into(),
     };
-    assert_server_roundtrip(&JsonCodec, bare.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, bare);
+    assert_server_roundtrip(bare.clone());
 }
 
 /// BlasterFired server message round-trip (issue #631, extended #638).
@@ -1904,8 +1853,7 @@ fn blaster_fired_server_message_round_trips() {
         heading: 1.57,
         visual_scale: 1.5,
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 /// BlasterFired defaults visual_scale to 1.0 when absent (wire compat).
@@ -2099,14 +2047,11 @@ fn game_over_wire_keys_are_reason_outcome_and_report() {
 #[test]
 fn game_over_outcome_round_trips_and_defaults_when_absent() {
     for outcome in [Some("victory".to_string()), Some("defeat".into()), None] {
-        assert_server_roundtrip(
-            &JsonCodec,
-            ServerMessage::GameOver {
-                reason: "server.game_over.ship_destroyed".into(),
-                outcome: outcome.clone(),
-                report: Vec::new(),
-            },
-        );
+        assert_server_roundtrip(ServerMessage::GameOver {
+            reason: "server.game_over.ship_destroyed".into(),
+            outcome: outcome.clone(),
+            report: Vec::new(),
+        });
     }
 
     // A peer still sending the pre-#1023 `{reason}` shape decodes as an
@@ -2187,14 +2132,11 @@ fn game_over_report_rows_round_trip_in_authored_order() {
             state: "partial".into(),
         },
     ];
-    assert_server_roundtrip(
-        &JsonCodec,
-        ServerMessage::GameOver {
-            reason: "world.falling_skyway.game_over.lark_collision".into(),
-            outcome: Some("defeat".into()),
-            report: rows,
-        },
-    );
+    assert_server_roundtrip(ServerMessage::GameOver {
+        reason: "world.falling_skyway.game_over.lark_collision".into(),
+        outcome: Some("defeat".into()),
+        report: rows,
+    });
 }
 
 // ── Human-seeking hosts on the wire (issue #984) ──────────────────────
@@ -2248,8 +2190,7 @@ fn blaster_hit_server_message_round_trips() {
         projectile_id: "proj-uuid-abc".into(),
         target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 /// Torpedo volley target command codec round-trip (issue #632).
@@ -2264,8 +2205,7 @@ fn set_torpedo_volley_target_control_system_round_trips() {
             .expect("fore_port resolves"),
         payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 3 },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     // Pin the on-the-wire JSON shape — action-map.js depends on this.
     let encoded = JsonCodec.encode_client(&msg).unwrap();
@@ -2288,8 +2228,7 @@ fn set_red_alert_control_system_round_trips() {
         target: SystemId("red-alert".into()),
         payload: SystemControlPayload::SetRedAlert { active: true },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     // Pin the on-the-wire JSON shape — action-map.js depends on this.
     let encoded = JsonCodec.encode_client(&msg).unwrap();
@@ -2304,8 +2243,7 @@ fn set_red_alert_control_system_round_trips() {
         target: SystemId("red-alert".into()),
         payload: SystemControlPayload::SetRedAlert { active: false },
     };
-    assert_client_roundtrip(&JsonCodec, off.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, off);
+    assert_client_roundtrip(off.clone());
 }
 
 /// The correlated Red Alert tracer has its own additive envelope.  The
@@ -2323,7 +2261,7 @@ fn correlated_red_alert_and_action_feedback_round_trip() {
         encoded,
         r#"{"type":"ControlSystemCorrelated","data":{"correlation":"red-alert-4f4f","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
     );
-    assert_client_roundtrip(&JsonCodec, request);
+    assert_client_roundtrip(request);
 
     let response = ServerMessage::ActionFeedback {
         correlation,
@@ -2333,7 +2271,7 @@ fn correlated_red_alert_and_action_feedback_round_trip() {
         JsonCodec.encode_server(&response).unwrap(),
         r#"{"type":"ActionFeedback","data":{"correlation":"red-alert-4f4f","outcome":"Refused"}}"#,
     );
-    assert_server_roundtrip(&JsonCodec, response);
+    assert_server_roundtrip(response);
 }
 
 #[test]
@@ -2358,8 +2296,7 @@ fn set_repair_priority_control_system_round_trips() {
             priority: 2,
         },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     // Pin the on-the-wire JSON shape — action-map.js depends on this.
     let encoded = JsonCodec.encode_client(&msg).unwrap();
@@ -2383,8 +2320,7 @@ fn recall_repair_team_control_system_round_trips() {
         target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
         payload: SystemControlPayload::RecallRepairTeam { team_idx: 1 },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     // Pin the on-the-wire JSON shape — repair-dispatch.js depends on this.
     let encoded = JsonCodec.encode_client(&msg).unwrap();
@@ -2412,8 +2348,7 @@ fn dispatch_repair_team_to_the_field_target_round_trips() {
             target: crate::core::messages::RepairTarget::External,
         },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -2460,8 +2395,7 @@ fn set_repair_target_priority_control_system_round_trips() {
             system_id: SystemId("helm-engine-port".into()),
         },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     // Pin the on-the-wire JSON shape — repair-dispatch.js depends on this.
     let encoded = JsonCodec.encode_client(&msg).unwrap();
@@ -2519,8 +2453,7 @@ fn toggle_god_mode_control_system_round_trips() {
         target: SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
         payload: SystemControlPayload::ToggleGodMode,
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -2545,8 +2478,7 @@ fn scan_target_control_system_round_trips() {
             uuid: "00000000-0000-8000-8000-000000000042".into(),
         },
     };
-    assert_client_roundtrip(&JsonCodec, msg.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_client_roundtrip(msg.clone());
 
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
@@ -2570,8 +2502,7 @@ fn tractor_engage_and_release_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
         payload: SystemControlPayload::EngageTractor,
     };
-    assert_client_roundtrip(&JsonCodec, engage.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, engage.clone());
+    assert_client_roundtrip(engage.clone());
     assert_eq!(
         JsonCodec.encode_client(&engage).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"tractor","payload":{"type":"EngageTractor"}}}"#,
@@ -2582,8 +2513,7 @@ fn tractor_engage_and_release_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
         payload: SystemControlPayload::ReleaseTractor,
     };
-    assert_client_roundtrip(&JsonCodec, release.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, release.clone());
+    assert_client_roundtrip(release.clone());
     assert_eq!(
         JsonCodec.encode_client(&release).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"tractor","payload":{"type":"ReleaseTractor"}}}"#,
@@ -2605,8 +2535,7 @@ fn dock_and_undock_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::DOCK_SYSTEM_ID.into()),
         payload: SystemControlPayload::Dock,
     };
-    assert_client_roundtrip(&JsonCodec, dock.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, dock.clone());
+    assert_client_roundtrip(dock.clone());
     assert_eq!(
         JsonCodec.encode_client(&dock).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"dock","payload":{"type":"Dock"}}}"#,
@@ -2617,8 +2546,7 @@ fn dock_and_undock_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::DOCK_SYSTEM_ID.into()),
         payload: SystemControlPayload::Undock,
     };
-    assert_client_roundtrip(&JsonCodec, undock.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, undock.clone());
+    assert_client_roundtrip(undock.clone());
     assert_eq!(
         JsonCodec.encode_client(&undock).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"dock","payload":{"type":"Undock"}}}"#,
@@ -2727,8 +2655,7 @@ fn external_repair_dispatch_and_recall_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
         payload: SystemControlPayload::DispatchExternalRepair,
     };
-    assert_client_roundtrip(&JsonCodec, dispatch.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, dispatch.clone());
+    assert_client_roundtrip(dispatch.clone());
     assert_eq!(
         JsonCodec.encode_client(&dispatch).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchExternalRepair"}}}"#,
@@ -2739,8 +2666,7 @@ fn external_repair_dispatch_and_recall_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
         payload: SystemControlPayload::RecallExternalRepair,
     };
-    assert_client_roundtrip(&JsonCodec, recall.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, recall.clone());
+    assert_client_roundtrip(recall.clone());
     assert_eq!(
         JsonCodec.encode_client(&recall).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"RecallExternalRepair"}}}"#,
@@ -2763,8 +2689,7 @@ fn security_dispatch_and_recall_control_system_round_trip() {
             action: "assist_evacuation".into(),
         },
     };
-    assert_client_roundtrip(&JsonCodec, dispatch.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, dispatch.clone());
+    assert_client_roundtrip(dispatch.clone());
     assert_eq!(
         JsonCodec.encode_client(&dispatch).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DispatchSecurityTeam","data":{"team_idx":1,"target":"00000000-0000-8000-8000-000000000042","action":"assist_evacuation"}}}}"#,
@@ -2775,8 +2700,7 @@ fn security_dispatch_and_recall_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
         payload: SystemControlPayload::RecallSecurityTeam { team_idx: 0 },
     };
-    assert_client_roundtrip(&JsonCodec, recall.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, recall.clone());
+    assert_client_roundtrip(recall.clone());
     assert_eq!(
         JsonCodec.encode_client(&recall).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"RecallSecurityTeam","data":{"team_idx":0}}}}"#,
@@ -2796,8 +2720,7 @@ fn detonate_charges_control_system_round_trips() {
             target: "00000000-0000-8000-8000-000000000042".into(),
         },
     };
-    assert_client_roundtrip(&JsonCodec, detonate.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, detonate.clone());
+    assert_client_roundtrip(detonate.clone());
     assert_eq!(
         JsonCodec.encode_client(&detonate).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DetonateCharges","data":{"target":"00000000-0000-8000-8000-000000000042"}}}}"#,
@@ -2940,8 +2863,7 @@ fn start_and_stop_transfer_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::UMBILICAL_SYSTEM_ID.into()),
         payload: SystemControlPayload::StartTransfer,
     };
-    assert_client_roundtrip(&JsonCodec, start.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, start.clone());
+    assert_client_roundtrip(start.clone());
     assert_eq!(
         JsonCodec.encode_client(&start).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"umbilical","payload":{"type":"StartTransfer"}}}"#,
@@ -2952,8 +2874,7 @@ fn start_and_stop_transfer_control_system_round_trip() {
         target: SystemId(crate::ship::system_registry::UMBILICAL_SYSTEM_ID.into()),
         payload: SystemControlPayload::StopTransfer,
     };
-    assert_client_roundtrip(&JsonCodec, stop.clone());
-    assert_client_roundtrip(&PrettyJsonCodec, stop.clone());
+    assert_client_roundtrip(stop.clone());
     assert_eq!(
         JsonCodec.encode_client(&stop).unwrap(),
         r#"{"type":"ControlSystem","data":{"target":"umbilical","payload":{"type":"StopTransfer"}}}"#,
@@ -3022,15 +2943,12 @@ fn system_blackboard_tractor_round_trips_and_is_additive() {
         coupled_target_name: Some("world.probe_tractor.entity.derelict.name".into()),
         refusal: None,
     });
-    assert_server_roundtrip(
-        &JsonCodec,
-        ServerMessage::BlackboardUpdate {
-            updates: vec![(
-                SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
-                held.clone(),
-            )],
-        },
-    );
+    assert_server_roundtrip(ServerMessage::BlackboardUpdate {
+        updates: vec![(
+            SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+            held.clone(),
+        )],
+    });
     let json = serde_json::to_string(&held).unwrap();
     assert!(json.contains(r#""kind":"Tractor""#), "got: {json}");
     assert_eq!(
@@ -3164,8 +3082,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     let msg = ServerMessage::BlackboardUpdate {
         updates: vec![(SystemId(crate::science::SCAN_BLACKBOARD_KEY.into()), bb)],
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 /// The debris half of a reading (issue #1347), pinned as its own key set for
@@ -3399,8 +3316,7 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
     let msg = ServerMessage::BlackboardUpdate {
         updates: vec![(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)],
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 /// The phone settings menu's wire shapes (issue #940), pinned because
@@ -3418,7 +3334,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
         let msg = ClientMessage::ToggleDebugFlag {
             flag: DebugSurface::Regions,
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(msg.clone());
         assert_eq!(
             JsonCodec.encode_client(&msg).unwrap(),
             r#"{"type":"ToggleDebugFlag","data":{"flag":"Regions"}}"#,
@@ -3431,7 +3347,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
         // sends it and how `ReleaseStation` has always been sent. Pinned
         // because the JS builds this by hand.
         let pause = ClientMessage::TogglePause;
-        assert_client_roundtrip(&JsonCodec, pause.clone());
+        assert_client_roundtrip(pause.clone());
         assert_eq!(
             JsonCodec.encode_client(&pause).unwrap(),
             r#"{"type":"TogglePause"}"#,
@@ -3455,7 +3371,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
     // never decodes it, so THIS is the only place the wire shape a native host
     // must understand is checked against the shape the phone sends.
     let qr = ClientMessage::ToggleQrCode;
-    assert_client_roundtrip(&JsonCodec, qr.clone());
+    assert_client_roundtrip(qr.clone());
     assert_eq!(
         JsonCodec.encode_client(&qr).unwrap(),
         r#"{"type":"ToggleQrCode"}"#,
@@ -3479,7 +3395,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
         paused: true,
         god_mode: true,
     };
-    assert_server_roundtrip(&JsonCodec, report.clone());
+    assert_server_roundtrip(report.clone());
     assert_eq!(
         JsonCodec.encode_server(&report).unwrap(),
         r#"{"type":"DebugState","data":{"flags":[["Regions",true],["Modifiers",false]],"paused":true,"god_mode":true}}"#,
@@ -3493,7 +3409,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
         let msg = ClientMessage::ToggleDebugFlag {
             flag: DebugSurface::StationActivity,
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(msg.clone());
         assert_eq!(
             JsonCodec.encode_client(&msg).unwrap(),
             r#"{"type":"ToggleDebugFlag","data":{"flag":"StationActivity"}}"#,
@@ -3504,7 +3420,7 @@ fn client_settings_menu_wire_shapes_are_pinned() {
         let msg = ClientMessage::ToggleDebugFlag {
             flag: DebugSurface::AiDoctrine,
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(msg.clone());
         assert_eq!(
             JsonCodec.encode_client(&msg).unwrap(),
             r#"{"type":"ToggleDebugFlag","data":{"flag":"AiDoctrine"}}"#,
@@ -4029,8 +3945,7 @@ fn torpedo_tube_state_volley_fields_round_trip() {
         blasters: vec![],
         phaser_frequency: 0.5,
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 /// `TorpedoTubeState` patterned-attack fields round-trip (issue #766).
@@ -4063,8 +3978,7 @@ fn torpedo_tube_state_pattern_fields_round_trip() {
         blasters: vec![],
         phaser_frequency: 0.5,
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 /// Shared weapon readiness contract (issue #764): each family's per-instance
@@ -4136,8 +4050,7 @@ fn weapon_readiness_contract_round_trips_for_all_families() {
         }],
         phaser_frequency: 0.5,
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 /// Regression: the on-the-wire JSON for `LoadingProgress` must place
@@ -4376,8 +4289,7 @@ fn comms_control_system_payloads_round_trip() {
             target: crate::ship::system_registry::comms_system_id(),
             payload,
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
+        assert_client_roundtrip(msg.clone());
     }
 
     // Pin one wire shape exactly — action-map.js `hail` depends on this.
@@ -4417,8 +4329,7 @@ fn navigation_control_system_payloads_round_trip() {
             target: crate::ship::system_registry::navigation_system_id(),
             payload,
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
+        assert_client_roundtrip(msg.clone());
     }
 
     // Pin the unit-payload wire shape — action-map.js
@@ -4459,8 +4370,7 @@ fn civilian_order_payloads_round_trip() {
                 order,
             },
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
+        assert_client_roundtrip(msg.clone());
     }
 
     // Pin the wire shape the nav console's order controls send.
@@ -4490,8 +4400,7 @@ fn vertical_thrust_control_system_payload_round_trips() {
             target: crate::ship::system_registry::vertical_thrust_system_id(),
             payload: SystemControlPayload::VerticalThrustInput { vertical },
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
+        assert_client_roundtrip(msg.clone());
     }
 
     // Pin the wire shape.
@@ -5171,8 +5080,7 @@ fn system_blackboard_repair_round_trips() {
     let msg = ServerMessage::BlackboardUpdate {
         updates: vec![(SystemId("repair".into()), bb)],
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg);
+    assert_server_roundtrip(msg.clone());
 }
 
 #[test]
@@ -5705,8 +5613,7 @@ fn ship_client_config_station_systems_round_trips() {
         station_ratings: HashMap::new(),
         gms: vec![],
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_server_roundtrip(msg.clone());
     // Verify the station_systems field survives the round-trip.
     let json = JsonCodec.encode_server(&msg).unwrap();
     let decoded = JsonCodec.decode_server(&json).unwrap();
@@ -5853,8 +5760,7 @@ fn ship_client_config_helm_capability_round_trips() {
         station_ratings: HashMap::new(),
         gms: vec![],
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_server_roundtrip(msg.clone());
     // Verify the helm capability fields survive the round-trip.
     let json = JsonCodec.encode_server(&msg).unwrap();
     let decoded = JsonCodec.decode_server(&json).unwrap();
@@ -5925,8 +5831,7 @@ fn ship_client_config_station_tutorials_round_trip() {
         station_ratings: HashMap::new(),
         gms: vec![],
     };
-    assert_server_roundtrip(&JsonCodec, msg.clone());
-    assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+    assert_server_roundtrip(msg.clone());
     let json = JsonCodec.encode_server(&msg).unwrap();
     let decoded = JsonCodec.decode_server(&json).unwrap();
     if let ServerMessage::Welcome { ship_config, .. } = decoded {
@@ -6386,8 +6291,7 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
     for snapshot in fixture["snapshots"].as_array().unwrap() {
         let expected = &snapshot["message"];
         let message = JsonCodec.decode_server(&expected.to_string()).unwrap();
-        assert_server_roundtrip(&JsonCodec, message.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, message.clone());
+        assert_server_roundtrip(message.clone());
         // The crew transports carry UTF-8 JSON, including the native binary's
         // transport. There is no binary ServerMessage codec; postcard digests
         // are not peer messages and cannot establish wire compatibility.

@@ -5066,6 +5066,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_rapier3d",
  "console_error_panic_hook",
+ "cpal",
  "crossbeam-channel",
  "directories",
  "getrandom 0.3.4",
@@ -5097,6 +5098,8 @@ dependencies = [
  "vellum-ultralight",
  "wasm-bindgen",
  "web-sys",
+ "windows 0.62.2",
+ "windows-future 0.3.2",
 ]
 
 [[package]]

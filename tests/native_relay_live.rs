@@ -66,7 +66,7 @@ use std::time::{Duration, Instant};
 
 use project_phoenix::core::codec::{
     decode_handshake_frame, decode_rendezvous_frame, encode_handshake_frame,
-    encode_rendezvous_frame, JsonCodec, MessageCodec,
+    encode_rendezvous_frame, JsonCodec,
 };
 use project_phoenix::core::messages::{ClientMessage, DeliveryClass, ServerMessage};
 use project_phoenix::core::rendezvous::{

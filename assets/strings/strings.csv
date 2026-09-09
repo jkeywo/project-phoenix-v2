@@ -1078,6 +1078,7 @@ settings.tab.accessibility,Phone client settings menu — name of the Accessibil
 settings.accessibility.presentation,Phone client Accessibility tab — heading over the presentation (display) settings,Presentation
 settings.accessibility.intro_hint,Phone client Accessibility tab — explains the settings change how YOUR console presents information; effect-named and never asks for or infers a reason or condition,[Adjust how your console looks and moves. Turn on whatever helps you play.]
 settings.accessibility.local_hint,Phone client Accessibility tab — states the profile is private to this player and stored on this device only,[Private to you and saved on this device.]
+settings.accessibility.os_unavailable,Native Accessibility settings when a Windows preference read is unavailable,[Some system preferences could not be read. Choose your settings here; unread preferences use standard defaults.]
 settings.accessibility.text_scale,Phone client Accessibility tab — heading over the text size control,Text Size
 settings.accessibility.text_scale_value,Phone client Accessibility tab — text size readout as a percentage. {value} is the whole-number percentage.,{value}%
 settings.accessibility.text_scale_hint,Phone client Accessibility tab — explains larger text size scales every label and readout on your consoles,[Scales the text on all of your console screens.]

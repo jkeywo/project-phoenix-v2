@@ -122,6 +122,7 @@ describe('checking one deployed response', () => {
       'cache-control': CONTENT_ADDRESSED,
     }));
     expect(errors(findings)).toHaveLength(1);
+    expect(messages(findings)).toContain('cached for 14400s');
     expect(messages(findings)).toMatch(/name does not change/);
   });
 

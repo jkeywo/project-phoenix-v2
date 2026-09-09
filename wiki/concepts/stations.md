@@ -2,8 +2,8 @@
 title: Stations
 type: concept
 tags: [stations, lobby, ratings, authority, backfill, puppeting, human-seeking]
-sources: [src/lobby/stations_config.rs, src/lobby/session.rs, src/lobby/result_application.rs, src/ship/config.rs, src/ship/rating_systems.rs, src/command_admission/policy.rs, src/gm_puppet.rs, src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
-updated: 2026-09-07
+sources: [src/lobby/stations_config.rs, src/lobby/session.rs, src/lobby/result_application.rs, src/lobby/crew_replication.rs, src/ship/config.rs, src/ship/rating_systems.rs, src/command_admission/policy.rs, src/gm_puppet.rs, src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
+updated: 2026-09-09
 ---
 
 # Stations
@@ -32,6 +32,14 @@ Lobby message results reach both loaded-Ship components through
 `LobbyResultApplier::apply` in `src/lobby/result_application.rs`. Before the
 LocalShip exists, pending Lobby choices remain in `SessionManager`; no temporary
 rating component is created and discarded by each message system.
+
+In an active fleet, `PendingCrewRatingChanges` stages local crew requests for
+ordinary admission. `apply_assigned_station_rating` changes the live rating and
+control sources on the same agreed tick on every peer, including the ship host.
+Reconnect and AFK bookkeeping project the latest choice from `PendingCommands`
+plus unsent requests; they never activate local AI before that tick. Mid-game
+rating input retains its Input schedule position and is submitted next tick.
+
 
 An active GM puppet is a temporary control overlay, not tenure. It can be added
 only while the Station is Backfill, suppresses AI only for that Station, and

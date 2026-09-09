@@ -982,9 +982,8 @@ fn insert_power_multipliers_and_modifiers(
     cmds.insert(crate::ship::power::PowerMultiplierResource { multipliers });
     // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
     // gets an empty modifier cache. Region-entry observers and
-    // translate_power_modifiers write to the subject entity's cache;
-    // translate_impulse_modifiers remains LocalShip-only (ShipImpulse is a
-    // player-only mechanic).
+    // translate_power_modifiers and translate_impulse_modifiers write to the
+    // subject entity's cache, independent of which ship is locally projected.
     cmds.insert(crate::modifiers::ShipModifiers::new());
     // Per-entity ShipRepairTeams — only insert when the entity TOML declares
     // repair TEAMS, i.e. a `[repair] repair_team_count` above zero. No

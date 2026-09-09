@@ -1,13 +1,5 @@
 use crate::core::messages::{ClientMessage, ServerMessage};
 
-pub trait MessageCodec {
-    type Error;
-    fn encode_client(&self, msg: &ClientMessage) -> Result<String, Self::Error>;
-    fn decode_client(&self, s: &str) -> Result<ClientMessage, Self::Error>;
-    fn encode_server(&self, msg: &ServerMessage) -> Result<String, Self::Error>;
-    fn decode_server(&self, s: &str) -> Result<ServerMessage, Self::Error>;
-}
-
 /// Browser-host local FFI reply. This does not change the game wire protocol.
 pub fn encode_connection_binding(
     result: Result<
@@ -73,22 +65,20 @@ pub(crate) fn connection_transcript() -> Vec<ConnectionTranscriptStep> {
 
 pub struct JsonCodec;
 
-impl MessageCodec for JsonCodec {
-    type Error = serde_json::Error;
-
-    fn encode_client(&self, msg: &ClientMessage) -> Result<String, Self::Error> {
+impl JsonCodec {
+    pub fn encode_client(&self, msg: &ClientMessage) -> Result<String, serde_json::Error> {
         serde_json::to_string(msg)
     }
 
-    fn decode_client(&self, s: &str) -> Result<ClientMessage, Self::Error> {
+    pub fn decode_client(&self, s: &str) -> Result<ClientMessage, serde_json::Error> {
         serde_json::from_str(s)
     }
 
-    fn encode_server(&self, msg: &ServerMessage) -> Result<String, Self::Error> {
+    pub fn encode_server(&self, msg: &ServerMessage) -> Result<String, serde_json::Error> {
         serde_json::to_string(msg)
     }
 
-    fn decode_server(&self, s: &str) -> Result<ServerMessage, Self::Error> {
+    pub fn decode_server(&self, s: &str) -> Result<ServerMessage, serde_json::Error> {
         serde_json::from_str(s)
     }
 }

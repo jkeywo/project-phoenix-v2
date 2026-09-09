@@ -1,0 +1,75 @@
+{
+  "compared_rounds": 90,
+  "expected_positions": [
+    [
+      400.0,
+      0.0,
+      200.0
+    ],
+    [
+      400.0,
+      0.0,
+      250.0
+    ]
+  ],
+  "initial_tick": 1,
+  "peers": [
+    {
+      "digest": "613cccc16d5570e0",
+      "hail_ast_loaded": true,
+      "local_ship": "00000000-0000-8000-8000-000100000007",
+      "local_slot": 1,
+      "spawns": [
+        {
+          "position": [
+            400.0,
+            0.0,
+            200.0
+          ],
+          "slot": 1,
+          "uuid": "00000000-0000-8000-8000-000100000007"
+        },
+        {
+          "position": [
+            400.0,
+            0.0,
+            250.0
+          ],
+          "slot": 2,
+          "uuid": "00000000-0000-8000-8000-000100000008"
+        }
+      ],
+      "tick": 90
+    },
+    {
+      "digest": "613cccc16d5570e0",
+      "hail_ast_loaded": true,
+      "local_ship": "00000000-0000-8000-8000-000100000008",
+      "local_slot": 2,
+      "spawns": [
+        {
+          "position": [
+            400.0,
+            0.0,
+            200.0
+          ],
+          "slot": 1,
+          "uuid": "00000000-0000-8000-8000-000100000007"
+        },
+        {
+          "position": [
+            400.0,
+            0.0,
+            250.0
+          ],
+          "slot": 2,
+          "uuid": "00000000-0000-8000-8000-000100000008"
+        }
+      ],
+      "tick": 90
+    }
+  ],
+  "schema": 1,
+  "seed": 1320,
+  "world": "assets/worlds/prepared/gm_live_event_two_ship.toml"
+}

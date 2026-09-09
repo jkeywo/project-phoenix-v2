@@ -1,6 +1,6 @@
 //! A retained native world returns its existing crew to a usable lobby.
 use super::*;
-use project_phoenix::core::codec::{JsonCodec, MessageCodec};
+use project_phoenix::core::codec::JsonCodec;
 use project_phoenix::core::messages::DeliveryClass;
 use project_phoenix::lobby::{stations_config::ShipStations, SelectedShipResource, Sessions};
 use project_phoenix::native_host::panes::{identity::PaneIdentity, PaneBus};

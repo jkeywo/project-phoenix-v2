@@ -70,8 +70,8 @@ use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryMonitor, PrimaryWindow, Window, WindowMode};
 
 use project_phoenix::native_host::bridge_display::{
-    BridgeDisplayApplied, BridgeDisplayConfig, BridgeDisplayPlugin, BridgeStationSurfaces,
-    BridgeSurface,
+    BridgeDisplayApplied, BridgeDisplayConfig, BridgeDisplayPlugin, BridgeDisplaySet,
+    BridgeStationSurfaces, BridgeSurface,
 };
 use project_phoenix::native_host::bridge_profile::{
     identify, BridgeProfile, DisplayEntry, PaneSlot, RawMonitor, ROLE_STATION, ROLE_VIEWSCREEN,
@@ -91,7 +91,7 @@ struct Outcome(Verdict);
 
 /// What the driver expects each surface to become, recorded when it builds the
 /// profile so the check can compare against it.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Expected {
     viewscreen_id: String,
     viewscreen_size: (u32, u32),
@@ -136,7 +136,9 @@ fn a_bridge_profile_covers_each_monitor_with_a_borderless_fullscreen_surface() {
     app.add_plugins(BridgeDisplayPlugin);
     app.insert_resource(Outcome(verdict.clone()));
     app.init_resource::<Driver>();
-    app.add_systems(Update, drive);
+    // Publish the authored fixture before the adapter can synthesize and apply
+    // its one-shot unconfigured default on the first monitor discovery frame.
+    app.add_systems(Update, drive.before(BridgeDisplaySet));
 
     app.run();
 
@@ -171,9 +173,11 @@ fn drive(
             &outcome,
             &mut exit,
             Err(format!(
-                "timed out after {FRAME_BUDGET} frames (built profile: {}, applied: {})",
+                "timed out after {FRAME_BUDGET} frames (built profile: {}, applied: {}); expected {:?}; windows {:?}",
                 driver.built,
-                applied.is_some()
+                applied.is_some(),
+                driver.expected,
+                windows.iter().map(|w| (&w.title, w.physical_width(), w.physical_height(), w.scale_factor(), w.mode)).collect::<Vec<_>>()
             )),
         );
         return;

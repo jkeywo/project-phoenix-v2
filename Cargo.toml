@@ -155,6 +155,11 @@ debug = 2
 strip = false
 
 [[example]]
+name = "capture_planet"
+path = "examples/capture_planet.rs"
+required-features = ["capture"]
+
+[[example]]
 name = "profile_systems"
 path = "examples/profile_systems.rs"
 required-features = ["host", "headless", "perf"]

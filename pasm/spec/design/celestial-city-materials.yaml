@@ -1,0 +1,25 @@
+entities:
+  - component: layered-city-planet-renderer
+    core:
+      origin: ai
+      status: implemented
+      confidence: provisional
+      title: Layered City Planet Renderer
+      summary: Renders the ecumenopolis through aligned baked city materials, independent emission channels, drifting smog and an atmospheric scattering shell on the browser and native viewscreens.
+      rationale:
+        - "[ai] Bake expensive city layout generation offline from the supplied district, material and infrastructure maps; one layout produces aligned surface colour, height-derived normals and light channels. Keep the original source files unchanged."
+        - "[ai] City mode is optional. Roughness RGBA carries roughness, AO, metal and daytime activity; emission-mask RGBA carries windows, neon, thermal and traffic. The daytime mask selects persistent lights at reduced intensity without changing the night maps. Existing planets retain their ordinary scalar maps and rim atmosphere."
+        - "[ai] Smog shadows intersect the sun ray with the drifting cloud shell. Surface-aligned city illumination is baked into a low-resolution glow map and remains stationary beneath the moving cloud coverage."
+        - "[ai] Integrate molecular and aerosol single scattering over twelve view samples. A baked optical-depth lookup supplies solar attenuation; planet intersections enforce the shadow. Regional haze scales aerosol density. Premultiplied shell coverage approximates RGB extinction by luminance while the scattering term retains RGB attenuation."
+        - "[ai] The optical-depth table uses unit planet radius, the bake-config shell ratio and exponential density falloffs of six and twelve per shell thickness. Asset validation asserts the authored shell ratio matches the bake."
+        - "[ai] Ship portable RGBA8 and single-channel R8 KTX2 images with lossless Zstd compression and full mip chains; verify WebGL2 as well as native rendering. Preserve 4K base colour and light masks, use smaller secondary maps, and omit the negligible optional skyglow. Browser city glow must stand without bloom."
+    architecture:
+      kind: renderer
+      authority: derived
+      reads: [spawned-entity-state]
+      renders: [spawned-entity-state]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/planet.rs, src/entities/celestial_visual.rs, src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_ecumenopolis.toml, scripts/planets]
+      tests: [cargo test --lib entities::planet::tests, node scripts/planets/check-ecumenopolis.mjs]

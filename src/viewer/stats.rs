@@ -23,6 +23,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::entities::mesh_stats::{pixels_in, triangles_in};
+use crate::entities::planet::{PlanetCloudMaterial, PlanetSurfaceMaterial};
 
 use super::camera::OrbitCamera;
 use super::lod::{LadderState, LodMode};
@@ -63,6 +64,10 @@ pub fn measure_subject(
     images: Res<Assets<Image>>,
     materials: Res<Assets<StandardMaterial>>,
     rendered: Query<(&Mesh3d, Option<&MeshMaterial3d<StandardMaterial>>)>,
+    surfaces: Option<Res<Assets<PlanetSurfaceMaterial>>>,
+    shells: Option<Res<Assets<PlanetCloudMaterial>>>,
+    planet_surfaces: Query<&MeshMaterial3d<PlanetSurfaceMaterial>>,
+    planet_shells: Query<&MeshMaterial3d<PlanetCloudMaterial>>,
 ) {
     if !subject.settled || subject.measured {
         return;
@@ -85,6 +90,35 @@ pub fn measure_subject(
         }
     }
 
+    if let Some(surfaces) = surfaces {
+        for handle in &planet_surfaces {
+            if let Some(m) = surfaces.get(&handle.0) {
+                seen_images.insert(m.albedo.id());
+                for image in [
+                    &m.normal,
+                    &m.roughness,
+                    &m.emissive_colour,
+                    &m.emissive_mask,
+                    &m.cloud_opacity,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    seen_images.insert(image.id());
+                }
+            }
+        }
+    }
+    if let Some(shells) = shells {
+        for handle in &planet_shells {
+            if let Some(m) = shells.get(&handle.0) {
+                seen_images.insert(m.albedo.id());
+                for image in [&m.opacity, &m.normal, &m.glow].into_iter().flatten() {
+                    seen_images.insert(image.id());
+                }
+            }
+        }
+    }
     found.textures = seen_images.len() as u32;
     for id in &seen_images {
         let Some(image) = images.get(*id) else {
@@ -96,6 +130,10 @@ pub fn measure_subject(
     }
 
     *stats = found;
+    // Celestial subjects settle before their independently requested maps do.
+    if !planet_surfaces.is_empty() && found.measured_textures < found.textures {
+        subject.measured = false;
+    }
 }
 
 /// Every image a standard material references.

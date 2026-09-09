@@ -3,7 +3,7 @@ title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
 sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
-updated: 2026-08-27
+updated: 2026-09-09
 ---
 
 # Model Viewer
@@ -141,6 +141,26 @@ maps have their generator-feathered vertical border removed and a clean periodic
 join rebuilt by `scripts/stitch-planet-textures.mjs`; every aligned map in a
 texture set (surface, clouds, normal, roughness, emissive and masks) receives the
 same longitude remap. Normal vectors are renormalised after resampling.
+
+The ecumenopolis uses `scripts/planets/bake-ecumenopolis.mjs` instead: it reads
+the raw PNG sources once, repairs every aligned longitude, and generates city
+materials with complete KTX2 mip chains. Its configured `albedoSource` supplies
+enhanced base-colour artwork while the other layers retain their source maps.
+Base colour and light masks remain 4K; secondary maps use smaller resolutions,
+with haze and smog opacity stored as R8. The optional skyglow map is omitted
+for this planet. KTX2 uses lossless Zstd without a Basis/UASTC transcoder.
+`scripts/planets/README.md` describes
+channels, reproduction, texture memory and capture commands. Do not run the
+legacy WebP stitcher on these generated outputs. Optional `surface.city`,
+`clouds.smog` and `atmosphere.scattering` settings drive the richer layers;
+other planet templates retain their ordinary maps and surface rim. The surface
+and shell shaders share the star direction. Smog drifts over stationary city
+glow; its shadow intersects the light ray with the shell. Material-map alpha
+selects sparse daytime lights at reduced intensity. A second shell
+integrates single scattering and samples a baked solar optical-depth table.
+Viewer texture statistics include both celestial material types and deduplicate
+their shared images. `scripts/capture-planet.mjs` and the native
+`examples/capture_planet.rs` use matching camera and light poses.
 
 ## Notes
 

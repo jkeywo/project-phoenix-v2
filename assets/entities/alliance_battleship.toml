@@ -38,7 +38,7 @@ includes = [
 ]
 
 [mesh]
-model = "assets/models/alliance_battleship.glb"
+model = "assets/models/alliance_battleship_recreated.glb"
 shape = "sphere"
 colour = []
 

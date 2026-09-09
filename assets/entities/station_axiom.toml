@@ -108,8 +108,8 @@ hull_integrity = 1600
 # Sized to the hull this station actually draws, at John's request: collision has
 # to match visible size.
 #
-# `alliance_starbase.glb` measures 1.8973 x 0.7958 x 1.8936 in raw model units,
-# and its sidecar's `[base].scale` of [15, 18, 18] puts 28.46 x 14.33 x 34.08 on
+# The recreated starbase preserves the original rig's rendered dimensions,
+# baked into its GLB with an identity sidecar: 28.46 x 14.33 x 34.08 on
 # screen — a max half-extent of 17.04. The 12 here was seven-tenths of that, so
 # the outer five units of the ring carried no collision and ships flew THROUGH
 # the visible structure.
@@ -142,13 +142,13 @@ size = 18
 icon = "station"
 
 [mesh]
-model = "assets/models/alliance_starbase.glb"
+model = "assets/models/alliance_starbase_recreated.glb"
 # The torus is the procedural stand-in, drawn only while the GLB above is still
 # streaming or when it is missing entirely. RENDER-ONLY — the simulation reads
 # none of it (the `[collider]` above is the only thing anything collides with),
 # so correcting it moves no digest.
 #
-# Sized off the same measurement the collider is. `alliance_starbase.model.toml`
+# Sized off the same measurement the collider is. `alliance_starbase_recreated.model.toml`
 # records the drawn hull at 28.46 x 14.33 x 34.08 in its `[extents].size` —
 # already through that sidecar's `[base].scale` of [15, 18, 18] — so the stand-in
 # wants a 34.08-wide, 14.33-tall envelope. A Bevy `Torus` spans

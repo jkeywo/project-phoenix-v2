@@ -1,0 +1,63 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -0.22248367921350146, -0.062340400000000004, -0.37918741785855176 ]
+max = [ 0.22212415915410358, 0.06234039328536989, 0.3777402113110257 ]
+size = [ 0.44460783836760503, 0.12468079328536989, 0.7569276291695775 ]
+
+[markers.engine_port]
+position = [ -0.1445922842536988, -0.010340399999999993, 0.37177018618267066 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.engine_starboard]
+position = [ 0.14340735048383257, -0.010340399999999993, 0.37222887022261886 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.blaster_fore]
+position = [ 0.0005733550499352582, -0.014340399999999996, -0.35999954342191426 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.camera_fore]
+position = [ 0.000630690554928784, -0.0023403999999999994, -0.39599949776410565 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/alliance_courier_recreated.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/alliance_courier_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_courier.glb"
+ratio = 0.65
+error = 0.025
+texture_size = 256
+
+[[lod]]
+max_distance = 400.0
+model = "assets/models/alliance_courier_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_courier_far.glb"
+ratio = 0.23
+error = 0.08
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/alliance_courier_recreated_lod3.png"
+scale = [ 0.7576, 0.1247, 1.0 ]
+
+[lod.capture]
+source = "assets/models/alliance_courier_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

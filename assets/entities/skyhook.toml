@@ -73,8 +73,8 @@ hull_integrity = 1200.0
 
 [collider]
 # Matched to the visible hull, at John's request. This structure draws the SAME
-# `alliance_starbase.glb` as `station_axiom`, through the same sidecar and the
-# same `[base].scale` of [15, 18, 18], so it is exactly the same size on screen:
+# `alliance_starbase_recreated.glb` as `station_axiom`, through the same identity
+# sidecar and baked original rig dimensions, so it is the same size on screen:
 # 28.46 x 14.33 x 34.08, a max half-extent of 17.04. It cannot have a different
 # collider from the axiom station while sharing its mesh, and it had one — 26,
 # half again too big, an invisible wall nine units out from the visible surface.
@@ -103,7 +103,7 @@ icon = "station"
 # The starbase hull — the largest station silhouette in the library, and the
 # only one that reads as a transfer head rather than as an outpost. The torus is
 # the streaming/flat-render fallback, as on every other station.
-model = "assets/models/alliance_starbase.glb"
+model = "assets/models/alliance_starbase_recreated.glb"
 # Same hull as `station_axiom`, through the same sidecar and the same
 # `[base].scale`, so it draws at the same size and takes the same stand-in:
 # 28.46 x 14.33 x 34.08 measured, minor = 7.16 and major = 9.88 derived from it.

@@ -1,0 +1,64 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -1.8981809389027724, -0.30000000000000004, -1.6970321046357961 ]
+max = [ 1.8985618167477414, 1.0864595890045166, 2.0412314812741505 ]
+size = [ 3.796742755650514, 1.3864595890045166, 3.7382635859099467 ]
+
+[markers.engine_port]
+position = [ 2.105890152418834, -0.3, -3.4966507362672736 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.engine_starboard]
+position = [ -2.0941045208368316, -0.3, -3.5033398785165186 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[[target_points]]
+position = [ -0.9999987317275395, -0.5, 0.19840734708351318 ]
+
+[[target_points]]
+position = [ 0.5007956923220132, -0.5, -0.29920303940552634 ]
+
+[[target_points]]
+position = [ 0.49920303940552635, -0.5, 0.7007956923220131 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/dynasty_battleship_recreated.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/dynasty_battleship_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/dynasty_battleship.glb"
+ratio = 0.65
+error = 0.0015
+texture_size = 256
+
+[[lod]]
+max_distance = 400.0
+model = "assets/models/dynasty_battleship_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/dynasty_battleship_far.glb"
+ratio = 0.23
+error = 0.003
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/dynasty_battleship_recreated_lod3.png"
+scale = [ 3.8027, 1.3865, 1.0 ]
+
+[lod.capture]
+source = "assets/models/dynasty_battleship_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

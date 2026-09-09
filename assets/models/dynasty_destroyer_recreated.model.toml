@@ -1,0 +1,68 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -0.9502598623104025, -0.1, -0.8497607320655971 ]
+max = [ 0.9498521914753902, 0.3212138652801514, 1.0496280969430143 ]
+size = [ 1.9001120537857927, 0.42121386528015137, 1.8993888290086114 ]
+
+[markers.fore_emitter]
+position = [ -0.0007071899584373593, -0.1, 0.5440321266530387 ]
+direction = [ 0.02050054861229957, 0, -0.9997898416700356 ]
+
+[markers.engine_port]
+position = [ 0.3514329437294769, -0.1, -0.7994414300340152 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.engine_starboard]
+position = [ -0.34856616847980065, -0.1, -0.8005562870755559 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[[target_points]]
+position = [ -0.49999936586376975, -0.2, 0.09920367354175659 ]
+
+[[target_points]]
+position = [ 0.2503978461610066, -0.2, -0.14960151970276317 ]
+
+[[target_points]]
+position = [ 0.24960151970276317, -0.2, 0.35039784616100655 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/dynasty_destroyer_recreated.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/dynasty_destroyer_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/dynasty_destroyer.glb"
+ratio = 0.65
+error = 0.0015
+texture_size = 256
+
+[[lod]]
+max_distance = 400.0
+model = "assets/models/dynasty_destroyer_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/dynasty_destroyer_far.glb"
+ratio = 0.23
+error = 0.003
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/dynasty_destroyer_recreated_lod3.png"
+scale = [ 1.9031, 0.4212, 1.0 ]
+
+[lod.capture]
+source = "assets/models/dynasty_destroyer_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

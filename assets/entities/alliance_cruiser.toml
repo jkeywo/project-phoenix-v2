@@ -148,7 +148,7 @@ includes = [
 ]
 
 [mesh]
-model = "assets/models/alliance_cruiser.glb"
+model = "assets/models/alliance_cruiser_recreated.glb"
 shape = "sphere"
 colour = []
 
@@ -1699,7 +1699,7 @@ station = "engineering"
 # is what maps it onto the Helm Console Family (`ship::system_registry`) and
 # what makes `DockControl` appear at spawn; the approach terms it runs under are
 # the `[dock]` table at the foot of this file, and the plates it mates on are
-# authored in the rig sidecar (`assets/models/alliance_cruiser.model.toml`).
+# authored in the rig sidecar (`assets/models/alliance_cruiser_recreated.model.toml`).
 #
 # On the `helm` power group at the table's `min_power_level = 2`, exactly as the
 # destroyer's dock is, and for the reason spelled out there: docking gear adds no
@@ -2249,7 +2249,7 @@ sensor_range = 350.0
 # scaled to this bigger hull — a berth is a berth, and a shared reach is what lets
 # one authored structure be dockable by either hull without per-hull tuning. The
 # dock MARKERS themselves are authored in the rig sidecar
-# (`assets/models/alliance_cruiser.model.toml`), not here. [ai] Unratified.
+# (`assets/models/alliance_cruiser_recreated.model.toml`), not here. [ai] Unratified.
 [dock]
 range = 200.0
 engage_distance = 400.0

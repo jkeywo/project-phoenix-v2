@@ -34,9 +34,9 @@ description = "entity.depot_transfer.target.description"
 hull_integrity = 400.0
 
 [collider]
-# Matched to the visible hull, at John's request. `alliance_research_outpost.glb`
-# measures 1.8905 x 0.8416 x 1.8986 raw, and its sidecar's `[base].scale` of
-# [4, 4, 4] draws 7.56 x 3.37 x 7.59 — a max half-extent of 3.80. The 10 here was
+# Matched to the visible hull, at John's request. The recreated research outpost
+# preserves the original rendered dimensions, baked into its GLB with an identity
+# sidecar: 7.56 x 3.37 x 7.59 — a max half-extent of 3.80. The 10 here was
 # two and a half times that: a ship "collided" with this depot while still nearly
 # six units clear of anything on screen.
 #
@@ -61,11 +61,11 @@ icon = "station"
 [mesh]
 # Shares the Alliance research-outpost hull with the other stations; the torus
 # is the streaming/flat-render fallback, as on station_outpost.
-model = "assets/models/alliance_research_outpost.glb"
+model = "assets/models/alliance_research_outpost_recreated.glb"
 # Sized off the same measurement the collider is, and render-only the same way
 # (see `station_axiom.toml` for why the stand-in is derived from the sidecar's
 # extents at all, and for the `Torus` envelope arithmetic).
-# `alliance_research_outpost.model.toml` records the drawn hull at
+# `alliance_research_outpost_recreated.model.toml` records the drawn hull at
 # 7.56 x 3.37 x 7.59 in its `[extents].size`, already through that sidecar's
 # `[base].scale` of [4, 4, 4]:
 #

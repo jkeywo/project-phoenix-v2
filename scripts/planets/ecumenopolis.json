@@ -1,0 +1,16 @@
+{
+  "width": 4096,
+  "height": 2048,
+  "seed": 73491,
+  "sourceTrim": 48,
+  "albedoSource": "sources/ecumenopolis_albedo_enhanced.png",
+  "blockSize": 8,
+  "normalStrength": 2.2,
+  "normalWidth": 2048,
+  "emissionWidth": 512,
+  "hazeWidth": 256,
+  "smogNormalWidth": 512,
+  "districtColours": [[99, 89, 75], [115, 128, 139], [112, 111, 103], [153, 147, 130]],
+  "lightColours": [[255, 144, 58], [104, 205, 255], [255, 212, 145], [210, 230, 255]],
+  "atmosphereScale": 1.055
+}

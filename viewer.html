@@ -326,18 +326,18 @@
     // it exactly as server.html does rather than silently feeding Rust an empty
     // string that a good load is indistinguishable from. So the `.catch` logs
     // before it unblocks Rust, matching server.html's post-#sidecar behaviour.
-    wasm.set_world_fetch_callback((path, optional) => {
+    wasm.viewer_set_world_fetch_callback((path, optional) => {
       fetch(path)
         .then((r) => {
           if (r.ok) return r.text();
           if (optional && r.status === 404) return '';
           return Promise.reject(new Error('HTTP ' + r.status));
         })
-        .then((toml) => wasm.wasm_push_sidecar_toml(path, toml))
+        .then((toml) => wasm.viewer_push_sidecar_toml(path, toml))
         .catch((err) => {
           console.error('[Phoenix] Failed to fetch TOML at ' + path + ':', err);
           // Push empty string so Rust stops re-requesting.
-          wasm.wasm_push_sidecar_toml(path, '');
+          wasm.viewer_push_sidecar_toml(path, '');
         });
     });
 

@@ -1,0 +1,80 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -1.3671599097181153, -0.40000000000000013, -1.124585501290709 ]
+max = [ 1.3662493500884378, 0.8132160663604736, 1.7240639703458673 ]
+size = [ 2.733409259806553, 1.2132160663604736, 2.8486494716365764 ]
+
+[markers.engine_port]
+position = [ 0.978701681465183, -0.4, -2.023444214672955 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.engine_starboard]
+position = [ -0.9712958454035192, -0.4, -2.0265498878601043 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.phasers_fore]
+position = [ -0.00226953040599373, -0.625, 1.7249981927117437 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.phasers_aft]
+position = [ 0.0035834690620953633, 0.35, -1.9499971463869639 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.phasers_port]
+position = [ 2.0542140894149217, -0.09999999999999998, -0.14672891651338704 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
+
+[markers.phasers_starboard]
+position = [ -2.052780701790083, -0.09999999999999998, -0.15326994204139843 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
+[[target_points]]
+position = [ -0.7499990487956546, -0.55, 0.29880551031263486 ]
+
+[[target_points]]
+position = [ 0.37559676924150986, -0.55, -0.07440227955414475 ]
+
+[[target_points]]
+position = [ 0.37440227955414473, -0.55, 0.6755967692415099 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/dynasty_cruiser_recreated.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/dynasty_cruiser_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/dynasty_cruiser.glb"
+ratio = 0.65
+error = 0.0015
+texture_size = 256
+
+[[lod]]
+max_distance = 400.0
+model = "assets/models/dynasty_cruiser_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/dynasty_cruiser_far.glb"
+ratio = 0.23
+error = 0.003
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/dynasty_cruiser_recreated_lod3.png"
+scale = [ 2.8528, 1.2132, 1.0 ]
+
+[lod.capture]
+source = "assets/models/dynasty_cruiser_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

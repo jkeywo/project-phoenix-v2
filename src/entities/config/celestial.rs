@@ -131,6 +131,10 @@ pub struct PlanetConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanetSurfaceConfig {
+    /// Packed city material: roughness RGBA = roughness/AO/metal/daytime activity;
+    /// emissive_mask RGBA = windows/neon/thermal/traffic. Absent = legacy maps.
+    #[serde(default)]
+    pub city: Option<PlanetCityConfig>,
     /// Base colour map (sRGB). Required.
     pub albedo: String,
     /// Tangent-space normal map (linear).
@@ -158,14 +162,15 @@ pub struct PlanetSurfaceConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanetCloudsConfig {
+    #[serde(default)]
+    pub smog: Option<PlanetSmogConfig>,
     /// Cloud colour map (sRGB). Required.
     pub albedo: String,
     /// Grayscale opacity map (linear). When absent the albedo luminance is
     /// used as opacity.
     #[serde(default)]
     pub opacity: Option<String>,
-    /// Cloud normal map — accepted for authoring completeness but unused by
-    /// the core shader.
+    /// Tangent-space cloud normal map, sampled as linear data.
     #[serde(default)]
     pub normal: Option<String>,
     /// Shell radius as a multiple of the planet radius.
@@ -180,10 +185,71 @@ pub struct PlanetCloudsConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanetAtmosphereConfig {
+    /// A separate scattering shell. Absent preserves the inexpensive rim.
+    #[serde(default)]
+    pub scattering: Option<PlanetScatteringConfig>,
     /// RGB colour `[r, g, b]` in linear 0-1 range.
     pub colour: [f32; 3],
     #[serde(default = "default_planet_atmosphere_strength")]
     pub strength: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PlanetCityConfig {
+    pub normal_strength: f32,
+    pub windows: f32,
+    pub neon: f32,
+    pub thermal: f32,
+    pub traffic: f32,
+    pub traffic_speed: f32,
+    pub shadow_strength: f32,
+    pub neon_colour: [f32; 3],
+    pub thermal_colour: [f32; 3],
+    pub traffic_colour: [f32; 3],
+}
+
+impl Default for PlanetCityConfig {
+    fn default() -> Self {
+        Self {
+            normal_strength: 0.65,
+            windows: 1.4,
+            neon: 0.7,
+            thermal: 0.2,
+            traffic: 0.5,
+            traffic_speed: 0.035,
+            shadow_strength: 0.55,
+            neon_colour: [0.15, 0.65, 1.0],
+            thermal_colour: [1.0, 0.16, 0.025],
+            traffic_colour: [1.0, 0.43, 0.13],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetSmogConfig {
+    /// Surface-aligned city illumination, sampled beneath the drifting smog.
+    pub city_glow: String,
+    pub opacity: f32,
+    pub glow_strength: f32,
+    pub normal_strength: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetScatteringConfig {
+    /// Baked for this shell scale, with density falloffs 6 and 12 per shell.
+    pub optical_depth: String,
+    pub haze: String,
+    /// Optional atmospheric emission; omitted when the authored map is negligible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skyglow: Option<String>,
+    pub scale: f32,
+    pub rayleigh: [f32; 3],
+    pub mie: [f32; 3],
+    pub mie_anisotropy: f32,
+    pub skyglow_strength: f32,
 }
 
 /// Kind of a `[[light]]` entry: a point light or a directional light.

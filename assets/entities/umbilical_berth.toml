@@ -12,7 +12,7 @@ tags = ["structure"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
-model = "assets/models/alliance_courier.glb"
+model = "assets/models/alliance_courier_recreated_dock_probe.glb"
 variant = "dock_probe"
 shape = "sphere"
 colour = []

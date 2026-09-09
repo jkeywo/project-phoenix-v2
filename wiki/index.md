@@ -78,4 +78,5 @@ Current implementation orientation only. For intended design use
 - [Testing Strategy](./concepts/testing-strategy.md)
 - [Performance Measurement](./concepts/performance-measurement.md)
 - [Model Viewer](./concepts/model-viewer.md)
+- [Native Lighting Lab](./concepts/native-lighting-lab.md)
 - [LOD Generation](./concepts/lod-generation.md)

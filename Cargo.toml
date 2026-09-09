@@ -155,6 +155,11 @@ debug = 2
 strip = false
 
 [[example]]
+name = "capture_planet"
+path = "examples/capture_planet.rs"
+required-features = ["capture"]
+
+[[example]]
 name = "profile_systems"
 path = "examples/profile_systems.rs"
 required-features = ["host", "headless", "perf"]
@@ -551,3 +556,7 @@ web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "
 # entry point fired next (typically `wasm_receive_message`), which makes the
 # real panic site invisible.
 console_error_panic_hook = "0.1"
+
+[[example]]
+name = "capture_native_lighting"
+required-features = ["host"]

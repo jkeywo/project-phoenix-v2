@@ -3742,9 +3742,15 @@ fn every_station_mesh_user_authors_the_disc_its_mesh_draws() {
     // (model, radius, half_height) — radius is the widest half-extent of the
     // drawn hull and half_height is half its drawn height, both read off the
     // model's own rig sidecar `[extents].size`.
-    let expected: [(&str, f32, f32); 2] = [
+    let expected: [(&str, f32, f32); 4] = [
         ("assets/models/alliance_starbase.glb", 17.04, 7.16),
         ("assets/models/alliance_research_outpost.glb", 3.8, 1.68),
+        ("assets/models/alliance_starbase_recreated.glb", 17.04, 7.16),
+        (
+            "assets/models/alliance_research_outpost_recreated.glb",
+            3.8,
+            1.68,
+        ),
     ];
 
     let templates = shipped_templates();

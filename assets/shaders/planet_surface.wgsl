@@ -21,6 +21,12 @@ struct PlanetSurfaceParams {
     texture_y: vec4<f32>,
     texture_z: vec4<f32>,
     planet_center: vec4<f32>,
+    city: vec4<f32>,
+    city_lights: vec4<f32>,
+    weather: vec4<f32>,
+    neon_colour: vec4<f32>,
+    thermal_colour: vec4<f32>,
+    traffic_colour: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
@@ -35,6 +41,8 @@ var<uniform> params: PlanetSurfaceParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(8) var emissive_smp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(9) var emask_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(10) var emask_smp: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var cloud_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var cloud_smp: sampler;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -52,7 +60,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The UV sphere duplicates its vertices at u = 0/1, so interpolation stays
     // continuous inside every triangle and the repeat sampler performs the one
     // wrap.
-    let uv = in.uv;
+    var uv = in.uv;
+    if (params.city.x > 0.5 && abs(texture_normal.y) > 0.9) {
+        // Interpolated UVs fan across the pole's triangles. Recover spherical
+        // coordinates there, keeping longitude on this triangle's wrap branch.
+        let longitude = atan2(texture_normal.z, texture_normal.x) / 6.2831853;
+        uv.x += fract(longitude - uv.x + 0.5) - 0.5;
+        uv.y = acos(clamp(texture_normal.y, -1.0, 1.0)) / 3.14159265;
+    }
 
     // Shading normal: perturb by the tangent-space normal map using an
     // analytic TBN. The mesh (uv_sphere_mesh) has no tangent attribute, but
@@ -76,19 +91,55 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
                 + params.texture_z.xyz * local_b.z,
             );
             let nm = textureSample(normal_tex, normal_smp, uv).xyz * 2.0 - 1.0;
-            n = normalize(t * nm.x + b * nm.y + n_geo * nm.z);
+            n = normalize(t * nm.x * params.city.y + b * nm.y * params.city.y + n_geo * nm.z);
         }
     }
 
     let ndotl = dot(n, light_dir);
+    let geometric_light = dot(n_geo, light_dir);
+    let night = 1.0 - smoothstep(-0.15, 0.1, geometric_light);
     // Soft terminator so the day/night boundary doesn't alias.
     let day = smoothstep(-0.05, 0.15, ndotl);
 
     let albedo = textureSample(albedo_tex, albedo_smp, uv).rgb;
     var colour = albedo * (ambient_floor + day * max(ndotl, 0.0) * params.misc.w);
+    var day_activity = 0.0;
+
+    if (params.city.x > 0.5) {
+        let material = textureSample(rough_tex, rough_smp, uv);
+        day_activity = clamp((material.a * 255.0 - 128.0) / 127.0, 0.0, 1.0);
+        let view_dir = normalize(view.world_position - in.world_position.xyz);
+        let half_dir = normalize(light_dir + view_dir);
+        let rough = clamp(material.r, 0.22, 1.0);
+        let metal = material.b;
+        let nv = max(dot(n, view_dir), 0.001);
+        let nl = max(ndotl, 0.0);
+        let nh = max(dot(n, half_dir), 0.0);
+        let vh = max(dot(view_dir, half_dir), 0.0);
+        let a2 = pow(rough, 4.0);
+        let d = a2 / max(3.14159265 * pow(nh * nh * (a2 - 1.0) + 1.0, 2.0), 0.0001);
+        let k = pow(rough + 1.0, 2.0) / 8.0;
+        let geometry = nv / (nv * (1.0 - k) + k) * nl / (nl * (1.0 - k) + k);
+        let f0 = mix(vec3<f32>(0.04), albedo, metal);
+        let fresnel = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+        let specular = d * geometry * fresnel / max(4.0 * nv * nl, 0.001);
+        var shadow = 1.0;
+        if (params.weather.z > 0.0) {
+            // Intersect the sun ray with the actual cloud shell; a fixed UV
+            // offset produces detached shadows near the terminator and poles.
+            let scale = params.weather.x;
+            let distance = -geometric_light + sqrt(geometric_light * geometric_light + scale * scale - 1.0);
+            let q = normalize(n_geo + light_dir * distance);
+            let local = vec3<f32>(dot(q, params.texture_x.xyz), dot(q, params.texture_y.xyz), dot(q, params.texture_z.xyz));
+            let cloud_uv = vec2<f32>(atan2(local.z, local.x) / 6.2831853 + params.weather.w, acos(clamp(local.y, -1.0, 1.0)) / 3.14159265);
+            shadow -= textureSample(cloud_tex, cloud_smp, cloud_uv).r * params.weather.z;
+        }
+        colour = albedo * ambient_floor * material.g
+            + (albedo * (1.0 - metal * 0.65) + specular) * nl * day * shadow * params.misc.w;
+    }
 
     // Roughness-modulated specular glint (oceans, ice). Subtle by design.
-    if (params.flags.y > 0.5) {
+    if (params.flags.y > 0.5 && params.city.x < 0.5) {
         let roughness = textureSample(rough_tex, rough_smp, uv).r;
         let view_dir = normalize(view.world_position - in.world_position.xyz);
         let half_dir = normalize(light_dir + view_dir);
@@ -104,14 +155,31 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (params.flags.z > 0.5) {
         var night_gate = 1.0;
         if (params.flags.w > 0.5) {
-            night_gate = smoothstep(0.1, -0.15, ndotl);
+            night_gate = night;
         }
         var mask = 1.0;
         if (params.misc.x > 0.5) {
             mask = textureSample(emask_tex, emask_smp, uv).r;
         }
         let emissive = textureSample(emissive_tex, emissive_smp, uv).rgb;
-        colour += emissive * mask * params.emissive_strength * night_gate;
+        if (params.city.x > 0.5) {
+            let channels = textureSample(emask_tex, emask_smp, uv);
+            // Modulate intensity along authored routes, never scroll the whole
+            // light map across buildings. Fine channels are already mipmapped.
+            let traffic_phase = uv.x * 804.2477 + uv.y * 402.1239;
+            let traffic_visibility = 1.0 - smoothstep(0.5, 3.0, fwidth(traffic_phase));
+            let movement = 0.7 + 0.3 * traffic_visibility * sin(traffic_phase - params.city.z * 6.2831853);
+            let city = emissive * channels.r * params.city_lights.x
+                + params.neon_colour.rgb * channels.g * params.city_lights.y
+                + params.traffic_colour.rgb * channels.a * params.city_lights.w * movement;
+            let heat = params.thermal_colour.rgb * channels.b * params.city_lights.z;
+            // Material alpha selects daytime activity independently of the
+            // original night-light maps. Active patches retain 60% intensity.
+            let city_gate = mix(day_activity * 0.6, 1.0, night_gate);
+            colour += (city * city_gate + heat) * params.emissive_strength;
+        } else {
+            colour += emissive * mask * params.emissive_strength * night_gate;
+        }
     }
 
     // Fresnel atmosphere rim, brighter on the day side.

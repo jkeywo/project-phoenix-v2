@@ -21,6 +21,7 @@ pub mod load;
 pub mod manifest;
 pub mod materialization;
 pub mod mod_pack;
+pub mod native_render_config;
 pub mod script;
 pub mod server;
 /// What a runtime-spawned entity was made from (issue #863) — the template,

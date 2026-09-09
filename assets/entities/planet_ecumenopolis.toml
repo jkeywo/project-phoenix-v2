@@ -29,19 +29,49 @@ longitude_segments = 128
 latitude_segments = 64
 
 [planet.surface]
-albedo = "assets/planets/ecumenopolis/albedo.webp"
-normal = "assets/planets/ecumenopolis/normal.webp"
-roughness = "assets/planets/ecumenopolis/roughness.webp"
-emissive_colour = "assets/planets/ecumenopolis/emissive_colour.webp"
-emissive_mask = "assets/planets/ecumenopolis/emissive_mask.webp"
+albedo = "assets/planets/ecumenopolis/city_albedo.ktx2"
+normal = "assets/planets/ecumenopolis/city_normal.ktx2"
+roughness = "assets/planets/ecumenopolis/city_material.ktx2"
+emissive_colour = "assets/planets/ecumenopolis/city_emission.ktx2"
+emissive_mask = "assets/planets/ecumenopolis/city_lights.ktx2"
 emissive_night_only = true
-emissive_strength = 2.0
+emissive_strength = 1.4
+
+[planet.surface.city]
+normal_strength = 0.3
+windows = 1.5
+neon = 0.7
+thermal = 0.07
+traffic = 0.6
+traffic_speed = 0.035
+shadow_strength = 0.4
+neon_colour = [0.15, 0.65, 1.0]
+thermal_colour = [1.0, 0.16, 0.025]
+traffic_colour = [1.0, 0.43, 0.13]
 
 [planet.clouds]
-albedo = "assets/planets/ecumenopolis/cloud_albedo.webp"
-opacity = "assets/planets/ecumenopolis/cloud_opacity.webp"
-scale = 1.025
+albedo = "assets/planets/ecumenopolis/smog_albedo.ktx2"
+opacity = "assets/planets/ecumenopolis/smog_opacity.ktx2"
+scale = 1.008
+
+normal = "assets/planets/ecumenopolis/smog_normal.ktx2"
+drift_speed = 0.00012
+
+[planet.clouds.smog]
+city_glow = "assets/planets/ecumenopolis/city_glow.ktx2"
+opacity = 0.24
+glow_strength = 0.5
+normal_strength = 0.3
 
 [planet.atmosphere]
 colour = [0.8, 0.6, 0.4]
 strength = 0.8
+
+[planet.atmosphere.scattering]
+optical_depth = "assets/planets/ecumenopolis/optical_depth.png"
+haze = "assets/planets/ecumenopolis/haze.ktx2"
+scale = 1.055
+rayleigh = [0.025, 0.05, 0.1]
+mie = [0.12, 0.09, 0.055]
+mie_anisotropy = 0.65
+skyglow_strength = 0.0

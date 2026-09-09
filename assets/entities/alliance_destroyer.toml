@@ -37,7 +37,7 @@ includes = [
 ]
 
 [mesh]
-model = "assets/models/alliance_destroyer.glb"
+model = "assets/models/alliance_destroyer_recreated.glb"
 shape = "sphere"
 colour = []
 
@@ -1891,7 +1891,7 @@ max_penalty = 0.8
 # appears within and a held dock parts past, the close-in engage distance, the
 # low approach speed, the mate tolerance, how far undock backs clear, and the
 # lowest powered rung. The dock MARKERS themselves are authored in the rig
-# sidecar (`alliance_destroyer.model.toml`), not here.
+# sidecar (`alliance_destroyer_recreated.model.toml`), not here.
 [dock]
 range = 200.0
 engage_distance = 400.0

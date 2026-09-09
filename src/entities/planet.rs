@@ -15,7 +15,7 @@ use bevy::{
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
     reflect::TypePath,
-    render::render_resource::{AsBindGroup, Face, ShaderType},
+    render::render_resource::{AsBindGroup, ShaderType},
     shader::ShaderRef,
 };
 
@@ -77,6 +77,14 @@ pub struct PlanetSurfaceParams {
     pub texture_z: Vec4,
     /// World-space centre used to derive an exact radial geometric normal.
     pub planet_center: Vec4,
+    /// x: packed city mode, y: normal strength, z: traffic time, w: unused.
+    pub city: Vec4,
+    pub city_lights: Vec4,
+    /// cloud shell scale, drift speed, shadow strength, current drift.
+    pub weather: Vec4,
+    pub neon_colour: Vec4,
+    pub thermal_colour: Vec4,
+    pub traffic_colour: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -98,6 +106,9 @@ pub struct PlanetSurfaceMaterial {
     #[texture(9)]
     #[sampler(10)]
     pub emissive_mask: Option<Handle<Image>>,
+    #[texture(11)]
+    #[sampler(12)]
+    pub cloud_opacity: Option<Handle<Image>>,
 }
 
 impl Material for PlanetSurfaceMaterial {
@@ -118,6 +129,12 @@ pub struct PlanetCloudParams {
     pub texture_y: Vec4,
     pub texture_z: Vec4,
     pub planet_center: Vec4,
+    /// x: 0 cloud / 1 atmosphere, y: normal strength, z: opacity, w: glow.
+    pub layer: Vec4,
+    /// planet radius, shell radius, Mie anisotropy, has normal.
+    pub geometry: Vec4,
+    pub rayleigh: Vec4,
+    pub mie: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -130,6 +147,12 @@ pub struct PlanetCloudMaterial {
     #[texture(3)]
     #[sampler(4)]
     pub opacity: Option<Handle<Image>>,
+    #[texture(5)]
+    #[sampler(6)]
+    pub normal: Option<Handle<Image>>,
+    #[texture(7)]
+    #[sampler(8)]
+    pub glow: Option<Handle<Image>>,
 }
 
 impl Material for PlanetCloudMaterial {
@@ -138,7 +161,16 @@ impl Material for PlanetCloudMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Blend
+        AlphaMode::Premultiplied
+    }
+
+    fn depth_bias(&self) -> f32 {
+        // Shell centres coincide. Draw atmospheric scattering after the smog.
+        if self.params.layer.x > 0.5 {
+            -0.1
+        } else {
+            0.0
+        }
     }
 
     fn specialize(
@@ -147,10 +179,9 @@ impl Material for PlanetCloudMaterial {
         _layout: &bevy::mesh::MeshVertexBufferLayoutRef,
         _key: bevy::pbr::MaterialPipelineKey<Self>,
     ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
-        // A transparent sphere must not blend its far hemisphere back through
-        // the near one. Apart from darkening the globe, that ordering failure
-        // made the longitude wrap look like an opaque black seam.
-        descriptor.primitive.cull_mode = Some(Face::Back);
+        // The shader selects exactly one hemisphere, including when the camera
+        // crosses inside the atmosphere. Never composite both faces.
+        descriptor.primitive.cull_mode = None;
         Ok(())
     }
 }
@@ -172,6 +203,7 @@ pub fn load_planet_image(asset_server: &AssetServer, path: &str, srgb: bool) -> 
         s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
             address_mode_u: ImageAddressMode::Repeat,
             address_mode_v: ImageAddressMode::ClampToEdge,
+            anisotropy_clamp: 4,
             ..ImageSamplerDescriptor::linear()
         });
     })
@@ -201,6 +233,22 @@ pub fn planet_texture_paths(config: &PlanetConfig) -> Vec<(String, bool)> {
         if let Some(p) = &clouds.opacity {
             out.push((p.clone(), false));
         }
+        if let Some(p) = &clouds.normal {
+            out.push((p.clone(), false));
+        }
+        if let Some(smog) = &clouds.smog {
+            out.push((smog.city_glow.clone(), true));
+        }
+    }
+    if let Some(a) = config
+        .atmosphere
+        .as_ref()
+        .and_then(|a| a.scattering.as_ref())
+    {
+        out.extend([(a.optical_depth.clone(), false), (a.haze.clone(), false)]);
+        if let Some(skyglow) = &a.skyglow {
+            out.push((skyglow.clone(), true));
+        }
     }
     out
 }
@@ -225,11 +273,33 @@ pub fn surface_material_from_config(
             .map(|path| load_planet_image(asset_server, path, srgb))
     };
     let (atmosphere_colour, atmosphere_strength) = match &config.atmosphere {
-        Some(a) => (Vec3::from_array(a.colour), a.strength),
+        Some(a) => (
+            Vec3::from_array(a.colour),
+            if a.scattering.is_some() {
+                0.0
+            } else {
+                a.strength
+            },
+        ),
         None => (Vec3::ZERO, 0.0),
     };
     PlanetSurfaceMaterial {
         params: PlanetSurfaceParams {
+            neon_colour: s
+                .city
+                .as_ref()
+                .map(|c| Vec3::from_array(c.neon_colour).extend(0.0))
+                .unwrap_or(Vec4::ZERO),
+            thermal_colour: s
+                .city
+                .as_ref()
+                .map(|c| Vec3::from_array(c.thermal_colour).extend(0.0))
+                .unwrap_or(Vec4::ZERO),
+            traffic_colour: s
+                .city
+                .as_ref()
+                .map(|c| Vec3::from_array(c.traffic_colour).extend(0.0))
+                .unwrap_or(Vec4::ZERO),
             // Corrected to the real star direction by `update_planet_materials`
             // on the next frame; X is a harmless placeholder.
             light_dir: Vec3::X,
@@ -247,12 +317,42 @@ pub fn surface_material_from_config(
             texture_y: Vec4::Y,
             texture_z: Vec4::Z,
             planet_center: Vec4::ZERO,
+            city: s
+                .city
+                .as_ref()
+                .map(|c| Vec4::new(1.0, c.normal_strength, 0.0, c.traffic_speed))
+                .unwrap_or(Vec4::new(0.0, 1.0, 0.0, 0.0)),
+            city_lights: s
+                .city
+                .as_ref()
+                .map(|c| Vec4::new(c.windows, c.neon, c.thermal, c.traffic))
+                .unwrap_or(Vec4::ZERO),
+            weather: config
+                .clouds
+                .as_ref()
+                .map(|c| {
+                    Vec4::new(
+                        c.scale.max(1.001),
+                        c.drift_speed,
+                        s.city
+                            .as_ref()
+                            .map(|city| city.shadow_strength)
+                            .unwrap_or(0.0),
+                        0.0,
+                    )
+                })
+                .unwrap_or(Vec4::ZERO),
         },
         albedo: load_planet_image(asset_server, &s.albedo, true),
         normal: load(&s.normal, false),
         roughness: load(&s.roughness, false),
         emissive_colour: load(&s.emissive_colour, true),
         emissive_mask: load(&s.emissive_mask, false),
+        cloud_opacity: config
+            .clouds
+            .as_ref()
+            .and_then(|c| c.opacity.as_ref())
+            .map(|p| load_planet_image(asset_server, p, false)),
     }
 }
 
@@ -275,12 +375,83 @@ pub fn cloud_material_from_config(
             texture_y: Vec4::Y,
             texture_z: Vec4::Z,
             planet_center: Vec4::ZERO,
+            layer: Vec4::new(
+                0.0,
+                clouds
+                    .smog
+                    .as_ref()
+                    .map(|s| s.normal_strength)
+                    .unwrap_or(1.0),
+                clouds.smog.as_ref().map(|s| s.opacity).unwrap_or(1.0),
+                clouds.smog.as_ref().map(|s| s.glow_strength).unwrap_or(0.0),
+            ),
+            geometry: Vec4::new(
+                config.radius,
+                config.radius * clouds.scale,
+                0.0,
+                flag(clouds.normal.is_some()),
+            ),
+            rayleigh: Vec4::ZERO,
+            mie: Vec4::ZERO,
         },
         albedo: load_planet_image(asset_server, &clouds.albedo, true),
         opacity: clouds
             .opacity
             .as_ref()
             .map(|p| load_planet_image(asset_server, p, false)),
+        normal: clouds
+            .normal
+            .as_ref()
+            .map(|p| load_planet_image(asset_server, p, false)),
+        glow: clouds
+            .smog
+            .as_ref()
+            .map(|s| load_planet_image(asset_server, &s.city_glow, true)),
+    })
+}
+
+/// Atmosphere shares the shell material plumbing; its branch integrates light
+/// through the shell and samples a baked sun optical-depth table.
+pub fn atmosphere_material_from_config(
+    config: &PlanetConfig,
+    asset_server: &AssetServer,
+) -> Option<PlanetCloudMaterial> {
+    let a = config.atmosphere.as_ref()?.scattering.as_ref()?;
+    Some(PlanetCloudMaterial {
+        params: PlanetCloudParams {
+            light_dir: Vec3::X,
+            time: 0.0,
+            misc: Vec4::new(0.0, 1.0, AMBIENT_FLOOR, 1.0),
+            texture_x: Vec4::X,
+            texture_y: Vec4::Y,
+            texture_z: Vec4::Z,
+            planet_center: Vec4::ZERO,
+            layer: Vec4::new(
+                1.0,
+                0.0,
+                1.0,
+                if a.skyglow.is_some() {
+                    a.skyglow_strength
+                } else {
+                    0.0
+                },
+            ),
+            geometry: Vec4::new(
+                config.radius,
+                config.radius * a.scale.max(1.001),
+                a.mie_anisotropy.clamp(-0.95, 0.95),
+                0.0,
+            ),
+            rayleigh: Vec3::from_array(a.rayleigh).extend(0.0),
+            mie: Vec3::from_array(a.mie).extend(0.0),
+        },
+        albedo: load_planet_image(asset_server, &a.optical_depth, false),
+        opacity: Some(load_planet_image(asset_server, &a.haze, false)),
+        normal: None,
+        glow: a
+            .skyglow
+            .as_ref()
+            .map(|p| load_planet_image(asset_server, p, true)),
     })
 }
 
@@ -352,6 +523,8 @@ fn update_planet_materials(
             material.params.texture_y = texture_y;
             material.params.texture_z = texture_z;
             material.params.planet_center = transform.translation().extend(0.0);
+            material.params.city.z = elapsed * material.params.city.w;
+            material.params.weather.w = elapsed * material.params.weather.y;
         }
     }
     for (transform, mat_handle) in &clouds {
@@ -388,6 +561,7 @@ mod tests {
             longitude_segments: 64,
             latitude_segments: 32,
             surface: PlanetSurfaceConfig {
+                city: None,
                 albedo: "assets/planets/earth/albedo.webp".into(),
                 normal: Some("assets/planets/earth/normal.webp".into()),
                 roughness: Some("assets/planets/earth/roughness.webp".into()),
@@ -397,6 +571,7 @@ mod tests {
                 emissive_strength: 1.5,
             },
             clouds: Some(PlanetCloudsConfig {
+                smog: None,
                 albedo: "assets/planets/earth/cloud_albedo.webp".into(),
                 opacity: Some("assets/planets/earth/cloud_opacity.webp".into()),
                 normal: None,
@@ -404,6 +579,7 @@ mod tests {
                 drift_speed: 0.0,
             }),
             atmosphere: Some(PlanetAtmosphereConfig {
+                scattering: None,
                 colour: [0.35, 0.55, 1.0],
                 strength: 1.0,
             }),
@@ -440,6 +616,48 @@ mod tests {
         assert_eq!(
             paths,
             vec![("assets/planets/earth/albedo.webp".to_string(), true)]
+        );
+    }
+
+    #[test]
+    fn ecumenopolis_preloads_every_shell_and_packed_data_map() {
+        let entity = crate::entities::config::EntityConfig::from_toml(include_str!(
+            "../../assets/entities/planet_ecumenopolis.toml"
+        ))
+        .unwrap();
+        let cfg = entity.planet.unwrap();
+        assert!(cfg.surface.city.is_some());
+        let paths = planet_texture_paths(&cfg);
+        for (suffix, srgb) in [
+            ("city_lights.ktx2", false),
+            ("city_material.ktx2", false),
+            ("smog_normal.ktx2", false),
+            ("city_glow.ktx2", true),
+            ("optical_depth.png", false),
+            ("haze.ktx2", false),
+        ] {
+            assert!(
+                paths
+                    .iter()
+                    .any(|(p, colour)| p.ends_with(suffix) && *colour == srgb),
+                "missing or incorrectly interpreted {suffix}"
+            );
+        }
+        for (p, _) in &paths {
+            assert!(std::path::Path::new(p).exists(), "missing {p}");
+        }
+        assert!(!paths.iter().any(|(p, _)| p.ends_with("skyglow.ktx2")));
+        let mut with_skyglow = cfg.clone();
+        with_skyglow
+            .atmosphere
+            .as_mut()
+            .unwrap()
+            .scattering
+            .as_mut()
+            .unwrap()
+            .skyglow = Some("optional-skyglow.ktx2".into());
+        assert!(
+            planet_texture_paths(&with_skyglow).contains(&("optional-skyglow.ktx2".into(), true))
         );
     }
 }

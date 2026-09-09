@@ -20,6 +20,19 @@ output_bytes = 252806
 declared_by = ["assets/models/alliance_battleship.model.toml"]
 
 [[output]]
+path = "assets/models/alliance_battleship_recreated_lod3.png"
+source = "assets/models/alliance_battleship_recreated.glb"
+source_sha256 = "586f9d25f3696932308b34f3505595211b3039757e54ad4f97fd11bcaaa04573"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/alliance_battleship_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "458227cdfc163e90f7478307be209a1c5bd00c944a52760e72bbff8eacaa6263"
+output_bytes = 227679
+declared_by = ["assets/models/alliance_battleship_recreated.model.toml"]
+
+[[output]]
 path = "assets/models/alliance_courier_lod3.png"
 source = "assets/models/alliance_courier.glb"
 source_sha256 = "a4d2833ab0066ce9710aed2515aebdf0187dcff886475a70b98d9bd10adfcf96"
@@ -31,6 +44,19 @@ base_sha256 = "8d14e9284ed5474c0c368ec5e1b5fd8565063e9c7ffeb8cda99da97ddd111787"
 output_sha256 = "8c9701b3e75025c7344a5ff2beb983070e6eb09ad4e339c1822da59b317c4b56"
 output_bytes = 136491
 declared_by = ["assets/models/alliance_courier.model.toml"]
+
+[[output]]
+path = "assets/models/alliance_courier_recreated_lod3.png"
+source = "assets/models/alliance_courier_recreated.glb"
+source_sha256 = "900cbb42be00c6149437b774d6052bfb7576221aa5e15ad16dc4f2b752014db2"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/alliance_courier_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "b95ff5980d5a36a6679bdff77e008e81a711d5ee24754f19fd32a88d8e6c0a6b"
+output_bytes = 126765
+declared_by = ["assets/models/alliance_courier_recreated.model.toml"]
 
 [[output]]
 path = "assets/models/alliance_cruiser_lod3.png"
@@ -46,6 +72,19 @@ output_bytes = 221680
 declared_by = ["assets/models/alliance_cruiser.model.toml"]
 
 [[output]]
+path = "assets/models/alliance_cruiser_recreated_lod3.png"
+source = "assets/models/alliance_cruiser_recreated.glb"
+source_sha256 = "8ad9160f58db9dab62fbb10832876f68bd85b141212184bd186b583480fd9b51"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/alliance_cruiser_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "3c7b91c87d09d9696707365cd2c62a25f7b59b5770bcafef3c4675a7d8bd2a12"
+output_bytes = 242876
+declared_by = ["assets/models/alliance_cruiser_recreated.model.toml"]
+
+[[output]]
 path = "assets/models/alliance_destroyer_lod3.png"
 source = "assets/models/alliance_destroyer.glb"
 source_sha256 = "3597b8c9a87605169048f45e02c525039bfcb039c7d8850b20300b1056b899cb"
@@ -57,6 +96,19 @@ base_sha256 = "7be184836587cbc413831f3298e4a0b2b08f96649202153d6d9c8be97817be09"
 output_sha256 = "166596dfb1c5fd6e66249c4ade1e26e975893d116bf5d421950462f6a7a24ca9"
 output_bytes = 282573
 declared_by = ["assets/models/alliance_destroyer.model.toml"]
+
+[[output]]
+path = "assets/models/alliance_destroyer_recreated_lod3.png"
+source = "assets/models/alliance_destroyer_recreated.glb"
+source_sha256 = "9b83ef66d33bccfc9eb0520163ad96195b4ba3cf265dbd8c5bb6bf263ac7b11b"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/alliance_destroyer_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "ad6d5b521383b3ca09a1099bb472a81493bd4b81e63e396c9fbcb4b7c885b5c4"
+output_bytes = 280466
+declared_by = ["assets/models/alliance_destroyer_recreated.model.toml"]
 
 [[output]]
 path = "assets/models/alliance_research_outpost_lod3.png"
@@ -72,6 +124,19 @@ output_bytes = 292812
 declared_by = ["assets/models/alliance_research_outpost.model.toml"]
 
 [[output]]
+path = "assets/models/alliance_research_outpost_recreated_lod3.png"
+source = "assets/models/alliance_research_outpost_recreated.glb"
+source_sha256 = "bd97b5e75a4de2987405396765972cf84c89e1e04b63b3787877f7992fcd90ab"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/alliance_research_outpost_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "b0d65e8a185867698f2ace687b1a5cb7b616bfbfb88db0463fbb8a321607fa1c"
+output_bytes = 307098
+declared_by = ["assets/models/alliance_research_outpost_recreated.model.toml"]
+
+[[output]]
 path = "assets/models/alliance_starbase_lod3.png"
 source = "assets/models/alliance_starbase.glb"
 source_sha256 = "08f78a60cd1630bb9fd26c6c6b1e2307000fe0d0a8a68b923ee035bd17786c1e"
@@ -83,6 +148,19 @@ base_sha256 = "87a63577f48852d95c1558aff16a5fb4bc1062ade09367b2609c740fb06328f0"
 output_sha256 = "ffe6c4123f1018c424b35b450db066c904029a0d7e80fe99e18f2d9a20e33e87"
 output_bytes = 252853
 declared_by = ["assets/models/alliance_starbase.model.toml"]
+
+[[output]]
+path = "assets/models/alliance_starbase_recreated_lod3.png"
+source = "assets/models/alliance_starbase_recreated.glb"
+source_sha256 = "1f5f0ae97df718a96377c29b1c29296298881ea9dc1d0f0540502bc4ece7227b"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/alliance_starbase_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "b2c0ab0c95c07af32b88632399170bcd844f85880c90b61a80d6b3d23be1a575"
+output_bytes = 262575
+declared_by = ["assets/models/alliance_starbase_recreated.model.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_1_lod3.png"
@@ -254,6 +332,19 @@ output_bytes = 310645
 declared_by = ["assets/models/dynasty_battleship.model.toml"]
 
 [[output]]
+path = "assets/models/dynasty_battleship_recreated_lod3.png"
+source = "assets/models/dynasty_battleship_recreated.glb"
+source_sha256 = "352560f066c9469995404e1cd35248b457039aca8d8f7d781e2fb5c245dd9f93"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/dynasty_battleship_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "71db5d9882c5ef0cf592f21329840bf14dadd11ad3eebfddd879809fb7d2fc8a"
+output_bytes = 303398
+declared_by = ["assets/models/dynasty_battleship_recreated.model.toml"]
+
+[[output]]
 path = "assets/models/dynasty_courier_lod3.png"
 source = "assets/models/dynasty_courier.glb"
 source_sha256 = "3722aa7d377f1f0fc3dbe000125f72e9079d469da7fbd02f68253dd57b166b38"
@@ -265,6 +356,19 @@ base_sha256 = "78b942f1975d814dfa7dabfad91b808a9052cc4014367703e2ac9ab468bc8679"
 output_sha256 = "2957a27b58a45d43fc415a62d37b3f79de7e8af716b28047b1514492b398acdb"
 output_bytes = 217229
 declared_by = ["assets/models/dynasty_courier.model.toml"]
+
+[[output]]
+path = "assets/models/dynasty_courier_recreated_lod3.png"
+source = "assets/models/dynasty_courier_recreated.glb"
+source_sha256 = "f16444878fe41f5e7b41c23b69cfd8c33f2d6376bb034c2f0e316c3feb03919b"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/dynasty_courier_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "c8053528bd00d92fc02c52d2e780f8ed2292bdeacc89bfa6084b4931c14c8691"
+output_bytes = 236401
+declared_by = ["assets/models/dynasty_courier_recreated.model.toml"]
 
 [[output]]
 path = "assets/models/dynasty_cruiser_lod3.png"
@@ -280,6 +384,19 @@ output_bytes = 252815
 declared_by = ["assets/models/dynasty_cruiser.model.toml"]
 
 [[output]]
+path = "assets/models/dynasty_cruiser_recreated_lod3.png"
+source = "assets/models/dynasty_cruiser_recreated.glb"
+source_sha256 = "7cecb8f2471be241fd259e6453da5a8ff5698a8aee6cfdc5a218c2902f5b49e1"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/dynasty_cruiser_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "e96fd77a7f2bea3cd116ad533c3a5189cd30528b3694429ea9c9b851d8027fd0"
+output_bytes = 291657
+declared_by = ["assets/models/dynasty_cruiser_recreated.model.toml"]
+
+[[output]]
 path = "assets/models/dynasty_destroyer_lod3.png"
 source = "assets/models/dynasty_destroyer.glb"
 source_sha256 = "8f3b09997ee1435f6d78073ee0b6cce380875a3ab2da5e7b4c8ad823f0a4f6f6"
@@ -291,3 +408,16 @@ base_sha256 = "01fc3da9457f7ec115c11040a3c16e0a5713cf1dfadbc24bb4c3aeca4d946adf"
 output_sha256 = "6aaef54bed09e2fdeacf9e0c2309ca81b747fb1ba452db12319e683a95848457"
 output_bytes = 231786
 declared_by = ["assets/models/dynasty_destroyer.model.toml"]
+
+[[output]]
+path = "assets/models/dynasty_destroyer_recreated_lod3.png"
+source = "assets/models/dynasty_destroyer_recreated.glb"
+source_sha256 = "fe2e59241e0cb31fc6bc13be2610113a50ed564996280280302774a38cdb76bf"
+params = { yaw_views = 8, resolution = 256, pitch = 20.0 }
+recipe_version = 1
+base_source = "assets/models/dynasty_destroyer_recreated.model.toml"
+base = { offset = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
+base_sha256 = "5b3e261b94dc7c2692c15d1d7fcf8eb24886eba27715f2e071a8f6b2acc8a4ab"
+output_sha256 = "7c927f308cb03289610ae67118e8e6bba97928a4494de521f38a2f0dd37b0309"
+output_bytes = 229191
+declared_by = ["assets/models/dynasty_destroyer_recreated.model.toml"]

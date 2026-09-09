@@ -88,4 +88,17 @@ pub fn insert_planet_visual(
             ));
         });
     }
+    if let Some(atmosphere) =
+        crate::entities::planet::atmosphere_material_from_config(cfg, asset_server)
+    {
+        let mesh = meshes.add(crate::entities::star::uv_sphere_mesh(
+            atmosphere.params.geometry.y,
+            cfg.longitude_segments,
+            cfg.latitude_segments,
+        ));
+        let material = cloud_materials.add(atmosphere);
+        ec.with_children(|parent| {
+            parent.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::default()));
+        });
+    }
 }

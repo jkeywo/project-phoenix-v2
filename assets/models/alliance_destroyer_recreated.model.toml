@@ -1,0 +1,96 @@
+# Rebuilt destroyer with original gameplay attachments in the identity rig frame.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -0.713245564126471, -0.27532915342047803, -0.5289779500823741 ]
+max = [ 0.7111134462940705, 0.10808804734230043, 0.7061519483187249 ]
+size = [ 1.4243590104205415, 0.38341720076277847, 1.235129898401099 ]
+
+[[lod]]
+max_distance = 15
+model = "assets/models/alliance_destroyer_recreated.glb"
+
+[[lod]]
+max_distance = 100
+model = "assets/models/alliance_destroyer_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "assets/models/alliance_destroyer_recreated.glb"
+ratio = 0.1
+error = 0.01
+texture_size = 256
+remesh_voxel_size = 0.065
+
+[[lod]]
+max_distance = 400
+model = "assets/models/alliance_destroyer_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "assets/models/alliance_destroyer_recreated.glb"
+ratio = 0.025
+error = 0.02
+texture_size = 128
+remesh_voxel_size = 0.065
+
+[[lod]]
+billboard = "assets/models/alliance_destroyer_recreated_lod3.png"
+scale = [ 1.4263, 0.3834, 1 ]
+
+[lod.capture]
+source = "assets/models/alliance_destroyer_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20
+
+[markers.engine_port]
+position = [ 0.562478291924405, -0.17221525, 0.7228207420009025 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.engine_starboard]
+position = [ -0.5594736861976571, -0.17221525, 0.7107200796738635 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.camera_fore]
+position = [ 0.0010395631804241776, -0.1778900589268605, -0.5656934221678094 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.camera_aft]
+position = [ -0.0010395631804241776, -0.275545, 0.7397534221678095 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.camera_port]
+position = [ -0.8678433993367208, -0.275545, 0.08564782492601794 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
+[markers.camera_starboard]
+position = [ 0.8678433993367208, -0.275545, 0.08841217507398205 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
+
+[markers.torpedo_fore]
+position = [ 0.000854043277923727, -0.28008360838109436, -0.4492087409857362 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.blaster_port]
+position = [ -0.417706425695601, -0.22260091984006708, 0.08619556172714825 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.blaster_starboard]
+position = [ 0.4075223632040007, -0.2017065046596599, 0.08091964044546737 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.phasers_omni]
+position = [ -2.168404344971009e-19, 0.0775432873611015, 0.49403825920201166 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.dock_port]
+position = [ -0.8678433993367208, -0.275545, 0.08564782492601794 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
+[markers.dock_starboard]
+position = [ 0.8678433993367208, -0.275545, 0.08841217507398205 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]

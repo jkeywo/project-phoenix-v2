@@ -10,8 +10,10 @@ cargo test --features headless --test gm_live_event_precheck prepared_event_has_
 ```
 
 **1 passed, 0 failed, 0 ignored, 0 filtered**, exit 0, runtime 0.92 seconds.
-This ran after the #1248 work and before the subsequent mechanical and browser
-edge changes; it is not a final integrated-build receipt.
+The original run was after #1248 and before subsequent mechanical/browser-edge
+changes. The exact test was run again on integrated main `1f8fc0e6`:
+**1 passed, 0 failed, 0 ignored, 0 filtered**, exit 0, runtime **1.06s**.
+`1320-precheck.json` now retains that final run, with the same digest and topology.
 
 The `GM_LIVE_EVENT_PRECHECK` result reported schema 1, seed 1320, initial tick 1,
 90 compared rounds, and final tick 90 / digest `613cccc16d5570e0` on both peers.

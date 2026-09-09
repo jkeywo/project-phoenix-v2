@@ -49,3 +49,9 @@ assignment/testing on native surfaces, runtime disconnect/reassignment handling,
 and Part B's camera + two microphones + two outputs rig pass. Audible routing
 was not independently judged. This first output diagnostic does not close #1126
 or establish actual remote-media playback. Final integration/push remains.
+
+Subsequent implementation `7fec5813` added the real microphone meter and camera
+preview adapters; their current scope and hardware remainder are recorded in
+`docs/acceptance/1126-media.md`. The paragraph above is the first output-path
+checkpoint, not the final implementation status. The integrated Clippy matrix,
+host build and ordinary native suite have since passed; push remains pending.

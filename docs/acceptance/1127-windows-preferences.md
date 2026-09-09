@@ -82,3 +82,10 @@ consumer and persistence seam, not Ultralight or live OS preference changes.
 --nocapture`: process exit 0, one test reported passed, but its actual verdict
 was **SKIPPED: needs two displays**. This machine has one 1920x1080 display.
 No lawful two-pane Station layout was exercised and no multi-monitor PASS is claimed.
+
+The separate real Ultralight console test was explicitly run on the `5df5a85c`
+source tree: **1 passed, 0 failed, 0 ignored**, 13.56 seconds. Two offscreen panes
+loaded served console pages, operated a Station, retained independent stores,
+and recovered a crashed pane on the same identity. This supplies native engine
+storage/reconnect evidence; it does not change the physical layout skip above
+or prove live OS preference adoption. The required local integration gates pass.

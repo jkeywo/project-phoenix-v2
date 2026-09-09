@@ -178,11 +178,19 @@ async function joinFleetAsGm(page, code) {
 }
 
 const gmStart = (page) => page.evaluate(() => window.__hostGmStartState());
-const clickGmControl = (page, controlId) => page.evaluate((id) => {
-  const control = document.getElementById(id);
-  if (!control) throw new Error(`missing GM control: ${id}`);
-  control.click();
-}, controlId);
+const clickGmControl = async (page, controlId) => {
+  // Fleet setup leaves Settings open. Its focus trap correctly makes the
+  // separate confirmation dialog inert until the operator closes Settings.
+  if (await page.locator('#server-settings-overlay').isVisible()) {
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#server-settings-overlay')).toBeHidden();
+  }
+  await page.evaluate((id) => {
+    const control = document.getElementById(id);
+    if (!control) throw new Error(`missing GM control: ${id}`);
+    control.click();
+  }, controlId);
+};
 
 test.describe('fleet lobby start policy', () => {
   test('pending Leave withholds a just-adopted frozen roster and grant until its exact result', async ({ context }) => {

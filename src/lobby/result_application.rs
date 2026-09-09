@@ -22,12 +22,17 @@ use crate::{
 /// The Bevy-owned output half of each per-variant Lobby message system.
 #[derive(SystemParam)]
 pub struct LobbyResultApplier<'w, 's> {
+    fleet: Option<Res<'w, crate::lockstep::FleetLockstep>>,
+    pending: Option<Res<'w, crate::command_admission::PendingCommands>>,
+    intents: ResMut<'w, crate::lobby::crew_replication::PendingCrewRatingChanges>,
     outbox: ResMut<'w, LobbyOutbox>,
     next_state: ResMut<'w, NextState<GamePhase>>,
     ship: Query<
         'w,
         's,
         (
+            Entity,
+            Option<&'static crate::entities::spawner::EntityUuid>,
             &'static ShipConfigComponent,
             &'static mut ShipSystemControlSources,
             &'static mut ActiveStationRatings,
@@ -43,17 +48,34 @@ impl LobbyResultApplier<'_, '_> {
     pub fn identify_ratings(&self, sessions: &SessionManager) -> HashMap<StationId, String> {
         self.ship
             .single()
-            .map(|(_, _, ratings)| ratings.0.clone())
+            .map(|(entity, uuid, _, _, ratings)| self.project_ratings(entity, uuid, ratings))
             .unwrap_or_else(|_| sessions.pending_ratings().clone())
     }
 
-    /// AFK snapshots only a rating already applied to a Ship. Its existing
-    /// pre-spawn policy uses an empty map, rather than a pending Lobby choice.
+    /// AFK snapshots a loaded Ship's latest crew choice, including a fleet
+    /// choice waiting for its agreed tick. Before spawn it uses an empty map.
     pub fn afk_ratings(&self) -> HashMap<StationId, String> {
         self.ship
             .single()
-            .map(|(_, _, ratings)| ratings.0.clone())
+            .map(|(entity, uuid, _, _, ratings)| self.project_ratings(entity, uuid, ratings))
             .unwrap_or_default()
+    }
+
+    // Lobby handlers run before AdmissionSet. Due commands are therefore still
+    // pending here, or were applied last tick; there is no drained-but-unapplied
+    // gap. Preserve a within-delay choice when AFK/disconnect saves its rating.
+    fn project_ratings(
+        &self,
+        entity: Entity,
+        uuid: Option<&crate::entities::spawner::EntityUuid>,
+        ratings: &ActiveStationRatings,
+    ) -> HashMap<StationId, String> {
+        let mut projected = ratings.0.clone();
+        if self.fleet.is_some() {
+            self.intents
+                .overlay(&mut projected, self.pending.as_deref(), entity, uuid);
+        }
+        projected
     }
 
     pub fn send(&mut self, target: Target, message: ServerMessage) {
@@ -97,9 +119,13 @@ impl LobbyResultApplier<'_, '_> {
             self.next_state.set(phase);
         }
         if let Some((station, name)) = result.station_rating_update {
-            if let Ok((config, mut sources, mut ratings)) = self.ship.single_mut() {
-                rating::apply_rating(&config.0, &station, &name, &mut sources.0);
-                ratings.0.insert(station, name);
+            if let Ok((_, _, config, mut sources, mut ratings)) = self.ship.single_mut() {
+                if self.fleet.is_some() {
+                    self.intents.push(station, name);
+                } else {
+                    rating::apply_rating(&config.0, &station, &name, &mut sources.0);
+                    ratings.0.insert(station, name);
+                }
             }
         }
         self.outbox.0.extend(result.outbound);
@@ -116,14 +142,19 @@ impl LobbyResultApplier<'_, '_> {
         phase: GamePhase,
         preload_complete: bool,
     ) {
-        let result = if let Ok((config, mut sources, ratings)) = self.ship.single_mut() {
+        let projected = self.afk_ratings();
+        let result = if let Ok((_, _, config, sources, _)) = self.ship.single_mut() {
+            // The pure disconnect helper also writes its resolver. Apply its
+            // returned intent below, so a fleet never mutates the live source
+            // ahead of the agreed command tick.
+            let mut departure_sources = sources.0.clone();
             handler::process_disconnect_with_stations(
                 token,
                 sessions,
                 stations,
                 &config.0,
-                &mut sources.0,
-                &ratings.0,
+                &mut departure_sources,
+                &projected,
                 phase,
                 preload_complete,
             )

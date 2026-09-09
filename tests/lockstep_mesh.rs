@@ -296,6 +296,253 @@ fn mission_orders() -> Vec<(u64, HostSlot, &'static str, SystemControlPayload)> 
 
 // ── The preconditions ────────────────────────────────────────────────────────
 
+fn slot_one_helm_state(
+    host: &mut Host,
+) -> (
+    String,
+    project_phoenix::ship::control_source::ControlSource,
+    project_phoenix::ship::state::ShipPhysics,
+) {
+    use project_phoenix::ship::components::{ActiveStationRatings, ShipSystemControlSources};
+    use project_phoenix::ship::state::ShipPhysics;
+    let mut query = host.app.world_mut().query::<(
+        &FleetSlotOf,
+        &ActiveStationRatings,
+        &ShipSystemControlSources,
+        &ShipPhysics,
+    )>();
+    let (_, ratings, sources, physics) = query
+        .iter(host.app.world())
+        .find(|(slot, _, _, _)| slot.0 == SLOT_ONE)
+        .expect("slot one ship");
+    (
+        ratings.0[&StationId(CREWED_STATION.into())].clone(),
+        sources
+            .0
+            .source_for(&project_phoenix::ship::system_registry::helm_steering_system_id()),
+        *physics,
+    )
+}
+
+fn assert_crew_transition_peers_agree(hosts: &mut [Host]) {
+    assert_eq!(hosts[0].tick(), hosts[1].tick());
+    let tick = hosts[0].tick();
+    let owner = slot_one_helm_state(&mut hosts[0]);
+    let peer = slot_one_helm_state(&mut hosts[1]);
+    assert_eq!(owner, peer, "rating/control/physics diverged at {tick}");
+    assert_eq!(
+        hosts[0].digest(),
+        hosts[1].digest(),
+        "authoritative state diverged at {tick}"
+    );
+}
+
+#[test]
+fn crew_disconnect_defers_local_backfill_until_the_shared_command_tick() {
+    use project_phoenix::lobby::PlayerDisconnected;
+    use project_phoenix::ship::control_source::ControlSource;
+    let mut hosts = vec![Host::new(SLOT_ONE), Host::new(SLOT_TWO)];
+    for _ in 0..20 {
+        step(&mut hosts);
+    }
+    assert_crew_transition_peers_agree(&mut hosts);
+    let before = slot_one_helm_state(&mut hosts[0]);
+    assert_eq!(before.0, CREWED_RATING);
+    assert_eq!(before.1, ControlSource::Human);
+    let requested_at = hosts[0].tick();
+    let delay = hosts[0].delay();
+    assert!(delay > 0);
+    let token = hosts[0].token.clone();
+    hosts[0]
+        .app
+        .world_mut()
+        .resource_mut::<Messages<PlayerDisconnected>>()
+        .write(PlayerDisconnected {
+            token: token.clone(),
+        });
+    let mut first_backfill = None;
+    for _ in 0..delay + 90 {
+        step(&mut hosts);
+        assert_crew_transition_peers_agree(&mut hosts);
+        let player = hosts[0]
+            .app
+            .world()
+            .resource::<Sessions>()
+            .0
+            .players()
+            .iter()
+            .find(|player| player.token == token)
+            .expect("disconnect retains the player");
+        assert!(!player.connected);
+        assert_eq!(
+            player.station.as_ref(),
+            Some(&StationId(CREWED_STATION.into()))
+        );
+        let state = slot_one_helm_state(&mut hosts[0]);
+        if state.0 == project_phoenix::ship::rating::BACKFILL_RATING {
+            assert_eq!(state.1, ControlSource::Ai);
+            first_backfill.get_or_insert(hosts[0].tick() - 1);
+        } else {
+            assert_eq!(state.0, CREWED_RATING);
+            assert_eq!(state.1, ControlSource::Human);
+        }
+    }
+    let applied_at = first_backfill.expect("the disconnect must activate AI");
+    assert!(applied_at >= requested_at + delay);
+    for host in &hosts {
+        let ratings: Vec<_> = host
+            .log()
+            .entries()
+            .iter()
+            .filter(|entry| {
+                matches!(
+            &entry.payload, SystemControlPayload::AssignStationRating { station, .. }
+            if station.0 == CREWED_STATION)
+            })
+            .collect();
+        assert_eq!(ratings.len(), 1, "one disconnect, one applied rating");
+        assert_eq!(ratings[0].tick, applied_at);
+    }
+    assert_eq!(hosts[0].log().entries(), hosts[1].log().entries());
+    let after = slot_one_helm_state(&mut hosts[0]).2;
+    assert_ne!(
+        [before.2.x, before.2.y, before.2.z],
+        [after.x, after.y, after.z],
+        "Backfill must actually fly the ship"
+    );
+}
+
+#[test]
+fn afk_return_before_backfill_applies_preserves_both_ordered_transitions() {
+    use project_phoenix::ship::control_source::ControlSource;
+    let mut hosts = vec![Host::new(SLOT_ONE), Host::new(SLOT_TWO)];
+    for _ in 0..20 {
+        step(&mut hosts);
+    }
+    assert_crew_transition_peers_agree(&mut hosts);
+    let delay = hosts[0].delay();
+    assert!(delay >= 2);
+    let token = hosts[0].token.clone();
+    for afk in [true, false] {
+        hosts[0]
+            .app
+            .world_mut()
+            .resource_mut::<Messages<InboundMessage>>()
+            .write(InboundMessage {
+                token: token.clone(),
+                msg: ClientMessage::SetAfk { afk },
+            });
+        step(&mut hosts);
+        assert_crew_transition_peers_agree(&mut hosts);
+        assert_eq!(
+            hosts[0].app.world().resource::<Sessions>().0.is_afk(&token),
+            afk
+        );
+    }
+    for _ in 0..delay + 60 {
+        step(&mut hosts);
+        assert_crew_transition_peers_agree(&mut hosts);
+    }
+    for host in &hosts {
+        let ratings: Vec<_> = host
+            .log()
+            .entries()
+            .iter()
+            .filter_map(|entry| match &entry.payload {
+                SystemControlPayload::AssignStationRating { station, rating }
+                    if station.0 == CREWED_STATION =>
+                {
+                    Some((entry.tick, rating.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ratings.len(), 2, "neither pending transition may disappear");
+        assert_eq!(ratings[0].1, project_phoenix::ship::rating::BACKFILL_RATING);
+        assert_eq!(ratings[1].1, CREWED_RATING);
+        assert_eq!(ratings[1].0, ratings[0].0 + 1);
+    }
+    assert_eq!(hosts[0].log().entries(), hosts[1].log().entries());
+    let final_state = slot_one_helm_state(&mut hosts[0]);
+    assert_eq!(final_state.0, CREWED_RATING);
+    assert_eq!(final_state.1, ControlSource::Human);
+}
+
+#[test]
+fn disconnect_saves_a_rating_requested_in_input_before_its_delayed_apply() {
+    use project_phoenix::lobby::PlayerDisconnected;
+    let mut hosts = vec![Host::new(SLOT_ONE), Host::new(SLOT_TWO)];
+    for _ in 0..20 {
+        step(&mut hosts);
+    }
+    let token = hosts[0].token.clone();
+    hosts[0]
+        .app
+        .world_mut()
+        .resource_mut::<Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: token.clone(),
+            msg: ClientMessage::SetStationRating {
+                rating_name: "Simplified".into(),
+            },
+        });
+    step(&mut hosts);
+    assert_crew_transition_peers_agree(&mut hosts);
+    assert_eq!(
+        slot_one_helm_state(&mut hosts[0]).0,
+        CREWED_RATING,
+        "Input only staged the requested rating"
+    );
+    hosts[0]
+        .app
+        .world_mut()
+        .resource_mut::<Messages<PlayerDisconnected>>()
+        .write(PlayerDisconnected {
+            token: token.clone(),
+        });
+    step(&mut hosts);
+    assert_crew_transition_peers_agree(&mut hosts);
+    hosts[0]
+        .app
+        .world_mut()
+        .resource_mut::<Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: token.clone(),
+            msg: ClientMessage::Identify {
+                token,
+                name: "Returning Helm".into(),
+            },
+        });
+    for _ in 0..hosts[0].delay() + 60 {
+        step(&mut hosts);
+        assert_crew_transition_peers_agree(&mut hosts);
+    }
+    for host in &hosts {
+        let ratings: Vec<_> = host
+            .log()
+            .entries()
+            .iter()
+            .filter_map(|entry| match &entry.payload {
+                SystemControlPayload::AssignStationRating { station, rating }
+                    if station.0 == CREWED_STATION =>
+                {
+                    Some(rating.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ratings,
+            [
+                "Simplified",
+                project_phoenix::ship::rating::BACKFILL_RATING,
+                "Simplified"
+            ]
+        );
+    }
+    assert_eq!(slot_one_helm_state(&mut hosts[0]).0, "Simplified");
+}
+
 /// The browser's frozen choices, not local Sessions or a later command,
 /// determine both hulls' initial automation on every peer.
 #[test]

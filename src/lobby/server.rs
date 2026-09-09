@@ -397,6 +397,18 @@ impl Plugin for LobbyPlugin {
         if !app.is_plugin_added::<bevy::state::app::StatesPlugin>() {
             app.add_plugins(bevy::state::app::StatesPlugin);
         }
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.init_resource::<super::crew_replication::PendingCrewRatingChanges>()
+                .declare_state::<super::crew_replication::PendingCrewRatingChanges>(
+                    StateClass::Timer,
+                    "digest-exclusion-classes",
+                )
+                .add_systems(
+                    OnEnter(GamePhase::Lobby),
+                    super::crew_replication::clear_pending_crew_ratings,
+                );
+        }
         let initial_cache = GameStateCache(GameState {
             phase: GamePhase::Lobby,
             players: vec![],

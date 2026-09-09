@@ -1190,24 +1190,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .in_set(crate::sim_sets::SimSet::Input),
     );
 
-    // Crew-rating replication across the fleet (issue #1119): the same ownerless
-    // synthetic-system pattern as God Mode above. The ship host injects an
-    // `AssignStationRating` when its own ship's `ActiveStationRatings` changes so
-    // every peer makes the same Backfill<->Human transition on the agreed tick;
-    // without it a stationless GM keeps the frozen roster's Backfill and its AI
-    // overwrites what a reconnected human just did. The consumer registration
-    // keeps the unrouted-command lint quiet, exactly as God Mode's does.
-    app.init_resource::<crate::lobby::crew_replication::LastReplicatedRatings>();
+    // Local crew intents use ordinary admission; only the agreed-tick consumer
+    // changes authoritative ratings, on the originating host and every peer.
     {
-        use crate::authoritative::{DeclareState, StateClass};
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        // A one-directional delta-suppression mirror of `ActiveStationRatings`
-        // (which is the truth it diffs against) — the census's Cache class,
-        // verbatim.
-        app.declare_state::<crate::lobby::crew_replication::LastReplicatedRatings>(
-            StateClass::Cache,
-            "digest-exclusion-classes",
-        );
         app.register_admitted_consumer(ConsumerMatcher::undeclared_exact(
             crate::ship::system_registry::ASSIGN_STATION_RATING_SYSTEM_ID,
         ));
@@ -1215,7 +1201,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.add_systems(
         FixedUpdate,
         (
-            // After the lobby handlers have written the change and before
+            // After the lobby handlers have queued the intent and before
             // admission reads the injected command, so it is stamped and staged
             // to the mesh on the tick the change happened.
             crate::lobby::crew_replication::replicate_local_crew_ratings

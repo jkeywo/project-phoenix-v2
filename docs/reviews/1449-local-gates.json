@@ -140,6 +140,23 @@
       "passed": 1,
       "failed": 0,
       "ignored": 0
+    },
+    {
+      "name": "pasm-scan-acceptance",
+      "exit": 0,
+      "command": "uv run pasm scan",
+      "revision": "d3745761 plus uncommitted falling-skyway-flow.spec.js",
+      "note": "Covers acceptance additions after initial gate batch. Interrupted by power loss; restarted and completed 9 September."
+    },
+    {
+      "name": "media-final",
+      "exit": 0,
+      "command": "cargo test --lib --features host -- native_host::media native_host::bridge_media",
+      "revision": "d3745761",
+      "passed": 43,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 7324
     }
   ],
   "evidence_notes": [

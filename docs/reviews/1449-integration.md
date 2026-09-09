@@ -82,9 +82,22 @@ and recovered a crashed pane on the same identity. The test's rendererless Bevy
 fixture logged missing mesh/image loaders; this is a console-page/transport/
 storage/recovery result, not a 3D scene-render or physical-monitor judgment.
 
+After the power outage, the additional acceptance-source scan was restarted and
+passed. The final host-gated media correction was also checked explicitly:
+`cargo test --lib --features host -- native_host::media native_host::bridge_media`
+passed **43 tests, 0 failed, 0 ignored** on `d3745761`, including the tone and
+partial-scan report. The release capture's SHA-256 still matches its committed
+receipt. The outage interrupted the long browser mission rather than invalidating
+the completed gates; that mission was restarted from the beginning.
+
 Additional #1044 preparation in `e683a2e2` supplies all **357 mission-owned
 bracketed strings** in `docs/acceptance/1044-skyway-copy-inventory.md`, grouped by
 surface with source lines and hashes. Generation and `--check` passed;
 independent review passed. Human approval remains NOT RUN. A full unmodified
 browser timeline check is running separately, with Backfill and ordinary
-spectators; it will not replace per-console human judgments.
+spectators; it will not replace per-console human judgments. Its first complete
+post-outage attempt passed through transfer opening, then failed an incorrect
+hold-berth expectation: shipped seed 1034 actually booked and served Havelock.
+The corrected branch assertions are being checked in a fresh full run. The
+completed implementation batch can be pushed for matching Linux CI while that
+separate opt-in acceptance test remains uncommitted and pending.

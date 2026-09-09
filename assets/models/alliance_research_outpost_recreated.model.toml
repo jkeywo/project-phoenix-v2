@@ -1,0 +1,48 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -3.7817976474761963, -0.19994945526123076, -3.799628019332885 ]
+max = [ 3.780076742172241, 3.1662600517272947, 3.794759988784789 ]
+size = [ 7.5618743896484375, 3.3662095069885254, 7.594388008117674 ]
+
+[markers]
+[[lod]]
+max_distance = 15
+model = "assets/models/alliance_research_outpost_recreated.glb"
+
+[[lod]]
+max_distance = 100
+model = "assets/models/alliance_research_outpost_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_research_outpost.glb"
+ratio = 0.65
+error = 0.025
+texture_size = 256
+
+[[lod]]
+max_distance = 400
+model = "assets/models/alliance_research_outpost_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_research_outpost_far.glb"
+ratio = 0.23
+error = 0.08
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/alliance_research_outpost_recreated_lod3.png"
+scale = [ 7.5944, 3.3662, 1 ]
+
+[lod.capture]
+source = "assets/models/alliance_research_outpost_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20

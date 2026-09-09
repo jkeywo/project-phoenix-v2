@@ -1,0 +1,107 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -0.9334975857818811, -0.275972, -1.325382139237542 ]
+max = [ 0.9314864553914267, 0.6259125558166504, 1.5261545665651546 ]
+size = [ 1.8649840411733078, 0.9018845558166504, 2.8515367058026966 ]
+
+[markers.phasers_fore]
+position = [ 0.0023906779390656754, -0.5414615, -1.4009935962386966 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.phasers_aft]
+position = [ -0.0023123718498711233, 0.6618550000000001, 1.3993929650884946 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.torpedo_port]
+position = [ -0.5480324389183072, -0.275972, -0.6614693069784134 ]
+direction = [ -0.13735264416849827, 0, -0.9905222113309332 ]
+
+[markers.torpedo_starboard]
+position = [ 0.5604607873017238, -0.275972, -0.6526086934941815 ]
+direction = [ 0.14095790627556798, 0, -0.9900155901087659 ]
+
+[markers.engine_port]
+position = [ 0.5466822425369763, 0.24596095939637952, 1.4524755365044284 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.engine_starboard]
+position = [ -0.5610592322618878, 0.2636194082226816, 1.449583036724845 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.camera_fore]
+position = [ 0.0023906779390656754, -0.275972, -1.4009935962386966 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.camera_aft]
+position = [ -0.0023906779390656754, -0.275972, 1.6011355962386966 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.camera_port]
+position = [ -1.1350935603902714, -0.275972, 0.09826318763776037 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
+[markers.camera_starboard]
+position = [ 1.1350935603902714, -0.275972, 0.10187881236223961 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
+
+[markers.blaster_fore]
+position = [ -2.710505431213761e-20, 0.567894233497435, 0.14187396618560216 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.blaster_fore_port]
+position = [ -0.37506610192940204, 0.567894233497435, 0.1412766153068853 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.blaster_fore_starboard]
+position = [ 0.37493294686625256, 0.567894233497435, 0.14247110499425042 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.torpedo_centre_port]
+position = [ -0.17880528202359197, -0.275972, -0.6502147263206222 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.torpedo_centre_starboard]
+position = [ 0.18119426139832223, -0.275972, -0.649641371270687 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[[lod]]
+max_distance = 15
+model = "assets/models/alliance_battleship_recreated.glb"
+
+[[lod]]
+max_distance = 100
+model = "assets/models/alliance_battleship_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_battleship.glb"
+ratio = 0.65
+error = 0.025
+texture_size = 256
+
+[[lod]]
+max_distance = 400
+model = "assets/models/alliance_battleship_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_battleship_far.glb"
+ratio = 0.23
+error = 0.08
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/alliance_battleship_recreated_lod3.png"
+scale = [ 2.8536, 0.9019, 1 ]
+
+[lod.capture]
+source = "assets/models/alliance_battleship_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20

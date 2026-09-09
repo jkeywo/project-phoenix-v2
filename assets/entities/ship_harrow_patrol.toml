@@ -96,7 +96,7 @@ size = 7.0
 icon = "cruiser"
 
 [mesh]
-model = "assets/models/dynasty_cruiser.glb"
+model = "assets/models/dynasty_cruiser_recreated.glb"
 shape = "cuboid"
 size = [6.0, 2.0, 10.0]
 colour = [0.8, 0.3, 0.1]

@@ -1,0 +1,99 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -0.8210937089077488, -0.2, -0.8493797460588495 ]
+max = [ 0.8218531955217558, 0.23574371933937072, 1.0501465961414393 ]
+size = [ 1.6429469044295046, 0.4357437193393707, 1.8995263422002888 ]
+
+[markers.phasers_fore]
+position = [ 0.0015926529164868282, -0.32826885043814286, -0.8999987317275395 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.phasers_aft]
+position = [ -0.001592652916486828, 0.2531023289281153, 0.9655995534152054 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.engine_port]
+position = [ 0.7985655977571935, -0.1, 1.001272980887975 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.engine_starboard]
+position = [ -0.8014323730068698, -0.1, 0.9987247362215961 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.torpedo_aft]
+position = [ -0.0011148570415407796, -0.2, 0.7999991122092776 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.torpedo_port]
+position = [ -0.24960151970276317, -0.2, -0.15039784616100657 ]
+direction = [ -0.13735291561425134, 0, -0.9905221736903543 ]
+
+[markers.torpedo_starboard]
+position = [ 0.2503978461610066, -0.2, -0.14960151970276317 ]
+direction = [ 0.14095786999035612, 0, -0.990015595275035 ]
+
+[markers.camera_fore]
+position = [ 0.0015926529164868282, -0.2, -0.8999987317275395 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.camera_aft]
+position = [ -0.0015926529164868282, -0.2, 1.0999987317275395 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.camera_port]
+position = [ -0.9999987317275395, -0.2, 0.09840734708351317 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
+[markers.camera_starboard]
+position = [ 0.9999987317275395, -0.2, 0.10159265291648684 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
+
+[markers.dock_port]
+position = [ -0.9999987317275395, -0.2, 0.09840734708351317 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
+[markers.dock_starboard]
+position = [ 0.9999987317275395, -0.2, 0.10159265291648684 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
+
+[[lod]]
+max_distance = 15
+model = "assets/models/alliance_cruiser_recreated.glb"
+
+[[lod]]
+max_distance = 100
+model = "assets/models/alliance_cruiser_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_cruiser.glb"
+ratio = 0.65
+error = 0.025
+texture_size = 256
+
+[[lod]]
+max_distance = 400
+model = "assets/models/alliance_cruiser_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_cruiser_far.glb"
+ratio = 0.23
+error = 0.08
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/alliance_cruiser_recreated_lod3.png"
+scale = [ 1.9019, 0.4357, 1 ]
+
+[lod.capture]
+source = "assets/models/alliance_cruiser_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20

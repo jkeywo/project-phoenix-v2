@@ -1,0 +1,48 @@
+# Concept recreation. Original gameplay points are baked into the identity rig frame.
+# Regenerate with scripts/art/prepare-fleet.mjs, then the standard LOD/capture tools.
+[base]
+offset = [ 0, 0, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -14.226287305355072, -0.1999999999999984, -17.05310618877411 ]
+max = [ 14.2324697971344, 14.125019598007203, 17.03184163570404 ]
+size = [ 28.45875710248947, 14.325019598007202, 34.08494782447815 ]
+
+[markers]
+[[lod]]
+max_distance = 15
+model = "assets/models/alliance_starbase_recreated.glb"
+
+[[lod]]
+max_distance = 100
+model = "assets/models/alliance_starbase_recreated_lod1.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_starbase.glb"
+ratio = 0.65
+error = 0.0005
+texture_size = 256
+
+[[lod]]
+max_distance = 400
+model = "assets/models/alliance_starbase_recreated_lod2.glb"
+tier_rig = "identity"
+
+[lod.generate]
+source = "scripts/art/lod-sources/alliance_starbase_far.glb"
+ratio = 0.23
+error = 0.001
+texture_size = 128
+
+[[lod]]
+billboard = "assets/models/alliance_starbase_recreated_lod3.png"
+scale = [ 34.0849, 14.325, 1 ]
+
+[lod.capture]
+source = "assets/models/alliance_starbase_recreated.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20

@@ -1,0 +1,281 @@
+[
+  {
+    "model": "alliance_cruiser",
+    "variant": "model",
+    "originalTriangles": 120000,
+    "originalBytes": 7755052,
+    "levels": [
+      {
+        "file": "assets/models/alliance_cruiser_recreated.glb",
+        "triangles": 6388,
+        "bytes": 907748,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_cruiser_recreated_lod1.glb",
+        "triangles": 1608,
+        "bytes": 189716,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_cruiser_recreated_lod2.glb",
+        "triangles": 1144,
+        "bytes": 133092,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 13,
+    "targetPoints": 0
+  },
+  {
+    "model": "alliance_battleship",
+    "variant": "model",
+    "originalTriangles": 120000,
+    "originalBytes": 7949856,
+    "levels": [
+      {
+        "file": "assets/models/alliance_battleship_recreated.glb",
+        "triangles": 9964,
+        "bytes": 1168688,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_battleship_recreated_lod1.glb",
+        "triangles": 2404,
+        "bytes": 254284,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_battleship_recreated_lod2.glb",
+        "triangles": 1696,
+        "bytes": 184664,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 15,
+    "targetPoints": 0
+  },
+  {
+    "model": "alliance_courier",
+    "variant": "model",
+    "originalTriangles": 34114,
+    "originalBytes": 4411172,
+    "levels": [
+      {
+        "file": "assets/models/alliance_courier_recreated.glb",
+        "triangles": 3180,
+        "bytes": 655808,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_courier_recreated_lod1.glb",
+        "triangles": 1188,
+        "bytes": 150148,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_courier_recreated_lod2.glb",
+        "triangles": 758,
+        "bytes": 95396,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 4,
+    "targetPoints": 0
+  },
+  {
+    "model": "alliance_starbase",
+    "variant": "model",
+    "originalTriangles": 120000,
+    "originalBytes": 13601536,
+    "levels": [
+      {
+        "file": "assets/models/alliance_starbase_recreated.glb",
+        "triangles": 16464,
+        "bytes": 1715088,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_starbase_recreated_lod1.glb",
+        "triangles": 6074,
+        "bytes": 499824,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_starbase_recreated_lod2.glb",
+        "triangles": 4460,
+        "bytes": 379428,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 0,
+    "targetPoints": 0
+  },
+  {
+    "model": "alliance_research_outpost",
+    "variant": "model",
+    "originalTriangles": 90000,
+    "originalBytes": 7951392,
+    "levels": [
+      {
+        "file": "assets/models/alliance_research_outpost_recreated.glb",
+        "triangles": 8880,
+        "bytes": 983368,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_research_outpost_recreated_lod1.glb",
+        "triangles": 3322,
+        "bytes": 298760,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_research_outpost_recreated_lod2.glb",
+        "triangles": 1514,
+        "bytes": 159908,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 0,
+    "targetPoints": 0
+  },
+  {
+    "model": "dynasty_cruiser",
+    "variant": "model",
+    "originalTriangles": 120000,
+    "originalBytes": 8319504,
+    "levels": [
+      {
+        "file": "assets/models/dynasty_cruiser_recreated.glb",
+        "triangles": 6486,
+        "bytes": 1300316,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/dynasty_cruiser_recreated_lod1.glb",
+        "triangles": 2546,
+        "bytes": 337044,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/dynasty_cruiser_recreated_lod2.glb",
+        "triangles": 1076,
+        "bytes": 135952,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 6,
+    "targetPoints": 3
+  },
+  {
+    "model": "dynasty_battleship",
+    "variant": "model",
+    "originalTriangles": 90000,
+    "originalBytes": 8184360,
+    "levels": [
+      {
+        "file": "assets/models/dynasty_battleship_recreated.glb",
+        "triangles": 7344,
+        "bytes": 1365712,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/dynasty_battleship_recreated_lod1.glb",
+        "triangles": 2710,
+        "bytes": 352864,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/dynasty_battleship_recreated_lod2.glb",
+        "triangles": 1216,
+        "bytes": 150236,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 2,
+    "targetPoints": 3
+  },
+  {
+    "model": "dynasty_courier",
+    "variant": "model",
+    "originalTriangles": 31958,
+    "originalBytes": 4364828,
+    "levels": [
+      {
+        "file": "assets/models/dynasty_courier_recreated.glb",
+        "triangles": 6076,
+        "bytes": 1259968,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/dynasty_courier_recreated_lod1.glb",
+        "triangles": 2140,
+        "bytes": 296520,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/dynasty_courier_recreated_lod2.glb",
+        "triangles": 682,
+        "bytes": 96088,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 2,
+    "targetPoints": 3
+  },
+  {
+    "model": "alliance_courier",
+    "variant": "dock_probe",
+    "originalTriangles": 34114,
+    "originalBytes": 4411172,
+    "levels": [
+      {
+        "file": "assets/models/alliance_courier_recreated_dock_probe.glb",
+        "triangles": 3180,
+        "bytes": 655748,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_courier_recreated_dock_probe_lod1.glb",
+        "triangles": 1188,
+        "bytes": 150092,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      },
+      {
+        "file": "assets/models/alliance_courier_recreated_dock_probe_lod2.glb",
+        "triangles": 758,
+        "bytes": 95336,
+        "validationErrors": 0,
+        "validationWarnings": 0
+      }
+    ],
+    "markers": 2,
+    "targetPoints": 0
+  }
+]

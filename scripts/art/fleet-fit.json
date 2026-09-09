@@ -1,0 +1,3024 @@
+[
+  {
+    "name": "alliance_cruiser",
+    "variant": "model",
+    "candidate": "assets/models/alliance_cruiser_recreated",
+    "source": "scripts/art/lod-sources/alliance_cruiser.glb",
+    "concept": "PPAllianceStarship",
+    "originalBounds": {
+      "min": [
+        -0.8210937089077488,
+        -0.2,
+        -0.8493797460588494
+      ],
+      "max": [
+        0.8218531955217558,
+        0.23574371933937072,
+        1.0501465961414393
+      ]
+    },
+    "bounds": {
+      "min": [
+        -0.8210937089077488,
+        -0.2,
+        -0.8493797460588495
+      ],
+      "max": [
+        0.8218531955217558,
+        0.23574371933937072,
+        1.0501465961414393
+      ]
+    },
+    "base": {
+      "offset": [
+        -0.000508312801588584,
+        -0.12635823549943814,
+        0.09982857343033169
+      ],
+      "rotation": [
+        0,
+        3.14,
+        0
+      ],
+      "scale": [
+        0.213370003744618,
+        0.19379411953853748,
+        0.19772889074294484
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.2,
+          0.1
+        ],
+        "rotation": [
+          0,
+          3.14,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -4.000085809088489,
+          -0.428268851928259,
+          -3.9000858090884902
+        ],
+        "max": [
+          4.000085809088489,
+          0.3531023304182314,
+          4.1000858090884895
+        ],
+        "size": [
+          8.000171618176978,
+          0.7813711823464904,
+          8.00017161817698
+        ]
+      },
+      "markers": {
+        "phasers_fore": {
+          "position": [
+            0,
+            -0.12826885043814285,
+            1
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "phasers_aft": {
+          "position": [
+            0.00021405124331257193,
+            0.4531023289281153,
+            -0.8656009921424426
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "engine_port": {
+          "position": [
+            -0.8,
+            0.1,
+            -0.9
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            0.8,
+            0.1,
+            -0.9
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "torpedo_aft": {
+          "position": [
+            0,
+            0,
+            -0.7
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "torpedo_port": {
+          "position": [
+            0.25,
+            0,
+            0.25
+          ],
+          "direction": [
+            0.1389302994421039,
+            0,
+            0.9903021619167189
+          ]
+        },
+        "torpedo_starboard": {
+          "position": [
+            -0.25,
+            0,
+            0.25
+          ],
+          "direction": [
+            -0.13938093999218928,
+            0,
+            0.9902388366282621
+          ]
+        },
+        "camera_fore": {
+          "position": [
+            0,
+            0,
+            1
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "camera_aft": {
+          "position": [
+            0,
+            0,
+            -1
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "camera_port": {
+          "position": [
+            1,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ]
+        },
+        "camera_starboard": {
+          "position": [
+            -1,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            0,
+            0
+          ]
+        },
+        "dock_port": {
+          "position": [
+            1,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ]
+        },
+        "dock_starboard": {
+          "position": [
+            -1,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            0,
+            0
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_cruiser.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_cruiser_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_cruiser.glb",
+            "ratio": 0.19,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_cruiser_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_cruiser.glb",
+            "ratio": 0.113,
+            "error": 0.01,
+            "texture_size": 128,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_cruiser_lod3.png",
+          "scale": [
+            1.9019,
+            0.4357,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_cruiser.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -0.8210937089077488,
+          -0.2,
+          -0.8493797460588495
+        ],
+        "max": [
+          0.8218531955217558,
+          0.23574371933937072,
+          1.0501465961414393
+        ],
+        "size": [
+          1.6429469044295046,
+          0.4357437193393707,
+          1.8995263422002888
+        ]
+      },
+      "markers": {
+        "phasers_fore": {
+          "position": [
+            0.0015926529164868282,
+            -0.32826885043814286,
+            -0.8999987317275395
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "phasers_aft": {
+          "position": [
+            -0.001592652916486828,
+            0.2531023289281153,
+            0.9655995534152054
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "engine_port": {
+          "position": [
+            0.7985655977571935,
+            -0.1,
+            1.001272980887975
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            -0.8014323730068698,
+            -0.1,
+            0.9987247362215961
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "torpedo_aft": {
+          "position": [
+            -0.0011148570415407796,
+            -0.2,
+            0.7999991122092776
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "torpedo_port": {
+          "position": [
+            -0.24960151970276317,
+            -0.2,
+            -0.15039784616100657
+          ],
+          "direction": [
+            -0.13735291561425134,
+            0,
+            -0.9905221736903543
+          ]
+        },
+        "torpedo_starboard": {
+          "position": [
+            0.2503978461610066,
+            -0.2,
+            -0.14960151970276317
+          ],
+          "direction": [
+            0.14095786999035612,
+            0,
+            -0.990015595275035
+          ]
+        },
+        "camera_fore": {
+          "position": [
+            0.0015926529164868282,
+            -0.2,
+            -0.8999987317275395
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "camera_aft": {
+          "position": [
+            -0.0015926529164868282,
+            -0.2,
+            1.0999987317275395
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "camera_port": {
+          "position": [
+            -0.9999987317275395,
+            -0.2,
+            0.09840734708351317
+          ],
+          "direction": [
+            -0.9999987317275396,
+            0,
+            -0.0015926529164868284
+          ]
+        },
+        "camera_starboard": {
+          "position": [
+            0.9999987317275395,
+            -0.2,
+            0.10159265291648684
+          ],
+          "direction": [
+            0.9999987317275396,
+            0,
+            0.0015926529164868284
+          ]
+        },
+        "dock_port": {
+          "position": [
+            -0.9999987317275395,
+            -0.2,
+            0.09840734708351317
+          ],
+          "direction": [
+            -0.9999987317275396,
+            0,
+            -0.0015926529164868284
+          ]
+        },
+        "dock_starboard": {
+          "position": [
+            0.9999987317275395,
+            -0.2,
+            0.10159265291648684
+          ],
+          "direction": [
+            0.9999987317275396,
+            0,
+            0.0015926529164868284
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_cruiser_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_cruiser_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_cruiser.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_cruiser_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_cruiser_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_cruiser_recreated_lod3.png",
+          "scale": [
+            1.9019,
+            0.4357,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_cruiser_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "alliance_battleship",
+    "variant": "model",
+    "candidate": "assets/models/alliance_battleship_recreated",
+    "source": "scripts/art/lod-sources/alliance_battleship.glb",
+    "concept": "PPAllianceBattleship",
+    "originalBounds": {
+      "min": [
+        -0.9334975857818812,
+        -0.275972,
+        -1.3253821392375418
+      ],
+      "max": [
+        0.9314864553914268,
+        0.6259125558166504,
+        1.5261545665651546
+      ]
+    },
+    "bounds": {
+      "min": [
+        -0.9334975857818811,
+        -0.275972,
+        -1.325382139237542
+      ],
+      "max": [
+        0.9314864553914267,
+        0.6259125558166504,
+        1.5261545665651546
+      ]
+    },
+    "base": {
+      "offset": [
+        -0.0021294912464255855,
+        -0.07846697436374672,
+        0.10037274476221603
+      ],
+      "rotation": [
+        0,
+        3.14,
+        0
+      ],
+      "scale": [
+        0.21486017752466402,
+        0.29221043166718036,
+        0.23760751804764424
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.275972,
+          0.100071
+        ],
+        "rotation": [
+          0,
+          3.14,
+          0
+        ],
+        "scale": [
+          1.5,
+          1.5,
+          1.5
+        ]
+      },
+      "extents": {
+        "min": [
+          -5.635224176431697,
+          -0.6914615022351742,
+          -5.901124212280123
+        ],
+        "max": [
+          5.635224176431697,
+          0.8118550022351743,
+          6.101266212280123
+        ],
+        "size": [
+          11.270448352863394,
+          1.5033165044703485,
+          12.002390424560247
+        ]
+      },
+      "markers": {
+        "phasers_fore": {
+          "position": [
+            0,
+            -0.176993,
+            1.000711
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "phasers_aft": {
+          "position": [
+            0.000162,
+            0.625218,
+            -0.866216
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "torpedo_port": {
+          "position": [
+            0.3661630755031927,
+            0,
+            0.507111010450428
+          ],
+          "direction": [
+            0.13893002805664348,
+            0,
+            0.9903021999895689
+          ]
+        },
+        "torpedo_starboard": {
+          "position": [
+            -0.37284087931714543,
+            0,
+            0.5023809055991516
+          ],
+          "direction": [
+            -0.1393809762855832,
+            0,
+            0.9902388315197894
+          ]
+        },
+        "engine_port": {
+          "position": [
+            -0.36589030681618484,
+            0.347955306264253,
+            -0.9010214308126876
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            0.37260614426986066,
+            0.3597276054817877,
+            -0.9002692651989851
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "camera_fore": {
+          "position": [
+            0,
+            0,
+            1.000711
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "camera_aft": {
+          "position": [
+            0,
+            0,
+            -1.000711
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "camera_port": {
+          "position": [
+            0.75673,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ]
+        },
+        "camera_starboard": {
+          "position": [
+            -0.75673,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            0,
+            0
+          ]
+        },
+        "blaster_fore": {
+          "position": [
+            -0.00004438507734219972,
+            0.56257748899829,
+            -0.02786860877870094
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "blaster_fore_port": {
+          "position": [
+            0.25,
+            0.56257748899829,
+            -0.02786860877870094
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "blaster_fore_starboard": {
+          "position": [
+            -0.25,
+            0.56257748899829,
+            -0.02786860877870094
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "torpedo_centre_port": {
+          "position": [
+            0.12,
+            0,
+            0.5
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "torpedo_centre_starboard": {
+          "position": [
+            -0.12,
+            0,
+            0.5
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_battleship.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_battleship_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_battleship.glb",
+            "ratio": 0.19,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_battleship_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_battleship.glb",
+            "ratio": 0.113,
+            "error": 0.01,
+            "texture_size": 128,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_battleship_lod3.png",
+          "scale": [
+            2.8536,
+            0.9019,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_battleship.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -0.9334975857818811,
+          -0.275972,
+          -1.325382139237542
+        ],
+        "max": [
+          0.9314864553914267,
+          0.6259125558166504,
+          1.5261545665651546
+        ],
+        "size": [
+          1.8649840411733078,
+          0.9018845558166504,
+          2.8515367058026966
+        ]
+      },
+      "markers": {
+        "phasers_fore": {
+          "position": [
+            0.0023906779390656754,
+            -0.5414615,
+            -1.4009935962386966
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "phasers_aft": {
+          "position": [
+            -0.0023123718498711233,
+            0.6618550000000001,
+            1.3993929650884946
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "torpedo_port": {
+          "position": [
+            -0.5480324389183072,
+            -0.275972,
+            -0.6614693069784134
+          ],
+          "direction": [
+            -0.13735264416849827,
+            0,
+            -0.9905222113309332
+          ]
+        },
+        "torpedo_starboard": {
+          "position": [
+            0.5604607873017238,
+            -0.275972,
+            -0.6526086934941815
+          ],
+          "direction": [
+            0.14095790627556798,
+            0,
+            -0.9900155901087659
+          ]
+        },
+        "engine_port": {
+          "position": [
+            0.5466822425369763,
+            0.24596095939637952,
+            1.4524755365044284
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            -0.5610592322618878,
+            0.2636194082226816,
+            1.449583036724845
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "camera_fore": {
+          "position": [
+            0.0023906779390656754,
+            -0.275972,
+            -1.4009935962386966
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "camera_aft": {
+          "position": [
+            -0.0023906779390656754,
+            -0.275972,
+            1.6011355962386966
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "camera_port": {
+          "position": [
+            -1.1350935603902714,
+            -0.275972,
+            0.09826318763776037
+          ],
+          "direction": [
+            -0.9999987317275396,
+            0,
+            -0.0015926529164868284
+          ]
+        },
+        "camera_starboard": {
+          "position": [
+            1.1350935603902714,
+            -0.275972,
+            0.10187881236223961
+          ],
+          "direction": [
+            0.9999987317275396,
+            0,
+            0.0015926529164868284
+          ]
+        },
+        "blaster_fore": {
+          "position": [
+            -2.710505431213761e-20,
+            0.567894233497435,
+            0.14187396618560216
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "blaster_fore_port": {
+          "position": [
+            -0.37506610192940204,
+            0.567894233497435,
+            0.1412766153068853
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "blaster_fore_starboard": {
+          "position": [
+            0.37493294686625256,
+            0.567894233497435,
+            0.14247110499425042
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "torpedo_centre_port": {
+          "position": [
+            -0.17880528202359197,
+            -0.275972,
+            -0.6502147263206222
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "torpedo_centre_starboard": {
+          "position": [
+            0.18119426139832223,
+            -0.275972,
+            -0.649641371270687
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_battleship_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_battleship_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_battleship.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_battleship_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_battleship_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_battleship_recreated_lod3.png",
+          "scale": [
+            2.8536,
+            0.9019,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_battleship_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "alliance_courier",
+    "variant": "model",
+    "candidate": "assets/models/alliance_courier_recreated",
+    "source": "scripts/art/lod-sources/alliance_courier.glb",
+    "concept": "PPAllianceCourier",
+    "originalBounds": {
+      "min": [
+        -0.22248367921350146,
+        -0.0623404,
+        -0.3791874178585518
+      ],
+      "max": [
+        0.2221241591541036,
+        0.06234039328536988,
+        0.3777402113110257
+      ]
+    },
+    "bounds": {
+      "min": [
+        -0.22248367921350146,
+        -0.06234039999999999,
+        -0.3791874178585518
+      ],
+      "max": [
+        0.22212415915410358,
+        0.06234039328536989,
+        0.3777402113110257
+      ]
+    },
+    "base": {
+      "offset": [
+        -0.00020415708911622477,
+        -0.04224377890675461,
+        0.05333856069328785
+      ],
+      "rotation": [
+        0,
+        3.14,
+        0
+      ],
+      "scale": [
+        0.07079751929254371,
+        0.09134827819155007,
+        0.09010886738869844
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.0623404,
+          0
+        ],
+        "rotation": [
+          0,
+          3.14,
+          0
+        ],
+        "scale": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      },
+      "extents": {
+        "min": [
+          -0.2223608,
+          -0.0623404,
+          -0.3776708
+        ],
+        "max": [
+          0.2222476,
+          0.0623404,
+          0.379188
+        ],
+        "size": [
+          0.4446084,
+          0.1246808,
+          0.7568588
+        ]
+      },
+      "markers": {
+        "engine_port": {
+          "position": [
+            0.36,
+            0.13,
+            -0.93
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            -0.36,
+            0.13,
+            -0.93
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "blaster_fore": {
+          "position": [
+            0,
+            0.12,
+            0.9
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "camera_fore": {
+          "position": [
+            0,
+            0.15,
+            0.99
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_courier.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_courier_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_courier.glb",
+            "ratio": 0.113,
+            "error": 0.01,
+            "texture_size": 128,
+            "remesh_voxel_size": 0.021
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_courier_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_courier.glb",
+            "ratio": 0.19,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.021
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_courier_lod3.png",
+          "scale": [
+            0.7576,
+            0.1247,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_courier.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -0.22248367921350146,
+          -0.06234039999999999,
+          -0.3791874178585518
+        ],
+        "max": [
+          0.22212415915410358,
+          0.06234039328536989,
+          0.3777402113110257
+        ],
+        "size": [
+          0.44460783836760503,
+          0.12468079328536988,
+          0.7569276291695775
+        ]
+      },
+      "markers": {
+        "engine_port": {
+          "position": [
+            -0.1445922842536988,
+            -0.010340399999999993,
+            0.37177018618267066
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            0.14340735048383257,
+            -0.010340399999999993,
+            0.37222887022261886
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "blaster_fore": {
+          "position": [
+            0.0005733550499352582,
+            -0.014340399999999996,
+            -0.35999954342191426
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "camera_fore": {
+          "position": [
+            0.000630690554928784,
+            -0.0023403999999999994,
+            -0.39599949776410565
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_courier_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_courier_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_courier.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_courier_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_courier_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_courier_recreated_lod3.png",
+          "scale": [
+            0.7576,
+            0.1247,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_courier_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "alliance_starbase",
+    "variant": "model",
+    "candidate": "assets/models/alliance_starbase_recreated",
+    "source": "scripts/art/lod-sources/alliance_starbase.glb",
+    "concept": "PPAllianceStation",
+    "originalBounds": {
+      "min": [
+        -14.226287305355072,
+        -0.2,
+        -17.05310618877411
+      ],
+      "max": [
+        14.2324697971344,
+        14.125019598007203,
+        17.03184163570404
+      ]
+    },
+    "bounds": {
+      "min": [
+        -14.226287305355072,
+        -0.1999999999999984,
+        -17.05310618877411
+      ],
+      "max": [
+        14.2324697971344,
+        14.125019598007203,
+        17.03184163570404
+      ]
+    },
+    "base": {
+      "offset": [
+        0.0030912458896636963,
+        1.7950736913361025,
+        -0.01063227653503418
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        2.803818539119346,
+        3.4696934481705566,
+        3.358123064581324
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.2,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          15,
+          18,
+          18
+        ]
+      },
+      "base_build": {
+        "budget_mb": 16
+      },
+      "extents": {
+        "min": [
+          -14.226287305355072,
+          -0.2,
+          -17.05310618877411
+        ],
+        "max": [
+          14.2324697971344,
+          14.125019598007203,
+          17.03184163570404
+        ],
+        "size": [
+          28.45875710248947,
+          14.325019598007202,
+          34.08494782447815
+        ]
+      },
+      "markers": {},
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_starbase.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_starbase_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_starbase.glb",
+            "ratio": 0.319,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_starbase_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_starbase.glb",
+            "ratio": 0.113,
+            "error": 0.01,
+            "texture_size": 128,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_starbase_lod3.png",
+          "scale": [
+            34.0849,
+            14.325,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_starbase.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -14.226287305355072,
+          -0.1999999999999984,
+          -17.05310618877411
+        ],
+        "max": [
+          14.2324697971344,
+          14.125019598007203,
+          17.03184163570404
+        ],
+        "size": [
+          28.45875710248947,
+          14.325019598007202,
+          34.08494782447815
+        ]
+      },
+      "markers": {},
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_starbase_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_starbase_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_starbase.glb",
+            "ratio": 0.65,
+            "error": 0.0005,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_starbase_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_starbase_far.glb",
+            "ratio": 0.23,
+            "error": 0.001,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_starbase_recreated_lod3.png",
+          "scale": [
+            34.0849,
+            14.325,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_starbase_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "alliance_research_outpost",
+    "variant": "model",
+    "candidate": "assets/models/alliance_research_outpost_recreated",
+    "source": "scripts/art/lod-sources/alliance_research_outpost.glb",
+    "concept": "PPAllianceResearchOutpost",
+    "originalBounds": {
+      "min": [
+        -3.7817976474761963,
+        -0.19994945526123048,
+        -3.7996280193328857
+      ],
+      "max": [
+        3.780076742172241,
+        3.1662600517272947,
+        3.79475998878479
+      ]
+    },
+    "bounds": {
+      "min": [
+        -3.7817976474761963,
+        -0.19994945526123076,
+        -3.799628019332885
+      ],
+      "max": [
+        3.780076742172241,
+        3.1662600517272947,
+        3.794759988784789
+      ]
+    },
+    "base": {
+      "offset": [
+        -0.0008604526519775391,
+        0.08417980946977988,
+        -0.7894886427905712
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.8642141891155869,
+        0.9631500927485385,
+        1.3807978061614878
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.2,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          4,
+          4,
+          4
+        ]
+      },
+      "extents": {
+        "min": [
+          -3.7817976474761963,
+          -0.2,
+          -3.7996280193328857
+        ],
+        "max": [
+          3.780076742172241,
+          3.1662600517272947,
+          3.79475998878479
+        ],
+        "size": [
+          7.5618743896484375,
+          3.366260051727295,
+          7.594388008117676
+        ]
+      },
+      "markers": {},
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_research_outpost.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_research_outpost_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_research_outpost.glb",
+            "ratio": 0.319,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_research_outpost_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/alliance_research_outpost.glb",
+            "ratio": 0.113,
+            "error": 0.01,
+            "texture_size": 128,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_research_outpost_lod3.png",
+          "scale": [
+            7.5944,
+            3.3662,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_research_outpost.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -3.7817976474761963,
+          -0.19994945526123076,
+          -3.799628019332885
+        ],
+        "max": [
+          3.780076742172241,
+          3.1662600517272947,
+          3.794759988784789
+        ],
+        "size": [
+          7.5618743896484375,
+          3.3662095069885254,
+          7.594388008117674
+        ]
+      },
+      "markers": {},
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_research_outpost_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_research_outpost_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_research_outpost.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/alliance_research_outpost_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_research_outpost_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/alliance_research_outpost_recreated_lod3.png",
+          "scale": [
+            7.5944,
+            3.3662,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/alliance_research_outpost_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "dynasty_cruiser",
+    "variant": "model",
+    "candidate": "assets/models/dynasty_cruiser_recreated",
+    "source": "scripts/art/lod-sources/dynasty_cruiser.glb",
+    "concept": "PPDynastyCruiser",
+    "originalBounds": {
+      "min": [
+        -1.3671599097181155,
+        -0.4,
+        -1.124585501290709
+      ],
+      "max": [
+        1.3662493500884378,
+        0.8132160663604736,
+        1.7240639703458673
+      ]
+    },
+    "bounds": {
+      "min": [
+        -1.3671599097181153,
+        -0.4,
+        -1.124585501290709
+      ],
+      "max": [
+        1.3662493500884378,
+        0.8132160663604736,
+        1.7240639703458673
+      ]
+    },
+    "base": {
+      "offset": [
+        -0.0004034475664433934,
+        -0.2453347071569444,
+        0.5352310607180139
+      ],
+      "rotation": [
+        0,
+        3.14,
+        0
+      ],
+      "scale": [
+        0.2777858418833213,
+        0.5523760435163289,
+        0.3254459718525649
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.4,
+          0.3
+        ],
+        "rotation": [
+          0,
+          3.14,
+          0
+        ],
+        "scale": [
+          1.5,
+          1.5,
+          1.5
+        ]
+      },
+      "extents": {
+        "min": [
+          -1.3691397150193694,
+          -0.4,
+          -1.1267647541034258
+        ],
+        "max": [
+          1.368830553179971,
+          0.8132160663604736,
+          1.7255248113575536
+        ],
+        "size": [
+          2.7379702681993403,
+          1.2132160663604736,
+          2.8522895654609792
+        ]
+      },
+      "target_points": [
+        {
+          "position": [
+            0.5,
+            -0.1,
+            0
+          ]
+        },
+        {
+          "position": [
+            -0.25,
+            -0.1,
+            0.25
+          ]
+        },
+        {
+          "position": [
+            -0.25,
+            -0.1,
+            -0.25
+          ]
+        }
+      ],
+      "markers": {
+        "engine_port": {
+          "position": [
+            -0.65,
+            0,
+            1.55
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            0.65,
+            0,
+            1.55
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "phasers_fore": {
+          "position": [
+            0,
+            -0.15,
+            -0.95
+          ],
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "phasers_aft": {
+          "position": [
+            0,
+            0.5,
+            1.5
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "phasers_port": {
+          "position": [
+            -1.369,
+            0.2,
+            0.3
+          ],
+          "direction": [
+            -1,
+            0,
+            0
+          ]
+        },
+        "phasers_starboard": {
+          "position": [
+            1.369,
+            0.2,
+            0.3
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/dynasty_cruiser.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/dynasty_cruiser_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/dynasty_cruiser.glb",
+            "ratio": 0.319,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/dynasty_cruiser_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/dynasty_cruiser.glb",
+            "ratio": 0.113,
+            "error": 0.01,
+            "texture_size": 128,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "billboard": "assets/models/dynasty_cruiser_lod3.png",
+          "scale": [
+            2.8523,
+            1.2132,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/dynasty_cruiser.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -1.3671599097181153,
+          -0.4,
+          -1.124585501290709
+        ],
+        "max": [
+          1.3662493500884378,
+          0.8132160663604736,
+          1.7240639703458673
+        ],
+        "size": [
+          2.733409259806553,
+          1.2132160663604736,
+          2.8486494716365764
+        ]
+      },
+      "markers": {
+        "engine_port": {
+          "position": [
+            0.978701681465183,
+            -0.4,
+            -2.023444214672955
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            -0.9712958454035192,
+            -0.4,
+            -2.0265498878601043
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "phasers_fore": {
+          "position": [
+            -0.00226953040599373,
+            -0.625,
+            1.7249981927117437
+          ],
+          "direction": [
+            -0.0015926529164868284,
+            0,
+            0.9999987317275396
+          ]
+        },
+        "phasers_aft": {
+          "position": [
+            0.0035834690620953633,
+            0.35,
+            -1.9499971463869639
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "phasers_port": {
+          "position": [
+            2.0542140894149217,
+            -0.09999999999999998,
+            -0.14672891651338704
+          ],
+          "direction": [
+            0.9999987317275396,
+            0,
+            0.0015926529164868284
+          ]
+        },
+        "phasers_starboard": {
+          "position": [
+            -2.052780701790083,
+            -0.09999999999999998,
+            -0.15326994204139843
+          ],
+          "direction": [
+            -0.9999987317275396,
+            0,
+            -0.0015926529164868284
+          ]
+        }
+      },
+      "target_points": [
+        {
+          "position": [
+            -0.7499990487956546,
+            -0.55,
+            0.29880551031263486
+          ]
+        },
+        {
+          "position": [
+            0.37559676924150986,
+            -0.55,
+            -0.07440227955414475
+          ]
+        },
+        {
+          "position": [
+            0.37440227955414473,
+            -0.55,
+            0.6755967692415099
+          ]
+        }
+      ],
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/dynasty_cruiser_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/dynasty_cruiser_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/dynasty_cruiser.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/dynasty_cruiser_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/dynasty_cruiser_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/dynasty_cruiser_recreated_lod3.png",
+          "scale": [
+            2.8523,
+            1.2132,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/dynasty_cruiser_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "dynasty_battleship",
+    "variant": "model",
+    "candidate": "assets/models/dynasty_battleship_recreated",
+    "source": "scripts/art/lod-sources/dynasty_battleship.glb",
+    "concept": "PPDynastyBattleship",
+    "originalBounds": {
+      "min": [
+        -1.8981809389027724,
+        -0.3,
+        -1.697032104635796
+      ],
+      "max": [
+        1.8985618167477414,
+        1.0864595890045166,
+        2.0412314812741505
+      ]
+    },
+    "bounds": {
+      "min": [
+        -1.8981809389027724,
+        -0.30000000000000004,
+        -1.697032104635796
+      ],
+      "max": [
+        1.8985618167477414,
+        1.0864595890045168,
+        2.0412314812741505
+      ]
+    },
+    "base": {
+      "offset": [
+        0.0002534139497702981,
+        -0.15436426145121962,
+        0.5964022338339829
+      ],
+      "rotation": [
+        0,
+        3.14,
+        0
+      ],
+      "scale": [
+        0.3858483243988938,
+        0.5201276354597857,
+        0.39540960679826037
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.3,
+          0.2
+        ],
+        "rotation": [
+          0,
+          3.14,
+          0
+        ],
+        "scale": [
+          2,
+          2,
+          2
+        ]
+      },
+      "extents": {
+        "min": [
+          -1.9011206581177087,
+          -0.3,
+          -1.7000550403194616
+        ],
+        "max": [
+          1.9015838440234958,
+          1.0864595890045166,
+          2.0442562229928125
+        ],
+        "size": [
+          3.8027045021412045,
+          1.3864595890045166,
+          3.744311263312274
+        ]
+      },
+      "target_points": [
+        {
+          "position": [
+            0.5,
+            -0.1,
+            0
+          ]
+        },
+        {
+          "position": [
+            -0.25,
+            -0.1,
+            0.25
+          ]
+        },
+        {
+          "position": [
+            -0.25,
+            -0.1,
+            -0.25
+          ]
+        }
+      ],
+      "markers": {
+        "engine_port": {
+          "position": [
+            -1.05,
+            0,
+            1.85
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            1.05,
+            0,
+            1.85
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/dynasty_battleship.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/dynasty_battleship_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/dynasty_battleship.glb",
+            "ratio": 0.536,
+            "error": 0.01,
+            "texture_size": 512,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/dynasty_battleship_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/dynasty_battleship.glb",
+            "ratio": 0.113,
+            "error": 0.01,
+            "texture_size": 128,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "billboard": "assets/models/dynasty_battleship_lod3.png",
+          "scale": [
+            3.8027,
+            1.3865,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/dynasty_battleship.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -1.8981809389027724,
+          -0.30000000000000004,
+          -1.697032104635796
+        ],
+        "max": [
+          1.8985618167477414,
+          1.0864595890045168,
+          2.0412314812741505
+        ],
+        "size": [
+          3.796742755650514,
+          1.3864595890045168,
+          3.7382635859099462
+        ]
+      },
+      "markers": {
+        "engine_port": {
+          "position": [
+            2.105890152418834,
+            -0.3,
+            -3.4966507362672736
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            -2.0941045208368316,
+            -0.3,
+            -3.5033398785165186
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        }
+      },
+      "target_points": [
+        {
+          "position": [
+            -0.9999987317275395,
+            -0.5,
+            0.19840734708351318
+          ]
+        },
+        {
+          "position": [
+            0.5007956923220132,
+            -0.5,
+            -0.29920303940552634
+          ]
+        },
+        {
+          "position": [
+            0.49920303940552635,
+            -0.5,
+            0.7007956923220131
+          ]
+        }
+      ],
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/dynasty_battleship_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/dynasty_battleship_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/dynasty_battleship.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/dynasty_battleship_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/dynasty_battleship_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/dynasty_battleship_recreated_lod3.png",
+          "scale": [
+            3.8027,
+            1.3865,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/dynasty_battleship_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "dynasty_courier",
+    "variant": "model",
+    "candidate": "assets/models/dynasty_courier_recreated",
+    "source": "scripts/art/lod-sources/dynasty_courier.glb",
+    "concept": "PPDynastyCourier",
+    "originalBounds": {
+      "min": [
+        -0.7116377216674142,
+        -0.1,
+        -0.5031922558587472
+      ],
+      "max": [
+        0.7110482131107413,
+        0.2415822461247444,
+        0.9064310057193945
+      ]
+    },
+    "bounds": {
+      "min": [
+        -0.7116377216674142,
+        -0.09999999999999999,
+        -0.5031922558587472
+      ],
+      "max": [
+        0.7110482131107413,
+        0.2415822461247444,
+        0.9064310057193945
+      ]
+    },
+    "base": {
+      "offset": [
+        -0.00026673890008355183,
+        -0.03946643535668995,
+        0.3059874340864005
+      ],
+      "rotation": [
+        0,
+        3.14,
+        0
+      ],
+      "scale": [
+        0.14458208506832923,
+        0.21619130137710688,
+        0.17590384914016755
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          -0.1,
+          0.2
+        ],
+        "rotation": [
+          0,
+          3.14,
+          0
+        ],
+        "scale": [
+          0.75,
+          0.75,
+          0.75
+        ]
+      },
+      "extents": {
+        "min": [
+          -0.7124516218446484,
+          -0.1,
+          -0.5042907575195503
+        ],
+        "max": [
+          0.712478993161924,
+          0.2415822461247444,
+          0.9073702938917316
+        ],
+        "size": [
+          1.4249306150065724,
+          0.3415822461247444,
+          1.411661051411282
+        ]
+      },
+      "target_points": [
+        {
+          "position": [
+            0.5,
+            -0.1,
+            0
+          ]
+        },
+        {
+          "position": [
+            -0.25,
+            -0.1,
+            0.25
+          ]
+        },
+        {
+          "position": [
+            -0.25,
+            -0.1,
+            -0.25
+          ]
+        }
+      ],
+      "markers": {
+        "engine_port": {
+          "position": [
+            -0.25,
+            0,
+            0.78
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            0.25,
+            0,
+            0.78
+          ],
+          "direction": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/dynasty_courier.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/dynasty_courier_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/dynasty_courier.glb",
+            "ratio": 0.19,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/dynasty_courier_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "assets/models/dynasty_courier.glb",
+            "ratio": 0.19,
+            "error": 0.01,
+            "texture_size": 256,
+            "remesh_voxel_size": 0.0211
+          }
+        },
+        {
+          "billboard": "assets/models/dynasty_courier_lod3.png",
+          "scale": [
+            1.4249,
+            0.3416,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/dynasty_courier.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -0.7116377216674142,
+          -0.09999999999999999,
+          -0.5031922558587472
+        ],
+        "max": [
+          0.7110482131107413,
+          0.2415822461247444,
+          0.9064310057193945
+        ],
+        "size": [
+          1.4226859347781555,
+          0.3415822461247444,
+          1.4096232615781417
+        ]
+      },
+      "markers": {
+        "engine_port": {
+          "position": [
+            0.18843146415505843,
+            -0.1,
+            -0.3847006356387693
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        },
+        "engine_starboard": {
+          "position": [
+            -0.18656806024276887,
+            -0.1,
+            -0.3852978804824519
+          ],
+          "direction": [
+            0.0015926529164868284,
+            0,
+            -0.9999987317275396
+          ]
+        }
+      },
+      "target_points": [
+        {
+          "position": [
+            -0.3749995243978273,
+            -0.17500000000000002,
+            0.19940275515631745
+          ]
+        },
+        {
+          "position": [
+            0.18779838462075493,
+            -0.17500000000000002,
+            0.012798860222927644
+          ]
+        },
+        {
+          "position": [
+            0.18720113977707237,
+            -0.17500000000000002,
+            0.38779838462075494
+          ]
+        }
+      ],
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/dynasty_courier_recreated.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/dynasty_courier_recreated_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/dynasty_courier.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "max_distance": 400,
+          "model": "assets/models/dynasty_courier_recreated_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/dynasty_courier_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        },
+        {
+          "billboard": "assets/models/dynasty_courier_recreated_lod3.png",
+          "scale": [
+            1.4249,
+            0.3416,
+            1
+          ],
+          "capture": {
+            "source": "assets/models/dynasty_courier_recreated.glb",
+            "yaw_views": 8,
+            "resolution": 256,
+            "pitch": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "alliance_courier",
+    "variant": "dock_probe",
+    "candidate": "assets/models/alliance_courier_recreated_dock_probe",
+    "source": "scripts/art/lod-sources/alliance_courier_dock_probe.glb",
+    "concept": "PPAllianceCourier",
+    "originalBounds": {
+      "min": [
+        -0.5559020042419434,
+        0,
+        -0.944176971912384
+      ],
+      "max": [
+        0.5556190013885498,
+        0.3117019832134247,
+        0.9479699730873108
+      ]
+    },
+    "bounds": {
+      "min": [
+        -0.5559020042419434,
+        2.7755575615628914e-17,
+        -0.944176971912384
+      ],
+      "max": [
+        0.5556190013885498,
+        0.3117019832134247,
+        0.9479699730873108
+      ]
+    },
+    "base": {
+      "offset": [
+        -0.00014150142669677734,
+        0.05024155273311348,
+        -0.13325688331543867
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.17699379823135927,
+        0.22837069547887517,
+        0.22525558613305333
+      ]
+    },
+    "originalRig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "markers": {
+        "dock_port": {
+          "position": [
+            -5,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            0,
+            0
+          ]
+        },
+        "dock_starboard": {
+          "position": [
+            5,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_courier.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_courier_lod1.glb",
+          "tier_rig": "identity"
+        },
+        {
+          "model": "assets/models/alliance_courier_lod2.glb",
+          "tier_rig": "identity"
+        }
+      ]
+    },
+    "rig": {
+      "base": {
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "extents": {
+        "min": [
+          -0.5559020042419434,
+          2.7755575615628914e-17,
+          -0.944176971912384
+        ],
+        "max": [
+          0.5556190013885498,
+          0.3117019832134247,
+          0.9479699730873108
+        ],
+        "size": [
+          1.1115210056304932,
+          0.3117019832134247,
+          1.8921469449996948
+        ]
+      },
+      "markers": {
+        "dock_port": {
+          "position": [
+            -5,
+            0,
+            0
+          ],
+          "direction": [
+            -1,
+            0,
+            0
+          ]
+        },
+        "dock_starboard": {
+          "position": [
+            5,
+            0,
+            0
+          ],
+          "direction": [
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "lod": [
+        {
+          "max_distance": 15,
+          "model": "assets/models/alliance_courier_recreated_dock_probe.glb"
+        },
+        {
+          "max_distance": 100,
+          "model": "assets/models/alliance_courier_recreated_dock_probe_lod1.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_courier_dock_probe.glb",
+            "ratio": 0.65,
+            "error": 0.025,
+            "texture_size": 256
+          }
+        },
+        {
+          "model": "assets/models/alliance_courier_recreated_dock_probe_lod2.glb",
+          "tier_rig": "identity",
+          "generate": {
+            "source": "scripts/art/lod-sources/alliance_courier_dock_probe_far.glb",
+            "ratio": 0.23,
+            "error": 0.08,
+            "texture_size": 128
+          }
+        }
+      ]
+    }
+  }
+]

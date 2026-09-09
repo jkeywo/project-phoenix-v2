@@ -15,6 +15,15 @@ render path, with lighting switchable between off / ambient / directional.
 It provides a short feedback loop for tuning lighting, rigs, LODs, textures,
 and WGSL without starting a scenario and flying to the subject.
 
+Combat Test and Falling Skyway's recreated ship/station assets are authored by
+`scripts/art/recreate-fleet.py`, with concept mappings and reproduction commands
+in `scripts/art/README.md`. Their `_recreated` GLBs embed the original rendered
+size and orientation; identity sidecars preserve gameplay markers and target
+points. The courier docking variant has a separate fitted GLB because its
+original rig used a different scale. The same standard LOD and billboard tools
+generate their ladders; the simpler mesh sources live outside the shipped bundle
+under `scripts/art/lod-sources/`.
+
 ```bash
 npm run dev:viewer     # → :8081
 start-viewer.bat       # Windows: same, plus a compile check and opens the browser
@@ -139,6 +148,9 @@ same longitude remap. Normal vectors are renormalised after resampling.
   with the default feature set also present. Shared visual constructors live
   outside `crate::server`, so the viewer can exercise the real asset/material
   path without carrying the browser-host bridge or viewscreen renderer.
+  Its `viewer_set_world_fetch_callback` and `viewer_push_sidecar_toml` WASM
+  exports forward to the shared content cache directly; `viewer.html` uses
+  those bindings because the server bridge exports are absent in this build.
 - Bevy asset hot-reload does not work on wasm. Editing a `.wgsl` triggers a
   Trunk rebuild and page reload — that reload *is* the iteration loop.
 - The model dropdown reads the gitignored index generated on every

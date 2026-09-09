@@ -57,7 +57,7 @@ icon = "ship"
 [mesh]
 # Shares the Dynasty courier hull with `ship_requiem_courier`: a civilian hauler
 # is the same silhouette at this scale, and a new .glb for it would buy nothing.
-model = "assets/models/dynasty_courier.glb"
+model = "assets/models/dynasty_courier_recreated.glb"
 shape = "cuboid"
 size = [4.0, 1.5, 6.0]
 colour = [0.55, 0.75, 0.45]

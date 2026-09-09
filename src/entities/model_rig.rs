@@ -598,7 +598,10 @@ position = [-0.25, -0.1, -0.25]
         let mesh = cfg.mesh.as_ref().expect("mesh present");
         let model_path = mesh.model.as_deref().expect("model path present");
         let path = sidecar_path(model_path, mesh.variant.as_deref());
-        assert_eq!(path, "assets/models/alliance_destroyer.model.toml");
+        assert_eq!(
+            path,
+            "assets/models/alliance_destroyer_recreated.model.toml"
+        );
 
         // Parse the sidecar and resolve the linked marker.
         let rig_toml =

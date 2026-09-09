@@ -493,9 +493,19 @@ fn percent_decode(s: &str) -> String {
 
 // ── JS control surface ─────────────────────────────────────────────────────
 
-// TOML fetching (rig sidecars, entity configs) reuses the server bridge's
-// `set_world_fetch_callback` + `wasm_push_sidecar_toml` exports — the same pair
-// `server.html` wires up. See `viewer.html` for the JS side.
+// The standalone viewer has no server bridge. Export its own thin bindings
+// over the shared content cache so rig and entity fetches work in that build.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_set_world_fetch_callback(callback: js_sys::Function) {
+    crate::entities::config_cache::set_world_fetch_callback(callback);
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_push_sidecar_toml(path: String, toml_str: String) -> bool {
+    crate::entities::config_cache::wasm_push_sidecar_toml(path, toml_str)
+}
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]

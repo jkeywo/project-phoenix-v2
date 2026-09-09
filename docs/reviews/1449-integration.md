@@ -1,11 +1,14 @@
 # Integration closeout map for #1449
 
-Prepared against local main after the issue commits. This file records decisions
-and prerequisites; final gate results will be appended before push.
+The initial issue batch was assembled on local main, then published through
+`codex/1449-completion` and [PR #1451](https://github.com/jkeywo/project-phoenix-v2/pull/1451).
+Automatic approval review rejected a direct main push and recommended this
+branch/PR route. Remote main remains `349dea20`. The current fleet repair and
+its validation are recorded in [1449-ci-recovery.md](1449-ci-recovery.md).
 
 ## Closure rules
 
-After required integrated gates and push, #1248, #1244, #1181, #1238, #1241 and
+After required gates and upstream integration, #1248, #1244, #1181, #1238, #1241 and
 #1269 have concrete completion evidence in their per-issue receipts. The #1269
 closure records recovered current behavior, not an invented causal fix.
 #1239/#1055/#1056 have current passing asset measurements; headless timing
@@ -28,7 +31,9 @@ its two-arm CI measurements. #1183/#1240 remain superseded by #1400.
 - #1126: real capture/play correspondence, permission changes, unplug and
   multi-device contention. Native enumeration/refusal checks are supporting evidence.
 - #1127/#1128: real Windows adoption and native focus/reflow judgment; this rig
-  has only one monitor, so the native layout diagnostic explicitly skipped.
+  initially had one monitor, so the native layout diagnostic explicitly skipped.
+  The 9 September four-display rerun passed the real geometry and two-pane
+  accessibility checks; see [hardware receipt](1128-four-display-verification.md).
   #1422 still blocks a completed 200% T3 claim.
 - #1320/#1323: two equal human GMs, ordinary crews on the prepared Fleet hulls,
   and two physical gamepads. Keep #1273/#1324 and broader parents dependent on
@@ -42,7 +47,7 @@ its two-arm CI measurements. #1183/#1240 remain superseded by #1400.
 
 Unrelated pre-existing wiki and planning changes remain unstaged throughout.
 
-## Integrated evidence
+## Initial integration evidence
 
 The ordinary JavaScript/PASM gate batch completed on local main. The first
 Vitest run caught an obsolete bridge-source assertion in `gm-local-projection`;
@@ -93,11 +98,34 @@ the completed gates; that mission was restarted from the beginning.
 Additional #1044 preparation in `e683a2e2` supplies all **357 mission-owned
 bracketed strings** in `docs/acceptance/1044-skyway-copy-inventory.md`, grouped by
 surface with source lines and hashes. Generation and `--check` passed;
-independent review passed. Human approval remains NOT RUN. A full unmodified
-browser timeline check is running separately, with Backfill and ordinary
-spectators; it will not replace per-console human judgments. Its first complete
-post-outage attempt passed through transfer opening, then failed an incorrect
-hold-berth expectation: shipped seed 1034 actually booked and served Havelock.
-The corrected branch assertions are being checked in a fresh full run. The
-completed implementation batch can be pushed for matching Linux CI while that
-separate opt-in acceptance test remains uncommitted and pending.
+independent review passed. Human approval remains NOT RUN.
+
+The full unmodified browser timeline subsequently passed in `b948d943`:
+**1 passed, 0 failed, 0 skipped, 30.7 minutes**. The seed-1034 mission advanced
+through both acts, all three storm bands, transfer opening/closure and its
+visible nine-row ending at tick 110208. The authored world was unchanged;
+Backfill flew the ship while two ordinary Spectators observed. The test used
+the existing host launch binding, so it does not claim an operator clicked
+the hidden launch button. The receipt records the earlier failed outcome
+oracles and their correction, final state, screenshot, and human limitations:
+[1044-browser-flow.md](1044-browser-flow.md). This is the major-flow browser
+proof, not per-console crew or editorial acceptance.
+
+The first full Linux matrix on `705f8524` failed five smoke cases despite a
+passing ordinary PR run. The recovery receipt identifies the compact Helm
+overflow, three modal test-setup failures, and a real crew-rating lockstep
+defect. `249cf4d9` fixes the latter and passes all 16 two-host regressions.
+Release-browser, final native gates and a new full Linux matrix remain pending.
+Issue closure waits for upstream integration; human/external obligations above
+remain separate even when the automated checks pass.
+
+The reconnect investigation subsequently fixed per-ship impulse modifiers,
+pending hull-damage continuation, insertion-tick drive writes, current mesh
+crew authority, and fixed-step/collider synchronization (`e10015b6`). The fresh
+normal browser bundle passed five strict post-reconnect checkpoint repeats.
+Focused coverage passed 18 native tests plus two snapshot continuation tests;
+independent integration review passed. Final JavaScript gates passed 7,237
+tests and all drift checks. The native gate found and corrected test-module
+ordering (`22afe996`) and a broadcast fixture's modifier ownership (`cd030d16`);
+both corrected broadcast tests passed. Full native and Linux results follow in
+the CI recovery receipt.

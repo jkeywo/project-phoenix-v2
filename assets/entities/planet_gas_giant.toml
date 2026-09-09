@@ -29,19 +29,53 @@ longitude_segments = 192
 latitude_segments = 96
 
 [planet.surface]
-albedo = "assets/planets/gas_giant/albedo.webp"
-normal = "assets/planets/gas_giant/normal.webp"
-roughness = "assets/planets/gas_giant/roughness.webp"
-emissive_colour = "assets/planets/gas_giant/emissive_colour.webp"
-emissive_mask = "assets/planets/gas_giant/emissive_mask.webp"
+albedo = "assets/planets/gas_giant/surface_colour.ktx2"
+normal = "assets/planets/gas_giant/surface_normal.ktx2"
+roughness = "assets/planets/gas_giant/surface_material.ktx2"
+emissive_colour = "assets/planets/gas_giant/emission_colour.ktx2"
+emissive_mask = "assets/planets/gas_giant/surface_effects.ktx2"
 emissive_night_only = true
 emissive_strength = 1.0
 
+[planet.surface.natural]
+kind = "gas_giant"
+normal_strength = 0.16
+shadow_strength = 0.38
+rotation_speed = 0.00012
+shear = 0.012
+turbulence = 0.0018
+bands = 8
+nightglow = 0.25
+event_strength = 2.2
+event_speed = 1.15
+scatter_strength = 0
+scatter_colour = [0.12, 0.38, 0.65]
+event_colour = [0.6, 0.75, 1.0]
+
 [planet.clouds]
-albedo = "assets/planets/gas_giant/cloud_albedo.webp"
-opacity = "assets/planets/gas_giant/cloud_opacity.webp"
-scale = 1.02
+albedo = "assets/planets/gas_giant/upper_colour.ktx2"
+opacity = "assets/planets/gas_giant/upper_opacity.ktx2"
+normal = "assets/planets/gas_giant/upper_normal.ktx2"
+scale = 1.009
+drift_speed = 0.00022
+
+[planet.clouds.dynamics]
+opacity = 0.32
+normal_strength = 0.2
+shear = 0.016
+turbulence = 0.0025
+bands = 8
 
 [planet.atmosphere]
 colour = [0.9, 0.7, 0.5]
-strength = 1.2
+strength = 0.0
+
+[planet.atmosphere.scattering]
+optical_depth = "assets/planets/gas_giant/optical_depth.png"
+haze = "assets/planets/gas_giant/atmosphere_density.ktx2"
+skyglow = "assets/planets/gas_giant/aurora.ktx2"
+scale = 1.045
+rayleigh = [0.045, 0.065, 0.10]
+mie = [0.13, 0.10, 0.065]
+mie_anisotropy = 0.6
+skyglow_strength = 4

@@ -2,7 +2,7 @@
 title: Networking
 type: concept
 tags: [networking, webrtc, rendezvous, join-code, session-token, gm, star-topology, datachannel, snapshot, fleet, host-mesh, lockstep, ws-relay, diagnostics]
-sources: [gui/fleet-crew.js, src/lockstep/crew.rs, src/lobby/session.rs, src/session_connections.rs, src/session_connections/browser.rs, server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/gm_join.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/transfer.rs, src/lockstep/snapshot_relay.rs, src/lockstep/mod.rs, src/core/codec.rs, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/world_setup.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
+sources: [gui/fleet-crew.js, src/lockstep/crew.rs, src/lobby/session.rs, src/session_connections.rs, src/session_connections/browser.rs, server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/gm_join.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/transfer.rs, src/lockstep/snapshot_relay.rs, src/lockstep/mod.rs, src/core/codec.rs, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/world_setup.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
 updated: 2026-09-09
 ---
 
@@ -64,6 +64,10 @@ A fleet session has **one** privileged code, in the `server` namespace, distinct
 - **Tests.** `tests/client/host-mesh.test.js` (envelope + fleet model), `tests/client/fleet-session.test.js` (both ends over the real registry), `tests/smoke/fleet-lobby.spec.js` (two WASM host pages), `tests/smoke/fleet-start-policy.spec.js` (collective start), and `tests/smoke/fleet-lockstep.spec.js` (wire plus leave/rejoin lifecycle).
 
 ## Running-mission host-mesh frames (issues #1116, #1117, #1118)
+
+The PreUpdate mesh barrier clears the already-calculated virtual frame delta and whole fixed-step debt whenever peer readiness, recovery, start failure, or model-rig readiness holds the clock. Pausing future frames alone would let the newly withheld tick run once. Fractional interpolation time is retained (#1449).
+
+Rapier’s fixed transform propagation includes Bevy 0.18 dirty-tree marking after authoritative motion and character controls. Visual children therefore cannot leave a ship’s collision pose stale relative to a rendererless peer; static-tree optimization remains enabled. The registration owner tests real contacts with and without that hierarchy (#1449).
 
 `MeshAgreement` compares each checkpoint when either the local sample or the
 peer's frame arrives last. Dynamic GM admission enables periodic sampling at
@@ -315,3 +319,10 @@ It also carries `window.__wasmReady` (set once the host page has both opened its
 
 - [Architecture](./architecture.md) · [Message Flow](./message-flow.md)
 - [Player](../entities/player.md) · [Session](../entities/session.md)
+
+Mesh snapshots additionally carry current station ratings and resolved system
+control sources as token-free `EntityState.mesh_crew`. A verified mesh restore
+applies this frontier and reseeds Command's directed-station edge state before
+continuing; rollback restores it too. Ordinary standalone save restore retains
+its fresh crew policy. This avoids falling back to frozen boot ratings after
+a GM reconnect, which could let AI issue a stance for a human-controlled system.

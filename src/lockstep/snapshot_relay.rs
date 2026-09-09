@@ -588,6 +588,9 @@ fn gate_and_restore_against_with_readiness(
     let report = snapshot::restore(world, &snap.state);
     let restored = crate::sim_digest::world_digest(world);
     if restored == snap.digest && report.is_complete() {
+        // Current crew authority belongs to this running mesh continuation,
+        // including a private joining candidate without a session yet.
+        snapshot::restore_mesh_crew(world, &snap.state);
         // The transfer's whole-payload checksum already covered this history,
         // and `import_artifact` parsed it through the canonical Run gate.  Install
         // it only after the snapshot itself proved its digest so a refused or
@@ -611,6 +614,7 @@ fn gate_and_restore_against_with_readiness(
     // entities that already exist, always complete for the homogeneous fleet this
     // path recovers. It stays asserted to catch a heterogeneous-roster regression.
     let rollback = snapshot::restore(world, &checkpoint);
+    snapshot::restore_mesh_crew(world, &checkpoint);
     debug_assert!(
         crate::sim_digest::world_digest(world) == pre_digest && rollback.is_complete(),
         "the recovery rollback did not return the world to its pre-restore fold"

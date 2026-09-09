@@ -193,6 +193,10 @@ impl ControlState {
     /// Component installation remains the bootstrap/LOD owner's responsibility.
     pub fn restore_into(&self, entity_mut: &mut EntityWorldMut<'_>) {
         let control = self;
+        // Restored intent values are continuation, not a fresh producer write.
+        if let Some(mut writes) = entity_mut.get_mut::<crate::ship::helm::DriveCommandWrites>() {
+            *writes = Default::default();
+        }
         if let Some(mut thrust) = entity_mut.get_mut::<ThrustInput>() {
             thrust.0 = control.thrust;
         }

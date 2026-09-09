@@ -2016,6 +2016,7 @@ pub fn gate_lockstep_ticks(
     paused: Option<Res<crate::debug_overlay::SimulationPaused>>,
     model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
     virtual_time: Option<ResMut<Time<Virtual>>>,
+    mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut diagnostics: ResMut<MeshDiagnostics>,
     recovery_hold: Option<Res<recovery::RecoveryHold>>,
     slot_recovery_hold: Option<Res<slot_recovery::SlotRecoveryHold>>,
@@ -2049,8 +2050,8 @@ pub fn gate_lockstep_ticks(
                     LogCat::Assets,
                     "authoritative model-rig hold at tick {next_tick}: waiting for primary sidecar"
                 );
-                virtual_time.pause();
             }
+            withhold_current_fixed_frame(&mut virtual_time, fixed_time.as_deref_mut());
         } else if virtual_time.is_paused() {
             crate::pinfo!(
                 log,
@@ -2098,11 +2099,24 @@ pub fn gate_lockstep_ticks(
                      divergence is healed"
                 ),
             }
-            virtual_time.pause();
         }
+        withhold_current_fixed_frame(&mut virtual_time, fixed_time.as_deref_mut());
     } else if virtual_time.is_paused() {
         crate::pinfo!(log, LogCat::Admit, "host-mesh resumed at tick {next_tick}");
         virtual_time.unpause();
+    }
+}
+
+/// PreUpdate runs after TimePlugin has calculated this frame's delta. Pausing
+/// future frames alone leaves that delta available to the fixed runner now.
+fn withhold_current_fixed_frame(
+    virtual_time: &mut Time<Virtual>,
+    fixed_time: Option<&mut Time<Fixed>>,
+) {
+    virtual_time.pause();
+    virtual_time.advance_by(std::time::Duration::ZERO);
+    if let Some(fixed) = fixed_time {
+        discard_whole_fixed_overstep(fixed);
     }
 }
 
@@ -3053,6 +3067,63 @@ station = "helm"
                 .outcome,
             crate::gm_action::GmActionOutcome::Applied
         );
+    }
+
+    #[test]
+    fn a_new_peer_stall_withholds_the_current_frame_before_fixed_work() {
+        use crate::sim_tick::{register_sim_tick, SimTick};
+
+        let period = std::time::Duration::from_millis(10);
+        let local = HostSlot(1);
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        register_sim_tick(&mut app);
+        app.init_resource::<crate::command_admission::log::PendingCommands>();
+        register_lockstep(&mut app);
+        app.insert_resource(FleetLockstep(LockstepSession::new(
+            local,
+            [local, HostSlot(2)],
+            6,
+        )));
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::ZERO,
+        ));
+        app.update();
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
+        for _ in 0..6 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<SimTick>().0, 6);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            period * 3 / 2,
+        ));
+        app.update();
+        assert_eq!(app.world().resource::<SimTick>().0, 7);
+        app.world_mut().resource_mut::<MeshOutbox>().drain();
+
+        // First has already calculated this delta when PreUpdate discovers
+        // that tick 7 has no peer input. No FixedUpdate system may run yet.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 5));
+        app.update();
+        assert_eq!(app.world().resource::<SimTick>().0, 7);
+        assert!(app
+            .world_mut()
+            .resource_mut::<MeshOutbox>()
+            .drain()
+            .is_empty());
+        assert_eq!(app.world().resource::<Time<Fixed>>().overstep(), period / 2);
+
+        app.world_mut()
+            .resource_mut::<FleetLockstep>()
+            .0
+            .observe(HostSlot(2), 100);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<SimTick>().0, 8);
     }
 
     #[test]

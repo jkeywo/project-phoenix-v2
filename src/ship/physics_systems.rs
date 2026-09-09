@@ -34,7 +34,8 @@ pub(crate) fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Trans
 /// same tick; splitting admission from integration would otherwise delay
 /// that transition by one tick).
 ///
-/// Uses change detection (`Ref::is_changed`) rather than unconditionally
+/// Uses explicit real-write markers (including insertion ticks), plus change
+/// detection for existing non-added direct intents, rather than unconditionally
 /// re-applying the persisted intent every tick: the intent components
 /// default to `Idle`/`false`, and blindly re-applying that default every
 /// tick would fight any *other* code path (including test harnesses) that
@@ -53,23 +54,23 @@ pub(crate) fn apply_helm_commands(
             Option<Ref<ImpulseCommand>>,
             Option<&mut ShipBoost>,
             Option<Ref<BoostCommand>>,
+            Option<&mut crate::ship::helm::DriveCommandWrites>,
             Option<&ShipSystemControlSources>,
             Option<&crate::ship::components::ShipConfigComponent>,
         ),
         With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
-    for (impulse, impulse_cmd, boost, boost_cmd, sources, config) in ships.iter_mut() {
+    for (impulse, impulse_cmd, boost, boost_cmd, writes, sources, config) in ships.iter_mut() {
+        // Consume even when the drive is unavailable. A later enable must not
+        // replay an intent whose original application was already handled.
+        let writes = writes
+            .map(|mut writes| std::mem::take(&mut *writes))
+            .unwrap_or_default();
         if let (Some(mut impulse), Some(cmd)) = (impulse, impulse_cmd) {
-            // Exclude the insertion tick (issue #695 follow-up): LOD
-            // promotion inserts a fresh default `ImpulseCommand`, which
-            // Bevy also reports as "changed" on that same tick. Without
-            // `!cmd.is_added()`, a promoted NPC's legitimate in-progress
-            // impulse would be silently force-reset to `Idle` purely as a
-            // side effect of gaining `AiHighFidelity`, not from any actual
-            // AI decision or player command. The default should persist
-            // untouched until something explicitly writes a new value on a
-            // later tick.
+            // Fresh LOD defaults remain inert, but real damage/admitted writes
+            // on that same insertion tick must apply. Keep change detection
+            // for existing non-added direct-intent producers and fixtures.
             if !crate::ship::impulse_boost_systems::drive_available(
                 sources,
                 config,
@@ -77,7 +78,7 @@ pub(crate) fn apply_helm_commands(
                 crate::ship::system_registry::helm_impulse_system_id(),
             ) {
                 impulse.0.cancel_charge();
-            } else if cmd.is_changed() && !cmd.is_added() {
+            } else if writes.impulse || (cmd.is_changed() && !cmd.is_added()) {
                 match cmd.0 {
                     crate::ship::impulse::ImpulsePhase::Charging => impulse.0.start_charge(),
                     crate::ship::impulse::ImpulsePhase::Idle => impulse.0.cancel_charge(),
@@ -98,7 +99,7 @@ pub(crate) fn apply_helm_commands(
                 crate::ship::system_registry::helm_boost_system_id(),
             ) {
                 boost.0.deactivate();
-            } else if cmd.is_changed() && !cmd.is_added() {
+            } else if writes.boost || (cmd.is_changed() && !cmd.is_added()) {
                 if cmd.0 {
                     boost.0.activate();
                 } else {
@@ -499,6 +500,72 @@ mod tests {
             tick(&mut app);
             assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Charging);
             assert!(app.world().get::<ShipBoost>(ship).unwrap().0.is_active());
+        }
+    }
+
+    #[test]
+    fn added_drive_defaults_stay_inert_but_real_writes_apply_in_order() {
+        use crate::core::messages::{AdmittedCommand, AdmittedCommands, SystemControlPayload};
+        use crate::entities::spawner::EntitySystemHull;
+        use crate::server_app::{ImpulseHullHistory, ShipImpulse};
+        use crate::ship::damage::SystemHull;
+        use crate::ship::helm::DriveCommandWrites;
+        use crate::ship::impulse::{ImpulsePhase, ImpulseState};
+        use crate::ship::impulse_boost_systems::handle_impulse_messages;
+
+        for (damage, admitted_start) in [(false, false), (true, false), (true, true)] {
+            let mut app = App::new();
+            app.add_systems(
+                Update,
+                (
+                    handle_impulse_messages,
+                    crate::ship::helm_admission::process_helm_inputs,
+                    apply_helm_commands,
+                )
+                    .chain(),
+            );
+            let commands = if admitted_start {
+                vec![AdmittedCommand {
+                    target: crate::ship::system_registry::helm_impulse_system_id(),
+                    payload: SystemControlPayload::StartImpulseCharge,
+                    response_token: None,
+                    feedback_correlation: None,
+                }]
+            } else {
+                Vec::new()
+            };
+            let entity = app
+                .world_mut()
+                .spawn((
+                    crate::ai::server::AiHighFidelity,
+                    ShipImpulse(ImpulseState {
+                        phase: ImpulsePhase::Active,
+                        charge_progress: 1.0,
+                    }),
+                    ImpulseHullHistory(Some(if damage { 101.0 } else { 100.0 })),
+                    EntitySystemHull(SystemHull::from_config(&[(
+                        crate::core::messages::SystemId("hull".into()),
+                        100.0,
+                    )])),
+                    ImpulseCommand::default(),
+                    AdmittedCommands(commands),
+                ))
+                .id();
+            app.update();
+            let expected = if damage && !admitted_start {
+                ImpulsePhase::Idle
+            } else {
+                ImpulsePhase::Active
+            };
+            assert_eq!(
+                app.world().get::<ShipImpulse>(entity).unwrap().0.phase,
+                expected,
+                "damage={damage}, later admitted start={admitted_start}"
+            );
+            assert_eq!(
+                *app.world().get::<DriveCommandWrites>(entity).unwrap(),
+                DriveCommandWrites::default()
+            );
         }
     }
 

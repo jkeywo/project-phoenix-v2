@@ -117,16 +117,22 @@ pub struct AsteroidUuid(pub String);
 pub struct AsteroidShieldPierce(pub f32);
 
 // ── Resources ────────────────
+/// Previous Input-phase hull sample for this drive. A hit applied later in
+/// Damage remains pending across a save and is consumed by the next Input pass.
+/// None is an unsampled drive; Some(0.0) is a sampled destroyed hull.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ImpulseHullHistory(pub Option<f32>);
+
 /// The ship's impulse drive state. Cancelled automatically when hull damage is taken.
 ///
 /// Per-ship `Component` post ship-parity audit; every ship (player + NPC)
-/// carries its own impulse state. NPCs never charge impulse under current
-/// AI, but the state lives on the entity so future NPC helm behaviour can
-/// route through the same per-ship pathway.
+/// carries its own impulse state, used by admitted crew commands and the
+/// per-axis AI through the same per-ship pathway.
 ///
 /// Per-entity `Component` on each ship (issue #606: component is the sole
 /// source of truth; no Resource fallback).
 #[derive(Component, Default)]
+#[require(ImpulseHullHistory)]
 pub struct ShipImpulse(pub ImpulseState);
 
 // ShipShields has moved to `crate::ship::shields` as a Component.

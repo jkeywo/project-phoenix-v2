@@ -8449,3 +8449,169 @@ fn default_navigation_continuation_replaces_non_default_bootstrap() {
         Some(HelmWaypointClearanceState::default())
     );
 }
+
+/// Impulse speed limits are derived state: restoring the drive must rebuild
+/// its modifier before the first Physics pass, in both transition directions.
+#[test]
+fn impulse_modifiers_resume_before_the_first_physics_tick() {
+    use bevy::prelude::World;
+    use project_phoenix::{
+        core::messages::ModifierSlot,
+        entities::spawner::EntityUuid,
+        modifiers::{coordination::apply_impulse_to, ShipModifiers},
+        server_app::ShipImpulse,
+        ship::{helm::ImpulseCommand, impulse::ImpulsePhase, state::ShipPhysics},
+        ship_plugin::{ImpulseConfigResource, ShipPhysicsConfigResource},
+        sim_tick::SimTick,
+    };
+    use std::collections::BTreeMap;
+
+    fn seed(world: &mut World, active: bool) {
+        let mut query = world.query::<(
+            &mut ShipImpulse,
+            &ImpulseConfigResource,
+            &ShipPhysicsConfigResource,
+            &mut ShipModifiers,
+            &mut ShipPhysics,
+            Option<&mut ImpulseCommand>,
+        )>();
+        let mut count = 0;
+        for (mut impulse, config, physics_config, mut modifiers, mut physics, command) in
+            query.iter_mut(world)
+        {
+            assert!(config.speed_multiplier > 1.0);
+            impulse.0.phase = if active {
+                ImpulsePhase::Active
+            } else {
+                ImpulsePhase::Idle
+            };
+            impulse.0.charge_progress = if active { 1.0 } else { 0.0 };
+            // Match the persisted intent produced by a real charge command.
+            // An old Idle intent would be reapplied when restore marks it changed.
+            if let Some(mut command) = command {
+                command.0 = if active {
+                    ImpulsePhase::Charging
+                } else {
+                    ImpulsePhase::Idle
+                };
+            }
+            // Seed through the pure producer so the reference remains valid
+            // even when the scheduled translator is the code under test.
+            apply_impulse_to(&mut modifiers, &impulse.0, config.speed_multiplier);
+            // Above the ordinary cap: a stale cache changes the very next
+            // integration, rather than hiding until the ship accelerates to it.
+            physics.forward_speed = physics_config.0.max_speed * 1.05;
+            count += 1;
+        }
+        assert!(count >= 2, "both local and remote duel ships participate");
+    }
+
+    fn frontier(world: &mut World) -> BTreeMap<String, (f32, ShipPhysics)> {
+        let mut query = world.query::<(&EntityUuid, &ShipModifiers, &ShipPhysics)>();
+        query
+            .iter(world)
+            .map(|(uuid, modifiers, physics)| {
+                (
+                    uuid.0.clone(),
+                    (modifiers.get(&ModifierSlot::MaxSpeed), *physics),
+                )
+            })
+            .collect()
+    }
+
+    for active in [true, false] {
+        let mut live = duel();
+        step(&mut live, CAPTURE_AT);
+        seed(live.world_mut(), active);
+        let payload = capture(live.world());
+        let expected = frontier(live.world_mut());
+
+        let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+        seed(resumed.world_mut(), !active);
+        assert_ne!(frontier(resumed.world_mut()), expected);
+
+        let report = restore(resumed.world_mut(), &payload);
+        assert!(report.is_complete(), "{:?}", report.gaps);
+        assert_eq!(
+            frontier(resumed.world_mut()),
+            expected,
+            "restored active={active}: derived speed limit must already be rebuilt"
+        );
+
+        let before = live.world().resource::<SimTick>().0;
+        live.update();
+        resumed.update();
+        assert!(live.world().resource::<SimTick>().0 > before);
+        assert_eq!(
+            resumed.world().resource::<SimTick>().0,
+            live.world().resource::<SimTick>().0
+        );
+        assert_eq!(
+            frontier(resumed.world_mut()),
+            frontier(live.world_mut()),
+            "restored active={active}: first continuation tick must integrate identically"
+        );
+    }
+}
+
+/// A hit applied after the last Input sample is pending work, not a stale
+/// bootstrap value: restore must preserve it until the next detector pass.
+#[test]
+fn impulse_restore_preserves_unprocessed_hull_damage() {
+    use bevy::ecs::system::RunSystemOnce;
+    use project_phoenix::{
+        entities::spawner::{EntitySystemHull, EntityUuid},
+        server_app::{ImpulseHullHistory, ShipImpulse},
+        ship::impulse_boost_systems::handle_impulse_messages,
+        ship::{helm::ImpulseCommand, impulse::ImpulsePhase},
+    };
+    use std::collections::BTreeMap;
+
+    fn pending(world: &mut bevy::prelude::World) -> BTreeMap<String, (Option<f32>, ImpulsePhase)> {
+        let mut query = world.query::<(&EntityUuid, &ImpulseHullHistory, &ImpulseCommand)>();
+        query
+            .iter(world)
+            .map(|(uuid, history, command)| (uuid.0.clone(), (history.0, command.0)))
+            .collect()
+    }
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    {
+        let world = live.world_mut();
+        let mut query = world.query::<(
+            &EntitySystemHull,
+            &mut ImpulseHullHistory,
+            &mut ImpulseCommand,
+            &mut ShipImpulse,
+        )>();
+        let mut count = 0;
+        for (hull, mut history, mut command, mut impulse) in query.iter_mut(world) {
+            // A previous sample one HP above the current hull models a hit
+            // after Input and before the snapshot boundary without RNG draws.
+            history.0 = Some(hull.0.total_current() + 1.0);
+            command.0 = ImpulsePhase::Charging;
+            impulse.0.phase = ImpulsePhase::Active;
+            impulse.0.charge_progress = 1.0;
+            count += 1;
+        }
+        assert!(count >= 2);
+    }
+    let payload = capture(live.world());
+    let expected = pending(live.world_mut());
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    assert_eq!(pending(resumed.world_mut()), expected);
+    live.world_mut()
+        .run_system_once(handle_impulse_messages)
+        .unwrap();
+    resumed
+        .world_mut()
+        .run_system_once(handle_impulse_messages)
+        .unwrap();
+    let expected = pending(live.world_mut());
+    assert!(expected
+        .values()
+        .all(|(_, command)| *command == ImpulsePhase::Idle));
+    assert_eq!(pending(resumed.world_mut()), expected);
+}

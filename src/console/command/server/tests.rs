@@ -1220,3 +1220,97 @@ fn scoped_objective_stance_reaches_only_its_recipient_catalogue_and_applier() {
         Some("scoped-escort")
     );
 }
+
+#[test]
+fn mesh_crew_restore_keeps_human_command_from_issuing_an_ai_stance() {
+    use crate::entities::spawner::EntityUuid;
+    use crate::ship_plugin::ActiveStationRatings;
+
+    let mut live = ai_app();
+    let source = spawn_ship(&mut live, true, false);
+    live.world_mut().entity_mut(source).insert((
+        EntityUuid("mesh-command-ship".into()),
+        ActiveStationRatings(std::collections::HashMap::from([
+            (StationId("captain".into()), "Std".into()),
+            (tactical(), crate::ship::rating::BACKFILL_RATING.into()),
+            // Command is human-seeking: its human override must survive even
+            // though its own rating describes an otherwise uncrewed station.
+            (
+                StationId("command".into()),
+                crate::ship::rating::BACKFILL_RATING.into(),
+            ),
+        ])),
+    ));
+    set_red_alert(&mut live, source, true);
+    // The minimal Command fixture has no physics/hull bundle. Register those
+    // optional capture-query types, as the real simulation plugins do.
+    live.world_mut()
+        .register_component::<crate::ship::state::ShipPhysics>();
+    live.world_mut()
+        .register_component::<crate::entities::spawner::EntitySystemHull>();
+    let snapshot = crate::snapshot::capture(live.world());
+    assert!(snapshot
+        .entities
+        .iter()
+        .any(|row| row.uuid == "mesh-command-ship" && row.mesh_crew.is_some()));
+
+    let mut resumed = ai_app();
+    let target = spawn_ship(&mut resumed, true, true);
+    resumed.world_mut().entity_mut(target).insert((
+        EntityUuid("mesh-command-ship".into()),
+        ActiveStationRatings(std::collections::HashMap::from([
+            (
+                StationId("captain".into()),
+                crate::ship::rating::BACKFILL_RATING.into(),
+            ),
+            (tactical(), crate::ship::rating::BACKFILL_RATING.into()),
+            (
+                StationId("command".into()),
+                crate::ship::rating::BACKFILL_RATING.into(),
+            ),
+        ])),
+    ));
+    set_red_alert(&mut resumed, target, true);
+    // Establish that this stale bootstrap really produces the observed fault.
+    run_command_ai_tick(&mut resumed);
+    assert_eq!(
+        stances(&resumed, target)
+            .0
+            .get(&tactical())
+            .map(String::as_str),
+        Some("weapons-free")
+    );
+    resumed
+        .world_mut()
+        .get_mut::<ShipStationStances>(target)
+        .unwrap()
+        .0
+        .clear();
+    // The real admission pass clears this buffer between ticks.
+    resumed
+        .world_mut()
+        .entity_mut(target)
+        .insert(AdmittedCommands::default());
+    crate::snapshot::restore_mesh_crew(resumed.world_mut(), &snapshot);
+    assert_eq!(
+        resumed
+            .world()
+            .get::<ActiveStationRatings>(target)
+            .unwrap()
+            .0,
+        live.world().get::<ActiveStationRatings>(source).unwrap().0
+    );
+    run_command_ai_tick(&mut live);
+    run_command_ai_tick(&mut resumed);
+    assert!(stances(&live, source).0.is_empty());
+    assert!(stances(&resumed, target).0.is_empty());
+    assert_eq!(
+        resumed
+            .world()
+            .get::<LastDirectedControl>(target)
+            .unwrap()
+            .0
+            .get(&tactical()),
+        Some(&true)
+    );
+}

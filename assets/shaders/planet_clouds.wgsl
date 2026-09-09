@@ -5,7 +5,7 @@ struct PlanetCloudParams {
     light_dir: vec3<f32>, time: f32,
     misc: vec4<f32>, texture_x: vec4<f32>, texture_y: vec4<f32>, texture_z: vec4<f32>,
     planet_center: vec4<f32>, layer: vec4<f32>, geometry: vec4<f32>,
-    rayleigh: vec4<f32>, mie: vec4<f32>,
+    rayleigh: vec4<f32>, mie: vec4<f32>, flow: vec4<f32>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> params: PlanetCloudParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var albedo_tex: texture_2d<f32>;
@@ -16,6 +16,19 @@ struct PlanetCloudParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var normal_smp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var glow_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(8) var glow_smp: sampler;
+
+// Bounded shear preserves the authored storms over long sessions. The base
+// rotation wraps naturally; latitude-dependent flow never accumulates stretch.
+fn advect(uv: vec2<f32>, flow: vec4<f32>, time: f32) -> vec2<f32> {
+    let latitude = sin(uv.y * 3.14159265);
+    let band = sin(uv.y * flow.w * 6.2831853);
+    let phase = uv.x * 6.2831853;
+    let eddy = sin(phase * 5.0 + uv.y * 31.0 + time * 0.035)
+        * cos(phase * 3.0 - uv.y * 19.0 - time * 0.025);
+    return vec2<f32>(uv.x + flow.x * time + latitude * latitude *
+        (flow.y * band * sin(time * 0.045) + flow.z * eddy), uv.y);
+}
+
 fn local_normal(n: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(dot(n, params.texture_x.xyz), dot(n, params.texture_y.xyz), dot(n, params.texture_z.xyz));
 }
@@ -64,14 +77,23 @@ fn atmosphere(in: VertexOutput) -> vec4<f32> {
         let extinction = params.rayleigh.rgb * density.x + aerosol * density.y;
         let segment_depth = extinction * step / thickness;
         let sun_hit = sphere_hit(p, light, 1.0);
-        if (!(sun_hit.x > 0.0 && sun_hit.y > sun_hit.x)) {
-            let mu = dot(p / r, light);
+        var visibility = select(1.0, 0.0, sun_hit.x > 0.0 && sun_hit.y > sun_hit.x);
+        var mu = dot(p / r, light);
+        if (params.geometry.w > 0.0) {
+            // Resolve the sun's finite angular width at the local horizon.
+            // Binary occultation makes the twelve integration samples appear
+            // as hard arcs when a dense atmosphere turns out of sunlight.
+            let horizon = -sqrt(max(1.0 - 1.0 / (r * r), 0.0));
+            visibility = smoothstep(-params.geometry.w, params.geometry.w, mu - horizon);
+            mu = max(mu, horizon);
+        }
+        if (visibility > 0.0) {
             let lut_uv = (vec2<f32>(mu * 0.5 + 0.5, altitude) * vec2<f32>(255.0, 127.0) + 0.5) / vec2<f32>(256.0, 128.0);
             let encoded = textureSampleLevel(albedo_tex, albedo_smp, lut_uv, 0.0).rg;
             let optical = -8.0 * log(max(vec2<f32>(1.0) - encoded, vec2<f32>(0.0001)));
             let transmittance = exp(-params.rayleigh.rgb * optical.x - aerosol * optical.y - depth - segment_depth * 0.5);
             let source = params.rayleigh.rgb * density.x * rayleigh_phase + aerosol * density.y * mie_phase;
-            scattered += transmittance * source * step / thickness;
+            scattered += transmittance * source * step / thickness * visibility;
         }
         depth += segment_depth;
     }
@@ -98,7 +120,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
         surface_uv.x += fract(polar_uv.x - surface_uv.x + 0.5) - 0.5;
         surface_uv.y = polar_uv.y;
     }
-    let uv = vec2<f32>(surface_uv.x + params.time * params.misc.x, surface_uv.y);
+    let uv = advect(surface_uv, params.flow, params.time);
     let albedo = textureSample(albedo_tex, albedo_smp, uv).rgb;
     var alpha = dot(albedo, vec3<f32>(0.299, 0.587, 0.114));
     if (params.misc.y > 0.5) { alpha = textureSample(opacity_tex, opacity_smp, uv).r; }

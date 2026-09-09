@@ -1,5 +1,7 @@
 # Ecumenopolis material baking
 
+Gas Giant and Ice Moon baking and research notes are in [NATURAL.md](NATURAL.md).
+
 The numeric baker preserves the supplied planet's broad structures while adding
 coordinated buildings, roads and illumination at 4096 × 2048. District and
 material masks guide palette and physical response. Original inputs remain under

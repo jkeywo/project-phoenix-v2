@@ -29,14 +29,53 @@ longitude_segments = 128
 latitude_segments = 64
 
 [planet.surface]
-albedo = "assets/planets/ice_moon/albedo.webp"
-normal = "assets/planets/ice_moon/normal.webp"
-roughness = "assets/planets/ice_moon/roughness.webp"
-emissive_colour = "assets/planets/ice_moon/emissive_colour.webp"
-emissive_mask = "assets/planets/ice_moon/emissive_mask.webp"
+albedo = "assets/planets/ice_moon/surface_colour.ktx2"
+normal = "assets/planets/ice_moon/surface_normal.ktx2"
+roughness = "assets/planets/ice_moon/surface_material.ktx2"
+emissive_colour = "assets/planets/ice_moon/emission_colour.ktx2"
+emissive_mask = "assets/planets/ice_moon/surface_effects.ktx2"
 emissive_night_only = true
-emissive_strength = 0.8
+emissive_strength = 1.0
+
+[planet.surface.natural]
+kind = "ice"
+normal_strength = 0.55
+shadow_strength = 0.1
+rotation_speed = 0
+shear = 0
+turbulence = 0
+bands = 0
+nightglow = 0.16
+event_strength = 0.4
+event_speed = 0.45
+scatter_strength = 0.3
+scatter_colour = [0.12, 0.38, 0.65]
+event_colour = [0.18, 0.65, 0.85]
+
+[planet.clouds]
+albedo = "assets/planets/ice_moon/upper_colour.ktx2"
+opacity = "assets/planets/ice_moon/upper_opacity.ktx2"
+normal = "assets/planets/ice_moon/upper_normal.ktx2"
+scale = 1.006
+drift_speed = 0.00003
+
+[planet.clouds.dynamics]
+opacity = 0.075
+normal_strength = 0.18
+shear = 0
+turbulence = 0
+bands = 0
 
 [planet.atmosphere]
 colour = [0.6, 0.8, 1.0]
-strength = 0.5
+strength = 0.0
+
+[planet.atmosphere.scattering]
+optical_depth = "assets/planets/ice_moon/optical_depth.png"
+haze = "assets/planets/ice_moon/atmosphere_density.ktx2"
+skyglow = "assets/planets/ice_moon/aurora.ktx2"
+scale = 1.025
+rayleigh = [0.006, 0.012, 0.024]
+mie = [0.008, 0.011, 0.014]
+mie_anisotropy = 0.3
+skyglow_strength = 3

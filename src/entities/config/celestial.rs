@@ -131,6 +131,9 @@ pub struct PlanetConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanetSurfaceConfig {
+    /// Layered natural material; independent of the city-light channel layout.
+    #[serde(default)]
+    pub natural: Option<PlanetNaturalConfig>,
     /// Packed city material: roughness RGBA = roughness/AO/metal/daytime activity;
     /// emissive_mask RGBA = windows/neon/thermal/traffic. Absent = legacy maps.
     #[serde(default)]
@@ -162,6 +165,8 @@ pub struct PlanetSurfaceConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanetCloudsConfig {
+    #[serde(default)]
+    pub dynamics: Option<PlanetCloudDynamics>,
     #[serde(default)]
     pub smog: Option<PlanetSmogConfig>,
     /// Cloud colour map (sRGB). Required.
@@ -250,6 +255,44 @@ pub struct PlanetScatteringConfig {
     pub mie: [f32; 3],
     pub mie_anisotropy: f32,
     pub skyglow_strength: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanetNaturalKind {
+    GasGiant,
+    Ice,
+}
+
+/// Gas material RGBA stores roughness, band flow, storms and encoded height;
+/// ice stores roughness, AO, thin ice and encoded frost. Emission masks contain
+/// nightglow, lightning-or-vents, and thermal activity in RGB.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetNaturalConfig {
+    pub kind: PlanetNaturalKind,
+    pub normal_strength: f32,
+    pub shadow_strength: f32,
+    pub rotation_speed: f32,
+    pub shear: f32,
+    pub turbulence: f32,
+    pub bands: f32,
+    pub nightglow: f32,
+    pub event_strength: f32,
+    pub event_speed: f32,
+    pub scatter_strength: f32,
+    pub scatter_colour: [f32; 3],
+    pub event_colour: [f32; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetCloudDynamics {
+    pub opacity: f32,
+    pub normal_strength: f32,
+    pub shear: f32,
+    pub turbulence: f32,
+    pub bands: f32,
 }
 
 /// Kind of a `[[light]]` entry: a point light or a directional light.

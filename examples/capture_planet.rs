@@ -22,6 +22,8 @@ use project_phoenix::{
 #[derive(Resource)]
 struct Capture {
     output: std::path::PathBuf,
+    radius_scale: f32,
+    textures: Vec<Handle<Image>>,
     frame: usize,
     shot: usize,
     started: std::time::Instant,
@@ -42,6 +44,8 @@ fn main() {
     App::new()
         .insert_resource(Capture {
             output,
+            radius_scale: 1.0,
+            textures: Vec::new(),
             frame: 0,
             shot: 0,
             started: std::time::Instant::now(),
@@ -68,6 +72,7 @@ fn main() {
 }
 fn setup(
     mut commands: Commands,
+    mut capture: ResMut<Capture>,
     server: Res<AssetServer>,
     device: Res<RenderDevice>,
     mut images: ResMut<Assets<Image>>,
@@ -75,8 +80,17 @@ fn setup(
     mut surfaces: ResMut<Assets<PlanetSurfaceMaterial>>,
     mut clouds: ResMut<Assets<PlanetCloudMaterial>>,
 ) {
-    let text = std::fs::read_to_string("assets/entities/planet_ecumenopolis.toml").unwrap();
+    let entity_path = std::env::var("PLANET_ENTITY")
+        .unwrap_or_else(|_| "assets/entities/planet_ecumenopolis.toml".into());
+    let text = std::fs::read_to_string(entity_path).unwrap();
     let config = EntityConfig::from_toml(&text).unwrap().planet.unwrap();
+    capture.radius_scale = config.radius / 33.0;
+    capture.textures = project_phoenix::entities::planet::planet_texture_paths(&config)
+        .iter()
+        .map(|(path, srgb)| {
+            project_phoenix::entities::planet::load_planet_image(&server, path, *srgb)
+        })
+        .collect();
     let entity = commands
         .spawn((Transform::default(), Visibility::default()))
         .id();
@@ -107,12 +121,25 @@ fn setup(
 }
 fn drive(
     mut capture: ResMut<Capture>,
+    server: Res<AssetServer>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     mut light: ResMut<PlanetLightingOverride>,
     receiver: Res<MainWorldReceiver>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if capture.shot >= SHOTS.len() {
+        return;
+    }
+    if capture
+        .textures
+        .iter()
+        .any(|image| !server.is_loaded_with_dependencies(image.id()))
+    {
+        while receiver.try_recv().is_ok() {}
+        assert!(
+            capture.started.elapsed().as_secs() < 60,
+            "planet textures did not load"
+        );
         return;
     }
     let (name, yaw, pitch, radius, sun_yaw, sun_pitch) = SHOTS[capture.shot];
@@ -122,7 +149,8 @@ fn drive(
                 yaw.sin() * pitch.cos(),
                 pitch.sin(),
                 yaw.cos() * pitch.cos(),
-            ) * radius,
+            ) * radius
+                * capture.radius_scale,
         )
         .looking_at(Vec3::ZERO, Vec3::Y);
         light.light_dir = Quat::from_euler(EulerRot::YXZ, sun_yaw, sun_pitch, 0.0) * Vec3::Z;

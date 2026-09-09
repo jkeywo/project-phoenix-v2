@@ -1,0 +1,23 @@
+entities:
+  - component: natural-planet-materials
+    core:
+      origin: ai
+      status: implemented
+      confidence: provisional
+      title: Gas Giant and Ice Moon Materials
+      summary: Render authored weather and ice layers with distinct natural material channels, compact textures and a shared atmosphere on browser and native viewscreens.
+      rationale:
+        - "[ai] Preserve major source geography while enhancing base artwork; bake aligned material and effect masks from the supplied sources. Keep 4K base colour, 2K normals and smaller supporting maps with lossless RGBA8/R8 KTX2 and full mip chains."
+        - "[ai] Gas bands use bounded differential advection and storm-controlled turbulence, independent upper clouds, matching moving shadows, local lightning pulses and polar aurora. Avoid unbounded texture stretching."
+        - "[ai] Ice combines frost relief, geology-dependent roughness/AO, masked local blue wrap lighting, sparse thermal fractures and timed vent emission beneath a thin haze. This approximates subsurface appearance without making the planet transparent."
+        - "[ai] Natural material channels are separate from city channels. Existing planets retain their prior paths when the optional natural and cloud-dynamics blocks are absent. Validate real WebGL and native rendering, including night and pole views."
+    architecture:
+      kind: renderer
+      authority: derived
+      reads: [spawned-entity-state]
+      renders: [spawned-entity-state]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/planet.rs, src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_gas_giant.toml, assets/entities/moon_ice.toml, scripts/planets/bake-natural.mjs]
+      tests: [node scripts/planets/check-natural.mjs, cargo test --lib entities::planet::tests]

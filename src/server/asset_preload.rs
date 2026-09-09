@@ -1317,6 +1317,7 @@ mod tests {
                 longitude_segments: 64,
                 latitude_segments: 32,
                 surface: PlanetSurfaceConfig {
+                    natural: None,
                     city: None,
                     albedo: "assets/planets/earth/albedo.webp".into(),
                     normal: Some("assets/planets/earth/normal.webp".into()),
@@ -1327,6 +1328,7 @@ mod tests {
                     emissive_strength: 1.0,
                 },
                 clouds: Some(PlanetCloudsConfig {
+                    dynamics: None,
                     smog: None,
                     albedo: "assets/planets/earth/cloud_albedo.webp".into(),
                     opacity: Some("assets/planets/earth/cloud_opacity.webp".into()),

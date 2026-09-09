@@ -161,6 +161,10 @@ integrates single scattering and samples a baked solar optical-depth table.
 Viewer texture statistics include both celestial material types and deduplicate
 their shared images. `scripts/capture-planet.mjs` and the native
 `examples/capture_planet.rs` use matching camera and light poses.
+Both capture tools accept `PLANET_ENTITY` and scale camera poses by body radius.
+Gas Giant and Ice Moon use `surface.natural` and `clouds.dynamics` for their own
+packed material/effect channels, cloud motion, and ice scattering. Their baker,
+format checks and research references are documented in `scripts/planets/NATURAL.md`.
 
 ## Notes
 

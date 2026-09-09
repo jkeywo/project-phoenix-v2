@@ -85,6 +85,12 @@ pub struct PlanetSurfaceParams {
     pub neon_colour: Vec4,
     pub thermal_colour: Vec4,
     pub traffic_colour: Vec4,
+    pub natural: Vec4,
+    pub flow: Vec4,
+    pub effects: Vec4,
+    pub scatter_colour: Vec4,
+    pub event_colour: Vec4,
+    pub cloud_flow: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -135,6 +141,7 @@ pub struct PlanetCloudParams {
     pub geometry: Vec4,
     pub rayleigh: Vec4,
     pub mie: Vec4,
+    pub flow: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -285,6 +292,49 @@ pub fn surface_material_from_config(
     };
     PlanetSurfaceMaterial {
         params: PlanetSurfaceParams {
+            natural: s
+                .natural
+                .as_ref()
+                .map(|n| {
+                    Vec4::new(
+                        match n.kind {
+                            crate::entities::config::PlanetNaturalKind::GasGiant => 1.0,
+                            crate::entities::config::PlanetNaturalKind::Ice => 2.0,
+                        },
+                        n.normal_strength,
+                        n.shadow_strength,
+                        0.0,
+                    )
+                })
+                .unwrap_or(Vec4::ZERO),
+            flow: s
+                .natural
+                .as_ref()
+                .map(|n| Vec4::new(n.rotation_speed, n.shear, n.turbulence, n.bands))
+                .unwrap_or(Vec4::ZERO),
+            effects: s
+                .natural
+                .as_ref()
+                .map(|n| {
+                    Vec4::new(
+                        n.nightglow,
+                        n.event_strength,
+                        n.event_speed,
+                        n.scatter_strength,
+                    )
+                })
+                .unwrap_or(Vec4::ZERO),
+            scatter_colour: s
+                .natural
+                .as_ref()
+                .map(|n| Vec3::from_array(n.scatter_colour).extend(0.0))
+                .unwrap_or(Vec4::ZERO),
+            event_colour: s
+                .natural
+                .as_ref()
+                .map(|n| Vec3::from_array(n.event_colour).extend(0.0))
+                .unwrap_or(Vec4::ZERO),
+            cloud_flow: config.clouds.as_ref().map(cloud_flow).unwrap_or(Vec4::ZERO),
             neon_colour: s
                 .city
                 .as_ref()
@@ -356,6 +406,13 @@ pub fn surface_material_from_config(
     }
 }
 
+fn cloud_flow(c: &crate::entities::config::PlanetCloudsConfig) -> Vec4 {
+    c.dynamics
+        .as_ref()
+        .map(|d| Vec4::new(c.drift_speed, d.shear, d.turbulence, d.bands))
+        .unwrap_or(Vec4::new(c.drift_speed, 0.0, 0.0, 0.0))
+}
+
 pub fn cloud_material_from_config(
     config: &PlanetConfig,
     asset_server: &AssetServer,
@@ -363,6 +420,7 @@ pub fn cloud_material_from_config(
     let clouds = config.clouds.as_ref()?;
     Some(PlanetCloudMaterial {
         params: PlanetCloudParams {
+            flow: cloud_flow(clouds),
             light_dir: Vec3::X,
             time: 0.0,
             misc: Vec4::new(
@@ -381,8 +439,14 @@ pub fn cloud_material_from_config(
                     .smog
                     .as_ref()
                     .map(|s| s.normal_strength)
+                    .or_else(|| clouds.dynamics.as_ref().map(|d| d.normal_strength))
                     .unwrap_or(1.0),
-                clouds.smog.as_ref().map(|s| s.opacity).unwrap_or(1.0),
+                clouds
+                    .smog
+                    .as_ref()
+                    .map(|s| s.opacity)
+                    .or_else(|| clouds.dynamics.as_ref().map(|d| d.opacity))
+                    .unwrap_or(1.0),
                 clouds.smog.as_ref().map(|s| s.glow_strength).unwrap_or(0.0),
             ),
             geometry: Vec4::new(
@@ -421,6 +485,7 @@ pub fn atmosphere_material_from_config(
         params: PlanetCloudParams {
             light_dir: Vec3::X,
             time: 0.0,
+            flow: Vec4::ZERO,
             misc: Vec4::new(0.0, 1.0, AMBIENT_FLOOR, 1.0),
             texture_x: Vec4::X,
             texture_y: Vec4::Y,
@@ -440,7 +505,11 @@ pub fn atmosphere_material_from_config(
                 config.radius,
                 config.radius * a.scale.max(1.001),
                 a.mie_anisotropy.clamp(-0.95, 0.95),
-                0.0,
+                if config.surface.natural.is_some() {
+                    0.02
+                } else {
+                    0.0
+                },
             ),
             rayleigh: Vec3::from_array(a.rayleigh).extend(0.0),
             mie: Vec3::from_array(a.mie).extend(0.0),
@@ -517,6 +586,7 @@ fn update_planet_materials(
             } else {
                 (star_pos - transform.translation()).normalize_or(Vec3::X)
             };
+            material.params.misc.z = elapsed;
             material.params.misc.y = ambient_floor;
             material.params.misc.w = directional_strength;
             material.params.texture_x = texture_x;
@@ -561,6 +631,7 @@ mod tests {
             longitude_segments: 64,
             latitude_segments: 32,
             surface: PlanetSurfaceConfig {
+                natural: None,
                 city: None,
                 albedo: "assets/planets/earth/albedo.webp".into(),
                 normal: Some("assets/planets/earth/normal.webp".into()),
@@ -571,6 +642,7 @@ mod tests {
                 emissive_strength: 1.5,
             },
             clouds: Some(PlanetCloudsConfig {
+                dynamics: None,
                 smog: None,
                 albedo: "assets/planets/earth/cloud_albedo.webp".into(),
                 opacity: Some("assets/planets/earth/cloud_opacity.webp".into()),

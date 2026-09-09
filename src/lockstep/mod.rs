@@ -768,6 +768,31 @@ impl MeshAgreement {
         self.disagreements.first().copied()
     }
 
+    /// Compare when either half of a checkpoint arrives last. Discovery order
+    /// and duplicate suppression are shared by inbound and local sampling.
+    fn compare_sample(
+        &mut self,
+        peer: HostSlot,
+        tick: u64,
+        peer_digest: u64,
+    ) -> Option<MeshDisagreement> {
+        let local_digest = self.local.digest_at(tick)?;
+        if local_digest == peer_digest {
+            return None;
+        }
+        let found = MeshDisagreement {
+            tick,
+            peer,
+            local_digest,
+            peer_digest,
+        };
+        if self.disagreements.contains(&found) {
+            return None;
+        }
+        self.disagreements.push(found);
+        Some(found)
+    }
+
     /// Forget every sampled checkpoint at or before `tick`, across this host's own
     /// ledger and every peer's, and clear the recorded disagreements at or before
     /// it (issue #1118).
@@ -1644,25 +1669,16 @@ pub fn apply_mesh_inbox(
                 if digest.from == session.local() {
                     continue;
                 }
-                if let Some(local) = agreement.local.digest_at(digest.tick) {
-                    if local != digest.digest {
-                        let found = MeshDisagreement {
-                            tick: digest.tick,
-                            peer: digest.from,
-                            local_digest: local,
-                            peer_digest: digest.digest,
-                        };
-                        if !agreement.disagreements.contains(&found) {
-                            crate::perror!(
-                                log,
-                                LogCat::Admit,
-                                "host-mesh divergence — {found}. The fleet's \
+                if let Some(found) =
+                    agreement.compare_sample(digest.from, digest.tick, digest.digest)
+                {
+                    crate::perror!(
+                        log,
+                        LogCat::Admit,
+                        "host-mesh divergence — {found}. The fleet's \
                                  command logs are the first place to look: they \
                                  are byte-identical on hosts that agree.",
-                            );
-                            agreement.disagreements.push(found);
-                        }
-                    }
+                    );
                 }
                 agreement
                     .peers
@@ -2251,8 +2267,26 @@ pub fn sample_and_publish_digest(world: &mut World) {
         return;
     }
     let digest = crate::sim_digest::world_digest(world);
+    let mut discovered = Vec::new();
     if let Some(mut agreement) = world.get_resource_mut::<MeshAgreement>() {
         agreement.local.record(tick, digest);
+        // A faster peer may already have sent this checkpoint in PreUpdate.
+        // Compare it now rather than leaving agreement dependent on arrival order.
+        let early: Vec<_> = agreement
+            .peers
+            .iter()
+            .filter_map(|(peer, ledger)| ledger.digest_at(tick).map(|digest| (*peer, digest)))
+            .collect();
+        for (peer, peer_digest) in early {
+            if let Some(found) = agreement.compare_sample(peer, tick, peer_digest) {
+                discovered.push(found);
+            }
+        }
+    }
+    let log = world.get_resource::<crate::logging::LogFilterConfig>();
+    for found in discovered {
+        crate::perror!(log, crate::logging::LogCat::Admit,
+            "host-mesh divergence — {found}. The fleet's command logs are the first place to look: they are byte-identical on hosts that agree.");
     }
     if let Some(mut outbox) = world.get_resource_mut::<MeshOutbox>() {
         outbox.push(MeshFrame::Digest(DigestFrame { from, tick, digest }));
@@ -2727,6 +2761,67 @@ station = "helm"
         let text = found.to_string();
         assert!(text.contains("240"), "{text}");
         assert!(text.contains("slot-2"), "{text}");
+    }
+
+    #[test]
+    fn local_sampling_compares_a_peer_checkpoint_received_earlier_once() {
+        let mut world = World::new();
+        world.insert_resource(FleetLockstep(LockstepSession::new(
+            HostSlot(1),
+            [HostSlot(2)],
+            6,
+        )));
+        world.insert_resource(crate::sim_tick::SimTick(300));
+        world.insert_resource(MeshAgreement::new(300));
+        world.init_resource::<MeshOutbox>();
+        let expected = crate::sim_digest::world_digest(&world);
+        let mut remote = crate::sim_digest::DigestLedger::new(300);
+        remote.record(300, expected ^ 1);
+        world
+            .resource_mut::<MeshAgreement>()
+            .peers
+            .insert(HostSlot(2), remote);
+        assert!(world.resource::<MeshAgreement>().agreed());
+        sample_and_publish_digest(&mut world);
+        let found = world
+            .resource::<MeshAgreement>()
+            .first_disagreement()
+            .expect("compare the early peer when local sampling catches up");
+        assert_eq!(
+            found,
+            MeshDisagreement {
+                tick: 300,
+                peer: HostSlot(2),
+                local_digest: expected,
+                peer_digest: expected ^ 1
+            }
+        );
+        sample_and_publish_digest(&mut world);
+        assert_eq!(world.resource::<MeshAgreement>().disagreements.len(), 1);
+        assert_eq!(
+            world.resource_mut::<MeshOutbox>().drain().len(),
+            1,
+            "duplicate sampling cannot republish"
+        );
+    }
+
+    #[test]
+    fn checkpoint_comparison_preserves_discovery_order_and_recovery_cleanup() {
+        let mut agreement = MeshAgreement::new(300);
+        let peer = HostSlot(2);
+        assert!(agreement.compare_sample(peer, 600, 2).is_none());
+        agreement.local.record(300, 1);
+        agreement.local.record(600, 1);
+        assert!(agreement.compare_sample(peer, 600, 1).is_none());
+        assert!(agreement.compare_sample(peer, 600, 2).is_some());
+        assert!(agreement.compare_sample(peer, 600, 2).is_none());
+        assert!(agreement.compare_sample(peer, 300, 2).is_some());
+        assert_eq!(agreement.first_disagreement().unwrap().tick, 600);
+        agreement.forget_through(300);
+        assert_eq!(agreement.disagreements.len(), 1);
+        assert!(agreement.compare_sample(peer, 300, 2).is_none());
+        agreement.local.record(900, 3);
+        assert!(agreement.compare_sample(peer, 900, 3).is_none());
     }
 
     /// Canonical marker geometry is an authority prerequisite even when no

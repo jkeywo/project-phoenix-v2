@@ -195,6 +195,8 @@ entities:
       confidence: confirmed
       title: Fleet Agreement State
       summary: This host's sampled digest ledger, one ledger per peer, and every tick the fleet is known to have disagreed on.
+      rationale:
+        - "[ai] #1449: compare a checkpoint when either its local or remote half arrives last; network/frame ordering must not leave a known mismatch reported as agreement. Preserve discovery order, duplicate suppression and recovery cleanup. A committed dynamic GM join enables the existing disabled sampler without resetting retained ledgers or disagreements; a private candidate still emits no authoritative digest."
     architecture:
       classification: derived
       owner: fleet-digest-exchange

@@ -305,6 +305,16 @@ export function readInjectedOsDefaults(w) {
   return out;
 }
 
+/** Failed native reads are distinct from a successfully read neutral value. */
+export function unavailableOsPreferences(w) {
+  try {
+    const available = w?.PhoenixOsAccessibilityDefaults?.availability;
+    return ['textScale', 'contrast', 'reducedMotion'].filter(key => available?.[key] === false);
+  } catch (_) {
+    return [];
+  }
+}
+
 /**
  * The OS-derived DEFAULT layer. Reads the browser's accessibility media queries
  * where they exist; a host without `matchMedia` (or a query that throws) simply

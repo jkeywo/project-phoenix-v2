@@ -60,7 +60,7 @@ import { createGamepadInputRuntime } from './gamepad-input.js';
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import {
   mountOverlayShell,
-  renderTabBar,
+  renderSettingsOverlay,
   makeSectionBuilders,
   makeRowBuilder,
   VOLUME_MIN,
@@ -979,31 +979,11 @@ export function mountServerSettings(opts = {}) {
     controls.joinCode = {};
     controls.fleet = {};
 
-    overlay.innerHTML = '';
-
-    const popup = doc.createElement('div');
-    popup.className = 'server-settings-popup';
-    overlay.appendChild(popup);
-
-    const heading = doc.createElement('div');
-    heading.className = 'server-settings-title';
-    heading.textContent = t('settings.title');
-    popup.appendChild(heading);
-
-    const tabBar = doc.createElement('div');
-    tabBar.className = 'server-settings-tabs';
-    popup.appendChild(tabBar);
-
-    const body = doc.createElement('div');
-    body.className = 'server-settings-body';
-    popup.appendChild(body);
-
-    renderTabBar(doc, tabBar, tabs, activeTab, 'server-settings-tab', selectTab);
-
-    if (activeTab === 'debug') buildDebugTab(body);
-    else if (activeTab === 'audio') buildAudioTab(body);
-    else if (activeTab === 'gameplay') buildGameplayTab(body);
-    else if (activeTab === 'controls') buildControlsTab(body);
+    const renderers = { debug: buildDebugTab, audio: buildAudioTab, gameplay: buildGameplayTab, controls: buildControlsTab };
+    renderSettingsOverlay(doc, overlay, {
+      tabs: tabs.map(tab => ({ ...tab, render: renderers[tab.id] })),
+      activeTab, onSelect: selectTab, prefix: 'server-settings', headingId: 'settings.title',
+    });
 
     paintOutput();
     refresh();

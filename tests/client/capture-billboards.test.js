@@ -316,7 +316,7 @@ describe('shipped Cruiser capture records', () => {
   it('--check succeeds even when the configured capture binary is missing', () => {
     const result = spawnSync(
       process.execPath,
-      ['scripts/capture-billboards.mjs', '--check', 'alliance_cruiser'],
+      ['scripts/capture-billboards.mjs', '--check', 'assets/models/alliance_cruiser_lod3.png'],
       {
         cwd: ROOT,
         encoding: 'utf8',

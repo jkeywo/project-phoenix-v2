@@ -70,6 +70,8 @@ fn main() {
         .add_systems(Update, drive)
         .run();
 }
+// Each argument is a distinct Bevy system parameter.
+#[allow(clippy::too_many_arguments)]
 fn setup(
     mut commands: Commands,
     mut capture: ResMut<Capture>,

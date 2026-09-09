@@ -319,14 +319,19 @@ impl Plugin for PfxPlugin {
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
                     tick_bursts.run_if(in_state(GamePhase::InProgress)),
                     // Ordered: state feeds both the emitter and the materials.
-                    tick_dust_state.run_if(in_state(GamePhase::InProgress)),
+                    tick_dust_state
+                        .run_if(in_state(GamePhase::InProgress))
+                        .run_if(legacy_dust_enabled),
                     spawn_dust_motes
+                        .run_if(legacy_dust_enabled)
                         .after(tick_dust_state)
                         .run_if(in_state(GamePhase::InProgress)),
                     move_dust_motes
+                        .run_if(legacy_dust_enabled)
                         .after(tick_dust_state)
                         .run_if(in_state(GamePhase::InProgress)),
                     sync_dust_materials
+                        .run_if(legacy_dust_enabled)
                         .after(tick_dust_state)
                         .run_if(in_state(GamePhase::InProgress)),
                 ),
@@ -4080,6 +4085,11 @@ pub fn diff_torpedo_sets(
     let to_spawn: Vec<String> = in_flight_uuids.difference(tracked).cloned().collect();
     let to_despawn: Vec<String> = tracked.difference(in_flight_uuids).cloned().collect();
     (to_spawn, to_despawn)
+}
+
+// Native gameplay uses the approved fixed-pool motes.
+fn legacy_dust_enabled() -> bool {
+    cfg!(target_arch = "wasm32")
 }
 
 #[cfg(test)]

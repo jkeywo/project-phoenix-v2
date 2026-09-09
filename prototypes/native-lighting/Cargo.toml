@@ -1,0 +1,21 @@
+[package]
+name = "phoenix-lighting-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone renderer experiment: never links the simulation or Ultralight.
+[workspace]
+
+[dependencies]
+bevy = { version = "=0.18.1", features = ["webgl2", "webp", "debug"] }
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = false

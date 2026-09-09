@@ -551,3 +551,7 @@ web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "
 # entry point fired next (typically `wasm_receive_message`), which makes the
 # real panic site invisible.
 console_error_panic_hook = "0.1"
+
+[[example]]
+name = "capture_native_lighting"
+required-features = ["host"]

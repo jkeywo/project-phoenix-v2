@@ -7,7 +7,7 @@ scale = [ 1, 1, 1 ]
 
 [extents]
 min = [ -0.9334975857818811, -0.275972, -1.325382139237542 ]
-max = [ 0.9314864553914267, 0.6259125558166504, 1.5261545665651546 ]
+max = [ 0.9314864553914267, 0.6259125558166504, 1.5261545665651548 ]
 size = [ 1.8649840411733078, 0.9018845558166504, 2.8515367058026966 ]
 
 [markers.phasers_fore]
@@ -71,11 +71,11 @@ position = [ 0.18119426139832223, -0.275972, -0.649641371270687 ]
 direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
 
 [[lod]]
-max_distance = 15
+max_distance = 15.0
 model = "assets/models/alliance_battleship_recreated.glb"
 
 [[lod]]
-max_distance = 100
+max_distance = 100.0
 model = "assets/models/alliance_battleship_recreated_lod1.glb"
 tier_rig = "identity"
 
@@ -86,7 +86,7 @@ error = 0.025
 texture_size = 256
 
 [[lod]]
-max_distance = 400
+max_distance = 400.0
 model = "assets/models/alliance_battleship_recreated_lod2.glb"
 tier_rig = "identity"
 
@@ -98,10 +98,10 @@ texture_size = 128
 
 [[lod]]
 billboard = "assets/models/alliance_battleship_recreated_lod3.png"
-scale = [ 2.8536, 0.9019, 1 ]
+scale = [ 2.8543, 0.9019, 1.0 ]
 
 [lod.capture]
 source = "assets/models/alliance_battleship_recreated.glb"
 yaw_views = 8
 resolution = 256
-pitch = 20
+pitch = 20.0

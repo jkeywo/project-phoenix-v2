@@ -188,7 +188,7 @@ size = 9.0
 icon = "destroyer"
 
 [mesh]
-model = "assets/models/dynasty_battleship_recreated.glb"
+model = "assets/models/dynasty_destroyer_recreated.glb"
 shape = "cuboid"
 size = [6.0, 2.5, 12.0]
 colour = [0.95, 0.45, 0.1]

@@ -75,7 +75,7 @@ asset costs, not an FPS benchmark.
 Fleet recreation for Combat Test and Falling Skyway
 -------------------------------------------------
 
-`fleet.json` maps eight distinct models to their concept sheets. The Cruiser
+`fleet.json` maps nine distinct models to their concept sheets. The Cruiser
 uses `PPAllianceStarship.png`. `recreate-fleet.py` authors the Alliance ships,
 ring starbase, research station and Dynasty ships as separate silhouettes,
 using `fleet_geometry.py` for mesh/atlas primitives. Every exported model has
@@ -95,8 +95,9 @@ npm run lods:check
 npm run lod-captures:check
 ```
 
-`PHOENIX_BLENDER` overrides the Blender executable. The builder accepts model
-names to rebuild a subset. The atlas generator accepts `PHOENIX_ART_OUT`,
+`PHOENIX_BLENDER` overrides the Blender executable. The builder and preparation
+script accept model names to rebuild a subset; preparation preserves the other
+fitted assets and report entries. The atlas generator accepts `PHOENIX_ART_OUT`,
 `PHOENIX_ART_TITLE` and `PHOENIX_ART_FACTION` when invoked by the fleet builder.
 
 Preparation fits the actual rendered GLB bounds, not advisory cached extents.
@@ -120,3 +121,24 @@ quaternion checks in `check-fleet.mjs`; `fleet-validation.json` records actual
 GLB triangle counts, file sizes, validation results and attachment counts.
 `integrate-fleet.mjs` changes only the twelve scenario entity model references
 and verifies every other parsed entity value remains identical.
+
+The Dynasty Destroyer uses `PPDynastyDestroyer.png` and replaces the battleship
+mesh previously assigned to `ship_harrow_destroyer`. Its scale and rig are fitted
+to the original Dynasty Destroyer asset. The Alliance cruiser has an unarmed
+visual hull, elevated nacelles and a rounded bow; the courier has a deeper aft
+belly and blended wing roots. Research arrays alternate with laboratories on
+radial spokes, and both dish assemblies face away from the centre. Dynasty wings
+use paired Bezier boundaries and closed airfoil sections, with gun sockets
+embedded in their surface. The battleship has a restored four-tier tower;
+the outer fitted bounds still match the original asset.
+Dynasty simplification errors are limited to 0.0015 for the middle level and
+0.003 for the far level to preserve the open crescent silhouette.
+
+The Harrow cruiser retains its broad forebody outline with a flatter vertical
+section, layered dorsal plates, exposed curved ribs and flank reactors. Harrow
+battleship batteries sit on thick forebody armour and reinforced wing decks.
+Its four-tier aft tower rises above the hull; the forebody's panel joints are
+shallow Boolean cuts into the solid armour, rather than overlapping raised plates.
+The Alliance battleship has no visual turrets at any detail level; its fixed
+spinal laser has hull-integrated shoulders, field coils and a recessed blue
+focusing lens at the bow.

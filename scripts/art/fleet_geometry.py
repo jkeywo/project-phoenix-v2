@@ -57,8 +57,10 @@ def atlas_uv(obj, tile):
         if tile in (0,1,2,8,14):
             lo=[min(v.co[q] for v in mesh.vertices) for q in (a,b)]
             hi=[max(v.co[q] for v in mesh.vertices) for q in (a,b)]
-        # Bevels need a clean trim, not the entire panel sheet squeezed into 2 cm.
-        face_tile = 8 if tile == 0 and p.area < .06 else tile
+        # Small faces on a finely sampled hull still belong to its panel sheet.
+        # Area alone cannot distinguish a bevel from a curved armour surface.
+        legacy_battleship = OUT.parent.name == 'PPAllianceBattleship'
+        face_tile = 8 if legacy_battleship and tile == 0 and p.area < .06 else tile
         for k,c in zip(p.loop_indices,coords):
             u=(c[a]-lo[0])/max(hi[0]-lo[0],1e-8)
             v=(c[b]-lo[1])/max(hi[1]-lo[1],1e-8)

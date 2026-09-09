@@ -575,8 +575,8 @@ mod tests {
         }
 
         assert_eq!(
-            identity, 42,
-            "expected the 11 original ladders plus nine recreated hull/station ladders and \
+            identity, 44,
+            "expected the 11 original ladders plus ten recreated hull/station ladders and \
              the recreated docking variant's two generated tiers each to ship no sidecar of their own"
         );
         assert_eq!(

@@ -6,5 +6,6 @@
   {"name":"alliance_research_outpost","concept":"PPAllianceResearchOutpost","title":"RESEARCH","faction":"alliance"},
   {"name":"dynasty_cruiser","concept":"PPDynastyCruiser","title":"HARROW","faction":"dynasty"},
   {"name":"dynasty_battleship","concept":"PPDynastyBattleship","title":"HARROW","faction":"dynasty"},
-  {"name":"dynasty_courier","concept":"PPDynastyCourier","title":"REQUIEM","faction":"dynasty"}
+  {"name":"dynasty_courier","concept":"PPDynastyCourier","title":"REQUIEM","faction":"dynasty"},
+  {"name":"dynasty_destroyer","concept":"PPDynastyDestroyer","title":"HARROW","faction":"dynasty"}
 ]

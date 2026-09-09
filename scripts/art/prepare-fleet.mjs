@@ -7,6 +7,9 @@ import {parse,stringify} from 'smol-toml';
 import assert from 'node:assert/strict';
 import {migrateMarkers} from './destroyer-markers.mjs';
 const specs=JSON.parse(await readFile('scripts/art/fleet.json','utf8'));
+const chosen=process.argv.slice(2);
+for(const name of chosen)assert.ok(specs.some(s=>s.name===name),'unknown fleet model: '+name);
+const previous=chosen.length?JSON.parse(await readFile('scripts/art/fleet-fit.json','utf8')):[];
 const io=new NodeIO().registerExtensions(ALL_EXTENSIONS);
 const identity={offset:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
 const size=b=>b.max.map((v,i)=>v-b.min[i]);
@@ -28,6 +31,11 @@ const jobs=specs.map(s=>({...s,variant:'model'}));
 jobs.push({...specs.find(s=>s.name==='alliance_courier'),variant:'dock_probe'});
 const reports=[];
 for(const spec of jobs){
+  if(chosen.length&&!chosen.includes(spec.name)){
+    const report=previous.find(r=>r.name===spec.name&&r.variant===spec.variant);
+    assert.ok(report,'run full preparation once before a subset build');
+    reports.push(report);continue;
+  }
   const original=`assets/models/${spec.name}`;
   const reference=parse(await readFile(`${original}.${spec.variant}.toml`,'utf8'));
   const candidate=`assets/models/${spec.name}_recreated${spec.variant==='model'?'':'_'+spec.variant}`;
@@ -61,6 +69,9 @@ for(const spec of jobs){
         level.tier_rig='identity';
         level.generate={source:i===1?source:farSource,ratio:i===1?.65:.23,error:i===1?.025:.08,texture_size:i===1?256:128};
         if(spec.name==='alliance_starbase')level.generate.error=i===1?.0005:.001;
+        // The open crescent is the Dynasty silhouette; the old 8% far error
+        // flattened it into a straight sail even when its bounds still matched.
+        if(spec.faction==='dynasty')level.generate.error=i===1?.0015:.003;
       }
     }
     if(level.billboard){level.billboard=`${candidate}_lod3.png`;level.capture.source=`${candidate}.glb`;}

@@ -23,6 +23,8 @@ points. The courier docking variant has a separate fitted GLB because its
 original rig used a different scale. The same standard LOD and billboard tools
 generate their ladders; the simpler mesh sources live outside the shipped bundle
 under `scripts/art/lod-sources/`.
+The fleet recipe also supplies the Dynasty Destroyer used by the Harrow
+destroyer entity; its concept is `raw/models/PPDynastyDestroyer.png`.
 
 ```bash
 npm run dev:viewer     # → :8081

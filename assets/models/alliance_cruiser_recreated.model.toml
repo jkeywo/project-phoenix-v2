@@ -7,8 +7,8 @@ scale = [ 1, 1, 1 ]
 
 [extents]
 min = [ -0.8210937089077488, -0.2, -0.8493797460588495 ]
-max = [ 0.8218531955217558, 0.23574371933937072, 1.0501465961414393 ]
-size = [ 1.6429469044295046, 0.4357437193393707, 1.8995263422002888 ]
+max = [ 0.8218531955217558, 0.23574371933937072, 1.0501465961414396 ]
+size = [ 1.6429469044295046, 0.4357437193393707, 1.899526342200289 ]
 
 [markers.phasers_fore]
 position = [ 0.0015926529164868282, -0.32826885043814286, -0.8999987317275395 ]
@@ -63,11 +63,11 @@ position = [ 0.9999987317275395, -0.2, 0.10159265291648684 ]
 direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
 
 [[lod]]
-max_distance = 15
+max_distance = 15.0
 model = "assets/models/alliance_cruiser_recreated.glb"
 
 [[lod]]
-max_distance = 100
+max_distance = 100.0
 model = "assets/models/alliance_cruiser_recreated_lod1.glb"
 tier_rig = "identity"
 
@@ -78,7 +78,7 @@ error = 0.025
 texture_size = 256
 
 [[lod]]
-max_distance = 400
+max_distance = 400.0
 model = "assets/models/alliance_cruiser_recreated_lod2.glb"
 tier_rig = "identity"
 
@@ -90,10 +90,10 @@ texture_size = 128
 
 [[lod]]
 billboard = "assets/models/alliance_cruiser_recreated_lod3.png"
-scale = [ 1.9019, 0.4357, 1 ]
+scale = [ 1.9009, 0.4357, 1.0 ]
 
 [lod.capture]
 source = "assets/models/alliance_cruiser_recreated.glb"
 yaw_views = 8
 resolution = 256
-pitch = 20
+pitch = 20.0

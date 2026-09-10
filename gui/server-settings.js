@@ -14,6 +14,12 @@
  *
  *   - **Controls** — host-local semantic action bindings. The QR action is the
  *     tracer; its button and remapped keyboard path share one adapter.
+ *   - **Display** — this ENDPOINT's text size and contrast (issue #1427),
+ *     saved in this browser for every later session and applied to the menus,
+ *     overlays and lobby chrome around the shared view. The only tab here whose
+ *     store is neither the simulation nor a page binding; the controls are
+ *     shared with the native viewscreen's cog
+ *     (`gui/viewscreen-presentation-panel.js`).
  *
  * Two behaviours are new rather than moved:
  *
@@ -44,7 +50,15 @@ import {
   renderEntityBehaviorDebug,
   renderEntityInspectorDebug,
 } from './debug-overlays.js';
-import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
+import {
+  TABS,
+  visibleTabs,
+  resolveActiveTab,
+  visibleViewscreenTabs,
+  resolveViewscreenActiveTab,
+} from './settings-tabs.js';
+import { createViewscreenPresentation } from './viewscreen-presentation.js';
+import { renderViewscreenPresentationPanel } from './viewscreen-presentation-panel.js';
 import {
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
@@ -334,6 +348,22 @@ export function mountServerSettings(opts = {}) {
 
   const outputHost = doc.getElementById(OUTPUT_HOST_ID);
   const outputContent = doc.getElementById(OUTPUT_CONTENT_ID);
+
+  /**
+   * This endpoint's presentation record (issue #1427).
+   *
+   * Built at MOUNT and applied immediately, not when the Display tab is first
+   * opened: the whole point of saving it on this machine is that the screen
+   * comes up at the size the room left it, and a preference that only takes
+   * effect once somebody opens the menu would be a preference nobody set.
+   *
+   * `opts.presentation` lets a test — and, in principle, an embedding with its
+   * own store — supply the controller; the default is this browser's own
+   * `localStorage`, which is the endpoint.
+   */
+  const presentation = opts.presentation
+    || createViewscreenPresentation({ doc, win });
+  presentation.apply();
 
   // ── Small builders ─────────────────────────────────────────────────────────
 
@@ -655,6 +685,38 @@ export function mountServerSettings(opts = {}) {
     buildFleetSection(body);
   }
 
+  /**
+   * The Display tab (issue #1427, PRD #1418 stories 11, 12, 16, 17) — this
+   * ENDPOINT's text size and contrast.
+   *
+   * It is the only tab in this panel whose store is not the simulation and not
+   * a `window` binding published by the page: it is the browser's own
+   * `localStorage` on this machine, which is what "saved on that host across
+   * sessions, independently of the scenario" means for a browser viewscreen.
+   * Nothing here reaches `bindings`, so a scenario load, a reconnect or an exit
+   * to the lobby cannot disturb it, and it never enters a save.
+   *
+   * The controls themselves are `gui/viewscreen-presentation-panel.js`, shared
+   * with the native viewscreen's cog — this function supplies only this page's
+   * element factories and class names.
+   */
+  function buildPresentationTab(body) {
+    renderViewscreenPresentationPanel(body, {
+      doc,
+      t,
+      presentation,
+      section,
+      hint,
+      row: rowHost,
+      control,
+      classes: {
+        slider: 'server-settings-slider',
+        readout: 'server-settings-readout',
+        status: 'server-settings-hint',
+      },
+    });
+  }
+
   function buildControlsTab(body) {
     if (currentHostActionContext() === GM_ACTION_CONTEXT && bindings.__hostGmConfirmationProfile) {
       renderGmConfirmationSettings({ doc, target: body, t,
@@ -964,12 +1026,15 @@ export function mountServerSettings(opts = {}) {
 
   function buildPanel() {
     const demo = isDemo();
-    const tabs = visibleTabs(demo);
+    // The shared operational tabs plus this endpoint's own Display tab (issue
+    // #1427) — the viewscreen list, which the native viewscreen's cog also
+    // draws from, rather than a fifth tab appended here.
+    const tabs = visibleViewscreenTabs(demo);
     // Shared with the phone client rather than duplicated: a panel whose active
     // tab was gated away renders an empty body instead of falling back, and the
     // two pages getting different answers to that is invisible until someone
     // opens the demo build's cog.
-    activeTab = resolveActiveTab(activeTab, demo);
+    activeTab = resolveViewscreenActiveTab(activeTab, demo);
     controls.toggles = {};
     controls.commands = {};
     controls.outputs = {};
@@ -979,7 +1044,13 @@ export function mountServerSettings(opts = {}) {
     controls.joinCode = {};
     controls.fleet = {};
 
-    const renderers = { debug: buildDebugTab, audio: buildAudioTab, gameplay: buildGameplayTab, controls: buildControlsTab };
+    const renderers = {
+      debug: buildDebugTab,
+      audio: buildAudioTab,
+      gameplay: buildGameplayTab,
+      controls: buildControlsTab,
+      presentation: buildPresentationTab,
+    };
     renderSettingsOverlay(doc, overlay, {
       tabs: tabs.map(tab => ({ ...tab, render: renderers[tab.id] })),
       activeTab, onSelect: selectTab, prefix: 'server-settings', headingId: 'settings.title',
@@ -1065,6 +1136,9 @@ export function mountServerSettings(opts = {}) {
     selectTab,
     semanticActions: hostActions,
     gamepad,
+    /** This endpoint's presentation record, so the page (and a test) can read
+     *  or re-apply it without going through the panel that edits it. */
+    presentation,
     destroy,
   };
 }

@@ -265,6 +265,43 @@ pub enum HostLobbyRecord {
     /// spellings are the layout row's alone and are historical (see
     /// [`SetViewscreen`](Self::SetViewscreen)).
     ToggleFullscreen,
+    /// The operator changed this display's text size or contrast in the settings
+    /// menu's Display tab (issue #1427).
+    ///
+    /// The WHOLE record every time, not a delta: the page holds the two values
+    /// and the host holds the file, and a per-field message would make "which
+    /// side is right about contrast" a question with two answers whenever one
+    /// message was dropped. A press is therefore idempotent, and Reset all is
+    /// this same message with both fields absent rather than a fourth verb.
+    ///
+    /// `None` in a field means *follow this machine's own system preference* —
+    /// the tri-state `gui/accessibility-profile.js` spells `default`, and not
+    /// "off". Answered by
+    /// [`crate::native_host::viewscreen_presentation::ViewscreenPresentationStore`],
+    /// which clamps the scale before it is written and again when it is read.
+    ///
+    /// It carries no scenario, no save slot, no session and no participant, and
+    /// what answers it touches one file: this is the endpoint's own reading
+    /// comfort, which PRD #1418 requires to persist *independently* of scenario
+    /// saves and of any player's private profile.
+    ///
+    /// **Web hosts never send it** and do not need to: a browser viewscreen has
+    /// `localStorage` of its own, which is what "this endpoint" means there. It
+    /// is here because an Ultralight view's storage session is ephemeral, so the
+    /// native page has nowhere of its own to keep it (see the store's note).
+    ///
+    /// Snake_case, with the picks and the landing's verbs; the kebab spellings
+    /// are the layout row's alone and are historical (see
+    /// [`SetViewscreen`](Self::SetViewscreen)).
+    SetPresentation {
+        /// Whole percent (`150` is 1.5x), the resolution the slider offers.
+        /// An integer rather than a float because this enum is `Eq` and because
+        /// a size the operator reads as "150%" should cross the bridge as 150.
+        #[serde(default)]
+        text_scale_percent: Option<u32>,
+        #[serde(default)]
+        contrast: Option<bool>,
+    },
 }
 
 impl HostLobbyRecord {
@@ -356,6 +393,14 @@ mod tests {
                 pack: "thin-margin.zip".into(),
             },
             HostLobbyRecord::ToggleFullscreen,
+            HostLobbyRecord::SetPresentation {
+                text_scale_percent: Some(150),
+                contrast: Some(true),
+            },
+            HostLobbyRecord::SetPresentation {
+                text_scale_percent: None,
+                contrast: None,
+            },
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
             assert_eq!(HostLobbyRecord::decode(&json), Some(record));
@@ -419,6 +464,36 @@ mod tests {
             HostLobbyRecord::decode(r#"{"kind":"unassign-station","station":"helm"}"#),
             Some(HostLobbyRecord::UnassignStation {
                 station: "helm".into()
+            })
+        );
+        // Issue #1427. `gui/viewscreen-presentation.js` builds this by hand too,
+        // so the tag and both field names are pinned here. An ABSENT field is
+        // "follow this machine", which is what a per-setting reset and Reset all
+        // both send — so the empty-bodied form has to decode rather than being a
+        // record the host cannot read.
+        assert_eq!(
+            HostLobbyRecord::decode(
+                r#"{"kind":"set_presentation","text_scale_percent":150,"contrast":true}"#
+            ),
+            Some(HostLobbyRecord::SetPresentation {
+                text_scale_percent: Some(150),
+                contrast: Some(true),
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(
+                r#"{"kind":"set_presentation","text_scale_percent":null,"contrast":null}"#
+            ),
+            Some(HostLobbyRecord::SetPresentation {
+                text_scale_percent: None,
+                contrast: None,
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"set_presentation"}"#),
+            Some(HostLobbyRecord::SetPresentation {
+                text_scale_percent: None,
+                contrast: None,
             })
         );
         assert_eq!(

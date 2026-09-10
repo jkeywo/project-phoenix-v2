@@ -240,6 +240,37 @@ pass/fail/note per device in §4.
 5. Native multi-monitor GM: do not duplicate here — run
    `docs/acceptance/1128-accessibility.md` and cite its dated result in §4.
 
+### Task D — The Viewscreen's own Display settings (#1427)
+
+Endpoint-owned text size and contrast. The browser half is covered by
+`tests/smoke/viewscreen-settings-presentation.spec.js`; **the native half is
+not automatable at all** — an Ultralight window on a real Windows machine,
+restarted — so it is a human check:
+
+1. On the NATIVE host, open the settings cog on the viewscreen window and
+   select **Display**. Set text size to 200% and contrast to **More**.
+   Confirm the landing, the world picker, the join panel and the lobby chrome
+   all enlarge and re-contrast *while you watch* (live preview), and that the
+   3D view behind them is unchanged in size and framing.
+2. Confirm the panel wraps/stacks/scrolls at 200% rather than clipping: every
+   control on the tab is still reachable, and **Escape** closes the panel and
+   returns focus to the cog.
+3. **Quit the host and start it again.** The surface must come back up at
+   200% / More *before* you open the menu. This is the property the file
+   `%APPDATA%/ProjectPhoenix/viewscreen-presentation.toml` exists for; if it
+   is absent after step 1, the host could not write it and the log says so.
+4. Load a *different* scenario, then a saved session. The Display settings
+   must not move, and nothing about them may appear in the save.
+5. Press **Reset Contrast** (text size stays at 200%), then **Reset Display
+   Settings** (both return to following Windows). Confirm your bridge layout,
+   host bindings and saved games are untouched.
+6. Repeat step 1 with Windows' own text-size and high-contrast settings
+   changed while the Display tab is set to **System**, to confirm the
+   follow-the-machine state — the same machine preferences
+   `docs/acceptance/1127-windows-preferences.md` records.
+
+Record the result in §4 with `Task D` and the build SHA.
+
 ---
 
 ## 4. Where to record results

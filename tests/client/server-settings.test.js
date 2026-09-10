@@ -263,17 +263,21 @@ describe('the settings cog', () => {
     expect(mounted.isOpen()).toBe(false);
   });
 
-  it('clicking the cog opens a panel with the four tabs', () => {
+  it('clicking the cog opens a panel with the viewscreen tabs', () => {
+    // Four shared tabs, plus this ENDPOINT's own Display tab since issue #1427.
+    // Display sits before Debug rather than after it, so the demo build (which
+    // drops Debug) does not land on it — see `visibleViewscreenTabs`.
     ({ menu: mounted } = mount());
     $('#server-settings-btn').click();
     expect(mounted.isOpen()).toBe(true);
     const tabs = [...document.querySelectorAll('.server-settings-tab')];
     expect(tabs.map((el) => el.getAttribute('data-tab')))
-      .toEqual(['audio', 'gameplay', 'controls', 'debug']);
+      .toEqual(['audio', 'gameplay', 'controls', 'presentation', 'debug']);
     expect(tabs.map((el) => el.textContent)).toEqual([
       t('settings.tab.audio'),
       t('settings.tab.gameplay'),
       t('settings.tab.controls'),
+      t('settings.tab.presentation'),
       t('settings.tab.debug'),
     ]);
   });
@@ -1008,7 +1012,9 @@ describe('the demo build gate', () => {
 
     const tabs = [...document.querySelectorAll('.server-settings-tab')]
       .map((el) => el.getAttribute('data-tab'));
-    expect(tabs).toEqual(['audio', 'gameplay', 'controls']);
+    // Display is NOT gated (issue #1427): a shared screen in a demo build is
+    // still a screen somebody has to read from the back of the room.
+    expect(tabs).toEqual(['audio', 'gameplay', 'controls', 'presentation']);
     expect(control('godmode')).toBeNull();
     expect(control('instagib')).toBeNull();
     expect(control('modifiers')).toBeNull();

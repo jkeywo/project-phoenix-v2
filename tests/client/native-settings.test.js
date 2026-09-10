@@ -32,7 +32,7 @@ import {
   NATIVE_SETTINGS_OVERLAY_ID,
   NATIVE_SETTINGS_CONTROLS,
 } from '../../gui/native-settings.js';
-import { TABS, visibleTabs } from '../../gui/settings-tabs.js';
+import { TABS, visibleViewscreenTabs } from '../../gui/settings-tabs.js';
 
 import { readStripped, colourLiterals, fontSizeLiterals, GUI } from './css-scan.js';
 
@@ -57,11 +57,15 @@ function freshDoc() {
 
 describe('nativeSettingsView', () => {
   it('offers only the shared tabs this surface can put a control on', () => {
+    // The Display tab (issue #1427) is on the table but needs a `presentation`
+    // controller behind it, which `nativeSettingsView` is not given here — the
+    // mount is what filters on the hooks, so the pure decision still sees the
+    // row and offers its tab.
     const vm = nativeSettingsView({});
-    expect(vm.tabs.map((tab) => tab.id)).toEqual(['gameplay']);
-    // …and that is a SUBSET of the shared list rather than a list of its own:
-    // a tab this surface offers must be one the fleet already has.
-    const shared = visibleTabs(false).map((tab) => tab.id);
+    expect(vm.tabs.map((tab) => tab.id)).toEqual(['gameplay', 'presentation']);
+    // …and that is a SUBSET of the viewscreen list rather than a list of its
+    // own: a tab this surface offers must be one the fleet already has.
+    const shared = visibleViewscreenTabs(false).map((tab) => tab.id);
     for (const tab of vm.tabs) expect(shared).toContain(tab.id);
     // The label is the shared table's, not one written here.
     const gameplay = TABS.find((tab) => tab.id === 'gameplay');
@@ -138,8 +142,16 @@ describe('mountNativeSettings', () => {
     expect(overlay.hidden).toBe(false);
     expect([...overlay.querySelectorAll('[data-tab]')].map((el) => el.getAttribute('data-tab')))
       .toEqual(['gameplay']);
+    // The action rows, in table order. The Display row (issue #1427) is not
+    // among them on a mount with no `presentation` hook: a row whose need this
+    // mount cannot meet is dropped, and its tab with it — which is the same
+    // "a control exists exactly when something answers it" rule the tab strip
+    // above applies to a tab with nothing on it. Its own suite
+    // (tests/client/viewscreen-presentation.test.js) drives the hooked mount.
     expect([...overlay.querySelectorAll('[data-control]')].map((el) => el.getAttribute('data-control')))
-      .toEqual(NATIVE_SETTINGS_CONTROLS.map((row) => row.id));
+      .toEqual(NATIVE_SETTINGS_CONTROLS
+        .filter((row) => row.kind !== 'presentation')
+        .map((row) => row.id));
     // The sections are the kit's primitives, so the two other cogs' CSS shape
     // and this one's are the same shape under different class names.
     expect(overlay.querySelectorAll('.native-settings-section')).toHaveLength(2);

@@ -1,14 +1,27 @@
-/* Shared desktop GM desk. Dimensions describe the artboard; visual values use tokens. */
+/* Shared desktop GM desk. Dimensions describe the artboard; visual values use tokens.
+ *
+ * TEXT SCALE IS APPLIED EXACTLY ONCE, AND NOT HERE. This sheet is only ever
+ * loaded into server.html (gui/gm-workspace-shell.js links it) and into the
+ * native GM document, which is server.html with its scripts stripped
+ * (src/native_host/native_gm/document.rs). Both carry
+ *   html { font-size: calc(var(--root-size-viewscreen) * var(--a11y-text-scale, 1)) }
+ * since issue #1427, so every `rem` below — and so every `--text-*` rung, each
+ * of which is a `max(px, rem)` — already grows with the endpoint's chosen text
+ * size. Multiplying a rung by `--a11y-text-scale` again, as these rules did
+ * before that root rule existed, squares the setting: 200% rendered the desk at
+ * 56px instead of 28px. Ratcheted by
+ * tests/client/gm-workspace-shell.test.js › 'applies the endpoint text scale
+ * exactly once'. */
 #gm-console.gm-desk {
   padding: 0; gap: 0; background: var(--surface-void); color: var(--ink);
-  font-family: var(--font-display); font-size: calc(var(--text-md) * var(--a11y-text-scale));
+  font-family: var(--font-display); font-size: var(--text-md);
   scroll-padding: var(--space-5);
 }
 .gm-desk * { box-sizing: border-box; }
 #gm-console.gm-desk [hidden] { display: none !important; }
-#gm-console.gm-desk h1 { font-size: calc(var(--text-xl) * var(--a11y-text-scale)); color: var(--gold); }
-#gm-console.gm-desk h2 { font-size: calc(var(--text-lg) * var(--a11y-text-scale)); }
-#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: calc(var(--text-sm) * var(--a11y-text-scale)); color: var(--ink-dim); }
+#gm-console.gm-desk h1 { font-size: var(--text-xl); color: var(--gold); }
+#gm-console.gm-desk h2 { font-size: var(--text-lg); }
+#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: var(--text-sm); color: var(--ink-dim); }
 #gm-console.gm-desk p { margin: var(--space-2) 0; overflow-wrap: anywhere; }
 #gm-console.gm-desk p:empty, #gm-console.gm-desk ol:empty { display: none; }
 #gm-console .gm-station-bar {
@@ -58,7 +71,7 @@
 #gm-console.gm-desk button.btn {
   min-width: 0; max-width: 100%; padding: var(--space-3) var(--space-4); margin: 0;
   min-height: var(--control-hit-min); height: auto; border: 0;
-  font-size: calc(var(--text-xs) * var(--a11y-text-scale)); color: var(--ink);
+  font-size: var(--text-xs); color: var(--ink);
   background: var(--surface-panel-up); white-space: normal; overflow-wrap: anywhere;
 }
 #gm-console.gm-desk button[aria-pressed="true"], #gm-console.gm-desk button[aria-selected="true"] { color: var(--gold); background: var(--surface-lift); }
@@ -153,14 +166,14 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 /* ── Legibility (GM console feedback, 2026-09-10) ──────────────────────
    The desk's smallest rungs (--text-xs is 11px, dim headings, dim pills)
    read fine on a phone console at arm's length and badly on a wall pane
-   across a desk. Floor the desk's body at 14px, lift every dim/xs rung one
-   step, and let the shared ramp still scale it (--a11y-text-scale). */
-#gm-console.gm-desk { font-size: calc(max(14px, var(--text-md)) * var(--a11y-text-scale)); line-height: 1.4; }
-#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: calc(max(13px, var(--text-sm)) * var(--a11y-text-scale)); color: var(--ink); letter-spacing: var(--tracking-wide); }
-#gm-console.gm-desk button.btn { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); }
+   across a desk. Floor the desk's body at 14px and lift every dim/xs rung one
+   step; the rem half of each `max()` carries the text scale on its own. */
+#gm-console.gm-desk { font-size: max(14px, var(--text-md)); line-height: 1.4; }
+#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: max(13px, var(--text-sm)); color: var(--ink); letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk button.btn { font-size: max(12px, var(--text-sm)); }
 #gm-console.gm-desk #gm-map-legend, #gm-console.gm-desk #gm-entity-identity, #gm-console.gm-desk #gm-session-clock,
 #gm-console.gm-desk #gm-scenario-title, #gm-console.gm-desk .gm-station-pills span,
-#gm-console.gm-desk #gm-system-pills span, #gm-console.gm-desk #gm-operator-identity { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); }
+#gm-console.gm-desk #gm-system-pills span, #gm-console.gm-desk #gm-operator-identity { font-size: max(12px, var(--text-sm)); }
 #gm-console.gm-desk .gm-station-pills span, #gm-console.gm-desk #gm-scenario-title { color: var(--ink); }
 #gm-console.gm-desk .gm-station-pills [data-rating="Backfill"] { color: var(--ink-dim); }
 #gm-console.gm-desk label, #gm-console.gm-desk dt, #gm-console.gm-desk .gm-activity-entry { color: var(--ink); }
@@ -251,9 +264,9 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-attention-reason { grid-column: 1 / -1; margin: 0; }
 #gm-console.gm-desk .gm-attention-resolved {
   grid-column: 1 / -1; margin: 0; font-style: italic;
-  font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale));
+  font-size: max(12px, var(--text-sm));
 }
-#gm-console.gm-desk .gm-attention-band { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-attention-band { font-size: max(12px, var(--text-sm)); letter-spacing: var(--tracking-wide); color: var(--gold); }
 #gm-console.gm-desk .gm-attention-age { font-family: var(--font-mono); text-align: right; }
 #gm-console.gm-desk #gm-attention-status[data-state="held"] { color: var(--gold); }
 /* Where focus lands when the row an operator was standing on leaves the queue

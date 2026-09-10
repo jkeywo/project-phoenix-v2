@@ -142,6 +142,11 @@ pub mod relay_transport;
 /// CI-tested.
 pub mod setup_accessibility;
 pub mod transport;
+/// This machine's own **viewscreen presentation settings** (issue #1427): the
+/// text size and contrast an operator chose at the shared display, saved beside
+/// the bridge layouts so the room comes back up the way it was left. Endpoint
+/// data — never a scenario save, and never a player's private profile.
+pub mod viewscreen_presentation;
 /// Loading a world into a **running** host (issue #1326): the native half of the
 /// pre-scenario flow. Boots into an empty `GamePhase::Lobby` holding the merged
 /// scenario catalogue, arbitrates `SelectScenario` + `SelectPlayerShip` through

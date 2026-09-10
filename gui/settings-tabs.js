@@ -48,6 +48,23 @@ export const CLIENT_ACCESSIBILITY_TABS = [
   { id: 'accessibility', labelId: 'settings.tab.accessibility', gated: false },
 ];
 
+/**
+ * The Viewscreen's Display tab (issue #1427). VIEWSCREEN-SCOPED on purpose, and
+ * for the mirror image of the reason the Accessibility tab above is phone-only:
+ * what it edits is the ENDPOINT's record — this display's text size and
+ * contrast, saved on this machine for whoever walks up to it next — rather than
+ * one player's private profile. Two different records (see
+ * `gui/viewscreen-presentation.js`), so two different tab ids, and a surface
+ * therefore cannot show one tab and edit the other's store.
+ *
+ * Both viewscreen runtimes offer it — `server.html`'s cog and the native host
+ * lobby's — and neither gates it: a shared screen in a demo build is still a
+ * shared screen someone has to read from the back of the room.
+ */
+export const VIEWSCREEN_PRESENTATION_TABS = [
+  { id: 'presentation', labelId: 'settings.tab.presentation', gated: false },
+];
+
 /** Client-only documentation tabs, always available including in demo builds. */
 export const CLIENT_DOCUMENTATION_TABS = [
   { id: 'station-help', labelId: 'settings.tab.station_help', gated: false },
@@ -96,6 +113,34 @@ export function resolveActiveTab(wanted, demo) {
 /** Resolve the selected tab against the phone client's complete tab list. */
 export function resolveClientActiveTab(wanted, demo) {
   const tabs = visibleClientTabs(demo);
+  if (tabs.some((tab) => tab.id === wanted)) return wanted;
+  return tabs.length > 0 ? tabs[0].id : null;
+}
+
+/**
+ * A Viewscreen's tabs in display order: the shared operational tabs, then the
+ * endpoint's own Display tab (issue #1427).
+ *
+ * Display sits LAST among the ungated tabs and before Debug for the same reason
+ * Accessibility sits after the operational tabs on the phone: it is the tab an
+ * operator visits when setting the room up rather than during a session, so it
+ * must not become the demo build's landing tab (`resolveActiveTab` falls back to
+ * the first entry). The native surface filters this list again by what it can
+ * actually put a control on — see `nativeSettingsView`.
+ */
+export function visibleViewscreenTabs(demo) {
+  const shared = visibleTabs(demo);
+  const debugAt = shared.findIndex((tab) => tab.id === 'debug');
+  if (debugAt < 0) return shared.concat(VIEWSCREEN_PRESENTATION_TABS);
+  return shared
+    .slice(0, debugAt)
+    .concat(VIEWSCREEN_PRESENTATION_TABS)
+    .concat(shared.slice(debugAt));
+}
+
+/** Resolve the selected tab against a Viewscreen's complete tab list. */
+export function resolveViewscreenActiveTab(wanted, demo) {
+  const tabs = visibleViewscreenTabs(demo);
   if (tabs.some((tab) => tab.id === wanted)) return wanted;
   return tabs.length > 0 ? tabs[0].id : null;
 }

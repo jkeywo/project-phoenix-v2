@@ -87,3 +87,24 @@ it('offers a sticky way back to the selection card after a quick action jumps th
   expect(back.hidden).toBe(true);
   expect(inspector.scrollTo).toHaveBeenCalledWith({ top: 0 });
 });
+it('applies the endpoint text scale exactly once', () => {
+  // gui/gm-workspace.css is loaded into server.html and into the native GM
+  // document built from it (src/native_host/native_gm/document.rs), and both of
+  // those carry `html { font-size: calc(var(--root-size-viewscreen) *
+  // var(--a11y-text-scale, 1)) }` since issue #1427. That root rule is the ONE
+  // lever: every `--text-*` rung is a `max(px, rem)`, so a rung already grows
+  // with the setting. A `font-size: calc(<rung> * var(--a11y-text-scale))` here
+  // would square it — the desk rendered at 56px instead of 28px at 200%.
+  const commentless = /\/\*[\s\S]*?\*\//g;
+  const sheet = readFileSync('gui/gm-workspace.css', 'utf8').replace(commentless, '');
+  const scaledSizes = sheet
+    .split(/[;{}]/)
+    .map(declaration => declaration.trim())
+    .filter(declaration => /^font-size\s*:/.test(declaration)
+      && declaration.includes('var(--a11y-text-scale'));
+  expect(scaledSizes).toEqual([]);
+  // …and server.html really is where the multiplication happens.
+  expect(source).toContain(
+    'html { font-size: calc(var(--root-size-viewscreen) * var(--a11y-text-scale, 1)); }',
+  );
+});

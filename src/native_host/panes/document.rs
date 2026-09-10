@@ -448,13 +448,31 @@ pub fn inject_os_accessibility_defaults(
     document: &str,
     prefs: &super::os_prefs::OsAccessibilityPrefs,
 ) -> String {
+    inject_head_script(document, &super::os_prefs::os_defaults_script(prefs))
+}
+
+/// Put `body` in a classic `<script>` immediately after `<head>`.
+///
+/// The mechanics of the injection above, named separately once a SECOND seed
+/// needed them (issue #1427's saved viewscreen presentation): both are one
+/// assignment to a documented `window.Phoenix…` global that a `gui/` module
+/// reads, and both must run before any module evaluates.
+///
+/// The safety rule travels with it and is the caller's: `body` is interpolated
+/// verbatim into an HTML `<script>`, so every value inside it must already be a
+/// bool, a finite number or a JSON-escaped string. Each caller's own function
+/// states that invariant over the string it builds
+/// ([`super::os_prefs::os_defaults_script`],
+/// [`crate::native_host::viewscreen_presentation::presentation_script`]).
+///
+/// A document with no `<head>` is returned unchanged — the same "nowhere to
+/// inject" a browser tolerates by falling back to no injected layer, rather than
+/// an error that would fail a surface over a default it can live without.
+pub fn inject_head_script(document: &str, body: &str) -> String {
     let Some(head_end) = find_tag_end(document, "<head") else {
         return document.to_string();
     };
-    let script = format!(
-        "\n<script>\n{}\n</script>\n",
-        super::os_prefs::os_defaults_script(prefs),
-    );
+    let script = format!("\n<script>\n{body}\n</script>\n");
     let mut out = String::with_capacity(document.len() + script.len());
     out.push_str(&document[..head_end]);
     out.push_str(&script);

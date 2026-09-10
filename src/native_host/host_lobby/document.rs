@@ -744,6 +744,14 @@ const QR_TOGGLE_MARKUP: &str = "<div id=\"host-lobby-qr-toggle\" role=\"button\"
 const GROUND_CSS: &str = "\
 :root { --settings-cog-keepout: 92px; }\n\
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }\n\
+/* The root every `rem` on this surface is relative to, multiplied by this\n\
+DISPLAY's own text-size setting (issue #1427). gui/viewscreen-presentation.js\n\
+stamps --a11y-text-scale on this document's :root, so one choice at the settings\n\
+cog enlarges the landing, the world picker, the join panel and the lobby chrome\n\
+together. --root-size-viewscreen (gui/tokens.css) is the 16px this document rode\n\
+by default written down, so an unscaled surface renders exactly as before.\n\
+server.html carries the identical rule. */\n\
+html { font-size: calc(var(--root-size-viewscreen) * var(--a11y-text-scale, 1)); }\n\
 body { font-family: monospace; }\n\
 #overlay { z-index: 210; bottom: 72px; }\n\
 #host-lobby-qr-toggle { z-index: 211; }\n\
@@ -1207,6 +1215,50 @@ mod tests {
         // control the assembly could leave dead.
         assert!(!html.contains("id=\"native-settings-btn\""));
         assert!(!html.contains("id=\"native-settings-overlay\""));
+    }
+
+    #[test]
+    fn this_surface_scales_its_own_chrome_with_the_saved_text_size() {
+        // Issue #1427. The lobby chrome, the picker and the landing are all
+        // written in `--text-*` rungs, which are `rem` against a root this
+        // document never set — so before this rule the Display tab's text size
+        // reached nothing on the surface it is a setting FOR. The rule is the
+        // one `server.html` carries, over the token that names the 16px both
+        // documents rode by default.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains(
+            "html { font-size: calc(var(--root-size-viewscreen) * var(--a11y-text-scale, 1)); }"
+        ));
+        // …and it is the SCENE that must not move with it. The viewscreen this
+        // surface floats over is drawn by the host process into the window, not
+        // by a `rem`-sized element, so there is nothing here for the scale to
+        // reach — which is why this document sizes its own chrome and stops.
+        assert!(html.contains("href=\"gui/tokens.css\""));
+    }
+
+    #[test]
+    fn the_saved_display_settings_are_seeded_before_any_module_runs() {
+        // The seed is what makes the setting survive a restart on native: the
+        // page's own storage session is ephemeral, so a document without this
+        // assignment comes up at the default however many times the room turned
+        // it up. `publish` composes the two; this asserts the composition puts
+        // the assignment in `<head>`, ahead of the module island at the end of
+        // `<body>` that reads it.
+        let seeded = crate::native_host::panes::document::inject_head_script(
+            &build_host_lobby_document(HOST_PAGE).unwrap(),
+            &crate::native_host::viewscreen_presentation::presentation_script(
+                &crate::native_host::viewscreen_presentation::ViewscreenPresentation {
+                    text_scale_percent: Some(150),
+                    contrast: Some(true),
+                },
+            ),
+        );
+        let at = seeded
+            .find("window.PhoenixViewscreenPresentation")
+            .expect("the saved settings are seeded");
+        assert!(seeded[at..].contains("\"textScale\":1.5"));
+        assert!(seeded[at..].contains("\"contrast\":true"));
+        assert!(at < seeded.find("</head>").expect("a head"));
     }
 
     #[test]

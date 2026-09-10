@@ -58,6 +58,11 @@ import { renderHostScenarios } from './gui/host-scenario-render.js';
 import { landingEntries, landingViewModel, nextOpenEntry } from './gui/host-landing-view.js';
 import { renderHostLanding } from './gui/host-landing-render.js';
 import { mountNativeSettings } from './gui/native-settings.js';
+import {
+  createViewscreenPresentation,
+  readInjectedViewscreenPresentation,
+  viewscreenPresentationRecordFields,
+} from './gui/viewscreen-presentation.js';
 
 // The static `data-i18n` markup — "CREW", "CONNECTED", the awaiting-selection
 // badge, the join panel's caption, this surface's QR toggle, the picker's
@@ -499,6 +504,41 @@ const LOCAL_SETTINGS_VERBS = {
   toggle_qr: () => requestToggleQr(),
 };
 
+// ── This display's own presentation settings (issue #1427) ─────────────────
+//
+// The third arrangement in this file, and the one the other two do not fit: the
+// setting is applied HERE, in this document, the instant it changes — that is
+// the live preview, and a round trip through the host would make the operator
+// judge a text size one frame late — while REMEMBERING it is the host's, because
+// this view's storage session is ephemeral and forgets at the end of every run
+// (`panes::ultralight`). So the store below is split down that seam: `load` is
+// what the host seeded the document with, and `save` is a record the host files.
+//
+// `createViewscreenPresentation` owns the order the two happen in, which is why
+// it is shared with `server.html`'s cog rather than restated: normalise, persist,
+// apply, on both viewscreens.
+const presentation = createViewscreenPresentation({
+  doc: document,
+  win: window,
+  store: {
+    // What this machine last saved, injected into <head> before any module ran
+    // (`viewscreen_presentation::presentation_script`). Absent — a bundle newer
+    // than the host, or a machine that names no settings directory — is not an
+    // error: the display then follows its own system preferences, which is what
+    // an unconfigured screen should do.
+    load: () => readInjectedViewscreenPresentation(window) || {},
+    // The WHOLE record every time, so a dropped message cannot leave the file
+    // and the screen disagreeing about one of the two values.
+    save: (record) => send({
+      kind: 'set_presentation',
+      ...viewscreenPresentationRecordFields(record),
+    }),
+  },
+});
+// Applied at load, not at first open: the room left this screen at a size, and
+// it must come up at that size rather than when somebody opens the menu.
+presentation.apply();
+
 mountNativeSettings(document, {
   // The row's verb, forwarded — never a name this file decides.
   run: (action) => {
@@ -506,6 +546,7 @@ mountNativeSettings(document, {
     if (local) local();
     else send({ kind: action });
   },
+  presentation,
 }, { t });
 
 /**

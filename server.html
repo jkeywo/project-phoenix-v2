@@ -239,6 +239,23 @@
       --settings-cog-keepout: 56px;
     }
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--surface-void); overflow: hidden; }
+    /* The root every `rem` on this page is relative to, multiplied by this
+       ENDPOINT's text-scale setting (issue #1427, PRD #1418 stories 11/12).
+       gui/viewscreen-presentation.js stamps --a11y-text-scale on this document's
+       :root, so one choice at the shared display enlarges the settings menu, the
+       join panel, the world picker, the landing and the lobby chrome together —
+       the same arithmetic gui/console.css does inside a console and client.html
+       does around them.
+
+       Before this rule the page had no root size of its own and rode the
+       browser's 16px default, so every `--text-*` rung here ignored the setting.
+       --root-size-viewscreen (gui/tokens.css) is that 16px written down, so an
+       unscaled viewscreen renders exactly as before.
+
+       NOT the 3D scene: #canvas below is sized as a percentage of its shell and
+       the simulation draws in world units, so this cannot crop or shrink what
+       the room is watching. */
+    html { font-size: calc(var(--root-size-viewscreen) * var(--a11y-text-scale, 1)); }
     body { font-family: monospace; }
     #server-shell {
       display: flex;
@@ -1249,7 +1266,7 @@
       border: 1px solid var(--edge); border-radius: 4px;
       color: var(--ink);
       font-family: "Chakra Petch", system-ui, sans-serif;
-      font-size: var(--text-min); letter-spacing: 0.06em;
+      font-size: var(--text-xs); letter-spacing: 0.06em;
     }
     #host-action-feedback:empty { display: none; }
     #server-settings-overlay {
@@ -1278,15 +1295,22 @@
       color: var(--ink-dim);
       margin-bottom: 10px;
     }
+    /* `flex-wrap: wrap`, matching the native viewscreen's own tab strip
+       (gui/native-settings.css): the strip is a fixed-width popup holding a
+       growing number of labels, and at 200% text five of them do not fit on one
+       row. Wrapping is the answer PRD #1418 requires — panels may wrap, stack
+       and scroll, and must not silently shrink text to preserve the original
+       composition — where `flex: 1` on a nowrap row would squeeze every tab
+       until its label clipped. */
     .server-settings-tabs {
-      display: flex; flex-direction: row; gap: 3px;
+      display: flex; flex-direction: row; flex-wrap: wrap; gap: 3px;
       margin-bottom: 12px;
     }
     .server-settings-tab {
-      flex: 1; padding: 6px 4px;
+      flex: 1 1 auto; padding: 6px 4px;
       background: var(--surface-card); border: 1px solid var(--edge-strong);
       color: var(--ink-dim); cursor: pointer;
-      font-family: inherit; font-size: var(--text-min);
+      font-family: inherit; font-size: var(--text-xs);
       letter-spacing: 0.06em;
       -webkit-tap-highlight-color: transparent;
     }
@@ -1310,7 +1334,7 @@
       padding: 6px 9px;
       background: var(--surface-card); border: 1px solid var(--edge-strong);
       color: var(--ink-dim); cursor: pointer;
-      font-family: inherit; font-size: var(--text-min);
+      font-family: inherit; font-size: var(--text-xs);
       -webkit-tap-highlight-color: transparent;
     }
     .server-settings-control:hover { background: var(--surface-high); color: var(--ink); }
@@ -1328,7 +1352,7 @@
     .server-settings-popup .settings-binding-label {
       display: grid; grid-template-columns: minmax(62px, auto) minmax(120px, 1fr);
       align-items: center; gap: 7px; width: 100%;
-      color: var(--ink-dim); font-family: var(--font-mono, monospace); font-size: var(--text-min);
+      color: var(--ink-dim); font-family: var(--font-mono, monospace); font-size: var(--text-xs);
     }
     .server-settings-popup .settings-binding-capture {
       width: 100%; box-sizing: border-box; padding: 6px 9px;
@@ -1343,7 +1367,7 @@
       display: flex; flex-direction: column; gap: 5px;
       padding: 7px; margin-bottom: 10px;
       border: 1px solid var(--reloading); background: var(--surface-card); color: var(--reloading);
-      font-family: var(--font-mono, monospace); font-size: var(--text-min);
+      font-family: var(--font-mono, monospace); font-size: var(--text-xs);
     }
     .server-settings-popup .settings-binding-conflict-heading {
       font-family: "Chakra Petch", system-ui, sans-serif;
@@ -1359,7 +1383,7 @@
     .server-settings-input {
       padding: 6px 9px; width: 8ch;
       background: var(--surface-card); border: 1px solid var(--edge-strong); color: var(--ink);
-      font-family: var(--font-mono, monospace); font-size: var(--text-min);
+      font-family: var(--font-mono, monospace); font-size: var(--text-xs);
       letter-spacing: 0.15em; text-transform: uppercase;
     }
     .server-settings-role-group {
@@ -1368,7 +1392,7 @@
     .server-settings-slider { flex: 1; min-width: 140px; }
     .server-settings-readout {
       min-width: 4ch; text-align: right;
-      font-size: var(--text-min); color: var(--ink-dim);
+      font-size: var(--text-xs); color: var(--ink-dim);
     }
 
     /* Orientation lock (issue: phone-as-server): the server/viewscreen is

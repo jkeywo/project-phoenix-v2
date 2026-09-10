@@ -343,6 +343,23 @@
      arithmetic. */
   --root-size-shell:      13px;
 
+  /* The VIEWSCREEN's root (server.html and the native host's lobby document:
+     the settings menu, the join panel, the world picker, the landing and the
+     lobby chrome around the shared 3D view). Named here in issue #1427 for the
+     same reason --root-size-shell was named in #1422: neither viewscreen
+     document set a root size, so both rode the browser's 16px default and every
+     `--text-*` rung on them ignored a text-scale setting entirely.
+
+     16px is that inherited default written down, so an unscaled viewscreen
+     renders at exactly the size it always has; each document multiplies it by
+     --a11y-text-scale. What does NOT multiply is the scene: `#canvas` is sized
+     as a percentage of its shell and the simulation draws in world units, so
+     enlarging the menus cannot crop or shrink the picture the room is watching.
+     A token rather than a literal so a designer can retune the viewscreen
+     baseline — a television is read from across a room — without editing the
+     scaling arithmetic in two documents. */
+  --root-size-viewscreen: 16px;
+
   /* ── Accessibility (issue #1102) ────────────────────────────────
      The private per-player Accessibility profile (gui/accessibility-profile.js)
      drives these at runtime. `--a11y-text-scale` multiplies the console root

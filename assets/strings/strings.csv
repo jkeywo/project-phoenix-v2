@@ -1103,6 +1103,30 @@ settings.accessibility.reset_all_heading,"Phone client Accessibility tab — hea
 settings.accessibility.reset_all,"Phone client Accessibility tab — button returning text size, contrast and motion to following the system","[Reset Presentation Settings]"
 settings.accessibility.reset_all_hint,"Phone client Accessibility tab — says what the scoped reset does: all three presentation settings return to following the device","[Returns text size, contrast and motion to following your device.]"
 settings.accessibility.reset_all_scope_hint,"Phone client Accessibility tab — states what the scoped reset deliberately does NOT touch, so it is not confused with the Controls tab Reset All","[Your controls, key bindings and saved games are not affected.]"
+settings.tab.presentation,Viewscreen settings menu (browser and native host) — name of the Display tab holding this screen's own text size and contrast,Display
+settings.viewscreen.presentation,Viewscreen Display tab — heading over this screen's own presentation settings,[This Display]
+settings.viewscreen.intro_hint,Viewscreen Display tab — explains the settings change how this shared screen reads; effect-named and never asks for or infers a reason or condition,[Set how this shared screen reads from where the crew are sitting.]
+settings.viewscreen.endpoint_hint,"Viewscreen Display tab — states the settings belong to this machine, are kept for later sessions, and are not any player's own console settings or part of a saved game","[Saved on this machine for every session. It does not change anyone's own console, and it is not part of a saved game.]"
+settings.viewscreen.os_unavailable,Viewscreen Display tab when a system preference read on this machine is unavailable,[Some system preferences could not be read on this machine. Choose the settings here; unread preferences use standard defaults.]
+settings.viewscreen.text_scale,Viewscreen Display tab — heading over this screen's text size control,[Text Size]
+settings.viewscreen.text_scale_value,Viewscreen Display tab — text size readout as a percentage. {value} is the whole-number percentage.,{value}%
+settings.viewscreen.text_scale_hint,"Viewscreen Display tab — explains larger text scales the menus, overlays and lobby on this screen and leaves the view of space alone","[Scales the menus, overlays and lobby on this screen. The view of space is unchanged.]"
+settings.viewscreen.text_scale_reset,Viewscreen Display tab — button that returns this screen's text size to following the system and leaves contrast alone,[Reset Text Size]
+settings.viewscreen.contrast,Viewscreen Display tab — heading over this screen's contrast control,[Contrast]
+settings.viewscreen.contrast_hint,Viewscreen Display tab — explains higher contrast strengthens the difference between text and background on this screen,[Strengthen the difference between text and background on this screen.]
+settings.viewscreen.contrast_reset,Viewscreen Display tab — button that returns this screen's contrast to following the system and leaves text size alone,[Reset Contrast]
+settings.viewscreen.follow_system,Viewscreen Display tab — tri-state option that follows the system preference of the machine this screen runs on,[System]
+settings.viewscreen.contrast_more,Viewscreen Display tab — contrast option that forces higher contrast on for this screen,[More]
+settings.viewscreen.contrast_standard,Viewscreen Display tab — contrast option that forces standard contrast for this screen,[Standard]
+settings.viewscreen.status,Viewscreen Display tab — live readout under one control. {value} is the value now in force; {source} is where it came from.,"[{value} — {source}]"
+settings.viewscreen.source_explicit,"Viewscreen Display tab — status source when the value was chosen here at the screen, overriding any system preference",[chosen here]
+settings.viewscreen.source_system,Viewscreen Display tab — status source when the setting follows this machine and the machine supplied this value,[from system settings]
+settings.viewscreen.source_default,"Viewscreen Display tab — status source when the setting follows this machine and the machine asked for nothing, so the built-in default applies",[default]
+settings.viewscreen.source_unread,"Viewscreen Display tab — status source when a system preference could not be read, so the built-in default is standing in for it",[system preference unavailable]
+settings.viewscreen.reset_all_heading,Viewscreen Display tab — heading over the scoped reset-everything control,[Reset This Display]
+settings.viewscreen.reset_all,Viewscreen Display tab — button returning this screen's text size and contrast to following the system,[Reset Display Settings]
+settings.viewscreen.reset_all_hint,Viewscreen Display tab — says what the scoped reset does: both of this screen's settings return to following the system,[Returns text size and contrast on this screen to following this machine.]
+settings.viewscreen.reset_all_scope_hint,"Viewscreen Display tab — states what the scoped reset deliberately does NOT touch, so it is not confused with the Controls tab Reset All or with a player's own settings","[Saved games, host controls and players' own console settings are not affected.]"
 station.rating.std.name,Display name of the Std station rating (identifier in TOML),STANDARD
 station.rating.simplified.name,Display name of the Simplified station rating,SIMPLIFIED
 station.rating.backfill.name,"Display name of the implicit Backfill rating (station unmanned, AI operates all its systems)",BACKFILL (AI)

@@ -388,18 +388,31 @@ impl LocalHostLobby {
         // would otherwise initialise from nothing at all. Best-effort, read
         // once, and never across the transport seam.
         //
-        // Stated honestly, because the claim is easy to overstate: the lobby
-        // chrome reads NOTHING from this layer today, exactly as the web lobby
-        // reads nothing from it — `gui/accessibility-profile.js` is the phone's,
-        // and the host lobby's own reduced-motion answer is a CSS media query.
-        // It is seeded because a document assembled for an Ultralight view is
-        // assembled the same way whichever surface it is, and because the slices
-        // that put profile-reading UI on this permanent surface should find the
-        // layer already there rather than have to remember to add it.
+        // Since issue #1427 the lobby chrome DOES read this layer: the settings
+        // menu's Display tab follows this machine's own text-size and contrast
+        // preferences until an operator overrides them, and on an Ultralight view
+        // this injection is the only place those preferences can come from. It
+        // was seeded ahead of that slice because a document assembled for an
+        // Ultralight view is assembled the same way whichever surface it is —
+        // which is exactly why the slice that needed it found it already there.
         let prefs = super::panes::os_prefs::query_os_accessibility_prefs();
         let body = super::panes::document::inject_os_accessibility_defaults(
             &build_host_lobby_document(host_index_html)?,
             &prefs,
+        );
+        // …and the operator's own OVERRIDE of it, saved on this machine by that
+        // same Display tab (issue #1427). Seeded the same way, for a stronger
+        // reason: an Ultralight view's storage session is ephemeral, so the page
+        // has nowhere of its own to remember this, and without the seed the
+        // shared screen would come up at the default every launch however many
+        // times the room had turned it up. Best-effort — a machine that will not
+        // name a settings directory simply follows its system preferences.
+        let saved = super::viewscreen_presentation::ViewscreenPresentationStore::user()
+            .map(|store| store.load())
+            .unwrap_or_default();
+        let body = super::panes::document::inject_head_script(
+            &body,
+            &super::viewscreen_presentation::presentation_script(&saved),
         );
         documents.publish(self.path(), body);
         documents.publish(
@@ -1115,6 +1128,49 @@ pub(crate) fn drain_surface_records(
                         LogCat::Lobby,
                         "host lobby: the fullscreen control was pressed on a host that carries \
                          no window-mode latch; it is dropped"
+                    ),
+                }
+                continue;
+            }
+            HostLobbyRecord::SetPresentation {
+                text_scale_percent,
+                contrast,
+            } => {
+                // Issue #1427. Written straight through to this machine's own
+                // file: the page has already applied it to its own root (that is
+                // the live preview, and it must not wait on a round trip), so
+                // what the host owes is only that the NEXT launch comes up the
+                // same way. Nothing else in the process is touched — no
+                // simulation state, no scenario, no save, no participant.
+                //
+                // A host that cannot name a settings directory, or cannot write
+                // to it, keeps the setting for this session and says so once:
+                // the operator can see the screen has changed, so a refusal
+                // would be a worse sentence than an honest "it will not be
+                // remembered".
+                let record = super::viewscreen_presentation::ViewscreenPresentation {
+                    text_scale_percent,
+                    contrast,
+                };
+                match super::viewscreen_presentation::ViewscreenPresentationStore::user() {
+                    Some(store) => match store.save(&record) {
+                        Ok(()) => crate::pinfo!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: this display's presentation settings were saved"
+                        ),
+                        Err(e) => crate::pwarn!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: this display's presentation settings could not be \
+                             written ({e}); they apply for this session only"
+                        ),
+                    },
+                    None => crate::pwarn!(
+                        log,
+                        LogCat::Lobby,
+                        "host lobby: this machine names no settings directory, so this \
+                         display's presentation settings apply for this session only"
                     ),
                 }
                 continue;

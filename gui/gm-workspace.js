@@ -19,6 +19,7 @@ import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
+import { createGmJournalPanel } from './gm-journal-panel.js';
 import {
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
@@ -83,6 +84,17 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     getOperatorName: (id) => typeof win.__hostGmName === 'function'
       ? win.__hostGmName(id) : id,
   });
+  // Saved action history (issue #1441). A pure reader over the same canonical
+  // journal the Session controls settle their own results against — it rides
+  // the `gm_session` projection rather than opening a second channel, because
+  // it is not a second log.
+  const gmJournalPanel = createGmJournalPanel({
+    doc: doc,
+    t,
+    getOperatorName: (id) => typeof win.__hostGmName === 'function'
+      ? win.__hostGmName(id) : id,
+  });
+  win.__hostGmJournalState = gmJournalPanel.state;
   win.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
   win.__hostGmSessionReset = gmSessionControls.reset;
   win.__hostGmSessionState = gmSessionControls.state;
@@ -271,7 +283,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
         shell.refresh(null, gmStationPuppet.state().projection);
       }
     },
-    gm_session:   function(p) { gmSessionControls.update(p); },
+    gm_session:   function(p) { gmSessionControls.update(p); gmJournalPanel.update(p); },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
@@ -290,6 +302,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     },
     reset() {
       gmSessionControls.reset();
+      gmJournalPanel.reset();
       win.__hostGmMissionReset();
       gmCommsPanel.reset();
       gmSpawnPanel.reset();

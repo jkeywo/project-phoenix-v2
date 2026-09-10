@@ -2148,10 +2148,31 @@ impl LocalGmActionRefusals {
 pub struct GmSessionProjection {
     pub paused: bool,
     pub results: Vec<LoggedGmAction>,
+    /// The public view of the SAME canonical journal these results are derived
+    /// from (issue #1441), for the GM journal panel. It rides this existing
+    /// session channel rather than opening a second one precisely because it is
+    /// not a second log: both halves are recomputed from one `GmActionLog` in
+    /// the one place below, so they can never disagree about what happened.
+    ///
+    /// `#[serde(default)]` keeps a pre-#1441 payload (including the native
+    /// host's `{"paused":true}` bootstrap) readable.
+    #[serde(default)]
+    pub journal: crate::gm_journal::GmJournalProjection,
 }
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct LastGmSessionProjection(Option<GmSessionProjection>);
+
+impl LastGmSessionProjection {
+    /// Forget the last published payload so the next publish emits again.
+    ///
+    /// Named for what it is FOR rather than for the field it clears: a replayed
+    /// terminal fact and a restore both change what the page must be told
+    /// without necessarily changing the de-duplication key.
+    pub fn clear_for_republish(&mut self) {
+        self.0 = None;
+    }
+}
 
 /// Presentation-bounded terminal facts for one typed GM action family.
 ///
@@ -2220,6 +2241,11 @@ pub fn projection(
     GmSessionProjection {
         paused,
         results: projected_results(GmActionKind::SessionPause, log, refusals),
+        // Canonical facts only. Supplemental local refusals (`refusals`) are
+        // page-local diagnostics that no snapshot carries, so admitting them
+        // here would put rows in the saved history that a restore could never
+        // reproduce — exactly the abandoned-timeline residue #1441 forbids.
+        journal: crate::gm_journal::journal_projection(log),
     }
 }
 
@@ -3378,7 +3404,9 @@ fn submit_bound(
         {
             world.resource_mut::<LocalGmActionRefusals>().push(fact);
         }
-        world.resource_mut::<LastGmSessionProjection>().0 = None;
+        world
+            .resource_mut::<LastGmSessionProjection>()
+            .clear_for_republish();
         return Ok(GmActionSubmission::Replayed(existing));
     }
     request.action.validate()?;

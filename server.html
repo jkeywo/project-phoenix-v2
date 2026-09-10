@@ -2067,6 +2067,40 @@
           <p id="gm-despawn-feedback" role="status" aria-live="polite"></p>
           <ol id="gm-despawn-results" aria-live="polite"></ol>
         </section>
+        <!-- Saved GM action history (issue #1441). A reader over the ONE
+             canonical journal published on `gm_session`; it submits nothing. -->
+        <section id="gm-journal" role="region" aria-labelledby="gm-journal-heading">
+          <h2 id="gm-journal-heading" data-i18n="server.gm.journal.heading"></h2>
+          <div id="gm-journal-filters">
+            <label class="gm-activity-filter" for="gm-journal-operator-filter">
+              <span data-i18n="server.gm.journal.filter.operator"></span>
+              <select id="gm-journal-operator-filter"></select>
+            </label>
+            <label class="gm-activity-filter" for="gm-journal-outcome-filter">
+              <span data-i18n="server.gm.journal.filter.outcome"></span>
+              <select id="gm-journal-outcome-filter">
+                <option value="all" data-i18n="server.gm.journal.filter.outcome_all"></option>
+                <option value="applied" data-i18n="server.gm.journal.outcome.applied"></option>
+                <option value="no-op" data-i18n="server.gm.journal.outcome.no_op"></option>
+                <option value="refused" data-i18n="server.gm.journal.outcome.refused"></option>
+              </select>
+            </label>
+            <button id="gm-journal-clear-filters" type="button"
+              data-i18n="server.gm.journal.filter.clear"></button>
+          </div>
+          <p id="gm-journal-inverse-support"></p>
+          <p id="gm-journal-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="gm-journal-empty" data-i18n="server.gm.journal.empty"></p>
+          <ol id="gm-journal-list" role="list" aria-labelledby="gm-journal-heading"></ol>
+          <div id="gm-journal-detail" hidden role="group"
+            aria-labelledby="gm-journal-detail-heading">
+            <h3 id="gm-journal-detail-heading" data-i18n="server.gm.journal.detail_heading"></h3>
+            <p id="gm-journal-detail-summary"></p>
+            <p id="gm-journal-detail-target"></p>
+            <p id="gm-journal-detail-outcome"></p>
+            <div id="gm-journal-inverse"></div>
+          </div>
+        </section>
         <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
           <h2 id="gm-comms-heading" data-i18n="server.gm.comms.heading"></h2>
           <p id="gm-comms-empty" role="status" data-i18n="server.gm.comms.empty"></p>

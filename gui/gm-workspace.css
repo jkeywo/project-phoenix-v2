@@ -185,3 +185,39 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
    such a jump and hides again once the selection card is in view. */
 #gm-console.gm-desk #gm-inspector-back { position: sticky; top: 0; z-index: 2; width: 100%; flex-shrink: 0; }
 #gm-console.gm-desk #gm-objective-scope { color: var(--gold); font-family: var(--font-mono); margin: 0; }
+
+/* ── Saved GM action history (issue #1441) ──────────────────────────────
+   The journal is a READING surface, so it has to stay legible when the
+   operator turns text up: rows wrap instead of truncating, the list scrolls
+   inside its own bounded box rather than pushing the detail off the column,
+   and outcome is spelled out in words with the colour edge as a second,
+   redundant signal. */
+#gm-console.gm-desk #gm-journal-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+#gm-console.gm-desk #gm-journal-filters .gm-activity-filter { min-width: 0; flex: 1 1 8em; }
+#gm-console.gm-desk #gm-journal-filters select { min-width: 0; width: 100%; }
+#gm-console.gm-desk #gm-journal-list {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2);
+  max-height: 22em; overflow: auto;
+  scrollbar-width: thin; scrollbar-color: var(--edge-bright) var(--surface-deep); scrollbar-gutter: stable;
+}
+#gm-console.gm-desk .gm-journal-row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3);
+  width: 100%; min-width: 0; max-width: 100%; text-align: left;
+  min-height: var(--control-hit-min); height: auto; padding: var(--space-3);
+  border: 1px solid var(--edge); background: var(--surface-panel-up);
+  color: var(--ink); font: inherit; white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-journal-row[data-selected="true"] { border-color: var(--gold); background: var(--surface-lift); }
+#gm-console.gm-desk .gm-journal-row:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk .gm-journal-row[data-outcome="applied"] { border-left: 3px solid var(--cyan); }
+#gm-console.gm-desk .gm-journal-row[data-outcome="no-op"] { border-left: 3px solid var(--edge-bright); }
+#gm-console.gm-desk .gm-journal-row[data-outcome="refused"] { border-left: 3px solid var(--fire-bright); }
+#gm-console.gm-desk .gm-journal-order { font-family: var(--font-mono); color: var(--ink-dim); }
+#gm-console.gm-desk .gm-journal-outcome { margin-left: auto; letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk #gm-journal-detail {
+  display: grid; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--edge);
+}
+#gm-console.gm-desk .gm-inverse-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; }
+#gm-console.gm-desk .gm-inverse-rows dt { color: var(--ink-dim); }
+#gm-console.gm-desk .gm-inverse-rows dd { margin: 0 0 var(--space-2) 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk .gm-inverse-eligibility { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); }

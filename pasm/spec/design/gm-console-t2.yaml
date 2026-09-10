@@ -384,3 +384,29 @@ entities:
       paths: [src/gm_despawn.rs, src/gm_action.rs, src/world/server.rs, src/snapshot.rs, src/sim_digest.rs, src/gm_projection.rs, src/core/codec.rs, src/console/comms/inbox.rs, gui/gm-despawn-panel.js, server.html]
       symbols: [DespawnEntity, RemovalQuery, validate_target, remove_entity, pending_gm_despawns, createGmDespawnPanel]
       tests: [cargo test --features headless gm_despawn, npx vitest run tests/client/gm-despawn-panel.test.js, tests/smoke/gm-page.spec.js]
+
+  - component: gm-t3-saved-action-history
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Saved GM Action History and Shared Inverse Presentation
+      summary: "The GM console reads the ONE canonical action journal. GmSessionProjection gains a public journal view derived from the same GmActionLog its Session results already come from: public operator id, action family, named target, agreed apply tick and canonical sequence, and the terminal Applied/No-op/Refused outcome with its refusal reason. Transport identity — a grant's from, sequenced_by and recovery_generation, and the HostSlot inside GmActionOrder::origin — is excluded by construction. A capture/restore rewinds the visible history with the world, discarding entries made after the save and appending new ones to the restored log, with no abandoned-timeline surface. A shared inverse-presentation component states before/after, technical versus already-witnessed consequences and undo eligibility, and today declares that NO action family has inverse support."
+      rationale:
+        - "[ai] Issue #1441 (PRD #1420 M5), carrying PRD #1418's usability contract. The journal rides the existing gm_session Host Channel rather than a new one: both halves of that payload are recomputed from one GmActionLog in one function, so a second channel could only create a way for them to disagree, and no parallel journal, store or protocol is introduced."
+        - "[ai] The projection reads GmActionLog, which apply_due_actions recomputes from the durable snapshot-folded GmActionJournal and which snapshot::restore_run_scope re-inserts as applied_log(). Rewind therefore falls out of the existing capture/restore contract rather than needing a save-scoped log of its own. Canonical facts only: LocalGmActionRefusals are page-local diagnostics no snapshot carries, so admitting them would put rows in the saved history a restore could never reproduce."
+        - "[ai] Only GmActionOrder::sequence is published, never its HostSlot origin. The order a GM needs is the deterministic one; which technical slot a peer occupied is session information the facilitation history has no use for."
+        - "[ai] Presentation is bounded at 128 rows with total and capacity published beside them, matching the Session result feed's bound and keeping the trimming honest instead of implying the run only contained what is shown."
+        - "[ai] gui/gm-inverse-preview.js holds a CLOSED wire-kind table, so a new GmActionKind forces an explicit answer rather than inheriting a default. Every family is unsupported today: spawn, despawn and NPC doctrine are marked planned (PRD #1420's inverse families); the rest carry the reason no inverse can exist for them. Nothing renders an undo control, and the already-witnessed sentence is not caller-suppressible — a restored hull does not un-see an explosion."
+        - "[ai] Reading discipline per PRD #1418: filters, selection and keyboard focus survive every republish, outcome is words as well as a data attribute, rows scroll inside a bounded box in the inspector column so 200% text wraps and stacks instead of shrinking, and no republish opens a dialog or moves a panel. Exposing 200% in the Settings slider itself remains issue #1422's deliverable; TEXT_SCALE_MAX is untouched here."
+    architecture:
+      kind: gm-presentation
+      authority: non-authoritative
+      coordinates: [gm-milestone-operations-safety, gm-t2-device-and-milestone-boundaries]
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_journal.rs, src/gm_action.rs, gui/gm-journal-panel.js, gui/gm-inverse-preview.js, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, server.html, assets/strings/strings.csv]
+      symbols: [GmJournalProjection, GmJournalEntry, journal_projection, GM_JOURNAL_WINDOW, GmSessionProjection, clear_for_republish, parseGmJournalProjection, createGmJournalPanel, filterGmJournalEntries, gmJournalEntryKey, GM_JOURNAL_ACTION_KIND_LABELS, createGmInversePreview, gmInverseAvailability, gmInverseSupportedKinds, GM_INVERSE_SUPPORT]
+      tests: [cargo test --features headless --lib gm_journal, cargo test --features headless --test gm_journal, npx vitest run tests/client/gm-journal-panel.test.js tests/client/gm-inverse-preview.test.js, tests/smoke/gm-journal-200.spec.js]

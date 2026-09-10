@@ -114,6 +114,8 @@ pub mod gm_despawn;
 pub mod gm_effect;
 pub mod gm_event;
 pub mod gm_join;
+/// Public presentation of the canonical GM action journal (issue #1441).
+pub mod gm_journal;
 pub mod gm_npc;
 pub mod gm_objective;
 pub mod gm_projection;

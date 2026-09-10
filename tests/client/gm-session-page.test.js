@@ -60,7 +60,9 @@ describe('server GM session page seam', () => {
 
   it('wires the gm_session Host Channel into accessible page controls', () => {
     expect(WORKSPACE).toContain("import { createGmSessionControls } from './gm-session-controls.js'");
-    expect(WORKSPACE).toMatch(/gm_session:\s+function\(p\) \{ gmSessionControls\.update\(p\); \}/);
+    // The channel still reaches the Session controls first; the saved-history
+    // reader (issue #1441) rides the same payload after it.
+    expect(WORKSPACE).toMatch(/gm_session:\s+function\(p\) \{ gmSessionControls\.update\(p\);/);
     expect(WORKSPACE).toContain('win.__hostSemanticActions = hostSemanticActions');
     expect(WORKSPACE).toContain('win.__hostActionFeedback = hostActionFeedback');
     expect(WORKSPACE).toContain('win.__hostGmSessionReset = gmSessionControls.reset');

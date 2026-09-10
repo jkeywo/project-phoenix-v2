@@ -191,6 +191,7 @@ fn publish_session(bridge: &NativeGmBridge, paused: bool) {
         codec::encode_gm_session_projection(&GmSessionProjection {
             paused,
             results: Vec::new(),
+            journal: Default::default(),
         })
         .unwrap(),
     );

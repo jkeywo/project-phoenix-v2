@@ -9,6 +9,7 @@ import { phColor } from './ph-console-styles.js';
 import {
   SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
   applyArcCompositeCap, cappedArcAlpha, phPx, TEXT_MIN_FALLBACK_PX,
+  forcedColorsActive,
 } from './ph-scope-chrome.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
@@ -330,10 +331,15 @@ export class PhTacticalRadar extends PhElement {
     if (!circle) {
       circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       circle.setAttribute('fill', phColor(this, 'none'));
-      circle.setAttribute('stroke', phColor(this, 'var(--cyan)'));
       circle.setAttribute('stroke-width', '1.5');
       g.appendChild(circle);
     }
+    // Forced colours is a live browser toggle (issue #1424), re-resolved on
+    // every render rather than only at creation — so a mode change reaches an
+    // already-mounted ring the same way its position already does on every
+    // frame. See ph-radar.js's matching selected/locked rings and
+    // forcedColorsActive()'s own note on why canvas/SVG need this at all.
+    circle.setAttribute('stroke', phColor(this, forcedColorsActive() ? 'Highlight' : 'var(--cyan)'));
     const bx = cx + (blip.radar_x != null ? blip.radar_x : 0) * r;
     const by = cy - (blip.radar_y != null ? blip.radar_y : 0) * r;
     circle.setAttribute('cx', bx.toFixed(1));

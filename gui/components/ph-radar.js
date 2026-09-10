@@ -5,7 +5,7 @@
 import '../strings-boot.js';
 import { phColor } from './ph-console-styles.js';
 import {
-  ringPlan, scaleReadout, phPx, TEXT_MIN_FALLBACK_PX, textScaleOf,
+  ringPlan, scaleReadout, phPx, TEXT_MIN_FALLBACK_PX, textScaleOf, forcedColorsActive,
 } from './ph-scope-chrome.js';
 import { PhElement, phDefine } from './ph-element.js';
 
@@ -17,6 +17,9 @@ import { PhElement, phDefine } from './ph-element.js';
  */
 const LABEL_GAP_CSS = 4;
 const LABEL_HALO_CSS = 3;
+
+/** The gap between a lock's two concentric rings — see the render loop. */
+const LOCK_RING_GAP_CSS = 4;
 
 export class PhRadar extends PhElement {
   // The state backing stays PRIVATE: `set state` is overridden below to flag a
@@ -226,6 +229,12 @@ export class PhRadar extends PhElement {
     const blips = state.blips || [];
     if (blips.length === 0) { this.needsRender = false; return; }
 
+    // Queried live, once per frame (issue #1424): a real OS/browser toggle a
+    // player can flip while Phoenix is running, not a Phoenix setting cached
+    // across renders. See forcedColorsActive()'s own note on why canvas needs
+    // this at all when tokens.css already covers every DOM-styled control.
+    const forced = forcedColorsActive();
+
     this.#projectedBlips = [];
     const labels = [];
 
@@ -255,6 +264,20 @@ export class PhRadar extends PhElement {
           octx.fillStyle = phColor(this, color);
           octx.fill();
         }
+
+        // A hostile contact's marker (issue #1424): an icon loaded from
+        // `assets/radar_icons/` is a bare silhouette by CLASS (battleship,
+        // cruiser, ship…), never by STANCE — so a hostile heavy and a friendly
+        // one of the same class drew IDENTICALLY once the icon loaded, colour
+        // tint included: `#color` above only ever reaches the fallback circle
+        // an unloaded icon takes for one frame. `target_tags` (not the
+        // "purely cosmetic" `threat_level` — src/entities/target.rs's own
+        // words — which describes a scanned target's flavour text, not IFF)
+        // is the actual stance a console's `selects` filter already reads, so
+        // it is the honest source for this marker too. Shape carries the
+        // meaning — present or absent, never a colour swap alone — so it
+        // survives both forced colours and a colour-deficient eye.
+        if (this.#isHostile(b)) this.#drawHostileMarker(octx, bx, by, dotR, px, forced);
       }
 
       // Collected, not drawn: a label's final Y depends on the other labels,
@@ -267,11 +290,21 @@ export class PhRadar extends PhElement {
         });
       }
 
+      // Selected and locked are both rendered here, and are deliberately NOT
+      // colour-only distinctions of each other (issue #1424): a selected
+      // candidate is one SINGLE ring; a Tactical lock is committed weapons
+      // authority and draws as a DOUBLE ring — a shape difference that reads
+      // the same in grayscale as it does in colour, on top of (not instead
+      // of) the signal/fire-hot colour split already there. Sensors never
+      // sets `target_uuid` (see ph-sensor-radar.js), so its own selection
+      // never grows the second ring.
       if (state.selected_target_uuid && state.selected_target_uuid === b.uuid) {
-        this.#drawRing(octx, bx, by, dotR + 6 * px, 2 * px, 'var(--signal)');
+        this.#drawRing(octx, bx, by, dotR + 6 * px, 2 * px, forced ? 'Highlight' : 'var(--signal)');
       }
       if (state.target_uuid && state.target_uuid === b.uuid) {
-        this.#drawRing(octx, bx, by, dotR + 8 * px, 2 * px, 'var(--fire-hot)');
+        const lockColor = forced ? 'Mark' : 'var(--fire-hot)';
+        this.#drawRing(octx, bx, by, dotR + 8 * px, 2 * px, lockColor);
+        this.#drawRing(octx, bx, by, dotR + 8 * px + LOCK_RING_GAP_CSS * px, 1.5 * px, lockColor);
       }
 
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
@@ -499,6 +532,41 @@ export class PhRadar extends PhElement {
     ctx.strokeStyle = phColor(this, color);
     ctx.lineWidth = lineWidth;
     ctx.stroke();
+  }
+
+  /**
+   * `target_tags` carries the entity's real IFF stance — the same list a
+   * console's `selects` filter already reads (see `buildBlips` in
+   * gui/console-state.js) — lower-cased for comparison since the wire does
+   * not promise a case.
+   */
+  #isHostile(b) {
+    const tags = b && b.target_tags;
+    if (!Array.isArray(tags)) return false;
+    return tags.some((tag) => String(tag).toLowerCase() === 'hostile');
+  }
+
+  /**
+   * A small filled wedge above a hostile contact (issue #1424): SHAPE, not
+   * colour, is what marks a contact hostile — the wedge is either drawn or it
+   * is not, which survives forced colours and colour-deficient vision alike.
+   * Skipped for the synthetic 'tactical-target' / 'science-target' / 'waypoint'
+   * kinds (see the call site): those already draw their own distinct diamond
+   * shape and are never `target_tags`-bearing world entities in the first
+   * place.
+   */
+  #drawHostileMarker(ctx, bx, by, dotR, px, forced) {
+    const r = dotR + 4 * px;
+    const half = 3 * px;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(bx, by - r - half);
+    ctx.lineTo(bx + half, by - r + half);
+    ctx.lineTo(bx - half, by - r + half);
+    ctx.closePath();
+    ctx.fillStyle = phColor(this, forced ? 'Mark' : 'var(--fire-hot)');
+    ctx.fill();
+    ctx.restore();
   }
 
   #drawTargetBlip(ctx, bx, by, dotR, edge, color) {

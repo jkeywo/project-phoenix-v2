@@ -222,6 +222,57 @@ describe('PhTacticalRadar', () => {
     expect(g.childNodes.length).toBe(0);
   });
 
+  // ── Forced colours (issue #1424) ────────────────────────────────────────
+  // Canvas/SVG paint colour strings, not CSS declarations, so the browser's
+  // forced-colours mode cannot repaint them the way it repaints a `.btn`'s
+  // background (see ph-radar.js's forcedColorsActive() for the full note).
+  // This selected-highlight ring must ask the browser itself, on every
+  // render, rather than keep the authored --cyan hex regardless of the
+  // user's forced palette.
+
+  it('paints the system Highlight colour instead of --cyan when the browser is in forced-colours mode', () => {
+    const { el } = setup();
+    const origMatchMedia = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: q === '(forced-colors: active)' });
+    try {
+      el.state = {
+        blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5 }],
+        selected_target_uuid: 'abc',
+      };
+      const circle = el.shadowRoot.getElementById('selected-highlight').querySelector('circle');
+      expect(circle.getAttribute('stroke')).toBe('Highlight');
+    } finally {
+      if (origMatchMedia) window.matchMedia = origMatchMedia; else delete window.matchMedia;
+    }
+  });
+
+  it('re-resolves forced colours on every render of an already-mounted ring, not only at creation', () => {
+    const { el } = setup();
+    const origMatchMedia = window.matchMedia;
+    try {
+      window.matchMedia = () => ({ matches: false });
+      el.state = {
+        blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5 }],
+        selected_target_uuid: 'abc',
+      };
+      const circle = el.shadowRoot.getElementById('selected-highlight').querySelector('circle');
+      expect(circle.getAttribute('stroke')).toBe('var(--cyan)');
+
+      // The OS/browser toggles forced colours ON while the console keeps
+      // running; the SAME circle element (never recreated — see the render
+      // method) must pick it up on its next state update.
+      window.matchMedia = (q) => ({ matches: q === '(forced-colors: active)' });
+      el.state = {
+        blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.6 }],
+        selected_target_uuid: 'abc',
+      };
+      expect(el.shadowRoot.getElementById('selected-highlight').querySelector('circle')).toBe(circle);
+      expect(circle.getAttribute('stroke')).toBe('Highlight');
+    } finally {
+      if (origMatchMedia) window.matchMedia = origMatchMedia; else delete window.matchMedia;
+    }
+  });
+
   it('blip click on inner radar dispatches sendAction via wrapper', () => {
     const sendAction = vi.fn();
     const { el, canvas, tickRaf } = setup({ sendAction });

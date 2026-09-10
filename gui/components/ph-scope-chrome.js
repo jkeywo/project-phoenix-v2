@@ -341,5 +341,39 @@ export function scaleReadout(range) {
   return t('console.radar.scale', { range: range.toFixed(0) });
 }
 
+/**
+ * Is the browser itself repainting the page in a forced-colours palette
+ * (Windows High Contrast and friends) right now? (issue #1424)
+ *
+ * `gui/tokens.css`'s `@media (forced-colors: active)` block (issue #1422)
+ * repaints every DOM-styled control automatically — a CSS declaration is
+ * exactly the thing the browser overrides. A scope's contact rings and its
+ * hostile marker are `<canvas>` pixels and SVG attribute strings, neither of
+ * which is a CSS declaration the browser can intercept: `phColor()` resolves
+ * `var(--fire-hot)` etc. against a COMPUTED custom-property value, and custom
+ * properties are explicitly exempt from the forced-colours override (see the
+ * tokens.css comment this mirrors). So without this check a scope keeps
+ * painting its authored red/cyan regardless of the user's forced palette —
+ * not wrong exactly (the picture stays legible), but not the user's chosen
+ * palette either, which is the same complaint #1422 fixed for the focus ring.
+ *
+ * A scope calls this once per frame/render rather than caching it: forced
+ * colours is a live browser state a user can toggle at the OS level while
+ * Phoenix is running, and the two DOM-side blocks above re-evaluate on every
+ * repaint for the same reason.
+ *
+ * @param {Window|object|null} [win]
+ * @returns {boolean}
+ */
+export function forcedColorsActive(win) {
+  const w = win || (typeof window !== 'undefined' ? window : null);
+  try {
+    return !!(w && typeof w.matchMedia === 'function'
+      && w.matchMedia('(forced-colors: active)').matches);
+  } catch (_) {
+    return false;
+  }
+}
+
 /** Re-exported so a scope needs one import for its token-resolving helpers. */
 export { phColor };

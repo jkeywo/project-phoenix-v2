@@ -142,8 +142,8 @@ describe('contrast-bearing tokens meet WCAG AA', () => {
 
   // 4.5:1 — these are all used as TEXT, at sizes down to the type floor.
   for (const name of ['--ink', '--ink-dim', '--ink-faint', '--tactical', '--fire',
-    '--fire-bright', '--loaded', '--reloading', '--cyan', '--gold', '--signal',
-    '--sky', '--science']) {
+    '--fire-bright', '--fire-hot', '--loaded', '--reloading', '--cyan', '--gold',
+    '--signal', '--sky', '--science']) {
     it(`${name} clears 4.5:1 as text on --surface-base`, () => {
       const value = hex(name);
       expect(value).not.toBeNull();
@@ -164,8 +164,8 @@ describe('contrast-bearing tokens meet WCAG AA', () => {
   });
 
   for (const name of ['--ink', '--ink-dim', '--ink-faint', '--tactical', '--fire',
-    '--fire-bright', '--loaded', '--reloading', '--cyan', '--gold', '--signal',
-    '--sky', '--science']) {
+    '--fire-bright', '--fire-hot', '--loaded', '--reloading', '--cyan', '--gold',
+    '--signal', '--sky', '--science']) {
     it(`${name} clears 4.5:1 as text on --surface-panel`, () => {
       expect(ratio(hex(name), PANEL)).toBeGreaterThanOrEqual(4.5);
     });
@@ -261,8 +261,8 @@ describe('data-contrast="more" swaps in a genuine high-contrast palette', () => 
   // Every text/signal rung clears WCAG AAA (7:1) on the high-contrast surface —
   // a strictly higher bar than the standard palette's 4.5:1 floor.
   for (const name of ['--ink', '--ink-dim', '--ink-faint', '--tactical', '--fire',
-    '--loaded', '--reloading', '--cyan', '--gold', '--signal', '--sky', '--science',
-    '--violet']) {
+    '--fire-hot', '--loaded', '--reloading', '--cyan', '--gold', '--signal', '--sky',
+    '--science', '--violet']) {
     it(`${name} clears 7:1 (AAA) as text on the high-contrast background`, () => {
       const value = hexIn(block, name);
       expect(value).not.toBeNull();

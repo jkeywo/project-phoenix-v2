@@ -798,10 +798,19 @@ pub(crate) fn update_session_with_config(
     selected_ship: Option<Res<SelectedShipResource>>,
     browser_gm: Option<Res<crate::gm_projection::BrowserGameMaster>>,
 ) {
-    // An explicit rendererless GM peer owns no local ship and therefore no
-    // station/manual config. In particular, do not take the native filesystem
-    // fallback below: browser GM boot deliberately skips ship selection.
-    if browser_gm.is_some() {
+    // A browser GM that owns NO SHIP has no station/manual config to build, and
+    // in particular must not take the native filesystem fallback below: a joined
+    // GM peer deliberately skips ship selection, and answering it with whatever
+    // hull happens to be on disk would give it a bridge it never chose.
+    //
+    // Owning a ship is what is tested, not being a GM. Since the landing's Host
+    // as GM route (a standalone game master IS its own session), the profile no
+    // longer decides this: that boot selects a hull like any host, so it arrives
+    // with a `PendingShipConfig` from `wasm_validate_stations` and a
+    // `SelectedShipResource` from `wasm_select_ship`, and its ship needs exactly
+    // the stations and manual every other ship gets — its crew is AI backfill,
+    // which is a rating on a station and not the absence of one.
+    if browser_gm.is_some() && pending_ship_config.is_none() && selected_ship.is_none() {
         return;
     }
     let ship_config_resource = if let Some(pending) = pending_ship_config {
@@ -2533,6 +2542,81 @@ mod tests {
         assert_eq!(stations.stations[0].name, "Helm");
         assert_eq!(stations.stations[1].id.0, "tactical");
         assert_eq!(stations.stations[1].name, "Tactical");
+    }
+
+    /// One station, enough to tell "the roster was built" from "it was not".
+    #[cfg(test)]
+    fn one_station_ship_config() -> crate::ship::config::ShipConfig {
+        use crate::core::messages::StationId;
+        use crate::ship::config::{ShipConfig, StationConfig, StationRatingConfig};
+        ShipConfig {
+            stations: vec![StationConfig {
+                id: StationId("helm".into()),
+                name: "Helm".into(),
+                description: "Helm station".into(),
+                rank: "Crew".into(),
+                short_code: "H".into(),
+                ratings: vec![StationRatingConfig {
+                    name: "Std".into(),
+                    automated_systems: vec![],
+                    ai_tuning: None,
+                }],
+                console: None,
+                manual_overview: None,
+                tutorials: vec![],
+                human_seeking: false,
+                host_order: vec![],
+                visiting_rating: None,
+                auxiliary: false,
+                command_target: None,
+                stances: vec![],
+            }],
+            systems: vec![],
+            power_groups: std::collections::HashMap::new(),
+            coordination_lag_secs: 2.0,
+        }
+    }
+
+    /// A STANDALONE browser game master owns a ship, and its ship gets stations.
+    ///
+    /// The landing's Host as GM route picks a World and a hull like any host, so
+    /// this boot arrives with a `PendingShipConfig` — and its ship needs the same
+    /// station roster every other ship gets, because "crew on AI backfill" is a
+    /// rating on a station, not the absence of one. Before this, the marker alone
+    /// short-circuited the system and the standalone GM's ship had no stations at
+    /// all.
+    #[test]
+    fn browser_gm_with_a_selected_hull_still_gets_its_stations() {
+        let mut app = test_app();
+        app.world_mut()
+            .insert_resource(crate::gm_projection::BrowserGameMaster);
+        app.world_mut()
+            .insert_resource(crate::ship_plugin::PendingShipConfig(
+                one_station_ship_config(),
+            ));
+
+        app.update();
+
+        let stations = app.world().resource::<ShipStations>();
+        assert_eq!(stations.stations.len(), 1);
+        assert_eq!(stations.stations[0].id.0, "helm");
+    }
+
+    /// A JOINED browser game master owns no ship, and must not be given one.
+    ///
+    /// The other half of the pair: no `PendingShipConfig`, no
+    /// `SelectedShipResource`, so nothing was ever selected — and the native
+    /// filesystem fallback below the guard must not answer for it with whatever
+    /// hull happens to be on disk.
+    #[test]
+    fn browser_gm_with_no_selected_hull_gets_no_stations() {
+        let mut app = test_app();
+        app.world_mut()
+            .insert_resource(crate::gm_projection::BrowserGameMaster);
+
+        app.update();
+
+        assert!(app.world().resource::<ShipStations>().stations.is_empty());
     }
 
     // ── #773: system_extras extraction from real hull assets ──────────────────

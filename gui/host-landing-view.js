@@ -60,7 +60,7 @@
  * this page has a world loaded into a running Bevy that was composed from a
  * boot profile. A route whose whole job is to decide that profile — or to leave
  * the page entirely — cannot be offered on that second landing, so both join
- * rows carry it. Like the other two, it takes the STAGE away and leaves the
+ * rows and `host_gm` carry it. Like the other two, it takes the STAGE away and leaves the
  * row: an operator who used Join as Peer before the mission should find it
  * where they left it, saying it is not available now, rather than find the menu
  * silently one row shorter.
@@ -223,6 +223,50 @@ export const LANDING_ENTRIES = [
     //     about the native lifecycle, not a port of this row, which is why it
     //     is not taken here.
     stagePlatforms: ['web'],
+  },
+  {
+    // HOST AS GAME MASTER, ALONE. The third route onto the Game Master
+    // profile, and the only one that opens a session of its own: Join as Peer
+    // below joins somebody else's fleet, `?gm=1` is the bookmarkable spelling
+    // of the same request, and this row is a host that IS the session — one
+    // selected hull, every station on AI backfill, and no viewscreen.
+    //
+    // Its `stage` and `docks` are New Game's, deliberately and to the letter:
+    // the questions a game master answers to open a session are the questions
+    // a captain answers — which World, then which hull — and a second picker
+    // that asked them differently would be a second answer to "what is this
+    // session flying". What differs is what has been REQUESTED by the time the
+    // picker's answers reach `wasm_init`, which is a fact about the page's boot
+    // and not about the columns.
+    id: 'host_gm',
+    labelId: 'server.landing.host_gm',
+    descId: 'server.landing.host_gm_desc',
+    stage: 'world-picker',
+    // The same ladder for the same reason New Game has one (issue #1362): the
+    // hull column is a rung of THIS route, not a route of its own, and a
+    // standalone game master picks a hull exactly as a host does — that hull
+    // is the ship its own crew of AI flies.
+    deeper: ['ship-picker'],
+    docks: 'scenario-panel',
+    platforms: ['web', 'native'],
+    // ...and only the browser host can OPEN it, for the reason Join as Peer's
+    // line below says: the Game Master profile is a BROWSER profile
+    // (`BootProfile::BrowserGameMaster`, chosen inside `wasm_init` from a
+    // thread-local only `wasm_prepare_game_master` sets), and the native host
+    // composes its app before any landing row can ask for one. The row is
+    // still offered there, dashed, because "a native host never game-masters"
+    // is not true — the work is simply not done.
+    stagePlatforms: ['web'],
+    // PRE-BOOT, and for exactly the reason `join_peer` carries the same field:
+    // the profile is read INSIDE `wasm_init` (`is_browser_gm`,
+    // src/server/bridge.rs), which throws-to-unwind and runs once per page. On
+    // the landing that comes back after a Game Over (`showLandingAtPicker`,
+    // issue #756) the request is a dead letter, and honouring it would compose
+    // a GM document over an app Bevy already built as a `BrowserHost`. A
+    // reload is the honest way to change profile, so the stage goes and the row
+    // stays.
+    stagePreBoot: true,
+    statusId: 'server.landing.status_host_gm',
   },
   {
     id: 'join_peer',

@@ -203,3 +203,93 @@ describe('storedGmIdentity/rememberGmIdentity role-preset round-trip (issue #131
     expect(storedGmIdentity('WXYZ')).toBeNull();
   });
 });
+
+describe('standalone Host as GM boot (issue #1368)', () => {
+  // The route's whole difference from the two GM routes that already existed:
+  // this page IS the session. It asks for the Game Master profile like a join
+  // does, and then goes on to pick a hull like a host does — so the wiring
+  // this suite guards is the pair of places where those two halves meet.
+
+  it('remembers WHICH game master this is, and exposes it read-only', () => {
+    // `__phoenixGmPage` cannot answer it (up for both routes) and `fleetHandle`
+    // cannot either (null for a fleet join until the join completes), so the
+    // route records what the operator chose.
+    expect(SERVER_HTML).toContain('let _gmStandalone = false;');
+    expect(SERVER_HTML).toContain('return _gmStandalone && !fleetHandle;');
+    expect(SERVER_HTML).toContain(
+      "window.__hostGmStandalone = function () { return gmStandalone(); };",
+    );
+  });
+
+  it('commits the profile request BEFORE the role, or the press reloads the page', () => {
+    // `__hostSetFleetRole` navigates to `?gm=1` whenever the role and
+    // `__phoenixGmPage` disagree. The same order `boot-game-master` spells out.
+    expect(SERVER_HTML).toMatch(
+      /window\.__phoenixRequestGameMaster\(\);\s*\n\s*if \(typeof window\.__hostSetFleetRole === 'function'\) window\.__hostSetFleetRole\('gm'\);\s*\n\s*return true;/,
+    );
+    expect(SERVER_HTML).toContain("if (!requestStandaloneGameMaster()) {");
+    expect(SERVER_HTML).toContain(
+      "} else if (_landingOpenEntry === 'host_gm') releaseStandaloneGameMaster();",
+    );
+  });
+
+  it('falls through to the ordinary ship picker, so a hull is selected before the start', () => {
+    // The joined GM keeps its early return — it owns no ship. The standalone one
+    // must reach `wasm_select_ship`, because Rust has no `SelectedShipResource`
+    // otherwise and the session would fly nothing.
+    expect(SERVER_HTML).toContain('if (!gmStandalone()) {\n      startServer();\n      return;\n    }');
+  });
+
+  it('gives a fleetless game master a Start, and routes it to the legacy solo launch', () => {
+    // There is no attributed mesh policy to route through when this peer is the
+    // whole session — `apply_force_start` is allowed precisely when
+    // `FleetManagedLobby` is not enabled.
+    expect(SERVER_HTML).toContain("if (fleetRole === 'gm' && gmStandalone()) {");
+    expect(SERVER_HTML).toMatch(
+      /if \(!gmStandalone\(\) \|\| typeof window\.wasm_force_start !== 'function'\)/,
+    );
+    expect(SERVER_HTML).toContain('window.wasm_force_start();');
+    // Readiness is a collective answer and there is no collective, so the Ready
+    // control is absent rather than merely disabled, and the policy line says
+    // what this session is instead of reporting 0 of 0 participants.
+    expect(SERVER_HTML).toContain('readyBtn.hidden = true;');
+    expect(SERVER_HTML).toContain("t('server.gm.start.standalone')");
+  });
+
+  it('leaves #ai-launch-btn exactly as it was — still hidden for every GM', () => {
+    // The legacy shortcut must not masquerade as a start authority. The
+    // standalone GM's Start is the GM control, not this one.
+    expect(SERVER_HTML).toContain(
+      "aiBtn.style.display = vm.aiLaunchVisible && !fleetHandle && fleetRole !== 'gm'",
+    );
+    expect(SERVER_HTML).toContain(
+      "if (!fleetHandle && fleetRole !== 'gm' && typeof wasm_force_start === 'function') {",
+    );
+  });
+});
+
+describe('standalone Host as GM start control (issue #1368)', () => {
+  // The lobby rail's `#gm-start-controls` lives in `#lobby-panel`, which the
+  // GM page never shows — a fleetless GM would have had a Force Start it
+  // could not reach. So the session controls, the surface the GM page does
+  // draw, carry the Start, and both buttons share one request path.
+  it('gives the session controls a Start button, hidden by default', () => {
+    expect(SERVER_HTML).toMatch(
+      /<button id="gm-session-start" type="button" hidden\s+data-i18n="server\.gm\.session\.start_standalone">/,
+    );
+  });
+
+  it('shows that Start only for a fleetless GM whose session is still in the Lobby', () => {
+    expect(SERVER_HTML).toContain(
+      "sessionStart.hidden = !(fleetRole === 'gm' && gmStandalone() && fleetLobbyPhase === 'Lobby');",
+    );
+  });
+
+  it('routes both Start buttons through the one standalone force-start request', () => {
+    expect(SERVER_HTML).toContain(
+      "document.getElementById('gm-session-start')?.addEventListener('click', requestStandaloneForceStart);",
+    );
+    expect(SERVER_HTML).toContain('function requestStandaloneForceStart()');
+    expect(SERVER_HTML).toContain("if (gmStandalone()) paintGmStartControls();");
+  });
+});

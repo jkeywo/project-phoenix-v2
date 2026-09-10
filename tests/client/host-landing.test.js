@@ -16,6 +16,8 @@
 // No DOM here at all: that is the whole reason the decision was lifted out.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { buildTable } from '../../gui/strings.js';
 import {
   LANDING_ENTRIES,
   CONFIRM_CANCEL_ID,
@@ -72,11 +74,38 @@ const TABLE = [
 ];
 
 describe('the shipped entry table', () => {
-  it('offers the six entries drawn so far, in order', () => {
+  it('offers the seven entries drawn so far, in order', () => {
     expect(LANDING_ENTRIES.map((e) => e.id)).toEqual([
-      'new_game', 'load_game', 'join_peer', 'connect_host', 'load_mod_pack',
-      'exit_desktop',
+      'new_game', 'load_game', 'host_gm', 'join_peer', 'connect_host',
+      'load_mod_pack', 'exit_desktop',
     ]);
+  });
+
+  it('puts Host as GM between the host routes and the join routes, where it belongs', () => {
+    // It is BOTH: a host that opens its own session, and the game master
+    // profile. Sitting next to Join as Peer is what says the two GM routes are
+    // the same destination reached two ways — one that IS the session, one that
+    // joins somebody else's.
+    const ids = LANDING_ENTRIES.map((e) => e.id);
+    expect(ids.indexOf('host_gm')).toBeGreaterThan(ids.indexOf('new_game'));
+    expect(ids.indexOf('host_gm')).toBeLessThan(ids.indexOf('join_peer'));
+  });
+
+  it('gives Host as GM New Game`s own stage, ladder and panel — to the letter', () => {
+    // The load-bearing claim: a standalone game master answers the SAME two
+    // questions a host answers, in the same columns, through the same
+    // `#scenario-panel`. A second picker would be a second answer to "what is
+    // this session flying".
+    const host = LANDING_ENTRIES.find((e) => e.id === 'new_game');
+    const gm = LANDING_ENTRIES.find((e) => e.id === 'host_gm');
+    expect(gm.stage).toBe(host.stage);
+    expect(gm.docks).toBe(host.docks);
+    expect(gm.deeper).toEqual(host.deeper);
+    // ...and it carries no `join`: this route opens a session, it does not
+    // type a code at one.
+    expect(gm.join).toBeUndefined();
+    expect(gm.confirm).toBeUndefined();
+    expect(gm.statusId).toBe('server.landing.status_host_gm');
   });
 
   it('gives every row a stage, now that all six slices have landed', () => {
@@ -91,8 +120,8 @@ describe('the shipped entry table', () => {
     // run — but through `needs`, `stagePlatforms` or `stagePreBoot`, each
     // tested below, rather than through a missing stage.
     expect(LANDING_ENTRIES.filter((e) => e.stage).map((e) => e.id)).toEqual([
-      'new_game', 'load_game', 'join_peer', 'connect_host', 'load_mod_pack',
-      'exit_desktop',
+      'new_game', 'load_game', 'host_gm', 'join_peer', 'connect_host',
+      'load_mod_pack', 'exit_desktop',
     ]);
     expect(LANDING_ENTRIES.filter((e) => !e.stage)).toEqual([]);
   });
@@ -106,6 +135,7 @@ describe('the shipped entry table', () => {
     expect(LANDING_ENTRIES.filter((e) => e.docks).map((e) => [e.id, e.docks])).toEqual([
       ['new_game', 'scenario-panel'],
       ['load_game', 'save-slots-panel'],
+      ['host_gm', 'scenario-panel'],
       ['join_peer', 'landing-join-panel'],
       ['connect_host', 'landing-join-panel'],
     ]);
@@ -159,7 +189,13 @@ describe('the shipped entry table', () => {
     // Nothing else in the shipped table is gated this way; a third would be a
     // third unfinished AC and should arrive with its own test.
     expect(LANDING_ENTRIES.filter((e) => e.stagePlatforms).map((e) => e.id))
-      .toEqual(['load_game', 'join_peer']);
+      .toEqual(['load_game', 'host_gm', 'join_peer']);
+    // Host as GM is the third, and the same KIND of gap as Join as Peer's: the
+    // Game Master profile is a browser profile chosen inside `wasm_init`, and
+    // the native host composes its app before any landing row can ask for one.
+    const hostGm = LANDING_ENTRIES.find((e) => e.id === 'host_gm');
+    expect(hostGm.platforms).toEqual(['web', 'native']);
+    expect(hostGm.stagePlatforms).toEqual(['web']);
   });
 
   it('marks both join routes as pre-boot stages, and nothing else', () => {
@@ -169,7 +205,7 @@ describe('the shipped entry table', () => {
     // and the landing DOES come back over one (issue #756). New Game and Load
     // Game are the routes round two exists for, so they must not pick this up.
     expect(LANDING_ENTRIES.filter((e) => e.stagePreBoot).map((e) => e.id))
-      .toEqual(['join_peer', 'connect_host']);
+      .toEqual(['host_gm', 'join_peer', 'connect_host']);
     // Every row with a code field is one of them: a third join route arriving
     // without this is a third way to swap a profile that cannot be swapped.
     expect(LANDING_ENTRIES.filter((e) => e.join).map((e) => e.id))
@@ -362,6 +398,10 @@ describe('a booted surface offers no join stage', () => {
     const inert = Object.fromEntries(vm.entries.map((e) => [e.id, e.inert]));
     expect(inert.join_peer).toBe(true);
     expect(inert.connect_host).toBe(true);
+    // Host as GM goes with them, and for the same reason: the profile is read
+    // once inside `wasm_init`, so the request this route commits is a dead
+    // letter on the landing that comes back over a loaded world.
+    expect(inert.host_gm).toBe(true);
     expect(inert.new_game).toBe(false);
     expect(inert.load_game).toBe(false);
     // The menu is not one row shorter: an operator finds the route where they
@@ -380,6 +420,15 @@ describe('a booted surface offers no join stage', () => {
     expect(vm.join).toBe(null);
     expect(vm.docks).toBe(null);
     expect(vm.stage).toBe('idle');
+  });
+
+  it('opens Host as GM before the boot and never after it', () => {
+    expect(landingViewModel({ platform: 'web', openEntryId: 'host_gm' }).stage)
+      .toBe('world-picker');
+    const after = landingViewModel({ platform: 'web', openEntryId: 'host_gm', booted: true });
+    expect(after.openEntryId).toBe(null);
+    expect(after.docks).toBe(null);
+    expect(after.stage).toBe('idle');
   });
 
   it('still opens both of them before the boot, which is the whole of the slice', () => {
@@ -670,7 +719,10 @@ describe('the shipped New Game ladder (issue #1362)', () => {
     const withLadders = LANDING_ENTRIES
       .filter((e) => Array.isArray(e.deeper) && e.deeper.length)
       .map((e) => e.id);
-    expect(withLadders).toEqual(['new_game']);
+    // Two now, and they are the same ladder: Host as GM descends into the hull
+    // column exactly as New Game does, because a standalone game master picks
+    // the hull its own AI crew flies.
+    expect(withLadders).toEqual(['new_game', 'host_gm']);
   });
 });
 
@@ -771,7 +823,8 @@ describe('the entries a native host is offered (issue #1361)', () => {
     const native = landingEntries('native', LANDING_ENTRIES).map((e) => e.id);
     expect(native).not.toContain('connect_host');
     expect(native).toEqual([
-      'new_game', 'load_game', 'join_peer', 'load_mod_pack', 'exit_desktop',
+      'new_game', 'load_game', 'host_gm', 'join_peer', 'load_mod_pack',
+      'exit_desktop',
     ]);
   });
 
@@ -793,7 +846,8 @@ describe('the entries a native host is offered (issue #1361)', () => {
 
   it('numbers a curated menu from one, so native has no gap where a row was', () => {
     const vm = landingViewModel({ platform: 'native' });
-    expect(vm.entries.map((e) => e.ordinal)).toEqual(['01', '02', '03', '04', '05']);
+    expect(vm.entries.map((e) => e.ordinal))
+      .toEqual(['01', '02', '03', '04', '05', '06']);
   });
 
   it('offers Exit to Desktop on native and never on the web', () => {
@@ -1327,5 +1381,35 @@ describe('landingViewModel — the mod-pack shelf stage (issue #1366)', () => {
     expect(vm.packs.findings).toEqual([]);
     expect(vm.packs.emptyId).toBe('server.landing.packs.empty');
     expect(vm.packs.ctaEnabled).toBe(false);
+  });
+});
+
+describe('every id the shipped table names is authored (issue #1368)', () => {
+  // A row is only as good as the words behind it: a `labelId` with no CSV row
+  // renders the id itself down the menu, which no other check in this suite
+  // would notice — every `t` here is a stub that echoes its argument.
+  const table = buildTable(
+    readFileSync(new URL('../../assets/strings/strings.csv', import.meta.url), 'utf8'),
+  );
+  const resolves = (id) => !!table.get(id);
+
+  it('authors a label and a description for every row', () => {
+    for (const entry of LANDING_ENTRIES) {
+      expect(resolves(entry.labelId), entry.labelId).toBe(true);
+      expect(resolves(entry.descId), entry.descId).toBe(true);
+    }
+  });
+
+  it('authors the status line every row that names one asks for', () => {
+    for (const entry of LANDING_ENTRIES.filter((e) => e.statusId)) {
+      expect(resolves(entry.statusId), entry.statusId).toBe(true);
+    }
+  });
+
+  it('authors the standalone game master`s own start policy line', () => {
+    // Not a landing string, but the sentence the same route puts under the one
+    // Start control a fleetless game master is shown (server.html's
+    // `paintGmStartControls`). It has no other test.
+    expect(resolves('server.gm.start.standalone')).toBe(true);
   });
 });

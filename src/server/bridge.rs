@@ -860,11 +860,26 @@ pub fn wasm_init() {
     );
     app.add_plugins(WorldPlugin);
     // Insert the selected ship resource (set by wasm_select_ship before
-    // wasm_init was called). Falls back to the legacy default path.
-    if !is_browser_gm {
-        let ship_path = edge::read_selected_ship_template_path()
-            .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
+    // wasm_init was called).
+    //
+    // A hull that was actually SELECTED is inserted whatever the profile,
+    // because the two browser GM routes differ on exactly this point: a GM that
+    // joined somebody else's fleet calls no `wasm_select_ship` and owns no ship,
+    // while a standalone GM — the landing's Host as GM route — picked a World
+    // and a hull on the way in, and that hull is its own ship with every station
+    // on AI backfill. Reading the selection rather than the profile is what lets
+    // one boot answer both without a third flag to keep in step.
+    //
+    // The legacy fallback stays profile-bound: a world with no `available_ships`
+    // still boots a `BrowserHost` on the shipped cruiser, but a GM that selected
+    // nothing selected nothing, and inventing a cruiser for it would give a
+    // joined GM a local ship it never asked for.
+    if let Some(ship_path) = edge::read_selected_ship_template_path() {
         app.insert_resource(SelectedShipResource(ship_path));
+    } else if !is_browser_gm {
+        app.insert_resource(SelectedShipResource(
+            "assets/entities/alliance_cruiser.toml".to_string(),
+        ));
     }
     // The same pre-init record that selected the hull also owns the frozen
     // fleet topology. Install it before Startup spawns any GameStart ships, so

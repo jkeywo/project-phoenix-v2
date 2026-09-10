@@ -37,6 +37,14 @@ use crate::ship::state::ShipPhysics;
 use crate::world::server::WorldContentRuntime;
 
 /// Marks the explicit production rendererless browser GM peer.
+///
+/// Rendererless always; shipless only sometimes. A GM that JOINED a fleet owns
+/// no local ship — it selected no hull and looks at somebody else's session. A
+/// GM booted STANDALONE from the landing's Host as GM route is the session: it
+/// picked a World and a hull on the way in, so it owns a `LocalShip` like any
+/// host, with every station on AI backfill and no viewscreen drawn for it.
+/// Anything reading this marker to mean "there is no local ship" is reading it
+/// wrong; ask for the ship.
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct BrowserGameMaster;
 

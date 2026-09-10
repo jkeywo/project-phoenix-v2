@@ -238,7 +238,7 @@ test('choosing a world from the landing reaches the lobby it always reached',
     // than gone from the menu.
     expect(await page.locator(`${MENU} [data-landing-entry][aria-disabled="true"]`)
       .evaluateAll((els) => els.map((el) => el.getAttribute('data-landing-entry'))))
-      .toEqual(['join_peer', 'connect_host']);
+      .toEqual(['host_gm', 'join_peer', 'connect_host']);
     await expect(page.locator(`${NEW_GAME}[aria-disabled="true"]`)).toHaveCount(0);
 
     // Round two's hull cards are NOT asserted here, and the omission is

@@ -1145,6 +1145,7 @@ mod tests {
         for id in [
             "new_game",
             "load_game",
+            "host_gm",
             "join_peer",
             "connect_host",
             "load_mod_pack",

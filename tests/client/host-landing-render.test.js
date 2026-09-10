@@ -141,11 +141,11 @@ describe('renderHostLanding — the idle landing', () => {
     const doc = landingDoc();
     renderHostLanding(doc, landingViewModel(), t);
     const list = entries(doc);
-    // The WEB menu: four rows. Exit to Desktop is native-only (a tab cannot
+    // The WEB menu: five rows. Exit to Desktop is native-only (a tab cannot
     // quit an app) and so is Load mod pack (its stage is a scanned folder, and
     // this host's mod-pack door is the live upload control inside the picker).
     expect(list.map((el) => el.getAttribute(LANDING_ENTRY_ATTR))).toEqual([
-      'new_game', 'load_game', 'join_peer', 'connect_host',
+      'new_game', 'load_game', 'host_gm', 'join_peer', 'connect_host',
     ]);
     expect(list[0].querySelector('.landing-mi-ix').textContent).toBe('01');
     expect(list[0].querySelector('.landing-mi-label').textContent).toBe('server.landing.new_game');
@@ -171,7 +171,7 @@ describe('renderHostLanding — the idle landing', () => {
     const list = entries(doc);
     expect(list.filter((el) => el.getAttribute('aria-disabled') === 'true')
       .map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
-      .toEqual(['load_game', 'join_peer', 'load_mod_pack']);
+      .toEqual(['load_game', 'host_gm', 'join_peer', 'load_mod_pack']);
     expect(list.every((el) => el.disabled === false)).toBe(true);
   });
 
@@ -187,7 +187,7 @@ describe('renderHostLanding — the idle landing', () => {
     renderHostLanding(doc, landingViewModel(), t);
     renderHostLanding(doc, landingViewModel(), t);
 
-    expect(entries(doc)).toHaveLength(4);
+    expect(entries(doc)).toHaveLength(5);
     expect(doc.getElementById('not-ours')).not.toBe(null);
   });
 
@@ -199,7 +199,7 @@ describe('renderHostLanding — the idle landing', () => {
     renderHostLanding(doc, landingViewModel(), t, h);
     entries(doc).forEach((el) => el.click());
     expect(calls.pick).toEqual([
-      'new_game', 'load_game', 'join_peer', 'connect_host',
+      'new_game', 'load_game', 'host_gm', 'join_peer', 'connect_host',
     ]);
   });
 
@@ -922,7 +922,7 @@ describe('a deliberately incomplete document', () => {
     const doc = landingDoc();
     doc.getElementById('landing-title').remove();
     renderHostLanding(doc, landingViewModel({ openEntryId: 'new_game' }), t, {});
-    expect(entries(doc)).toHaveLength(4);
+    expect(entries(doc)).toHaveLength(5);
     expect(doc.getElementById('scenario-panel').parentElement)
       .toBe(doc.getElementById('landing-mid'));
     expect(text(doc, 'landing-status-session')).toBe('server.landing.status_hosting');
@@ -1040,7 +1040,8 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     // Desktop is the mirror image and native-only, so this menu is longer than
     // the web one by exactly that row (issue #1365).
     expect(ids).toEqual([
-      'new_game', 'load_game', 'join_peer', 'load_mod_pack', 'exit_desktop',
+      'new_game', 'load_game', 'host_gm', 'join_peer', 'load_mod_pack',
+      'exit_desktop',
     ]);
     // …and the same document on the web surface still offers it, so this is a
     // curated menu and not a lost row.
@@ -1143,7 +1144,7 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     const disabled = entries(doc)
       .filter((el) => el.getAttribute('aria-disabled') === 'true')
       .map((el) => el.getAttribute(LANDING_ENTRY_ATTR));
-    expect(disabled).toEqual(['load_game', 'join_peer', 'load_mod_pack']);
+    expect(disabled).toEqual(['load_game', 'host_gm', 'join_peer', 'load_mod_pack']);
     // ...and pressing it opens no middle column, which is the failure the row
     // being absent was avoiding in the first place.
     renderHostLanding(

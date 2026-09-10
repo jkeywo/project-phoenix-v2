@@ -1965,6 +1965,15 @@
               data-i18n="semantic_action.gm.session_pause.label"></button>
             <button id="gm-session-resume" type="button"
               data-i18n="semantic_action.gm.session_resume.label"></button>
+            <!-- The standalone game master's Start (the `host_gm` landing
+                 route). The lobby rail's `#gm-start-controls` is the fleet's
+                 start surface and lives in `#lobby-panel`, which the GM page
+                 never shows — so a GM who IS the whole session starts it from
+                 the session controls in front of them. Hidden except for a
+                 fleetless GM whose session is still in the Lobby phase;
+                 `paintGmStartControls` owns that. -->
+            <button id="gm-session-start" type="button" hidden
+              data-i18n="server.gm.session.start_standalone"></button>
           </div>
           <p id="gm-session-state" role="status" aria-live="polite" aria-atomic="true"></p>
           <p id="gm-session-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -4231,7 +4240,14 @@
           };
         }
       }
-      if (!fleetHandle) return;
+      if (!fleetHandle) {
+        // No mesh to publish to. A standalone game master still owns a start
+        // control on this page, and the lobby payload is the one signal that
+        // reaches it after boot — so paint from here, or the Force Start
+        // button stays hidden behind the admission gate a fleet would open.
+        if (gmStandalone()) paintGmStartControls();
+        return;
+      }
       const valid = fleetStartValidation() && fleetLobbyStationRatings !== null;
       const role = normaliseFleetRole(fleetHandle.role || fleetRole);
       const stateKey = `${role}|${fleetLobbyReadiness.connected}|${fleetLobbyReadiness.ready}`
@@ -4554,7 +4570,36 @@
       if (typeof window.__hostGmEffectRefresh === 'function') {
         window.__hostGmEffectRefresh();
       }
+      // The session-controls Start of a standalone GM (see the markup): the one
+      // start control on a surface the GM page actually shows. Visible only
+      // while there is a mission to start — a fleetless GM in the Lobby phase.
+      const sessionStart = document.getElementById('gm-session-start');
+      if (sessionStart) {
+        sessionStart.hidden = !(fleetRole === 'gm' && gmStandalone() && fleetLobbyPhase === 'Lobby');
+      }
       if (!controls || !readyBtn || !forceBtn) return;
+      // A STANDALONE game master has no fleet and therefore no `localGm()` —
+      // `localGm` reads the fleet roster, and there is no roster when this peer
+      // is the whole session. It still needs a way to start, and there is
+      // nobody to be ready FOR: readiness is a collective answer, so the Ready
+      // control is not merely disabled here but absent, and the policy line
+      // says what this session is instead of reporting 0 of 0 participants.
+      if (fleetRole === 'gm' && gmStandalone()) {
+        controls.setAttribute('aria-hidden', 'false');
+        readyBtn.hidden = true;
+        forceBtn.hidden = false;
+        forceBtn.textContent = t('server.gm.start.force');
+        forceBtn.disabled = false;
+        if (policyEl) policyEl.textContent = t('server.gm.start.standalone');
+        if (resultEl) {
+          resultEl.textContent = fleetStartResultView
+            ? t(fleetStartResultView.id, fleetStartResultView.params)
+            : '';
+          resultEl.classList.toggle('refused', !!(fleetStartResultView && fleetStartResultView.refused));
+        }
+        return;
+      }
+      readyBtn.hidden = false;
       const gm = localGm();
       controls.setAttribute('aria-hidden', gm ? 'false' : 'true');
       if (!gm) return;
@@ -5425,9 +5470,44 @@
       paintGmStartControls();
     });
 
+    /**
+     * The standalone game master's Start. There is no attributed mesh policy
+     * to route through — `apply_force_start` is allowed precisely when
+     * `FleetManagedLobby` is not enabled — so this is the legacy solo launch,
+     * reached from the controls this page shows a fleetless GM rather than
+     * from `#ai-launch-btn`, which stays hidden for every GM. The confirmation
+     * is the same one every other GM start goes through. Two buttons share it:
+     * the lobby rail's Force Start (kept coherent for a page that shows that
+     * rail) and `#gm-session-start` in the session controls, which is the one
+     * a GM page actually displays.
+     */
+    function requestStandaloneForceStart() {
+      if (!(fleetRole === 'gm' && gmStandalone())) return;
+      window.__hostGmConfirmations.request({ category: 'session.force-start',
+        description: t('server.gm.start.force'),
+        preview: () => t('server.gm.start.force'),
+        accept: () => {
+          if (!gmStandalone() || typeof window.wasm_force_start !== 'function') {
+            fleetStartResultView = {
+              id: 'server.gm.start.force_refused', params: {}, refused: true,
+            };
+            paintGmStartControls();
+            return false;
+          }
+          window.wasm_force_start();
+          return true;
+        },
+      });
+    }
+    document.getElementById('gm-session-start')?.addEventListener('click', requestStandaloneForceStart);
+
     document.getElementById('gm-force-start-btn')?.addEventListener('click', () => {
       const gm = localGm();
       const requestedFleet = fleetHandle;
+      if (fleetRole === 'gm' && gmStandalone()) {
+        requestStandaloneForceStart();
+        return;
+      }
       if (!gm) return;
       window.__hostGmConfirmations.request({ category: 'session.force-start',
         description: t('server.gm.start.force'),
@@ -5946,6 +6026,91 @@
     let _landingDismissed = false;
     /** The string id of the last join refusal, or null (issue #1364). */
     let _landingJoinError = null;
+    /**
+     * This page is booting as a game master that IS the session — the
+     * `host_gm` landing route — rather than as one that joined somebody
+     * else's fleet.
+     *
+     * The two GM routes reach the same profile (`wasm_prepare_game_master`,
+     * `?gm=1`, `phoenix-gm-page`) and differ in exactly one thing: whether
+     * there is a fleet behind this peer. `__phoenixGmPage` cannot answer that
+     * — it is up for both — and `fleetHandle` alone cannot either, because it
+     * is null for a fleet join too until the join completes. So the ROUTE
+     * records what the operator chose, once, where it was chosen.
+     *
+     * Read through `gmStandalone()` below and never directly, so "standalone"
+     * means one thing to the boot path, the start controls and the tests.
+     */
+    let _gmStandalone = false;
+    /**
+     * A standalone game master, as the two places that must agree on it read
+     * it: this page asked for the GM profile by the `host_gm` route AND no
+     * fleet ever formed behind it. Both halves, because a page that somehow
+     * acquired a fleet handle is a fleet peer whatever it once chose, and the
+     * attributed mesh start policy is then the only start authority.
+     */
+    function gmStandalone() {
+      return _gmStandalone && !fleetHandle;
+    }
+    /** Read-only, for tests and for code outside this script. */
+    window.__hostGmStandalone = function () { return gmStandalone(); };
+    /**
+     * True when THIS route turned the Game Master request on, as opposed to a
+     * page that arrived on `?gm=1` already wearing it. Only what this route
+     * committed may this route take back — the mirror of `boot-game-master`'s
+     * `requested` capture.
+     */
+    let _gmStandaloneOwnsRequest = false;
+
+    /**
+     * Open the Host as GM route: ask for the Game Master profile, then take the
+     * role.
+     *
+     * ORDER, and it is the same one `boot-game-master` spells out below and for
+     * the same reason: `__hostSetFleetRole` is the single owner of `fleetRole`
+     * and NAVIGATES to `?gm=1` whenever the role and `__phoenixGmPage`
+     * disagree, so the request has to be committed first or the press would
+     * reload the page out from under the picker it is opening.
+     *
+     * Nothing else happens here. The route then behaves exactly as New Game
+     * does — the same `#scenario-panel`, the same World then hull ladder, the
+     * same `driveWorldLoad` — because the questions a game master answers to
+     * open a session are the questions a host answers.
+     *
+     * @returns {boolean} whether the profile was taken. `false` refuses the
+     *   route rather than opening a picker whose answers cannot change what
+     *   this page already booted as.
+     */
+    function requestStandaloneGameMaster() {
+      // The row's `stagePreBoot` should have made this unreachable — the pick
+      // handler judges the click against a menu this world load has already
+      // taken the stage off. This is the belt to that braces: if a world IS
+      // loaded, refuse rather than compose a GM document over an app that
+      // booted as a `BrowserHost`.
+      if (_worldLoadedIntoBevy) return false;
+      _gmStandaloneOwnsRequest = !window.__phoenixGmPage;
+      _gmStandalone = true;
+      window.__phoenixRequestGameMaster();
+      if (typeof window.__hostSetFleetRole === 'function') window.__hostSetFleetRole('gm');
+      return true;
+    }
+
+    /**
+     * Leave the Host as GM route before it committed to a World.
+     *
+     * Undone in the mirror order — the flag down before the role moves, or
+     * `__hostSetFleetRole` navigates on the way back out — and only as far as
+     * this route reached: a page that was already `?gm=1` keeps the profile the
+     * URL gave it.
+     */
+    function releaseStandaloneGameMaster() {
+      if (!_gmStandalone || _worldLoadStarted) return;
+      _gmStandalone = false;
+      if (!_gmStandaloneOwnsRequest) return;
+      _gmStandaloneOwnsRequest = false;
+      window.__phoenixRequestGameMaster(false);
+      if (typeof window.__hostSetFleetRole === 'function') window.__hostSetFleetRole('ship');
+    }
 
     /**
      * How long a landing join waits for this host's transport and exports
@@ -6195,6 +6360,22 @@
           // rebuild. The renderer restores focus across the renders that DO
           // change something (New Game), which this cannot skip.
           if (next === _landingOpenEntry) return;
+          // Host as GM is the one row on this menu whose PRESS changes what
+          // this page will boot as, and it has to happen here rather than at
+          // the Start: the profile is read inside `wasm_init`, which the World
+          // this stage is about to choose is what triggers. Opening the route
+          // commits the request; leaving it before a World is committed takes
+          // the request back, so a look at the route costs nothing.
+          if (next === 'host_gm') {
+            if (!requestStandaloneGameMaster()) {
+              // Refused, so the route does NOT open: the menu stays where it
+              // was and says why, rather than showing a picker whose answers
+              // cannot change what this page already booted as.
+              _landingJoinError = 'server.landing.join_after_boot';
+              window.__hostRenderLanding();
+              return;
+            }
+          } else if (_landingOpenEntry === 'host_gm') releaseStandaloneGameMaster();
           _landingOpenEntry = next;
           // A refusal describes ONE attempt on ONE route. Leaving it behind
           // when the stage changes would put "that is a crew code" over the
@@ -7571,9 +7752,22 @@ function finishInit() {
   // gui/gm-role-presets.js.
   window.wasm_get_gm_role_presets = wasmBindings.wasm_get_gm_role_presets;
 
-  // The explicit GM profile owns no selected/local ship. It still follows the
-  // ordinary world preload and startServer path, including the runtime sidecar
-  // fetch callback installed there.
+  // The explicit GM profile. It still follows the ordinary world preload and
+  // startServer path, including the runtime sidecar fetch callback installed
+  // there — what differs is whether it owns a ship.
+  //
+  // A JOINED game master owns no selected/local ship: it is a second host-class
+  // peer looking at somebody else's fleet, so it skips hull selection entirely
+  // and starts here.
+  //
+  // A STANDALONE one — the `host_gm` landing route — IS the session, and the
+  // hull the operator picked on the landing is its own ship, flown by a crew of
+  // AI. So it takes the profile and the role presets and then FALLS THROUGH to
+  // the ordinary picker below, because `wasm_select_ship` has to run before
+  // `startServer()` for Rust to have a `SelectedShipResource` at all. The only
+  // GM-shaped things about it after this point are what the profile already
+  // decided: no renderer (`SimPluginOptions { render: false }`) and no
+  // viewscreen (`html.phoenix-gm-page #canvas`).
   if (window.__phoenixGmPage) {
     window.wasm_prepare_game_master();
     if (typeof window.__hostGmRolePresetsSetAvailable === 'function') {
@@ -7583,8 +7777,10 @@ function finishInit() {
           : '[]',
       );
     }
-    startServer();
-    return;
+    if (!gmStandalone()) {
+      startServer();
+      return;
+    }
   }
 
   const ships = wasm_get_available_ships();

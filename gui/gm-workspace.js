@@ -23,6 +23,7 @@ import { createGmAttentionFilters } from './gm-attention-filters.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
 import { createGmJournalPanel } from './gm-journal-panel.js';
 import { createGmFactionPanel } from './gm-faction-panel.js';
+import { createGmCheckpointPanel } from './gm-checkpoint-panel.js';
 import {
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
@@ -110,6 +111,25 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       : request.accept()),
   });
   win.__hostGmJournalState = gmJournalPanel.state;
+  // Named checkpoints (issue #1445). The save API is the page's own — the same
+  // one gui/save-slots.js is handed — so a bookmark is the ordinary manual
+  // capture with a name, not a second storage path. Late-bound through the
+  // window seam because the classic host script installs it after this module
+  // island; an absent API leaves the panel readable and its controls inert
+  // rather than throwing at mount.
+  const gmCheckpointPanel = createGmCheckpointPanel({
+    doc: doc,
+    t,
+    api: {
+      list: () => (typeof win.__hostGmCheckpointList === 'function'
+        ? win.__hostGmCheckpointList() : []),
+      create: (name) => (typeof win.__hostGmCheckpointCreate === 'function'
+        ? win.__hostGmCheckpointCreate(name) : ''),
+    },
+    canCapture: () => win.__saveSlotsCaptureAvailable === true,
+  });
+  win.__hostGmCheckpointPanel = gmCheckpointPanel;
+  win.__hostGmCheckpointState = gmCheckpointPanel.state;
   win.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
   win.__hostGmSessionReset = gmSessionControls.reset;
   win.__hostGmSessionState = gmSessionControls.state;
@@ -362,6 +382,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmStationPuppet.refresh();
       gmFactionPanel.refreshAdmission();
       gmJournalPanel.refreshAdmission();
+      gmCheckpointPanel.refresh();
       win.__hostGmEffectRefresh();
     },
     reset() {
@@ -369,6 +390,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmSessionControls.reset();
       gmFactionPanel.reset();
       gmJournalPanel.reset();
+      gmCheckpointPanel.reset();
       win.__hostGmMissionReset();
       gmCommsPanel.reset();
       gmSpawnPanel.reset();

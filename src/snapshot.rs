@@ -2454,6 +2454,16 @@ pub struct GameStartEntityUuid {
 /// [`crate::lobby::SelectedShipResource`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootIdentity {
+    /// The hull this peer itself booted, or empty on a peer that flies none.
+    ///
+    /// A stationless GM peer (issue #1445) is a full deterministic participant
+    /// with no lobby ship selection at all: `?gm=1` deliberately inserts no
+    /// [`crate::lobby::SelectedShipResource`]. Its identity is therefore the
+    /// roster — which is replicated and peer-identical — and empty here means
+    /// exactly "this peer flies nothing", not "the hull was lost". Every peer
+    /// that DOES fly a roster ship still records its hull, and
+    /// [`required_boot_identity`] refuses an empty value from one of those.
+    #[serde(default)]
     pub selected_ship: String,
     pub fleet: crate::lockstep::FleetRoster,
     /// Every authored `GameStart` entity that actually spawned, in authored row
@@ -2672,11 +2682,18 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         .unwrap_or_default();
     PhoenixSnapshot {
         tick: world.get_resource::<SimTick>().map_or(0, |t| t.0),
+        // The ROSTER is the identity: it is replicated and every peer agrees on
+        // it, while `SelectedShipResource` is this peer's own local choice and
+        // is absent by design on a stationless GM peer (issue #1445). Requiring
+        // both would have meant a GM's own bookmark carried no boot identity at
+        // all, and so came straight back out of its catalogue as unreadable.
         boot_identity: world
-            .get_resource::<crate::lobby::SelectedShipResource>()
-            .zip(world.get_resource::<crate::lockstep::FleetRoster>())
-            .map(|(selected, fleet)| BootIdentity {
-                selected_ship: selected.0.clone(),
+            .get_resource::<crate::lockstep::FleetRoster>()
+            .map(|fleet| BootIdentity {
+                selected_ship: world
+                    .get_resource::<crate::lobby::SelectedShipResource>()
+                    .map(|selected| selected.0.clone())
+                    .unwrap_or_default(),
                 fleet: fleet.clone(),
                 game_start_entity_uuids: world
                     .get_resource::<crate::server_app::GameStartEntityUuids>()
@@ -4901,12 +4918,23 @@ pub fn required_boot_identity(run: &StoredRun) -> Result<&BootIdentity, LoadRefu
             )
         })?;
 
+    // A stationless GM peer flies no roster ship and holds no lobby selection,
+    // so it records neither a hull nor (in a GM-only fleet) any ship at all —
+    // its identity is the replicated roster it participates in (issue #1445).
+    // That relaxation is granted ONLY to a peer that claims no hull: a peer
+    // that recorded one must still appear in the roster it claims to fly in.
+    let flies_own_ship = identity
+        .fleet
+        .ships()
+        .iter()
+        .any(|ship| ship.host == identity.fleet.local());
     if identity.selected_ship.trim().is_empty() {
-        return Err(LoadRefusal::Unparsable(
-            "the current snapshot boot identity has no selected player hull".to_string(),
-        ));
-    }
-    if identity.fleet.is_empty() {
+        if flies_own_ship {
+            return Err(LoadRefusal::Unparsable(
+                "the current snapshot boot identity has no selected player hull".to_string(),
+            ));
+        }
+    } else if identity.fleet.is_empty() {
         return Err(LoadRefusal::Unparsable(
             "the current snapshot boot identity has an empty fleet roster".to_string(),
         ));

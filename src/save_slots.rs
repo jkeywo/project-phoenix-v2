@@ -1041,6 +1041,64 @@ mod tests {
         }
     }
 
+    /// A stationless GM peer records no hull of its own (issue #1445): `?gm=1`
+    /// inserts no `SelectedShipResource`, so its identity is the replicated
+    /// roster it participates in. That relaxation belongs ONLY to a peer with no
+    /// roster ship — a run that claims a hull must still be in a fleet.
+    #[test]
+    fn a_stationless_identity_is_admitted_while_a_hull_claim_still_needs_its_fleet() {
+        use crate::command_admission::log::HostSlot;
+        let versions = current_versions();
+
+        let mut gm = stored_run(9, "scenario", 17, versions.clone());
+        {
+            let boot = boot_identity_mut(&mut gm);
+            boot.selected_ship = String::new();
+            boot.fleet = crate::lockstep::FleetRoster::with_participants(
+                vec![crate::lockstep::FleetShip {
+                    host: HostSlot(1),
+                    ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
+                    crew: Vec::new(),
+                }],
+                vec![HostSlot(1), HostSlot(2)],
+                HostSlot(2),
+                HostSlot(1),
+            )
+            .expect("a GM peer beside one ship is a valid topology");
+        }
+        let store = FakeStore::default();
+        put_run(&store, SLOT_A, &gm);
+        assert!(
+            load_slot(&store, SLOT_A, &versions).is_ok(),
+            "a GM peer's own capture is readable"
+        );
+
+        // The same empty hull from a peer that DOES own its roster slot is the
+        // old malformed case and stays refused.
+        let mut lost_hull = stored_run(9, "scenario", 17, versions.clone());
+        boot_identity_mut(&mut lost_hull).selected_ship = String::new();
+        // ...as is a hull claimed from outside any fleet at all.
+        let mut fleetless = stored_run(9, "scenario", 17, versions.clone());
+        boot_identity_mut(&mut fleetless).fleet = crate::lockstep::FleetRoster::with_participants(
+            Vec::new(),
+            vec![HostSlot::SOLO],
+            HostSlot::SOLO,
+            HostSlot::SOLO,
+        )
+        .expect("a participant-only topology is representable");
+        for (index, run) in [lost_hull, fleetless].iter().enumerate() {
+            let store = FakeStore::default();
+            put_run(&store, SLOT_B, run);
+            assert!(
+                matches!(
+                    load_slot(&store, SLOT_B, &versions),
+                    Err(crate::snapshot::LoadRefusal::Unparsable(_))
+                ),
+                "malformed boot identity case {index} must be refused"
+            );
+        }
+    }
+
     #[test]
     fn automatic_captures_cover_start_periodic_and_final_boundaries_once() {
         let mut schedule = SaveSchedule::default();

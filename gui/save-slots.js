@@ -62,6 +62,17 @@ export function normalizeSaveSlot(row) {
     metadataError: text(source.metadata_error),
     canStart: startable && scenario !== '' && text(source.selected_ship) !== '',
     canRename: kind === 'manual',
+    // Issue #1445's live-restore candidate preflight is deliberately NOT read
+    // here. Rust publishes it on these same rows, but only while a world is
+    // booted, and this catalogue is only ever on screen BEFORE one is chosen:
+    // the landing docks `#save-slots-panel` to pick a save, and the panel is
+    // `display: none` from then on (see the comment above `#snapshot-import`
+    // in server.html). A verdict this surface could never show is not
+    // presentation it should carry, and it answers a different question from
+    // the version gate above — whether a LIVE restore could keep the ship and
+    // Station assignments that exist right now. `gui/gm-checkpoint-panel.js`
+    // reads the field, from the in-session GM console where a live seating
+    // exists to be a candidate for.
   };
 }
 

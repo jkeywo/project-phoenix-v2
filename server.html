@@ -1496,6 +1496,12 @@
         if (window.phManualSaveController) {
           window.phManualSaveController.reportOutcome(ok, message);
         }
+        // Named GM checkpoints (issue #1445). Same one-shot outcome, same
+        // capture: the panel settles its own pending bookmark against it and
+        // then re-reads the catalogue before claiming a tick.
+        if (window.__hostGmCheckpointPanel) {
+          window.__hostGmCheckpointPanel.reportOutcome(ok, message);
+        }
       }
       // Three sources now (issue #866 added `export`), so the mapping is a
       // table rather than a ternary: a fourth would otherwise land silently on
@@ -2148,6 +2154,40 @@
             <p id="gm-journal-undo-feedback" role="status" aria-live="polite"></p>
           </div>
         </section>
+        <!-- Named GM checkpoints (issue #1445). Bookmark asks the ORDINARY
+             save machinery for a manual capture and then re-reads this
+             browser's own catalogue: a capture tick appears only once a row
+             with that id has actually come back. The candidate list is the
+             shared preflight from src/gm_checkpoint.rs; it restores nothing. -->
+        <section id="gm-checkpoint" role="region" aria-labelledby="gm-checkpoint-heading">
+          <h2 id="gm-checkpoint-heading" data-i18n="server.gm.checkpoint.heading"></h2>
+          <p id="gm-checkpoint-intro" data-i18n="server.gm.checkpoint.intro"></p>
+          <div id="gm-checkpoint-create">
+            <label for="gm-checkpoint-name" data-i18n="server.gm.checkpoint.name_label"></label>
+            <input id="gm-checkpoint-name" type="text"
+              data-i18n-attr="placeholder:server.gm.checkpoint.name_placeholder"
+              aria-describedby="gm-checkpoint-hint">
+            <button id="gm-checkpoint-bookmark" type="button"
+              data-i18n="server.gm.checkpoint.bookmark"></button>
+          </div>
+          <p id="gm-checkpoint-hint"></p>
+          <p id="gm-checkpoint-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-checkpoint-candidates-heading"
+            data-i18n="server.gm.checkpoint.candidates_heading"></h3>
+          <p id="gm-checkpoint-restore-note" data-i18n="server.gm.checkpoint.restore_note"></p>
+          <p id="gm-checkpoint-summary"></p>
+          <p id="gm-checkpoint-empty"></p>
+          <ol id="gm-checkpoint-list" role="list"
+            aria-labelledby="gm-checkpoint-candidates-heading"></ol>
+          <div id="gm-checkpoint-detail" hidden role="group"
+            aria-labelledby="gm-checkpoint-detail-heading">
+            <h3 id="gm-checkpoint-detail-heading"
+              data-i18n="server.gm.checkpoint.detail_heading"></h3>
+            <p id="gm-checkpoint-detail-name"></p>
+            <p id="gm-checkpoint-detail-record"></p>
+            <div id="gm-checkpoint-detail-preflight"></div>
+          </div>
+        </section>
         <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
           <h2 id="gm-comms-heading" data-i18n="server.gm.comms.heading"></h2>
           <p id="gm-comms-empty" role="status" data-i18n="server.gm.comms.empty"></p>
@@ -2598,6 +2638,23 @@
       if (window.phManualSaveController) {
         window.phManualSaveController.setPhase(phase);
       }
+      if (window.__hostGmCheckpointPanel) {
+        window.__hostGmCheckpointPanel.setPhase(phase);
+      }
+    };
+    // Named GM checkpoints (issue #1445) read and write through the SAME
+    // wasm catalogue the save panels use. Published as two narrow functions
+    // rather than the whole api object so the GM panel cannot grow rename,
+    // export, delete or Start behind the console's back.
+    window.__hostGmCheckpointList = function () {
+      const bindings = window.wasmBindings;
+      if (!bindings || typeof bindings.wasm_list_save_slots !== 'function') return [];
+      return Array.from(bindings.wasm_list_save_slots() || []);
+    };
+    window.__hostGmCheckpointCreate = function (name) {
+      const bindings = window.wasmBindings;
+      if (!bindings || typeof bindings.wasm_create_save_slot !== 'function') return '';
+      return bindings.wasm_create_save_slot(name);
     };
     window.__mountSaveSlots = function () {
       const bindings = window.wasmBindings;
@@ -2675,6 +2732,7 @@
         }
       }
       window.__setSaveSlotsPhase(window.__saveSlotsPhase || '');
+      if (window.__hostGmCheckpointPanel) window.__hostGmCheckpointPanel.refresh();
       return window.phSaveSlotsController;
     };
     // This module is deferred while the classic host script below installs

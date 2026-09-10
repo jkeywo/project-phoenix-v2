@@ -173,6 +173,15 @@ thread_local! {
     /// through `config_cache` so the save path has one obvious source.
     static SNAPSHOT_WORLD: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
 
+    /// This session's live ship/Station seating (issue #1445), mirrored each
+    /// frame from the replicated `FleetRoster` so `wasm_list_save_slots` — a
+    /// synchronous JS call with no `World` in scope — can run the shared
+    /// candidate preflight against it. `None` before a world has booted, which
+    /// is exactly when the landing catalogue has no live session to be a
+    /// candidate FOR, and is why a pre-boot row carries no preflight at all.
+    static LIVE_SEATING: RefCell<Option<crate::gm_checkpoint::LiveSeating>> =
+        const { RefCell::new(None) };
+
     /// The private LocalStorage namespace chosen for this browser host. The JS
     /// identity installer runs before the first catalogue call, and this cache
     /// then makes every later API/capture use exactly that namespace even if a
@@ -557,6 +566,14 @@ pub(super) fn publish_pending_pause(value: bool) {
 
 pub(super) fn publish_resume_pending_mirror(value: bool) {
     RESUME_PENDING_MIRROR.with(|slot| *slot.borrow_mut() = value);
+}
+
+pub(super) fn publish_live_seating(value: Option<crate::gm_checkpoint::LiveSeating>) {
+    LIVE_SEATING.with(|slot| *slot.borrow_mut() = value);
+}
+
+pub(super) fn live_seating() -> Option<crate::gm_checkpoint::LiveSeating> {
+    LIVE_SEATING.with(|slot| slot.borrow().clone())
 }
 
 pub(super) fn publish_exported_artifact(value: Option<String>) {

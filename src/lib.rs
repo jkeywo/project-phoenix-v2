@@ -107,6 +107,9 @@ pub mod entities;
 pub mod gm_action;
 pub mod gm_activity;
 pub mod gm_attention;
+/// Named GM checkpoints and the shared live-restore candidate preflight model
+/// (issue #1445).
+pub mod gm_checkpoint;
 pub mod gm_comms;
 pub mod gm_contact;
 pub mod gm_despawn;

@@ -3051,3 +3051,47 @@ server.gm.activity.action_reason.inverse-unsupported,GM activity refusal; the na
 server.gm.activity.action_reason.inverse-facts-mismatch,GM activity refusal; the before/after values the undo carried do not match the saved record,[The undo did not match the saved record.]
 server.gm.activity.action_reason.affected-state-changed,GM activity refusal; something else changed the affected state between the action and its undo,[Something else changed that state after the action.]
 server.gm.activity.action_reason.already-inverted,GM activity refusal; that action had already been reversed,[That action has already been reversed.]
+server.gm.checkpoint.heading,GM named-checkpoint panel heading (issue #1445),[Checkpoints]
+server.gm.checkpoint.intro,GM named-checkpoint panel; states that the catalogue is private to this browser,[Checkpoints are saved in this browser only. No other game master can see or restore them.]
+server.gm.checkpoint.name_label,GM named-checkpoint panel; label for the name of a new checkpoint,[Checkpoint name]
+server.gm.checkpoint.name_placeholder,GM named-checkpoint panel; placeholder for the name of a new checkpoint,[Name this checkpoint]
+server.gm.checkpoint.bookmark,GM named-checkpoint panel; requests a named capture at the next tick boundary,[Bookmark]
+server.gm.checkpoint.name_required,GM named-checkpoint panel; the operator pressed Bookmark with no name typed,[Type a name before bookmarking a checkpoint.]
+server.gm.checkpoint.unavailable,GM named-checkpoint panel hint outside the only phase that accepts a capture,[Checkpoints can be taken only while the session is in progress.]
+server.gm.checkpoint.pending,"GM named-checkpoint panel; {name} is the requested checkpoint, whose capture has not yet been confirmed",[Capturing {name}. Waiting for the next tick boundary.]
+server.gm.checkpoint.confirmed,"GM named-checkpoint panel success; {name} the checkpoint, {tick} the tick it was really captured at, {time} the local clock time it was confirmed","[{name} captured at tick {tick}, confirmed at {time}.]"
+server.gm.checkpoint.failed,GM named-checkpoint panel failure; {detail} is the reason no checkpoint was created,[No checkpoint was created: {detail}]
+server.gm.checkpoint.unconfirmed,GM named-checkpoint panel failure reason; storage reported success but no checkpoint came back from the catalogue,[the capture reported success but no checkpoint reached this browser catalogue.]
+server.gm.checkpoint.capture_dropped,GM named-checkpoint panel failure reason; the run left the capturable phase before the requested boundary,[the run left the in-progress phase before the capture boundary.]
+server.gm.checkpoint.local_failure,GM named-checkpoint panel failure reason with no further detail from storage,[this browser storage refused the write and gave no detail.]
+server.gm.checkpoint.list_failed,GM named-checkpoint panel; the local catalogue could not be read. {detail} is the storage error,[The checkpoint catalogue could not be read: {detail}]
+server.gm.checkpoint.empty,GM named-checkpoint panel empty state for the candidate list,[This browser holds no saved sessions yet.]
+server.gm.checkpoint.autosave,GM named-checkpoint panel display label for the reserved rolling storage slot,[Automatic save]
+server.gm.checkpoint.candidates_heading,GM named-checkpoint panel; heading of the saved sessions checked against this session,[Restore candidates]
+server.gm.checkpoint.restore_note,GM named-checkpoint panel; states that this list only reports compatibility and performs no restore,[This list reports whether a saved session could hold the current ship and Station assignments. It does not restore anything; a restore rechecks for itself.]
+server.gm.checkpoint.summary,"GM named-checkpoint panel candidate summary; {eligible} rows that can hold the current assignments, {total} rows checked",[{eligible} of {total} saved sessions can hold the current assignments.]
+server.gm.checkpoint.row_detail,GM named-checkpoint candidate row detail. {scenario} is the world path and {tick} the capture tick,[{scenario} - tick {tick}]
+server.gm.checkpoint.select,"Accessible name for a GM checkpoint candidate row. {name} is its display name, {verdict} whether it can hold the current assignments",[Show details for {name}. {verdict}]
+server.gm.checkpoint.detail_heading,GM named-checkpoint panel; heading of the selected candidate detail region,[Selected saved session]
+server.gm.checkpoint.eligible,GM named-checkpoint candidate verdict; the save could hold the current ship and Station assignments,[Can hold the current assignments.]
+server.gm.checkpoint.ineligible,GM named-checkpoint candidate verdict; the save could not hold the current ship and Station assignments,[Cannot hold the current assignments.]
+server.gm.checkpoint.verdict_unknown,GM named-checkpoint candidate verdict; this row has not been checked against a live session because there is none,[Compatibility has not been checked.]
+server.gm.checkpoint.summary_unchecked,GM named-checkpoint candidate summary addition; {unchecked} rows that were not checked against this session,[{unchecked} more have not been checked.]
+server.gm.checkpoint.unknown_scenario,GM named-checkpoint candidate row; the save records no readable world path,[unknown world]
+server.gm.checkpoint.unknown_tick,GM named-checkpoint candidate row; the save records no readable capture tick,[unknown tick]
+server.gm.checkpoint.unknown_time,GM named-checkpoint success; the local clock could not be read,[an unknown time]
+server.gm.checkpoint.hull_unspecified,GM named-checkpoint refusal; a roster row that names no hull and uses whatever the host lobby selected,[the hull chosen in the host lobby]
+server.gm.checkpoint.block.unreadable,GM named-checkpoint refusal reason; the saved session could not be read at all,[This saved session could not be read.]
+server.gm.checkpoint.block.no_fleet_record,GM named-checkpoint refusal reason; the save carries no fleet record to compare ships against,"[This saved session records no fleet, so its ships cannot be compared with the ones flying now.]"
+server.gm.checkpoint.block.scenario_differs,"GM named-checkpoint refusal reason; {candidate} the world the save holds, {live} the world running now","[A different world: this saved session holds {candidate}, and the session is running {live}.]"
+server.gm.checkpoint.block.format_moved,GM named-checkpoint refusal reason; the save format belongs to another build,[This saved session was written in the save format of another build.]
+server.gm.checkpoint.block.rules_moved,GM named-checkpoint refusal reason; the simulation rules have changed since the save,[This saved session was recorded under different simulation rules.]
+server.gm.checkpoint.block.content_moved,GM named-checkpoint refusal reason; the authored data has changed since the save,[The authored data has changed since this session was saved.]
+server.gm.checkpoint.block.content_unverified,GM named-checkpoint refusal reason; this browser has not loaded the world of the save so content cannot be compared,"[This browser has not loaded the world of this saved session, so its content cannot be checked yet.]"
+server.gm.checkpoint.block.missing_ship,"GM named-checkpoint refusal reason; {slot} the live ship slot the save lacks, {stations} the Stations its crew hold","[Ship slot {slot} is flying now but is absent from this saved session, so its Stations ({stations}) could not be re-seated.]"
+server.gm.checkpoint.block.missing_ship_uncrewed,GM named-checkpoint refusal reason; {slot} is a live ship slot with no human crew that the save lacks,[Ship slot {slot} is flying now but is absent from this saved session.]
+server.gm.checkpoint.block.hull_differs,"GM named-checkpoint refusal reason; {slot} the live ship slot, {live} the hull it flies now, {candidate} the hull the save has, {stations} the Stations its crew hold","[Ship slot {slot} is flying {live} now; this saved session has {candidate}, so its Stations ({stations}) are not the same ones.]"
+server.gm.checkpoint.block.hull_differs_uncrewed,"GM named-checkpoint refusal reason; {slot} the live ship slot with no human crew, {live} the hull it flies now, {candidate} the hull the save has",[Ship slot {slot} is flying {live} now; this saved session has {candidate}.]
+server.gm.checkpoint.block.hull_unknown,"GM named-checkpoint refusal reason; {slot} the live ship slot whose hull cannot be determined on one side, {stations} the Stations its crew hold","[The hull at ship slot {slot} could not be determined, so this saved session cannot be shown to hold its Stations ({stations}).]"
+server.gm.checkpoint.block.hull_unknown_uncrewed,GM named-checkpoint refusal reason; {slot} is a live ship slot with no human crew whose hull cannot be determined on one side,"[The hull at ship slot {slot} could not be determined, so this saved session cannot be shown to match it.]"
+server.gm.checkpoint.block.unknown,GM named-checkpoint refusal reason this build does not know; {kind} preserves the wire identity,[Unrecognized compatibility refusal ({kind}).]

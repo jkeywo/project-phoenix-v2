@@ -999,6 +999,7 @@ pub fn wasm_init() {
                 .after(crate::gm_attention::publish_attention_projection)
                 .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
+            publish_live_seating,
             publish_god_mode,
             publish_instagib,
             publish_pause_mirror,
@@ -1923,9 +1924,14 @@ pub fn wasm_list_save_slots() -> Result<Array, JsValue> {
         None
     };
     defer_unloaded_scenario_content(&mut entries, loaded_scenario.as_deref());
+    // The live-restore candidate answer (issue #1445). `None` before a world
+    // has booted: the landing catalogue has no live seating to be a candidate
+    // FOR, and a row there therefore carries no `preflight` field at all rather
+    // than a fabricated verdict.
+    let live = edge::live_seating();
     let rows = Array::new();
     for entry in entries {
-        rows.push(&save_slot_js(entry));
+        rows.push(&save_slot_js(entry, live.as_ref()));
     }
     Ok(rows)
 }
@@ -1964,8 +1970,17 @@ fn defer_unloaded_scenario_content(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn save_slot_js(entry: crate::save_slots::SaveSlotEntry) -> Object {
+fn save_slot_js(
+    entry: crate::save_slots::SaveSlotEntry,
+    live: Option<&crate::gm_checkpoint::LiveSeating>,
+) -> Object {
     use crate::save_slots::{MetadataStatus, SaveSlotKind};
+
+    // Issue #1445. Decided FIRST, while the whole entry is still intact: the
+    // DECISION is `gm_checkpoint::preflight`, a pure function this file only
+    // marshals. There is no second compatibility rule here, and the restore in
+    // #1446 revalidates authoritatively against the same model.
+    let preflight = live.map(|live| crate::gm_checkpoint::preflight(live, &entry));
 
     let row = Object::new();
     save_js_field(&row, "slot_id", &JsValue::from_str(&entry.slot_id));
@@ -2060,7 +2075,93 @@ fn save_slot_js(entry: crate::save_slots::SaveSlotEntry) -> Object {
             .as_deref()
             .map_or(JsValue::NULL, JsValue::from_str),
     );
+    save_js_field(
+        &row,
+        "preflight",
+        &preflight.map_or(JsValue::NULL, |answer| {
+            JsValue::from(candidate_preflight_js(&answer))
+        }),
+    );
     row
+}
+
+/// Marshal one shared preflight answer into the catalogue row's `preflight`.
+///
+/// Field-by-field rather than through a serializer, for the reason every other
+/// object on this boundary is: `serde_json` is the crate's `core::codec`
+/// exception and save metadata does not take it.
+#[cfg(target_arch = "wasm32")]
+fn candidate_preflight_js(answer: &crate::gm_checkpoint::CandidatePreflight) -> Object {
+    use crate::gm_checkpoint::CandidateBlock;
+
+    let object = Object::new();
+    save_js_field(&object, "eligible", &JsValue::from_bool(answer.eligible));
+    let blocks = Array::new();
+    for block in &answer.blocks {
+        let row = Object::new();
+        let stations = |ids: &[String]| {
+            let list = Array::new();
+            for id in ids {
+                list.push(&JsValue::from_str(id));
+            }
+            JsValue::from(list)
+        };
+        let kind = match block {
+            CandidateBlock::Unreadable => "unreadable",
+            CandidateBlock::NoFleetRecord => "no-fleet-record",
+            CandidateBlock::ScenarioDiffers { candidate, live } => {
+                save_js_field(&row, "candidate", &JsValue::from_str(candidate));
+                save_js_field(&row, "live", &JsValue::from_str(live));
+                "scenario-differs"
+            }
+            CandidateBlock::FormatMoved => "format-moved",
+            CandidateBlock::RulesMoved => "rules-moved",
+            CandidateBlock::ContentMoved => "content-moved",
+            CandidateBlock::ContentUnverified => "content-unverified",
+            CandidateBlock::MissingShip {
+                slot,
+                stations: ids,
+            } => {
+                save_js_field(&row, "slot", &JsValue::from_f64(f64::from(*slot)));
+                save_js_field(&row, "stations", &stations(ids));
+                "missing-ship"
+            }
+            CandidateBlock::HullDiffers {
+                slot,
+                candidate,
+                live,
+                stations: ids,
+            } => {
+                save_js_field(&row, "slot", &JsValue::from_f64(f64::from(*slot)));
+                save_js_field(
+                    &row,
+                    "candidate",
+                    &candidate
+                        .as_deref()
+                        .map_or(JsValue::NULL, JsValue::from_str),
+                );
+                save_js_field(
+                    &row,
+                    "live",
+                    &live.as_deref().map_or(JsValue::NULL, JsValue::from_str),
+                );
+                save_js_field(&row, "stations", &stations(ids));
+                "hull-differs"
+            }
+            CandidateBlock::HullUnknown {
+                slot,
+                stations: ids,
+            } => {
+                save_js_field(&row, "slot", &JsValue::from_f64(f64::from(*slot)));
+                save_js_field(&row, "stations", &stations(ids));
+                "hull-unknown"
+            }
+        };
+        save_js_field(&row, "kind", &JsValue::from_str(kind));
+        blocks.push(&row);
+    }
+    save_js_field(&object, "blocks", &JsValue::from(blocks));
+    object
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -4018,6 +4119,36 @@ fn drain_teleport_to_waypoint(
 #[cfg(target_arch = "wasm32")]
 fn publish_sim_tick(tick: Res<crate::sim_tick::SimTick>) {
     edge::publish_sim_tick_count(tick.0);
+}
+
+/// Mirrors this session's live ship/Station seating each frame (issue #1445),
+/// so the synchronous catalogue call can run the shared candidate preflight.
+///
+/// The roster is the replicated one every peer agrees on, and the scenario is
+/// the same `SNAPSHOT_WORLD` path the catalogue already compares rows against.
+/// Nothing here is authoritative and nothing crosses the wire: this is a local
+/// read of local state, published for a local picker.
+///
+/// `SelectedShipResource` rides along because `FleetShip::ship_path` is a
+/// per-host PLACEHOLDER on a fleet that never formed, and this resource is
+/// exactly what `snapshot::capture` writes into a save's
+/// `BootIdentity::selected_ship`. Resolving with it therefore compares the two
+/// sides' real hulls instead of two placeholders. Absent on a stationless
+/// browser GM peer, which is honest: that peer flies nothing.
+#[cfg(target_arch = "wasm32")]
+fn publish_live_seating(
+    roster: Option<Res<crate::lockstep::FleetRoster>>,
+    selected: Option<Res<crate::lobby::SelectedShipResource>>,
+) {
+    let seating = match (edge::snapshot_scenario(), roster) {
+        (Some(scenario), Some(roster)) => Some(crate::gm_checkpoint::LiveSeating::from_roster(
+            scenario,
+            &roster,
+            selected.as_ref().map(|selected| selected.0.as_str()),
+        )),
+        _ => None,
+    };
+    edge::publish_live_seating(seating);
 }
 
 /// Drains pending God Mode toggle requests each frame (issue #900), turning

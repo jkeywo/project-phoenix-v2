@@ -1602,6 +1602,39 @@ fn push_gamepads_to_panes(
     }
 }
 
+/// The (origin, size) each of a window's tiled panes resizes to, given which
+/// ones (if any) resolved to a live Station slot.
+///
+/// Pure so it is CI-tested without Ultralight or a live `App`, the same
+/// reasoning [`super::placement::home_for_pane`] is pure for: `seated[i] =
+/// Some(rect)` takes that rect verbatim — it already reflects whatever
+/// `PaneSplit` the profile authored — and every `None` shares the window
+/// side by side in order, which is correct only for panes with no Station
+/// slot at all (the legacy `--pane`-without-`--profile` fallback this tiling
+/// was always meant for).
+fn resize_tile_targets(
+    window_size: (u32, u32),
+    seated: &[Option<(u32, u32, u32, u32)>],
+) -> Vec<((u32, u32), (u32, u32))> {
+    let (pw, ph) = window_size;
+    let mut targets: Vec<((u32, u32), (u32, u32))> = vec![((0, 0), (pw, ph)); seated.len()];
+    let mut unresolved: Vec<usize> = Vec::new();
+    for (i, rect) in seated.iter().enumerate() {
+        match rect {
+            Some((x, y, w, h)) => targets[i] = ((*x, *y), ((*w).max(1), (*h).max(1))),
+            None => unresolved.push(i),
+        }
+    }
+    if !unresolved.is_empty() {
+        let count = unresolved.len() as u32;
+        let tile_w = (pw / count).max(1);
+        for (slot, &i) in unresolved.iter().enumerate() {
+            targets[i] = ((tile_w * slot as u32, 0), (tile_w, ph));
+        }
+    }
+    targets
+}
+
 /// Follow each OS window's size: resize every surface's Ultralight view and its
 /// Bevy texture so the page reflows to the window, the way a browser viewport
 /// does.
@@ -1614,10 +1647,17 @@ fn push_gamepads_to_panes(
 /// a window's physical size actually changes.
 ///
 /// The per-window layout mirrors [`init_pane_host`]'s: a lone surface fills its
-/// window; several panes on one window tile side by side in their existing
-/// order. The device scale is taken as unchanged (a resize within one monitor);
-/// a drag onto a monitor of a different DPI would need the view rebuilt at the
-/// new `device_scale`, which is out of scope here.
+/// window; several panes on one window with no live Station slot tile side by
+/// side in their existing order — the legacy `--pane`-without-`--profile`
+/// fallback. A pane the live [`BridgeStationSurfaces`] seats on that window
+/// takes its rectangle straight from that slot instead of being folded into
+/// the tile count, so a `PaneSplit::Stacked` pair stays stacked (full width,
+/// half height) rather than being flattened into a side-by-side half-width
+/// tile on every resize (issue #1420: this is what silently discarded an
+/// authored split and clipped the console laid out for it). The device scale
+/// is taken as unchanged (a resize within one monitor); a drag onto a monitor
+/// of a different DPI would need the view rebuilt at the new `device_scale`,
+/// which is out of scope here.
 fn resize_pane_surfaces(
     host: Option<ResMut<PaneHost>>,
     windows: Query<&Window>,
@@ -1627,6 +1667,11 @@ fn resize_pane_surfaces(
     // mints a NEW asset rather than resizing the old one, so the node has to be
     // pointed at it.
     mut canvases: Query<&mut ImageNode>,
+    // Resolves a Station-seated pane's live slot rect (see above). Both
+    // optional for the same reason `drive_pane_host` treats them so: a
+    // `NativeRenderSurface::Contract` host has no display adapter and no bus.
+    bus: Option<Res<PaneBusResource>>,
+    stations: Option<Res<BridgeStationSurfaces>>,
 ) {
     let Some(mut host) = host else {
         return;
@@ -1664,13 +1709,24 @@ fn resize_pane_surfaces(
                 targets[i] = Some(((0, 0), (pw, ph)));
             }
         }
-        if tiled.len() == 1 {
-            targets[tiled[0]] = Some(((0, 0), (pw, ph)));
-        } else if tiled.len() > 1 {
-            let count = tiled.len() as u32;
-            let tile_w = (pw / count).max(1);
-            for (slot, &i) in tiled.iter().enumerate() {
-                targets[i] = Some(((tile_w * slot as u32, 0), (tile_w, ph)));
+        if !tiled.is_empty() {
+            // Resolve each tiled pane's live Station slot, if it has one —
+            // the impure half (it needs the bus and the live
+            // `BridgeStationSurfaces`). What to DO with that is
+            // `resize_tile_targets`'s pure half, below.
+            let seated: Vec<Option<(u32, u32, u32, u32)>> = tiled
+                .iter()
+                .map(|&i| {
+                    bus.as_ref()
+                        .and_then(|b| b.0.name_of(host.mirror[i].id))
+                        .and_then(|name| stations.as_deref().and_then(|s| s.slot_for(&name)))
+                        .map(|(_, slot)| {
+                            (slot.rect.x, slot.rect.y, slot.rect.width, slot.rect.height)
+                        })
+                })
+                .collect();
+            for (&i, rect) in tiled.iter().zip(resize_tile_targets((pw, ph), &seated)) {
+                targets[i] = Some(rect);
             }
         }
     }
@@ -2921,5 +2977,87 @@ mod keyboard_tests {
             pane_virtual_key(PaneKeyCode::Tab),
             VirtualKeyCode::Tab
         ));
+    }
+}
+
+#[cfg(test)]
+mod resize_tile_targets_tests {
+    use super::*;
+
+    /// A `Stacked` pair (full width, half height each) must stay stacked on
+    /// resize, not collapse into the naive side-by-side tiling — the bug
+    /// issue #1420 fixes: before this, ANY window with 2+ panes was tiled
+    /// `pw / count` wide regardless of what split the profile authored.
+    #[test]
+    fn seated_panes_keep_their_authored_split_instead_of_tiling() {
+        let window = (1920, 1080);
+        let seated = vec![Some((0, 0, 1920, 540)), Some((0, 540, 1920, 540))];
+        let targets = resize_tile_targets(window, &seated);
+        assert_eq!(
+            targets,
+            vec![((0, 0), (1920, 540)), ((0, 540), (1920, 540)),]
+        );
+    }
+
+    /// A `SideBySide` pair keeps working exactly as before.
+    #[test]
+    fn seated_side_by_side_pair_is_unaffected() {
+        let window = (1920, 1080);
+        let seated = vec![Some((0, 0, 960, 1080)), Some((960, 0, 960, 1080))];
+        let targets = resize_tile_targets(window, &seated);
+        assert_eq!(
+            targets,
+            vec![((0, 0), (960, 1080)), ((960, 0), (960, 1080)),]
+        );
+    }
+
+    /// The legacy `--pane`-without-`--profile` fallback: panes with no
+    /// Station slot still tile side by side across the window.
+    #[test]
+    fn unseated_panes_tile_side_by_side_as_before() {
+        let window = (1920, 1080);
+        let seated = vec![None, None];
+        let targets = resize_tile_targets(window, &seated);
+        assert_eq!(
+            targets,
+            vec![((0, 0), (960, 1080)), ((960, 0), (960, 1080)),]
+        );
+    }
+
+    /// A mixed window — one pane seated on a live Station slot, one with
+    /// none — is not something the profile format produces today, but the
+    /// function should still do the sane thing: the seated pane keeps its
+    /// slot, and the lone unresolved pane gets the rest of the window rather
+    /// than being squeezed by the seated pane's share.
+    #[test]
+    fn mixed_seated_and_unresolved_panes_resolve_independently() {
+        let window = (1920, 1080);
+        let seated = vec![Some((0, 0, 960, 1080)), None];
+        let targets = resize_tile_targets(window, &seated);
+        assert_eq!(
+            targets,
+            vec![((0, 0), (960, 1080)), ((0, 0), (1920, 1080)),]
+        );
+    }
+
+    /// A lone Station-seated pane on its window takes its slot's own rect,
+    /// not the full window — a Station can be mid-transition between one and
+    /// two occupants.
+    #[test]
+    fn lone_seated_pane_takes_its_slot_not_the_full_window() {
+        let window = (1920, 1080);
+        let seated = vec![Some((0, 0, 1920, 540))];
+        let targets = resize_tile_targets(window, &seated);
+        assert_eq!(targets, vec![((0, 0), (1920, 540))]);
+    }
+
+    /// A lone unseated pane (the legacy single-`--pane` case) still fills
+    /// the whole window, as before this change.
+    #[test]
+    fn lone_unresolved_pane_fills_the_window() {
+        let window = (1920, 1080);
+        let seated = vec![None];
+        let targets = resize_tile_targets(window, &seated);
+        assert_eq!(targets, vec![((0, 0), (1920, 1080))]);
     }
 }

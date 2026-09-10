@@ -1,0 +1,89 @@
+# Authored attention-band probe for #1433. Three speakers, three GM Comms
+# routes, three bands: one explicit `urgent`, one explicit `background`, one
+# left to the system default (`attention`). Each route opens a real scripted
+# hail, so the pending-Comms occurrences the GM attention queue projects come
+# from ordinary Comms delivery rather than a hand-built inbox.
+[global]
+seed = 1433
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+command_delay_ticks = 2
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_attention.speaker_urgent"
+transform = { position = [0.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_attention.speaker_default"
+transform = { position = [80.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_attention.speaker_background"
+transform = { position = [-80.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[gm_comms_route]]
+id = "urgent-route"
+label = "world.probe_gm_attention.route.urgent"
+visibility = "selected_ships"
+senders = ["world.probe_gm_attention.speaker_urgent"]
+attention_band = "urgent"
+[[gm_comms_route.hail]]
+id = "urgent-hail"
+label = "world.probe_gm_attention.hail.urgent"
+script_path = "assets/worlds/probe_gm_attention.toml#script.setup"
+root_fn = "urgent_offer"
+
+[[gm_comms_route]]
+id = "default-route"
+label = "world.probe_gm_attention.route.default"
+visibility = "selected_ships"
+senders = ["world.probe_gm_attention.speaker_default"]
+[[gm_comms_route.hail]]
+id = "default-hail"
+label = "world.probe_gm_attention.hail.default"
+script_path = "assets/worlds/probe_gm_attention.toml#script.setup"
+root_fn = "default_offer"
+
+[[gm_comms_route]]
+id = "background-route"
+label = "world.probe_gm_attention.route.background"
+visibility = "selected_ships"
+senders = ["world.probe_gm_attention.speaker_background"]
+attention_band = "background"
+[[gm_comms_route.hail]]
+id = "background-hail"
+label = "world.probe_gm_attention.hail.background"
+script_path = "assets/worlds/probe_gm_attention.toml#script.setup"
+root_fn = "background_offer"
+
+[script]
+setup = """
+fn urgent_offer(ctx) {
+    #{ message: "world.probe_gm_attention.offer_urgent", responses: [
+        #{ text: "world.probe_gm_attention.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn default_offer(ctx) {
+    #{ message: "world.probe_gm_attention.offer_default", responses: [
+        #{ text: "world.probe_gm_attention.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn background_offer(ctx) {
+    #{ message: "world.probe_gm_attention.offer_background", responses: [
+        #{ text: "world.probe_gm_attention.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn close_offer(ctx) { ctx.flags.increment("gm_attention_closed", 1); }
+"""

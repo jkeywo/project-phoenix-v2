@@ -22,9 +22,12 @@
 #gm-console.gm-desk #gm-session-heading, #gm-console.gm-desk #gm-session-log-heading,
 #gm-console.gm-desk #gm-session-log { display: none; }
 #gm-console.gm-desk #gm-session-actions { gap: var(--space-2); }
+/* Four rows of grid, three rows of panel: the map and the inspector span the
+   first two so the left column can carry the roster AND the M4 attention queue
+   (issue #1433) without stealing height from anything else. */
 #gm-console.gm-desk #gm-workspace {
   display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px;
-  grid-template-rows: minmax(0, 1fr) 236px; gap: var(--space-5); padding: var(--space-5);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) 236px; gap: var(--space-5); padding: var(--space-5);
   height: calc(100vh - 88px); min-height: 580px; flex: 0 0 auto;
 }
 #gm-console.gm-desk #gm-workspace > section {
@@ -33,11 +36,12 @@
   display: flex; flex-direction: column; gap: var(--space-4); overflow: auto;
 }
 #gm-console.gm-desk #gm-roster { grid-area: 1 / 1; }
-#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2; overflow: hidden; }
-#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3; }
-#gm-console.gm-desk #gm-mission-panel { grid-area: 2 / 1; }
-#gm-console.gm-desk #gm-comms-panel { grid-area: 2 / 2; }
-#gm-console.gm-desk #gm-activity { grid-area: 2 / 3; }
+#gm-console.gm-desk #gm-attention-panel { grid-area: 2 / 1; }
+#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 3 / 3; overflow: hidden; }
+#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3 / 3 / 4; }
+#gm-console.gm-desk #gm-mission-panel { grid-area: 3 / 1; }
+#gm-console.gm-desk #gm-comms-panel { grid-area: 3 / 2; }
+#gm-console.gm-desk #gm-activity { grid-area: 3 / 3; }
 #gm-console.gm-desk #gm-entity-map { flex: 1; min-height: 0; height: auto; width: 100%; background: var(--surface-abyss); }
 #gm-console.gm-desk #gm-map-legend { font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-selection-chip { color: var(--gold); font-family: var(--font-mono); }
@@ -221,3 +225,42 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-inverse-rows dt { color: var(--ink-dim); }
 #gm-console.gm-desk .gm-inverse-rows dd { margin: 0 0 var(--space-2) 0; overflow-wrap: anywhere; }
 #gm-console.gm-desk .gm-inverse-eligibility { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); }
+
+/* ── Attention queue (issue #1433) ──────────────────────────────────────
+   Every rung is a token multiple so the whole panel keeps working at
+   --a11y-text-scale: 2 (PRD #1418): rows wrap and the panel scrolls rather
+   than the text shrinking, filters stack instead of squeezing, and band /
+   held state read as WORDS so forced colours cannot erase them. */
+#gm-console.gm-desk #gm-attention-filters { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+#gm-console.gm-desk #gm-attention-filters label { display: grid; gap: var(--space-2); flex: 1 1 8ch; min-width: 0; }
+#gm-console.gm-desk #gm-attention-filters select { width: 100%; min-width: 0; }
+#gm-console.gm-desk #gm-attention-list { display: grid; gap: var(--space-4); min-width: 0; }
+#gm-console.gm-desk .gm-attention-band-group { display: grid; gap: var(--space-2); min-width: 0; }
+#gm-console.gm-desk .gm-attention-band-group ol { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+#gm-console.gm-desk .gm-attention-band-group li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2);
+  padding: var(--space-3); border: 1px solid var(--edge); background: var(--surface-panel-up);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-attention-band-group li[data-selected="true"] { border-color: var(--gold); }
+#gm-console.gm-desk .gm-attention-band-group li[data-band="urgent"] { border-left-width: var(--space-2); }
+/* A row the projection has dropped while the list is held for reading. The
+   dashed edge is the hint; the sentence in .gm-attention-resolved is the
+   status, because a border is the first thing forced colours take away. */
+#gm-console.gm-desk .gm-attention-band-group li[data-stale="true"] { border-style: dashed; }
+#gm-console.gm-desk .gm-attention-reason { grid-column: 1 / -1; margin: 0; }
+#gm-console.gm-desk .gm-attention-resolved {
+  grid-column: 1 / -1; margin: 0; font-style: italic;
+  font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale));
+}
+#gm-console.gm-desk .gm-attention-band { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-attention-age { font-family: var(--font-mono); text-align: right; }
+#gm-console.gm-desk #gm-attention-status[data-state="held"] { color: var(--gold); }
+/* Where focus lands when the row an operator was standing on leaves the queue
+   (snoozed, or resolved under a held list). Drawn for plain `:focus` as well as
+   `:focus-visible`, because the landing is programmatic and an invisible
+   landing is a lost operator. */
+#gm-console.gm-desk #gm-attention-status:focus,
+#gm-console.gm-desk .gm-attention-resolved:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk #gm-attention-banners { display: grid; gap: var(--space-2); }
+#gm-console.gm-desk #gm-attention-banners p { border: 1px solid var(--gold); padding: var(--space-3); margin: 0; }

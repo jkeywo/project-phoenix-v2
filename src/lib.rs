@@ -106,6 +106,7 @@ pub mod entities;
 /// Minimal peer-local authoritative projection for the rendererless GM page.
 pub mod gm_action;
 pub mod gm_activity;
+pub mod gm_attention;
 pub mod gm_comms;
 pub mod gm_contact;
 pub mod gm_despawn;

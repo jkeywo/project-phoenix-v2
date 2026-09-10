@@ -778,6 +778,7 @@ fn comms_activity_uses_durable_audience_for_applied_stale_and_grantless_refusals
         visibility: crate::gm_comms::GmCommsVisibility::SelectedShips,
         senders: vec!["Speaker".into()],
         hails: Vec::new(),
+        attention_band: None,
     }];
     let config = crate::ship::config::ShipConfig::from_toml(
         r#"

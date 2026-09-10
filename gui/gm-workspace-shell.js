@@ -65,7 +65,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
     move(roster, 'manual-save-panel');
   }
   desk.prepend(roster);
-  move(desk, 'gm-mission-panel', 'gm-comms-panel', 'gm-activity');
+  move(desk, 'gm-attention-panel', 'gm-mission-panel', 'gm-comms-panel', 'gm-activity');
   get('gm-comms-text')?.parentElement.classList.add('gm-comms-draft');
   const sessionHistory = element('details', 'gm-session-history');
   sessionHistory.append(element('summary', null, 'server.gm.session.log_heading'));

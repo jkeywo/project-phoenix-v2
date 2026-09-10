@@ -45,6 +45,18 @@ pub struct GmCommsRoute {
     pub senders: Vec<String>,
     #[serde(default, rename = "hail")]
     pub hails: Vec<GmCommsHail>,
+    /// Optional Game Master attention band for pending conversations this
+    /// route's speakers hold open (issue #1433). One of `urgent`, `attention`
+    /// or `background`; absent means the system default, `attention`.
+    ///
+    /// Held as the authored string rather than the typed
+    /// [`crate::gm_attention::GmAttentionBand`] on purpose: a mistyped band is
+    /// a *world* error that has to name the `[[gm_comms_route]]` it came from
+    /// (see [`validate_routes`]), and a serde variant failure names a TOML path
+    /// instead. GM-facing triage only — it changes no crew delivery, routing,
+    /// recipients or `CommsPriority`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention_band: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +110,20 @@ pub fn validate_routes(routes: &[GmCommsRoute]) -> Result<(), String> {
                 "invalid or duplicate [[gm_comms_route]] '{}'",
                 route.id
             ));
+        }
+        // The GM attention band (issue #1433) is a closed three-word
+        // vocabulary. A world that names a fourth is refused at load with the
+        // section and id that carry it, rather than quietly falling back to the
+        // default and shipping a scenario whose triage nobody chose.
+        if let Some(band) = route.attention_band.as_deref() {
+            if crate::gm_attention::GmAttentionBand::from_authored(band).is_none() {
+                return Err(format!(
+                    "[[gm_comms_route]] '{}' declares attention_band '{band}'; the \
+                     Game Master attention queue accepts only {}",
+                    route.id,
+                    crate::gm_attention::GmAttentionBand::authored_vocabulary()
+                ));
+            }
         }
         let mut hails = std::collections::BTreeSet::new();
         for hail in &route.hails {
@@ -516,9 +542,24 @@ mod tests {
             visibility: GmCommsVisibility::SelectedShips,
             senders: vec!["existing".into()],
             hails: Vec::new(),
+            attention_band: None,
         };
         assert!(validate_routes(std::slice::from_ref(&route)).is_ok());
-        assert!(validate_routes(&[route.clone(), route]).is_err());
+        assert!(validate_routes(&[route.clone(), route.clone()]).is_err());
+        for band in ["urgent", "attention", "background"] {
+            let mut banded = route.clone();
+            banded.attention_band = Some(band.into());
+            assert!(validate_routes(std::slice::from_ref(&banded)).is_ok());
+        }
+        for band in ["Urgent", "critical", ""] {
+            let mut banded = route.clone();
+            banded.attention_band = Some(band.into());
+            let error = validate_routes(std::slice::from_ref(&banded)).unwrap_err();
+            assert!(
+                error.contains("[[gm_comms_route]] 'private'") && error.contains("attention_band"),
+                "{error}"
+            );
+        }
         assert!(serde_json::from_value::<GmCommsRoute>(
             serde_json::json!({"id":"a", "label":"a", "visibility":"invented", "senders":["a"]})
         )

@@ -130,3 +130,11 @@ pub struct GmSpawnChanged {
 pub struct GmCommsChanged {
     pub payload: crate::gm_comms::GmCommsProjection,
 }
+
+/// Page-local absolute Game Master attention queue (issue #1433). Like every
+/// other GM projection this is Host Channel data only: it never enters the peer
+/// wire, a snapshot or the authoritative digest.
+#[derive(bevy::prelude::Message)]
+pub struct GmAttentionChanged {
+    pub payload: crate::gm_attention::GmAttentionProjection,
+}

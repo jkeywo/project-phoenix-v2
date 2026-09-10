@@ -54,14 +54,16 @@ use {
     crate::asteroids::lifecycle::AsteroidLifecyclePlugin,
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
-        AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged, GmCommsChanged,
-        GmEntityProjectionChanged, GmMissionChanged, GmSessionChanged, GmSpawnChanged,
-        GmStationProjectionChanged, HudStateChanged, LobbyStateChanged,
+        AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
+        GmAttentionChanged, GmCommsChanged, GmEntityProjectionChanged, GmMissionChanged,
+        GmSessionChanged, GmSpawnChanged, GmStationProjectionChanged, HudStateChanged,
+        LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec},
     crate::core::messages::{self, DeliveryClass},
     crate::entities::config_cache::ConfigCachePlugin,
     crate::gm_activity::GmActivityPlugin,
+    crate::gm_attention::GmAttentionPlugin,
     crate::gm_projection::{BrowserGameMaster, GmProjectionPlugin},
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
@@ -531,10 +533,13 @@ pub mod host_channels {
     /// results (issue #1305) — what the placement panel lists and places.
     pub const GM_SPAWN: &str = "gm_spawn";
     pub const GM_COMMS: &str = "gm_comms";
+    /// The Game Master attention queue (issue #1433) — the bounded advisory
+    /// list of pending conversations and, later, other waiting conditions.
+    pub const GM_ATTENTION: &str = "gm_attention";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 14] = [
+    pub const ALL: [&str; 15] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -549,6 +554,7 @@ pub mod host_channels {
         GM_MISSION,
         GM_SPAWN,
         GM_COMMS,
+        GM_ATTENTION,
     ];
 }
 
@@ -832,7 +838,7 @@ pub fn wasm_init() {
     if is_browser_gm {
         app.insert_resource(BrowserGameMaster);
     }
-    app.add_plugins((GmProjectionPlugin, GmActivityPlugin));
+    app.add_plugins((GmProjectionPlugin, GmActivityPlugin, GmAttentionPlugin));
 
     app.insert_resource(log_config)
         .add_plugins(crate::logging::LoggingPlugin);
@@ -990,6 +996,7 @@ pub fn wasm_init() {
                 .after(crate::gm_event::publish_mission_projection)
                 .after(crate::gm_spawn::publish_spawn_projection)
                 .after(crate::gm_comms::publish_comms_projection)
+                .after(crate::gm_attention::publish_attention_projection)
                 .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
             publish_god_mode,
@@ -4167,10 +4174,11 @@ fn flush_host_channels(
     mut gm_mission: MessageReader<GmMissionChanged>,
     mut gm_spawn: MessageReader<GmSpawnChanged>,
     mut gm_comms: MessageReader<GmCommsChanged>,
+    mut gm_attention: MessageReader<GmAttentionChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 12] = [
+    let message_batches: [(&str, Vec<String>); 13] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4241,6 +4249,13 @@ fn flush_host_channels(
             gm_spawn
                 .read()
                 .filter_map(|event| codec::encode_gm_spawn_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_ATTENTION,
+            gm_attention
+                .read()
+                .filter_map(|event| codec::encode_gm_attention_projection(&event.payload).ok())
                 .collect(),
         ),
     ];
@@ -5149,6 +5164,7 @@ spawn_on = "game_start"
                 host_channels::GM_MISSION,
                 host_channels::GM_SPAWN,
                 host_channels::GM_COMMS,
+                host_channels::GM_ATTENTION,
             ]
         );
     }

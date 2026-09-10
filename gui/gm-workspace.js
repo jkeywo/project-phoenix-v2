@@ -18,6 +18,8 @@ import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
+import { createGmAttentionPanel } from './gm-attention-panel.js';
+import { createGmAttentionFilters } from './gm-attention-filters.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
 import { createGmJournalPanel } from './gm-journal-panel.js';
 import {
@@ -156,6 +158,35 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   win.__hostGmCommsRefresh = gmCommsPanel.refreshAdmission;
   win.__hostGmCommsReset = gmCommsPanel.reset;
   win.__hostGmCommsState = gmCommsPanel.state;
+  // The M4 attention queue (issue #1433). Its filters/snoozes are one private
+  // controller so #1442's authored widgets reuse this exact state rather than
+  // growing a second copy; the session id arrives later (the fleet join
+  // resolves it), so `restore` is called then, like the role presets.
+  // The panel is built FROM the controller, so it cannot be named here yet;
+  // the repaint is resolved lazily instead. Without it a same-session
+  // reconnect restores the operator's bands and snoozes into a queue that goes
+  // on showing the old rows until membership happens to change.
+  let repaintGmAttention = () => {};
+  const gmAttentionFilters = createGmAttentionFilters({
+    storage: operatorStorage,
+    getSessionId: () => (typeof win.__hostGmSessionId === 'function' ? win.__hostGmSessionId() : null),
+    getOperatorId: () => (typeof win.__hostLocalGm === 'function' ? (win.__hostLocalGm()?.id ?? null) : null),
+    onChange: () => repaintGmAttention(),
+  });
+  const gmAttentionPanel = createGmAttentionPanel({
+    doc: doc, t, has,
+    filters: gmAttentionFilters,
+    // Opening a row is a NAVIGATION to the conversation route that already
+    // exists on this desk. No GmAction, no dialog, no panel switch.
+    onOpen: (occurrence) => {
+      if (occurrence.target.ship) gmProjection.select(occurrence.target.ship.entity_id);
+      if (occurrence.target.route) gmCommsPanel.focusRoute(occurrence.target.route);
+    },
+  });
+  repaintGmAttention = gmAttentionPanel.repaint;
+  win.__hostGmAttentionState = gmAttentionPanel.state;
+  win.__hostGmAttentionRestore = gmAttentionFilters.restore;
+  win.__hostGmAttentionBanners = gmAttentionPanel.banners;
   const gmSpawnPanel = createGmSpawnPanel({
     doc: doc,
     win: win,
@@ -286,11 +317,12 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     gm_session:   function(p) { gmSessionControls.update(p); gmJournalPanel.update(p); },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
+    gm_attention: function(p) { gmAttentionPanel.update(p); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
     handlers,
-    dispose() { shell.dispose(); },
+    dispose() { gmAttentionPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       shell.refresh();
       gmSessionControls.refreshAdmission();
@@ -301,6 +333,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       win.__hostGmEffectRefresh();
     },
     reset() {
+      gmAttentionPanel.reset();
       gmSessionControls.reset();
       gmJournalPanel.reset();
       win.__hostGmMissionReset();

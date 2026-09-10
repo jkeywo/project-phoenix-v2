@@ -121,6 +121,10 @@ fn native_ship_and_full_gm_projections_share_one_authoritative_world_and_action_
         "gm_mission",
         "gm_spawn",
         "gm_comms",
+        // The M4 attention queue (issue #1433) reaches the private native
+        // surface on the same local Host Channel walk as every other GM
+        // projection — including its first, empty, publish.
+        "gm_attention",
     ] {
         assert!(
             scripts.contains(&format!("__phoenixNativeGmChannels.{channel}")),

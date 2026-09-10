@@ -16,14 +16,20 @@ function mount() {
   const shell = mountGmWorkspaceShell({doc:document,win,t:id=>id,has:()=>false,selectEntity});
   return {shell,selectEntity};
 }
-it('keeps shared control identities in the six desk regions and the authentic iframe outside them', () => {
+it('keeps shared control identities in the seven desk regions and the authentic iframe outside them', () => {
   mount();
   expect(document.querySelector('#gm-roster #gm-force-start-btn')).not.toBeNull();
   expect(document.getElementById('gm-roster-heading').nextElementSibling.id).toBe('gm-start-controls');
   expect(document.querySelector('#gm-inspector #gm-station-toggle')).not.toBeNull();
   expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
-  expect(document.querySelectorAll('#gm-workspace > section')).toHaveLength(6);
+  // Seven since #1433 added the attention queue, and it is a first-class desk
+  // region rather than a strip inside another panel.
+  expect([...document.querySelectorAll('#gm-workspace > section')].map(section => section.id))
+    .toEqual(['gm-roster', 'gm-map-panel', 'gm-inspector', 'gm-attention-panel',
+      'gm-mission-panel', 'gm-comms-panel', 'gm-activity']);
+  // The #1437 technical-banner seam lives inside it and is never a filtered row.
+  expect(document.querySelector('#gm-attention-panel #gm-attention-banners')).not.toBeNull();
   expect(document.querySelector('#gm-roster #manual-save-panel')).not.toBeNull();
   expect(document.querySelector('#gm-roster #gm-join-controls').style.position).toBe('');
 });

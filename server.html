@@ -2115,6 +2115,28 @@
           <p id="gm-comms-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
           <ol id="gm-comms-log" role="log" aria-label="" data-i18n-aria-label="server.gm.comms.history"></ol>
         </section>
+        <!-- GM attention queue (issue #1433). Three bands, oldest first, one
+             short reason per row. #gm-attention-banners is the #1437 seam for
+             technical connection/recovery warnings: it sits OUTSIDE the
+             filtered, snoozeable, holdable list on purpose. -->
+        <section id="gm-attention-panel" role="region" aria-labelledby="gm-attention-heading">
+          <h2 id="gm-attention-heading" data-i18n="server.gm.attention.heading"></h2>
+          <div id="gm-attention-banners" role="alert" aria-live="assertive" hidden></div>
+          <div id="gm-attention-filters" role="group" aria-label=""
+            data-i18n-aria-label="server.gm.attention.filters">
+            <label for="gm-attention-filter-band"><span data-i18n="server.gm.attention.filter.band"></span>
+              <select id="gm-attention-filter-band"></select></label>
+            <label for="gm-attention-filter-category"><span data-i18n="server.gm.attention.filter.category"></span>
+              <select id="gm-attention-filter-category"></select></label>
+            <label for="gm-attention-filter-ship"><span data-i18n="server.gm.attention.filter.ship"></span>
+              <select id="gm-attention-filter-ship"></select></label>
+          </div>
+          <p id="gm-attention-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <button type="button" id="gm-attention-live"
+            data-i18n="server.gm.attention.return_to_live" hidden></button>
+          <div id="gm-attention-list"></div>
+          <p id="gm-attention-empty" role="status" data-i18n="server.gm.attention.empty"></p>
+        </section>
         <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
           <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
           <ul id="gm-spawn-palette" role="list"></ul>
@@ -4715,6 +4737,18 @@
       }
     }
 
+    /**
+     * The session a Game Master's private presentation state is scoped to
+     * (issue #1433): the reconnectable identity code when this host joined
+     * one, otherwise the fleet code it opened. `null` before a session exists,
+     * which is when nothing may be persisted yet.
+     */
+    window.__hostGmSessionId = function() {
+      if (gmRolePresetIdentityCode) return gmRolePresetIdentityCode;
+      const code = fleetHandle && fleetHandle.code && fleetHandle.code.full;
+      return typeof code === 'string' && code ? code : null;
+    };
+
     /** This browser's own current role-preset choice (issue #1319), or
      * `null` before the module island above has constructed the controller —
      * the boot ordering `finishInit()` documents elsewhere never assumes
@@ -5224,6 +5258,10 @@
     function adoptFleet(handle) {
       fleetHandle = handle;
       fleetRole = normaliseFleetRole(handle && handle.role);
+      // This session's identity is now known, so the GM's own private
+      // attention filters/snoozes for it can be adopted (issue #1433). A
+      // DIFFERENT session simply has no stored scope, which is the reset.
+      window.__hostGmAttentionRestore?.();
       fleetLastPublishedStartState = null;
       setFleetManagedLobby(true);
       announceFleetSelection();
@@ -5359,6 +5397,10 @@
       // reset the operator's own already-live selection back to All, and a
       // join that then gets refused below never undoes that reset.
       gmRolePresetIdentityCode = identityCode;
+      // Same session, same private attention state (issue #1433). Called here
+      // as well as in `adoptFleet` because a reconnect resolves its identity
+      // code before the handle exists.
+      window.__hostGmAttentionRestore?.();
       if (priorIdentity && typeof priorIdentity.rolePreset === 'string'
           && typeof window.__hostGmRolePresetsRestore === 'function') {
         window.__hostGmRolePresetsRestore(priorIdentity.rolePreset);

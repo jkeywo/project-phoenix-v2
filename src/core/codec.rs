@@ -1541,6 +1541,15 @@ pub fn encode_gm_comms_projection(
     serde_json::to_string(payload)
 }
 
+/// Absolute local GM attention queue (issue #1433). String Table reason ids and
+/// their parameters cross verbatim; the page resolves them at its own
+/// presentation boundary, exactly as the other GM DTOs do.
+pub fn encode_gm_attention_projection(
+    payload: &crate::gm_attention::GmAttentionProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn decode_native_gm_record(
     json: &str,

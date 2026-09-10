@@ -5,6 +5,28 @@
  * the same console-state builder used by player phones. Outbound envelopes go
  * through the existing action map; only resulting ControlSystem commands cross
  * the typed GM action lane.
+ *
+ * ## Reading the puppet at the desk's own scale (issue #1430)
+ *
+ * `gui/accessibility-profile.js`'s shell->iframe push (`.console-section
+ * iframe`) deliberately never reaches a console iframe — that document
+ * "belongs to whoever is sitting at it" (its own private operator). The same
+ * is true of `gui/viewscreen-presentation.js`'s endpoint record: "never a
+ * console iframe". Both are correct for a PLAYER's own seat or the shared
+ * Viewscreen watching one.
+ *
+ * `#gm-station-frame` is neither. Nobody is privately sitting at it — the GM
+ * IS the one reading and operating it, through this very frame, at whatever
+ * text scale and contrast the rest of the desk around it already uses. Left
+ * unpropagated, the "already-corrected Station family contents" (#1423-1426)
+ * would sit at their own 100% default inside the puppet no matter how far the
+ * GM turns the desk's own text up — exactly the deferred readability check
+ * PRD #1418 / issue #1430 names. So this module mirrors the endpoint's OWN
+ * resolved presentation effects — the same `--a11y-text-scale` / contrast /
+ * effect-intensity custom properties `gui/gm-workspace.css` already inherits
+ * from `server.html`'s root — onto the puppeted document's root each time its
+ * state is pushed: once on load, and again on every following `gm_station`
+ * tick, so a mid-session change reaches an already-open puppet too.
  */
 
 import { buildRadarRegions } from './console-state.js';
@@ -16,6 +38,7 @@ import {
   isValidActionCorrelation,
 } from './action-feedback.js';
 import { ClientSimState } from './sim-state.js';
+import { applyViewscreenEffectsToRoot } from './viewscreen-presentation.js';
 
 const STATION_COMMAND_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 const LOCAL_INGRESS_REFUSAL = 'ingress-rejected';
@@ -266,11 +289,28 @@ export function createGmStationPuppet({
     else if (timer != null) cancelSchedule(timer);
   }
 
+  /**
+   * Mirror this endpoint's own resolved presentation onto the puppeted
+   * document's root (see the module note above). Late-bound off
+   * `win.__serverSettings`, mounted after this module by `server.html`, so an
+   * early tick or a test double simply leaves the puppeted document at its
+   * own default rather than throwing.
+   */
+  function applyPresentation() {
+    let idoc = null;
+    try { idoc = frame && frame.contentDocument; } catch (_) { /* cross-origin — never true here */ }
+    if (!idoc || !idoc.documentElement) return;
+    const presentation = win.__serverSettings && win.__serverSettings.presentation;
+    const effects = typeof presentation?.effects === 'function' ? presentation.effects() : null;
+    if (effects) applyViewscreenEffectsToRoot(idoc.documentElement, effects);
+  }
+
   function pushState() {
     if (!selectedRow || !frame || !frame.contentWindow
         || typeof frame.contentWindow.__updateConsole !== 'function') return false;
     const builder = win.buildConsoleState;
     if (typeof builder !== 'function') return false;
+    applyPresentation();
     const json = builder(selectedRow.station.station_id, consoleInput);
     frame.contentWindow.__updateConsole(selectedRow.station.station_id, json);
     return true;

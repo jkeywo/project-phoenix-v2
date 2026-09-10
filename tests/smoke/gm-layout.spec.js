@@ -1,6 +1,26 @@
 import { test, expect, waitForWasmReady } from './fixtures';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEVICE_MATRIX, TEXT_SCALES, BROWSER_ZOOMS } from '../fixtures/device-matrix.mjs';
+
+// Issue #1430: the GM's smallest supported landscape surface and the top of
+// the enlargement range, from #1421's shared matrix (PRD #1418) — the same
+// pair `gm-undo-200.spec.js` / `gm-journal-200.spec.js` / `gm-checkpoint-200.spec.js`
+// use, so this file and its M4/M5 siblings exercise one matrix rather than
+// four copies of viewport/scale literals.
+const GM_VIEWPORT = DEVICE_MATRIX.find((row) => row.id === 'desktop-1280x720-gm');
+const MAX_TEXT_SCALE = Math.max(...TEXT_SCALES);
+
+async function joinAsReadyGm(page, world) {
+  await page.route('**/assets/worlds/default.toml', route => route.fulfill({ contentType: 'text/plain', body: world }));
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => window.__hostGmStartState?.().localValidation);
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+}
+
 test('GM desktop layout is usable at both host viewport sizes', async ({ context }, testInfo) => {
   test.setTimeout(90000);
   const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
@@ -144,3 +164,322 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   await page.evaluate(() => document.documentElement.style.removeProperty('--a11y-text-scale'));
   expect(errors).toEqual([]);
 });
+
+// Issue #1430: the T2 "directing" (#1301-#1316) and "performing" (#1317-#1320)
+// panels above are the desk's ORIGINAL controls/status/confirmations — the
+// mission log and the Objective list are the two that grow into genuinely
+// dense reading surfaces during a live session, and #1421's own
+// `DENSE_CONTENT.gmLists` fixture names real long rows from exactly these two
+// panels without anything ever having driven them through the real reducer at
+// 200%. Injected via the same real Host Channel seam
+// (`window.__hostChannel('gm_mission', …)`) the existing test above already
+// uses for `gm_attention` — both panels share that one channel
+// (`GmMissionProjection`), so one push exercises both.
+test('GM directing panels stay reachable with a dense mission log and Objective list at 100%, 150% and 200% text',
+  async ({ context }, testInfo) => {
+    test.setTimeout(90000);
+    const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: GM_VIEWPORT.width, height: GM_VIEWPORT.height });
+    await joinAsReadyGm(page, world);
+
+    const EVENT_IDS = ['base-world::breach_alarm', 'base-world::relief', 'base-world::skyhook_loss'];
+    await page.evaluate(({ eventIds }) => {
+      const event = (id) => ({ id, label: 'server.gm.mission.heading', fire: true, pause: true,
+        skip: true, repeatable: true, spent: false, armed: false, paused: false, skip_armed: false });
+      const outcomes = ['applied', 'no-op', 'refused'];
+      const results = [];
+      for (let i = 0; i < 9; i += 1) {
+        results.push({ operator_id: 'gm-a', correlation: `dense-fire-${i}`, outcome: outcomes[i % 3],
+          tick: 100 + i, target: eventIds[i % 3], verb: 'fire', requested_active: true,
+          ...(outcomes[i % 3] === 'refused' ? { reason: 'unknown-gm-event' } : {}) });
+      }
+      // #1421's own dense-fixture id, driven for real: the `skip_result`
+      // family, three occurrences across applied/no-op/refused.
+      for (let i = 0; i < 3; i += 1) {
+        results.push({ operator_id: 'gm-b', correlation: `dense-skip-${i}`, outcome: outcomes[i],
+          tick: 200 + i, target: eventIds[i], lever: 'skip-next', requested_active: true,
+          ...(outcomes[i] === 'refused' ? { reason: 'unknown-gm-event' } : {}) });
+      }
+      const objectives = Array.from({ length: 12 }, (_, i) => ({
+        id: `dense-objective-${i}`,
+        text: `Escort the Directive courier past the Ladder ${i} inspection line and confirm the transfer window stays open for every crew still aboard (objective ${i}).`,
+        text_params: {}, recipients: [], available: true, status: 'Active',
+      }));
+      window.__hostChannel('gm_mission', JSON.stringify({
+        events: eventIds.map(event), results,
+        objective_palette: [], objectives, objective_results: [],
+      }));
+    }, { eventIds: EVENT_IDS });
+
+    // The mission log: twelve rows, none shrunk sideways off the desk.
+    const missionRows = page.locator('#gm-mission-log .gm-mission-log-entry');
+    await expect(missionRows).toHaveCount(12);
+    for (const id of EVENT_IDS) {
+      await expect(page.locator(`button[data-role="fire"][data-event-id="${id}"]`)).toBeVisible();
+      await expect(page.locator(`button[data-role="skip"][data-event-id="${id}"]`)).toBeVisible();
+    }
+
+    // The Objective list: twelve dense rows, each with its full ~180-char
+    // description and both verb buttons — PRD #1418's "long text and dense
+    // states", not a shortened stand-in.
+    const objectiveRows = page.locator('#gm-objective-list .gm-objective-row');
+    await expect(objectiveRows).toHaveCount(12);
+    const firstText = await objectiveRows.first().locator('p').first().textContent();
+    expect(firstText?.length).toBeGreaterThan(120);
+    await expect(objectiveRows.first().locator('button[data-verb="complete"]')).toBeVisible();
+    await expect(objectiveRows.first().locator('button[data-verb="fail"]')).toBeVisible();
+
+    // PRD #1418 Testing Decisions: "exercise 100%, 150% and 200% with
+    // realistic long text and dense states." Content is injected once above;
+    // only the scale changes on each pass, so this stays one boot.
+    let previousFont = 0;
+    for (const scale of TEXT_SCALES) {
+      const where = `@ ${scale}x`;
+      await page.evaluate((value) => document.documentElement.style
+        .setProperty('--a11y-text-scale', String(value)), scale);
+      await expect(missionRows).toHaveCount(12);
+      await expect(objectiveRows).toHaveCount(12);
+
+      // Neither dense panel — nor the desk around them — grows a sideways
+      // scrollbar to hold it, at any of the three scales.
+      const geometry = await page.locator('#gm-workspace').evaluate(el => ({
+        scroll: el.scrollWidth, width: el.clientWidth,
+        body: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
+        fontPx: parseFloat(getComputedStyle(document.getElementById('gm-console')).fontSize),
+      }));
+      expect(geometry.scroll, `${where}: mission/objective desk width`).toBeLessThanOrEqual(geometry.width);
+      expect(geometry.body, `${where}: no sideways body scroll`).toBeLessThanOrEqual(geometry.viewport);
+      // Enlargement is genuinely applied, never a silent shrink back down.
+      expect(geometry.fontPx, `${where}: desk root grew`).toBeGreaterThan(previousFont);
+      previousFont = geometry.fontPx;
+
+      // Every control PRD #1418 story 1 asks to stay reachable is still
+      // there and still pressable — not merely present in the DOM.
+      await expect(objectiveRows.first().locator('button[data-verb="complete"]')).toBeVisible();
+      await expect(objectiveRows.first().locator('button[data-verb="fail"]')).toBeVisible();
+      const firstBox = await objectiveRows.first().locator('button[data-verb="complete"]').boundingBox();
+      expect(firstBox?.height, `${where}: verb button hit height`).toBeGreaterThanOrEqual(44);
+    }
+
+    // Keyboard reach into the dense Objective list's own verb button, at the
+    // ceiling this loop finished on (200%).
+    await objectiveRows.first().locator('button[data-verb="complete"]').focus();
+    expect(await page.evaluate(() => document.activeElement?.dataset?.verb)).toBe('complete');
+
+    await page.evaluate(() => document.documentElement.style.removeProperty('--a11y-text-scale'));
+    expect(errors).toEqual([]);
+  });
+
+// Issue #1430 acceptance: "the shell does not clone [the already-corrected
+// Station family] contents or defer their readability checks." The puppet
+// mounts the REAL authored `StationConfig.console` URL (`gm-station-puppet.js`
+// — never a second/simplified Station UI), and this proves the desk's own
+// text scale reaches THROUGH that iframe rather than leaving the puppeted
+// document at its own 100% default (the fix `gui/gm-station-puppet.js`
+// carries for this issue).
+test('the authentic Station puppet mounts the real per-hull console and reads the desk\'s own text scale',
+  async ({ context }, testInfo) => {
+    test.setTimeout(90000);
+    const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: GM_VIEWPORT.width, height: GM_VIEWPORT.height });
+    await joinAsReadyGm(page, world);
+
+    // The fixture's player ship is an Alliance Cruiser (#1424 corrected its
+    // Tactical console at 200%). A real Ship/Station row is selected as soon
+    // as the projection has one — no takeover click required to READ it.
+    await page.waitForFunction(() =>
+      (window.__hostGmStationState?.().projection?.ships || []).length > 0);
+    const consoleUrl = await page.evaluate(() =>
+      window.__hostGmStationState().selectedRow?.station?.console);
+    // A real authored `StationConfig.console` path (`assets/entities/*.toml`),
+    // never a second/synthetic GM-only document.
+    expect(consoleUrl).toMatch(/^gui\/[a-z-]+(\/[a-z-]+)?\.html$/);
+    await expect(page.locator('#gm-station-frame')).toHaveAttribute('src', consoleUrl);
+
+    const frameFontPx = () => page.locator('#gm-station-frame').evaluate(el =>
+      parseFloat(getComputedStyle(el.contentDocument.documentElement).fontSize));
+    const before = await frameFontPx();
+    expect(before).toBeGreaterThan(0);
+
+    await page.evaluate((scale) => document.documentElement.style
+      .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
+    // The puppet's own tick cadence (`gm_station` arriving again) is what
+    // carries the change in — no reload, matching the production comment in
+    // `gui/gm-station-puppet.js`.
+    await page.waitForFunction((prev) => {
+      const el = document.getElementById('gm-station-frame');
+      const doc = el && el.contentDocument;
+      return !!doc && parseFloat(getComputedStyle(doc.documentElement).fontSize) > prev;
+    }, before, { timeout: 10000 });
+    const after = await frameFontPx();
+    expect(after).toBeGreaterThan(before);
+
+    await page.evaluate(() => document.documentElement.style.removeProperty('--a11y-text-scale'));
+    expect(errors).toEqual([]);
+  });
+
+// Issue #1430: browser zoom, tested separately from the Phoenix text setting
+// (PRD #1418: "Verify browser zoom separately; do not assume a universally
+// available browser query for the Windows text-size percentage") — a gap
+// across every GM spec until now. Emulated the way the browser itself does
+// it (a shrunk CSS viewport plus a grown device pixel ratio), matching
+// `tests/smoke/text-scale-power-workflow.spec.js`. One representative step
+// rather than the full `BROWSER_ZOOMS` sweep: unlike a static console
+// document, a GM page pays a full deterministic-simulation boot per browser
+// context, and this file already carries that cost four times over.
+test('browser zoom on the GM desk works alongside the Phoenix text setting', async ({ browser }, testInfo) => {
+  test.setTimeout(90000);
+  const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
+  const zoom = BROWSER_ZOOMS[BROWSER_ZOOMS.length - 2]; // 1.5, bracketing 150%/200% text without the 4x cost
+  const zoomContext = await browser.newContext({
+    viewport: {
+      width: Math.round(GM_VIEWPORT.width / zoom),
+      height: Math.round(GM_VIEWPORT.height / zoom),
+    },
+    deviceScaleFactor: zoom,
+  });
+  try {
+    const page = await zoomContext.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await joinAsReadyGm(page, world);
+
+    await expect(page.locator('#gm-workspace')).toBeVisible();
+    await expect(page.locator('#gm-mission-panel')).toBeVisible();
+    const before = await page.evaluate(() =>
+      parseFloat(getComputedStyle(document.getElementById('gm-console')).fontSize));
+
+    // Additive, not exclusive: the Phoenix ceiling on top of browser zoom
+    // still enlarges, and the desk still fits without a sideways scrollbar.
+    await page.evaluate((scale) => document.documentElement.style
+      .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
+    const after = await page.evaluate(() =>
+      parseFloat(getComputedStyle(document.getElementById('gm-console')).fontSize));
+    expect(after).toBeGreaterThan(before);
+    const geometry = await page.locator('#gm-workspace').evaluate(el => ({
+      scroll: el.scrollWidth, width: el.clientWidth,
+      body: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
+    }));
+    expect(geometry.scroll).toBeLessThanOrEqual(geometry.width);
+    expect(geometry.body).toBeLessThanOrEqual(geometry.viewport);
+    expect(errors).toEqual([]);
+  } finally {
+    await zoomContext.close();
+  }
+});
+
+// Issue #1430: forced colours, tested as the browser's own behaviour (PRD
+// #1418: "A Phoenix contrast selection is not permission to defeat
+// browser-enforced colours") — also a gap across every GM spec until now.
+// Covers the general focus-ring/edge repair `gui/tokens.css` already carries
+// for every endpoint (issue #1422) AND the GM-specific redundant border this
+// issue adds for the roster's selected entity, since a forced palette is
+// free to flatten `background: var(--gold)` on the pressed button to the
+// system's own button colour.
+test('forced colours keep the GM desk\'s focus ring, edges and selected entity visible',
+  async ({ context }, testInfo) => {
+    test.setTimeout(90000);
+    const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: GM_VIEWPORT.width, height: GM_VIEWPORT.height });
+    await page.emulateMedia({ forcedColors: 'active' });
+    await joinAsReadyGm(page, world);
+
+    await expect(page.locator('#gm-roster-ships button').first()).toBeVisible();
+    await page.locator('#gm-roster-ships button').first().click();
+    const row = page.locator('.gm-roster-row', { has: page.locator('button[aria-pressed="true"]') });
+    await expect(row).toHaveCount(1);
+    const edge = await row.evaluate(el => getComputedStyle(el).borderLeftColor);
+    expect(edge, 'the selected row draws a real forced-colours border').not.toBe('rgba(0, 0, 0, 0)');
+
+    // Under forced colours the ring redraws as a BORDER on the chamfered
+    // `.btn-bg` body (`ph-console-styles.js`), not an outline on the button
+    // itself — the box-shadow ring `forced-colors` drops entirely.
+    await row.locator('button').focus();
+    const ring = await row.locator('button .btn-bg').evaluate(el => {
+      const s = getComputedStyle(el);
+      return { width: parseFloat(s.borderTopWidth), colour: s.borderTopColor };
+    });
+    expect(ring.width, 'the forced-colours focus border is drawn').toBeGreaterThan(0);
+    expect(ring.colour, 'the forced-colours focus ring is a real colour').not.toBe('rgba(0, 0, 0, 0)');
+
+    expect(errors).toEqual([]);
+  });
+
+// Issue #1430 review, blocking finding: the "performing" surface (Comms
+// Studio #1317, Knowledge Compare #1318, role presets #1319) is named
+// alongside the directing panels above as in scope for this issue, but
+// nothing here had touched it at 200% text. #1421's own `DENSE_CONTENT
+// .gmLists` fixture names two rows the Knowledge Compare panel renders
+// (`server.gm.knowledge.hint`, `server.gm.knowledge.summary`); those are now
+// driven through the real controller at the jsdom level
+// (`tests/client/gm-directing-performing-dense-content.test.js`) — this is
+// the companion Playwright half, proving the real running page never clips
+// them. It also stresses the one pre-existing panel-specific CSS rule on
+// this surface the issue's own audit missed (`#gm-role-preset-label`'s
+// `max-width`, gui/gm-workspace.css — present before this issue's diff, not
+// added by it) with a maximally long preset id: that rule constrains the
+// LABEL box only (no `overflow:hidden`/`text-overflow`/`white-space:nowrap`
+// on it), so the real risk it could pose is pushing the desk into sideways
+// scroll, not silently clipping text — the same "no sideways scrollbar"
+// contract every other case in this file already checks.
+test('GM performing panels (Comms, Knowledge Compare, role presets) stay reachable and unclipped at 200% text',
+  async ({ context }, testInfo) => {
+    test.setTimeout(90000);
+    const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: GM_VIEWPORT.width, height: GM_VIEWPORT.height });
+    await joinAsReadyGm(page, world);
+
+    // Knowledge Compare: a real ship's Truth/Crew comparison, waited for
+    // exactly as the #1318 exit tests do (tests/smoke/gm-page.spec.js).
+    await page.waitForFunction(() => !!window.__hostGmKnowledgeState?.().selectedShipId);
+    await page.waitForFunction(() => {
+      const rows = document.getElementById('gm-knowledge-contacts-rows');
+      return !!rows && rows.children.length > 0;
+    });
+
+    // A maximally long preset id, injected through the real controller's own
+    // exposed global (`gui/gm-workspace.js`) rather than fabricated markup —
+    // an empty `label` falls back to rendering the id itself
+    // (`gm-role-presets.js`'s `paintOptions`), so this needs no new
+    // String-Table row to carry 80 real characters into the option text.
+    const longPresetId = 'x'.repeat(80);
+    await page.evaluate((id) => window.__hostGmRolePresetsSetAvailable(JSON.stringify([
+      { id, label: '', panels: [], quick_actions: [], contacts: [] },
+    ])), longPresetId);
+    await page.selectOption('#gm-role-preset-select', longPresetId);
+
+    await page.evaluate(() => document.documentElement.style.setProperty('--a11y-text-scale', '2'));
+
+    await expect(page.locator('#gm-knowledge-panel')).toBeVisible();
+    const hint = await page.locator('#gm-knowledge-hint').textContent();
+    expect(hint?.length).toBeGreaterThan(100);
+    await expect(page.locator('#gm-knowledge-hint')).toBeVisible();
+    const summary = await page.locator('#gm-knowledge-contacts-summary').textContent();
+    expect(summary?.trim().length).toBeGreaterThan(0);
+
+    await expect(page.locator('#gm-comms-panel')).toBeVisible();
+    await expect(page.locator('#gm-role-preset-label')).toBeVisible();
+    await expect(page.locator('#gm-role-preset-select')).toHaveValue(longPresetId);
+
+    const geometry = await page.locator('#gm-workspace').evaluate(el => ({
+      scroll: el.scrollWidth, width: el.clientWidth,
+      body: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
+    }));
+    expect(geometry.scroll, 'no sideways scroll inside the desk').toBeLessThanOrEqual(geometry.width);
+    expect(geometry.body, 'no sideways scroll on the page').toBeLessThanOrEqual(geometry.viewport);
+
+    await page.evaluate(() => document.documentElement.style.removeProperty('--a11y-text-scale'));
+    expect(errors).toEqual([]);
+  });

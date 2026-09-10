@@ -47,6 +47,39 @@ it('selects roster entities through the map seam and shows authored Station rati
   expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
   expect(document.querySelector('.gm-station-pills').textContent).toContain('Helm · Backfill');
 });
+// Issue #1430, PRD #1418 story 6: the selected roster entity must read as
+// more than the button's own `background: var(--gold)`, which a forced-
+// colours browser is free to replace with its own system colour regardless
+// of the author's choice — the same redundant-border pattern the attention
+// queue, journal and checkpoint rows already use. jsdom's computed-style
+// engine does not resolve `var()` inside a `border` shorthand (verified: even
+// the file's PRE-EXISTING `.gm-roster-row { border-bottom: 1px solid
+// var(--edge); }` computes as the unset `medium` there), so — like the
+// sibling "applies the endpoint text scale exactly once" ratchet just above —
+// this checks the actual shipped CSS TEXT rather than a jsdom layout it
+// cannot produce; `tests/smoke/gm-layout.spec.js` is where a real engine
+// proves the rendered edge.
+it('gives the selected roster row a real border rule, not only the pressed button background', () => {
+  const sheet = readFileSync('gui/gm-workspace.css', 'utf8');
+  expect(sheet).toMatch(
+    /\.gm-roster-row:has\(\s*>?\s*button\[aria-pressed="true"\]\s*\)\s*\{[^}]*border-left/,
+  );
+  // And the real markup this rule targets exists: a roster row whose direct
+  // child is the pressed button, matched with the same `:has()` jsdom itself
+  // supports for `querySelectorAll` (only its computed-style var() resolution
+  // is the gap, proven above).
+  const { shell } = mount();
+  shell.refresh({ entities: [
+    { entity_id: 'ship-a', name: 'Courier', kind: 'player_ship', faction: null },
+    { entity_id: 'ship-b', name: 'Resolute', kind: 'player_ship', faction: null },
+  ] }, { ships: [] });
+  shell.selection({ entity_id: 'ship-a', name: 'Courier', status: { systems: [] } });
+  const matched = [...document.querySelectorAll(
+    '.gm-roster-row:has(> button[aria-pressed="true"])',
+  )];
+  expect(matched).toHaveLength(1);
+  expect(matched[0].querySelector('button').dataset.entityId).toBe('ship-a');
+});
 it('offers keyboard-operated comparison tabs without replacing existing comparison controls', () => {
   mount();
   document.getElementById('gm-tab-truth').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight'}));

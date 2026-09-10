@@ -85,6 +85,74 @@ describe('GM authentic Station projection', () => {
     expect(submitStationCommand).toHaveBeenCalledWith(expect.objectContaining({ ship: 'npc-b' }));
   });
 
+  // Issue #1430: the puppeted document is not "whoever is sitting at it" in
+  // the sense `gui/accessibility-profile.js` and `gui/viewscreen-presentation.js`
+  // both reserve for a private operator's own seat or the shared Viewscreen —
+  // the GM reading THROUGH this frame is the one sitting at it. Without this,
+  // the already-corrected Station family contents (#1423-1426) would sit at
+  // their own 100% default no matter how far the desk's own text is turned up.
+  it('mirrors this endpoint\'s own presentation onto the puppeted document, and again on every later tick', () => {
+    const effects = { textScale: 2, contrast: true, reducedMotion: false, shake: 1, flash: 1, decorativeMotion: 1 };
+    // `gui/console-state.js` sets the REAL `window.buildConsoleState` as an
+    // import-time side effect this same test file relies on later; stand a
+    // stub in for this test only and restore the original rather than
+    // deleting it, so a later test does not lose it for the rest of the run.
+    const previousBuildConsoleState = window.buildConsoleState;
+    window.__serverSettings = { presentation: { effects: () => effects } };
+    window.buildConsoleState = () => '{}';
+    try {
+      const controller = createGmStationPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }) });
+      // First tick: a fresh browsing context, its 'load' has not (and in this
+      // harness never will) fire, so nothing has been pushed into it yet.
+      controller.update(projection({ operators: ['gm-1'] }));
+      const frame = document.getElementById('gm-station-frame');
+      // jsdom never actually completes an iframe navigation (no fetch, no
+      // 'load'), so `contentDocument` stays a bare, root-less Document under
+      // this harness even though `contentWindow` is a stable proxy — a real
+      // browser's loaded document always has one. Stand in a real, detached
+      // `<html>` element as that root so the assertions below exercise the
+      // SAME `applyViewscreenEffectsToRoot(idoc.documentElement, …)` call
+      // production code makes, without depending on jsdom's navigation model.
+      const puppetRoot = document.createElement('html');
+      Object.defineProperty(frame, 'contentDocument', {
+        configurable: true, get: () => ({ documentElement: puppetRoot }),
+      });
+      frame.contentWindow.__updateConsole = vi.fn();
+      // Second tick: the SAME Ship/Station selection, exactly like a live
+      // `gm_station` projection arriving again — the ordinary path, not the
+      // unfired load event, is what actually reaches an open puppet.
+      controller.update(projection({ operators: ['gm-1'] }));
+      expect(frame.contentWindow.__updateConsole).toHaveBeenCalled();
+      expect(puppetRoot.style.getPropertyValue('--a11y-text-scale')).toBe('2');
+      expect(puppetRoot.getAttribute('data-contrast')).toBe('more');
+      // A later change on the endpoint's own Display tab reaches the ALREADY
+      // open puppet on the next ordinary tick — no reload, no second control.
+      effects.textScale = 1;
+      effects.contrast = false;
+      controller.update(projection({ operators: ['gm-1'] }));
+      expect(puppetRoot.style.getPropertyValue('--a11y-text-scale')).toBe('1');
+      expect(puppetRoot.getAttribute('data-contrast')).toBe('standard');
+    } finally {
+      delete window.__serverSettings;
+      window.buildConsoleState = previousBuildConsoleState;
+    }
+  });
+
+  it('never throws pushing state when no endpoint presentation is mounted yet', () => {
+    const previousBuildConsoleState = window.buildConsoleState;
+    window.buildConsoleState = () => '{}';
+    try {
+      const controller = createGmStationPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }) });
+      expect(() => controller.update(projection({ operators: ['gm-1'] }))).not.toThrow();
+      const frame = document.getElementById('gm-station-frame');
+      frame.contentWindow.__updateConsole = vi.fn();
+      expect(() => controller.update(projection({ operators: ['gm-1'] }))).not.toThrow();
+      expect(frame.contentWindow.__updateConsole).toHaveBeenCalled();
+    } finally {
+      window.buildConsoleState = previousBuildConsoleState;
+    }
+  });
+
   it('retires disappeared-target feedback and unloads the final removed interface', () => {
     const controller = createGmStationPuppet({
       doc: document, win: window, getOperator: () => ({ id: 'gm-1' }),

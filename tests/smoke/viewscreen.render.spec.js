@@ -257,4 +257,28 @@ test.describe('viewscreen renders', () => {
     console.log(`falling_skyway/default pixels: ${JSON.stringify(stats)}`);
     expectViewscreenDrawn(stats, errors, 'falling_skyway default');
   });
+
+  test('combat_test draws with the compressed Gas Giant base texture', { tag: '@core' }, async ({ context }) => {
+    const textureLogs = [], downloads = [];
+    context.on('page', page => {
+      page.on('console', message => {
+        if (/Planet UASTC/.test(message.text())) textureLogs.push(message.text());
+      });
+      page.on('request', request => downloads.push(request.url()));
+    });
+    const { errors, stats } = await bootAndMeasure(context, { world: COMBAT_TEST });
+    expectViewscreenDrawn(stats, errors, 'combat_test UASTC');
+    expect(textureLogs.some(line => /Planet UASTC loaded:.*(Astc|Bc7|Etc2)/.test(line)), textureLogs.join('\n')).toBe(true);
+    expect(downloads.some(url => /\/surface_colour\.uastc\.ktx2$/.test(url))).toBe(true);
+    expect(downloads.some(url => /gas_giant\/surface_colour\.ktx2$/.test(url))).toBe(false);
+  });
+
+  test('combat_test recovers the original planet texture after a worker failure', async ({ context }) => {
+    await context.route('**/uastc-worker.js', route => route.abort());
+    const downloads = [];
+    context.on('request', request => downloads.push(request.url()));
+    const { errors, stats } = await bootAndMeasure(context, { world: COMBAT_TEST });
+    expectViewscreenDrawn(stats, errors, 'combat_test UASTC fallback');
+    expect(downloads.some(url => /gas_giant\/surface_colour\.ktx2$/.test(url))).toBe(true);
+  });
 });

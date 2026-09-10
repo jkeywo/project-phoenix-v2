@@ -11,6 +11,7 @@ entities:
         - "[ai] Gas bands use bounded differential advection and storm-controlled turbulence, independent upper clouds, matching moving shadows, local lightning pulses and polar aurora. Avoid unbounded texture stretching."
         - "[ai] Ice combines frost relief, geology-dependent roughness/AO, masked local blue wrap lighting, sparse thermal fractures and timed vent emission beneath a thin haze. This approximates subsurface appearance without making the planet transparent."
         - "[ai] Natural material channels are separate from city channels. Existing planets retain their prior paths when the optional natural and cloud-dynamics blocks are absent. Validate real WebGL and native rendering, including night and pole views."
+        - "[ai] The approved Gas Giant base map has a browser UASTC variant. Shared preload and rendering select ASTC, BC7, ETC2 or RGBA from Bevy's enabled device formats through an explicit Image loader. A bounded local worker transcodes all mips; download, transcode or parsing failure resolves the same handle from the original lossless map. Native rendering and other maps keep their existing assets."
     architecture:
       kind: renderer
       authority: derived
@@ -19,5 +20,5 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/entities/planet.rs, src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_gas_giant.toml, assets/entities/moon_ice.toml, scripts/planets/bake-natural.mjs]
-      tests: [node scripts/planets/check-natural.mjs, cargo test --lib entities::planet::tests]
+      paths: [src/entities/planet.rs, src/entities/planet_texture.rs, src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_gas_giant.toml, assets/entities/moon_ice.toml, scripts/planets/bake-natural.mjs, scripts/planets/bake-uastc.mjs, assets/texture-codecs/]
+      tests: [node scripts/planets/check-natural.mjs, cargo test --lib entities::planet::tests, cargo test --lib entities::planet_texture::tests, node scripts/planets/check-uastc-browser.mjs, npx vitest run tests/client/uastc.test.js]

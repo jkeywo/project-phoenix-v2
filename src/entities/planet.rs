@@ -205,6 +205,8 @@ impl Material for PlanetCloudMaterial {
 /// U wraps (longitude tiling + cloud drift); V clamps (poles).
 pub fn load_planet_image(asset_server: &AssetServer, path: &str, srgb: bool) -> Handle<Image> {
     let rel = path.strip_prefix("assets/").unwrap_or(path).to_string();
+    #[cfg(target_arch = "wasm32")]
+    let rel = super::planet_texture::browser_path(&rel, srgb).to_string();
     asset_server.load_with_settings(rel, move |s: &mut ImageLoaderSettings| {
         s.is_srgb = srgb;
         s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -531,6 +533,7 @@ pub struct PlanetRenderPlugin;
 impl Plugin for PlanetRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<PlanetSurfaceMaterial>::default())
+            .add_plugins(super::planet_texture::PlanetTexturePlugin)
             .add_plugins(MaterialPlugin::<PlanetCloudMaterial>::default())
             .add_systems(Update, update_planet_materials);
     }

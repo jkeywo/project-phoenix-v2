@@ -2,8 +2,8 @@
 title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
-sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
-updated: 2026-09-09
+sources: [src/entities/planet_texture.rs, assets/texture-codecs/README.md, viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
+updated: 2026-09-10
 ---
 
 # Model Viewer
@@ -14,6 +14,12 @@ render path, with lighting switchable between off / ambient / directional.
 
 It provides a short feedback loop for tuning lighting, rigs, LODs, textures,
 and WGSL without starting a scenario and flying to the subject.
+
+The browser viewer and game share the Gas Giant UASTC base texture loader in
+`src/entities/planet_texture.rs`. It selects from Bevy's enabled GPU formats,
+transcodes in a local worker, and loads the original into the same handle on
+failure. Native keeps the original. See `assets/texture-codecs/README.md` for
+the bounded format contract and verification commands.
 
 Combat Test and Falling Skyway's recreated ship/station assets are authored by
 `scripts/art/recreate-fleet.py`, with concept mappings and reproduction commands

@@ -1,0 +1,10 @@
+{
+  "transcoderPackage": "three@0.180.0",
+  "hashes": {
+    "assets/planets/gas_giant/surface_colour.ktx2": "a08b71ffea3ad4a057be5212c01c6f19adf44f95dcb536c5f0533b15a42a635a",
+    "assets/planets/gas_giant/surface_colour.uastc.ktx2": "77486cba9c447f9820bd8a07c0891bc0c2160e54ea1c557b0fe0d3d3c6f558a5",
+    "assets/texture-codecs/gas-base-templates.json": "faba285c8db120c664f2f457a723a1f6ce863fee99f1b0256b1e24c531ea5ff7",
+    "assets/texture-codecs/basis/basis_transcoder.js": "8478b5b6d6b74e7d3082b89f6417321d8d1dc0307f2b30d4484bb11b441696a1",
+    "assets/texture-codecs/basis/basis_transcoder.wasm": "6cf17dc889352c42e9acf8897107978d127005fe3386c36a0e3845e27967630a"
+  }
+}

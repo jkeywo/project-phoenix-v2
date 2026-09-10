@@ -548,6 +548,7 @@ vellum-save = { workspace = true, features = ["backend-web"] }
 
 [target.wasm32-unknown-unknown.dependencies]
 js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "NavigatorAutomationInformation", "console", "Performance"] }
 # Routes Rust panics through console.error with a real message + location.
 # Without this, a panic anywhere in the Bevy app (e.g. inside a system) traps

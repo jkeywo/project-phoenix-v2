@@ -62,6 +62,8 @@ const MIME = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.ktx2': 'image/ktx2',
+  '.js': 'text/javascript',
+  '.wasm': 'application/wasm',
   '.toml': 'text/plain; charset=utf-8',
   '.json': 'application/json',
   '.wgsl': 'text/plain; charset=utf-8',

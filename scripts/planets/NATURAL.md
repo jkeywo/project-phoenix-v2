@@ -5,7 +5,9 @@ in `sources/`. Run from the repository root:
 
 ```powershell
 node scripts/planets/bake-natural.mjs raw/planets
+node scripts/planets/bake-uastc.mjs
 node scripts/planets/check-natural.mjs
+node scripts/planets/bake-uastc.mjs --check
 ```
 
 The generated artwork adds interpreted fine detail. It is not recovered source
@@ -14,12 +16,16 @@ The baker applies the same normalized frame crop, seam repair and narrow polar
 fade to every map, renormalizes mixed frost normals, and resizes packed channels
 independently. Alpha data is encoded above zero to avoid premultiplication loss.
 
-Each body uses 11 maps, 63.67 MiB including GPU mipmaps: 4K base colour, 2K
+Each body's lossless set uses 11 maps, 63.67 MiB including GPU mipmaps: 4K base colour, 2K
 normals, 1K material/effect masks and cloud colour, 512px emission colour,
 aurora, cloud normals and opacity, 256px atmosphere density, and a 256×128
 optical-depth LUT. Opacity/density use R8; other KTX2 maps use RGBA8. Colour
 maps are sRGB and data maps linear. KTX2 uses Zstd and complete mip chains;
-no Basis/UASTC transcoder or GPU compression extension is required.
+the lossless set needs no GPU compression extension. Browser game/viewer loads
+use a UASTC variant for the Gas Giant base colour, reducing that body's storage
+to 31.67 MiB on supported GPUs. The local Basis worker chooses from Bevy's
+enabled formats, with RGBA and original-file fallbacks. Native keeps the
+lossless set. See `assets/texture-codecs/README.md` for the loader and checks.
 
 | Map | Gas Giant | Ice Moon |
 |---|---|---|

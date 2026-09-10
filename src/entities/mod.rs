@@ -33,6 +33,7 @@ pub mod mesh_stats;
 pub mod model_markers;
 pub mod model_rig;
 pub mod planet;
+mod planet_texture;
 pub mod spawner;
 pub mod star;
 pub mod tags;

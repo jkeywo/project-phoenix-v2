@@ -146,3 +146,11 @@ pub struct GmAttentionChanged {
 pub struct GmHealthChanged {
     pub payload: crate::gm_health::GmHealthProjection,
 }
+
+/// Page-local Game Master Station-workload advisory (issue #1438). Host
+/// Channel data only, like every other GM projection: never a peer frame, a
+/// snapshot field or an authoritative digest fold.
+#[derive(bevy::prelude::Message)]
+pub struct GmWorkloadChanged {
+    pub payload: crate::gm_workload::GmWorkloadProjection,
+}

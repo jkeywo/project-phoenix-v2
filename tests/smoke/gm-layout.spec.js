@@ -40,8 +40,19 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     await page.setViewportSize({width,height});
     await page.locator('#gm-console').evaluate(el=>el.scrollTop=0);
     await expect(page.locator('#gm-workspace')).toBeVisible();
-    const geometry = await page.locator('#gm-workspace').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));
+    const geometry = await page.locator('#gm-workspace').evaluate(el=>({
+      width:el.clientWidth, scroll:el.scrollWidth,
+      height:el.clientHeight, scrollHeight:el.scrollHeight,
+    }));
     expect(geometry.scroll).toBeLessThanOrEqual(geometry.width);
+    // At ordinary text the whole desk fits ONE screen: every panel row is on
+    // it, and each section scrolls its own overflow. The desk's height must be
+    // DEFINITE for that — with `min-height` the grid's block size is
+    // indefinite, `1fr` resolves against max-content, and the desk silently
+    // becomes three viewports tall with only the roster/map/inspector row
+    // above the fold while the horizontal contract above still passes.
+    expect(geometry.height).toBeLessThanOrEqual(height);
+    expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.height + 1);
     const screenshot = testInfo.outputPath(`gm-screen-${width}.png`);
     await page.screenshot({path:screenshot});
     await testInfo.attach(`GM ${width}×${height}`, {path:screenshot,contentType:'image/png'});
@@ -158,6 +169,46 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   expect(await page.evaluate(() => document.activeElement?.dataset?.action)).toBe('snooze');
   // Routine attention stays in the queue: no dialog opened and no panel moved.
   expect(await page.locator('#gm-action-confirmation[open]').count()).toBe(0);
+  // The Station-workload advisory (issue #1438) meets the same contract in the
+  // same column: fed through the REAL host channel, its level reads as a word,
+  // its expander is reachable by keyboard at 200%, and its evidence appears
+  // without the desk scrolling sideways.
+  await page.evaluate(() => window.__hostChannel('gm_workload', JSON.stringify({
+    stations: [{
+      ship: { entity_id: 'smoke-hull', name: 'server.gm.roster.heading' },
+      station_id: 'comms',
+      station_name: 'server.gm.mission.heading',
+      level: 'overloaded',
+      count: 3,
+      sustained_secs: 31,
+      overload_count: 3,
+      overload_secs: 30,
+      demands: [
+        { key: 'comms:a', source: 'pending_comms',
+          reason: { id: 'server.gm.workload.reason.pending_comms', params: { sender: 'Cordon Control' } } },
+        { key: 'nav:smoke-hull#2', source: 'navigation_clearance',
+          reason: { id: 'server.gm.workload.reason.navigation_clearance', params: { x: '400', z: '-900' } } },
+        { key: 'repair:smoke-hull/weapons', source: 'repair_dispatch',
+          reason: { id: 'server.gm.workload.reason.repair_dispatch', params: { station: 'Tactical', tier: 'server.gm.workload.tier.damaged' } } },
+      ],
+    }],
+  })));
+  const workloadRow = page.locator('#gm-workload-list li[data-station-key="smoke-hull/comms"]');
+  await expect(workloadRow).toBeVisible();
+  await expect(workloadRow.locator('.gm-workload-state')).toHaveText(/\S/);
+  await expect(workloadRow.locator('.gm-workload-count')).toHaveText(/\S/);
+  await workloadRow.locator('summary').focus();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('SUMMARY');
+  await workloadRow.locator('summary').click();
+  await expect(workloadRow.locator('.gm-workload-demands li')).toHaveCount(3);
+  const withWorkload = await page.locator('#gm-workspace').evaluate(el => ({
+    scroll: el.scrollWidth,
+    width: el.clientWidth,
+    body: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(withWorkload.scroll).toBeLessThanOrEqual(withWorkload.width);
+  expect(withWorkload.body).toBeLessThanOrEqual(withWorkload.viewport);
   const doubled = testInfo.outputPath('gm-screen-1280-200pc.png');
   await page.screenshot({path:doubled});
   await testInfo.attach('GM 1280×720 at 200% text', {path:doubled,contentType:'image/png'});

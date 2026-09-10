@@ -13,6 +13,17 @@ seeds       = [1, 2, 3, 4, 5]
 sim_seconds = 120
 world       = "assets/worlds/duel.toml"
 
+# RECHECKED 2026-09-11 (issue #1438) against the behaviour change that lets an
+# AI-operated `repair` System sitting on a HUMAN seat receive a Channel-3
+# RepairRequest and dispatch teams (see docs/gm-station-workload-inventory.md,
+# "Behaviour change: AI repair now dispatches on a mixed seat"). All 20 runs won
+# and all 16 thresholds passed, with every figure IDENTICAL to the #1399 recheck
+# below: medians 4.78 / 13.82 / 8.58 / 15.70 seconds, mean damage margins
+# +163.00 / +283.80 / +310.20 / +47.24. That is the expected result and worth
+# stating rather than assuming: this matrix runs every Station Backfill, so the
+# Engineering seat routes `Ai` and the new human-routed arm never fires in it.
+# No threshold changed.
+#
 # RECHECKED 2026-09-07 (issue #1399), including #1390's tractor/umbilical
 # hull rows and #1391's field repair: all 20 runs won and all 16 thresholds
 # passed. Median TTKs remain 4.78 / 13.82 / 8.58 / 15.70 seconds; mean damage

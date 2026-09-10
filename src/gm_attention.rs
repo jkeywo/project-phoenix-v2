@@ -334,7 +334,7 @@ impl GmAttentionState {
 /// A message leaving the inbox entirely (a Comms officer's `ClearComms`, a
 /// world-layer unload) removes it from the walk below and so also removes the
 /// occurrence, without needing a fourth rule here.
-fn pending(message: &crate::core::messages::CommsMessage) -> bool {
+pub fn pending(message: &crate::core::messages::CommsMessage) -> bool {
     !message.is_orphaned && message.selected_response.is_none() && !message.responses.is_empty()
 }
 
@@ -614,6 +614,22 @@ pub struct GmAttentionSettings {
     /// other row — to say so.
     #[serde(default)]
     pub quiet_time_disabled: bool,
+    /// Distinct outstanding human demands at which a Station becomes a
+    /// candidate for Overloaded (issue #1438). Positive; validated at world
+    /// load. Zero is not "off" — see [`Self::workload_disabled`].
+    #[serde(default = "default_workload_overload_count")]
+    pub workload_overload_count: u32,
+    /// How long that count must hold, in SIMULATION seconds, before Overloaded
+    /// is the answer. Positive and finite; validated at world load. There is no
+    /// zero sentinel: a zero-second duration is a threshold with no duration at
+    /// all, which is a different rule wearing this one's name.
+    #[serde(default = "default_workload_overload_secs")]
+    pub workload_overload_secs: f32,
+    /// Silence the Station-workload advisory and nothing else. A scenario that
+    /// does not want workload advice must not have to give up the pending-Comms
+    /// queue or the technical banners to say so.
+    #[serde(default)]
+    pub workload_disabled: bool,
 }
 
 fn default_idle_npc_grace_secs() -> f32 {
@@ -624,6 +640,14 @@ fn default_quiet_time_secs() -> f32 {
     crate::gm_quiet::DEFAULT_QUIET_SECONDS
 }
 
+fn default_workload_overload_count() -> u32 {
+    crate::gm_workload::DEFAULT_OVERLOAD_COUNT
+}
+
+fn default_workload_overload_secs() -> f32 {
+    crate::gm_workload::DEFAULT_OVERLOAD_SECS
+}
+
 impl Default for GmAttentionSettings {
     fn default() -> Self {
         Self {
@@ -632,6 +656,9 @@ impl Default for GmAttentionSettings {
             quiet_time_disabled: false,
             idle_npc_band: None,
             idle_npc_disabled: false,
+            workload_overload_count: crate::gm_workload::DEFAULT_OVERLOAD_COUNT,
+            workload_overload_secs: crate::gm_workload::DEFAULT_OVERLOAD_SECS,
+            workload_disabled: false,
         }
     }
 }
@@ -672,7 +699,53 @@ impl GmAttentionSettings {
                 self.quiet_time_secs
             ));
         }
+        // The workload thresholds (issue #1438), refused on the same argument.
+        // A zero count would report a Station with nothing to do as a candidate
+        // for Overloaded; a zero, negative or `nan` duration would make the
+        // "continuously for" half of the rule vanish while still looking like a
+        // setting somebody chose.
+        if self.workload_overload_count == 0 {
+            return Err(
+                "[gm_attention] workload_overload_count = 0 must be a positive number of \
+                 outstanding human demands; use workload_disabled = true to silence the advisory"
+                    .to_string(),
+            );
+        }
+        if !(self.workload_overload_secs.is_finite() && self.workload_overload_secs > 0.0) {
+            return Err(format!(
+                "[gm_attention] workload_overload_secs = {} must be a positive, finite number of \
+                 simulation seconds; use workload_disabled = true to silence the advisory",
+                self.workload_overload_secs
+            ));
+        }
         Ok(())
+    }
+
+    /// The count threshold in force, floored at one so a value that somehow
+    /// reached the runtime without passing [`Self::validate`] still describes a
+    /// Station that has at least one thing to do.
+    pub fn workload_overload_count(&self) -> u32 {
+        self.workload_overload_count.max(1)
+    }
+
+    /// The authored overload duration as an exact whole number of simulation
+    /// ticks at `hz`.
+    ///
+    /// Rounded to nearest and floored at one, for
+    /// [`Self::idle_grace_ticks`]'s reason: a duration shorter than a tick is
+    /// one the fixed loop cannot express, and answering zero would make
+    /// "continuously for" mean "on the step it happened".
+    pub fn workload_overload_ticks(&self, hz: f32) -> u64 {
+        let hz = f64::from(hz);
+        let secs = f64::from(self.workload_overload_secs);
+        if !(hz.is_finite() && hz > 0.0 && secs.is_finite() && secs > 0.0) {
+            return u64::MAX;
+        }
+        let ticks = (hz * secs).round();
+        if !ticks.is_finite() || ticks >= u64::MAX as f64 {
+            return u64::MAX;
+        }
+        (ticks as u64).max(1)
     }
 
     /// The band an idle-NPC row lands in.

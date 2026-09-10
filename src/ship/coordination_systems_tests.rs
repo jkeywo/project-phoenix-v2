@@ -1025,12 +1025,35 @@ fn seat_human_on_shields(app: &mut App) {
     );
 }
 
+/// Threat-bearing deliveries a domain receiver may CONSUME — the `Ai` arm.
+///
+/// Counted by arm since issue #1438: a Popup route also emits a peer-identical
+/// `HumanRouted` delivery, so that a receiver keeping ship state about the
+/// request sees it on every peer. That delivery is the record, not something an
+/// AI-only receiver may act on, and a test asking "did this reach the AI" must
+/// not accidentally count it.
 fn delivered_threat_bearings(app: &App) -> usize {
     app.world()
         .resource::<DeliveredCoordinationBox>()
         .0
         .iter()
-        .filter(|message| matches!(&message.payload, CoordinationPayload::ThreatBearing { .. }))
+        .filter(|message| {
+            matches!(&message.payload, CoordinationPayload::ThreatBearing { .. })
+                && message.delivery == CoordinationDelivery::Ai
+        })
+        .count()
+}
+
+/// Threat-bearing deliveries carrying the peer-identical Popup RECORD.
+fn human_routed_threat_bearings(app: &App) -> usize {
+    app.world()
+        .resource::<DeliveredCoordinationBox>()
+        .0
+        .iter()
+        .filter(|message| {
+            matches!(&message.payload, CoordinationPayload::ThreatBearing { .. })
+                && message.delivery == CoordinationDelivery::HumanRouted
+        })
         .count()
 }
 
@@ -1101,7 +1124,16 @@ fn human_shields_threat_bearing_still_gets_a_popup_not_an_ai_delivery() {
     tick(&mut app);
 
     assert_eq!(coordination_popups(&app), popups_before + 1);
-    assert_eq!(delivered_threat_bearings(&app), 0);
+    assert_eq!(
+        delivered_threat_bearings(&app),
+        0,
+        "a human recipient gets no AI delivery for a receiver to consume"
+    );
+    assert_eq!(
+        human_routed_threat_bearings(&app),
+        1,
+        "it crosses the seam once as the peer-identical Popup record (issue #1438)"
+    );
     assert_eq!(
         app.world()
             .get::<crate::ship::shields::PendingShieldsThreatBearing>(ship)

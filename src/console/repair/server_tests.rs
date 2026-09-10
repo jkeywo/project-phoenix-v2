@@ -1205,10 +1205,12 @@ fn publish_repair_blackboard_contains_damageable_systems() {
 /// what would strand them: nothing else in the game clears a Destroyed
 /// latch.
 ///
-/// The predicate below is a copy of `operate_repair_ai`'s `rq.entries.retain`
-/// body. Change one and change the other — see
-/// `prune_retains_an_all_destroyed_station_through_the_ai_loop` for the test
-/// that runs the production copy.
+/// This drives the PRODUCTION predicate, `request_still_open` — the same one
+/// `prune_repair_request_queue` retains by (issue #1438 extracted it from
+/// `operate_repair_ai`'s inline `retain`, so this test no longer has to keep a
+/// copy of it in step). See
+/// `prune_retains_an_all_destroyed_station_through_the_ai_loop` for the same
+/// property driven through the whole system.
 #[test]
 fn queue_entry_retained_when_all_systems_destroyed() {
     use crate::ship::config::{ShipConfig, SystemInstanceConfig};
@@ -1252,15 +1254,9 @@ fn queue_entry_retained_when_all_systems_destroyed() {
         "system must be Destroyed after set_hp(0)"
     );
 
-    rq.entries.retain(|entry| {
-        config
-            .systems
-            .iter()
-            .filter(|s| {
-                s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
-            })
-            .any(|s| hull.tier_for(&s.id) != crate::ship::damage::DamageTier::Operational)
-    });
+    let mut entity_hull = crate::entities::spawner::EntitySystemHull(hull.clone());
+    rq.entries
+        .retain(|entry| request_still_open(entry, &entity_hull, &config));
 
     assert_eq!(
         rq.entries.len(),
@@ -1270,16 +1266,9 @@ fn queue_entry_retained_when_all_systems_destroyed() {
     );
 
     // …and it IS dropped once the station is genuinely fixed.
-    hull.set_hp(&system_id, 25.0);
-    rq.entries.retain(|entry| {
-        config
-            .systems
-            .iter()
-            .filter(|s| {
-                s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
-            })
-            .any(|s| hull.tier_for(&s.id) != crate::ship::damage::DamageTier::Operational)
-    });
+    entity_hull.0.set_hp(&system_id, 25.0);
+    rq.entries
+        .retain(|entry| request_still_open(entry, &entity_hull, &config));
     assert!(
         rq.entries.is_empty(),
         "a fully repaired station's entry must still be evicted"
@@ -1362,6 +1351,12 @@ fn npc_repair_app() -> App {
         Update,
         (
             clear_admitted_commands,
+            // Seat-independent and immediately before the AI loop, exactly as
+            // `RepairPlugin` orders them (issue #1438). The prune moved OUT of
+            // `operate_repair_ai` so a request ends when its damage does
+            // whoever is at the seat; a fixture that ran the AI without it
+            // would be weaker than production.
+            prune_repair_request_queue,
             operate_repair_ai,
             crate::console::repair::dispatch::handle_dispatch_repair_team,
             tick_repair_teams,

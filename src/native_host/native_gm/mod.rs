@@ -70,6 +70,7 @@ impl Plugin for NativeGmPlugin {
                 crate::gm_activity::GmActivityPlugin,
                 crate::gm_attention::GmAttentionPlugin,
                 crate::gm_health::GmHealthPlugin,
+                crate::gm_workload::GmWorkloadPlugin,
             ))
             .add_systems(
                 PreUpdate,
@@ -93,6 +94,7 @@ impl Plugin for NativeGmPlugin {
                     .after(crate::gm_comms::publish_comms_projection)
                     .after(crate::gm_attention::publish_attention_projection)
                     .after(crate::gm_health::publish_health_projection)
+                    .after(crate::gm_workload::publish_workload_projection)
                     .run_if(resource_exists::<NativeGmSurface>),
             );
     }
@@ -322,6 +324,7 @@ fn feed_projections(
     mut comms: MessageReader<GmCommsChanged>,
     mut attention: MessageReader<GmAttentionChanged>,
     mut health: MessageReader<GmHealthChanged>,
+    mut workload: MessageReader<GmWorkloadChanged>,
 ) {
     macro_rules! feed {
         ($reader:ident, $channel:literal, $encode:ident) => {
@@ -341,6 +344,7 @@ fn feed_projections(
     feed!(comms, "gm_comms", encode_gm_comms_projection);
     feed!(attention, "gm_attention", encode_gm_attention_projection);
     feed!(health, "gm_health", encode_gm_health_projection);
+    feed!(workload, "gm_workload", encode_gm_workload_projection);
 }
 
 #[cfg(test)]

@@ -35,7 +35,7 @@
  * reason to think a third would not appear.
  *
  * `gm_entity`, `gm_activity`, `gm_mission`, `gm_spawn`, `gm_comms`,
- * `gm_attention` and `gm_health` are deliberate
+ * `gm_attention`, `gm_health` and `gm_workload` are deliberate
  * exceptions. They are strict domain DTOs whose String Table display ids must
  * remain raw through parsing and state; only the map, inspector, mission panel
  * and spawn panel resolve their known display fields at presentation.
@@ -53,7 +53,9 @@
  * (issue #1437) carries exactly the same shape, plus StationIds and public
  * operator ids that a substitution would rewrite into display text — and its
  * banner region is the one surface a Game Master must never be shown a mangled
- * sentence in.
+ * sentence in. `gm_workload` is the same shape — String Table reason ids
+ * beside authored parameters, plus ship and Station identities — for the same
+ * reason.
  *
  * For every other channel, use the same rule as localiseTree: substitute only
  * what the table actually holds.
@@ -116,6 +118,7 @@ export function createHostChannel({ handlers, strings }) {
       handler(
         name === 'gm_entity' || name === 'gm_activity' || name === 'gm_mission' || name === 'gm_spawn'
           || name === 'gm_comms' || name === 'gm_attention' || name === 'gm_health'
+          || name === 'gm_workload'
           ? payload : localiseHostPayload(payload, strings),
       );
     } else {

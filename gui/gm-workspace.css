@@ -35,15 +35,32 @@
 #gm-console.gm-desk #gm-session-heading, #gm-console.gm-desk #gm-session-log-heading,
 #gm-console.gm-desk #gm-session-log { display: none; }
 #gm-console.gm-desk #gm-session-actions { gap: var(--space-2); }
-/* The map and the inspector span the flexible rows so the left column can
-   carry the roster, the M4 attention queue (issue #1433) and the technical
-   health panel (issue #1437) without stealing height from anything else. Every
-   panel scrolls its own overflow, which is what keeps the desk honest at
-   --a11y-text-scale: 2 instead of shrinking the operator's chosen text. */
+/* Five rows of grid, four rows of panel: the map and the inspector span the
+   first four so the left column can carry the roster, the M4 attention queue
+   (issue #1433), the technical health panel (issue #1437) AND the
+   Station-workload advisory (issue #1438) without stealing height from
+   anything else. Every one of them scrolls in place, which is what keeps the
+   desk usable at --a11y-text-scale: 2 (PRD #1418). */
 #gm-console.gm-desk #gm-workspace {
   display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px;
-  grid-template-rows: repeat(3, minmax(0, 1fr)) 236px; gap: var(--space-5); padding: var(--space-5);
-  height: calc(100vh - 88px); min-height: 640px; flex: 0 0 auto;
+  /* Every row keeps a FLOOR that scales with the operator’s text size (PRD
+     #1418, issue #1438): four 1fr rows of a fixed-height desk leave the left
+     column about one line each at --a11y-text-scale: 2 — a heading and a
+     clipped row, which is not a panel.
+     The height stays DEFINITE. `min-height` here would make the grid's block
+     size indefinite, at which point `1fr` resolves against max-content instead
+     of the viewport: every row grows to its whole content, the sections stop
+     scrolling inside their own `overflow: auto`, and at ordinary text size the
+     desk becomes four viewports tall with only the first row on screen.
+     With a definite height 1fr is larger than the floor at ordinary text, so
+     the desk is exactly as it was; at 200% the floors overflow the desk and
+     #gm-console scrolls VERTICALLY (server.html: overflow-y: auto). The desk
+     still never scrolls sideways, which is the contract the smoke spec asserts
+     — alongside the vertical fit at both default-text viewports, which is what
+     pins the definite height. */
+  grid-template-rows: repeat(4, minmax(7.5em, 1fr)) minmax(236px, auto);
+  gap: var(--space-5); padding: var(--space-5);
+  height: max(580px, calc(100vh - 88px)); flex: 0 0 auto;
 }
 #gm-console.gm-desk #gm-workspace > section {
   min-width: 0; min-height: 0; max-width: none; padding: var(--space-5);
@@ -53,11 +70,12 @@
 #gm-console.gm-desk #gm-roster { grid-area: 1 / 1; }
 #gm-console.gm-desk #gm-attention-panel { grid-area: 2 / 1; }
 #gm-console.gm-desk #gm-health-panel { grid-area: 3 / 1; }
-#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 4 / 3; overflow: hidden; }
-#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3 / 4 / 4; }
-#gm-console.gm-desk #gm-mission-panel { grid-area: 4 / 1; }
-#gm-console.gm-desk #gm-comms-panel { grid-area: 4 / 2; }
-#gm-console.gm-desk #gm-activity { grid-area: 4 / 3; }
+#gm-console.gm-desk #gm-workload-panel { grid-area: 4 / 1; }
+#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 5 / 3; overflow: hidden; }
+#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3 / 5 / 4; }
+#gm-console.gm-desk #gm-mission-panel { grid-area: 5 / 1; }
+#gm-console.gm-desk #gm-comms-panel { grid-area: 5 / 2; }
+#gm-console.gm-desk #gm-activity { grid-area: 5 / 3; }
 #gm-console.gm-desk #gm-entity-map { flex: 1; min-height: 0; height: auto; width: 100%; background: var(--surface-abyss); }
 #gm-console.gm-desk #gm-map-legend { font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-selection-chip { color: var(--gold); font-family: var(--font-mono); }
@@ -423,3 +441,33 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-health-banner-state { letter-spacing: var(--tracking-wide); color: var(--gold); }
 #gm-console.gm-desk .gm-health-banner-message { flex: 1 1 12ch; min-width: 0; }
 #gm-console.gm-desk .gm-health-banner[data-state="disconnected"] { border-width: 2px; }
+
+/* ── Station workload (issue #1438) ────────────────────────────────────
+   Every rung is a token multiple, so the panel keeps working at
+   --a11y-text-scale: 2 (PRD #1418): a Station row wraps onto as many lines as
+   its text needs and the panel scrolls, rather than the text shrinking or the
+   count being clipped off the end. The level reads as a WORD in its own
+   element, so forced colours cannot erase the one thing the row is for. */
+#gm-console.gm-desk #gm-workload-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); min-width: 0; }
+#gm-console.gm-desk #gm-workload-list > li {
+  border: 1px solid var(--edge); background: var(--surface-panel-up);
+  padding: var(--space-3); min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-workload-list > li[data-level="overloaded"] { border-left-width: var(--space-2); }
+/* An advisory nobody is sitting behind reads quieter, but it still reads: the
+   dimming is on top of the word, never instead of it. */
+#gm-console.gm-desk #gm-workload-list > li[data-level="backfill"] .gm-workload-state,
+#gm-console.gm-desk #gm-workload-list > li[data-level="offline"] .gm-workload-state { color: var(--ink-dim); }
+#gm-console.gm-desk #gm-workload-list summary {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3);
+  align-items: baseline; min-height: var(--control-hit-min); min-width: 0; cursor: pointer;
+}
+#gm-console.gm-desk #gm-workload-list summary:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk .gm-workload-name { flex: 1 1 12ch; min-width: 0; }
+#gm-console.gm-desk .gm-workload-state { letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-workload-count { font-family: var(--font-mono); }
+#gm-console.gm-desk .gm-workload-body { display: grid; gap: var(--space-2); padding-top: var(--space-2); min-width: 0; }
+#gm-console.gm-desk .gm-workload-demands { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+#gm-console.gm-desk .gm-workload-demands li { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk .gm-workload-note, #gm-console.gm-desk .gm-workload-building { margin: 0; color: var(--ink-dim); }
+#gm-console.gm-desk #gm-workload-status:focus { outline: 3px solid var(--gold); outline-offset: 2px; }

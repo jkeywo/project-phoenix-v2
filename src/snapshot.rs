@@ -679,7 +679,31 @@ pub const SNAPSHOT_FORMAT: u32 = 35;
 /// unchanged, but those older authoritative folds cannot continue as this run.
 /// `"0.6"` — #1449 applies impulse speed modifiers and hull-damage cancellation
 /// on every simulation host and preserves the pending damage continuation.
-pub const SIMULATION_RULES: &str = "0.6";
+///
+/// `"0.7"` — issue #1438. Two rule changes, neither of which moves the
+/// payload's shape. A `RepairRequest` routed to a HUMAN Repair seat now writes
+/// the ship's [`crate::console::repair::RepairRequestQueue`] on every peer
+/// (`receive_repair_coordination`'s new `HumanRouted` arm), where before only
+/// the `Ai` arm wrote it; and the stale-entry prune moved out of the
+/// cadence-gated `operate_repair_ai` into the seat-independent
+/// `prune_repair_request_queue`, which runs every fixed step regardless of who
+/// holds the seat. The queue is folded into no digest, so nothing about the
+/// content changed — which, exactly as in `"0.3"`, is why the RULES dimension
+/// is the one that can say what happened. `operate_repair_ai` is gated on the
+/// fine `repair` System rather than the seat, so on a stock
+/// `alliance_cruiser` whose Engineering Station carries the `Simplified`
+/// rating (`automated_systems = ["repair"]`) that write now dispatches repair
+/// teams and heals hull HP — authoritative state — where the pre-#1438 build
+/// did nothing at all. A pre-#1438 save of such a run restores intact with an
+/// empty queue and then diverges at its next damage-tier crossing, and the
+/// prune's new cadence moves when entries die on AI hulls besides. That is
+/// "restores cleanly and then continues as a different run", which is the
+/// failure this dimension exists to refuse. The same write also makes the
+/// human Repair console's own `queue_depth` readout non-empty on every
+/// human-crewed hull, where it was always zero before; that is presentation
+/// rather than rules, but it is the same write and is named here so the two
+/// are not mistaken for separate changes.
+pub const SIMULATION_RULES: &str = "0.7";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -2587,6 +2611,23 @@ pub struct PhoenixSnapshot {
     /// empty one, which is the truth about what it was watching.
     #[serde(default)]
     pub gm_idle_npcs: crate::gm_attention::GmIdleNpcWatch,
+    /// How long each Station has been carrying at or above its overload count
+    /// (issue #1438), in fixed simulation steps.
+    ///
+    /// In for `gm_idle_npcs`' reason and no other: sustained overload is
+    /// ELAPSED HISTORY, and a restored world cannot be asked how long a seat
+    /// has been underwater. A save taken twenty-nine seconds into a Station's
+    /// overload would otherwise resume forgiving it, and the advisory would
+    /// become a function of when somebody saved rather than of what the crew
+    /// were being asked to do.
+    ///
+    /// Did not bump [`SNAPSHOT_FORMAT`]: the field is `#[serde(default)]`
+    /// presentation-class advisory state, so an older save restores an empty
+    /// stopwatch — a Station that has to earn its Overloaded label again over
+    /// the authored duration, which is a conservative and visible answer rather
+    /// than a silently wrong one.
+    #[serde(default)]
+    pub gm_station_workload: crate::gm_workload::GmWorkloadWatch,
     /// Exact Objective lifecycle/authored state, excluding presentation transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub objective_records: Vec<crate::objectives::ObjectiveRecord>,
@@ -2777,6 +2818,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .unwrap_or_default(),
         gm_idle_npcs: world
             .get_resource::<crate::gm_attention::GmIdleNpcWatch>()
+            .cloned()
+            .unwrap_or_default(),
+        gm_station_workload: world
+            .get_resource::<crate::gm_workload::GmWorkloadWatch>()
             .cloned()
             .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
@@ -5616,6 +5661,8 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     if world.contains_resource::<crate::gm_attention::GmIdleNpcWatch>() {
         world.insert_resource(snapshot.gm_idle_npcs.clone());
     }
+    // The sustained-overload stopwatch (issue #1438), on the same terms.
+    crate::gm_workload::restore_watch(world, &snapshot.gm_station_workload);
     if !snapshot.objective_records.is_empty()
         || world.contains_resource::<crate::world::server::ObjectiveManagerRes>()
     {

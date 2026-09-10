@@ -1687,6 +1687,15 @@ pub fn encode_gm_health_projection(
     serde_json::to_string(payload)
 }
 
+/// Absolute local GM Station-workload summary (issue #1438). Levels cross as
+/// their stable snake_case ids and reasons as String Table ids plus their
+/// parameters; the page resolves both at its own presentation boundary.
+pub fn encode_gm_workload_projection(
+    payload: &crate::gm_workload::GmWorkloadProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn decode_native_gm_record(
     json: &str,

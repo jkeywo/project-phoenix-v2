@@ -491,7 +491,14 @@ pub fn resolve_human_seeking_hosts(
     }
 }
 
-fn station_delivery_policy(
+/// Reduce one addressed Station to the control policy and [`ControlSource`] the
+/// Channel-3 router delivers against.
+///
+/// `pub(crate)` since issue #1438 so the GM Station-workload advisory can ask
+/// the SAME question the router asks rather than re-deriving "is a person
+/// reading this seat" from the fine Systems and eventually disagreeing with it
+/// about the Helm (whose answer is the AXES, not one representative System).
+pub(crate) fn station_delivery_policy(
     config: &crate::ship::config::ShipConfig,
     control_sources: &ShipSystemControlSources,
     station: &StationId,
@@ -671,6 +678,20 @@ pub(crate) fn process_coordination_lag(
                 }
                 coordination::DeliverAction::Suppress => {}
                 coordination::DeliverAction::Popup => {
+                    // The peer-identical half of a Popup, first (issue #1438).
+                    // Every peer learns that this message routed to a PERSON,
+                    // with the ship-internal payload, so a receiver that keeps
+                    // ship state about the request — Repair's queue is the one
+                    // that does — keeps the same state on every host of the
+                    // fleet. The popup below is the presenting peer's alone,
+                    // which is exactly why the record cannot ride on it.
+                    delivered_writer.write(DeliveredCoordination {
+                        source_entity: ship_entity,
+                        address: msg.address.clone(),
+                        payload: msg.payload.clone(),
+                        presentation: msg.presentation.clone(),
+                        delivery: CoordinationDelivery::HumanRouted,
+                    });
                     if !is_local {
                         continue;
                     }

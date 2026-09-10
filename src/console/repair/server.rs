@@ -198,6 +198,13 @@ impl Plugin for RepairPlugin {
                     .after(super::dispatch::handle_recall_repair_team)
                     .after(super::dispatch::handle_set_repair_priority)
                     .after(super::dispatch::handle_set_repair_target_priority),
+                // Seat-independent, every fixed step, immediately before the AI
+                // loop that used to own it (issue #1438). See the system's own
+                // doc for why a request's terminal cannot live behind a
+                // control-source gate.
+                prune_repair_request_queue
+                    .in_set(crate::sim_sets::FixedStep::PruneRepairRequestQueue)
+                    .in_set(crate::sim_sets::SimSet::Physics),
                 operate_repair_ai
                     .in_set(crate::sim_sets::FixedStep::OperateRepairAi)
                     .in_set(crate::sim_sets::SimSet::Physics)
@@ -261,7 +268,25 @@ pub(crate) fn receive_repair_coordination(
         };
 
         match &message.delivery {
-            CoordinationDelivery::Ai => {
+            // The queue is the single source of truth for OUTSTANDING repair
+            // requests, on BOTH delivery arms (issue #1438). Before #1438 only
+            // the AI arm wrote it, so a request delivered to a human Repair seat
+            // lived solely as a popup — a thing that has been shown, not a thing
+            // that is still owed — and nothing could answer "is this crew still
+            // being asked to send a team". Now the entry is the record and the
+            // popup is the notification of it, which is also what lets a human
+            // seat's request END the way the AI arm's does:
+            // `prune_repair_request_queue` drops it when the damage it names is
+            // gone, whatever operates the seat.
+            //
+            // `HumanRouted` rather than `HumanPopup` is what carries it,
+            // deliberately. The popup is raised on the presenting peer alone —
+            // `LocalShip` plus a seated session — while the routing DECISION is
+            // peer-identical, so hanging the ship's queue off the popup would
+            // leave two hosts of one fleet holding different queues from
+            // identical input. The AI's own consumption is unchanged: it
+            // dispatches from exactly the entry it always did.
+            CoordinationDelivery::Ai | CoordinationDelivery::HumanRouted => {
                 if let Some(queue) = queue.as_deref_mut() {
                     queue.push_or_merge(RepairQueueEntry {
                         station_id: station_id.clone(),
@@ -879,6 +904,105 @@ fn station_damage_readings(
     (fraction, worst, count)
 }
 
+/// Is this queued request still asking for anything?
+///
+/// Retain a request while ANY system in its GROUP still needs a team — the
+/// systems the config gives to that station, or, for the `core` bucket, every
+/// ownerless hull row (see the branch below; the two are one rule wearing two
+/// lookups, because a station is named by the config and the ownerless bucket
+/// can only be named by the hull).
+///
+/// The tier predicate was `!= Operational && != Destroyed` until issue #1013: a
+/// station whose systems had all been shot to 0 HP had its request evicted,
+/// because a repair team could not lift the Destroyed latch and sending one
+/// would have been a pointless trip. The on-site sweep now repairs destroyed
+/// systems, so evicting them is what would strand them — nothing else in the
+/// game clears a Destroyed latch. `!= Operational` is now the whole test, and it
+/// is the same predicate `repair_teams::next_sweep_target` ranks candidates by,
+/// so what the dispatcher keeps sending teams for and what an arrived team works
+/// on are one rule.
+fn request_still_open(
+    entry: &RepairQueueEntry,
+    hull: &crate::entities::spawner::EntitySystemHull,
+    config: &crate::ship::config::ShipConfig,
+) -> bool {
+    // The `core` bucket owns NO station in `ShipConfig` — validation actively
+    // forbids a station with that id, and `damage_sync` files EVERY ownerless
+    // system under it — so the station-owned scan below would find zero systems
+    // and prune every core request. Prune it against the hull instead, over the
+    // whole ownerless GROUP.
+    //
+    // The group, not just the `core` row: `damage_sync` addresses a request for
+    // any system the config gives no station to under this one id, and a hull may
+    // carry several such rows (the shipped `alliance_cruiser` carries `core` and
+    // `science`). Testing only the literal `core` row evicted the request
+    // whenever `core` itself was Operational, so a destroyed sibling was never
+    // dispatched for and stayed destroyed forever — nothing else in the game
+    // clears the latch. This is deliberately the same set
+    // `repair_teams::sweep_group` calls ownerless and the same `!= Operational`
+    // test `next_sweep_target` ranks by, so what the dispatcher keeps sending
+    // teams for and what an arrived team works on are one rule.
+    if entry.station_id == REPAIR_CORE_BUCKET_KEY {
+        return hull.0.iter().any(|(sid, _)| {
+            config
+                .system(sid)
+                .and_then(|s| s.station.as_ref())
+                .is_none()
+                && hull.0.tier_for(sid) != DamageTier::Operational
+        });
+    }
+    config
+        .systems
+        .iter()
+        .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str()))
+        .any(|s| hull.0.tier_for(&s.id) != DamageTier::Operational)
+}
+
+/// End a repair request when the damage it names is gone — whatever operates
+/// the Repair seat (issue #1438).
+///
+/// This prune used to sit inside [`operate_repair_ai`], AFTER that system's
+/// `ai_operates` gate, so an entry only ever ended on a hull whose Repair seat
+/// was AI-operated. That was invisible while only the AI arm of
+/// [`receive_repair_coordination`] wrote the queue; it stopped being invisible
+/// the moment the HUMAN arm started writing it too, because a human seat's
+/// request would then have had no terminal at all — and a hull whose Backfill
+/// seat flipped to Human mid-repair would have carried its old entries for the
+/// rest of the mission.
+///
+/// Deliberately seat-independent and every fixed step: pruning is a statement
+/// about DAMAGE, not about who is reading the queue. It is ordered immediately
+/// before `operate_repair_ai` in the same Physics phase, so the AI still decides
+/// against an already-pruned queue exactly as it did before.
+///
+/// The read-only pass first is not an optimisation but a change-detection
+/// contract: touching `Mut<RepairRequestQueue>` marks the component changed, and
+/// the repair broadcaster repaints on change. A queue with nothing to prune must
+/// not repaint sixty times a second.
+pub(crate) fn prune_repair_request_queue(
+    mut ships: Query<
+        (
+            &mut RepairRequestQueue,
+            &crate::entities::spawner::EntitySystemHull,
+            &crate::ship_plugin::ShipConfigComponent,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (mut queue, hull, config) in ships.iter_mut() {
+        if queue
+            .entries
+            .iter()
+            .all(|entry| request_still_open(entry, hull, &config.0))
+        {
+            continue;
+        }
+        queue
+            .entries
+            .retain(|entry| request_still_open(entry, hull, &config.0));
+    }
+}
+
 /// Per-kind AI loop for repair. Iterates every ship (`With<Ship>`) whose
 /// Repair system is `ControlSource::Ai` and dispatches its idle teams to the
 /// stations the AUTHORED [`RepairTargetSelector`] ranks highest. Ships with no
@@ -981,7 +1105,11 @@ pub fn operate_repair_ai(
             &ShipSystemControlSources,
             Option<&ShipRepairTeams>,
             Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&mut RepairRequestQueue>,
+            // Read-only since issue #1438: the queue's only writers are the
+            // Channel-3 receiver (which enqueues) and
+            // `prune_repair_request_queue` (which ends entries). The AI reads it
+            // and dispatches; it no longer prunes behind its own control gate.
+            Option<&RepairRequestQueue>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&RepairTargetSelector>,
             Option<&crate::ship::state::ShipRedAlert>,
@@ -1020,65 +1148,21 @@ pub fn operate_repair_ai(
         // (the entity spawner inserts both unconditionally). Ships lacking
         // either simply have nothing to auto-dispatch — the old queue-less
         // hull-poll fallback (a direct-write §2 violation) is removed (#830).
-        let (Some(teams), Some(hull), Some(mut rq), Some(config)) =
+        let (Some(teams), Some(hull), Some(rq), Some(config)) =
             (teams_comp, hull_comp, repair_queue_comp, config_comp)
         else {
             continue;
         };
 
-        // Retain a request while ANY system in its GROUP still needs a team —
-        // the systems the config gives to that station, or, for the `core`
-        // bucket, every ownerless hull row (see the branch below; the two are
-        // one rule wearing two lookups, because a station is named by the config
-        // and the ownerless bucket can only be named by the hull).
-        //
-        // The tier predicate was `!= Operational && != Destroyed` until issue
-        // #1013: a station whose systems had all been shot to 0 HP had its
-        // request evicted, because a repair team could not lift the Destroyed
-        // latch and sending one would have been a pointless trip. The on-site
-        // sweep now repairs destroyed systems, so evicting them is what would
-        // strand them — nothing else in the game clears a Destroyed latch.
-        // `!= Operational` is now the whole test, and it is the same predicate
-        // `repair_teams::next_sweep_target` ranks candidates by, so what the
-        // dispatcher keeps sending teams for and what an arrived team works on
-        // are one rule.
-        rq.entries.retain(|entry| {
-            // The `core` bucket owns NO station in `ShipConfig` — validation
-            // actively forbids a station with that id, and `damage_sync` files
-            // EVERY ownerless system under it — so the station-owned scan below
-            // would find zero systems and prune every core request. Prune it
-            // against the hull instead, over the whole ownerless GROUP.
-            //
-            // The group, not just the `core` row: `damage_sync` addresses a
-            // request for any system the config gives no station to under this
-            // one id, and a hull may carry several such rows (the shipped
-            // `alliance_cruiser` carries `core` and `science`). Testing only the
-            // literal `core` row evicted the request whenever `core` itself was
-            // Operational, so a destroyed sibling was never dispatched for and
-            // stayed destroyed forever — nothing else in the game clears the
-            // latch. This is deliberately the same set `repair_teams::
-            // sweep_group` calls ownerless and the same `!= Operational` test
-            // `next_sweep_target` ranks by, so what the dispatcher keeps sending
-            // teams for and what an arrived team works on are one rule.
-            if entry.station_id == REPAIR_CORE_BUCKET_KEY {
-                return hull.0.iter().any(|(sid, _)| {
-                    config
-                        .0
-                        .system(sid)
-                        .and_then(|s| s.station.as_ref())
-                        .is_none()
-                        && hull.0.tier_for(sid) != DamageTier::Operational
-                });
-            }
-            config
-                .0
-                .systems
-                .iter()
-                .filter(|s| {
-                    s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
-                })
-                .any(|s| hull.0.tier_for(&s.id) != DamageTier::Operational)
-        });
+        // The stale-entry prune used to live HERE, inside the control-source
+        // gate above, which meant a request only ever ended on a hull whose
+        // Repair seat was AI-operated (issue #1438). It now runs seat-
+        // independently in `prune_repair_request_queue`, ordered immediately
+        // before this system in the same Physics phase, so the AI still decides
+        // against an already-pruned queue exactly as it did — and a request
+        // delivered to a HUMAN seat, or one whose seat flipped from Backfill to
+        // Human mid-repair, ends when its damage does instead of standing for
+        // ever.
 
         // Free team indices, ASCENDING — the deterministic visit order (AC4).
         // Emission does not mutate `teams` this tick (the applier does, later in

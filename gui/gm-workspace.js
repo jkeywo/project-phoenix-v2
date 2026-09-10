@@ -22,6 +22,7 @@ import { createGmAttentionPanel } from './gm-attention-panel.js';
 import { createGmAttentionFilters } from './gm-attention-filters.js';
 import { createGmHealthBanner } from './gm-health-banner.js';
 import { createGmHealthPanel } from './gm-health-panel.js';
+import { createGmWorkloadPanel } from './gm-workload-panel.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
 import { createGmJournalPanel } from './gm-journal-panel.js';
 import { createGmFactionPanel } from './gm-faction-panel.js';
@@ -287,6 +288,10 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   win.__hostGmRestoreState = gmRestoreControl.state;
   gmHealthPanelRef = gmHealthPanel;
   win.__hostGmHealthState = gmHealthPanel.state;
+  // The M4 Station-workload advisory (issue #1438). Read-only by construction:
+  // it takes no callbacks because there is nothing on it to act with.
+  const gmWorkloadPanel = createGmWorkloadPanel({ doc: doc, t, has });
+  win.__hostGmWorkloadState = gmWorkloadPanel.state;
   const gmSpawnPanel = createGmSpawnPanel({
     doc: doc,
     win: win,
@@ -430,11 +435,12 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
     gm_attention: function(p) { gmAttentionPanel.update(p); },
     gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); },
+    gm_workload:  function(p) { gmWorkloadPanel.update(p); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
     handlers,
-    dispose() { gmAttentionPanel.dispose(); shell.dispose(); },
+    dispose() { gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       shell.refresh();
       gmSessionControls.refreshAdmission();
@@ -451,6 +457,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     reset() {
       gmAttentionPanel.reset();
       gmHealthPanel.reset();
+      gmWorkloadPanel.reset();
       gmSessionControls.reset();
       gmFactionPanel.reset();
       gmJournalPanel.reset();

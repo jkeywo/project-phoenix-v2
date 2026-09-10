@@ -16,19 +16,19 @@ function mount() {
   const shell = mountGmWorkspaceShell({doc:document,win,t:id=>id,has:()=>false,selectEntity});
   return {shell,selectEntity};
 }
-it('keeps shared control identities in the eight desk regions and the authentic iframe outside them', () => {
+it('keeps shared control identities in the nine desk regions and the authentic iframe outside them', () => {
   mount();
   expect(document.querySelector('#gm-roster #gm-force-start-btn')).not.toBeNull();
   expect(document.getElementById('gm-roster-heading').nextElementSibling.id).toBe('gm-start-controls');
   expect(document.querySelector('#gm-inspector #gm-station-toggle')).not.toBeNull();
   expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
-  // Eight: #1433 added the attention queue and #1437 the technical health
-  // panel, each a first-class desk region rather than a strip inside another
-  // panel.
+  // Nine: #1433 added the attention queue, #1437 the technical health panel
+  // and #1438 the Station-workload advisory, each a first-class desk region
+  // rather than a strip inside another panel.
   expect([...document.querySelectorAll('#gm-workspace > section')].map(section => section.id))
     .toEqual(['gm-roster', 'gm-map-panel', 'gm-inspector', 'gm-attention-panel',
-      'gm-health-panel', 'gm-mission-panel', 'gm-comms-panel', 'gm-activity']);
+      'gm-health-panel', 'gm-workload-panel', 'gm-mission-panel', 'gm-comms-panel', 'gm-activity']);
   // The #1437 technical-banner seam lives inside the QUEUE, not inside the
   // health panel: it has to sit beside the list a Game Master reads and filters,
   // which is the surface it exists to be un-hideable from.

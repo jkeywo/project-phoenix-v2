@@ -57,7 +57,7 @@ use {
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
         GmAttentionChanged, GmCommsChanged, GmEntityProjectionChanged, GmHealthChanged,
         GmMissionChanged, GmSessionChanged, GmSpawnChanged, GmStationProjectionChanged,
-        HudStateChanged, LobbyStateChanged,
+        GmWorkloadChanged, HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec},
     crate::core::messages::{self, DeliveryClass},
@@ -66,6 +66,7 @@ use {
     crate::gm_attention::GmAttentionPlugin,
     crate::gm_health::GmHealthPlugin,
     crate::gm_projection::{BrowserGameMaster, GmProjectionPlugin},
+    crate::gm_workload::GmWorkloadPlugin,
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
         FleetLobbyInput, FleetManagedLobby, InboundMessage, LobbyPlugin, OutboundMessage,
@@ -540,10 +541,13 @@ pub mod host_channels {
     /// Public technical peer/Station/tick health (issue #1437) — the readable
     /// panel and the unfilterable connection/recovery banners.
     pub const GM_HEALTH: &str = "gm_health";
+    /// The Game Master Station-workload advisory (issue #1438) — how many
+    /// distinct outstanding human demands each Station is carrying.
+    pub const GM_WORKLOAD: &str = "gm_workload";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 16] = [
+    pub const ALL: [&str; 17] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -560,6 +564,7 @@ pub mod host_channels {
         GM_COMMS,
         GM_ATTENTION,
         GM_HEALTH,
+        GM_WORKLOAD,
     ];
 }
 
@@ -848,6 +853,7 @@ pub fn wasm_init() {
         GmActivityPlugin,
         GmAttentionPlugin,
         GmHealthPlugin,
+        GmWorkloadPlugin,
     ));
 
     app.insert_resource(log_config)
@@ -1008,6 +1014,7 @@ pub fn wasm_init() {
                 .after(crate::gm_comms::publish_comms_projection)
                 .after(crate::gm_attention::publish_attention_projection)
                 .after(crate::gm_health::publish_health_projection)
+                .after(crate::gm_workload::publish_workload_projection)
                 .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
             publish_live_seating,
@@ -4480,10 +4487,11 @@ fn flush_host_channels(
     mut gm_comms: MessageReader<GmCommsChanged>,
     mut gm_attention: MessageReader<GmAttentionChanged>,
     mut gm_health: MessageReader<GmHealthChanged>,
+    mut gm_workload: MessageReader<GmWorkloadChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 14] = [
+    let message_batches: [(&str, Vec<String>); 15] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4568,6 +4576,13 @@ fn flush_host_channels(
             gm_health
                 .read()
                 .filter_map(|event| codec::encode_gm_health_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_WORKLOAD,
+            gm_workload
+                .read()
+                .filter_map(|event| codec::encode_gm_workload_projection(&event.payload).ok())
                 .collect(),
         ),
     ];
@@ -5478,6 +5493,7 @@ spawn_on = "game_start"
                 host_channels::GM_COMMS,
                 host_channels::GM_ATTENTION,
                 host_channels::GM_HEALTH,
+                host_channels::GM_WORKLOAD,
             ]
         );
     }

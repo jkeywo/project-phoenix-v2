@@ -338,6 +338,21 @@ pub struct CoordinationEnqueueCursor(pub bevy::ecs::message::MessageCursor<Coord
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CoordinationDelivery {
     Ai,
+    /// The router resolved a HUMAN recipient, carrying the ship-internal
+    /// (uncoarsened) payload and raising no popup (issue #1438).
+    ///
+    /// The Popup DECISION is peer-identical — it is a function of the hull's
+    /// live control sources, which every peer holds — but the popup itself is
+    /// not: only the peer that holds `LocalShip` for that hull, with a session
+    /// seated at the addressed Station, ever shows one. A receiver that keeps
+    /// SHIP state about the request rather than merely displaying it (Repair's
+    /// `RepairRequestQueue`, which is the record of what the crew is still being
+    /// asked for) must therefore see the delivery on EVERY peer, or two hosts of
+    /// one fleet carry different ship state from identical input.
+    ///
+    /// Emitted alongside [`Self::HumanPopup`] on the presenting peer, never
+    /// instead of it: one variant is the record, the other is the notification.
+    HumanRouted,
     HumanPopup {
         token: String,
         sender_label: String,

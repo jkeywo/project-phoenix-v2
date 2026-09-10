@@ -93,6 +93,7 @@ pub(crate) enum FixedStep {
     HandleUmbilicalCommands,
     HandleSecurityCommands,
     HandleTransporterCommands,
+    PruneRepairRequestQueue,
     OperateRepairAi,
     HandleLoadTube,
     HandleUnloadTube,
@@ -315,6 +316,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
     sequence(
         &mut order,
         &[
+            PruneRepairRequestQueue,
             OperateRepairAi,
             HandleLoadTube,
             HandleUnloadTube,

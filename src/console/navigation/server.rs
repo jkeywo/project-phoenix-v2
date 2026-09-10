@@ -230,6 +230,20 @@ pub struct NavClearanceIssueState {
     helm_axes_were_ai: bool,
 }
 
+impl NavClearanceIssueState {
+    /// The waypoint generation whose clearance has actually been enqueued, or
+    /// `None` before any has been.
+    ///
+    /// Read-only, and read by the GM's Station-workload advisory
+    /// ([`crate::gm_workload`]): "Navigation has told the Helm where to go" is
+    /// exactly this frontier, and an advisory that used the waypoint's own
+    /// generation instead would report a demand on the Helm for an order
+    /// Navigation has not sent yet.
+    pub fn issued_generation(&self) -> Option<u64> {
+        self.issued_generation
+    }
+}
+
 /// Storage variant of the navigation waypoint.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WaypointMode {

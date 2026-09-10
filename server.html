@@ -2399,6 +2399,17 @@
           <div id="gm-health-groups"></div>
           <p id="gm-health-empty" role="status" data-i18n="server.gm.health.empty"></p>
         </section>
+        <!-- GM Station-workload advisory (issue #1438). One row per Station,
+             the level as a WORD, and an expander holding the exact source
+             demands that produced the count. Read-only: no verb here submits
+             anything, and nothing here is a rating of the person sitting
+             there. -->
+        <section id="gm-workload-panel" role="region" aria-labelledby="gm-workload-heading">
+          <h2 id="gm-workload-heading" data-i18n="server.gm.workload.heading"></h2>
+          <p id="gm-workload-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <ul id="gm-workload-list" role="list"></ul>
+          <p id="gm-workload-empty" role="status" data-i18n="server.gm.workload.empty"></p>
+        </section>
         <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
           <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
           <ul id="gm-spawn-palette" role="list"></ul>

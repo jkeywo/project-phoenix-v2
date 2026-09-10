@@ -1203,11 +1203,16 @@ human_seeking = true
 
 [cinematic_camera]
 position = [0, 12, 22]
-default_pitch_deg = 18
+default_pitch_deg = 22
 entity_look_range = 80
 look_ahead_distance = 150
 hysteresis_secs = 3
 yaw_follow_deg_per_sec = 45
+# [ai] Aim point lowered (world units) so the hull rises toward the lower
+# third of the frame instead of crowding the bottom edge. The pitch above was
+# steepened in step: both lower where the camera looks, the pitch across the
+# whole no-target view and this offset also when tracking a target.
+look_target_y_offset = -9
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 # Every sound this ship makes. Playback is server-side only (the host page's

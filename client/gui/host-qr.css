@@ -192,8 +192,12 @@
   box-sizing: border-box;
 }
 #overlay.pre-scenario #qr-panel { margin-left: auto; margin-right: auto; }
+/* html:not([data-phx-force-landscape]) excludes server.html (the
+   server/viewscreen), which sets that attribute so it always reads as
+   landscape and instead rotates a genuinely portrait phone screen into that
+   layout (see server.html's own orientation-lock CSS). */
 @media (orientation: portrait), (max-width: 800px) {
-  #overlay.pre-scenario {
+  html:not([data-phx-force-landscape]) #overlay.pre-scenario {
     width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
   }
 }

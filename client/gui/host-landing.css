@@ -1199,8 +1199,14 @@
  * status strip and corner control shrink to match. Two columns, so one step is
  * half the track.
  */
+/* `html:not([data-phx-force-landscape])` excludes server.html (the
+   server/viewscreen), which sets that attribute so it always reads as
+   landscape here and instead rotates a genuinely portrait phone screen into
+   this file's landscape rules (see server.html's own orientation-lock CSS).
+   The native host's lobby document carries no such attribute, so this guard
+   changes nothing for it. */
 @media (max-width: 999px), (orientation: portrait) {
-  .landing-rail {
+  html:not([data-phx-force-landscape]) .landing-rail {
     top: 0; left: 0; right: 0; bottom: auto;
     width: auto; height: 64px;
     flex-direction: row;
@@ -1220,41 +1226,41 @@
     background: linear-gradient(to bottom,
       rgba(var(--rgb-panel), 0.92), rgba(var(--rgb-base), 0.4));
   }
-  .landing-rail-stamp { writing-mode: horizontal-tb; text-orientation: mixed; }
-  #landing-fullscreen-btn { top: 9px; right: 16px; }
+  html:not([data-phx-force-landscape]) .landing-rail-stamp { writing-mode: horizontal-tb; text-orientation: mixed; }
+  html:not([data-phx-force-landscape]) #landing-fullscreen-btn { top: 9px; right: 16px; }
 
-  .landing-stage { left: 0; top: 64px; bottom: 44px; }
-  .landing-stage-inner { inset: 16px; }
+  html:not([data-phx-force-landscape]) .landing-stage { left: 0; top: 64px; bottom: 44px; }
+  html:not([data-phx-force-landscape]) .landing-stage-inner { inset: 16px; }
   /* Three columns, so one step is a third of the track (issue #1362 added the
      hull column; it was two and a half before). The step is written as the
      reciprocal of the column count in both places — a track N panes wide slid
      by 100/N per rung — so the two numbers cannot drift apart the way a
      hand-tuned pair would. */
-  .landing-track {
+  html:not([data-phx-force-landscape]) .landing-track {
     width: 300%;
     gap: 0;
     transform: translateX(calc(var(--landing-depth, 0) * -33.3333%));
   }
-  .landing-col { flex: 0 0 33.3333%; width: auto; padding-right: 16px; overflow-y: auto; }
-  .landing-col-menu { justify-content: flex-start; margin-left: 0; }
-  .landing-col-mid, .landing-col-ship { transform: none; }
+  html:not([data-phx-force-landscape]) .landing-col { flex: 0 0 33.3333%; width: auto; padding-right: 16px; overflow-y: auto; }
+  html:not([data-phx-force-landscape]) .landing-col-menu { justify-content: flex-start; margin-left: 0; }
+  html:not([data-phx-force-landscape]) .landing-col-mid, html:not([data-phx-force-landscape]) .landing-col-ship { transform: none; }
   /* One pane at a time is already the whole of the receding here, and dimming
      a column nobody can see would only follow the operator back to it. The
      INACTIVITY is not reset with it: the menu is off screen at this depth
      either way, and `inert` is written from the depth rather than from a
      breakpoint, so a pointer that could still reach it would be the one
      disagreement between the two. */
-  .is-deep .landing-col-menu { opacity: 1; }
+  html:not([data-phx-force-landscape]) .is-deep .landing-col-menu { opacity: 1; }
 
-  .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
-  .landing-logo, .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
-  .landing-wordmark { font-size: clamp(var(--text-lg), 5.4vw, var(--text-2xl)); letter-spacing: var(--tracking-wide); }
-  .landing-subline { justify-content: center; }
-  .landing-menu { gap: 8px; }
-  .landing-mi { height: 62px; }
-  .landing-mi-label { font-size: var(--text-lg); }
+  html:not([data-phx-force-landscape]) .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
+  html:not([data-phx-force-landscape]) .landing-logo, html:not([data-phx-force-landscape]) .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
+  html:not([data-phx-force-landscape]) .landing-wordmark { font-size: clamp(var(--text-lg), 5.4vw, var(--text-2xl)); letter-spacing: var(--tracking-wide); }
+  html:not([data-phx-force-landscape]) .landing-subline { justify-content: center; }
+  html:not([data-phx-force-landscape]) .landing-menu { gap: 8px; }
+  html:not([data-phx-force-landscape]) .landing-mi { height: 62px; }
+  html:not([data-phx-force-landscape]) .landing-mi-label { font-size: var(--text-lg); }
 
-  .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; }
+  html:not([data-phx-force-landscape]) .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; }
 }
 
 /* ── Short landscape (a phone on its side) ────────────────────────────── */

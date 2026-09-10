@@ -1,0 +1,4 @@
+{
+  "source": "planets/gas_giant/surface_colour.uastc.ktx2",
+  "fallback": "planets/gas_giant/surface_colour.ktx2"
+}

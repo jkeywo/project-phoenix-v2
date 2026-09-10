@@ -1,0 +1,4 @@
+{
+  "source": "planets/ecumenopolis/city_albedo.uastc.ktx2",
+  "fallback": "planets/ecumenopolis/city_albedo.ktx2"
+}

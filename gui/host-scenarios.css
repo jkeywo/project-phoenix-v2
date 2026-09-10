@@ -238,7 +238,11 @@
    this panel, and gui/host-landing.css sizes it for the middle column it docks
    into. Lives here with the rest of the picker's rules rather than in
    server.html (#1328). */
+/* html:not([data-phx-force-landscape]) excludes server.html (the
+   server/viewscreen), which sets that attribute so it always reads as
+   landscape and instead rotates a genuinely portrait phone screen into that
+   layout (see server.html's own orientation-lock CSS). */
 @media (orientation: portrait), (max-width: 800px) {
-  #scenario-panel { flex-direction: column; overflow-y: auto; }
-  #world-list { width: 100%; max-width: none; min-width: 0; overflow: visible; }
+  html:not([data-phx-force-landscape]) #scenario-panel { flex-direction: column; overflow-y: auto; }
+  html:not([data-phx-force-landscape]) #world-list { width: 100%; max-width: none; min-width: 0; overflow: visible; }
 }

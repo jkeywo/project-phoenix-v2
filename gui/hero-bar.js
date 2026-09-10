@@ -11,6 +11,51 @@ function legacyPlacement(station, stationSystems, blackboards) {
 }
 
 /**
+ * Whether a `Command`-kind blackboard reports a directable target — the one
+ * fact both the hero bar (this file) and the captain's visiting-system
+ * payload (`gui/console-state.js`'s `withVisitingSystems`) need, kept as one
+ * exported predicate so the two never drift on what "directable" means.
+ *
+ * @param {{directed_station_ai?: boolean}|null} board a `Command`-kind
+ *   blackboard entry (or any value — non-boards simply read as not directable)
+ * @returns {boolean}
+ */
+export function isCommandBoardDirectable(board) {
+  return !!board && board.directed_station_ai === true;
+}
+
+/**
+ * Whether a directing Station (one authoring `command_target`, e.g. the
+ * Command auxiliary, issues #1107/#1387) currently has anything to direct.
+ *
+ * `src/console/command/server.rs::station_is_ai_controlled` only lets Command
+ * direct a Station that is AI-controlled — a human-held target only gets
+ * advisory text, never a binding order. So the rule agreed with John is:
+ * hide the tab whenever every Station it can direct is human-controlled
+ * (today's single `command_target` means simply "hide when the directed
+ * Station is not AI").
+ *
+ * Ducktyped the same way `legacyPlacement` above and
+ * `gui/console-state.js`'s `blackboardOfKind`/`commandAdviceFor` find their
+ * board: no SystemId spelling or Console Family convention, just the
+ * discriminating `directed_station_ai` field every `Command`-kind blackboard
+ * carries. `system_registry.rs` guarantees at most one Command instance per
+ * hull, so scanning all of `blackboards` for the first match is exact, not a
+ * heuristic.
+ *
+ * @param {{command_target?: (string|null)}|null} def
+ * @param {Object<string, object>|null} blackboards keyed by system id, the
+ *   same map `heroBarModel` already receives
+ * @returns {boolean}
+ */
+export function commandStationDirectable(def, blackboards) {
+  if (!def?.command_target) return false;
+  const board = Object.values(blackboards || {})
+    .find(value => value && typeof value.directed_station_ai === 'boolean');
+  return isCommandBoardDirectable(board);
+}
+
+/**
  * Direct Station first, then the active console's own overlay tabs, then
  * visiting Stations in hull-authored order.
  * AI assignments are returned in `ownership` even though they are not tabs,
@@ -35,12 +80,21 @@ export function heroBarModel({ directStation, stations, stationSystems,
   consoleTabs, activeOverlay }) {
   const defs = stations || [];
   const byId = Object.fromEntries(defs.filter(Boolean).map(st => [st.id, st]));
-  const placements = Object.fromEntries(defs.filter(st => st?.human_seeking).map(st => [
+  // A directing Station (`command_target` set — the Command auxiliary) with
+  // nothing to direct right now is dropped everywhere below: from the tab
+  // strip, from ownership, and from the AI-status line. It is not merely
+  // undirectable, it has no reason to exist on this frame's bar at all.
+  const hiddenDirectingIds = new Set(
+    defs.filter(st => st?.command_target && !commandStationDirectable(st, blackboards))
+      .map(st => st.id),
+  );
+  const humanSeekingDefs = defs.filter(st => st?.human_seeking && !hiddenDirectingIds.has(st.id));
+  const placements = Object.fromEntries(humanSeekingDefs.map(st => [
     st.id,
     stationHosts?.[st.id] || legacyPlacement(st, stationSystems, blackboards),
   ]));
-  const visiting = directStation ? defs
-    .filter(st => st?.human_seeking && st.id !== directStation)
+  const visiting = directStation ? humanSeekingDefs
+    .filter(st => st.id !== directStation)
     .filter(st => placements[st.id]?.host === directStation) : [];
   // An overlay tab without a direct Station has no console to open it in.
   const overlays = directStation
@@ -55,7 +109,7 @@ export function heroBarModel({ directStation, stations, stationSystems,
   const selected = openOverlay
     || (stationIds.includes(activeStation) ? activeStation : (stationIds[0] || null));
   const ownership = {};
-  for (const st of defs.filter(st => st?.human_seeking)) {
+  for (const st of humanSeekingDefs) {
     const host = placements[st.id]?.host || null;
     ownership[st.id] = host === st.id ? 'direct' : (host ? 'visiting' : 'ai');
   }
@@ -117,8 +171,8 @@ export function heroBarModel({ directStation, stations, stationSystems,
         selected: id === selected };
     }),
     ownership,
-    aiStations: defs
-      .filter(st => st?.human_seeking && ownership[st.id] === 'ai')
+    aiStations: humanSeekingDefs
+      .filter(st => ownership[st.id] === 'ai')
       .map(st => ({ id: st.id, name: st.name || st.id })),
   };
 }
@@ -385,6 +439,8 @@ export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
 
 if (typeof window !== 'undefined') {
   window.heroBarModel = heroBarModel;
+  window.commandStationDirectable = commandStationDirectable;
+  window.isCommandBoardDirectable = isCommandBoardDirectable;
   window.heroBarKeyTarget = heroBarKeyTarget;
   window.renderHeroBarDom = renderHeroBarDom;
   window.heroBarLabelMode = heroBarLabelMode;

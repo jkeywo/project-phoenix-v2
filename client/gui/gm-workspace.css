@@ -145,3 +145,43 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-session-controls { flex: 0 0 190px; }
 #gm-console.gm-desk #gm-session-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
 #gm-console.gm-desk #gm-knowledge-scope { display: grid; gap: var(--space-2); }
+
+/* ── Legibility (GM console feedback, 2026-09-10) ──────────────────────
+   The desk's smallest rungs (--text-xs is 11px, dim headings, dim pills)
+   read fine on a phone console at arm's length and badly on a wall pane
+   across a desk. Floor the desk's body at 14px, lift every dim/xs rung one
+   step, and let the shared ramp still scale it (--a11y-text-scale). */
+#gm-console.gm-desk { font-size: calc(max(14px, var(--text-md)) * var(--a11y-text-scale)); line-height: 1.4; }
+#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: calc(max(13px, var(--text-sm)) * var(--a11y-text-scale)); color: var(--ink); letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk button.btn { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); }
+#gm-console.gm-desk #gm-map-legend, #gm-console.gm-desk #gm-entity-identity, #gm-console.gm-desk #gm-session-clock,
+#gm-console.gm-desk #gm-scenario-title, #gm-console.gm-desk .gm-station-pills span,
+#gm-console.gm-desk #gm-system-pills span, #gm-console.gm-desk #gm-operator-identity { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); }
+#gm-console.gm-desk .gm-station-pills span, #gm-console.gm-desk #gm-scenario-title { color: var(--ink); }
+#gm-console.gm-desk .gm-station-pills [data-rating="Backfill"] { color: var(--ink-dim); }
+#gm-console.gm-desk label, #gm-console.gm-desk dt, #gm-console.gm-desk .gm-activity-entry { color: var(--ink); }
+
+/* ── Scrolling ──────────────────────────────────────────────────────────
+   Every desk panel scrolls its own overflow, and a panel that scrolls must
+   SHOW it: a wall pane has no overlay scrollbar that appears on hover.
+   Chrome (121+) takes the standard properties and ignores the -webkit-
+   pseudo-elements; the native Ultralight pane (WebKit) is the reverse. Both
+   end in the same thin, always-visible thumb. */
+#gm-console.gm-desk #gm-workspace > section,
+#gm-console.gm-desk #gm-station-surface,
+#gm-console.gm-desk .gm-knowledge-category,
+#gm-console.gm-desk #gm-objective-results {
+  scrollbar-width: thin; scrollbar-color: var(--edge-bright) var(--surface-deep); scrollbar-gutter: stable;
+}
+#gm-console.gm-desk ::-webkit-scrollbar { width: 12px; height: 12px; }
+#gm-console.gm-desk ::-webkit-scrollbar-track { background: var(--surface-deep); }
+#gm-console.gm-desk ::-webkit-scrollbar-thumb { background: var(--edge-bright); border: 2px solid var(--surface-deep); min-height: 40px; }
+#gm-console.gm-desk ::-webkit-scrollbar-thumb:hover { background: var(--ink-dim); }
+#gm-console.gm-desk ::-webkit-scrollbar-corner { background: var(--surface-deep); }
+
+/* ── Inspector way back ─────────────────────────────────────────────────
+   A quick action scrolls the inspector down to its control (Objectives,
+   Systems, …). The way back up is a sticky button that appears only after
+   such a jump and hides again once the selection card is in view. */
+#gm-console.gm-desk #gm-inspector-back { position: sticky; top: 0; z-index: 2; width: 100%; flex-shrink: 0; }
+#gm-console.gm-desk #gm-objective-scope { color: var(--gold); font-family: var(--font-mono); margin: 0; }

@@ -2790,6 +2790,10 @@ server.gm.attention.empty,Shown when nothing is waiting for the Game Master,[Not
 server.gm.attention.resolved,Shown in place of the verbs on a held attention row whose occurrence has already been answered or withdrawn,[No longer waiting.]
 server.gm.attention.reason.pending_comms,"Why a pending conversation is in the queue; {sender} is the speaker and {ship} the ship whose console is waiting",[{sender} is waiting on {ship}.]
 server.gm.attention.reason.pending_comms_fleet,"Why a pending conversation with no single recipient ship is in the queue; {sender} is the speaker",[{sender} is waiting on a reply.]
+server.gm.attention.category.eligible_beat,Attention queue kind for an authored beat a Game Master could release now,[Eligible beat]
+server.gm.attention.reason.eligible_beat_manual,"Why a manual authored beat is in the queue; {beat} is the beat's authored name",[{beat} is yours to start.]
+server.gm.attention.reason.eligible_beat,"Why an automatic authored beat a Game Master may also release is in the queue; {beat} is the beat's authored name",[{beat} can be released early.]
+server.gm.attention.open_beat,Button that takes the Game Master to the mission-panel controls an attention row names,[Open controls]
 server.gm.comms.empty,GM Comms Studio #1317,"[This scenario offers no Comms routes.]"
 server.gm.comms.route,GM Comms Studio #1317,"[Authored routing visibility]"
 server.gm.comms.sender,GM Comms Studio #1317,"[Speak as]"
@@ -2838,6 +2842,12 @@ world.probe_gm_attention.acknowledge,GM attention band probe #1433,[Acknowledged
 world.probe_gm_attention.speaker_fleet,GM attention band probe #1433,[Relay Watch]
 world.probe_gm_attention.route.fleet,GM attention band probe #1433,[Relay channel]
 world.probe_gm_attention.offer_fleet,GM attention band probe #1433,[Relay Watch asks the fleet to confirm the corridor.]
+world.probe_gm_beats.beat.brief,GM eligible-beat probe #1434,[Mission briefing]
+world.probe_gm_beats.beat.recall,GM eligible-beat probe #1434,[Recall order]
+world.probe_gm_beats.beat.storm,GM eligible-beat probe #1434,[Storm front]
+world.probe_gm_beats.beat.open_gate,GM eligible-beat probe #1434,[Raise the storm warning]
+world.probe_gm_beats.beat.close_gate,GM eligible-beat probe #1434,[Stand the storm warning down]
+world.probe_gm_beats.beat.relief,GM eligible-beat probe #1434,[Relief convoy]
 server.gm.npc.heading,GM NPC doctrine heading,[NPC doctrine]
 server.gm.npc.select,GM NPC selection prompt,[Select an NPC on the map.]
 server.gm.npc.current,GM NPC current doctrine label,[Standing doctrine]

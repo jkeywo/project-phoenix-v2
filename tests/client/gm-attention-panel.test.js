@@ -94,7 +94,8 @@ describe('GM attention projection parsing', () => {
       occurrence('e', { target: {} }),
     )));
     expect(parsed.occurrences.map((row) => row.id)).toEqual(['a', 'e']);
-    expect(parsed.occurrences[1].target).toEqual({ route: null, ship: null, sender: null, conversation: null });
+    expect(parsed.occurrences[1].target)
+      .toEqual({ route: null, ship: null, sender: null, conversation: null, event: null });
   });
 
   it('reaches the panel through the host channel with its String Table ids intact', () => {
@@ -191,11 +192,14 @@ describe('bands, ordering and reading stability', () => {
     expect(rowIds()).toEqual(['comms:0', 'comms:1']);
     expect(liveButton.hidden).toBe(true);
     // Catching up hides the control the operator was standing on; focus must
-    // not be left on it, nor dropped to the document.
+    // not be left on it, nor dropped to the document. It lands on the panel's
+    // own status landmark rather than on a row (issue #1434 review fix): a row
+    // control would put the operator straight back into the list they just
+    // asked to stop holding, and the next projection would hold it again.
     expect(document.activeElement).not.toBe(liveButton);
     expect(document.getElementById('gm-attention-panel').contains(document.activeElement)).toBe(true);
-    expect(document.activeElement.dataset.action).toBe('open');
-    expect(document.activeElement.closest('li').dataset.occurrenceId).toBe('comms:0');
+    expect(document.activeElement).toBe(document.getElementById('gm-attention-status'));
+    expect(document.activeElement.closest('li[data-occurrence-id]')).toBe(null);
     panel.dispose();
   });
 
@@ -564,5 +568,176 @@ describe('private filters and their session scope', () => {
     const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
     expect(workspace).toContain('onChange: () => repaintGmAttention()');
     expect(workspace).toContain('repaintGmAttention = gmAttentionPanel.repaint;');
+  });
+});
+
+/**
+ * Eligible authored beats in the same queue (issue #1434, PRD #1419 story 7).
+ *
+ * The projection publishes one list; a beat is another kind of occurrence in
+ * it, not a second panel. What has to be true of a beat row is what has to be
+ * true of any row — it explains itself in words, it is banded without colour,
+ * it can be reached and operated from the keyboard, and its verb NAVIGATES.
+ */
+function beat(id, extra = {}) {
+  return {
+    id,
+    band: 'attention',
+    category: 'eligible_beat',
+    first_seen_tick: 90,
+    age_ms: 0,
+    reason: {
+      id: 'server.gm.attention.reason.eligible_beat_manual',
+      params: { beat: 'world.probe.beat.brief' },
+    },
+    target: {
+      event: {
+        id: 'base-world::brief', label: 'world.probe.beat.brief',
+        fire: true, pause: false, skip: false,
+      },
+    },
+    ...extra,
+  };
+}
+
+describe('GM attention queue: eligible beats', () => {
+  it('carries the beat and its declared levers through the parser, and drops a nameless one', () => {
+    const parsed = parseGmAttentionProjection(JSON.stringify(payload(
+      beat('event:base-world::brief#1'),
+      beat('event:nameless#1', { target: { event: { label: 'x', fire: true } } }),
+    )));
+    expect(parsed.occurrences[0].target.event)
+      .toEqual({ id: 'base-world::brief', label: 'world.probe.beat.brief', fire: true, pause: false, skip: false });
+    // A row that cannot name the event it points at claims no controls at all.
+    expect(parsed.occurrences[1].target.event).toBe(null);
+  });
+
+  it('renders a beat beside a conversation, banded in words, with its own verb', () => {
+    const { panel } = mount();
+    panel.update(payload(
+      beat('event:base-world::relief#1', {
+        band: 'background',
+        first_seen_tick: 80,
+        reason: { id: 'server.gm.attention.reason.eligible_beat', params: { beat: 'world.probe.beat.relief' } },
+        target: {
+          event: {
+            id: 'base-world::relief', label: 'world.probe.beat.relief',
+            fire: true, pause: true, skip: true,
+          },
+        },
+      }),
+      occurrence('comms:m1'),
+    ));
+    expect(rowIds()).toEqual(['comms:m1', 'event:base-world::relief#1']);
+    const row = document.querySelector('#gm-attention-list li[data-occurrence-id="event:base-world::relief#1"]');
+    // The band is a word, not a colour (PRD #1418 story 6), and the reason is
+    // the sentence the projection chose.
+    expect(row.querySelector('.gm-attention-band').textContent)
+      .toBe('server.gm.attention.band.background');
+    expect(row.querySelector('.gm-attention-reason').textContent)
+      .toBe('server.gm.attention.reason.eligible_beat');
+    // A beat's verb says where it goes; a conversation's says its own thing.
+    expect(row.querySelector('button[data-action="open"]').textContent)
+      .toBe('server.gm.attention.open_beat');
+    expect(document.querySelector('#gm-attention-list li[data-occurrence-id="comms:m1"] button[data-action="open"]')
+      .textContent).toBe('server.gm.attention.open');
+    // Both verbs are real buttons, so the keyboard reaches them.
+    expect([...row.querySelectorAll('button')].map((button) => button.dataset.action))
+      .toEqual(['open', 'snooze']);
+    panel.dispose();
+  });
+
+  it('hands the beat to the host on Open and never fires it', () => {
+    const { panel, onOpen } = mount();
+    panel.update(payload(beat('event:base-world::brief#1')));
+    document.querySelector('#gm-attention-list li button[data-action="open"]').click();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const opened = onOpen.mock.calls[0][0];
+    expect(opened.id).toBe('event:base-world::brief#1');
+    expect(opened.target.event.id).toBe('base-world::brief');
+    // Opening holds the list for the operator reading it, and marks the row —
+    // it does not submit anything, and the panel has nothing to submit with.
+    expect(panel.state().held).toBe(true);
+    expect(panel.state().selectedId).toBe('event:base-world::brief#1');
+    panel.dispose();
+  });
+
+  it('offers eligible beats as their own filter option', () => {
+    const { panel } = mount();
+    panel.update(payload(beat('event:base-world::brief#1'), occurrence('comms:m1')));
+    const filter = document.getElementById('gm-attention-filter-category');
+    expect([...filter.options].map((option) => option.value)).toContain('eligible_beat');
+    filter.value = 'eligible_beat';
+    filter.dispatchEvent(new window.Event('change'));
+    expect(rowIds()).toEqual(['event:base-world::brief#1']);
+    panel.dispose();
+  });
+
+  it('resolves a beat that stops being eligible, and treats its return as a new occurrence', () => {
+    const filters = createGmAttentionFilters();
+    const { panel } = mount({ filters });
+    panel.update(payload(beat('event:base-world::storm#1')));
+    expect(rowIds()).toEqual(['event:base-world::storm#1']);
+    // The gate closed: the projection stops publishing it, and with nobody
+    // reading, the live list simply catches up.
+    panel.update(payload());
+    expect(rowIds()).toEqual([]);
+    // The gate reopened. A fresh occurrence id, so a snooze taken against the
+    // first one cannot hide the second.
+    filters.snooze('event:base-world::storm#1', 'attention');
+    panel.update(payload(beat('event:base-world::storm#2')));
+    expect(rowIds()).toEqual(['event:base-world::storm#2']);
+    panel.dispose();
+  });
+
+  /**
+   * The carried-forward #1433 review finding.
+   *
+   * jsdom's `click()` does not move focus; a real browser's does. So a real
+   * operator who clicked Open and then *Return to live* ended with focus on the
+   * Return-to-live button — inside the panel — and the old rescue moved it onto
+   * a surviving row's Open verb. `usingList()` counted any focus inside the
+   * list as reading, so the very next projection re-entered held mode with
+   * nobody reading anything: the queue silently stopped catching up.
+   */
+  it('keeps catching up after Return to live, even with browser-accurate click focus', () => {
+    const { panel } = mount();
+    panel.update(payload(beat('event:base-world::brief#1'), occurrence('comms:m1')));
+    const open = document.querySelector('#gm-attention-list li button[data-action="open"]');
+    open.focus();
+    open.click();
+    expect(panel.state().held).toBe(true);
+    const live = document.getElementById('gm-attention-live');
+    expect(live.hidden).toBe(false);
+    live.focus();
+    live.click();
+    expect(panel.state().held).toBe(false);
+    // Focus stayed inside the panel — a keyboard operator is not thrown back to
+    // the top of the desk — but it landed on the panel's landmark, not on a row.
+    expect(document.activeElement).toBe(document.getElementById('gm-attention-status'));
+    // And the next projection is applied, not held.
+    panel.update(payload(beat('event:base-world::brief#1'), occurrence('comms:m1'), occurrence('comms:m2')));
+    expect(panel.state().held).toBe(false);
+    expect(panel.state().newCount).toBe(0);
+    expect(rowIds()).toContain('comms:m2');
+    panel.dispose();
+  });
+
+  it('still holds the list while focus is genuinely inside a row', () => {
+    const { panel } = mount();
+    panel.update(payload(beat('event:base-world::brief#1')));
+    document.querySelector('#gm-attention-list li button[data-action="snooze"]').focus();
+    panel.update(payload(beat('event:base-world::brief#1'), occurrence('comms:m1')));
+    expect(panel.state().held).toBe(true);
+    expect(panel.state().newCount).toBe(1);
+    panel.dispose();
+  });
+
+  it('wires Open to the mission-panel controls the beat already declares', () => {
+    // gm-workspace.js is the page module, so the wiring is read rather than
+    // mounted; gm-mission-panel.test.js proves what focusEvent then does.
+    const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
+    expect(workspace)
+      .toContain('if (occurrence.target.event) gmMissionPanel.focusEvent(occurrence.target.event.id);');
   });
 });

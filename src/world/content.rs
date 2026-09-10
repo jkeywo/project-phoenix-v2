@@ -329,15 +329,7 @@ pub fn fire_manual_trigger(
     flag_chain: &[&FlagStore],
     current_elapsed: f32,
 ) -> Option<FiredTrigger> {
-    if state.fired && !state.trigger.repeat {
-        return None;
-    }
-    if let Some(pred) = &state.trigger.when {
-        if !pred.evaluate(flag_chain) {
-            return None;
-        }
-    }
-    if !cooldown_elapsed(state, current_elapsed) {
+    if !manual_fire_would_land(state, flag_chain, current_elapsed) {
         return None;
     }
     state.fired = true;
@@ -346,6 +338,36 @@ pub fn fire_manual_trigger(
         origin_layer: state.origin_layer.clone(),
         entity_name: entity_name_from_condition(&state.trigger.condition),
     })
+}
+
+/// Would a manual Fire of this trigger LAND right now (issue #1434)?
+///
+/// [`fire_manual_trigger`]'s three gates with none of its mutation, extracted
+/// so that a READER of eligibility and the writer of it cannot drift. The GM
+/// attention queue ([`crate::gm_attention`]) calls exactly this to decide
+/// whether an authored beat is waiting for a Game Master, which is what
+/// "eligibility is read from the ordinary evaluator" has to mean mechanically:
+/// not a second rule that agrees with this one today, but this one.
+///
+/// It is pure. The `when` predicate is a declarative flag/counter expression
+/// read against the stores the evaluator itself reads — no trigger condition
+/// is matched a second time, no Rhai runs, no handler is dispatched and no
+/// latch, cooldown clock or `seen_destroyed` set is touched. Answering "could
+/// this fire" must never be a way of firing it.
+pub fn manual_fire_would_land(
+    state: &TriggerState,
+    flag_chain: &[&FlagStore],
+    current_elapsed: f32,
+) -> bool {
+    if state.fired && !state.trigger.repeat {
+        return false;
+    }
+    if let Some(pred) = &state.trigger.when {
+        if !pred.evaluate(flag_chain) {
+            return false;
+        }
+    }
+    cooldown_elapsed(state, current_elapsed)
 }
 
 /// Whether an armed Fire is still live against this trigger.

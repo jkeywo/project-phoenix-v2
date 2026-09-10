@@ -1,11 +1,17 @@
 /**
- * gui/gm-attention-panel.js — the Game Master attention queue (issue #1433,
- * PRD #1419 M4, presentation contract PRD #1418).
+ * gui/gm-attention-panel.js — the Game Master attention queue (issues #1433 and
+ * #1434, PRD #1419 M4, presentation contract PRD #1418).
  *
  * Renders the `gm_attention` Host Channel projection: three bands, oldest
  * first, each row explaining itself in one short sentence and offering exactly
- * two verbs — open the conversation that is already there, or snooze it for
- * one real minute.
+ * two verbs — open the thing that is already there, or snooze it for one real
+ * minute.
+ *
+ * One list, several kinds of occurrence. A pending conversation opens the
+ * authored Comms route that already speaks as its sender; an eligible beat
+ * (#1434) opens that beat's existing row in the mission panel, where the Fire,
+ * Pause and Skip its author declared already live. Neither verb acts: nothing
+ * in this file fires a beat, sends a hail, or submits any GM action at all.
  *
  * # Reading stability (PRD #1418 stories 23/24/26)
  *
@@ -49,7 +55,7 @@ import {
 
 /** Categories this build draws. Unknown categories still render (the reason id
  * carries the meaning); this list only seeds the filter's option order. */
-export const GM_ATTENTION_CATEGORIES = Object.freeze(['pending_comms']);
+export const GM_ATTENTION_CATEGORIES = Object.freeze(['pending_comms', 'eligible_beat']);
 
 /** Ages repaint on this cadence. Slow enough to be free, fast enough that a
  * sixty-second snooze visibly expires. */
@@ -95,6 +101,18 @@ export function parseGmAttentionProjection(payload) {
         ship: target.ship && typeof target.ship.entity_id === 'string' ? { ...target.ship } : null,
         sender: target.sender && typeof target.sender.entity_id === 'string' ? { ...target.sender } : null,
         conversation: typeof target.conversation === 'string' ? target.conversation : null,
+        // The authored beat this row is about (issue #1434), and which levers
+        // the mission panel is already offering for it. Dropped whole unless it
+        // names an event, so a row can never claim controls it cannot point at.
+        event: target.event && typeof target.event.id === 'string' && target.event.id.length > 0
+          ? {
+            id: target.event.id,
+            label: typeof target.event.label === 'string' ? target.event.label : '',
+            fire: target.event.fire === true,
+            pause: target.event.pause === true,
+            skip: target.event.skip === true,
+          }
+          : null,
       },
     });
   }
@@ -131,6 +149,9 @@ export function createGmAttentionPanel({
   // the tab ring; it only catches focus programmatically, when the row the
   // operator was standing on stops existing and there is no row left to move to.
   if (statusEl) statusEl.tabIndex = -1;
+  // The same landing place, one step out, for a host document that renders the
+  // list without the status sentence.
+  if (listEl) listEl.tabIndex = -1;
 
   /** The live projection, exactly as Rust last published it. */
   let live = [];
@@ -151,10 +172,23 @@ export function createGmAttentionPanel({
   let pendingIds = new Set();
   const label = (value) => (typeof value === 'string' && has(value) ? t(value) : (value || ''));
 
+  /**
+   * Is the operator actually reading a ROW right now?
+   *
+   * Deliberately narrower than "focus is somewhere in the panel": the panel
+   * also contains the filter selects and *Return to live*, and standing on one
+   * of those is not reading the list — it is operating the list. Counting them
+   * made *Return to live* self-defeating in a real browser, where clicking a
+   * button focuses it: the click ended the hold, focus stayed on a control
+   * inside the panel, and the very next projection re-entered held mode with
+   * nobody reading anything. Only focus inside an `li[data-occurrence-id]`
+   * holds the list.
+   */
   const usingList = () => {
     if (selectedId !== null) return true;
     const active = doc && doc.activeElement;
-    return !!(active && listEl && listEl !== active && listEl.contains(active));
+    if (!active || !listEl || active === listEl || !listEl.contains(active)) return false;
+    return !!(active.closest && active.closest('li[data-occurrence-id]'));
   };
 
   function ageMsOf(id) {
@@ -287,7 +321,12 @@ export function createGmAttentionPanel({
     const open = doc.createElement('button');
     open.type = 'button';
     open.dataset.action = 'open';
-    open.textContent = t('server.gm.attention.open');
+    // One verb, two destinations, and the label says which: a conversation row
+    // opens the conversation, a beat row opens the controls the author declared
+    // for that beat. Neither one ACTS - see `onListClick`.
+    open.textContent = t(occurrence.target.event
+      ? 'server.gm.attention.open_beat'
+      : 'server.gm.attention.open');
     const snooze = doc.createElement('button');
     snooze.type = 'button';
     snooze.dataset.action = 'snooze';
@@ -440,8 +479,6 @@ export function createGmAttentionPanel({
   function returnToLive() {
     held = false;
     const focused = doc && doc.activeElement;
-    const anchor = focused && focused.closest ? focused.closest('li[data-occurrence-id]') : null;
-    const anchorId = anchor ? anchor.dataset.occurrenceId : selectedId;
     // *Return to live* ends the reading session, not just this one hold. A row
     // left marked as selected keeps `usingList()` true forever, so the next
     // projection would drop straight back into held mode with nobody reading
@@ -452,9 +489,17 @@ export function createGmAttentionPanel({
     // keyboard route out of a hold entered by focus alone. Catching up hides it
     // (and may retire the row the operator was reading), so focus has to be put
     // somewhere on purpose rather than left on a `display: none` button.
+    //
+    // It lands on the panel's own status sentence — the landmark, never a row
+    // control. A row control would put focus straight back inside the list the
+    // operator just asked to stop holding: in a real browser the click that
+    // ended the hold focuses the button, the rescue then moves to a surviving
+    // row's Open verb, and the next projection holds the list again with nobody
+    // reading. The sentence is inside the region, is the line that just
+    // changed, and holds nothing.
     const rescuing = !!(focused && root && root.contains(focused));
     render();
-    if (rescuing) rescueFocus(anchorId ? [anchorId] : [], 'open');
+    if (rescuing) (statusEl || listEl)?.focus({ preventScroll: true });
   }
 
   /** Repaint ages and let an expired snooze bring its row back. */
@@ -525,8 +570,11 @@ export function createGmAttentionPanel({
       return;
     }
     // Open: mark the row as the one being read (which holds the list), then
-    // hand its EXISTING target to the host. No simulation command, no panel
-    // switch, no dialog.
+    // hand its EXISTING target to the host — the authored Comms route for a
+    // conversation, the authored beat's own mission-panel row for a beat. No
+    // simulation command, no dialog, and above all no Fire: the row takes the
+    // operator to the controls, and the operator presses them, where the
+    // ordinary admission check and the ordinary apply-tick revalidation are.
     selectedId = id;
     held = true;
     for (const other of listEl ? listEl.querySelectorAll('li[data-selected]') : []) delete other.dataset.selected;

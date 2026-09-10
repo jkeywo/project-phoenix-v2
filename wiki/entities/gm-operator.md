@@ -356,6 +356,14 @@ consumes an armed Skip: only a qualifying automatic occurrence consumes it
 while the event remains present. `FireGmEvent`, `SetEventPaused`, and `ArmGmEventSkip` use the same
 attributed canonical action journal as session controls.
 
+`src/gm_attention.rs` lists the beats whose Fire would land right now in the
+peer-local attention queue (`gui/gm-attention-panel.js`), reading that same
+control state plus `world::content::manual_fire_would_land` — the predicate
+`fire_manual_trigger` itself applies — so nothing is evaluated twice and no
+handler runs. `.attention_band(...)` on the control set chooses the row's band.
+Activating a beat row focuses that beat's existing mission-panel levers
+(`focusEvent`); it never fires anything.
+
 `src/gm_objective.rs` resolves `[[gm_objective_palette]]` entries and handles
 `ObjectiveAction` activation, completion and failure through the ordinary
 Objective lifecycle. Authored recipient ships are separate from subject

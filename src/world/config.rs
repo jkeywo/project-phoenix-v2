@@ -1195,6 +1195,24 @@ pub struct GmEventControls {
     /// on one is a load-time error rather than a lever that could never do
     /// anything.
     pub skip: bool,
+    /// The author's GM-attention band for this beat (issue #1434), declared by
+    /// the `.attention_band("…")` sibling modifier. `None` means the system
+    /// default, which is `attention`.
+    ///
+    /// Stored as the authored SPELLING rather than a parsed band for the same
+    /// reason `[[gm_comms_route]].attention_band` is (issue #1433): the band
+    /// vocabulary belongs to the GM attention projection, this struct belongs
+    /// to world config, and the one place that turns a word into a band is
+    /// [`crate::gm_attention::GmAttentionBand::from_authored`]. An invented
+    /// word never reaches here — both the authoring host fn and the load-time
+    /// validation pass refuse it, naming the three bands — so a reader that
+    /// still cannot parse one falls back to the default rather than inventing
+    /// a priority nobody chose.
+    ///
+    /// It is triage metadata for one operator's own desk: it changes nothing
+    /// about when the beat fires, what its handler does, or what any crew
+    /// console sees.
+    pub attention_band: Option<String>,
 }
 
 impl GmEventControls {
@@ -1282,7 +1300,27 @@ impl GmEventControls {
             fire: true,
             pause: false,
             skip: false,
+            attention_band: None,
         }
+    }
+
+    /// The one place an authored GM-attention band is accepted or refused
+    /// (issue #1434), shared by the `.attention_band(…)` host fn and the
+    /// load-time validation pass so the two cannot drift — exactly as
+    /// [`Self::validate_authored`] and [`Self::validate_skip_condition`] are
+    /// shared.
+    ///
+    /// Refusal names the three bands, because an author who wrote `critical`
+    /// believed this build does something it does not, and guessing on their
+    /// behalf is how a scenario ships with a priority nobody chose.
+    pub fn validate_attention_band(band: &str) -> Result<(), String> {
+        if crate::gm_attention::GmAttentionBand::from_authored(band).is_some() {
+            return Ok(());
+        }
+        Err(format!(
+            "attention_band '{band}' is not a GM attention band: write one of {}",
+            crate::gm_attention::GmAttentionBand::authored_vocabulary()
+        ))
     }
 }
 

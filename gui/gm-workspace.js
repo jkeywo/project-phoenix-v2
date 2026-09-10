@@ -222,11 +222,16 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   const gmAttentionPanel = createGmAttentionPanel({
     doc: doc, t, has,
     filters: gmAttentionFilters,
-    // Opening a row is a NAVIGATION to the conversation route that already
-    // exists on this desk. No GmAction, no dialog, no panel switch.
+    // Opening a row is a NAVIGATION to something that already exists on this
+    // desk — the authored conversation route, or (issue #1434) the authored
+    // beat's own mission-panel row, carrying the Fire/Pause/Skip its author
+    // declared. No GmAction, no dialog, no panel switch: the operator presses
+    // the lever, and that press takes the ordinary admission check and the
+    // ordinary apply-tick revalidation with it.
     onOpen: (occurrence) => {
       if (occurrence.target.ship) gmProjection.select(occurrence.target.ship.entity_id);
       if (occurrence.target.route) gmCommsPanel.focusRoute(occurrence.target.route);
+      if (occurrence.target.event) gmMissionPanel.focusEvent(occurrence.target.event.id);
     },
   });
   repaintGmAttention = gmAttentionPanel.repaint;

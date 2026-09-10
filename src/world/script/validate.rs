@@ -129,7 +129,10 @@ pub fn validate_script_triggers(
 ///    [`GmEventControls::validate_skip_condition`] defines, checked again here
 ///    for (1)'s reason. A manual event has no automatic occurrence, so its
 ///    Skip could never be consumed: it would publish a mission-panel button an
-///    operator can press for ever with no possible effect.
+///    operator can press for ever with no possible effect;
+/// 4. an invented GM-attention band (issue #1434) — the rule
+///    [`GmEventControls::validate_attention_band`] defines, checked again here
+///    for (1)'s reason.
 ///
 /// (2) is an error rather than a tolerated duplicate, and this is deliberately
 /// stricter than `ResetTrigger`'s `Trigger::id` lookup, which re-arms EVERY
@@ -172,6 +175,19 @@ pub fn validate_gm_events(script_triggers: &[ScriptTrigger]) -> Vec<WorldFinding
         if let Err(message) = skip_placement {
             findings.push(gm_event_finding(&st.source_path, &controls.id, message));
             continue;
+        }
+        // (4) an invented GM-attention band (issue #1434) — the exact rule
+        // `GmEventControls::validate_attention_band` defines, checked again
+        // here for (1)'s reason. A beat whose band nobody can parse would land
+        // silently in the default one, which is a priority the author did not
+        // choose turning up on a live facilitator's desk.
+        if let Some(band) = controls.attention_band.as_deref() {
+            if let Err(message) =
+                crate::world::config::GmEventControls::validate_attention_band(band)
+            {
+                findings.push(gm_event_finding(&st.source_path, &controls.id, message));
+                continue;
+            }
         }
         if !seen.insert(controls.id.as_str()) {
             findings.push(gm_event_finding(
@@ -920,6 +936,53 @@ mod tests {
         assert!(validate_gm_events(&[automatic]).is_empty());
 
         // And a manual event that declares no Skip is clean, as it always was.
+        assert!(validate_gm_events(&[gm_event_trigger(
+            "breach",
+            "world.gm.event.breach",
+            "w.toml#script.s"
+        )])
+        .is_empty());
+    }
+
+    /// Issue #1434: an invented GM-attention band is refused by THIS pass too,
+    /// not only by the `.attention_band(…)` host fn, so a control set that
+    /// reaches here from anywhere meets the same rule. A band nobody can parse
+    /// would otherwise land the beat silently in the default one — a priority
+    /// the author did not choose, on a live facilitator's desk.
+    #[test]
+    fn an_invented_attention_band_blocks_activation_at_the_validation_pass_too() {
+        let mut invented = gm_event_trigger("breach", "world.gm.event.breach", "w.toml#script.s");
+        invented
+            .trigger
+            .gm_controls
+            .as_mut()
+            .expect("controls")
+            .attention_band = Some("critical".to_string());
+        let findings = validate_gm_events(&[invented.clone()]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, INVALID_GM_EVENT);
+        assert_eq!(findings[0].source.reference, "breach");
+        // The refusal names what to write instead.
+        assert!(
+            findings[0].message.contains("'urgent'")
+                && findings[0].message.contains("'attention'")
+                && findings[0].message.contains("'background'"),
+            "{}",
+            findings[0].message
+        );
+        assert!(crate::world::validate::has_error(&findings));
+
+        // Each of the three authored spellings is clean, and so is no band.
+        for band in ["urgent", "attention", "background"] {
+            let mut authored = invented.clone();
+            authored
+                .trigger
+                .gm_controls
+                .as_mut()
+                .expect("controls")
+                .attention_band = Some(band.to_string());
+            assert!(validate_gm_events(&[authored]).is_empty(), "{band}");
+        }
         assert!(validate_gm_events(&[gm_event_trigger(
             "breach",
             "world.gm.event.breach",

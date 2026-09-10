@@ -40,9 +40,13 @@ A session's map composition and scenario script share one world asset:
 GM-operable event registrations share the ordinary script trigger pipeline:
 `gm_event(id, label, handler)` declares a manual event, while
 `.gm_controls(id, label)` adds controls to an automatic registration.
-`.pauseable()` and `.skip()` add per-event Pause/Resume and Skip-next.
+`.pauseable()` and `.skip()` add per-event Pause/Resume and Skip-next, and
+`.attention_band("urgent"|"attention"|"background")` sets where the beat sits in
+a Game Master's attention queue while it is eligible.
 `src/gm_event.rs` resolves their stable identities and mission projection;
 `WorldContentRuntime` holds their pending fires, pause state and skip arms.
+`src/gm_attention.rs` lists the eligible ones by READING that state and
+`world::content::manual_fire_would_land`, never by evaluating a condition twice.
 GM palette placements likewise enter ordinary `SpawnEntity` dispatch through
 `src/gm_spawn.rs`. See [GM Operator](../entities/gm-operator.md) for action and
 browser navigation.

@@ -1,8 +1,10 @@
-//! Peer-local Game Master attention queue (issue #1433 / PRD #1419 M4).
+//! Peer-local Game Master attention queue (issues #1433 and #1434, PRD #1419
+//! M4).
 //!
 //! One advisory projection answers "what is waiting for a Game Master right
-//! now". It reads facts the simulation already owns — today the ordinary Comms
-//! inbox and the authored `[[gm_comms_route]]` table — and publishes them onto
+//! now". It reads facts the simulation already owns — the ordinary Comms
+//! inbox, the authored `[[gm_comms_route]]` table, and (issue #1434) the
+//! ordinary trigger table with its GM event controls — and publishes them onto
 //! the page-local `gm_attention` Host Channel.
 //!
 //! # What this is NOT
@@ -24,13 +26,47 @@
 //! after the first was answered — is a different message and therefore a fresh
 //! occurrence that no stale snooze can hide.
 //!
+//! An eligible beat (issue #1434) has no per-occurrence identity of its own to
+//! borrow — a repeatable event is the SAME authored trigger every time it comes
+//! back — so the same two rules are made true by hand: the id is the
+//! layer-qualified event id plus an occurrence ordinal this peer increments
+//! each time the beat re-enters eligibility. The row is stable for as long as
+//! the beat stays ready, and a beat that fires and becomes ready again is a
+//! genuinely new occurrence, not the old one returning with a stale snooze on
+//! it. The ordinal is private presentation bookkeeping and reaches nothing
+//! authoritative.
+//!
+//! # Eligibility is READ, never re-derived
+//!
+//! "Eligible" means exactly one thing: a Fire of this beat would land right
+//! now. That question is answered by
+//! [`crate::world::content::manual_fire_would_land`] — literally the predicate
+//! [`crate::world::content::fire_manual_trigger`] itself applies, extracted so
+//! that a reader and the writer cannot drift — plus the GM control state the
+//! mission panel already publishes. No trigger condition is matched a second
+//! time, no Rhai runs, no handler is dispatched and no latch, cooldown clock or
+//! `seen_destroyed` set moves. Inspecting the queue must never be a way of
+//! advancing the world.
+//!
+//! The lifecycle states the existing control contract already defines are what
+//! withhold or resolve a row: a spent one-shot (completed), an event a GM has
+//! PAUSED, an armed Fire (the GM already acted, the handler has not run yet),
+//! an armed Skip (the GM has decided to spend the next occurrence quietly), a
+//! false `when` predicate or an unelapsed cooldown. None of them is a second
+//! rule invented here; every one is read from the state the ordinary evaluator
+//! and the ordinary GM action reducer maintain.
+//!
 //! # Bands
 //!
-//! Three bands, `Urgent`/`Attention`/`Background`. Pending Comms default to
-//! `Attention`; a scenario author may say otherwise on the route the sender
-//! speaks through ([`GmCommsRoute::attention_band`]). The band is GM-facing
-//! triage only: it does not touch `CommsPriority`, delivery, routing or
-//! anything a crew console renders.
+//! Three bands, `Urgent`/`Attention`/`Background`. Pending Comms and eligible
+//! beats both default to `Attention`; a scenario author may say otherwise on
+//! the route the sender speaks through ([`GmCommsRoute::attention_band`]) or on
+//! the beat's own control set
+//! ([`GmEventControls::attention_band`](crate::world::config::GmEventControls::attention_band)).
+//! The band is GM-facing triage only: it does not touch `CommsPriority`,
+//! delivery, routing, when a beat fires, or anything a crew console renders.
+//! Technical warnings (issue #1437) are not occurrences at all and take no
+//! authored band — see the banner seam in `gui/gm-attention-panel.js`.
 
 use std::collections::BTreeMap;
 
@@ -94,13 +130,15 @@ impl GmAttentionBand {
     }
 }
 
-/// Why a row is in the queue. One variant today; `#1437`'s technical banners
-/// are deliberately NOT a category — see the module note on the banner seam in
+/// Why a row is in the queue. `#1437`'s technical banners are deliberately NOT
+/// a category — see the module note on the banner seam in
 /// `gui/gm-attention-panel.js`.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum GmAttentionCategory {
     PendingComms,
+    /// An authored beat a Game Master could release right now (issue #1434).
+    EligibleBeat,
 }
 
 /// The short human reason, as a String Table id plus its runtime parameters.
@@ -132,6 +170,32 @@ pub struct GmAttentionTarget {
     /// The conversation thread, so a later surface can open the exact exchange.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<String>,
+    /// The authored beat this row is about, and which of its levers the mission
+    /// panel is already offering (issue #1434).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<GmAttentionEventTarget>,
+}
+
+/// The GM-operable event one eligible-beat row points at (issue #1434).
+///
+/// Every field is a copy of something [`crate::gm_event::GmMissionEvent`]
+/// already publishes on `gm_mission`. It is repeated here so a row can say
+/// which controls exist without the panel having to join two projections —
+/// never so that the attention queue can offer a control of its own. Opening a
+/// row is navigation to the mission panel's existing row; the Fire, Pause and
+/// Skip a GM then presses are that panel's buttons, taking that panel's
+/// admission check and the apply-tick revalidation
+/// ([`crate::gm_event::fireable_index`] and its twins) with them.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GmAttentionEventTarget {
+    /// The layer-qualified id a `FireGmEvent` action names.
+    pub id: String,
+    /// String Table id for the authored label.
+    pub label: String,
+    /// The levers this beat DECLARES, exactly as the mission panel lists them.
+    pub fire: bool,
+    pub pause: bool,
+    pub skip: bool,
 }
 
 /// One thing waiting for a Game Master.
@@ -169,12 +233,43 @@ struct FirstSeen {
 }
 
 /// This peer's own attention bookkeeping. `Presentation`: derived entirely from
-/// the Comms inbox and the authored route table, both already classified, and
-/// read by nothing authoritative.
+/// the Comms inbox, the authored route table and the ordinary trigger table,
+/// all already classified, and read by nothing authoritative.
 #[derive(Resource, Default)]
 pub struct GmAttentionState {
     first_seen: BTreeMap<String, FirstSeen>,
+    /// Which occurrence of each authored beat is on the desk (issue #1434).
+    beats: BTreeMap<String, BeatOccurrence>,
     last: Option<GmAttentionProjection>,
+}
+
+/// The authored beat's own lifecycle stamp, read straight off the trigger state
+/// the ordinary evaluator maintains (issue #1434).
+///
+/// It is what makes "this is a DIFFERENT occurrence" a fact about the world
+/// rather than about how often this peer happened to look: the stamp moves
+/// exactly when the beat fires (and moves back when a scenario's
+/// `reset_trigger` re-arms it), whether or not any frame in between caught the
+/// beat mid-flight.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct BeatStamp {
+    fired: bool,
+    last_fired_elapsed: Option<f32>,
+}
+
+/// One beat's occurrence bookkeeping on this peer.
+#[derive(Clone, Copy, Debug, Default)]
+struct BeatOccurrence {
+    /// Incremented once per occurrence, so a snooze, a focus ring or a reading
+    /// position taken against a beat that has since fired cannot be inherited
+    /// by the next time it comes round.
+    ordinal: u64,
+    /// The stamp the CURRENT occurrence began on.
+    stamp: BeatStamp,
+    /// Was the beat eligible at the last publish? A beat that goes ineligible
+    /// and comes back — an authored gate closing and reopening — ended one
+    /// occurrence and began another just as surely as a firing does.
+    eligible: bool,
 }
 
 impl GmAttentionState {
@@ -242,6 +337,26 @@ pub const PENDING_COMMS_REASON: &str = "server.gm.attention.reason.pending_comms
 /// and its own parameter set rather than a blank.
 pub const PENDING_COMMS_FLEET_REASON: &str = "server.gm.attention.reason.pending_comms_fleet";
 
+/// The String Table id an eligible MANUAL beat explains itself with. Takes
+/// `{beat}`, the authored label id.
+///
+/// Its own sentence because a `gm_event` beat has no automatic condition at
+/// all: nothing but a Game Master can ever cause it, so "ready" means "nobody
+/// else is going to do this".
+pub const ELIGIBLE_BEAT_MANUAL_REASON: &str = "server.gm.attention.reason.eligible_beat_manual";
+
+/// The String Table id an eligible beat that ALSO has an automatic condition
+/// explains itself with. Takes `{beat}`.
+///
+/// The distinction is the one a facilitator actually acts on: this moment will
+/// arrive on its own if left alone, and Fire brings it forward. Saying "yours
+/// to start" about a wave that is already on a timer would be false.
+pub const ELIGIBLE_BEAT_REASON: &str = "server.gm.attention.reason.eligible_beat";
+
+/// The `event:` prefix every eligible-beat occurrence id carries, so a page can
+/// tell one row's family from another's without parsing the category twice.
+pub const ELIGIBLE_BEAT_ID_PREFIX: &str = "event:";
+
 fn reference(uuid: &str, names: &BTreeMap<String, String>) -> GmEntityReference {
     GmEntityReference {
         entity_id: uuid.to_string(),
@@ -303,8 +418,105 @@ fn collect(
                 ship,
                 sender: Some(sender),
                 conversation: (!message.thread_id.is_empty()).then(|| message.thread_id.clone()),
+                event: None,
             },
         });
+    }
+    rows
+}
+
+/// Build the eligible-beat rows from the live trigger table (issue #1434).
+///
+/// The whole of the read is here, and every gate is somebody else's rule:
+///
+/// * no `gm_controls` — the trigger is not GM-addressable at all, which is the
+///   default for every trigger every shipped world already authors;
+/// * no Fire lever — a beat a GM cannot cause is not a beat waiting on one.
+///   Pause and Skip are levers ON an occurrence the world will produce, not
+///   ways to produce it, so they do not by themselves put a row on the desk;
+/// * PAUSED — the GM has already said "not now" about this exact event. (Fire
+///   still works while paused, deliberately; the queue withholds the row
+///   anyway, because a standing decision is not something to keep asking
+///   about.);
+/// * an armed Fire — the GM acted and the handler has not run yet;
+/// * an armed Skip — the GM decided to spend the next occurrence quietly;
+/// * anything [`manual_fire_would_land`](crate::world::content::manual_fire_would_land)
+///   declines: a spent one-shot (completed), a `when` predicate reading false,
+///   a cooldown that has not elapsed.
+///
+/// The id it returns is the beat's stable BASE key, paired with the beat's
+/// lifecycle stamp. The occurrence ordinal is attached by the publisher, which
+/// is the only place that knows what the previous occurrence was.
+fn collect_beats(
+    runtime: &crate::world::server::WorldContentRuntime,
+    layer_map: Option<&crate::world::server::WorldLayerMap>,
+    current_elapsed: f32,
+) -> Vec<(PendingRow, BeatStamp)> {
+    let mut rows = Vec::new();
+    for state in runtime.triggers.iter() {
+        let Some(controls) = state.trigger.gm_controls.as_ref() else {
+            continue;
+        };
+        if !controls.declares_fire() {
+            continue;
+        }
+        let id = crate::gm_event::qualified_event_id(state.origin_layer.as_deref(), &controls.id);
+        if runtime.paused_gm_events.contains(&id)
+            || runtime.pending_gm_event_fires.contains(&id)
+            || runtime.pending_gm_event_skips.contains(&id)
+        {
+            continue;
+        }
+        let chain = crate::world::server::layered_flag_chain(
+            state.origin_layer.as_deref(),
+            &runtime.flags,
+            layer_map,
+        );
+        if !crate::world::content::manual_fire_would_land(state, &chain, current_elapsed) {
+            continue;
+        }
+        // A manual beat is the Game Master's alone; anything else will also
+        // arrive on its own, and Fire only brings it forward.
+        let manual = matches!(
+            state.trigger.condition,
+            crate::world::config::TriggerCondition::Manual
+        );
+        rows.push((
+            PendingRow {
+                id: format!("{ELIGIBLE_BEAT_ID_PREFIX}{id}"),
+                category: GmAttentionCategory::EligibleBeat,
+                band: controls
+                    .attention_band
+                    .as_deref()
+                    .and_then(GmAttentionBand::from_authored)
+                    .unwrap_or(GmAttentionBand::Attention),
+                reason: GmAttentionReason {
+                    id: if manual {
+                        ELIGIBLE_BEAT_MANUAL_REASON.to_string()
+                    } else {
+                        ELIGIBLE_BEAT_REASON.to_string()
+                    },
+                    // The authored label id, not English: the page resolves it
+                    // through the same String Table the mission panel renders
+                    // the beat's own row with, so both name it identically.
+                    params: BTreeMap::from([("beat".to_string(), controls.label.clone())]),
+                },
+                target: GmAttentionTarget {
+                    event: Some(GmAttentionEventTarget {
+                        id,
+                        label: controls.label.clone(),
+                        fire: controls.fire,
+                        pause: controls.pause,
+                        skip: controls.skip,
+                    }),
+                    ..Default::default()
+                },
+            },
+            BeatStamp {
+                fired: state.fired,
+                last_fired_elapsed: state.last_fired_elapsed,
+            },
+        ));
     }
     rows
 }
@@ -313,12 +525,16 @@ fn collect(
 /// it changes. Never emits an unchanged payload: a GM desk that repainted a
 /// held list sixty times a second would defeat the reading stability this whole
 /// feature exists for.
+#[allow(clippy::too_many_arguments)]
 pub fn publish_attention_projection(
     world: Option<Res<WorldConfig>>,
     inbox: Option<Res<CommsInboxRes>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
     entities: Query<(&EntityUuid, Option<&EntityName>)>,
     tick: Res<crate::sim_tick::SimTick>,
     real: Option<Res<Time<Real>>>,
+    sim_time: Option<Res<Time>>,
     mut state: ResMut<GmAttentionState>,
     mut writer: MessageWriter<GmAttentionChanged>,
 ) {
@@ -334,11 +550,55 @@ pub fn publish_attention_projection(
     let now_ms = real.map_or(0, |real| {
         real.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
     });
-    let rows = collect(
+    let mut rows = collect(
         world.as_deref(),
         inbox.as_deref().map_or(&EMPTY_INBOX, |inbox| &inbox.0),
         &names,
     );
+    if let Some(runtime) = runtime.as_deref() {
+        // The same world-elapsed clock `collect_world_events` stamps its
+        // `TimerElapsed` with, so the cooldown gate reads eligibility off the
+        // clock the evaluator itself will use, not a second one. No anchor
+        // means the mission clock has not started, and a cooldown measured
+        // from zero is the same answer the pipeline would give.
+        let elapsed = sim_time
+            .as_deref()
+            .zip(runtime.mission_clock_anchor_secs)
+            .map_or(0.0, |(time, anchor)| {
+                (time.elapsed_secs() - anchor).max(0.0)
+            });
+        let beats = collect_beats(runtime, layers.as_deref(), elapsed);
+        // A new occurrence begins when the previous one ENDED — the beat fired
+        // (its stamp moved), or it stopped being eligible and came back. A beat
+        // that is simply still ready keeps the id, and therefore the snooze,
+        // the focus ring and the reading position, it already had.
+        let mut eligible_now = std::collections::BTreeSet::new();
+        for (mut row, stamp) in beats {
+            let base = std::mem::take(&mut row.id);
+            let entry = state.beats.entry(base.clone()).or_default();
+            if !entry.eligible || entry.stamp != stamp {
+                entry.ordinal += 1;
+                entry.stamp = stamp;
+            }
+            row.id = format!("{base}#{}", entry.ordinal);
+            eligible_now.insert(base);
+            rows.push(row);
+        }
+        // Bookkeeping is kept for every beat the LIVE table can still answer
+        // to, not only the eligible ones: a beat that fires and comes back is
+        // the case the ordinal exists for, and it is ineligible in between. A
+        // layer unload takes its beats' bookkeeping with it, exactly as it
+        // takes their arms.
+        let addressable: std::collections::BTreeSet<String> =
+            crate::gm_event::live_event_ids(&runtime.triggers)
+                .into_iter()
+                .map(|id| format!("{ELIGIBLE_BEAT_ID_PREFIX}{id}"))
+                .collect();
+        state.beats.retain(|base, _| addressable.contains(base));
+        for (base, entry) in state.beats.iter_mut() {
+            entry.eligible = eligible_now.contains(base);
+        }
+    }
 
     // Retire the bookkeeping for anything that stopped holding, so a recurrence
     // that somehow reused an identity still gets a fresh age rather than

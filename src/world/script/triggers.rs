@@ -669,6 +669,68 @@ pub(crate) fn register_trigger_builders(
         },
     );
 
+    // 17. The GM-attention band of a declared beat (issue #1434).
+    //
+    // `on_timer(45, "h").gm_controls("wave_2", "…").attention_band("background")`
+    // — a sibling modifier for `.pauseable()`'s reason, and it says one thing:
+    // where this beat sits in the Game Master's own attention queue while it is
+    // eligible. Urgent, Attention (the default) or Background, and nothing
+    // else; an invented word is a load-time error naming the three, not a beat
+    // that silently lands in a band the author did not choose.
+    //
+    // What it is NOT: it does not change when the beat fires, what its handler
+    // does, whether the crew see anything, or what any other operator's desk
+    // shows. It is triage metadata on one private, advisory, peer-local list —
+    // which is exactly why an author may set it and why setting it can never be
+    // a route into the simulation.
+    //
+    // It requires a control set to already exist, the same guard `.pauseable()`
+    // has and for the same reason: a band with no event identity has no row to
+    // belong to. Declaring it twice is deliberately fine — the second word can
+    // only change this beat's own band, unlike a second `gm_controls`, which
+    // would re-identify the event.
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "attention_band",
+        receiver = "trigger",
+        category = "trigger",
+        params = ["band"],
+        summary = "Set where this beat sits in a Game Master's attention queue \
+                  while it is eligible: `.gm_controls(id, label)\
+                  .attention_band(\"background\")`. One of \"urgent\", \
+                  \"attention\" (the default) or \"background\". Advisory \
+                  triage only: it changes nothing about when the beat fires or \
+                  what the crew see. Needs a preceding gm_event(...) or \
+                  .gm_controls(...).",
+        move |handle: &mut TriggerHandle,
+              band: ImmutableString|
+              -> Result<TriggerHandle, Box<EvalAltResult>> {
+            GmEventControls::validate_attention_band(&band)
+                .map_err(|message| raise(format!("attention_band(): {message}")))?;
+            let mut st = s.lock().expect("builder state lock");
+            let index = handle.index;
+            match st.script_triggers.get_mut(index) {
+                Some(t) => match t.trigger.gm_controls.as_mut() {
+                    Some(controls) => {
+                        controls.attention_band = Some(band.to_string());
+                        Ok(*handle)
+                    }
+                    None => Err(raise(
+                        "attention_band(): this registration declares no GM \
+                         controls; call gm_event(id, label, handler) or \
+                         .gm_controls(id, label) first"
+                            .to_string(),
+                    )),
+                },
+                // Unreachable through the front-end, exactly as in `when` below.
+                None => Err(raise(format!(
+                    "attention_band(): trigger handle {index} names no registered trigger"
+                ))),
+            }
+        },
+    );
+
     // The trigger-LEVEL predicate gate, chained onto whichever registration just
     // ran: `on_all_destroyed("hostiles", "h").when("counter(waves) >= 8")`.
     //

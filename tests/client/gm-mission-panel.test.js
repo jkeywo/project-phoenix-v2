@@ -684,3 +684,67 @@ describe('GM mission panel', () => {
     expect(panel.state().pending).toBe(1);
   });
 });
+
+/**
+ * The navigation the GM attention queue performs when an eligible beat's row is
+ * opened (issue #1434). It is navigation and nothing else: no lever is pressed,
+ * no command is submitted, and a beat this panel does not hold is refused.
+ */
+describe('GM mission panel: opening a beat from the attention queue', () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <section id="gm-mission-panel">
+        <h2 id="gm-mission-heading"></h2>
+        <ul id="gm-mission-events"></ul>
+        <p id="gm-mission-empty"></p>
+        <p id="gm-mission-feedback"></p>
+        <h3 id="gm-mission-log-heading"></h3>
+        <ol id="gm-mission-log"></ol>
+      </section>
+    `;
+  });
+
+  it('marks the beat row and focuses its Fire lever without pressing anything', () => {
+    const { panel, submitFireEvent } = mount();
+    panel.update({
+      events: [
+        event({ id: 'base-world::brief' }),
+        event({ id: 'base-world::relief', pause: true, skip: true }),
+      ],
+      results: [],
+    });
+
+    expect(panel.focusEvent('base-world::relief')).toBe(true);
+    const row = document.querySelector('li[data-event-id="base-world::relief"]');
+    expect(row.dataset.opened).toBe('true');
+    // Fire first: it is the lever an eligible beat is in the queue for.
+    expect(document.activeElement).toBe(fireButton('base-world::relief'));
+    // Navigation only — the operator still has to press it.
+    expect(submitFireEvent).not.toHaveBeenCalled();
+
+    // Only one row is ever marked as the one the operator was sent to.
+    expect(panel.focusEvent('base-world::brief')).toBe(true);
+    expect(document.querySelectorAll('li[data-opened]').length).toBe(1);
+    expect(document.querySelector('li[data-event-id="base-world::brief"]').dataset.opened).toBe('true');
+    panel.destroy();
+  });
+
+  it('falls through to the next declared lever, and refuses a beat it does not hold', () => {
+    const { panel, submitFireEvent, submitSetEventPaused } = mount();
+    // A spent one-shot that is still pausable: Fire is refused, Pause is not.
+    panel.update({
+      events: [event({ id: 'base-world::relief', spent: true, pause: true })],
+      results: [],
+    });
+    expect(panel.focusEvent('base-world::relief')).toBe(true);
+    expect(fireButton('base-world::relief').disabled).toBe(true);
+    expect(document.activeElement).toBe(pauseButton('base-world::relief'));
+    expect(submitFireEvent).not.toHaveBeenCalled();
+    expect(submitSetEventPaused).not.toHaveBeenCalled();
+
+    // A beat this projection does not list is not invented a control to click.
+    expect(panel.focusEvent('base-world::gone')).toBe(false);
+    expect(panel.focusEvent('')).toBe(false);
+    panel.destroy();
+  });
+});

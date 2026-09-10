@@ -252,6 +252,11 @@ mod tests {
         // spend is the author's judgement, and the mission panel can only offer
         // what a scenario declares.
         ("trigger", "skip", &[]),
+        // The GM-attention band of that declaration (issue #1434). Exposed for
+        // the same reason once more: how loudly an eligible beat asks for a
+        // Game Master's attention is the author's judgement, and the attention
+        // queue can only band what a scenario declares.
+        ("trigger", "attention_band", &["band"]),
         ("trigger", "when", &["predicate"]),
         ("trigger", "repeat", &[]),
         ("trigger", "repeatable", &[]),

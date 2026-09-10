@@ -48,6 +48,46 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   expect(scaled.scroll).toBeLessThanOrEqual(scaled.width);
   expect(scaled.body).toBeLessThanOrEqual(scaled.viewport);
   expect(scaled.fontPx).toBeGreaterThanOrEqual(28);
+  // An eligible authored beat (issue #1434) is a row in that same queue, so it
+  // meets the same contract: fed through the REAL host channel, its band reads
+  // as a word, its reason is a sentence, and both of its verbs are still on
+  // screen and pressable at 200% without the desk scrolling sideways.
+  await page.evaluate(() => window.__hostChannel('gm_attention', JSON.stringify({
+    occurrences: [{
+      id: 'event:base-world::smoke#1',
+      category: 'eligible_beat',
+      band: 'background',
+      first_seen_tick: 1,
+      age_ms: 1000,
+      reason: {
+        id: 'server.gm.attention.reason.eligible_beat_manual',
+        params: { beat: 'server.gm.mission.heading' },
+      },
+      target: {
+        event: {
+          id: 'base-world::smoke', label: 'server.gm.mission.heading',
+          fire: true, pause: false, skip: false,
+        },
+      },
+    }],
+  })));
+  const beatRow = page.locator('#gm-attention-list li[data-occurrence-id="event:base-world::smoke#1"]');
+  await expect(beatRow).toBeVisible();
+  await expect(beatRow.locator('.gm-attention-band')).toHaveText(/\S/);
+  await expect(beatRow.locator('.gm-attention-reason')).toHaveText(/\S/);
+  await expect(beatRow.locator('button[data-action="open"]')).toBeVisible();
+  await expect(beatRow.locator('button[data-action="snooze"]')).toBeVisible();
+  const withBeat = await page.locator('#gm-workspace').evaluate(el => ({
+    scroll: el.scrollWidth,
+    width: el.clientWidth,
+    body: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(withBeat.scroll).toBeLessThanOrEqual(withBeat.width);
+  expect(withBeat.body).toBeLessThanOrEqual(withBeat.viewport);
+  // The keyboard reaches the row's verbs, and reading one holds the list.
+  await beatRow.locator('button[data-action="open"]').focus();
+  expect(await page.evaluate(() => document.activeElement?.dataset?.action)).toBe('open');
   const doubled = testInfo.outputPath('gm-screen-1280-200pc.png');
   await page.screenshot({path:doubled});
   await testInfo.attach('GM 1280×720 at 200% text', {path:doubled,contentType:'image/png'});

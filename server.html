@@ -354,6 +354,11 @@
        operator did and can undo. */
     .gm-mission-event[data-paused="true"] .gm-mission-event-state { color: var(--ink-primary); }
     .gm-mission-event[data-paused="true"] { border-left: 2px solid var(--edge-bright); padding-left: .5rem; }
+    /* The row the attention queue just sent the operator to (issue #1434). The
+       lever it focused carries the real status; this only says "you were
+       brought here", and it is an outline rather than a colour so it survives
+       forced colours. */
+    .gm-mission-event[data-opened="true"] { outline: 2px dashed var(--edge-bright); outline-offset: 2px; }
     .gm-mission-event button {
       min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
       background: var(--surface-panel-up); border: 1px solid var(--edge-bright);

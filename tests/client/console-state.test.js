@@ -4767,4 +4767,38 @@ describe('withVisitingSystems', () => {
       .filter(name => parse(withVisitingSystems(name, state, '{}')).hosted_systems.includes('comms'));
     expect(hosting).toEqual(['engineering']);
   });
+
+  // The Command auxiliary (issues #1107/#1387) can never be opened by id
+  // through a host's payload either, not only through the hero-bar tab: when
+  // its directed target is human-controlled it has nothing to direct, so
+  // `withVisitingSystems` must drop it from the visiting list the same way
+  // `gui/hero-bar.js`'s `commandStationDirectable` drops its tab.
+  describe('a Command visiting system (issues #1107/#1387)', () => {
+    it('is omitted from the host payload when its target is human-controlled', () => {
+      const state = {
+        stationSystems: { captain: ['captain'] },
+        blackboards: { command: { host_station: 'captain', directed_station_ai: false } },
+      };
+      const s = parse(withVisitingSystems('captain', state, '{}'));
+      expect(s.hosted_systems).toEqual(['captain']);
+      expect(s.systems).toBeUndefined();
+    });
+
+    it('is kept in the host payload when its target is AI-controlled', () => {
+      const state = {
+        stationSystems: { captain: ['captain'] },
+        systemConsoleFamilies: { command: 'command' },
+        blackboards: { command: { host_station: 'captain', directed_station_ai: true } },
+      };
+      const s = parse(withVisitingSystems('captain', state, '{}'));
+      expect(s.hosted_systems).toContain('command');
+      expect(s.systems.command).toBeDefined();
+    });
+
+    it('leaves a non-Command visiting system unaffected by the directability rule', () => {
+      const state = seek({ comms: 'engineering' });
+      const s = parse(withVisitingSystems('engineering', state, '{}'));
+      expect(s.hosted_systems).toContain('comms');
+    });
+  });
 });

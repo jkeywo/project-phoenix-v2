@@ -967,6 +967,7 @@ describe("the cruiser's Command tab (issue #1387)", () => {
       human_seeking: st.human_seeking === true,
       visiting_rating: st.visiting_rating,
       auxiliary: st.auxiliary === true,
+      command_target: st.command_target ?? null,
     }));
   }
 
@@ -981,10 +982,11 @@ describe("the cruiser's Command tab (issue #1387)", () => {
       human_seeking: true,
       auxiliary: true,
       visiting_rating: 'Std',
+      command_target: 'tactical',
     });
   });
 
-  it('puts a CMD tab on the Captain once the host resolves Command there', () => {
+  it('puts a CMD tab on the Captain once the host resolves Command there and Tactical is AI-run', () => {
     const model = heroBarModel({
       directStation: 'captain',
       stations: cruiserStations(),
@@ -995,6 +997,9 @@ describe("the cruiser's Command tab (issue #1387)", () => {
         comms: { station: 'comms', host: null, rating: 'Backfill' },
         navigation: { station: 'navigation', host: null, rating: 'Backfill' },
       },
+      // Command has something to direct: Tactical (its `command_target`) is
+      // AI-controlled, per `src/console/command/server.rs::station_is_ai_controlled`.
+      blackboards: { command: { directed_station_ai: true } },
       stationRatings: { captain: 'Std' },
       activeStation: 'captain',
     });
@@ -1012,11 +1017,78 @@ describe("the cruiser's Command tab (issue #1387)", () => {
       directStation: 'helm',
       stations: cruiserStations(),
       stationHosts: { command: { station: 'command', host: null, rating: 'Backfill' } },
+      // Command itself runs on the ship AI here, but it still has a directable
+      // target, so it stays a real (if AI-run) Station rather than vanishing.
+      blackboards: { command: { directed_station_ai: true } },
       stationRatings: { helm: 'Std' },
       activeStation: 'helm',
     });
     expect(model.tabs.map(tab => tab.id)).toEqual(['helm']);
     expect(model.ownership.command).toBe('ai');
     expect(model.aiStations.map(st => st.id)).toContain('command');
+  });
+
+  it('hides the tab entirely when Tactical (the directed target) is human-controlled', () => {
+    const model = heroBarModel({
+      directStation: 'captain',
+      stations: cruiserStations(),
+      stationHosts: {
+        command: { station: 'command', host: 'captain', rating: 'Std' },
+      },
+      blackboards: { command: { directed_station_ai: false } },
+      stationRatings: { captain: 'Std' },
+      activeStation: 'captain',
+    });
+    expect(model.tabs.map(tab => tab.id)).toEqual(['captain']);
+    expect(model.ownership.command).toBeUndefined();
+    expect(model.aiStations.map(st => st.id)).not.toContain('command');
+  });
+
+  it('hides the tab when there is no Command blackboard at all', () => {
+    const model = heroBarModel({
+      directStation: 'captain',
+      stations: cruiserStations(),
+      stationHosts: {
+        command: { station: 'command', host: 'captain', rating: 'Std' },
+      },
+      blackboards: {},
+      stationRatings: { captain: 'Std' },
+      activeStation: 'captain',
+    });
+    expect(model.tabs.map(tab => tab.id)).toEqual(['captain']);
+  });
+
+  it('never places a hidden directing Station in visiting/placements even off the direct seat', () => {
+    const model = heroBarModel({
+      directStation: 'helm',
+      stations: cruiserStations(),
+      stationHosts: {
+        command: { station: 'command', host: 'captain', rating: 'Std' },
+      },
+      blackboards: { command: { directed_station_ai: false } },
+      stationRatings: { helm: 'Std' },
+      activeStation: 'helm',
+    });
+    expect(model.tabs.map(tab => tab.id)).toEqual(['helm']);
+    expect(model.ownership.command).toBeUndefined();
+  });
+
+  it('leaves a non-command visiting Station unaffected by the directability rule', () => {
+    // The generic top-of-file `stations` fixture, not the cruiser's — Comms
+    // there is a real seat, never a visiting Station. `navigation` authors no
+    // `command_target`, so it must stay governed purely by `stationHosts`,
+    // exactly as before this change.
+    const model = heroBarModel({
+      directStation: 'helm', stations,
+      stationSystems: { navigation: ['navigation'] },
+      stationHosts: {
+        navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+      },
+      blackboards: {},
+      stationRatings: { helm: 'Std' },
+      activeStation: 'helm',
+    });
+    expect(model.tabs.map(tab => tab.id)).toEqual(['helm', 'navigation']);
+    expect(model.ownership.navigation).toBe('visiting');
   });
 });

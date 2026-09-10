@@ -986,6 +986,7 @@ mod tests {
             host_order: vec![],
             visiting_rating: auxiliary.then(|| "Std".into()),
             auxiliary,
+            command_target: None,
         };
         let stations = ShipStations {
             stations: vec![

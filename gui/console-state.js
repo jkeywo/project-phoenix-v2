@@ -87,6 +87,7 @@
 import { t } from './strings.js';
 import { withWeaponCooldowns } from './weapon-cooldown.js';
 import { buildTutorialState, migrateTutorialProgressForHull } from './tutorial-state.js';
+import { isCommandBoardDirectable } from './hero-bar.js';
 
 /**
  * Display name for a station id.
@@ -2567,8 +2568,22 @@ export function withVisitingSystems(consoleName, state, json) {
     const kept = authored.filter(id => !(id in hosts) || hosts[id] === consoleName);
     // Sorted so two clients with the same state produce the same payload
     // regardless of blackboard key order.
+    //
+    // A Command system whose directed Station is human-held is excluded
+    // outright (never folded into a host's `systems` map) — the same "hide
+    // when there is nothing to direct" rule `gui/hero-bar.js`'s
+    // `commandStationDirectable` applies to the tab, applied here so the
+    // Command console can never be opened by id through a visited payload
+    // either. Any other visiting system (no `directed_station_ai` field on
+    // its board) is untouched.
+    const boards = state.blackboards || {};
     const visiting = Object.keys(hosts)
       .filter(id => hosts[id] === consoleName && !authored.includes(id))
+      .filter(id => {
+        const board = boards[id];
+        const isCommandBoard = board && typeof board.directed_station_ai === 'boolean';
+        return !isCommandBoard || isCommandBoardDirectable(board);
+      })
       .sort();
     const obj = JSON.parse(json);
     obj.hosted_systems = kept.concat(visiting);

@@ -36,6 +36,13 @@ pub struct StationDef {
     pub visiting_rating: Option<String>,
     #[serde(default)]
     pub auxiliary: bool,
+    /// The Station this one directs when it is AI-controlled (mirrors
+    /// `StationConfig.command_target`). Only the auxiliary Command station
+    /// authors this today; absent for every other Station. The client uses it
+    /// to hide the directing Station's hero-bar tab when its target is
+    /// human-held (issue tracked alongside #1107/#1387's Command work).
+    #[serde(default)]
+    pub command_target: Option<StationId>,
 }
 
 /// Fixed-roster station configuration. Populated from `ShipConfigResource`
@@ -65,6 +72,7 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
             host_order: sc.host_order.clone(),
             visiting_rating: sc.visiting_rating.clone(),
             auxiliary: sc.auxiliary,
+            command_target: sc.command_target.clone(),
         })
         .collect();
     ShipStations { stations }

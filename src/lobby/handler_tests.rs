@@ -476,6 +476,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("helm".into()),
@@ -489,6 +490,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("tactical".into()),
@@ -502,6 +504,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("repair".into()),
@@ -515,6 +518,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("sensors".into()),
@@ -528,6 +532,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("shields".into()),
@@ -541,6 +546,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("navigation".into()),
@@ -554,6 +560,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("power".into()),
@@ -567,6 +574,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
             StationDef {
                 id: StationId("comms".into()),
@@ -580,6 +588,7 @@ fn ship_stations() -> ShipStations {
                 host_order: vec![],
                 visiting_rating: None,
                 auxiliary: false,
+                command_target: None,
             },
         ],
     }
@@ -2237,6 +2246,7 @@ fn joining_after_all_claimable_stations_are_held_becomes_spectator_despite_auxil
         host_order: vec![StationId("comms".into())],
         visiting_rating: Some("Std".into()),
         auxiliary: true,
+        command_target: None,
     });
     let mut sessions = SessionManager::new();
     for (index, station) in stations

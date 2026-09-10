@@ -1,0 +1,70 @@
+# The independent off switch, and the proof that it is independent (#1435).
+#
+# `idle_npc_disabled = true` silences the idle-NPC advisory for a scenario whose
+# hulls are MEANT to be parked. It must silence nothing else, so this world also
+# opens an ordinary world-authored conversation at t=0: the pending-Comms
+# occurrence that raises has to keep arriving while the idle rows stay away.
+#
+# The grace is retuned as well, on purpose. A short grace means the drifter is
+# long past its boundary by the time the test looks, so an empty idle queue here
+# can only be the off switch and never "not yet".
+[global]
+seed = 1435
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+sim_tick_hz = 30.0
+ai_tick_hz = 30.0
+ai_snapshot_hz = 10.0
+command_delay_ticks = 2
+
+[gm_attention]
+idle_npc_grace_secs = 1.0
+idle_npc_disabled = true
+
+[anchors]
+ironveil_patrol_a = [1200.0, 0.0, -1200.0]
+ironveil_patrol_b = [1600.0, 0.0, -1200.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_gm_idle_npc.drifter"
+transform = { position = [-4000.0, 0.0, 4000.0] }
+overrides = { behaviour = { doctrine = [] } }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_attention.speaker_fleet"
+transform = { position = [0.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[gm_comms_route]]
+id = "fleet-route"
+label = "world.probe_gm_attention.route.fleet"
+visibility = "selected_ships"
+senders = ["world.probe_gm_attention.speaker_fleet"]
+
+[script]
+setup = """
+on_timer(0, "on_start");
+
+fn on_start(ctx) {
+    ctx.effects.open_comms(#{
+        from: "world.probe_gm_attention.speaker_fleet",
+        node_fn: "fleet_offer"
+    });
+}
+
+fn fleet_offer(ctx) {
+    #{ message: "world.probe_gm_attention.offer_fleet", responses: [
+        #{ text: "world.probe_gm_attention.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+
+fn close_offer(ctx) { ctx.flags.increment("gm_attention_closed", 1); }
+"""

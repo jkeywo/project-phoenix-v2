@@ -1,0 +1,54 @@
+# Idle-NPC advisory probe for #1435, with NOTHING authored under
+# `[gm_attention]` — so this world exercises the shipped defaults: a thirty
+# SIMULATION-second grace, and the Background band.
+#
+# Three hulls, one of each kind the advisory has to tell apart:
+#
+#   * `fleet-ship-1` — the crew's own cruiser. It carries `FleetSlotOf`, so it
+#     is a player ship on every peer and is never watched, however little its
+#     crew is doing.
+#   * `world.probe_gm_idle_npc.picket` — a Harrow picket flying its template's
+#     own `patrol-ironveil` Patrol entry. A standing patrol IS an order, so this
+#     hull must never reach the queue no matter how long the probe runs.
+#   * `world.probe_gm_idle_npc.drifter` — the same hull with its doctrine
+#     cleared (`doctrine = []`, the documented way to empty an array in a
+#     per-instance override). No doctrine, no Objective: idle from tick zero.
+#
+# `sim_tick_hz` sits on the 30 Hz floor so the default thirty-second grace is
+# exactly 900 fixed steps — few enough for a headless test to walk to the
+# boundary and check both sides of it, and still the real authored default
+# rather than a shortened stand-in.
+[global]
+seed = 1435
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+sim_tick_hz = 30.0
+ai_tick_hz = 30.0
+ai_snapshot_hz = 10.0
+command_delay_ticks = 2
+
+# The picket's own line. Authored so the patrolling hull has somewhere real to
+# be, rather than scoring a directive that names nothing.
+[anchors]
+ironveil_patrol_a = [1200.0, 0.0, -1200.0]
+ironveil_patrol_b = [1600.0, 0.0, -1200.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_gm_idle_npc.picket"
+transform = { position = [1200.0, 0.0, -1200.0] }
+
+# Far enough from the cruiser that neither hull can see, reach or shoot the
+# other: this probe is about what a ship has been TOLD to do, and a firefight
+# would only prove that combat is not what the advisory reads.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_gm_idle_npc.drifter"
+transform = { position = [-4000.0, 0.0, 4000.0] }
+overrides = { behaviour = { doctrine = [] } }

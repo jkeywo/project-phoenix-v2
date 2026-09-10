@@ -2780,6 +2780,7 @@ server.gm.attention.band.attention,Middle GM attention band and the default for 
 server.gm.attention.band.background,Lowest GM attention band,[Background]
 server.gm.attention.band_heading,"Heading above one band's rows; {band} is the band name, {count} the number of rows",[{band} ({count})]
 server.gm.attention.category.pending_comms,Attention queue kind for an unanswered conversation,[Pending Comms]
+server.gm.attention.category.idle_npc,Attention queue kind for an NPC ship that has been given nothing to do,[Idle NPC]
 server.gm.attention.age,"How long an occurrence has been waiting, in real minutes and seconds",[Waiting {clock}]
 server.gm.attention.open,Button that opens the conversation an attention row names,[Open]
 server.gm.attention.snooze,Button that hides one attention row for one real minute,[Snooze 1 min]
@@ -2794,6 +2795,7 @@ server.gm.attention.category.eligible_beat,Attention queue kind for an authored 
 server.gm.attention.reason.eligible_beat_manual,"Why a manual authored beat is in the queue; {beat} is the beat's authored name",[{beat} is yours to start.]
 server.gm.attention.reason.eligible_beat,"Why an automatic authored beat a Game Master may also release is in the queue; {beat} is the beat's authored name",[{beat} can be released early.]
 server.gm.attention.open_beat,Button that takes the Game Master to the mission-panel controls an attention row names,[Open controls]
+server.gm.attention.reason.idle_npc,"Why an NPC ship is in the queue; {ship} is the hull and {idle} how long it has had no Objective and no order, in simulation minutes and seconds",[{ship} has had no Objective and no order for {idle}.]
 server.gm.comms.empty,GM Comms Studio #1317,"[This scenario offers no Comms routes.]"
 server.gm.comms.route,GM Comms Studio #1317,"[Authored routing visibility]"
 server.gm.comms.sender,GM Comms Studio #1317,"[Speak as]"
@@ -2848,6 +2850,9 @@ world.probe_gm_beats.beat.storm,GM eligible-beat probe #1434,[Storm front]
 world.probe_gm_beats.beat.open_gate,GM eligible-beat probe #1434,[Raise the storm warning]
 world.probe_gm_beats.beat.close_gate,GM eligible-beat probe #1434,[Stand the storm warning down]
 world.probe_gm_beats.beat.relief,GM eligible-beat probe #1434,[Relief convoy]
+world.probe_gm_idle_npc.picket,GM idle-NPC advisory probe #1435; the hull flying its own standing patrol,[Ironveil Picket]
+world.probe_gm_idle_npc.drifter,GM idle-NPC advisory probe #1435; the hull with no doctrine and no Objective,[Ironveil Drifter]
+world.probe_gm_idle_npc.doctrine.hold_station,GM idle-NPC advisory probe #1435; the order a GM can give the drifting hull,[Hold station on the picket line]
 server.gm.npc.heading,GM NPC doctrine heading,[NPC doctrine]
 server.gm.npc.select,GM NPC selection prompt,[Select an NPC on the map.]
 server.gm.npc.current,GM NPC current doctrine label,[Standing doctrine]

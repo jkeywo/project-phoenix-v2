@@ -55,7 +55,7 @@ import {
 
 /** Categories this build draws. Unknown categories still render (the reason id
  * carries the meaning); this list only seeds the filter's option order. */
-export const GM_ATTENTION_CATEGORIES = Object.freeze(['pending_comms', 'eligible_beat']);
+export const GM_ATTENTION_CATEGORIES = Object.freeze(['pending_comms', 'eligible_beat', 'idle_npc']);
 
 /** Ages repaint on this cadence. Slow enough to be free, fast enough that a
  * sixty-second snooze visibly expires. */
@@ -318,8 +318,14 @@ export function createGmAttentionPanel({
       Object.entries(occurrence.reason.params || {}).map(([key, value]) => [key, label(value)]),
     );
     reason.textContent = t(occurrence.reason.id, params);
+    // `btn` is the desk's own control class, and it is what carries
+    // `min-height: var(--control-hit-min)` plus the wrap-don't-shrink rules
+    // (PRD #1418 stories 5 and 9). Without it these two verbs were the only
+    // controls on the desk with no touch-target floor, which shows up first at
+    // --a11y-text-scale: 2 where everything around them grows and they do not.
     const open = doc.createElement('button');
     open.type = 'button';
+    open.className = 'btn';
     open.dataset.action = 'open';
     // One verb, two destinations, and the label says which: a conversation row
     // opens the conversation, a beat row opens the controls the author declared
@@ -329,6 +335,7 @@ export function createGmAttentionPanel({
       : 'server.gm.attention.open');
     const snooze = doc.createElement('button');
     snooze.type = 'button';
+    snooze.className = 'btn';
     snooze.dataset.action = 'snooze';
     snooze.textContent = t('server.gm.attention.snooze');
     item.append(band, age, reason, open, snooze);

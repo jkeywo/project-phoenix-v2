@@ -1040,6 +1040,10 @@ pub struct RawWorld {
     pub gm_comms_route: Vec<crate::gm_comms::GmCommsRoute>,
     #[serde(default)]
     pub gm_npc_doctrine_palette: Vec<crate::gm_npc::RawNpcDoctrinePaletteEntry>,
+    /// Scenario tuning for the GM attention queue (issue #1435). The field name
+    /// already matches the `[gm_attention]` table key, so no rename is needed.
+    #[serde(default)]
+    pub gm_attention: crate::gm_attention::GmAttentionSettings,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -2098,6 +2102,10 @@ pub struct WorldConfig {
     /// Root-world approved fictional senders, routing and scripted hail roots.
     pub gm_comms_routes: Vec<crate::gm_comms::GmCommsRoute>,
     pub gm_npc_doctrine_palette: Vec<crate::gm_npc::NpcDoctrinePaletteEntry>,
+    /// Scenario tuning for the GM's own attention queue (issue #1435): the
+    /// idle-NPC grace, its band, and its independent off switch. Advisory only —
+    /// nothing here reaches a ship, a crew console or the digest.
+    pub gm_attention: crate::gm_attention::GmAttentionSettings,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -2454,6 +2462,12 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     // default every browser falls back to (`gui/gm-role-presets.js`'s
     // `GM_ALL_ROLE_PRESET`) and may not be authored.
     crate::gm_comms::validate_routes(&raw.gm_comms_route)?;
+    // The GM attention queue's own scenario tuning (issue #1435). Refused here
+    // rather than clamped at read time, for `attention_band`'s reason: a world
+    // whose author wrote a grace this build cannot honour has an advisory
+    // threshold nobody chose, and silently picking one for them is worse than
+    // refusing the load and naming the key.
+    raw.gm_attention.validate()?;
     for (i, preset) in raw.gm_role_preset.iter().enumerate() {
         if preset.id.trim().is_empty() {
             return Err(format!(
@@ -2620,6 +2634,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         gm_objective_palette: crate::gm_objective::parse_palette(&raw.gm_objective_palette)?,
         gm_comms_routes: raw.gm_comms_route,
         gm_npc_doctrine_palette: crate::gm_npc::parse_palette(&raw.gm_npc_doctrine_palette)?,
+        gm_attention: raw.gm_attention.clone(),
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }

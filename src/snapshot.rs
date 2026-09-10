@@ -40,6 +40,7 @@
 //! | accepted pending GM Station commands | [`PhoenixSnapshot::gm_station_commands`] |
 //! | armed GM direct damage/heal effects (with their Station/System scope) | [`PhoenixSnapshot::gm_direct_effects`] |
 //! | GM-attributed faction hostility overrides | [`PhoenixSnapshot::gm_faction_overrides`] |
+//! | per-NPC elapsed idleness behind the GM idle advisory | [`PhoenixSnapshot::gm_idle_npcs`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
 //! | `GamePhase` | [`PhoenixSnapshot::phase`] |
@@ -2537,6 +2538,21 @@ pub struct PhoenixSnapshot {
     /// `bool`.
     #[serde(default)]
     pub gm_faction_overrides: crate::gm_faction::GmFactionOverrides,
+    /// How long each NPC ship has had nothing to do (issue #1435).
+    ///
+    /// The one piece of the GM attention queue that travels. The occurrences
+    /// themselves are recomputed from live facts every publish and their reading
+    /// state (filters, snoozes, holds) is private to a browser, so neither is
+    /// here; but elapsed idleness is HISTORY, and no restored world can be asked
+    /// how long a hull has been standing about. Dropping it would forgive a ship
+    /// that was twenty-nine simulation seconds into its grace when the save was
+    /// taken and make the advisory a function of when somebody saved.
+    ///
+    /// Restored only into a peer that keeps the watch (one presenting a GM
+    /// desk); a save taken by a peer with no attention queue simply carries an
+    /// empty one, which is the truth about what it was watching.
+    #[serde(default)]
+    pub gm_idle_npcs: crate::gm_attention::GmIdleNpcWatch,
     /// Exact Objective lifecycle/authored state, excluding presentation transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub objective_records: Vec<crate::objectives::ObjectiveRecord>,
@@ -2719,6 +2735,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .unwrap_or_default(),
         gm_faction_overrides: world
             .get_resource::<crate::gm_faction::GmFactionOverrides>()
+            .cloned()
+            .unwrap_or_default(),
+        gm_idle_npcs: world
+            .get_resource::<crate::gm_attention::GmIdleNpcWatch>()
             .cloned()
             .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
@@ -5525,6 +5545,13 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // ordinary `add_enemy`/`remove_enemy` vocabulary keeps restore and the live
     // action on one path.
     crate::gm_faction::restore_overrides(world, &snapshot.gm_faction_overrides);
+    // The idle-NPC stopwatch (issue #1435), only into a peer that actually keeps
+    // one. Inserting it on a peer with no attention queue would create a
+    // resource no system maintains, which is worse than the honest absence:
+    // there is nobody there to be advised.
+    if world.contains_resource::<crate::gm_attention::GmIdleNpcWatch>() {
+        world.insert_resource(snapshot.gm_idle_npcs.clone());
+    }
     if !snapshot.objective_records.is_empty()
         || world.contains_resource::<crate::world::server::ObjectiveManagerRes>()
     {

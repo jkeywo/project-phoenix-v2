@@ -783,6 +783,22 @@ impl ObjectiveManager {
         true
     }
 
+    /// Whether this ship has an `Active` objective **explicitly scoped to it**.
+    ///
+    /// Deliberately stricter than [`Self::is_for_ship`], which also answers
+    /// `true` for an unscoped record because legacy all-ship visibility is the
+    /// right answer for a *display*. This is the question "has anybody given
+    /// this hull a job", and a mission line addressed to everyone has given no
+    /// particular hull anything. Read by the GM idle-NPC advisory
+    /// ([`crate::gm_attention`]), which would otherwise fall silent for every
+    /// NPC in the world the moment a scenario posted its first objective.
+    pub fn has_active_for_ship(&self, ship: &str) -> bool {
+        self.objectives.iter().any(|objective| {
+            objective.status == ObjectiveStatus::Active
+                && objective.recipients.iter().any(|id| id == ship)
+        })
+    }
+
     /// Whether a ship is an intended recipient. Missing identity sees only
     /// legacy unscoped objectives, never another ship's private assignment.
     pub fn is_for_ship(&self, id: &str, ship: &str) -> bool {

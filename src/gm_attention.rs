@@ -1,30 +1,43 @@
-//! Peer-local Game Master attention queue (issues #1433 and #1434, PRD #1419
-//! M4).
+//! Peer-local Game Master attention queue (issues #1433, #1434 and #1435, PRD
+//! #1419 M4).
 //!
 //! One advisory projection answers "what is waiting for a Game Master right
-//! now". It reads facts the simulation already owns — the ordinary Comms
-//! inbox, the authored `[[gm_comms_route]]` table, and (issue #1434) the
-//! ordinary trigger table with its GM event controls — and publishes them onto
-//! the page-local `gm_attention` Host Channel.
+//! now". It reads facts the simulation already owns and publishes them onto the
+//! page-local `gm_attention` Host Channel. Three producers today:
+//!
+//! * **Pending Comms** (#1433) — the ordinary Comms inbox and the authored
+//!   `[[gm_comms_route]]` table.
+//! * **Eligible beats** (#1434) — the ordinary trigger table with its GM event
+//!   controls.
+//! * **Idle NPCs** (#1435) — an NPC ship that has been given nothing to do for
+//!   an authored grace of SIMULATION time. See the idle-advisory section
+//!   further down.
 //!
 //! # What this is NOT
 //!
-//! It is not a `ServerMessage`, a mesh frame, a snapshot field, a digest fold,
-//! a replay record, or a second GM event bus. Nothing here reaches
+//! It is not a `ServerMessage`, a mesh frame, a digest fold, a replay record, or
+//! a second GM event bus. Nothing here reaches
 //! [`crate::gm_action::GmActionJournal`], and nothing here mutates the world:
 //! an occurrence appears because a condition holds and disappears because it
 //! stopped holding. Reading, filtering, holding and snoozing all happen in the
 //! operator's own browser (`gui/gm-attention-panel.js`) and never cross back.
 //!
+//! Neither is the projection a snapshot field: occurrences are recomputed from
+//! live facts on every publish. The one thing that travels is
+//! [`GmIdleNpcWatch`], because elapsed idleness is history rather than a
+//! repaint, and no restored world can be asked how long a hull has been
+//! standing about. It is still folded into no digest.
+//!
 //! # Occurrence identity
 //!
 //! An occurrence's id is derived from the durable identity of the thing that is
-//! waiting — for pending Comms, the `CommsMessage` id the world minted. That is
-//! what makes the two lifecycle rules fall out for free: while the condition
-//! holds the row keeps one identity (so a browser can hold a snooze, a focus
-//! ring or a reading position against it), and a *recurrence* — a second hail
-//! after the first was answered — is a different message and therefore a fresh
-//! occurrence that no stale snooze can hide.
+//! waiting — for pending Comms, the `CommsMessage` id the world minted; for an
+//! idle NPC, the hull plus the tick its current idle spell began. That is what
+//! makes the two lifecycle rules fall out for free: while the condition holds
+//! the row keeps one identity (so a browser can hold a snooze, a focus ring or a
+//! reading position against it), and a *recurrence* — a second hail after the
+//! first was answered, a second idle spell after an order was withdrawn — is a
+//! fresh occurrence that no stale snooze can hide.
 //!
 //! An eligible beat (issue #1434) has no per-occurrence identity of its own to
 //! borrow — a repeatable event is the SAME authored trigger every time it comes
@@ -59,14 +72,16 @@
 //! # Bands
 //!
 //! Three bands, `Urgent`/`Attention`/`Background`. Pending Comms and eligible
-//! beats both default to `Attention`; a scenario author may say otherwise on
-//! the route the sender speaks through ([`GmCommsRoute::attention_band`]) or on
-//! the beat's own control set
-//! ([`GmEventControls::attention_band`](crate::world::config::GmEventControls::attention_band)).
-//! The band is GM-facing triage only: it does not touch `CommsPriority`,
-//! delivery, routing, when a beat fires, or anything a crew console renders.
-//! Technical warnings (issue #1437) are not occurrences at all and take no
-//! authored band — see the banner seam in `gui/gm-attention-panel.js`.
+//! beats both default to `Attention`, idle NPCs to `Background`; a scenario
+//! author may say otherwise on the route the sender speaks through
+//! ([`GmCommsRoute::attention_band`]), on the beat's own control set
+//! ([`GmEventControls::attention_band`](crate::world::config::GmEventControls::attention_band)),
+//! or, for the idle advisory, in the `[gm_attention]` table
+//! ([`GmAttentionSettings`]). The band is GM-facing triage only: it does not
+//! touch `CommsPriority`, delivery, routing, when a beat fires, or anything a
+//! crew console renders. Technical warnings (issue #1437) are not occurrences at
+//! all and take no authored band — see the banner seam in
+//! `gui/gm-attention-panel.js`.
 
 use std::collections::BTreeMap;
 
@@ -139,6 +154,8 @@ pub enum GmAttentionCategory {
     PendingComms,
     /// An authored beat a Game Master could release right now (issue #1434).
     EligibleBeat,
+    /// An NPC ship that has been given nothing to do (issue #1435).
+    IdleNpc,
 }
 
 /// The short human reason, as a String Table id plus its runtime parameters.
@@ -521,6 +538,337 @@ fn collect_beats(
     rows
 }
 
+// ── Idle NPC advisory (issue #1435) ───────────────────────────────────────────
+
+/// The grace an NPC ship must spend with nothing to do before the queue
+/// mentions it, in SIMULATION seconds.
+pub const DEFAULT_IDLE_NPC_GRACE_SECS: f32 = 30.0;
+
+/// The String Table id an idle-NPC row explains itself with. Takes `{ship}` and
+/// `{idle}` — the hull, and how long it has been without work — so the sentence
+/// names both the observed condition and its age.
+pub const IDLE_NPC_REASON: &str = "server.gm.attention.reason.idle_npc";
+
+/// The authored `[gm_attention]` table.
+///
+/// Every knob here is scoped to the GM's own advisory queue: none of it changes
+/// what a ship flies, what a crew console renders, or what the digest folds. It
+/// is a separate table from `[[gm_comms_route]].attention_band` because that
+/// override belongs to one route, while these belong to the world.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GmAttentionSettings {
+    /// How long an NPC ship must be idle, in simulation seconds, before it
+    /// reaches the queue. Positive and finite; validated at world load.
+    #[serde(default = "default_idle_npc_grace_secs")]
+    pub idle_npc_grace_secs: f32,
+    /// The band an idle-NPC row lands in, from the same closed three-word
+    /// vocabulary [`GmAttentionBand`] parses. `None` keeps the system default,
+    /// [`GmAttentionBand::Background`] — an idle hull is a thing to notice, not
+    /// a thing to drop a conversation for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_npc_band: Option<String>,
+    /// Silence THIS advisory and nothing else. A scenario whose NPCs are meant
+    /// to be parked — a dockyard, a field of derelicts — does not want thirty
+    /// rows saying so, and it must not have to give up the pending-Comms queue
+    /// to say that.
+    #[serde(default)]
+    pub idle_npc_disabled: bool,
+}
+
+fn default_idle_npc_grace_secs() -> f32 {
+    DEFAULT_IDLE_NPC_GRACE_SECS
+}
+
+impl Default for GmAttentionSettings {
+    fn default() -> Self {
+        Self {
+            idle_npc_grace_secs: DEFAULT_IDLE_NPC_GRACE_SECS,
+            idle_npc_band: None,
+            idle_npc_disabled: false,
+        }
+    }
+}
+
+impl GmAttentionSettings {
+    /// Refuse an unusable authored value at world load, naming the section and
+    /// the key so the author is told what to write instead.
+    ///
+    /// A non-positive or non-finite grace is not a slow advisory, it is an
+    /// advisory with no boundary at all: zero fires on the first idle step,
+    /// negative fires before the ship has done anything, and `nan` never fires
+    /// while looking exactly like a setting that should. Guessing on the
+    /// author's behalf is how a scenario ships with a threshold nobody chose —
+    /// the same argument the band vocabulary is closed for.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(self.idle_npc_grace_secs.is_finite() && self.idle_npc_grace_secs > 0.0) {
+            return Err(format!(
+                "[gm_attention] idle_npc_grace_secs = {} must be a positive, finite number of \
+                 simulation seconds",
+                self.idle_npc_grace_secs
+            ));
+        }
+        if let Some(band) = &self.idle_npc_band {
+            if GmAttentionBand::from_authored(band).is_none() {
+                return Err(format!(
+                    "[gm_attention] declares idle_npc_band '{band}'; the GM attention bands are {}",
+                    GmAttentionBand::authored_vocabulary()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The band an idle-NPC row lands in.
+    pub fn idle_npc_band(&self) -> GmAttentionBand {
+        self.idle_npc_band
+            .as_deref()
+            .and_then(GmAttentionBand::from_authored)
+            .unwrap_or(GmAttentionBand::Background)
+    }
+
+    /// The authored grace as an exact whole number of simulation ticks at `hz`.
+    ///
+    /// Rounded to the nearest tick and floored at one: a grace shorter than a
+    /// tick is one the fixed loop cannot express, and answering "zero ticks"
+    /// would put every NPC in the queue on the step it stopped working. The
+    /// rounding is IEEE-deterministic, so every peer turns the same authored
+    /// seconds into the same tick count.
+    pub fn idle_grace_ticks(&self, hz: f32) -> u64 {
+        let hz = f64::from(hz);
+        let secs = f64::from(self.idle_npc_grace_secs);
+        if !(hz.is_finite() && hz > 0.0 && secs.is_finite() && secs > 0.0) {
+            return u64::MAX;
+        }
+        let ticks = (hz * secs).round();
+        if !ticks.is_finite() || ticks >= u64::MAX as f64 {
+            return u64::MAX;
+        }
+        (ticks as u64).max(1)
+    }
+}
+
+/// One NPC ship's current idle spell, in the only clock that can answer the
+/// question honestly: fixed simulation steps.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GmIdleSpell {
+    /// The simulation tick the spell began. Identity only — the row's id is
+    /// built from it, so a LATER idle spell on the same hull is a different
+    /// occurrence exactly as a second hail is a different pending-Comms
+    /// occurrence, and no snooze taken against the first can hide it.
+    pub started_tick: u64,
+    /// Fixed steps observed idle since `started_tick`.
+    ///
+    /// COUNTED, never differenced against the live [`crate::sim_tick::SimTick`].
+    /// A difference would be wrong twice over: sampled outside the fixed loop it
+    /// would advance across a pause, and it would take its answer from whichever
+    /// frame happened to read the counter. Counting one per observed step makes
+    /// a paused world contribute exactly nothing — a stall withholds the tick,
+    /// so this system does not run — and makes the boundary exact rather than
+    /// frame-paced.
+    pub ticks: u64,
+}
+
+/// How long each live NPC ship has had nothing to do.
+///
+/// `Presentation`: no fixed-tick system reads it, nothing here changes what a
+/// ship flies, and it is not folded into the authoritative digest. It IS
+/// captured in the snapshot, and that is the one place it differs from an
+/// ordinary repaint cache: elapsed history cannot be recomputed from a restored
+/// world. A resume that dropped it would silently forgive a hull that had been
+/// idle for twenty-nine seconds when the save was taken, and the advisory would
+/// become a function of when somebody happened to save rather than of what the
+/// NPC was doing.
+#[derive(Resource, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GmIdleNpcWatch {
+    /// Entity UUID → its current spell. A ship with an order, with an Objective
+    /// of its own, or with no existence at all is simply absent.
+    spells: BTreeMap<String, GmIdleSpell>,
+}
+
+impl GmIdleNpcWatch {
+    /// This ship's current idle spell, if it is having one.
+    pub fn spell(&self, ship: &str) -> Option<GmIdleSpell> {
+        self.spells.get(ship).copied()
+    }
+
+    /// Every ship currently mid-spell, in stable identity order.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &GmIdleSpell)> {
+        self.spells.iter()
+    }
+
+    /// How many ships are mid-spell — NOT how many are in the queue: a spell
+    /// under the authored grace is real and not yet worth saying.
+    pub fn len(&self) -> usize {
+        self.spells.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.spells.is_empty()
+    }
+}
+
+/// Is this ship flying nothing?
+///
+/// "No valid order" is read from the same pool the helm and the weapons act on
+/// — the ship's own `ViewscreenBlackboard::scored_objectives`, through the same
+/// `score > 0` and "not `AiDirective::None`" filter
+/// [`crate::ai::decision_trace::top_directive`] applies. So a standing Patrol, a
+/// Reach that holds station, an Escort or any other authored directive that is
+/// currently scoring IS an order and this returns `false`; a doctrine that has
+/// gated itself to zero — or a hull with no `[behaviour]` block at all — has
+/// nothing to do and returns `true`.
+///
+/// Movement and gunnery are deliberately not consulted. A ship coasting on last
+/// tick's velocity is not busy, and a ship shooting because something shot at it
+/// has still been given no orders; both are conditions this advisory exists to
+/// surface rather than to hide.
+fn without_orders(blackboards: &crate::server_app::ShipSystemBlackboards) -> bool {
+    let scored = match blackboards
+        .0
+        .get(&crate::ship::system_registry::viewscreen_system_id())
+    {
+        Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
+            bb.scored_objectives.as_slice()
+        }
+        // No Viewscreen entry at all: `aggregate_doctrine_blackboards` writes
+        // one for every `BehaviourSection` hull, so a ship without one authored
+        // no doctrine and is idle by construction.
+        _ => &[],
+    };
+    crate::ai::decision_trace::top_directive(scored).is_none()
+}
+
+/// NPC ships: a hull nobody's crew is aboard.
+///
+/// `FleetSlotOf` rides every fleet ship on EVERY host — the marker deliberately
+/// chosen so "a peer's player ship" is told apart by a component rather than by
+/// absence — so this classification is identical on every peer, unlike anything
+/// gated on `LocalShip`. A `StaticPointDefence` turret is excluded because it is
+/// a structure, not a ship with orders to be given. It is the same NPC/player
+/// split `gm_projection`'s `GmEntityKind` draws.
+type IdleNpcQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static EntityUuid,
+        &'static crate::server_app::ShipSystemBlackboards,
+    ),
+    (
+        With<crate::server_app::Ship>,
+        Without<crate::lockstep::FleetSlotOf>,
+        Without<crate::entities::spawner::StaticPointDefence>,
+    ),
+>;
+
+/// Advance every idle NPC's stopwatch by exactly one simulation step.
+///
+/// Registered in `FixedLast`, `.before(advance_sim_tick)`, so `started_tick` is
+/// the index of the step that observed the spell begin, and so it runs once per
+/// fixed step rather than once per rendered frame. Pause needs no special case:
+/// a paused world withholds the tick entirely (`SimulationPaused` and the
+/// lockstep stall both starve `Time<Virtual>`, which starves the fixed
+/// accumulator), and a step that never starts cannot count.
+pub fn observe_idle_npcs(
+    tick: Res<crate::sim_tick::SimTick>,
+    objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    ships: IdleNpcQuery,
+    mut watch: ResMut<GmIdleNpcWatch>,
+) {
+    let mut live: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (uuid, blackboards) in &ships {
+        live.insert(uuid.0.clone());
+        // Two ways to have been given something to do, and either is enough:
+        // an Objective addressed to this hull, or a doctrine directive that is
+        // currently scoring.
+        let ordered = objectives
+            .as_deref()
+            .is_some_and(|manager| manager.0.has_active_for_ship(&uuid.0))
+            || !without_orders(blackboards);
+        if ordered {
+            // An order or an Objective ends the spell outright. The next spell
+            // starts from zero at a new `started_tick`, so it is a new
+            // occurrence rather than a continuation of the resolved row.
+            watch.spells.remove(&uuid.0);
+            continue;
+        }
+        let spell = watch.spells.entry(uuid.0.clone()).or_insert(GmIdleSpell {
+            started_tick: tick.0,
+            ticks: 0,
+        });
+        spell.ticks = spell.ticks.saturating_add(1);
+    }
+    // A ship that left the world — destroyed, despawned, warped out, unloaded
+    // with its layer — takes its spell with it, so a hull recreated under the
+    // same name is watched from scratch rather than inheriting a dead one's wait.
+    watch.spells.retain(|id, _| live.contains(id));
+}
+
+/// `m:ss` in SIMULATION time, the same shape the page reads a real-time wait in.
+///
+/// Formatted here rather than on the page because this is a projection
+/// parameter, not a rendered age: the panel's own clock is real milliseconds
+/// (that is what a facilitator's patience runs on), while what an idle row has
+/// to report is how much of the WORLD's time the hull spent doing nothing.
+fn format_sim_clock(ticks: u64, hz: f32) -> String {
+    let hz = f64::from(hz);
+    let seconds = if hz.is_finite() && hz > 0.0 {
+        (ticks as f64 / hz).floor().max(0.0) as u64
+    } else {
+        0
+    };
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// The idle-NPC rows of the queue, as a pure function of the authored settings
+/// and this peer's stopwatch. Pure over its inputs for [`collect`]'s reason.
+fn idle_rows(
+    settings: &GmAttentionSettings,
+    hz: f32,
+    watch: &GmIdleNpcWatch,
+    names: &BTreeMap<String, String>,
+) -> Vec<PendingRow> {
+    if settings.idle_npc_disabled {
+        return Vec::new();
+    }
+    let grace = settings.idle_grace_ticks(hz);
+    let band = settings.idle_npc_band();
+    watch
+        .spells
+        .iter()
+        .filter(|(_, spell)| spell.ticks >= grace)
+        .map(|(uuid, spell)| {
+            let ship = reference(uuid, names);
+            let mut params = BTreeMap::new();
+            params.insert("ship".to_string(), ship.name.clone());
+            params.insert("idle".to_string(), format_sim_clock(spell.ticks, hz));
+            PendingRow {
+                // The spell's own start tick is part of the identity, so a hull
+                // given an order and later falling idle again produces a fresh
+                // occurrence rather than reviving the resolved one.
+                id: format!("idle:{}:{}", uuid, spell.started_tick),
+                category: GmAttentionCategory::IdleNpc,
+                band,
+                reason: GmAttentionReason {
+                    id: IDLE_NPC_REASON.to_string(),
+                    params,
+                },
+                // Only the ship. Activating the row selects that hull on the map
+                // the desk already draws, which is what opens its inspector and
+                // the actions that hull actually allows — no order is chosen,
+                // offered or issued on the operator's behalf.
+                target: GmAttentionTarget {
+                    route: None,
+                    ship: Some(ship),
+                    sender: None,
+                    conversation: None,
+                    event: None,
+                },
+            }
+        })
+        .collect()
+}
+
 /// Publish the absolute attention queue onto the page-local Host Channel when
 /// it changes. Never emits an unchanged payload: a GM desk that repainted a
 /// held list sixty times a second would defeat the reading stability this whole
@@ -535,6 +883,7 @@ pub fn publish_attention_projection(
     tick: Res<crate::sim_tick::SimTick>,
     real: Option<Res<Time<Real>>>,
     sim_time: Option<Res<Time>>,
+    idle: Option<Res<GmIdleNpcWatch>>,
     mut state: ResMut<GmAttentionState>,
     mut writer: MessageWriter<GmAttentionChanged>,
 ) {
@@ -598,6 +947,20 @@ pub fn publish_attention_projection(
         for (base, entry) in state.beats.iter_mut() {
             entry.eligible = eligible_now.contains(base);
         }
+    }
+    // The idle-NPC producer (issue #1435). It reads its own authored settings
+    // and its own stopwatch, and it joins the same one ordered queue rather than
+    // a parallel list, so a GM reads one screen and one age order.
+    if let Some(watch) = idle.as_deref() {
+        let settings = world
+            .as_deref()
+            .map(|world| world.gm_attention.clone())
+            .unwrap_or_default();
+        let hz = world.as_deref().map_or_else(
+            || crate::entities::config::GlobalConfig::default().sim_tick_hz,
+            |world| world.global.sim_tick_hz,
+        );
+        rows.extend(idle_rows(&settings, hz, watch, &names));
     }
 
     // Retire the bookkeeping for anything that stopped holding, so a recurrence
@@ -675,7 +1038,19 @@ impl Plugin for GmAttentionPlugin {
 
         app.init_resource::<GmAttentionState>()
             .declare_state::<GmAttentionState>(StateClass::Presentation, "gm-t3-attention-queue")
+            .init_resource::<GmIdleNpcWatch>()
+            // Presentation for the ordinary reason — no fixed-tick system reads
+            // it and it is not folded — but unlike the queue state it IS carried
+            // in the snapshot, because elapsed idleness is history a restored
+            // world cannot recompute. See the type's own doc comment.
+            .declare_state::<GmIdleNpcWatch>(StateClass::Presentation, "gm-t3-idle-npc-advisory")
             .add_message::<GmAttentionChanged>()
+            .add_systems(
+                FixedLast,
+                observe_idle_npcs
+                    .before(crate::sim_tick::advance_sim_tick)
+                    .run_if(crate::gm_projection::gm_presentation_active),
+            )
             .add_systems(
                 PostUpdate,
                 publish_attention_projection.run_if(crate::gm_projection::gm_presentation_active),
@@ -801,5 +1176,288 @@ mod tests {
         // mention a ship, so carrying an empty one would be a lie in waiting.
         assert!(rows[0].reason.params.get("ship").is_none());
         assert!(rows[0].target.ship.is_none());
+    }
+
+    // ── Idle NPC advisory (issue #1435) ──────────────────────────────────────
+    //
+    // The world-level behaviour lives in `tests/gm_idle_npc.rs`, over real
+    // authored hulls and real GM actions. What is here is the half that cannot
+    // be reached from an integration test: an Objective SCOPED to a hull, whose
+    // only writer (`ObjectiveManager::set_recipients`) is crate-private because
+    // the trusted activation seam is its only caller.
+
+    /// Build the smallest world the stopwatch needs: a tick, an objective
+    /// manager, the watch, and ships carrying exactly the components the
+    /// production query filters on.
+    fn idle_world() -> App {
+        let mut app = App::new();
+        app.init_resource::<crate::sim_tick::SimTick>()
+            .init_resource::<crate::world::server::ObjectiveManagerRes>()
+            .init_resource::<GmIdleNpcWatch>();
+        app
+    }
+
+    /// One hull with the given scored pool on its Viewscreen blackboard.
+    fn hull(app: &mut App, uuid: &str, pool: Vec<crate::core::messages::ScoredObjective>) {
+        let mut blackboards = crate::server_app::ShipSystemBlackboards(Default::default());
+        blackboards.0.insert(
+            crate::ship::system_registry::viewscreen_system_id(),
+            crate::core::messages::SystemBlackboard::Viewscreen(
+                crate::core::messages::ViewscreenBlackboard {
+                    red_alert: false,
+                    hull_integrity_pct: 100.0,
+                    last_damage_taken_secs: None,
+                    last_weapon_fired_secs: None,
+                    last_attacker_uuid: None,
+                    scored_objectives: pool,
+                    combat_lock: None,
+                    science_target: None,
+                },
+            ),
+        );
+        app.world_mut().spawn((
+            EntityUuid(uuid.to_string()),
+            blackboards,
+            crate::server_app::Ship,
+        ));
+    }
+
+    fn patrol_pool(score: f32) -> Vec<crate::core::messages::ScoredObjective> {
+        vec![crate::core::messages::ScoredObjective {
+            id: "patrol".into(),
+            score,
+            directive: crate::core::messages::AiDirective::Patrol {
+                anchors: vec!["a".into(), "b".into()],
+                loop_path: true,
+            },
+            source: crate::core::messages::ObjectiveSource::Doctrine,
+            relevance: Vec::new(),
+            snapshot: crate::core::messages::ObjectiveSnapshot {
+                id: "patrol".into(),
+                text: "patrol".into(),
+                text_params: Default::default(),
+                mandatory: false,
+                status: crate::core::messages::ObjectiveStatus::Active,
+                targets: Vec::new(),
+                source: crate::core::messages::ObjectiveSource::Doctrine,
+            },
+        }]
+    }
+
+    fn observe(app: &mut App) {
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut().run_system_once(observe_idle_npcs).unwrap();
+    }
+
+    /// A standing order is an order; a doctrine entry that has gated itself down
+    /// to zero is not, which is exactly the difference between "the ship is
+    /// holding station" and "the ship has nothing left to do".
+    #[test]
+    fn a_positively_scored_standing_directive_is_an_order_and_a_gated_out_one_is_not() {
+        let mut app = idle_world();
+        hull(&mut app, "patrolling", patrol_pool(45.0));
+        hull(&mut app, "gated-out", patrol_pool(0.0));
+        hull(&mut app, "no-doctrine", Vec::new());
+        observe(&mut app);
+        let watch = app.world().resource::<GmIdleNpcWatch>();
+        assert_eq!(watch.spell("patrolling"), None);
+        assert_eq!(watch.spell("gated-out").map(|s| s.ticks), Some(1));
+        assert_eq!(watch.spell("no-doctrine").map(|s| s.ticks), Some(1));
+    }
+
+    /// An Objective addressed to this hull is a job, and resolving it puts the
+    /// hull back on the clock from zero. An Objective addressed to NOBODY in
+    /// particular is the mission's, and must not silence the advisory for every
+    /// NPC in the world.
+    #[test]
+    fn an_objective_scoped_to_the_hull_ends_the_spell_and_an_unscoped_one_does_not() {
+        let mut app = idle_world();
+        hull(&mut app, "idle-one", Vec::new());
+        hull(&mut app, "idle-two", Vec::new());
+        observe(&mut app);
+        assert_eq!(
+            app.world()
+                .resource::<GmIdleNpcWatch>()
+                .spell("idle-one")
+                .map(|s| s.ticks),
+            Some(1)
+        );
+
+        // A mission line nobody addressed changes nothing for either hull.
+        {
+            let mut manager = app
+                .world_mut()
+                .resource_mut::<crate::world::server::ObjectiveManagerRes>();
+            manager.0.add("fleet-wide", "text", false, Vec::new());
+        }
+        observe(&mut app);
+        let watch = app.world().resource::<GmIdleNpcWatch>();
+        assert_eq!(watch.spell("idle-one").map(|s| s.ticks), Some(2));
+        assert_eq!(watch.spell("idle-two").map(|s| s.ticks), Some(2));
+
+        // One addressed at `idle-one` ends only that hull's spell.
+        {
+            let mut manager = app
+                .world_mut()
+                .resource_mut::<crate::world::server::ObjectiveManagerRes>();
+            manager.0.add("escort", "text", false, Vec::new());
+            assert!(manager.0.set_recipients("escort", vec!["idle-one".into()]));
+        }
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 40;
+        observe(&mut app);
+        let watch = app.world().resource::<GmIdleNpcWatch>();
+        assert_eq!(watch.spell("idle-one"), None);
+        assert_eq!(watch.spell("idle-two").map(|s| s.ticks), Some(3));
+
+        // Completing it puts the hull back on the clock — from zero, at a new
+        // start tick, so the row it eventually raises is a new occurrence.
+        {
+            let mut manager = app
+                .world_mut()
+                .resource_mut::<crate::world::server::ObjectiveManagerRes>();
+            assert!(manager.0.complete("escort"));
+        }
+        observe(&mut app);
+        assert_eq!(
+            app.world().resource::<GmIdleNpcWatch>().spell("idle-one"),
+            Some(GmIdleSpell {
+                started_tick: 40,
+                ticks: 1
+            })
+        );
+    }
+
+    /// A hull that leaves the world takes its wait with it, so a hull recreated
+    /// under the same identity is watched from scratch.
+    #[test]
+    fn a_ship_that_leaves_the_world_is_forgotten_rather_than_frozen() {
+        let mut app = idle_world();
+        hull(&mut app, "gone-soon", Vec::new());
+        observe(&mut app);
+        observe(&mut app);
+        assert_eq!(
+            app.world()
+                .resource::<GmIdleNpcWatch>()
+                .spell("gone-soon")
+                .map(|s| s.ticks),
+            Some(2)
+        );
+        let entity = app
+            .world_mut()
+            .query_filtered::<Entity, With<EntityUuid>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        app.world_mut().despawn(entity);
+        observe(&mut app);
+        assert!(app.world().resource::<GmIdleNpcWatch>().is_empty());
+
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 99;
+        hull(&mut app, "gone-soon", Vec::new());
+        observe(&mut app);
+        assert_eq!(
+            app.world().resource::<GmIdleNpcWatch>().spell("gone-soon"),
+            Some(GmIdleSpell {
+                started_tick: 99,
+                ticks: 1
+            })
+        );
+    }
+
+    /// The authored knobs, as pure arithmetic over the settings.
+    #[test]
+    fn the_authored_grace_converts_to_exact_ticks_and_refuses_the_unusable() {
+        let mut settings = GmAttentionSettings::default();
+        assert_eq!(settings.idle_npc_grace_secs, DEFAULT_IDLE_NPC_GRACE_SECS);
+        assert_eq!(settings.idle_npc_band(), GmAttentionBand::Background);
+        assert_eq!(settings.idle_grace_ticks(60.0), 1800);
+        assert_eq!(settings.idle_grace_ticks(30.0), 900);
+        assert!(settings.validate().is_ok());
+
+        // A grace shorter than a tick still costs a whole tick — the fixed loop
+        // has no smaller unit to spend.
+        settings.idle_npc_grace_secs = 0.001;
+        assert_eq!(settings.idle_grace_ticks(30.0), 1);
+
+        for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            settings.idle_npc_grace_secs = bad;
+            let error = settings.validate().unwrap_err();
+            assert!(
+                error.contains("[gm_attention]") && error.contains("idle_npc_grace_secs"),
+                "{error}"
+            );
+        }
+
+        settings.idle_npc_grace_secs = 5.0;
+        settings.idle_npc_band = Some("urgent".into());
+        assert!(settings.validate().is_ok());
+        assert_eq!(settings.idle_npc_band(), GmAttentionBand::Urgent);
+        settings.idle_npc_band = Some("Urgent".into());
+        let error = settings.validate().unwrap_err();
+        assert!(
+            error.contains("idle_npc_band") && error.contains("'urgent'"),
+            "{error}"
+        );
+    }
+
+    /// The rows themselves: below the grace nothing is said, at it exactly one
+    /// row is, and the off switch says nothing at any age.
+    #[test]
+    fn idle_rows_appear_at_the_grace_and_the_off_switch_suppresses_them_at_any_age() {
+        let mut watch = GmIdleNpcWatch::default();
+        watch.spells.insert(
+            "ship-a".into(),
+            GmIdleSpell {
+                started_tick: 7,
+                ticks: 59,
+            },
+        );
+        let names = BTreeMap::from([("ship-a".to_string(), "Drifter".to_string())]);
+        let settings = GmAttentionSettings {
+            idle_npc_grace_secs: 2.0,
+            idle_npc_band: Some("urgent".into()),
+            idle_npc_disabled: false,
+        };
+        assert!(idle_rows(&settings, 30.0, &watch, &names).is_empty());
+
+        watch.spells.get_mut("ship-a").unwrap().ticks = 60;
+        let rows = idle_rows(&settings, 30.0, &watch, &names);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "idle:ship-a:7");
+        assert_eq!(rows[0].band, GmAttentionBand::Urgent);
+        assert_eq!(rows[0].category, GmAttentionCategory::IdleNpc);
+        assert_eq!(rows[0].reason.id, IDLE_NPC_REASON);
+        assert_eq!(rows[0].reason.params.get("ship").unwrap(), "Drifter");
+        assert_eq!(rows[0].reason.params.get("idle").unwrap(), "0:02");
+        assert_eq!(
+            rows[0]
+                .target
+                .ship
+                .as_ref()
+                .map(|ship| ship.entity_id.as_str()),
+            Some("ship-a")
+        );
+        assert!(rows[0].target.route.is_none());
+        assert!(rows[0].target.event.is_none());
+
+        watch.spells.get_mut("ship-a").unwrap().ticks = 30 * 3600;
+        let disabled = GmAttentionSettings {
+            idle_npc_disabled: true,
+            ..settings
+        };
+        assert!(idle_rows(&disabled, 30.0, &watch, &names).is_empty());
+    }
+
+    /// Simulation minutes and seconds, floored — a wait is reported as the time
+    /// actually served, never rounded up into one the hull has not spent.
+    #[test]
+    fn the_reported_idle_age_is_floored_simulation_time() {
+        assert_eq!(format_sim_clock(0, 30.0), "0:00");
+        assert_eq!(format_sim_clock(29, 30.0), "0:00");
+        assert_eq!(format_sim_clock(30, 30.0), "0:01");
+        assert_eq!(format_sim_clock(30 * 90, 30.0), "1:30");
+        assert_eq!(format_sim_clock(60 * 125, 60.0), "2:05");
+        // A world with no usable rate cannot claim an age it cannot measure.
+        assert_eq!(format_sim_clock(600, 0.0), "0:00");
     }
 }

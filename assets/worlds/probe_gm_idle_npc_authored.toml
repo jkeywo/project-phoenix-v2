@@ -1,0 +1,63 @@
+# The authored half of the #1435 idle-NPC probe: the same three hulls as
+# `probe_gm_idle_npc.toml`, with every `[gm_attention]` knob moved off its
+# default so a test can tell an honoured override from a coincidence.
+#
+#   * a two-second grace instead of thirty, so the boundary this world proves is
+#     one an author chose;
+#   * `urgent` instead of the default `background`, from the same closed
+#     three-word vocabulary `[[gm_comms_route]].attention_band` parses.
+#
+# `idle_npc_disabled` is deliberately left at its default here — the off switch
+# has its own world (`probe_gm_idle_npc_quiet.toml`), because a world that both
+# retunes and silences the advisory cannot show that the retuning worked.
+[global]
+seed = 1435
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+sim_tick_hz = 30.0
+ai_tick_hz = 30.0
+ai_snapshot_hz = 10.0
+command_delay_ticks = 2
+
+[gm_attention]
+idle_npc_grace_secs = 2.0
+idle_npc_band = "urgent"
+
+[anchors]
+ironveil_patrol_a = [1200.0, 0.0, -1200.0]
+ironveil_patrol_b = [1600.0, 0.0, -1200.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_gm_idle_npc.picket"
+transform = { position = [1200.0, 0.0, -1200.0] }
+
+# `gm_removable` so the removal half of the lifecycle can be exercised through
+# the ordinary `DespawnEntity` action rather than by reaching into the ECS.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_gm_idle_npc.drifter"
+transform = { position = [-4000.0, 0.0, 4000.0] }
+overrides = { behaviour = { doctrine = [] }, tags = ["ship", "npc", "gm_removable"] }
+
+# The order a GM can actually give this hull, so "assigning an order resolves the
+# row" is exercised through the shipped `SetNpcDoctrine` action and its authored
+# palette rather than by writing a component.
+[[gm_npc_doctrine_palette]]
+id = "hold-station"
+label = "world.probe_gm_idle_npc.doctrine.hold_station"
+targets = ["world.probe_gm_idle_npc.drifter"]
+[[gm_npc_doctrine_palette.doctrine]]
+id = "hold-station"
+text = "world.probe_gm_idle_npc.doctrine.hold_station"
+directive_kind = "Reach"
+directive_anchor = "ironveil_patrol_a"
+base_priority = 100.0
+target_speed = 0.4
+use_impulse = false

@@ -741,3 +741,150 @@ describe('GM attention queue: eligible beats', () => {
       .toContain('if (occurrence.target.event) gmMissionPanel.focusEvent(occurrence.target.event.id);');
   });
 });
+
+// ── Idle-NPC rows (issue #1435) ──────────────────────────────────────────────
+
+/** An idle-NPC occurrence: a hull, no route, no conversation. */
+function idleRow(id = 'idle:npc-a:900', extra = {}) {
+  return occurrence(id, {
+    band: 'background',
+    category: 'idle_npc',
+    reason: {
+      id: 'server.gm.attention.reason.idle_npc',
+      params: { ship: 'Drifter', idle: '0:30' },
+    },
+    target: {
+      route: null,
+      ship: { entity_id: 'npc-a', name: 'Drifter' },
+      sender: null,
+      conversation: null,
+    },
+    ...extra,
+  });
+}
+
+describe('idle-NPC rows', () => {
+  it('reads as an ordinary row: band and reason in words, both verbs, no special case', () => {
+    const { panel } = mount();
+    panel.update(payload(idleRow()));
+    const item = document.querySelector('#gm-attention-list li');
+    expect(item.dataset.occurrenceId).toBe('idle:npc-a:900');
+    // Band as WORDS, in the Background group — not a colour, not a borrowed
+    // pending-Comms sentence.
+    expect(item.dataset.band).toBe('background');
+    expect(item.querySelector('.gm-attention-band').textContent)
+      .toBe('server.gm.attention.band.background');
+    expect(item.closest('.gm-attention-band-group').dataset.band).toBe('background');
+    // The reason names the observed condition AND its age, interpolated from
+    // the projection's own parameters.
+    expect(item.querySelector('.gm-attention-reason').textContent)
+      .toBe('server.gm.attention.reason.idle_npc');
+    const rendered = createGmAttentionPanel({
+      doc: document, t: (id, params = {}) => (id === 'server.gm.attention.reason.idle_npc'
+        ? `${params.ship} has had no Objective and no order for ${params.idle}.` : id),
+      has: () => false, filters: createGmAttentionFilters(),
+    });
+    rendered.update(payload(idleRow()));
+    expect(document.querySelector('.gm-attention-reason').textContent)
+      .toBe('Drifter has had no Objective and no order for 0:30.');
+    rendered.dispose();
+    panel.dispose();
+  });
+
+  it('opens the ship it names and nothing else — no route, no order, no dialog', () => {
+    const selectShip = vi.fn();
+    const focusRoute = vi.fn();
+    document.body.innerHTML = MARKUP;
+    const panel = createGmAttentionPanel({
+      doc: document, t, has: () => false, filters: createGmAttentionFilters(),
+      // The exact shape gm-workspace.js wires: select the hull, and only touch
+      // the Comms route when the occurrence actually names one.
+      onOpen: (row) => {
+        if (row.target.ship) selectShip(row.target.ship.entity_id);
+        if (row.target.route) focusRoute(row.target.route);
+      },
+    });
+    panel.update(payload(idleRow()));
+    const before = document.body.innerHTML.length;
+    document.querySelector('#gm-attention-list li button[data-action="open"]').click();
+    expect(selectShip).toHaveBeenCalledWith('npc-a');
+    // No route on an idle row, so nothing reaches the conversation surface and
+    // no order is chosen for the operator.
+    expect(focusRoute).not.toHaveBeenCalled();
+    // Routine attention does not interrupt: opening a row adds no dialog, and
+    // the row is simply marked as the one being read.
+    expect(document.querySelector('dialog')).toBe(null);
+    expect(document.body.innerHTML.length).toBeLessThanOrEqual(before + 64);
+    expect(panel.state().selectedId).toBe('idle:npc-a:900');
+    panel.dispose();
+  });
+
+  it('is one filterable kind among the queue, grouped by band and aged within it', () => {
+    const filters = createGmAttentionFilters();
+    const { panel } = mount({ filters });
+    panel.update(payload(
+      occurrence('comms:1', { age_ms: 1000 }),
+      idleRow('idle:npc-a:900', { age_ms: 5000 }),
+      idleRow('idle:npc-b:900', { age_ms: 9000, target: { route: null, sender: null,
+        conversation: null, ship: { entity_id: 'npc-b', name: 'Second' } } }),
+    ));
+    // Band groups come first — Background sits under Attention however old its
+    // rows are — and the two idle rows are oldest-first inside their own group,
+    // by the same rule a pending-Comms row is ordered by.
+    expect(rowIds()).toEqual(['comms:1', 'idle:npc-b:900', 'idle:npc-a:900']);
+    const kinds = [...document.getElementById('gm-attention-filter-category').options]
+      .map((option) => option.value);
+    expect(kinds).toEqual(['all', 'pending_comms', 'eligible_beat', 'idle_npc']);
+
+    filters.setFilter('category', 'idle_npc');
+    panel.returnToLive();
+    expect(rowIds()).toEqual(['idle:npc-b:900', 'idle:npc-a:900']);
+    filters.setFilter('category', 'pending_comms');
+    panel.returnToLive();
+    expect(rowIds()).toEqual(['comms:1']);
+    panel.dispose();
+  });
+
+  it('keeps its whole sentence and its touch-sized verbs at 200% text', () => {
+    // jsdom lays nothing out, so the two halves that CAN be checked here are
+    // checked here: the copy is not shortened for the larger size, and every
+    // control stays keyboard-reachable. The measured half is the CSS contract
+    // read below plus tests/smoke/gm-layout.spec.js, which drives the real desk
+    // at 1280x720 with --a11y-text-scale: 2.
+    document.documentElement.style.setProperty('--a11y-text-scale', '2');
+    const { panel } = mount();
+    panel.update(payload(idleRow()));
+    const item = document.querySelector('#gm-attention-list li');
+    expect(item.querySelector('.gm-attention-reason').textContent)
+      .toBe('server.gm.attention.reason.idle_npc');
+    expect(item.querySelector('.gm-attention-age').textContent)
+      .toBe('server.gm.attention.age');
+    const verbs = [...item.querySelectorAll('button[data-action]')];
+    expect(verbs.map((button) => button.dataset.action)).toEqual(['open', 'snooze']);
+    for (const button of verbs) {
+      expect(button.disabled).toBe(false);
+      // Reachable by keyboard: a real button, never a div with a click handler.
+      expect(button.tagName).toBe('BUTTON');
+      button.focus();
+      expect(document.activeElement).toBe(button);
+      // The desk's own control class, which is what carries the hit-target
+      // floor and the wrap-rather-than-shrink rules.
+      expect(button.classList.contains('btn')).toBe(true);
+    }
+    document.documentElement.style.removeProperty('--a11y-text-scale');
+    panel.dispose();
+  });
+
+  it('has a row style that grows with the text rather than clipping it', () => {
+    const css = readFileSync('gui/gm-workspace.css', 'utf8');
+    const row = css.slice(css.indexOf('.gm-attention-band-group li {'));
+    const rule = row.slice(0, row.indexOf('}'));
+    // Wrapping, not truncating; and no fixed height to clip a wrapped sentence.
+    expect(rule).toContain('overflow-wrap: anywhere');
+    expect(rule).toContain('min-width: 0');
+    expect(rule).not.toMatch(/(^|[^-])height:\s*\d/);
+    // The verbs' own floor, from the shared control rule.
+    const button = css.slice(css.indexOf('#gm-console.gm-desk button.btn {'));
+    expect(button.slice(0, button.indexOf('}'))).toContain('min-height: var(--control-hit-min)');
+  });
+});

@@ -223,11 +223,17 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     doc: doc, t, has,
     filters: gmAttentionFilters,
     // Opening a row is a NAVIGATION to something that already exists on this
-    // desk — the authored conversation route, or (issue #1434) the authored
-    // beat's own mission-panel row, carrying the Fire/Pause/Skip its author
-    // declared. No GmAction, no dialog, no panel switch: the operator presses
-    // the lever, and that press takes the ordinary admission check and the
-    // ordinary apply-tick revalidation with it.
+    // desk — the authored conversation route, (issue #1434) the authored beat's
+    // own mission-panel row carrying the Fire/Pause/Skip its author declared, or
+    // (issue #1435) simply the hull an idle-NPC row names. No GmAction, no
+    // dialog, no panel switch: the operator presses the lever, and that press
+    // takes the ordinary admission check and the ordinary apply-tick
+    // revalidation with it.
+    //
+    // Each row lights only the halves it actually names. An idle-NPC row names
+    // a ship and nothing else: selecting it is what draws that ship's inspector
+    // and the actions the ship allows, and the absent route and event are why
+    // nothing here chooses, offers or issues an order on the operator's behalf.
     onOpen: (occurrence) => {
       if (occurrence.target.ship) gmProjection.select(occurrence.target.ship.entity_id);
       if (occurrence.target.route) gmCommsPanel.focusRoute(occurrence.target.route);

@@ -3,7 +3,14 @@
   "hashes": {
     "assets/planets/gas_giant/surface_colour.ktx2": "a08b71ffea3ad4a057be5212c01c6f19adf44f95dcb536c5f0533b15a42a635a",
     "assets/planets/gas_giant/surface_colour.uastc.ktx2": "77486cba9c447f9820bd8a07c0891bc0c2160e54ea1c557b0fe0d3d3c6f558a5",
-    "assets/texture-codecs/gas-base-templates.json": "faba285c8db120c664f2f457a723a1f6ce863fee99f1b0256b1e24c531ea5ff7",
+    "assets/planets/gas_giant/surface_colour.ptex": "36f71ee1377c2a3f165fe0ad131163cc5a031ef3a2f1ac846231fc3710b4cf14",
+    "assets/planets/ice_moon/surface_colour.ktx2": "d50d0cf72b02c9a3c68e6c858424fb1d81a0aa26cfe019de3c29af21745e7519",
+    "assets/planets/ice_moon/surface_colour.uastc.ktx2": "c42d8d728d57d02fbe969a1baef42bd38ff76f4158aa27b63846ce993dc52f6e",
+    "assets/planets/ice_moon/surface_colour.ptex": "eb537f3a2db49ea2118c8e9817403b6cd91ad45511be21bca469814f0bd9227a",
+    "assets/planets/ecumenopolis/city_albedo.ktx2": "0c5f4b24d90b6550d17c9a7f0832df5742c58a12f5d1eeb64ac446d4abfe84a1",
+    "assets/planets/ecumenopolis/city_albedo.uastc.ktx2": "da7b72539d8263ba46264adc1ed4cf968d5b30629d5de12e01cdb60e2b72ca08",
+    "assets/planets/ecumenopolis/city_albedo.ptex": "49a80542cf7c759ed545c5593b2a174459fbe476e2d450a4ec9188a7486fc111",
+    "assets/texture-codecs/opaque-4k-templates.json": "faba285c8db120c664f2f457a723a1f6ce863fee99f1b0256b1e24c531ea5ff7",
     "assets/texture-codecs/basis/basis_transcoder.js": "8478b5b6d6b74e7d3082b89f6417321d8d1dc0307f2b30d4484bb11b441696a1",
     "assets/texture-codecs/basis/basis_transcoder.wasm": "6cf17dc889352c42e9acf8897107978d127005fe3386c36a0e3845e27967630a"
   }

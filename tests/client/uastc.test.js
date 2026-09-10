@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { maps } from '../../scripts/planets/uastc-maps.mjs';
+import { parse } from 'smol-toml';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.resetModules(); });
 
@@ -42,6 +44,14 @@ describe('planet UASTC worker lifecycle', () => {
 
 it('ships the baked source and pinned transcoder together', () => {
   const manifest = JSON.parse(readFileSync('assets/texture-codecs/manifest.json'));
+  for (const { entity, stem, textures } of maps) {
+    const config = parse(readFileSync(`assets/entities/${entity}.toml`, 'utf8'));
+    expect(config.planet.surface.albedo).toBe(`assets/planets/${stem}.ktx2`);
+    const descriptor = JSON.parse(readFileSync(`assets/planets/${stem}.ptex`));
+    expect(descriptor).toEqual({ source: `planets/${stem}.uastc.ktx2`, fallback: `planets/${stem}.ktx2` });
+    expect(manifest.hashes[`assets/planets/${stem}.uastc.ktx2`]).toBeTruthy();
+    expect(textures).toBeGreaterThan(0);
+  }
   for (const [file, hash] of Object.entries(manifest.hashes)) {
     expect(createHash('sha256').update(readFileSync(file)).digest('hex'), file).toBe(hash);
   }

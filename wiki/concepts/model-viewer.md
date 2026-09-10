@@ -15,7 +15,8 @@ render path, with lighting switchable between off / ambient / directional.
 It provides a short feedback loop for tuning lighting, rigs, LODs, textures,
 and WGSL without starting a scenario and flying to the subject.
 
-The browser viewer and game share the Gas Giant UASTC base texture loader in
+The browser viewer and game share the Gas Giant, Ice Moon and Ecumenopolis
+UASTC base texture loader in
 `src/entities/planet_texture.rs`. It selects from Bevy's enabled GPU formats,
 transcodes in a local worker, and loads the original into the same handle on
 failure. Native keeps the original. See `assets/texture-codecs/README.md` for

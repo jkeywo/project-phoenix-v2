@@ -11,7 +11,7 @@ entities:
         - "[ai] Gas bands use bounded differential advection and storm-controlled turbulence, independent upper clouds, matching moving shadows, local lightning pulses and polar aurora. Avoid unbounded texture stretching."
         - "[ai] Ice combines frost relief, geology-dependent roughness/AO, masked local blue wrap lighting, sparse thermal fractures and timed vent emission beneath a thin haze. This approximates subsurface appearance without making the planet transparent."
         - "[ai] Natural material channels are separate from city channels. Existing planets retain their prior paths when the optional natural and cloud-dynamics blocks are absent. Validate real WebGL and native rendering, including night and pole views."
-        - "[ai] The approved Gas Giant base map has a browser UASTC variant. Shared preload and rendering select ASTC, BC7, ETC2 or RGBA from Bevy's enabled device formats through an explicit Image loader. A bounded local worker transcodes all mips; download, transcode or parsing failure resolves the same handle from the original lossless map. Native rendering and other maps keep their existing assets."
+        - "[ai] The approved Gas Giant, Ice Moon and Ecumenopolis base maps have browser UASTC variants sharing the opaque 4K layout. Shared preload and rendering select ASTC, BC7, ETC2 or RGBA from Bevy's enabled device formats through an explicit Image loader. A bounded local worker transcodes all mips; download, transcode or parsing failure resolves the same handle from the original lossless map. Native rendering and other maps keep their existing assets."
     architecture:
       kind: renderer
       authority: derived

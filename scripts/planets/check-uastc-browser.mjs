@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { maps } from './uastc-maps.mjs';
 const require = createRequire(path.resolve('tests/smoke/package.json'));
 const { chromium } = require('playwright');
 const bundle = path.resolve(process.argv[2] ?? 'dist-viewer');
@@ -38,6 +39,9 @@ const browser = await chromium.launch({ headless: true,
 await fs.mkdir('target/uastc-game-check', { recursive: true });
 try {
   const requestedModes = process.argv.slice(3);
+  const selectedMaps = process.env.UASTC_ENTITIES ? maps.filter(map => process.env.UASTC_ENTITIES.split(',').includes(map.entity)) : maps;
+  assert.ok(selectedMaps.length, 'No requested planet matched');
+  for (const { entity, stem, textures } of selectedMaps) {
   for (const mode of requestedModes.length ? requestedModes : ['auto', 'rgba', 'missing-worker', 'missing-texture', 'bad-template', 'bad-output', 'subdir']) {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const logs = [], errors = [], requests = [];
@@ -70,28 +74,29 @@ try {
       };
     }, { rgba: mode === 'rgba' });
     if (mode === 'missing-worker') await page.route('**/uastc-worker.js', route => route.abort());
-    if (mode === 'missing-texture') await page.route('**/surface_colour.uastc.ktx2', route => route.fulfill({ status: 404, body: '' }));
-    if (mode === 'bad-template') await page.route('**/gas-base-templates.json', route => route.fulfill({ contentType: 'application/json', body: '{}' }));
+    if (mode === 'missing-texture') await page.route(`**/${stem}.uastc.ktx2`, route => route.fulfill({ status: 404, body: '' }));
+    if (mode === 'bad-template') await page.route('**/opaque-4k-templates.json', route => route.fulfill({ contentType: 'application/json', body: '{}' }));
     if (mode === 'bad-output') await page.route('**/uastc-worker.js', route => route.fulfill({
       contentType: 'text/javascript', body: 'self.onmessage = () => self.postMessage({buffer:new ArrayBuffer(80)});',
     }));
     const prefix = mode === 'subdir' ? '/subdir' : '';
-    await page.goto(`${origin}${prefix}/?entity=assets/entities/planet_gas_giant.toml&lighting=directional`);
-    await page.waitForFunction(() => {
+    await page.goto(`${origin}${prefix}/?entity=assets/entities/${entity}.toml&lighting=directional`);
+    await page.waitForFunction(count => {
       const raw = window.wasmBindings?.viewer_stats?.();
       const stats = raw && JSON.parse(raw);
-      return stats?.settled && stats.textures === 11 && stats.measuredTextures === 11;
-    }, null, { timeout: 180000 });
+      return stats?.settled && stats.textures === count && stats.measuredTextures === count;
+    }, textures, { timeout: 180000 });
     const allocations = await page.evaluate(() => window.textureAllocations);
     const fallback = mode.startsWith('missing') || mode.startsWith('bad-');
     assert.ok(logs.some(line => line.includes(fallback ? 'fallback' : 'loaded')), `${mode}: ${logs}`);
     const expected = fallback || mode === 'rgba' ? [0x8c43] : [0x93d0, 0x8e8d, 0x9279];
     assert.ok(allocations.some(a => a.levels === 13 && expected.includes(a.format)), `${mode}: ${JSON.stringify(allocations)}`);
-    assert.equal(requests.some(url => /\/surface_colour\.ktx2$/.test(url)), fallback, `${mode}: original download`);
+    assert.equal(requests.some(url => url.endsWith(`/planets/${stem}.ktx2`)), fallback, `${entity}/${mode}: original download`);
     assert.deepEqual(errors, []);
-    await page.screenshot({ path: `target/uastc-game-check/${mode}.png` });
-    console.log(JSON.stringify({ mode, allocations, logs, pass: true }));
+    await page.screenshot({ path: `target/uastc-game-check/${entity}-${mode}.png` });
+    console.log(JSON.stringify({ entity, mode, allocations, logs, pass: true }));
     await page.close();
+  }
   }
 } finally {
   await browser.close();

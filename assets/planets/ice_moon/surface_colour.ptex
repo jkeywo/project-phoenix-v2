@@ -1,0 +1,4 @@
+{
+  "source": "planets/ice_moon/surface_colour.uastc.ktx2",
+  "fallback": "planets/ice_moon/surface_colour.ktx2"
+}

@@ -1,4 +1,4 @@
-//! Browser UASTC for the approved Gas Giant base map. Native uses the original.
+//! Browser UASTC for approved planet base maps. Native uses the originals.
 //! A separate asset extension keeps retries inside one Image handle, so preload
 //! and the material agree even if the worker or compressed asset fails.
 use bevy::{
@@ -9,10 +9,14 @@ use bevy::{
 
 #[cfg(any(target_arch = "wasm32", test))]
 pub(super) fn browser_path(path: &str, srgb: bool) -> &str {
-    if srgb && path == "planets/gas_giant/surface_colour.ktx2" {
-        "planets/gas_giant/surface_colour.ptex"
-    } else {
-        path
+    if !srgb {
+        return path;
+    }
+    match path {
+        "planets/gas_giant/surface_colour.ktx2" => "planets/gas_giant/surface_colour.ptex",
+        "planets/ice_moon/surface_colour.ktx2" => "planets/ice_moon/surface_colour.ptex",
+        "planets/ecumenopolis/city_albedo.ktx2" => "planets/ecumenopolis/city_albedo.ptex",
+        _ => path,
     }
 }
 
@@ -153,39 +157,49 @@ mod tests {
         .add_plugins(PlanetTexturePlugin);
         app.finish();
         app.cleanup();
-        let handle: Handle<Image> = app
-            .world()
-            .resource::<AssetServer>()
-            .load("planets/gas_giant/surface_colour.ptex");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            app.update();
-            if let Some(image) = app.world().resource::<Assets<Image>>().get(&handle) {
-                assert_eq!(image.width(), 4096);
-                assert_eq!(image.height(), 2048);
-                assert_eq!(image.texture_descriptor.mip_level_count, 13);
-                assert_eq!(
-                    image.texture_descriptor.format,
-                    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb
+        for descriptor in [
+            "planets/gas_giant/surface_colour.ptex",
+            "planets/ice_moon/surface_colour.ptex",
+            "planets/ecumenopolis/city_albedo.ptex",
+        ] {
+            let handle: Handle<Image> = app.world().resource::<AssetServer>().load(descriptor);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                app.update();
+                if let Some(image) = app.world().resource::<Assets<Image>>().get(&handle) {
+                    assert_eq!(image.width(), 4096);
+                    assert_eq!(image.height(), 2048);
+                    assert_eq!(image.texture_descriptor.mip_level_count, 13);
+                    assert_eq!(
+                        image.texture_descriptor.format,
+                        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb
+                    );
+                    break;
+                }
+                let state = app
+                    .world()
+                    .resource::<AssetServer>()
+                    .load_state(handle.id());
+                assert!(!matches!(state, LoadState::Failed(_)), "{state:?}");
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "texture load timed out"
                 );
-                break;
+                std::thread::sleep(std::time::Duration::from_millis(5));
             }
-            let state = app
-                .world()
-                .resource::<AssetServer>()
-                .load_state(handle.id());
-            assert!(!matches!(state, LoadState::Failed(_)), "{state:?}");
-            assert!(
-                std::time::Instant::now() < deadline,
-                "texture load timed out"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
 
     #[test]
     fn only_the_approved_srgb_base_uses_uastc() {
-        assert!(browser_path("planets/gas_giant/surface_colour.ktx2", true).ends_with(".ptex"));
+        for path in [
+            "planets/gas_giant/surface_colour.ktx2",
+            "planets/ice_moon/surface_colour.ktx2",
+            "planets/ecumenopolis/city_albedo.ktx2",
+        ] {
+            assert!(browser_path(path, true).ends_with(".ptex"));
+            assert_eq!(browser_path(path, false), path);
+        }
         for (path, srgb) in [
             ("planets/ice/surface_colour.ktx2", true),
             ("planets/gas_giant/surface_colour.ktx2", false),

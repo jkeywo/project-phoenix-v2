@@ -8,11 +8,11 @@ self.onmessage = async ({ data: { buffer, target } }) => {
     if (!Object.hasOwn(formats, target)) throw new Error('Unsupported UASTC target');
     const module = await BASIS({ locateFile: name => new URL('./basis/' + name, self.location.href).href });
     module.initializeBasis();
-    const response = await fetch(new URL('./gas-base-templates.json', self.location.href));
+    const response = await fetch(new URL('./opaque-4k-templates.json', self.location.href));
     if (!response.ok) throw new Error('UASTC template download failed');
     const template = (await response.json())[target];
     file = new module.KTX2File(new Uint8Array(buffer));
-    // This rollout is only the approved opaque, sRGB 4K Gas Giant base map.
+    // The approved Gas Giant, Ice Moon and Ecumenopolis maps share this layout.
     if (!file.isValid() || !file.isUASTC() || file.getWidth() !== 4096 ||
         file.getHeight() !== 2048 || file.getLevels() !== 13 || file.getHasAlpha()) {
       throw new Error('Unsupported planet UASTC layout');

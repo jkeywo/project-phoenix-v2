@@ -258,7 +258,9 @@ test.describe('viewscreen renders', () => {
     expectViewscreenDrawn(stats, errors, 'falling_skyway default');
   });
 
-  test('combat_test draws with the compressed Gas Giant base texture', { tag: '@core' }, async ({ context }) => {
+  for (const [world, stems] of [[COMBAT_TEST, ['gas_giant/surface_colour', 'ice_moon/surface_colour', 'ecumenopolis/city_albedo']],
+    [FALLING_SKYWAY, ['ecumenopolis/city_albedo']]]) {
+  test(`${world} draws with compressed planet bases`, { tag: '@core' }, async ({ context }) => {
     const textureLogs = [], downloads = [];
     context.on('page', page => {
       page.on('console', message => {
@@ -266,19 +268,22 @@ test.describe('viewscreen renders', () => {
       });
       page.on('request', request => downloads.push(request.url()));
     });
-    const { errors, stats } = await bootAndMeasure(context, { world: COMBAT_TEST });
-    expectViewscreenDrawn(stats, errors, 'combat_test UASTC');
-    expect(textureLogs.some(line => /Planet UASTC loaded:.*(Astc|Bc7|Etc2)/.test(line)), textureLogs.join('\n')).toBe(true);
-    expect(downloads.some(url => /\/surface_colour\.uastc\.ktx2$/.test(url))).toBe(true);
-    expect(downloads.some(url => /gas_giant\/surface_colour\.ktx2$/.test(url))).toBe(false);
+    const { errors, stats } = await bootAndMeasure(context, { world });
+    expectViewscreenDrawn(stats, errors, `${world} UASTC`);
+    expect(textureLogs.filter(line => /Planet UASTC loaded:.*(Astc|Bc7|Etc2)/.test(line)).length, textureLogs.join('\n')).toBe(stems.length);
+    for (const stem of stems) {
+      expect(downloads.some(url => url.endsWith(`/planets/${stem}.uastc.ktx2`))).toBe(true);
+      expect(downloads.some(url => url.endsWith(`/planets/${stem}.ktx2`))).toBe(false);
+    }
   });
 
-  test('combat_test recovers the original planet texture after a worker failure', async ({ context }) => {
+  test(`${world} recovers original planet bases after a worker failure`, async ({ context }) => {
     await context.route('**/uastc-worker.js', route => route.abort());
     const downloads = [];
     context.on('request', request => downloads.push(request.url()));
-    const { errors, stats } = await bootAndMeasure(context, { world: COMBAT_TEST });
-    expectViewscreenDrawn(stats, errors, 'combat_test UASTC fallback');
-    expect(downloads.some(url => /gas_giant\/surface_colour\.ktx2$/.test(url))).toBe(true);
+    const { errors, stats } = await bootAndMeasure(context, { world });
+    expectViewscreenDrawn(stats, errors, `${world} UASTC fallback`);
+    for (const stem of stems) expect(downloads.some(url => url.endsWith(`/planets/${stem}.ktx2`))).toBe(true);
   });
+  }
 });

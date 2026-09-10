@@ -2145,6 +2145,26 @@ pub struct ScenarioState {
     pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_gm_despawns: Vec<String>,
+    /// The retained inverse data for allowed GM removals, and its two cross-tick
+    /// arms (issue #1444).
+    ///
+    /// Additive, and deliberately without a [`SNAPSHOT_FORMAT`] bump: an older
+    /// save simply has none, and a run restored from one is honestly told so —
+    /// its journal's removal rows carry no captured pair, the projection reports
+    /// the capture as lost and no Undo control is offered. That is the whole
+    /// difference, and it is exactly the answer this build would give for a
+    /// capture the run's own bound had evicted.
+    ///
+    /// It has to travel for [`Self::pending_gm_despawns`]' reason, twice over: an
+    /// accepted removal's capture is armed in `PreUpdate` and taken in
+    /// `FixedUpdate`, and an accepted inverse is armed and executed the same way,
+    /// so a capture taken between the two halves of either would otherwise
+    /// resume a world whose journal reports work nothing will ever do.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::gm_despawn_undo::GmDespawnCaptures::is_empty"
+    )]
+    pub gm_despawn_captures: crate::gm_despawn_undo::GmDespawnCaptures,
     // Historical scenarios must parse so the version gate can refuse them
     // while the save catalogue still retains their scenario/seed/tick metadata.
     #[serde(default)]
@@ -3038,6 +3058,7 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // is every shipped world today.
         pending_gm_spawns: runtime.pending_gm_spawns.clone(),
         pending_gm_despawns: runtime.pending_gm_despawns.clone(),
+        gm_despawn_captures: runtime.gm_despawn_captures.clone(),
         contact_overrides: runtime.contact_overrides.clone(),
         // The GM's paused events (issue #1303). Empty — and so absent from the
         // payload — for every world that authors no pausable event, which is
@@ -4330,6 +4351,20 @@ fn capture_navigation_continuation(world: &World) -> Vec<CapturedNavigationConti
         .collect();
     rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
     rows
+}
+
+/// The complete captured row for ONE live entity, taken through the same walk a
+/// save takes (issue #1444).
+///
+/// Deliberately the whole walk filtered, not a narrowed per-entity capture: the
+/// GM despawn inverse restores through [`apply_entity_state`], and a row built
+/// by a different function would be missing exactly the continuations that
+/// function had not been taught about. A removal is rare enough — a handful in a
+/// live event — that one save-sized walk is the right price for that guarantee.
+pub(crate) fn capture_entity_state(world: &World, uuid: &str) -> Option<EntityState> {
+    capture_entities(world)
+        .into_iter()
+        .find(|row| row.uuid == uuid)
 }
 
 fn capture_entities(world: &World) -> Vec<EntityState> {
@@ -5841,6 +5876,11 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // that decides which draws which uuid.
         runtime.pending_gm_spawns = stored.pending_gm_spawns.clone();
         runtime.pending_gm_despawns = stored.pending_gm_despawns.clone();
+        // Wholesale replacement on this walk's rule (issue #1444): a
+        // freshly-loaded world has removed nothing, so anything short of
+        // replacement would leave a bootstrap's captures beside the saved
+        // journal that is the only thing entitled to name them.
+        runtime.gm_despawn_captures = stored.gm_despawn_captures.clone();
         runtime.contact_overrides = stored.contact_overrides.clone();
         // The GM's paused events (issue #1303). Wholesale replacement on the
         // same rule and for the sharper reason on `ScenarioState`: a
@@ -6171,331 +6211,369 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
     report.entities_restored = writes.len();
 
     for (entity, row) in writes {
-        let mut entity_mut = world.entity_mut(entity);
-        // Reconcile the canonical LOD bundle before applying any of the
-        // continuations it owns. A High capture restored onto a Low bootstrap
-        // needs those components inserted so the writes below have somewhere to
-        // land; a Low capture restored onto High must remove them before any
-        // high-fidelity system can observe the stale bootstrap marker.
-        if let Some(ai_fidelity) = &row.ai_fidelity {
-            apply_ai_fidelity(&mut entity_mut, ai_fidelity, f64::from(restored_at));
-        }
-        if let Some(mut sources) =
-            entity_mut.get_mut::<crate::ship_plugin::ShipSystemControlSources>()
-        {
-            sources.0.replace_offline_systems(
-                row.damage_offline_systems
-                    .iter()
-                    .cloned()
-                    .map(crate::core::messages::SystemId),
-            );
-            sources.0.replace_gm_disabled_systems(
-                row.gm_disabled_systems
-                    .iter()
-                    .cloned()
-                    .map(crate::core::messages::SystemId),
-            );
-        }
-        let restored_doctrine = row
-            .npc_doctrine
-            .as_ref()
-            .map(|state| state.doctrine.clone())
-            .or_else(|| {
-                entity_mut
-                    .get::<crate::gm_npc::NpcDoctrineState>()
-                    .and_then(|state| state.0.as_ref().map(|state| state.baseline.clone()))
-            });
-        if let Some(doctrine) = restored_doctrine {
-            if let Some(mut behaviour) =
-                entity_mut.get_mut::<crate::entities::spawner::BehaviourSection>()
-            {
-                behaviour.0.doctrine = doctrine;
-            }
-        }
-        if entity_mut.contains::<crate::gm_npc::NpcDoctrineState>() || row.npc_doctrine.is_some() {
-            entity_mut.insert(crate::gm_npc::NpcDoctrineState(row.npc_doctrine.clone()));
-        }
-        if let Some(p) = row.physics {
-            if let Some(mut physics) = entity_mut.get_mut::<ShipPhysics>() {
-                physics.x = p[0];
-                physics.y = p[1];
-                physics.z = p[2];
-                physics.yaw = p[3];
-                physics.forward_speed = p[4];
-                physics.roll = p[5];
-                physics.lateral_speed = p[6];
-                physics.vertical_speed = p[7];
-            }
-            // The renderer and the physics solver both read `Transform`, so a
-            // restored ship that only moved its `ShipPhysics` would sit in one
-            // place and be drawn in another until the next helm integration.
-            //
-            // The ROTATION is written for a sharper reason than drawing:
-            // `build_helm_ai_surfaces_frame` reads a target's facing straight
-            // off `Transform::rotation`, not off its `ShipPhysics`. A resumed
-            // world that restored only the translation therefore had every ship
-            // steering against a target whose heading was the *bootstrap's* —
-            // and a Harrow inbound on a bearing of pi was read as facing 0.
-            //
-            // Derived here rather than stored, and by the same expression
-            // `physics_systems::apply_ship_physics` uses, so the two can only
-            // ever agree: the transform is a projection of `ShipPhysics`, and a
-            // save that stored it separately could contradict the thing it is a
-            // projection of.
-            if let Some(mut transform) = entity_mut.get_mut::<Transform>() {
-                transform.translation = Vec3::new(p[0], p[1], p[2]);
-                transform.rotation = Quat::from_euler(bevy::math::EulerRot::YXZ, -p[3], 0.0, p[5]);
-            }
-        }
-        if let Some(rows) = &row.hull {
-            if let Some(mut hull) = entity_mut.get_mut::<EntitySystemHull>() {
-                apply_hull(&mut hull.0, rows);
-            }
-        }
-        if let Some(active) = row.red_alert {
-            if let Some(mut alert) = entity_mut.get_mut::<ShipRedAlert>() {
-                alert.bypass_change_detection().0 = active;
-                alert.set_last_changed(restored_alert_tick);
-            }
-        }
-        // Issues #1107–#1109. The per-ship Command stance map IS folded into the
-        // sim digest, so a resume that dropped it stood at a different digest
-        // than the capture the instant any stance was in force. Overwrite the
-        // authoritative map from the row — an empty row clears it, byte-identical
-        // to a never-commanded hull. Re-wrapped into `StationId` from the sorted
-        // scalar pairs the capture stored.
-        if let Some(mut stances) =
-            entity_mut.get_mut::<crate::console::command::server::ShipStationStances>()
-        {
-            stances.0 = row
-                .station_stances
-                .iter()
-                .map(|(station, stance)| {
-                    (
-                        crate::core::messages::StationId(station.clone()),
-                        stance.clone(),
-                    )
-                })
-                .collect();
-        }
-        // Reseed the #1108 edge scratch (`LastDirectedControl`) from the restored
-        // control sources. It is NOT folded into the digest (it is a pure
-        // function of already-authoritative control state, classified `derived`),
-        // so this does not move the digest-at-restore assertion — but the scratch
-        // is what makes the Human→AI stance-resume trigger fire on an EDGE rather
-        // than every tick, and a restored map is empty. An empty scratch treats
-        // the first post-restore tick as a first OBSERVATION and fires nothing;
-        // a continuous host would have carried `Some(prev)` and could fire the
-        // edge that tick. Recording the directed Station's CURRENT
-        // `station_is_ai_controlled` result makes the first tick a continuation
-        // of the state the resumed world actually restored into, not a spurious
-        // first-observation no-op. The captured session-level human/AI split on
-        // the target is deliberately NOT recoverable — control sources are
-        // derived from who is at a console, which the snapshot excludes — so the
-        // honest reseed is the restored world's own current reading. See the
-        // WARNING on `command_plugin::LastDirectedControl`.
-        let reseed = {
-            let config = entity_mut.get::<crate::ship_plugin::ShipConfigComponent>();
-            let sources = entity_mut.get::<crate::ship_plugin::ShipSystemControlSources>();
-            match (config, sources) {
-                (Some(config), Some(sources)) => {
-                    crate::console::command::server::command_station(&config.0)
-                        .and_then(|command| command.command_target.clone())
-                        .map(|target| {
-                            let now_ai = crate::console::command::server::station_is_ai_controlled(
-                                &config.0, &sources.0, &target,
-                            );
-                            (target, now_ai)
-                        })
-                }
-                _ => None,
-            }
-        };
-        if let Some((target, now_ai)) = reseed {
-            if let Some(mut last) =
-                entity_mut.get_mut::<crate::console::command::server::LastDirectedControl>()
-            {
-                last.0.clear();
-                last.0.insert(target, now_ai);
-            }
-        }
-        if let Some(control) = &row.control {
-            control.restore_into(&mut entity_mut);
-        }
-        if let Some(drive) = &row.drive {
-            if let Some(mut history) = entity_mut.get_mut::<crate::server_app::ImpulseHullHistory>()
-            {
-                history.0 = drive.impulse_previous_hull_hp;
-            }
-            if let Some(mut impulse) = entity_mut.get_mut::<ShipImpulse>() {
-                impulse.0.phase = match drive.impulse_phase {
-                    1 => ImpulsePhase::Charging,
-                    2 => ImpulsePhase::Active,
-                    _ => ImpulsePhase::Idle,
-                };
-                impulse.0.charge_progress = drive.impulse_charge_progress;
-            }
-            if let Some(mut boost) = entity_mut.get_mut::<ShipBoost>() {
-                boost.0.active = drive.boost_active;
-                boost.0.battery = drive.boost_battery;
-            }
-        }
-        if let Some(waypoint) = &row.navigation_waypoint {
-            apply_navigation_waypoint(&mut entity_mut, waypoint);
-        }
-        if let Some(clearance_issue) = &row.navigation_clearance_issue {
-            apply_navigation_clearance_issue(&mut entity_mut, clearance_issue);
-        }
-        if let Some(helm_clearance) = &row.helm_waypoint_clearance {
-            apply_helm_waypoint_clearance(&mut entity_mut, helm_clearance);
-        }
-        if let Some(weapons) = &row.weapons {
-            apply_weapons(&mut entity_mut, weapons);
-        }
-        if let Some(shield_ai) = &row.shield_ai {
-            apply_shield_ai(&mut entity_mut, shield_ai);
-        }
-        if let Some(sensors_threat) = &row.sensors_threat {
-            apply_sensors_threat(&mut entity_mut, sensors_threat);
-        }
-        if let Some(intent_narration) = &row.intent_narration {
-            apply_intent_narration(&mut entity_mut, intent_narration);
-        }
-        if let Some(recent_combat) = &row.recent_combat {
-            apply_recent_combat(&mut entity_mut, recent_combat, restored_at);
-        }
-        if let Some(frequency_hint) = &row.frequency_hint {
-            apply_frequency_hint(&mut entity_mut, frequency_hint);
-        }
-        if let Some(phaser_frequency) = &row.phaser_frequency {
-            apply_ship_phaser_frequency(&mut entity_mut, phaser_frequency);
-        }
-        if let Some(tactical_frequency_hint) = &row.tactical_frequency_hint {
-            apply_tactical_frequency_hint(&mut entity_mut, tactical_frequency_hint);
-        }
-        if let Some(last_system_tiers) = &row.last_system_tiers {
-            apply_last_system_tiers(&mut entity_mut, last_system_tiers);
-        }
-        if let Some(power_brownout) = &row.power_brownout {
-            apply_power_brownout(&mut entity_mut, power_brownout);
-        }
-        if let Some(shields_coordination) = &row.shields_coordination {
-            apply_shields_coordination(&mut entity_mut, shields_coordination);
-        }
-        if let Some(coordination_queue) = &row.coordination_queue {
-            apply_coordination_queue(&mut entity_mut, coordination_queue, snapshot.tick);
-        }
-        if let Some(repair) = &row.repair {
-            apply_repair(&mut entity_mut, repair);
-        }
-        if let Some(arc) = &row.arc_request {
-            apply_arc_request(&mut entity_mut, arc);
-        }
-        if let Some(power) = &row.power {
-            if let Some(mut reactor) = entity_mut.get_mut::<crate::ship::power::ShipPowerSystem>() {
-                reactor.0.restore_continuation(power);
-            }
-        }
-        if let Some(surface) = row.pass_surface {
-            if let Some(mut pass) = entity_mut.get_mut::<crate::ship::helm_ai::HelmPassSurface>() {
-                *pass = surface;
-            }
-        }
-        if let Some(infrastructure) = &row.infrastructure {
-            if let Some(mut condition) =
-                entity_mut.get_mut::<crate::infrastructure::InfrastructureCondition>()
-            {
-                condition.0 = infrastructure.clone();
-            }
-        }
-        if let Some(tractor) = &row.tractor {
-            if let Some(mut beam) = entity_mut.get_mut::<crate::tractor::TractorBeam>() {
-                beam.restore(tractor);
-            }
-        }
-        if let Some(dock) = &row.dock {
-            if let Some(mut control) = entity_mut.get_mut::<crate::dock::DockControl>() {
-                control.restore(dock);
-            }
-        }
-        if let Some(external_repair) = &row.external_repair {
-            if let Some(mut dispatch) =
-                entity_mut.get_mut::<crate::console::repair::ExternalRepairDispatch>()
-            {
-                dispatch.restore(external_repair);
-            }
-        }
-        if let Some(umbilical) = &row.umbilical {
-            if let Some(mut control) = entity_mut.get_mut::<crate::umbilical::TransferUmbilical>() {
-                control.restore(umbilical);
-            }
-        }
-        if let Some(security) = &row.security {
-            if let Some(mut teams) = entity_mut.get_mut::<crate::security::ShipSecurityTeams>() {
-                teams.restore(security);
-            }
-        }
-        if let Some(scan) = &row.scan {
-            if let Some(mut record) = entity_mut.get_mut::<crate::science::ShipScanRecord>() {
-                record.restore(scan);
-            }
-        }
-        if let Some(civilian) = &row.civilian {
-            if let Some(mut traffic) = entity_mut.get_mut::<crate::civilian::CivilianTraffic>() {
-                traffic.0 = civilian.clone();
-            }
-        }
-        if let Some(debris) = &row.debris {
-            if let Some(mut threat) = entity_mut.get_mut::<crate::debris::DebrisThreat>() {
-                threat.restore(debris);
-            }
-            // The drifted position, written beside the latches for the same
-            // reason a resumed ship's `Transform` is written beside its
-            // `ShipPhysics` above: `DebrisThreat::restore` cannot reach its own
-            // entity's other components, and a rock carries no physics record
-            // for the transform to be a projection of. The rotation and scale
-            // are left alone — `tick_debris_drift` never touches either, so what
-            // the respawn put there is still right.
-            if let Some(mut transform) = entity_mut.get_mut::<Transform>() {
-                transform.translation = Vec3::new(
-                    debris.translation[0],
-                    debris.translation[1],
-                    debris.translation[2],
-                );
-            }
-        }
-        if !row.patrol_cursors.is_empty() {
-            if let Some(mut cursors) = entity_mut.get_mut::<crate::ai::server::ObjectiveCursors>() {
-                cursors.0 = row
-                    .patrol_cursors
-                    .iter()
-                    .map(|(id, index, settled)| {
-                        crate::ai::patrol_cursor::PatrolCursor::restored(
-                            id.clone(),
-                            *index as usize,
-                            *settled,
-                        )
-                    })
-                    .collect();
-            }
-        }
-        if !row.blackboards.is_empty() {
-            if let Some(mut boards) =
-                entity_mut.get_mut::<crate::server_app::ShipSystemBlackboards>()
-            {
-                boards.0 = row
-                    .blackboards
-                    .iter()
-                    .map(|(id, board)| (SystemId(id.clone()), board.clone()))
-                    .collect();
-            }
-        }
+        apply_entity_state_with(
+            world,
+            entity,
+            &row,
+            snapshot.tick,
+            restored_at,
+            restored_alert_tick,
+        );
     }
 
     report.despawned += surplus.len();
     for entity in surplus {
         if let Ok(entity_mut) = world.get_entity_mut(entity) {
             entity_mut.despawn();
+        }
+    }
+}
+
+/// Put ONE captured row back onto one live entity, at the caller's tick.
+///
+/// Lifted out of [`restore_entities`] unchanged so the GM despawn inverse
+/// (issue #1444) restores a single entity through the EXACT writes a resumed
+/// save performs. A second per-entity applier would be a second answer to
+/// "what is the state of this ship", and the two would drift the first time a
+/// continuation was added to only one of them.
+///
+/// `tick` is the capture's own simulation tick for a resume, and the CURRENT
+/// tick for an inverse: nothing here simulates the interval, so the value is
+/// simply the reading every age-relative continuation is measured against.
+pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    let restored_at = fixed_elapsed_secs(world).unwrap_or_default();
+    let restored_alert_tick = bevy::ecs::change_detection::Tick::new(
+        world
+            .read_change_tick()
+            .get()
+            .wrapping_sub(bevy::ecs::change_detection::MAX_CHANGE_AGE),
+    );
+    apply_entity_state_with(world, entity, row, tick, restored_at, restored_alert_tick);
+}
+
+/// The per-entity write list itself, with the two restore-wide readings the
+/// bulk path takes once and hands to every row.
+fn apply_entity_state_with(
+    world: &mut World,
+    entity: Entity,
+    row: &EntityState,
+    tick: u64,
+    restored_at: f32,
+    restored_alert_tick: bevy::ecs::change_detection::Tick,
+) {
+    let mut entity_mut = world.entity_mut(entity);
+    // Reconcile the canonical LOD bundle before applying any of the
+    // continuations it owns. A High capture restored onto a Low bootstrap
+    // needs those components inserted so the writes below have somewhere to
+    // land; a Low capture restored onto High must remove them before any
+    // high-fidelity system can observe the stale bootstrap marker.
+    if let Some(ai_fidelity) = &row.ai_fidelity {
+        apply_ai_fidelity(&mut entity_mut, ai_fidelity, f64::from(restored_at));
+    }
+    if let Some(mut sources) = entity_mut.get_mut::<crate::ship_plugin::ShipSystemControlSources>()
+    {
+        sources.0.replace_offline_systems(
+            row.damage_offline_systems
+                .iter()
+                .cloned()
+                .map(crate::core::messages::SystemId),
+        );
+        sources.0.replace_gm_disabled_systems(
+            row.gm_disabled_systems
+                .iter()
+                .cloned()
+                .map(crate::core::messages::SystemId),
+        );
+    }
+    let restored_doctrine = row
+        .npc_doctrine
+        .as_ref()
+        .map(|state| state.doctrine.clone())
+        .or_else(|| {
+            entity_mut
+                .get::<crate::gm_npc::NpcDoctrineState>()
+                .and_then(|state| state.0.as_ref().map(|state| state.baseline.clone()))
+        });
+    if let Some(doctrine) = restored_doctrine {
+        if let Some(mut behaviour) =
+            entity_mut.get_mut::<crate::entities::spawner::BehaviourSection>()
+        {
+            behaviour.0.doctrine = doctrine;
+        }
+    }
+    if entity_mut.contains::<crate::gm_npc::NpcDoctrineState>() || row.npc_doctrine.is_some() {
+        entity_mut.insert(crate::gm_npc::NpcDoctrineState(row.npc_doctrine.clone()));
+    }
+    if let Some(p) = row.physics {
+        if let Some(mut physics) = entity_mut.get_mut::<ShipPhysics>() {
+            physics.x = p[0];
+            physics.y = p[1];
+            physics.z = p[2];
+            physics.yaw = p[3];
+            physics.forward_speed = p[4];
+            physics.roll = p[5];
+            physics.lateral_speed = p[6];
+            physics.vertical_speed = p[7];
+        }
+        // The renderer and the physics solver both read `Transform`, so a
+        // restored ship that only moved its `ShipPhysics` would sit in one
+        // place and be drawn in another until the next helm integration.
+        //
+        // The ROTATION is written for a sharper reason than drawing:
+        // `build_helm_ai_surfaces_frame` reads a target's facing straight
+        // off `Transform::rotation`, not off its `ShipPhysics`. A resumed
+        // world that restored only the translation therefore had every ship
+        // steering against a target whose heading was the *bootstrap's* —
+        // and a Harrow inbound on a bearing of pi was read as facing 0.
+        //
+        // Derived here rather than stored, and by the same expression
+        // `physics_systems::apply_ship_physics` uses, so the two can only
+        // ever agree: the transform is a projection of `ShipPhysics`, and a
+        // save that stored it separately could contradict the thing it is a
+        // projection of.
+        if let Some(mut transform) = entity_mut.get_mut::<Transform>() {
+            transform.translation = Vec3::new(p[0], p[1], p[2]);
+            transform.rotation = Quat::from_euler(bevy::math::EulerRot::YXZ, -p[3], 0.0, p[5]);
+        }
+    }
+    if let Some(rows) = &row.hull {
+        if let Some(mut hull) = entity_mut.get_mut::<EntitySystemHull>() {
+            apply_hull(&mut hull.0, rows);
+        }
+    }
+    if let Some(active) = row.red_alert {
+        if let Some(mut alert) = entity_mut.get_mut::<ShipRedAlert>() {
+            alert.bypass_change_detection().0 = active;
+            alert.set_last_changed(restored_alert_tick);
+        }
+    }
+    // Issues #1107–#1109. The per-ship Command stance map IS folded into the
+    // sim digest, so a resume that dropped it stood at a different digest
+    // than the capture the instant any stance was in force. Overwrite the
+    // authoritative map from the row — an empty row clears it, byte-identical
+    // to a never-commanded hull. Re-wrapped into `StationId` from the sorted
+    // scalar pairs the capture stored.
+    if let Some(mut stances) =
+        entity_mut.get_mut::<crate::console::command::server::ShipStationStances>()
+    {
+        stances.0 = row
+            .station_stances
+            .iter()
+            .map(|(station, stance)| {
+                (
+                    crate::core::messages::StationId(station.clone()),
+                    stance.clone(),
+                )
+            })
+            .collect();
+    }
+    // Reseed the #1108 edge scratch (`LastDirectedControl`) from the restored
+    // control sources. It is NOT folded into the digest (it is a pure
+    // function of already-authoritative control state, classified `derived`),
+    // so this does not move the digest-at-restore assertion — but the scratch
+    // is what makes the Human→AI stance-resume trigger fire on an EDGE rather
+    // than every tick, and a restored map is empty. An empty scratch treats
+    // the first post-restore tick as a first OBSERVATION and fires nothing;
+    // a continuous host would have carried `Some(prev)` and could fire the
+    // edge that tick. Recording the directed Station's CURRENT
+    // `station_is_ai_controlled` result makes the first tick a continuation
+    // of the state the resumed world actually restored into, not a spurious
+    // first-observation no-op. The captured session-level human/AI split on
+    // the target is deliberately NOT recoverable — control sources are
+    // derived from who is at a console, which the snapshot excludes — so the
+    // honest reseed is the restored world's own current reading. See the
+    // WARNING on `command_plugin::LastDirectedControl`.
+    let reseed = {
+        let config = entity_mut.get::<crate::ship_plugin::ShipConfigComponent>();
+        let sources = entity_mut.get::<crate::ship_plugin::ShipSystemControlSources>();
+        match (config, sources) {
+            (Some(config), Some(sources)) => {
+                crate::console::command::server::command_station(&config.0)
+                    .and_then(|command| command.command_target.clone())
+                    .map(|target| {
+                        let now_ai = crate::console::command::server::station_is_ai_controlled(
+                            &config.0, &sources.0, &target,
+                        );
+                        (target, now_ai)
+                    })
+            }
+            _ => None,
+        }
+    };
+    if let Some((target, now_ai)) = reseed {
+        if let Some(mut last) =
+            entity_mut.get_mut::<crate::console::command::server::LastDirectedControl>()
+        {
+            last.0.clear();
+            last.0.insert(target, now_ai);
+        }
+    }
+    if let Some(control) = &row.control {
+        control.restore_into(&mut entity_mut);
+    }
+    if let Some(drive) = &row.drive {
+        if let Some(mut history) = entity_mut.get_mut::<crate::server_app::ImpulseHullHistory>() {
+            history.0 = drive.impulse_previous_hull_hp;
+        }
+        if let Some(mut impulse) = entity_mut.get_mut::<ShipImpulse>() {
+            impulse.0.phase = match drive.impulse_phase {
+                1 => ImpulsePhase::Charging,
+                2 => ImpulsePhase::Active,
+                _ => ImpulsePhase::Idle,
+            };
+            impulse.0.charge_progress = drive.impulse_charge_progress;
+        }
+        if let Some(mut boost) = entity_mut.get_mut::<ShipBoost>() {
+            boost.0.active = drive.boost_active;
+            boost.0.battery = drive.boost_battery;
+        }
+    }
+    if let Some(waypoint) = &row.navigation_waypoint {
+        apply_navigation_waypoint(&mut entity_mut, waypoint);
+    }
+    if let Some(clearance_issue) = &row.navigation_clearance_issue {
+        apply_navigation_clearance_issue(&mut entity_mut, clearance_issue);
+    }
+    if let Some(helm_clearance) = &row.helm_waypoint_clearance {
+        apply_helm_waypoint_clearance(&mut entity_mut, helm_clearance);
+    }
+    if let Some(weapons) = &row.weapons {
+        apply_weapons(&mut entity_mut, weapons);
+    }
+    if let Some(shield_ai) = &row.shield_ai {
+        apply_shield_ai(&mut entity_mut, shield_ai);
+    }
+    if let Some(sensors_threat) = &row.sensors_threat {
+        apply_sensors_threat(&mut entity_mut, sensors_threat);
+    }
+    if let Some(intent_narration) = &row.intent_narration {
+        apply_intent_narration(&mut entity_mut, intent_narration);
+    }
+    if let Some(recent_combat) = &row.recent_combat {
+        apply_recent_combat(&mut entity_mut, recent_combat, restored_at);
+    }
+    if let Some(frequency_hint) = &row.frequency_hint {
+        apply_frequency_hint(&mut entity_mut, frequency_hint);
+    }
+    if let Some(phaser_frequency) = &row.phaser_frequency {
+        apply_ship_phaser_frequency(&mut entity_mut, phaser_frequency);
+    }
+    if let Some(tactical_frequency_hint) = &row.tactical_frequency_hint {
+        apply_tactical_frequency_hint(&mut entity_mut, tactical_frequency_hint);
+    }
+    if let Some(last_system_tiers) = &row.last_system_tiers {
+        apply_last_system_tiers(&mut entity_mut, last_system_tiers);
+    }
+    if let Some(power_brownout) = &row.power_brownout {
+        apply_power_brownout(&mut entity_mut, power_brownout);
+    }
+    if let Some(shields_coordination) = &row.shields_coordination {
+        apply_shields_coordination(&mut entity_mut, shields_coordination);
+    }
+    if let Some(coordination_queue) = &row.coordination_queue {
+        apply_coordination_queue(&mut entity_mut, coordination_queue, tick);
+    }
+    if let Some(repair) = &row.repair {
+        apply_repair(&mut entity_mut, repair);
+    }
+    if let Some(arc) = &row.arc_request {
+        apply_arc_request(&mut entity_mut, arc);
+    }
+    if let Some(power) = &row.power {
+        if let Some(mut reactor) = entity_mut.get_mut::<crate::ship::power::ShipPowerSystem>() {
+            reactor.0.restore_continuation(power);
+        }
+    }
+    if let Some(surface) = row.pass_surface {
+        if let Some(mut pass) = entity_mut.get_mut::<crate::ship::helm_ai::HelmPassSurface>() {
+            *pass = surface;
+        }
+    }
+    if let Some(infrastructure) = &row.infrastructure {
+        if let Some(mut condition) =
+            entity_mut.get_mut::<crate::infrastructure::InfrastructureCondition>()
+        {
+            condition.0 = infrastructure.clone();
+        }
+    }
+    if let Some(tractor) = &row.tractor {
+        if let Some(mut beam) = entity_mut.get_mut::<crate::tractor::TractorBeam>() {
+            beam.restore(tractor);
+        }
+    }
+    if let Some(dock) = &row.dock {
+        if let Some(mut control) = entity_mut.get_mut::<crate::dock::DockControl>() {
+            control.restore(dock);
+        }
+    }
+    if let Some(external_repair) = &row.external_repair {
+        if let Some(mut dispatch) =
+            entity_mut.get_mut::<crate::console::repair::ExternalRepairDispatch>()
+        {
+            dispatch.restore(external_repair);
+        }
+    }
+    if let Some(umbilical) = &row.umbilical {
+        if let Some(mut control) = entity_mut.get_mut::<crate::umbilical::TransferUmbilical>() {
+            control.restore(umbilical);
+        }
+    }
+    if let Some(security) = &row.security {
+        if let Some(mut teams) = entity_mut.get_mut::<crate::security::ShipSecurityTeams>() {
+            teams.restore(security);
+        }
+    }
+    if let Some(scan) = &row.scan {
+        if let Some(mut record) = entity_mut.get_mut::<crate::science::ShipScanRecord>() {
+            record.restore(scan);
+        }
+    }
+    if let Some(civilian) = &row.civilian {
+        if let Some(mut traffic) = entity_mut.get_mut::<crate::civilian::CivilianTraffic>() {
+            traffic.0 = civilian.clone();
+        }
+    }
+    if let Some(debris) = &row.debris {
+        if let Some(mut threat) = entity_mut.get_mut::<crate::debris::DebrisThreat>() {
+            threat.restore(debris);
+        }
+        // The drifted position, written beside the latches for the same
+        // reason a resumed ship's `Transform` is written beside its
+        // `ShipPhysics` above: `DebrisThreat::restore` cannot reach its own
+        // entity's other components, and a rock carries no physics record
+        // for the transform to be a projection of. The rotation and scale
+        // are left alone — `tick_debris_drift` never touches either, so what
+        // the respawn put there is still right.
+        if let Some(mut transform) = entity_mut.get_mut::<Transform>() {
+            transform.translation = Vec3::new(
+                debris.translation[0],
+                debris.translation[1],
+                debris.translation[2],
+            );
+        }
+    }
+    if !row.patrol_cursors.is_empty() {
+        if let Some(mut cursors) = entity_mut.get_mut::<crate::ai::server::ObjectiveCursors>() {
+            cursors.0 = row
+                .patrol_cursors
+                .iter()
+                .map(|(id, index, settled)| {
+                    crate::ai::patrol_cursor::PatrolCursor::restored(
+                        id.clone(),
+                        *index as usize,
+                        *settled,
+                    )
+                })
+                .collect();
+        }
+    }
+    if !row.blackboards.is_empty() {
+        if let Some(mut boards) = entity_mut.get_mut::<crate::server_app::ShipSystemBlackboards>() {
+            boards.0 = row
+                .blackboards
+                .iter()
+                .map(|(id, board)| (SystemId(id.clone()), board.clone()))
+                .collect();
         }
     }
 }
@@ -6812,7 +6890,7 @@ fn apply_coordination_queue(
 /// explicitly through [`EntityState::ai_fidelity`], rather than inferring a tier
 /// from one bundle member. So the tier is *read*, not guessed, and the canonical
 /// bundle is present before the ordinary entity restore applies its continuations.
-fn spawn_from_origin(
+pub(crate) fn spawn_from_origin(
     world: &mut World,
     row: &EntityState,
     origin: &crate::world::spawn_origin::SpawnOrigin,

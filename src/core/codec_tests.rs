@@ -6435,3 +6435,51 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
     // assigned-station authority changed the protocol, not this JSON shape.
     assert_eq!(PROTOCOL_VERSION, 4);
 }
+
+/// The removal inverse's ingress (issue #1444).
+///
+/// `expected` is the `affected` object the journal projection published, echoed
+/// back verbatim by a page that never constructs one. The variant is new, so
+/// this pins that the ingress reads it, bounds it exactly as it bounds every
+/// other affected field, and refuses a pair that names no entity — the whole
+/// point of the echo being that the reducer can compare it against the fact.
+#[test]
+fn undo_of_a_removal_decodes_the_published_presence_pair_verbatim() {
+    let request = |expected: &str| {
+        format!(
+            r#"{{"operator_id":"gm-blake","correlation":"undo-1","action":"undo_gm_action",
+                "original":"remove-1","original_operator":"gm-alex","original_sequence":9,
+                "expected":{expected}}}"#
+        )
+    };
+    let decoded = crate::core::codec::decode_gm_action_request(&request(
+        r#"{"entity-presence":{"entity":"raider-7","before":true,"after":false}}"#,
+    ))
+    .expect("the published pair round-trips through the browser wire");
+    assert_eq!(
+        decoded.action,
+        crate::gm_action::GmAction::UndoGmAction {
+            original: crate::gm_action::GmActionId::new("remove-1".to_string()).unwrap(),
+            original_operator: "gm-alex".into(),
+            original_sequence: 9,
+            expected: crate::gm_action::GmAffectedField::EntityPresence {
+                entity: "raider-7".into(),
+                before: true,
+                after: false,
+            },
+        }
+    );
+    // A pair whose two sides are the same describes no change, and an unbounded
+    // identity is not vocabulary: both are refused at ingress rather than
+    // becoming a canonical grant that can only ever be refused.
+    for rejected in [
+        r#"{"entity-presence":{"entity":"raider-7","before":true,"after":true}}"#,
+        r#"{"entity-presence":{"entity":"","before":true,"after":false}}"#,
+        r#"{"entity-presence":{"before":true,"after":false}}"#,
+    ] {
+        assert!(
+            crate::core::codec::decode_gm_action_request(&request(rejected)).is_none(),
+            "{rejected}"
+        );
+    }
+}

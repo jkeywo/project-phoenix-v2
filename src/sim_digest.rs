@@ -1070,6 +1070,20 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, target);
         }
     }
+    // The retained despawn inverse data (issue #1444). Folded ONLY once a GM
+    // has actually removed something, on `gm-faction-overrides`' rule and for
+    // its reason: a run that never uses the surface keeps the digest it had
+    // before this landed. Folded at all because two peers must agree on which
+    // removals are reversible before either reverses one — see
+    // `GmDespawnCaptures::digest_facts` for why the captured entity ROW is
+    // deliberately outside this fold and caught by the ordinary per-entity one.
+    if !runtime.gm_despawn_captures.is_empty() {
+        acc = fold_str(acc, "gm-despawn-captures");
+        acc = fold_u64(
+            acc,
+            vellum_digest::digest_postcard(&runtime.gm_despawn_captures.digest_facts()),
+        );
+    }
     if !runtime.pending_gm_spawns.is_empty() {
         acc = fold_str(acc, "scenario-gm-spawns");
         acc = fold_u64(acc, runtime.pending_gm_spawns.len() as u64);

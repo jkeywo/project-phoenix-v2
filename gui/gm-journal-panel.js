@@ -81,7 +81,10 @@ function normaliseEntry(value) {
         && (!value.affected || typeof value.affected !== 'object'))
       || (value.spawn_exposure !== undefined
         && !normaliseGmSpawnExposure(value.spawn_exposure))
-      || (value.undo_of !== undefined && !normaliseUndoReference(value.undo_of))) return undefined;
+      || (value.undo_of !== undefined && !normaliseUndoReference(value.undo_of))
+      || (value.capture_lost !== undefined && typeof value.capture_lost !== 'boolean')) {
+    return undefined;
+  }
   return {
     operator_id: value.operator_id,
     correlation: value.correlation,
@@ -103,6 +106,9 @@ function normaliseEntry(value) {
     ...(value.spawn_exposure === undefined
       ? {}
       : { spawn_exposure: normaliseGmSpawnExposure(value.spawn_exposure) }),
+    // The same shape of narrowing for a removal (issue #1444): the run no
+    // longer holds — or never held — the capture a rebuild reads.
+    ...(value.capture_lost === true ? { capture_lost: true } : {}),
     ...(value.undo_of === undefined
       ? {}
       : { undo_of: normaliseUndoReference(value.undo_of) }),
@@ -174,6 +180,10 @@ export function filterGmJournalEntries(entries, { operator = 'all', outcome = 'a
 /**
  * Whether this build can offer an Undo control for one journal row.
  *
+ * `capture_lost` (issue #1444) is the removal family's extra condition and is
+ * consulted for every family, because a row that says it is asking for the same
+ * answer whatever it is about: the data this inverse would need is not there.
+ *
  * Every clause is a fact the CANONICAL journal published, not a local guess:
  * the action really applied, it recorded the affected pair an inverse needs,
  * nothing has already reversed it, and this build has a typed inverse for its
@@ -183,6 +193,7 @@ export function filterGmJournalEntries(entries, { operator = 'all', outcome = 'a
  */
 export function gmJournalEntryIsUndoable(entry) {
   return !!entry && entry.outcome === 'applied' && !!entry.affected && entry.inverted !== true
+    && entry.capture_lost !== true
     && gmInverseAvailability(entry.action_kind, entry.spawn_exposure).supported;
 }
 

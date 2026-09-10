@@ -200,7 +200,7 @@ fn canonical_boundary_attributes_once_and_shared_cleanup_needs_no_local_ship() {
         ["npc"]
     );
     // Exercise the public lifecycle independently of any renderer/local-ship systems.
-    phoenix::gm_despawn::remove_entity(app.world_mut(), entity);
+    let _ = phoenix::gm_despawn::remove_entity(app.world_mut(), entity);
     assert!(app.world().get_entity(entity).is_err());
     assert_eq!(
         app.world()
@@ -454,7 +454,7 @@ fn shared_removal_releases_support_partners_without_a_local_ship() {
     umbilical.activation_target = Some("partner".into());
     umbilical.partner_level = Some(90);
     let observer = world.spawn((tractor, dock, umbilical)).id();
-    phoenix::gm_despawn::remove_entity(&mut world, target);
+    let _ = phoenix::gm_despawn::remove_entity(&mut world, target);
     let tractor = world
         .get::<phoenix::tractor::TractorBeam>(observer)
         .unwrap();
@@ -494,7 +494,7 @@ fn removing_an_actor_ends_active_and_queued_work_without_claiming_its_subject_di
         slot: queued.clone(),
         target: Some("survivor".into()),
     }]));
-    phoenix::gm_despawn::remove_entity(&mut world, actor);
+    let _ = phoenix::gm_despawn::remove_entity(&mut world, actor);
     assert!(world.get_entity(subject).is_ok());
     let requests = &world.resource::<EffectQueue<TaskLifecycleRequest>>().0;
     for slot in [active, queued] {

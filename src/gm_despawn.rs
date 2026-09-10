@@ -5,6 +5,7 @@
 //! even when mislabeled. Runtime hazards need their normal spawn provenance.
 use crate::entities::spawner::{EntitySpawnOrigin, EntityTagsSection, EntityUuid};
 use crate::gm_action::GmActionRefusalReason;
+use crate::gm_despawn_undo::GmRemovalReference;
 use bevy::prelude::*;
 
 pub type RemovalQuery<'w, 's> = Query<
@@ -82,15 +83,48 @@ pub fn validate_target(query: &RemovalQuery, target: &str) -> Result<(), GmActio
 /// Authored name/group mappings are historical facts used by destruction
 /// predicates and deliberately survive. Historical Comms messages also survive;
 /// live locks, hail permission and support-system partners do not.
-pub fn remove_entity(world: &mut World, entity: Entity) {
+///
+/// # Why it reports the overrides it cleared
+///
+/// The returned list is the bounded inverse data a GM removal's undo is built on
+/// (issue #1444): the attributed GM contact-knowledge overrides an undo puts
+/// back. It is produced by the ONE walk that does the clearing rather than by a
+/// read-only mirror of it, so a clear added here cannot quietly stop being
+/// restored by the GM who is about to reverse the removal.
+///
+/// The live console links this walk also releases - radar selections, weapon
+/// locks, tows, docking, transports, dispatched repair crews, anchored
+/// waypoints, Comms presence, task activations - are deliberately NOT reported.
+/// Nothing restores them and nothing names them individually, and half of them
+/// are derived from state kept outside the #894 digest boundary on purpose; see
+/// [`crate::gm_despawn_undo`], which would have to fold and save anything this
+/// function handed it. Ordinary scripted and combat destruction drops the value.
+#[must_use]
+pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReference> {
+    let mut cleared: Vec<GmRemovalReference> = Vec::new();
     let Some(uuid) = world.get::<EntityUuid>(entity).map(|uuid| uuid.0.clone()) else {
-        return;
+        return cleared;
     };
     if let Some(mut content) = world.get_resource_mut::<crate::world::server::WorldContentRuntime>()
     {
-        content.contact_overrides.remove(&uuid);
-        for rows in content.contact_overrides.values_mut() {
-            rows.remove(&uuid);
+        // The removed entity's OWN observations, and every other observer's
+        // row about it. Both are attributed GM decisions, so both are recorded
+        // for the inverse rather than merely dropped.
+        for (target, mode) in content.contact_overrides.remove(&uuid).unwrap_or_default() {
+            cleared.push(GmRemovalReference {
+                observer: uuid.clone(),
+                target,
+                mode,
+            });
+        }
+        for (observer, rows) in content.contact_overrides.iter_mut() {
+            if let Some(mode) = rows.remove(&uuid) {
+                cleared.push(GmRemovalReference {
+                    observer: observer.clone(),
+                    target: uuid.clone(),
+                    mode,
+                });
+            }
         }
         content.contact_overrides.retain(|_, rows| !rows.is_empty());
     }
@@ -285,4 +319,10 @@ pub fn remove_entity(world: &mut World, entity: Entity) {
         }
     }
     world.despawn(entity);
+    // Sorted and de-duplicated before it leaves. This list is folded into the
+    // deterministic digest by the capture that keeps it, and map iteration order
+    // is an implementation detail no two peers may be required to share.
+    cleared.sort();
+    cleared.dedup();
+    cleared
 }

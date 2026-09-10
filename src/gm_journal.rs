@@ -91,18 +91,33 @@ pub struct GmJournalEntry {
     /// there rather than honoured here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn_exposure: Option<crate::gm_exposure::GmSpawnExposureStatus>,
+    /// Whether this entry's inverse needs retained data the run no longer holds
+    /// (issue #1444).
+    ///
+    /// The removal family's version of the narrowing `spawn_exposure` is for a
+    /// placement, and only a removal can say `true`. Its inverse is not a value
+    /// to write back but a whole entity to rebuild, so it needs a
+    /// [`crate::gm_despawn_undo::GmRemovalCapture`] — and those are bounded, and
+    /// a removal of something a capture cannot rebuild at all (an authored
+    /// `[[entity]]` block) never had one. Published rather than left for the
+    /// reducer to refuse, because a control a GM presses in a crisis and is then
+    /// told "no" is worse than a control that was honestly never offered.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub capture_lost: bool,
 }
 
 impl GmJournalEntry {
     /// Project one durable fact, dropping everything that is not public.
     ///
     /// `inverted` is supplied by the caller because it is a fact about the
-    /// whole log, not about this entry; `spawn_exposure` for the same reason —
-    /// it is a fact about the live world, which the journal does not hold.
+    /// whole log, not about this entry; `spawn_exposure` and `capture_lost` for
+    /// the same reason — both are facts about the live world, which the journal
+    /// does not hold.
     pub fn from_logged(
         entry: &LoggedGmAction,
         inverted: bool,
         spawn_exposure: Option<crate::gm_exposure::GmSpawnExposureStatus>,
+        capture_lost: bool,
     ) -> Self {
         Self {
             operator_id: entry.operator_id.clone(),
@@ -117,6 +132,7 @@ impl GmJournalEntry {
             undo_of: entry.undo_of.clone(),
             inverted,
             spawn_exposure,
+            capture_lost,
         }
     }
 }
@@ -138,10 +154,15 @@ pub struct GmJournalProjection {
 /// `Pending` facts are excluded: an action whose authentic consumer has not yet
 /// answered has no terminal outcome to attribute, and the journal panel's whole
 /// claim is that every row it shows really happened.
+/// `captures` is the run's retained removal inverse data (issue #1444), or
+/// `None` when there is no world at all — in which case nothing can be rebuilt
+/// and every removal row says so, which is the truth for a journal-only fixture
+/// and for a replay harness alike.
 pub fn journal_projection(
     log: &GmActionLog,
     exposure: Option<&crate::gm_exposure::GmSpawnExposure>,
     hz: f32,
+    captures: Option<&crate::gm_despawn_undo::GmDespawnCaptures>,
 ) -> GmJournalProjection {
     let terminal: Vec<&LoggedGmAction> = log
         .entries()
@@ -185,6 +206,7 @@ pub fn journal_projection(
                 entry,
                 inverted.contains(&(entry.operator_id.as_str(), entry.correlation.as_str())),
                 spawn_exposure,
+                capture_lost(entry, captures),
             )
         })
         .collect();
@@ -193,6 +215,30 @@ pub fn journal_projection(
         total,
         entries: window,
     }
+}
+
+/// Whether one fact's inverse would need a retained removal capture that is
+/// no longer there.
+///
+/// Answered for removals ALONE. Every other reversible family carries its whole
+/// inverse on the fact itself (`affected`), so no store can be missing for it,
+/// and a blanket "no capture" would hide their Undo controls too.
+fn capture_lost(
+    entry: &LoggedGmAction,
+    captures: Option<&crate::gm_despawn_undo::GmDespawnCaptures>,
+) -> bool {
+    if entry.action_kind != GmActionKind::WorldDespawn
+        || entry.outcome != GmActionOutcome::Applied
+        || entry.affected.is_none()
+    {
+        return false;
+    }
+    let Some(sequence) = entry.order.map(|order| order.sequence) else {
+        return true;
+    };
+    !captures.is_some_and(|captures| {
+        captures.is_restorable(&entry.operator_id, &entry.correlation, sequence)
+    })
 }
 
 #[cfg(test)]
@@ -217,6 +263,13 @@ mod tests {
         }
     }
 
+    /// The projection with no world behind it, which is what a journal-only
+    /// fixture has: no placement stopwatch, nothing that can be rebuilt, and no
+    /// fixture here places or removes anything.
+    fn journal_projection_for_test(log: &GmActionLog) -> GmJournalProjection {
+        journal_projection(log, None, 60.0, None)
+    }
+
     fn applied(grants: impl IntoIterator<Item = GmActionGrant>) -> GmActionLog {
         let mut journal = GmActionJournal::default();
         let mut last = 0;
@@ -229,7 +282,7 @@ mod tests {
 
     #[test]
     fn projects_public_attribution_without_transport_identity() {
-        let projection = journal_projection(&applied([pause(1, true)]), None, 60.0);
+        let projection = journal_projection_for_test(&applied([pause(1, true)]));
         let row = &projection.entries[0];
         assert_eq!(row.operator_id, "gm-2");
         assert_eq!(row.correlation, "corr-1");
@@ -264,11 +317,11 @@ mod tests {
     #[test]
     fn reports_the_real_applied_and_no_op_outcomes_in_canonical_order() {
         // Pause, pause again (nothing to change), resume.
-        let projection = journal_projection(
-            &applied([pause(1, true), pause(2, true), pause(3, false)]),
-            None,
-            60.0,
-        );
+        let projection = journal_projection_for_test(&applied([
+            pause(1, true),
+            pause(2, true),
+            pause(3, false),
+        ]));
         assert_eq!(projection.total, 3);
         assert_eq!(projection.capacity, MAX_GM_ACTIONS_PER_RUN);
         assert_eq!(
@@ -288,11 +341,9 @@ mod tests {
     #[test]
     fn trims_the_oldest_rows_while_still_reporting_the_full_total() {
         let count = GM_JOURNAL_WINDOW as u64 + 5;
-        let projection = journal_projection(
-            &applied((1..=count).map(|n| pause(n, !n.is_multiple_of(2)))),
-            None,
-            60.0,
-        );
+        let projection = journal_projection_for_test(&applied(
+            (1..=count).map(|n| pause(n, !n.is_multiple_of(2))),
+        ));
         assert_eq!(projection.total, count as usize);
         assert_eq!(projection.entries.len(), GM_JOURNAL_WINDOW);
         assert_eq!(projection.entries[0].sequence, Some(6));

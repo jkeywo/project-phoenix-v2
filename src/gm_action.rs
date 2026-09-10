@@ -308,6 +308,30 @@ pub enum GmAffectedField {
         before: bool,
         after: bool,
     },
+    /// Whether one entity identity exists in the world (issue #1444).
+    ///
+    /// `before: true, after: false` is exactly one allowed GM removal, and the
+    /// swapped pair is its inverse. Deliberately just the identity and the two
+    /// sides: the entity's restorable STATE is far too large to echo through a
+    /// browser and back on every Undo press, so it stays on the simulation side
+    /// in [`crate::gm_despawn_undo::GmDespawnCaptures`], keyed by the same
+    /// public action identity every other inverse names an original by. What
+    /// travels here is what the requesting GM was looking at, which is all the
+    /// stale-page check needs.
+    ///
+    /// Its subject is the removed entity's UUID rather than
+    /// [`Self::SpawnedEntity`]'s scenario name, and for that variant's own
+    /// reason read backwards: a removal names something that already exists, so
+    /// its stable identity is in hand at the apply tick, while a placement's is
+    /// not minted until the pipeline drains the arm.
+    ///
+    /// APPENDED after [`Self::SpawnedEntity`], never inserted: the journal is
+    /// folded through postcard, which encodes an enum by VARIANT INDEX.
+    EntityPresence {
+        entity: String,
+        before: bool,
+        after: bool,
+    },
 }
 
 impl GmAffectedField {
@@ -343,6 +367,15 @@ impl GmAffectedField {
                 before: *after,
                 after: *before,
             },
+            Self::EntityPresence {
+                entity,
+                before,
+                after,
+            } => Self::EntityPresence {
+                entity: entity.clone(),
+                before: *after,
+                after: *before,
+            },
         }
     }
 
@@ -353,6 +386,7 @@ impl GmAffectedField {
             Self::NpcDoctrine { before, after, .. } => before != after,
             Self::FactionHostility { before, after, .. } => before != after,
             Self::SpawnedEntity { before, after, .. } => before != after,
+            Self::EntityPresence { before, after, .. } => before != after,
         }
     }
 
@@ -368,6 +402,7 @@ impl GmAffectedField {
             } => ok(entity) && before.as_deref().is_none_or(ok) && after.as_deref().is_none_or(ok),
             Self::FactionHostility { faction, enemy, .. } => ok(faction) && ok(enemy),
             Self::SpawnedEntity { name, .. } => ok(name),
+            Self::EntityPresence { entity, .. } => ok(entity),
         }
     }
 }
@@ -1363,6 +1398,18 @@ pub enum GmActionRefusalReason {
     ///
     /// Appended for [`Self::UnknownGmEvent`]'s reason.
     SensorExposureElapsed,
+    /// A removal's captured identity is live again (issue #1444): the uuid now
+    /// belongs to another entity. Restoring would produce two claimants for one
+    /// identity, so it is refused and nothing is written.
+    ///
+    /// Appended for [`Self::UnknownGmEvent`]'s reason — the journal is folded
+    /// through postcard, which encodes an enum by VARIANT INDEX.
+    RestoreIdentityOccupied,
+    /// A reference the removal cleared and its inverse would put back now holds
+    /// a NEWER decision — an authored name the world has re-bound, or another
+    /// GM's contact override on the same observer/target pair. Refused rather
+    /// than overwritten, and refused as a whole rather than applied in part.
+    RestoreReferenceConflict,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -2600,6 +2647,7 @@ pub fn projection(
     factions: Option<&crate::ai::faction::FactionRegistry>,
     exposure: Option<&crate::gm_exposure::GmSpawnExposure>,
     hz: f32,
+    captures: Option<&crate::gm_despawn_undo::GmDespawnCaptures>,
 ) -> GmSessionProjection {
     GmSessionProjection {
         paused,
@@ -2609,7 +2657,7 @@ pub fn projection(
         // page-local diagnostics that no snapshot carries, so admitting them
         // here would put rows in the saved history that a restore could never
         // reproduce — exactly the abandoned-timeline residue #1441 forbids.
-        journal: crate::gm_journal::journal_projection(log, exposure, hz),
+        journal: crate::gm_journal::journal_projection(log, exposure, hz, captures),
     }
 }
 
@@ -2625,6 +2673,12 @@ pub fn publish_session_projection(
     // authored rate because the page reads the cutoff in seconds, never ticks.
     exposure: Option<Res<crate::gm_exposure::GmSpawnExposure>>,
     world: Option<Res<crate::world::config::WorldConfig>>,
+    // The retained despawn inverse data (issue #1444), so the journal panel can
+    // hide an Undo control whose capture the run no longer holds rather than
+    // offering one the reducer would only refuse. `Option` for every other
+    // world-backed param's reason: the pure journal fixtures and the replay
+    // harness publish this projection without a world.
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut last: ResMut<LastGmSessionProjection>,
     mut writer: MessageWriter<crate::console_bridge::GmSessionChanged>,
 ) {
@@ -2638,6 +2692,9 @@ pub fn publish_session_projection(
             || crate::entities::config::GlobalConfig::default().sim_tick_hz,
             |world| world.global.sim_tick_hz,
         ),
+        content
+            .as_deref()
+            .map(|content| &content.gm_despawn_captures),
     );
     if last.0.as_ref() == Some(&next) {
         return;
@@ -3051,6 +3108,84 @@ pub fn apply_due_actions(
                                 Some(GmActionRefusalReason::UnknownNpcDoctrine),
                             ),
                         },
+                        // Restoring a removed entity (issue #1444). Every
+                        // fallible question is asked HERE, against live state at
+                        // the canonical apply tick, and the rebuild itself is
+                        // armed for the fixed pipeline — which is the only place
+                        // with the exclusive world access a spawn needs. That
+                        // split is what makes the restore atomic: by the time
+                        // anything is written, nothing can still refuse.
+                        GmAffectedField::EntityPresence {
+                            entity,
+                            before,
+                            after,
+                        } => match content.as_deref_mut() {
+                            None => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::WorldUnavailable),
+                            ),
+                            // The pair the other way round: an inverse of a
+                            // removal must restore presence, and a request whose
+                            // recorded pair says anything else describes an
+                            // action this arm cannot perform.
+                            Some(_) if *before || !*after => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::InverseUnsupported),
+                            ),
+                            Some(runtime) => match runtime
+                                .gm_despawn_captures
+                                .capture_for(original_operator, original, *original_sequence)
+                                .cloned()
+                            {
+                                // Never taken, or evicted by the run's own
+                                // bound. Both are the same answer to a GM:
+                                // nothing retained can rebuild that entity.
+                                None => (
+                                    GmActionOutcome::Refused,
+                                    Some(GmActionRefusalReason::InverseUnsupported),
+                                ),
+                                // Unreachable through `undo_precheck`, which
+                                // has already matched the recorded pair. Kept
+                                // as the cheap insurance it is: a capture store
+                                // and a journal that disagreed about which
+                                // entity a removal was about must refuse rather
+                                // than rebuild the wrong hull.
+                                Some(capture) if capture.entity != *entity => (
+                                    GmActionOutcome::Refused,
+                                    Some(GmActionRefusalReason::InverseUnsupported),
+                                ),
+                                Some(capture) => {
+                                    let live: std::collections::BTreeSet<String> =
+                                        objective_control
+                                            .removal_targets
+                                            .iter()
+                                            .map(|(uuid, ..)| uuid.0.clone())
+                                            .collect();
+                                    match crate::gm_despawn_undo::restore_precheck(
+                                        &capture,
+                                        &live,
+                                        &runtime.name_to_uuid,
+                                        &runtime.contact_overrides,
+                                        |origin| {
+                                            origin
+                                                .resolve(
+                                                    &crate::entities::loader::WasmTemplateLoader,
+                                                    &mut Vec::new(),
+                                                )
+                                                .is_some()
+                                        },
+                                    ) {
+                                        Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+                                        Ok(()) => {
+                                            runtime
+                                                .gm_despawn_captures
+                                                .arm_restore(capture.action.clone());
+                                            (GmActionOutcome::Applied, None)
+                                        }
+                                    }
+                                }
+                            },
+                        },
                         GmAffectedField::FactionHostility {
                             faction,
                             enemy,
@@ -3420,6 +3555,26 @@ pub fn apply_due_actions(
                     Err(reason) => (GmActionOutcome::Refused, Some(reason)),
                     Ok(()) => {
                         runtime.pending_gm_despawns.push(target.clone());
+                        // Tell the destruction path to capture rather than
+                        // merely clean up (issue #1444). Armed HERE, at the
+                        // canonical apply tick, so every peer captures the same
+                        // removal under the same public action identity.
+                        runtime.gm_despawn_captures.arm_removal(
+                            crate::gm_despawn_undo::ArmedGmRemoval {
+                                action: GmUndoReference {
+                                    operator_id: grant.operator_id.clone(),
+                                    correlation: grant.correlation.clone(),
+                                    sequence: grant.order.sequence,
+                                },
+                                entity: target.clone(),
+                                tick: grant.apply_tick,
+                            },
+                        );
+                        affected = Some(GmAffectedField::EntityPresence {
+                            entity: target.clone(),
+                            before: true,
+                            after: false,
+                        });
                         (GmActionOutcome::Applied, None)
                     }
                 },
@@ -6374,6 +6529,7 @@ station = "helm"
             None,
             None,
             60.0,
+            None,
         );
         assert!(bounded
             .results
@@ -6400,6 +6556,7 @@ station = "helm"
             None,
             None,
             60.0,
+            None,
         );
         let exact = retried
             .results

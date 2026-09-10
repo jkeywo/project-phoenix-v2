@@ -1,0 +1,69 @@
+# Reversing an allowed GM removal (issue #1444).
+#
+# Three removable things, chosen to be the three shapes the capture has to tell
+# apart rather than three of the same thing:
+#
+#  - `[[gm_palette]] removable-raider` — a RUNTIME-spawned hull. A script or a
+#    GM placement records what it was made from, so a capture can rebuild it.
+#  - `[[gm_palette]] removable-berth` — a runtime-spawned STRUCTURE, which
+#    carries no ship physics, no hull systems and no AI. The capture is the same
+#    machinery and must not assume a ship.
+#  - `Authored raider` — an ordinary `[[entity]]` block, which a fresh boot
+#    re-creates from THIS file rather than from a record. Nothing can rebuild it
+#    from a capture, and the surface has to say so rather than guess.
+
+[global]
+seed = 1444
+title = "GM removal undo fixture"
+description = "Allowed removals and the captured state that reverses them."
+
+# The patrol template's own authored doctrine names these two; a composition
+# that declares neither is refused at load, so they live here rather than the
+# doctrine being overridden away.
+[anchors]
+picket = [4000.0, 0.0, -4000.0]
+ironveil_patrol_a = [6000.0, 0.0, -6000.0]
+ironveil_patrol_b = [6000.0, 0.0, -7000.0]
+
+[player_spawn]
+position = [0.0, 0.0, 500.0]
+
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 500.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "Authored raider"
+transform = { anchor = "picket" }
+overrides = { name = "Authored raider", display_name = "Authored raider", tags = [
+  "ship",
+  "npc",
+  "enemy",
+  "gm_removable",
+] }
+
+[[gm_palette]]
+id = "removable-raider"
+label = "Removable raider"
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name_prefix = "gm_raider"
+[[gm_palette.variant]]
+id = "removable"
+label = "Removable raider"
+overrides = { tags = ["ship", "npc", "enemy", "gm_removable"] }
+
+[[gm_palette]]
+id = "removable-berth"
+label = "Removable berth"
+template_path = "assets/entities/dock_berth.toml"
+name_prefix = "gm_berth"
+[[gm_palette.variant]]
+id = "removable"
+label = "Removable berth"
+overrides = { tags = ["structure", "gm_removable"] }

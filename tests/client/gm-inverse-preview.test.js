@@ -67,14 +67,11 @@ it('answers for every action family the canonical journal can record', () => {
 });
 
 it('claims undo support for exactly the families the reducer can reverse', () => {
-  // Issue #1442 builds the NPC-doctrine and faction-relation inverses, #1443
-  // the placement one. Despawn remains PLANNED and nothing else may claim
-  // support.
+  // #1442 built the NPC-doctrine and faction-relation inverses, #1443 the
+  // placement one and #1444 the removal one. Nothing else may claim support,
+  // and there is no `planned` family left in this build.
   expect(gmInverseSupportedKinds().sort())
-    .toEqual(['faction-relation', 'npc-doctrine', 'world-spawn']);
-  for (const planned of ['world-despawn']) {
-    expect(gmInverseAvailability(planned).status).toBe(GM_INVERSE_PLANNED);
-  }
+    .toEqual(['faction-relation', 'npc-doctrine', 'world-despawn', 'world-spawn']);
   expect(gmInverseAvailability('direct-effect').status).toBe(GM_INVERSE_OUT_OF_SCOPE);
   expect(gmInverseAvailability('comms').status).toBe(GM_INVERSE_OUT_OF_SCOPE);
   // An undo of an undo is a redo, and is refused as a matter of vocabulary.
@@ -117,12 +114,14 @@ it('names the ordered faction pair rather than implying a mutual relationship', 
 
 it('renders unavailable eligibility as readable words, not only a data attribute', () => {
   const preview = createGmInversePreview({ doc: document, t });
-  preview.render(host, { actionKind: 'world-despawn', target: 'courier' });
+  // A family that really has no inverse, now that every family PRD #1420
+  // scoped one for has been built (#1442, #1443, #1444).
+  preview.render(host, { actionKind: 'direct-effect', target: 'courier' });
   const eligibility = host.querySelector('.gm-inverse-eligibility');
   expect(eligibility.dataset.supported).toBe('false');
-  expect(eligibility.dataset.status).toBe(GM_INVERSE_PLANNED);
+  expect(eligibility.dataset.status).toBe(GM_INVERSE_OUT_OF_SCOPE);
   expect(eligibility.textContent).toContain(t('server.gm.inverse.unavailable'));
-  expect(eligibility.textContent).toContain(t('server.gm.inverse.unavailable.planned'));
+  expect(eligibility.textContent).toContain(t('server.gm.inverse.unavailable.folded'));
   // Nothing that could be mistaken for an offer to undo.
   expect(host.querySelector('button')).toBeNull();
   expect(host.textContent).not.toContain(t('server.gm.inverse.available'));
@@ -137,23 +136,20 @@ it('says state was not captured rather than showing an empty before/after', () =
   expect(values.some((value) => value.trim() === '')).toBe(false);
 });
 
-it('never lets an uncaptured before/after row deny the inverse a planned family is due', () => {
+it('never lets an uncaptured before/after row deny an inverse the family really has', () => {
   const preview = createGmInversePreview({ doc: document, t });
-  const planned = Object.entries(GM_INVERSE_SUPPORT)
-    .filter(([, entry]) => entry.status === GM_INVERSE_PLANNED)
-    .map(([kind]) => kind);
-  expect(planned.length).toBeGreaterThan(0);
-  for (const kind of planned) {
+  // Every family PRD #1420 scoped an inverse for is now built (#1442, #1443,
+  // #1444), so the case this guards has moved from `planned` to `supported`:
+  // a caller that captured no pair must still not make the row read as though
+  // no inverse could exist, because the eligibility row says the opposite.
+  const supported = gmInverseSupportedKinds();
+  expect(supported.length).toBeGreaterThan(0);
+  for (const kind of supported) {
     preview.render(host, { actionKind: kind });
     const [before, after] = [...host.querySelectorAll('dd')].map((node) => node.textContent);
-    // An uncaptured row reports only what this surface recorded. It must not
-    // rule an inverse out, because the eligibility row for these same families
-    // says the opposite: planned, not impossible.
     for (const text of [before, after]) {
       expect(text).not.toMatch(/inverse|undo|reverse|restore/i);
     }
-    expect(host.querySelector('.gm-inverse-eligibility').textContent)
-      .toContain(t('server.gm.inverse.unavailable.planned'));
   }
 });
 
@@ -296,4 +292,34 @@ it('never lets an exposure clock reach a family that has no window', () => {
   expect(availability.supported).toBe(true);
   expect(host.querySelector('.gm-inverse-eligibility').textContent)
     .toContain(t('server.gm.inverse.available'));
+  expect(host.querySelector('.gm-inverse-exposure')).toBeNull();
+});
+
+// ── Reversing an allowed removal (issue #1444) ───────────────────────────────
+
+it('describes a removal as the entity presence pair it is (issue #1444)', () => {
+  const preview = createGmInversePreview({ doc: document, t });
+  preview.render(host, {
+    actionKind: 'world-despawn',
+    affected: { 'entity-presence': { entity: 'raider-7', before: true, after: false } },
+  });
+  const values = [...host.querySelectorAll('dd')].map((node) => node.textContent);
+  expect(values[0]).toBe(t('server.gm.inverse.subject_presence', { entity: 'raider-7' }));
+  expect(values[1]).toBe(t('server.gm.inverse.presence_present'));
+  expect(values[2]).toBe(t('server.gm.inverse.presence_absent'));
+  const eligibility = host.querySelector('.gm-inverse-eligibility');
+  expect(eligibility.dataset.supported).toBe('true');
+  expect(eligibility.textContent).toContain(t('server.gm.inverse.supported.world_despawn'));
+  // The witnessed row gains the concrete half only for a removal.
+  expect(values[4]).toContain(t('server.gm.inverse.witnessed_removal'));
+});
+
+it('does not claim released links for a family that released none', () => {
+  const preview = createGmInversePreview({ doc: document, t });
+  preview.render(host, {
+    actionKind: 'faction-relation',
+    affected: { 'faction-hostility': { faction: 'a', enemy: 'b', before: false, after: true } },
+  });
+  const values = [...host.querySelectorAll('dd')].map((node) => node.textContent);
+  expect(values[4]).toBe(t('server.gm.inverse.witnessed_note'));
 });

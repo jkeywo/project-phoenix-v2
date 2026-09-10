@@ -1232,6 +1232,8 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::AffectedStateChanged => "affected-state-changed",
         Reason::AlreadyInverted => "already-inverted",
         Reason::SensorExposureElapsed => "sensor-exposure-elapsed",
+        Reason::RestoreIdentityOccupied => "restore-identity-occupied",
+        Reason::RestoreReferenceConflict => "restore-reference-conflict",
     }
 }
 

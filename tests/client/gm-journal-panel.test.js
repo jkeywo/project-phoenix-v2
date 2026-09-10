@@ -107,6 +107,7 @@ it('states up front which families this build can undo', () => {
         t('server.gm.journal.kind.npc_doctrine'),
         t('server.gm.journal.kind.faction_relation'),
         t('server.gm.journal.kind.world_spawn'),
+        t('server.gm.journal.kind.world_despawn'),
       ].join(', '),
     }));
 });
@@ -132,10 +133,10 @@ it('shows the refusal reason and the technical/witnessed split on the selected e
   const inverse = document.getElementById('gm-journal-inverse');
   expect(inverse.textContent).toContain(t('server.gm.inverse.technical_refused'));
   expect(inverse.textContent).toContain(t('server.gm.inverse.witnessed_note'));
-  // No undo is offered or implied for any family in this build.
-  expect(panel.inverseAvailability().supported).toBe(false);
-  expect(inverse.querySelector('.gm-inverse-eligibility').textContent)
-    .toContain(t('server.gm.inverse.unavailable'));
+  // The family is reversible (issue #1444), but THIS entry was refused and
+  // recorded no pair, so no control is offered over it.
+  expect(panel.inverseAvailability().supported).toBe(true);
+  expect(document.getElementById('gm-journal-undo').hidden).toBe(true);
   expect(inverse.querySelector('button')).toBeNull();
 });
 
@@ -665,5 +666,122 @@ it('gives the placement Undo control a reachable name and the shipped hit floor'
     operator: 'Alex',
     order: t('server.gm.journal.order', { tick: '40', sequence: '20' }),
   }));
+  panel2.destroy();
+});
+
+// ── Reversing an allowed removal (issue #1444) ───────────────────────────────
+
+/** An applied GM removal, exactly as Rust serialises it. */
+const REMOVAL = entry({
+  correlation: 'act-30',
+  action_kind: 'world-despawn',
+  target: 'raider-7',
+  tick: 30,
+  sequence: 30,
+  outcome: 'applied',
+  affected: { 'entity-presence': { entity: 'raider-7', before: true, after: false } },
+});
+
+it('describes a removal as a presence pair and offers its Undo', () => {
+  const panel2 = undoPanel();
+  expect(panel2.update(payload([REMOVAL]))).toBe(true);
+  rows()[0].click();
+  const values = [...document.querySelectorAll('#gm-journal-inverse dd')]
+    .map((node) => node.textContent);
+  expect(values[0]).toBe(t('server.gm.inverse.subject_presence', { entity: 'raider-7' }));
+  expect(values[1]).toBe(t('server.gm.inverse.presence_present'));
+  expect(values[2]).toBe(t('server.gm.inverse.presence_absent'));
+  expect(undoButton().hidden).toBe(false);
+  panel2.destroy();
+});
+
+it('names the released links a restore does not re-make, beside the standing witness note', () => {
+  const panel2 = undoPanel();
+  panel2.update(payload([REMOVAL]));
+  rows()[0].click();
+  const witnessed = [...document.querySelectorAll('#gm-journal-inverse dd')][4].textContent;
+  // Both halves: crews remember, AND the concrete links that were released.
+  expect(witnessed).toContain(t('server.gm.inverse.witnessed_note'));
+  expect(witnessed).toContain(t('server.gm.inverse.witnessed_removal'));
+  panel2.destroy();
+});
+
+it('hides the Undo control when the run no longer holds the capture a rebuild needs', () => {
+  const panel2 = undoPanel();
+  panel2.update(payload([{ ...REMOVAL, capture_lost: true }]));
+  rows()[0].click();
+  expect(undoButton().hidden).toBe(true);
+  // The family is still described as reversible; this ENTRY is the exception,
+  // and nothing on screen offers a control the reducer would refuse.
+  expect(panel2.inverseAvailability().supported).toBe(true);
+  panel2.destroy();
+});
+
+it('echoes the recorded presence pair back verbatim when a GM asks to undo a removal', () => {
+  const submitted = [];
+  const panel2 = undoPanel({ submitUndo: (request) => { submitted.push(request); return true; } });
+  panel2.update(payload([REMOVAL]));
+  rows()[0].click();
+  undoButton().click();
+  expect(submitted).toHaveLength(1);
+  expect(submitted[0].action).toBe('undo_gm_action');
+  expect(submitted[0].original).toBe('act-30');
+  expect(submitted[0].original_operator).toBe('gm-alex');
+  expect(submitted[0].original_sequence).toBe(30);
+  expect(submitted[0].expected).toEqual(REMOVAL.affected);
+  panel2.destroy();
+});
+
+it('states the witnessed consequences in the confirmation preview under every policy', () => {
+  const previews = [];
+  const panel2 = undoPanel({
+    confirmAction: (request) => { previews.push(request.preview()); request.accept(); },
+  });
+  panel2.update(payload([REMOVAL]));
+  rows()[0].click();
+  undoButton().click();
+  expect(previews).toHaveLength(1);
+  // `confirm-preview`, `confirm` and `immediate` all route through the same
+  // controller; what the sentence SAYS is what this pins.
+  expect(previews[0]).toContain(t('server.gm.inverse.witnessed_note'));
+  panel2.destroy();
+});
+
+it('rejects a malformed capture_lost rather than rendering a row it cannot trust', () => {
+  const panel2 = undoPanel();
+  expect(panel2.update(payload([{ ...REMOVAL, capture_lost: 'yes' }]))).toBe(false);
+  panel2.destroy();
+});
+
+it('keeps the removal Undo readable and operable at 200% text', () => {
+  const panel2 = undoPanel();
+  document.documentElement.style.setProperty('--a11y-text-scale', '2');
+  panel2.update(payload([REMOVAL]));
+  rows()[0].click();
+  // Status is words, never colour alone, and the accessible name names the
+  // action, the operator and the order rather than saying only "Undo".
+  expect(rows()[0].dataset.outcome).toBe('applied');
+  expect(undoButton().hidden).toBe(false);
+  expect(undoButton().getAttribute('aria-label')).toBe(t('server.gm.journal.undo_entry', {
+    action: t('server.gm.journal.action_target', {
+      action: t('server.gm.journal.kind.world_despawn'),
+      target: 'raider-7',
+    }),
+    operator: 'Alex',
+    order: t('server.gm.journal.order', { tick: '30', sequence: '30' }),
+  }));
+  // Keyboard reaches the control, and the selection it acts on is stable while
+  // the projection republishes underneath it.
+  rows()[0].focus();
+  expect(document.activeElement.dataset.correlation).toBe('act-30');
+  panel2.update(payload([REMOVAL, entry({ correlation: 'act-31', sequence: 31 })]));
+  expect(panel2.state().selected.correlation).toBe('act-30');
+  expect(document.activeElement.dataset.correlation).toBe('act-30');
+  expect(undoButton().hidden).toBe(false);
+  // Routine attention never opens a pop-up: the feedback line is a live region.
+  const feedback = document.getElementById('gm-journal-undo-feedback');
+  expect(feedback.getAttribute('role')).toBe('status');
+  expect(feedback.getAttribute('aria-live')).toBe('polite');
+  document.documentElement.style.removeProperty('--a11y-text-scale');
   panel2.destroy();
 });

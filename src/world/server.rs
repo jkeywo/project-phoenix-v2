@@ -199,6 +199,16 @@ pub struct WorldContentRuntime {
     pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
     /// Canonically ordered UUID removals accepted before the fixed pipeline.
     pub pending_gm_despawns: Vec<String>,
+    /// The bounded inverse data for allowed GM removals (issue #1444), and the
+    /// two cross-tick arms that produce and consume it.
+    ///
+    /// It lives here rather than in a resource of its own because both of its
+    /// arms are already this runtime's own cross-tick pattern: an accepted
+    /// removal is armed in `PreUpdate` beside `pending_gm_despawns` and the
+    /// capture is taken when the fixed pipeline destroys the entity, and an
+    /// accepted inverse is armed the same way and executed by the same
+    /// pipeline's command queue. Captured and folded with its siblings.
+    pub gm_despawn_captures: crate::gm_despawn_undo::GmDespawnCaptures,
     pub contact_overrides: crate::gm_contact::ContactOverrides,
     /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
     /// (issue #1303).
@@ -2280,6 +2290,14 @@ pub(crate) fn tick_trigger_pipeline(
         && runtime.pending_gm_event_fires.is_empty()
         && runtime.pending_gm_spawns.is_empty()
         && runtime.pending_gm_despawns.is_empty()
+        // An armed despawn inverse (issue #1444) is work this pipeline owes
+        // even on a tick with no world events at all: a GM undoing a removal
+        // during a lull is exactly the case, and returning here would leave the
+        // arm sitting in the runtime while the journal already reports Applied.
+        // The ARMS only — a run that merely RETAINS captures has no work, and
+        // testing the whole store would wake this pipeline every tick after the
+        // first GM removal of the session.
+        && !runtime.gm_despawn_captures.has_armed_restores()
     {
         return;
     }
@@ -2365,6 +2383,17 @@ pub(crate) fn tick_trigger_pipeline(
     // than move — one Vec clone per non-empty tick, the same cost the
     // pre-#716 local `world_events.clone()` paid.
     let mut current_events = buffer.0.clone();
+
+    // Accepted despawn inverses (issue #1444). Executed BEFORE this tick's
+    // removals so a restore and a removal armed in the same `PreUpdate` cannot
+    // race for one identity: the reducer already refused a restore whose uuid
+    // was live, and running the rebuild first means a removal armed against the
+    // rebuilt entity finds it, rather than silently doing nothing.
+    if runtime.gm_despawn_captures.has_armed_restores() {
+        commands.queue(|world: &mut World| {
+            crate::gm_despawn_undo::apply_armed_restores(world);
+        });
+    }
 
     // Safe removals use the same command and Destroyed cascade as authored removal.
     // Keep name/group history: on_destroyed/on_all_destroyed resolve against it.
@@ -3863,7 +3892,14 @@ pub(crate) fn apply_dispatch_result(
                 });
                 if let Some(ent) = target_entity {
                     commands.queue(move |world: &mut World| {
-                        crate::gm_despawn::remove_entity(world, ent);
+                        // The despawn inverse's capture (issue #1444), taken one
+                        // instant before the entity stops existing and only when
+                        // an accepted GM removal armed this uuid. Every ordinary
+                        // scripted or combat destruction gets `None` here and
+                        // pays for no capture walk.
+                        let capture = crate::gm_despawn_undo::capture_before_removal(world, ent);
+                        let cleared = crate::gm_despawn::remove_entity(world, ent);
+                        crate::gm_despawn_undo::record_capture(world, capture, cleared);
                     });
                 }
             }

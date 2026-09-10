@@ -10,17 +10,18 @@
  *  - what the action technically did, versus what crews already witnessed. A
  *    restored hull does not un-see an explosion, and no surface built on this
  *    component is allowed to imply otherwise (PRD #1418 story 29);
- *  - whether an inverse exists AT ALL. Three families now have one (issue
- *    #1442: NPC doctrine and faction relations; issue #1443: a placement);
- *    every other family says plainly, with the reason, that it does not. A
- *    greyed-out Undo button a GM might press in a crisis would be worse than no
- *    button.
+ *  - whether an inverse exists AT ALL. Four families now have one (#1442: NPC
+ *    doctrine and faction relations; #1443: a placement; #1444: an allowed
+ *    removal); every other family says plainly, with the reason, that it does
+ *    not. A greyed-out Undo button a GM might press in a crisis would be worse
+ *    than no button.
  *
  * A placement adds a fourth honest thing to say: how long crews have had it in
  * sensor range, and that at two cumulative simulation seconds the chance to
  * take it back is gone for good (issue #1443, PRD #1420 story 4). That is a
  * fact about ONE entry rather than about its family, so it arrives per row and
- * narrows the family answer rather than replacing it.
+ * narrows the family answer rather than replacing it. A removal narrows its own
+ * family answer the same way, through the journal row's `capture_lost`.
  *
  * It renders presentation only. It submits nothing, owns no state and never
  * opens a dialog.
@@ -79,7 +80,12 @@ export const GM_INVERSE_SUPPORT = Object.freeze({
   'npc-doctrine': SUPPORTED('server.gm.inverse.supported.npc_doctrine'),
   'faction-relation': SUPPORTED('server.gm.inverse.supported.faction_relation'),
   'world-spawn': SUPPORTED('server.gm.inverse.supported.world_spawn', true),
-  'world-despawn': PLANNED('server.gm.inverse.unavailable.planned'),
+  // A removal's inverse is not a value to write back but a whole entity to
+  // rebuild, so it is supported only while the run still holds the capture the
+  // rebuild reads. `capture_lost` on the journal row is that half of the answer
+  // and the panel consults it; this table answers the family-level question,
+  // which is that this build really does reverse removals.
+  'world-despawn': SUPPORTED('server.gm.inverse.supported.world_despawn'),
   // An inverse is itself an ordinary journal entry, and reversing one would be
   // a redo rather than an undo. Ask for the state you want instead.
   'action-undo': OUT_OF_SCOPE('server.gm.inverse.unavailable.inverse'),
@@ -192,17 +198,33 @@ export function gmAffectedFieldText(affected, t = (id) => id, displayText = wire
       after: value(doctrine.after),
     };
   }
+  // Presence, from either end: a placement that was added (issue #1443) and a
+  // removal that took one away (issue #1444) are the same pair read in opposite
+  // directions, and they share the two value sentences for that reason.
+  const inWorld = (present) => t(present
+    ? 'server.gm.inverse.presence_present'
+    : 'server.gm.inverse.presence_absent');
   const placement = affected['spawned-entity'];
   if (placement && typeof placement === 'object' && typeof placement.name === 'string') {
-    const value = (present) => t(present
-      ? 'server.gm.inverse.presence_present'
-      : 'server.gm.inverse.presence_absent');
     return {
       subject: t('server.gm.inverse.subject_placement', {
         name: displayText(placement.name, placement.name),
       }),
-      before: value(placement.before === true),
-      after: value(placement.after === true),
+      before: inWorld(placement.before === true),
+      after: inWorld(placement.after === true),
+    };
+  }
+  // A removal's pair is the ENTITY'S PRESENCE and nothing more: the
+  // simulation-side capture holds the state, because a whole hull is not
+  // something a browser echoes back on every Undo press.
+  const presence = affected['entity-presence'];
+  if (presence && typeof presence === 'object' && typeof presence.entity === 'string') {
+    return {
+      subject: t('server.gm.inverse.subject_presence', {
+        entity: displayText(presence.entity, presence.entity),
+      }),
+      before: inWorld(presence.before === true),
+      after: inWorld(presence.after === true),
     };
   }
   const relation = affected['faction-hostility'];
@@ -221,6 +243,12 @@ export function gmAffectedFieldText(affected, t = (id) => id, displayText = wire
     };
   }
   return null;
+}
+
+/** Whether one wire `affected` object describes an entity's presence. */
+export function affectedPresence(affected) {
+  const presence = affected && typeof affected === 'object' && affected['entity-presence'];
+  return !!presence && typeof presence === 'object' && typeof presence.entity === 'string';
 }
 
 export function createGmInversePreview({
@@ -283,13 +311,21 @@ export function createGmInversePreview({
         : t('server.gm.inverse.technical_unknown'),
     );
     // Never optional and never caller-suppressible: the one sentence that stops
-    // a restore from reading as an erasure of what players know.
+    // a restore from reading as an erasure of what players know. A removal adds
+    // a second sentence naming the KINDS of thing its cleanup released — locks,
+    // tows, docking, transports, console selections — which come back only when
+    // a crew re-makes them, because "crews remember" is not specific enough to
+    // plan around. The same words for every removal, keyed on the affected pair
+    // alone: which of them this particular hull held is simulation-side detail
+    // the capture deliberately does not carry (see `src/gm_despawn_undo.rs`).
     row(
       list,
       'server.gm.inverse.witnessed',
       typeof descriptor?.witnessed === 'string' && descriptor.witnessed.length > 0
         ? descriptor.witnessed
-        : t('server.gm.inverse.witnessed_note'),
+        : `${t('server.gm.inverse.witnessed_note')}${affectedPresence(descriptor?.affected)
+          ? ` ${t('server.gm.inverse.witnessed_removal')}`
+          : ''}`,
     );
     // How much of the two seconds is gone, in words and in numbers, whether or
     // not the window is still open. A GM deciding whether to take a placement

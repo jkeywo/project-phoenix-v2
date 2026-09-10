@@ -49,6 +49,11 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'already-inverted': 'server.gm.session.reason.already_inverted',
   // The one cutoff on taking a placement back (issue #1443).
   'sensor-exposure-elapsed': 'server.gm.session.reason.sensor_exposure_elapsed',
+  // Restoring a removed entity (issue #1444). Two more things that can be
+  // wrong, and each names itself: the identity is taken, or a reference the
+  // restore would put back now holds someone else's newer decision.
+  'restore-identity-occupied': 'server.gm.session.reason.restore_identity_occupied',
+  'restore-reference-conflict': 'server.gm.session.reason.restore_reference_conflict',
 });
 
 /** The immediate browser-to-WASM ingress refusal, which has no wire reason. */

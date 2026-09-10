@@ -113,6 +113,7 @@ pub mod gm_checkpoint;
 pub mod gm_comms;
 pub mod gm_contact;
 pub mod gm_despawn;
+pub mod gm_despawn_undo;
 /// Direct/internal GM damage and healing, applied through the ordinary damage
 /// lifecycle (issue #1310).
 pub mod gm_effect;

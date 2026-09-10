@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 import { applyToDom, getTable, localiseTree, setTable, t } from '../../gui/strings.js';
 import { localiseHostPayload } from '../../gui/host-channel.js';
+import { gameOverView } from '../../gui/game-over-view.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HTML = readFileSync(path.join(root, 'gui/viewscreen-hud.html'), 'utf8');
@@ -80,7 +81,7 @@ const IMPORTED = [...MODULE.matchAll(/^\s*import\s*\{([^}]*)\}/gm)]
   .sort();
 
 /** What `runIsland` binds those names to, in declaration order. */
-const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload };
+const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView };
 
 /**
  * Run the island's body with its imports bound to the real gui/ modules.
@@ -156,7 +157,7 @@ describe('the page localises itself from the String Table', () => {
     // header — the island never evaluates and the prelude's fallback carries
     // the Viewscreen — and a name added to an import list would otherwise be
     // an undefined binding here rather than a failing expectation.
-    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js']);
+    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js', 'game-over-view.js']);
     for (const file of SPECIFIERS) {
       expect(existsSync(path.join(root, 'gui', file)), `gui/${file}`).toBe(true);
     }
@@ -215,6 +216,68 @@ describe('the page localises itself from the String Table', () => {
     // Cleared on a new run rather than left over the live scene.
     push({ game_over_message: null });
     expect(overlay()).toBe('none');
+  });
+
+  it('frames the ending the way a phone does: scenario, headline and the report rows', () => {
+    // The same gui/game-over-view.js decision client.html's overlay runs, over
+    // the outcome and title the HUD payload now carries at game over.
+    mountPage();
+    runIsland();
+    push({
+      game_over_message: 'world.falling_skyway.game_over.mission_complete',
+      game_over_outcome: 'victory',
+      scenario_title: 'world.falling_skyway.global.title',
+      game_over_report: [
+        { id: 'skyhook', heading: 'world.falling_skyway.report.skyhook.heading', outcome: 'world.falling_skyway.report.skyhook.held', state: 'SAVED' },
+        // A row missing a text is dropped, exactly as a phone drops it.
+        { id: 'blank', heading: '', outcome: 'world.falling_skyway.report.lifts.none', state: 'lost' },
+      ],
+    });
+
+    const overlay = document.getElementById('game-over-overlay');
+    expect(overlay.style.display).toBe('flex');
+    expect(text('game-over-scenario')).toBe(t('world.falling_skyway.global.title'));
+    expect(text('game-over-message')).toBe(t('world.falling_skyway.game_over.mission_complete'));
+    // Rows outrank the declared side: the report IS the result (issue #1344),
+    // so the headline is the neutral one, not VICTORY.
+    expect(overlay.dataset.outcome).toBe('reported');
+    expect(text('game-over-headline')).toBe(t('client.game_over_reported'));
+    const dts = [...document.querySelectorAll('#game-over-report dt')];
+    expect(dts.map((d) => d.textContent)).toEqual([t('world.falling_skyway.report.skyhook.heading')]);
+    expect(dts[0].dataset.state).toBe('saved');
+    expect(text('game-over-report')).toContain(t('world.falling_skyway.report.skyhook.held'));
+    expect(document.getElementById('game-over-report').style.display).toBe('grid');
+    expect(document.body.textContent).not.toContain('⟨');
+
+    // No rows and a declared side: the headline is the verdict.
+    push({ game_over_message: 'server.game_over.ship_destroyed', game_over_outcome: 'defeat' });
+    expect(overlay.dataset.outcome).toBe('defeat');
+    expect(text('game-over-headline')).toBe(t('client.game_over_defeat'));
+    expect(document.getElementById('game-over-report').style.display).toBe('none');
+    expect(document.querySelectorAll('#game-over-report dt').length).toBe(0);
+
+    // No side declared and no rows: an honest ENDED, never a guess from prose.
+    push({ game_over_message: 'The channel went quiet.' });
+    expect(overlay.dataset.outcome).toBe('ended');
+    expect(text('game-over-headline')).toBe(t('client.game_over_ended'));
+  });
+
+  it('draws the rows raw when the island never ran, and no headline it cannot resolve', () => {
+    mountPage();
+    push({
+      game_over_message: 'All hands lost.',
+      game_over_outcome: 'defeat',
+      game_over_report: [
+        { id: 'skyhook', heading: 'world.falling_skyway.report.skyhook.heading', outcome: 'world.falling_skyway.report.skyhook.lost', state: 'lost' },
+      ],
+    });
+    expect(document.getElementById('game-over-overlay').style.display).toBe('flex');
+    expect(document.getElementById('game-over-overlay').dataset.outcome).toBe('defeat');
+    expect(text('game-over-headline')).toBe('');
+    expect(text('game-over-message')).toBe('All hands lost.');
+    const dts = [...document.querySelectorAll('#game-over-report dt')];
+    expect(dts.map((d) => d.textContent)).toEqual(['world.falling_skyway.report.skyhook.heading']);
+    expect(document.getElementById('game-over-report').style.display).toBe('grid');
   });
 });
 

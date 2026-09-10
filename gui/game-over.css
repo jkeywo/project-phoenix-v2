@@ -1,0 +1,224 @@
+/* ───────────────────────────────────────────────────────────────
+   gui/game-over.css — the ending, drawn as the viewscreen going dark.
+
+   ONE sheet for the three documents that show a mission's end: client.html's
+   phone overlay, server.html's Viewscreen overlay and gui/viewscreen-hud.html
+   (the native host's HUD, composited over the 3-D viewscreen). Each of them
+   carries the same markup —
+
+     #game-over-overlay[data-outcome]          the scrim
+       .game-over-frame                        a chamfered, scanlined screen
+         .game-over-scan  .game-over-tick ×4   the treatment
+         .game-over-body                       scenario · headline · message ·
+                                               report rows · (return button)
+
+   — and gui/game-over-view.js is the one decision behind what the words are.
+   The frame is sized by its CONTENT, never by an aspect ratio: Falling Skyway
+   ends with a six-row report, and the one failure this layout must not have
+   is a row clipped or scrolled off the shared screen the whole room watches.
+   The scrim scrolls only when a phone is shorter than the frame.
+
+   Every colour, size and face here is a gui/tokens.css rung, and
+   tests/client/design-tokens.test.js holds this file at zero literals. The
+   frame's language — the 22px chamfer, the scanlines, the corner ticks — is
+   the splash deliverable's (raw/gui/deliverables/splash/), where this game's
+   identity was decided; the outcome tints the headline, its rule and the
+   frame's glow, and nothing else, so a loss is laid out exactly as a win.
+   ─────────────────────────────────────────────────────────────── */
+
+#game-over-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-7);
+  background: rgba(var(--rgb-void), 0.88);
+  color: var(--ink);
+  font-family: var(--font-display);
+  text-align: center;
+  overflow-y: auto;
+}
+
+/* `margin: auto` rather than justify-content: a flex-centred child taller
+   than its scrolling parent loses its top edge; auto margins collapse to zero
+   and let the scrim scroll instead. */
+.game-over-frame {
+  position: relative;
+  margin: auto;
+  width: min(1040px, 100%);
+  min-height: min(560px, 100%);
+  padding: clamp(56px, 10vh, 92px) clamp(20px, 6vw, 70px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--edge);
+  clip-path: polygon(
+    22px 0, calc(100% - 22px) 0, 100% 22px,
+    100% calc(100% - 22px), calc(100% - 22px) 100%,
+    22px 100%, 0 calc(100% - 22px), 0 22px
+  );
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(var(--rgb-edge-strong), 0.07) 0%, transparent 62%),
+    var(--surface-void);
+  overflow: hidden;
+}
+#game-over-overlay[data-outcome="victory"] .game-over-frame {
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(var(--rgb-loaded), 0.07) 0%, transparent 62%),
+    var(--surface-void);
+}
+#game-over-overlay[data-outcome="defeat"] .game-over-frame {
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(var(--rgb-fire), 0.07) 0%, transparent 62%),
+    var(--surface-void);
+}
+
+.game-over-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(var(--rgb-signal), 0.025) 0px,
+    rgba(var(--rgb-signal), 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+.game-over-tick {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 solid rgba(var(--rgb-signal), 0.55);
+  pointer-events: none;
+}
+.game-over-tick.tl { top: 20px;    left: 20px;  border-top-width: 1px;    border-left-width: 1px; }
+.game-over-tick.tr { top: 20px;    right: 20px; border-top-width: 1px;    border-right-width: 1px; }
+.game-over-tick.bl { bottom: 20px; left: 20px;  border-bottom-width: 1px; border-left-width: 1px; }
+.game-over-tick.br { bottom: 20px; right: 20px; border-bottom-width: 1px; border-right-width: 1px; }
+
+.game-over-body {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* The frame, outermost first (PRD #1023 module 4): the scenario that just
+   ended, the result it ended in, then the world's own closing prose. */
+.game-over-scenario {
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-bottom: 14px;
+}
+.game-over-scenario:empty,
+.game-over-headline:empty { display: none; }
+
+.game-over-headline {
+  font-size: var(--text-display);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  line-height: 1.1;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--edge-strong);
+  color: var(--ink);
+}
+#game-over-overlay[data-outcome="victory"] .game-over-headline {
+  color: var(--loaded-bright);
+  border-bottom-color: var(--loaded);
+}
+#game-over-overlay[data-outcome="defeat"] .game-over-headline {
+  color: var(--fire-bright);
+  border-bottom-color: var(--fire);
+}
+/* A reported ending wears the neutral accent on purpose (issue #1344): the
+   rows are the result, and tinting the headline would reintroduce exactly
+   the win/loss verdict the report exists to replace. `ended` is neutral too. */
+
+.game-over-message {
+  font-size: var(--text-lg);
+  line-height: 1.65;
+  max-width: 56ch;
+  letter-spacing: var(--tracking-tight);
+  white-space: pre-wrap;
+  color: var(--ink);
+}
+
+/* The post-mission report (issue #1344): heading on the left, outcome on the
+   right, one grid row per report row, in the author's order. Full width of
+   the frame, so a sentence-long outcome sits on one line. No score column,
+   no total row and no grade — the wire carries none of them. */
+.game-over-report {
+  display: none;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px 32px;
+  margin: 26px 0 0;
+  padding: 22px var(--space-4) var(--space-2);
+  border-top: 1px solid var(--edge);
+  width: 100%;
+  text-align: left;
+}
+.game-over-report dt {
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  margin: 0;
+}
+.game-over-report dd {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  letter-spacing: var(--tracking-tight);
+  color: var(--ink);
+}
+/* The row's semantic state is the ONLY thing that varies per row, and it
+   varies by accent alone, so no row reads as the "real" result. */
+.game-over-report dt[data-state="saved"]   { color: var(--loaded); }
+.game-over-report dt[data-state="lost"]    { color: var(--fire); }
+.game-over-report dt[data-state="partial"] { color: var(--gold); }
+.game-over-report dt[data-state="neutral"] { color: var(--ink-dim); }
+
+@media (max-width: 600px) {
+  /* On a phone the two columns stack: the same rows, the same order, and the
+     heading still reads as the label of the line under it. */
+  .game-over-report {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .game-over-report dt { white-space: normal; }
+  .game-over-report dt + dd { margin-bottom: var(--space-5); }
+}
+
+.game-over-return-btn {
+  margin-top: 32px;
+  padding: 13px 38px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  color: var(--ink);
+  background: rgba(var(--rgb-signal), 0.10);
+  border: 1px solid var(--edge-strong);
+  border-radius: 0;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  cursor: pointer;
+  min-height: var(--control-hit-min);
+}
+.game-over-return-btn:hover { background: rgba(var(--rgb-signal), 0.18); }
+/* Inside the chamfer's clip, so the ring is not cut off with the corners. */
+.game-over-return-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(-2 * var(--focus-ring-width));
+}

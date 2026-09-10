@@ -671,6 +671,8 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         game_over_message: None,
         computer_message: None,
         game_over_report: Vec::new(),
+        game_over_outcome: None,
+        scenario_title: None,
     }));
 }
 
@@ -695,6 +697,10 @@ fn compute_hud_state(
     // the rows are already the score-free player projection, and the Viewscreen
     // renders exactly what a phone does.
     mission_report: Option<&crate::core::report::MissionReport>,
+    // The world's `[global] title` id. Published only at game over, where the
+    // ending names the scenario it belongs to (PRD #1023 module 4) — the same
+    // frame a phone draws from `lobbyState.scenarioTitle`.
+    scenario_title: Option<&str>,
 ) -> ViewscreenHudState {
     let alert = red_alert;
     let hull_pct = if hull_max > 0.0 {
@@ -733,6 +739,25 @@ fn compute_hud_state(
     } else {
         Vec::new()
     };
+    // The declared side and the scenario's name travel with the ending only.
+    // The outcome is `GameOverReason.1` — latched Defeat at the built-in death
+    // sites, whatever a world's `game_over` action declared, or None — and is
+    // NOT inferred from the reason text here, for the reason balance.rs gives:
+    // the reason is per-world prose (or a strings.csv id) and no substring
+    // reliably tells a win from a loss.
+    let ended = *phase == GamePhase::GameOver;
+    let game_over_outcome = if ended {
+        game_over_reason
+            .and_then(|r| r.1)
+            .map(|o| o.as_str().to_string())
+    } else {
+        None
+    };
+    let scenario_title = if ended {
+        scenario_title.map(str::to_owned)
+    } else {
+        None
+    };
     ViewscreenHudState {
         heading: yaw_to_compass_bearing(physics.yaw),
         hull_pct: hull_pct.round() as i32,
@@ -750,6 +775,8 @@ fn compute_hud_state(
         game_over_message,
         computer_message,
         game_over_report,
+        game_over_outcome,
+        scenario_title,
     }
 }
 
@@ -781,6 +808,7 @@ fn recompute_hud_state(
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::server_app::LocalShip>>,
     beam_q: Query<&crate::console::weapons::ActiveBeam, With<crate::server_app::LocalShip>>,
     computer_message: Option<Res<ActiveComputerMessage>>,
+    world_resource: Option<Res<WorldResource>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
     let Some(phase) = phase else { return };
@@ -814,6 +842,9 @@ fn recompute_hud_state(
         game_over_reason.as_deref(),
         computer_message_wire,
         mission_report.as_deref(),
+        world_resource
+            .as_deref()
+            .map(|w| w.0.scenario_title.as_str()),
     );
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
@@ -828,6 +859,7 @@ fn push_game_over_hud_state(
     hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     game_over_reason: Option<Res<GameOverReason>>,
     mission_report: Option<Res<crate::core::report::MissionReport>>,
+    world_resource: Option<Res<WorldResource>>,
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
     mut writer: MessageWriter<HudStateChanged>,
@@ -856,6 +888,9 @@ fn push_game_over_hud_state(
         game_over_reason.as_deref(),
         None,
         mission_report.as_deref(),
+        world_resource
+            .as_deref()
+            .map(|w| w.0.scenario_title.as_str()),
     );
     for mut hud in hud_q.iter_mut() {
         hud.0 = next.clone();
@@ -1100,6 +1135,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
@@ -1129,6 +1165,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
@@ -1149,6 +1186,7 @@ mod tests {
             0.5,
             false,
             &GamePhase::InProgress,
+            None,
             None,
             None,
             None,
@@ -1175,11 +1213,78 @@ mod tests {
             Some(&reason),
             None,
             None,
+            None,
         );
         assert_eq!(
             state.game_over_message.as_deref(),
             Some("server.game_over.ship_destroyed")
         );
+    }
+
+    /// The Viewscreen frames the ending the way a phone does: the declared
+    /// side and the scenario's title ride the final HUD state, and neither is
+    /// published while the mission still runs.
+    #[test]
+    fn compute_hud_state_frames_the_ending_with_outcome_and_scenario() {
+        use crate::server_app::GameOverReason;
+        let physics = ShipPhysics::default();
+        let reason = GameOverReason(
+            Some("world.falling_skyway.game_over.mission_complete".into()),
+            Some(crate::core::balance::Outcome::Victory),
+        );
+        let title = "world.falling_skyway.global.title";
+
+        let live = compute_hud_state(
+            false,
+            &physics,
+            80.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::InProgress,
+            Some(&reason),
+            None,
+            None,
+            Some(title),
+        );
+        assert!(live.game_over_outcome.is_none());
+        assert!(live.scenario_title.is_none());
+
+        let ended = compute_hud_state(
+            false,
+            &physics,
+            80.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::GameOver,
+            Some(&reason),
+            None,
+            None,
+            Some(title),
+        );
+        // `balance::Outcome::as_str`, the spelling ServerMessage::GameOver uses.
+        assert_eq!(ended.game_over_outcome.as_deref(), Some("victory"));
+        // An id, resolved by the host channel; Rust composes no English here.
+        assert_eq!(ended.scenario_title.as_deref(), Some(title));
+
+        // An ending that declared no side publishes none: the frame decides
+        // ENDED from that absence, never from the closing prose.
+        let undeclared = GameOverReason(Some("The channel went quiet.".into()), None);
+        let ended = compute_hud_state(
+            false,
+            &physics,
+            80.0,
+            100.0,
+            0.0,
+            false,
+            &GamePhase::GameOver,
+            Some(&undeclared),
+            None,
+            None,
+            Some(title),
+        );
+        assert!(ended.game_over_outcome.is_none());
     }
 
     /// Issue #1344: the Viewscreen shows the SAME rows a phone does, in the
@@ -1217,6 +1322,7 @@ mod tests {
             Some(&reason),
             None,
             Some(&report),
+            None,
         );
         assert!(live.game_over_report.is_empty());
 
@@ -1231,6 +1337,7 @@ mod tests {
             Some(&reason),
             None,
             Some(&report),
+            None,
         );
         assert_eq!(ended.game_over_report.len(), 1);
         assert_eq!(ended.game_over_report[0].id, "lyra");
@@ -1263,6 +1370,7 @@ mod tests {
             Some(&reason),
             None,
             Some(&crate::core::report::MissionReport::default()),
+            None,
         );
         assert!(state.game_over_report.is_empty());
         assert_eq!(
@@ -1285,6 +1393,7 @@ mod tests {
             false,
             &GamePhase::GameOver,
             Some(&reason),
+            None,
             None,
             None,
         );
@@ -1315,6 +1424,7 @@ mod tests {
             &GamePhase::InProgress,
             None,
             Some(msg.clone()),
+            None,
             None,
         );
         assert_eq!(state.computer_message, Some(msg));
@@ -1353,6 +1463,7 @@ mod tests {
             0.0,
             false,
             &GamePhase::GameOver,
+            None,
             None,
             None,
             None,

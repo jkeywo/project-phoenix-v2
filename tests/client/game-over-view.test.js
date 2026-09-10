@@ -424,12 +424,14 @@ describe('the report through the phone ingress', () => {
 // ── The OTHER player surface: the Viewscreen (server.html) ────────────────────
 //
 // The rows reach server.html on the HUD payload (`ViewscreenHudState.
-// game_over_report`) rather than on a `GameOver` message, so it renders its own
-// overlay and does not call `gameOverView`. What it must NOT do is normalise the
-// rows itself: until this issue's review it looped the raw array, which meant a
-// row a phone dropped rendered here as a pair of blank lines, and a `state` of
-// "SAVED" styled on a phone and not here. Those two rules live in `reportRows`,
-// and the page source is the only place that can say which function runs.
+// game_over_report`) rather than on a `GameOver` message, together with the
+// declared outcome and the scenario's title, and it frames the ending through
+// the same `gameOverView` a phone runs. What it must NOT do is normalise the
+// rows itself: until issue #1344's review it looped the raw array, which meant
+// a row a phone dropped rendered here as a pair of blank lines, and a `state`
+// of "SAVED" styled on a phone and not here. Those two rules live in
+// `reportRows`, which `gameOverView` runs, and the page source is the only
+// place that can say which function runs.
 describe('the report on the Viewscreen', () => {
   const serverPage = () =>
     readFileSync(
@@ -443,9 +445,11 @@ describe('the report on the Viewscreen', () => {
     );
   });
 
-  it('normalises its HUD rows through reportRows and renders what it returns', () => {
+  it('frames its HUD payload through gameOverView and renders the rows it returns', () => {
     const page = serverPage();
-    expect(page).toMatch(/window\.gameOverReportRows\(s\.game_over_report\)/);
+    expect(page).toMatch(/window\.gameOverView\(\{[^}]*report:\s*s\.game_over_report/);
+    expect(page).toMatch(/outcome:\s*s\.game_over_outcome/);
+    expect(page).toMatch(/scenarioTitle:\s*s\.scenario_title/);
     expect(page).toMatch(/dt\.textContent\s*=\s*row\.headingId/);
     expect(page).toMatch(/dd\.textContent\s*=\s*row\.outcomeId/);
     // The two rules must not be re-implemented beside the call: no second

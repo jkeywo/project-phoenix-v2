@@ -719,7 +719,11 @@ claiming success; copy failures and staging starvation retain their own full-cop
 obligation. A quiet revision no longer forces a whole copy on every iteration.
 The SDK still updates and renders, so animation dirty rectangles continue to
 copy. `gui/viewscreen-hud.html` skips unchanged text, class and display writes in
-both its fallback and localised renderers. P2 still applies new HUD revisions
+both its fallback and localised renderers — including the game-over screen,
+which it draws with the same `gui/game-over.css` and frames through the same
+`gui/game-over-view.js` as the phone and the web Viewscreen (scenario, headline
+by declared outcome, closing prose, report rows; no return button, the surface
+takes no input). P2 still applies new HUD revisions
 while hidden; hidden DOM deferral is separate. The acceptance note records the
 required visual pass and controlled comparison without treating unit checks as
 performance evidence.

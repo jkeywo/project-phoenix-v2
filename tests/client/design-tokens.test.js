@@ -431,6 +431,11 @@ const SURFACES = [
   // and a sheet written against the vocabulary from its first line costs
   // nothing to enforce. No allowlist entry, and there must never be one.
   path.join(GUI, 'native-settings.css'),
+  // gui/game-over.css joins in the slice that created it, by the same rule:
+  // the one sheet the phone, the Viewscreen and the native HUD share for the
+  // ending, written against the vocabulary from its first line. No allowlist
+  // entry, and there must never be one.
+  path.join(GUI, 'game-over.css'),
   path.join(REPO_ROOT, 'client.html'),
   path.join(REPO_ROOT, 'server.html'),
 ];
@@ -470,10 +475,10 @@ const SURFACES = [
  * allowance, which now covers only JavaScript and style attributes.
  * css-scan.js reads the WHOLE file, not the <style> block — there is no lexer
  * that will hand back "the stylesheet" — and this page carries colour well
- * outside it: the game-over accent table in JS (`const accent = { saved:
- * '#7ad48f', … }`) and the `style=` attributes on the GM join panel, the
- * asset-loading overlay and the game-over overlay. Those have to move into the
- * stylesheet layer on their own account.
+ * outside it: the `style=` attributes on the GM join panel and the
+ * asset-loading overlay. Those have to move into the stylesheet layer on their
+ * own account. The game-over overlay's share (its JS accent table and its
+ * inline styles) left with gui/game-over.css, which holds the ending at zero.
  *
  * To regenerate an entry, ask the scanner that enforces it:
  *
@@ -494,27 +499,17 @@ const KNOWN_LITERALS = {
       "#d8edff",
       "#000",
       "#aae",
-      "#cde",
-      "#8ac",
       "#fa4",
       "#8af",
       "#4c4",
       "#f44",
-      "#7ad48f",
-      "#e8705a",
-      "#e0c060",
-      "#8a98c4",
       "rgba(4,12,22 …)",
-      "rgba(0,0,0 …)",
-      "rgba(140,180,220 …)"
+      "rgba(0,0,0 …)"
     ],
     "sizes": [
       "font-size: 0.85rem",
       "font-size: 1.1rem",
       "font-size: 0.9rem",
-      "font-size: clamp(0.95rem,2.5vw,1.15rem)",
-      "font-size: clamp(0.85rem,2vw,1rem)",
-      "font-size: 1rem",
       "font-size: 13px",
       "font-size: 12px",
       "font-size: 16px"

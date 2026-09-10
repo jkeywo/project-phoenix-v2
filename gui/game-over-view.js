@@ -64,13 +64,15 @@
  * field at all, so this is a shape guarantee rather than a filter somebody has
  * to remember to apply.
  *
- * Pure and DOM-free. Two pages render what it returns and each imports this
- * module to do it: client.html (the phone) calls `gameOverView` for the whole
- * frame, and server.html (the Viewscreen) calls `reportRows` for the rows — its
- * rows ride the HUD payload rather than a `GameOver` message, so it composes its
- * own headline from `game_over_message` and takes only the row normalisation
- * from here. Different callers, ONE definition of what a renderable row is and
- * which `state` words style; that is the part that must not be written twice.
+ * Pure and DOM-free. Three documents render what it returns and each loads
+ * this module to do it: client.html (the phone) from the `GameOver` message
+ * and its lobby state, and the two Viewscreens — server.html and the native
+ * host's gui/viewscreen-hud.html — from the HUD payload, which carries the
+ * same four inputs (`game_over_message`, `game_over_outcome`, `scenario_title`,
+ * `game_over_report`). Different callers, ONE definition of which headline an
+ * ending wears, what a renderable row is and which `state` words style; that
+ * is the part that must not be written three times. gui/game-over.css is the
+ * matching single answer to how it looks.
  */
 
 /** The four frames the overlay can wear. */
@@ -94,15 +96,13 @@ const ROW_STATES = new Set(['saved', 'lost', 'partial', 'neutral']);
  * neutral presentation rather than inventing a mood from a word it does not
  * know.
  *
- * EXPORTED (and self-registered as `window.gameOverReportRows`) because it is
- * the whole of what the VIEWSCREEN needs. server.html receives the same rows on
- * its HUD payload rather than on a `GameOver` message, so it has no use for the
- * headline/body half of `gameOverView` below — but the validity filter and the
- * state lower-casing here are precisely the parts that must not exist twice.
+ * EXPORTED (and self-registered as `window.gameOverReportRows`) as the one
+ * validity filter and state lower-casing every surface's rows pass through —
+ * `gameOverView` runs it, and a caller with rows and nothing else can too.
  * Until issue #1344's review server.html carried its own row loop with neither,
  * and rendered as a pair of blank lines the row a phone had dropped: the two
- * player surfaces disagreed about what the report SAID. One function, both
- * surfaces, and the disagreement has nowhere left to live.
+ * player surfaces disagreed about what the report SAID. One function, every
+ * surface, and the disagreement has nowhere left to live.
  *
  * @param {unknown} report
  * @returns {{ id: string, headingId: string, outcomeId: string, state: string }[]}

@@ -89,6 +89,7 @@
      sizes. Defined once and consumed by this page, the host viewscreen, and
      every console document (which reaches it through gui/console.css). -->
 <link rel="stylesheet" href="gui/tokens.css" />
+<link rel="stylesheet" href="gui/game-over.css" />
 <link rel="stylesheet" href="gui/gm-confirmation.css" />
 <!-- The lobby panel's stylesheet (issue #1325), lifted out of the inline
      <style> below so that this page and the host-lobby document the NATIVE
@@ -2268,14 +2269,28 @@
         </section>
       </main>
 
-      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud.
-           When the scenario authored a post-mission report (issue #1344) its
-           rows render under the closing message, in the author's order, with no
-           score, total or grade — the HUD payload carries none. -->
-      <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
-        <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
-        <dl id="game-over-report" style="display:none;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:10px 24px;margin:28px 0 0;padding:0;max-width:64ch;text-align:left;font-size:clamp(0.85rem,2vw,1rem);"></dl>
-        <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;" data-i18n="client.return_to_lobby">Return to Lobby</button>
+      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud,
+           framed by gui/game-over-view.js and drawn by gui/game-over.css — the
+           same decision and the same sheet the phone's overlay uses, so the
+           room and the consoles see one ending. The scenario's name, the
+           headline, the closing message and — when the scenario authored one
+           (issue #1344) — the post-mission report rows, in the author's order,
+           with no score, total or grade: the HUD payload carries none.
+           The z-index stays inline: tests/client/server-settings.test.js reads
+           it here to keep the settings cog above this surface. -->
+      <div id="game-over-overlay" style="display:none;z-index:85">
+        <div class="game-over-frame">
+          <div class="game-over-scan"></div>
+          <span class="game-over-tick tl"></span><span class="game-over-tick tr"></span>
+          <span class="game-over-tick bl"></span><span class="game-over-tick br"></span>
+          <div class="game-over-body">
+            <div class="game-over-scenario" id="game-over-scenario"></div>
+            <div class="game-over-headline" id="game-over-headline"></div>
+            <div class="game-over-message" id="game-over-message"></div>
+            <dl class="game-over-report" id="game-over-report"></dl>
+            <button id="return-to-lobby-btn" class="game-over-return-btn" data-i18n="client.return_to_lobby">Return to Lobby</button>
+          </div>
+        </div>
       </div>
 
       <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
@@ -3056,55 +3071,67 @@
       }
     }
     // ── Game-over overlay ───────────────────────────────────────────────────
-    // The message is the scenario's `[[trigger.action]] message`, authored as a
-    // string id; it arrives resolved via localiseHostPayload (issue #949).
-    const goOverlay = document.getElementById('game-over-overlay');
-    const goMsg     = document.getElementById('game-over-message');
+    // `game_over_message` is on the payload only in GamePhase::GameOver, so it
+    // both shows the ending and clears it on a new run. It is the scenario's
+    // `game_over` message (or the built-in server.game_over.ship_destroyed),
+    // authored as a string id and arriving resolved via localiseHostPayload
+    // (issue #949) — as do the scenario's title and the post-mission report
+    // rows (issue #1344), while the declared outcome is a machine label.
+    //
+    // Framed by gui/game-over-view.js, the SAME decision client.html's overlay
+    // runs over the same four inputs: which headline, whether the rows are the
+    // result (a `reported` ending wears no verdict), and which rows survive —
+    // one missing either of its two texts is dropped, and `state` is
+    // lower-cased before the sheet styles on it. That is what makes the room
+    // and the consoles agree about what the ending SAYS; gui/game-over.css is
+    // what makes them agree about how it looks. `state` drives the accent only;
+    // there is no score in the payload to leak, by construction (see
+    // core::messages::GameOverReportRow — the wire shape has no score field).
+    //
+    // The typeof guard is defensive only: the module tag above is deferred and
+    // so has run before DOMContentLoaded, while every call to __updateHud comes
+    // from a WASM push that boots later. Without the view the closing message
+    // still shows, unframed, which beats a blank screen at the mission's end.
+    const goOverlay  = document.getElementById('game-over-overlay');
+    const goMsg      = document.getElementById('game-over-message');
+    const goScenario = document.getElementById('game-over-scenario');
+    const goHeadline = document.getElementById('game-over-headline');
+    const goReport   = document.getElementById('game-over-report');
     if (goOverlay && goMsg) {
       if (s.game_over_message != null) {
-        goMsg.textContent = s.game_over_message;
+        const gv = typeof window.gameOverView === 'function'
+          ? window.gameOverView({
+              phase: 'GameOver',
+              reason: s.game_over_message,
+              outcome: s.game_over_outcome,
+              scenarioTitle: s.scenario_title,
+              report: s.game_over_report,
+            })
+          : null;
+        goOverlay.dataset.outcome = gv ? gv.outcome : '';
+        if (goScenario) goScenario.textContent = gv ? gv.scenarioName : '';
+        if (goHeadline) goHeadline.textContent = gv ? t(gv.headlineId) : '';
+        goMsg.textContent = gv && gv.bodyId ? t(gv.bodyId) : s.game_over_message;
+        if (goReport) {
+          const rows = gv ? gv.rows : [];
+          goReport.replaceChildren();
+          for (const row of rows) {
+            const dt = document.createElement('dt');
+            dt.textContent = row.headingId;
+            const dd = document.createElement('dd');
+            dd.textContent = row.outcomeId;
+            if (row.state) {
+              dt.dataset.state = row.state;
+              dd.dataset.state = row.state;
+            }
+            goReport.append(dt, dd);
+          }
+          goReport.style.display = rows.length ? 'grid' : 'none';
+        }
         goOverlay.style.display = 'flex';
       } else {
         goOverlay.style.display = 'none';
       }
-    }
-    // ── Post-mission report rows (issue #1344) ─────────────────────────────
-    // The same rows a phone renders, in the same order, arriving already
-    // localised through localiseHostPayload like every other id in this
-    // payload. `state` is a machine label and drives the accent only; there is
-    // no score in the payload to leak, by construction (see
-    // core::messages::GameOverReportRow — the wire shape has no score field).
-    //
-    // Normalised by gui/game-over-view.js's reportRows(), the SAME function
-    // client.html's overlay runs its rows through. That is the point of the
-    // call and not a convenience: the rules it applies — drop a row missing
-    // either of its two texts, and lower-case `state` before styling on it —
-    // are what makes the phone and the Viewscreen agree about what the report
-    // says. This block used to apply neither, so an empty heading rendered here
-    // as a blank dt/dd pair and did not render at all on a phone.
-    //
-    // The typeof guard is defensive only: the module tag above is deferred and
-    // so has run before DOMContentLoaded, while every call to __updateHud comes
-    // from a WASM push that boots later. Showing no rows beats showing
-    // unfiltered ones, which is why the fallback is [] and not the raw array.
-    const goReport = document.getElementById('game-over-report');
-    if (goReport) {
-      const rows = typeof window.gameOverReportRows === 'function'
-        ? window.gameOverReportRows(s.game_over_report)
-        : [];
-      goReport.replaceChildren();
-      const accent = { saved: '#7ad48f', lost: '#e8705a', partial: '#e0c060', neutral: '#8a98c4' };
-      for (const row of rows) {
-        const dt = document.createElement('dt');
-        dt.textContent = row.headingId;
-        dt.style.cssText = 'letter-spacing:0.18em;text-transform:uppercase;white-space:nowrap;color:'
-          + (accent[row.state] || '#8a98c4') + ';';
-        const dd = document.createElement('dd');
-        dd.textContent = row.outcomeId;
-        dd.style.cssText = 'margin:0;line-height:1.6;color:#cde;';
-        goReport.append(dt, dd);
-      }
-      goReport.style.display = rows.length ? 'grid' : 'none';
     }
   };
 

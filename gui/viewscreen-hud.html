@@ -36,12 +36,11 @@
     boundary, which resolves the ids among them and passes a scenario's
     authored prose through untouched.
 
-    Two things server.html's viewscreen draws are simply absent here, and this
-    page carries neither the markup nor the ids for them: the ship's-computer
+    One thing server.html's viewscreen draws is simply absent here, and this
+    page carries neither the markup nor the ids for it: the ship's-computer
     banner it renders from `computer_message` (server.html:1946-1951, 2710-2745,
-    issue #1342) and the post-mission report rows. Adding either changes what
-    the shared Viewscreen SHOWS, which is a different change from wiring the
-    table in — see the game-over overlay's own comment below.
+    issue #1342). Adding it changes what the shared Viewscreen SHOWS, which is
+    a different change from wiring the table in.
   -->
   <!--
     No external font stylesheet: the native host is offline/LAN, and a
@@ -50,7 +49,13 @@
     frame never lays out or paints. The type below falls back to the system
     faces, which is the right call for an offline viewscreen anyway; server.html
     keeps the web font because it is online.
+
+    The two sheets below are LOCAL — served by this same process from /gui/,
+    so they cost no network round trip: the vocabulary, and the game-over
+    treatment the phone and the web Viewscreen draw the ending with.
   -->
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="game-over.css">
   <style>
     /* The page itself paints nothing — only the frame pieces below do, so the
        3-D viewscreen shows through everywhere else (the surface is transparent). */
@@ -232,19 +237,31 @@
   </div>
 
   <!--
-    Game-over screen (issue #422): shown over the frame when a mission ends,
-    mirroring server.html's viewscreen overlay. `__updateHud` fills the closing
-    message and reveals this when the host enters GamePhase::GameOver (the HUD
-    state carries `game_over_message` only then). The web host's report rows and
-    return-to-lobby button are still left out here, but only ONE of the two
-    reasons for that survives now that this page has a String Table: this
-    passive overlay takes no input, so the operator consoles own return-to-lobby.
-    The rows themselves are ordinary String Ids and this page could resolve
-    them; adding them would change what the shared Viewscreen SHOWS, which is a
-    separate change from wiring the table in.
+    Game-over screen (issue #422): shown over the frame when a mission ends —
+    the SAME markup server.html's viewscreen and client.html's phone overlay
+    carry, drawn by gui/game-over.css and framed by gui/game-over-view.js, so
+    the room and the consoles see one ending. `__updateHud` reveals it when the
+    host enters GamePhase::GameOver (the HUD state carries `game_over_message`
+    only then), with the scenario's name, the headline the declared outcome
+    picks, the closing message and the post-mission report rows in the author's
+    order (issue #1344; no score, total or grade — the payload carries none).
+    The web host's return-to-lobby button is left out here: this passive
+    overlay takes no input, so the operator consoles own return-to-lobby.
+    `display:none` stays inline so the overlay is hidden before the sheet
+    lands, and the z-index keeps it above the frame pieces.
   -->
-  <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',system-ui,monospace;text-align:center;padding:32px;">
-    <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+  <div id="game-over-overlay" style="display:none;z-index:85">
+    <div class="game-over-frame">
+      <div class="game-over-scan"></div>
+      <span class="game-over-tick tl"></span><span class="game-over-tick tr"></span>
+      <span class="game-over-tick bl"></span><span class="game-over-tick br"></span>
+      <div class="game-over-body">
+        <div class="game-over-scenario" id="game-over-scenario"></div>
+        <div class="game-over-headline" id="game-over-headline"></div>
+        <div class="game-over-message" id="game-over-message"></div>
+        <dl class="game-over-report" id="game-over-report"></dl>
+      </div>
+    </div>
   </div>
 
   <!--
@@ -295,19 +312,71 @@
         }
       };
 
-      // The game-over screen: revealed with the closing message when the host
-      // enters GamePhase::GameOver. `game_over_message` is null in every other
-      // phase, so this both shows the ending and clears it on a new run.
-      hud.showGameOver = function (message) {
+      // The game-over screen: revealed when the host enters GamePhase::GameOver.
+      // `game_over_message` is null in every other phase, so a null ending both
+      // clears the screen and clears it on a new run. The ending arrives as ONE
+      // object with the words already chosen — `{scenario, headline, message,
+      // outcome, rows}` — so the localising renderer and the raw fallback write
+      // it through the same calls; only which text they chose differs. Every
+      // write is guarded, because a lifecycle refresh may repeat a state and
+      // an unchanged push must not dirty the DOM.
+      hud.rowsKey = '';
+      hud.showGameOver = function (view) {
         var overlay = document.getElementById('game-over-overlay');
-        var msg = document.getElementById('game-over-message');
-        if (!overlay || !msg) return;
-        if (message != null) {
-          hud.setText('game-over-message', message);
-          if (overlay.style.display !== 'flex') overlay.style.display = 'flex';
-        } else {
+        var report = document.getElementById('game-over-report');
+        if (!overlay) return;
+        if (view == null) {
           if (overlay.style.display !== 'none') overlay.style.display = 'none';
+          return;
         }
+        var outcome = view.outcome == null ? '' : String(view.outcome);
+        if (overlay.dataset.outcome !== outcome) overlay.dataset.outcome = outcome;
+        hud.setText('game-over-scenario', view.scenario);
+        hud.setText('game-over-headline', view.headline);
+        hud.setText('game-over-message', view.message);
+        var rows = Array.isArray(view.rows) ? view.rows : [];
+        var key = JSON.stringify(rows);
+        if (report && hud.rowsKey !== key) {
+          hud.rowsKey = key;
+          while (report.firstChild) report.removeChild(report.firstChild);
+          for (var i = 0; i < rows.length; i++) {
+            var dt = document.createElement('dt');
+            dt.textContent = rows[i].heading == null ? '' : String(rows[i].heading);
+            var dd = document.createElement('dd');
+            dd.textContent = rows[i].outcome == null ? '' : String(rows[i].outcome);
+            if (rows[i].state) {
+              dt.dataset.state = rows[i].state;
+              dd.dataset.state = rows[i].state;
+            }
+            report.appendChild(dt);
+            report.appendChild(dd);
+          }
+          var want = rows.length ? 'grid' : 'none';
+          if (report.style.display !== want) report.style.display = want;
+        }
+        if (overlay.style.display !== 'flex') overlay.style.display = 'flex';
+      };
+
+      // The raw ending: the host's own strings written through untouched and
+      // the rows' two ids as they arrived. No headline — it is a String Id this
+      // renderer cannot resolve, and the sheet hides an empty one — and no
+      // normalisation: that is gui/game-over-view.js's, which the module owns.
+      hud.rawEnding = function (s) {
+        var rows = [];
+        var wire = Array.isArray(s.game_over_report) ? s.game_over_report : [];
+        for (var i = 0; i < wire.length; i++) {
+          var r = wire[i];
+          if (r && typeof r === 'object') {
+            rows.push({ heading: r.heading, outcome: r.outcome, state: r.state });
+          }
+        }
+        return {
+          scenario: s.scenario_title,
+          headline: '',
+          message: s.game_over_message,
+          outcome: s.game_over_outcome,
+          rows: rows,
+        };
       };
 
       // ── The fallback renderer ───────────────────────────────────────────
@@ -345,7 +414,7 @@
         }
         if (typeof s.condition === 'string') hud.setText('v-sys', s.condition);
         if (s.ship_name) hud.setText('hud-designation', s.ship_name);
-        hud.showGameOver(s.game_over_message);
+        hud.showGameOver(s.game_over_message == null ? null : hud.rawEnding(s));
       };
 
       hud.paint = function () {
@@ -380,6 +449,7 @@
     import './strings-boot.js';
     import { applyToDom, getTable, localiseTree, t } from './strings.js';
     import { localiseHostPayload } from './host-channel.js';
+    import { gameOverView } from './game-over-view.js';
 
     // ONE guard for the whole page: with a table, this island localises the
     // markup and installs the localising renderer; without one it does neither
@@ -437,7 +507,31 @@
       if (s.ship_name) {
         hud.setText('hud-designation', s.ship_name);
       }
-      hud.showGameOver(s.game_over_message);
+      hud.showGameOver(s.game_over_message == null ? null : localisedEnding(s));
+    }
+
+    // The ending, framed by the SAME decision client.html's overlay runs
+    // (gui/game-over-view.js): which headline the declared outcome picks,
+    // whether the rows are the result (a `reported` ending wears no verdict),
+    // and which rows survive — one missing either text is dropped, `state` is
+    // lower-cased before the sheet styles on it. The payload crossed
+    // localiseHostPayload above, so the message, the title and the rows' two
+    // ids are already prose; the headline is this page's own String Id.
+    function localisedEnding(s) {
+      const gv = gameOverView({
+        phase: 'GameOver',
+        reason: s.game_over_message,
+        outcome: s.game_over_outcome,
+        scenarioTitle: s.scenario_title,
+        report: s.game_over_report,
+      });
+      return {
+        scenario: gv.scenarioName,
+        headline: t(gv.headlineId),
+        message: gv.bodyId ? t(gv.bodyId) : gv.bodyText,
+        outcome: gv.outcome,
+        rows: gv.rows.map((row) => ({ heading: row.headingId, outcome: row.outcomeId, state: row.state })),
+      };
     }
 
     if (hasTable) hud.render = renderLocalised;

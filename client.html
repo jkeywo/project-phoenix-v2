@@ -34,6 +34,7 @@
      sizes. Defined once and consumed by this page, the host viewscreen, and
      every console document (which reaches it through gui/console.css). -->
 <link rel="stylesheet" href="gui/tokens.css" />
+<link rel="stylesheet" href="gui/game-over.css" />
   <!-- Keep rAF-driven UI (scheduleRender, radar sweeps, joystick decay in
        the console iframes) running at full rate even when this tab loses
        focus — see gui/bg-raf-keepalive.js. Must load before any other
@@ -920,116 +921,16 @@
     }
 
     /* -- Game-over overlay (shown when GamePhase::GameOver) ---------- */
+    /* Drawn by gui/game-over.css, the one sheet the phone, the Viewscreen and
+       the native HUD share for the ending (linked in <head>, after the
+       tokens). This page adds only its stacking: the overlay is a
+       full-viewport surface the Station Bar's cog has to sit above (issue
+       #1372 — tests/client/settings-panel.test.js reads this z-index), and it
+       is FIXED rather than the sheet's absolute because the phone shell
+       scrolls. */
     #game-over-overlay {
-      display: none;
-      position: fixed; inset: 0; z-index: 190;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(var(--rgb-void), 0.88);
-      color: var(--ink);
-      font-family: 'Chakra Petch', monospace;
-      text-align: center;
-      padding: 32px;
-    }
-    /* The frame, outermost first (PRD #1023 module 4): the scenario that just
-       ended, the result it ended in, then the world's own closing prose. The
-       accent is the only thing the outcome changes — the layout is identical
-       for a win and a loss, so neither reads as the "special" ending. */
-    #game-over-overlay .game-over-scenario {
-      font-size: var(--text-md);
-      letter-spacing: var(--tracking-widest);
-      text-transform: uppercase;
-      color: var(--ink-dim);
-      margin-bottom: 10px;
-    }
-    #game-over-overlay .game-over-scenario:empty { display: none; }
-    #game-over-overlay .game-over-headline {
-      font-size: var(--text-display);
-      font-weight: 700;
-      letter-spacing: var(--tracking-wide);
-      text-transform: uppercase;
-      line-height: 1.1;
-      margin-bottom: 18px;
-      padding-bottom: 14px;
-      border-bottom: 1px solid var(--edge-strong);
-    }
-    #game-over-overlay[data-outcome="victory"] .game-over-headline {
-      color: var(--loaded-bright); border-bottom-color: var(--loaded);
-    }
-    #game-over-overlay[data-outcome="defeat"] .game-over-headline {
-      color: var(--fire-bright); border-bottom-color: var(--fire);
-    }
-    #game-over-overlay[data-outcome="ended"] .game-over-headline {
-      color: var(--ink); border-bottom-color: var(--edge-strong);
-    }
-    /* A reported ending wears the neutral accent on purpose (issue #1344): the
-       rows below are the result, and tinting the headline green or red would
-       reintroduce exactly the win/loss verdict the report exists to replace. */
-    #game-over-overlay[data-outcome="reported"] .game-over-headline {
-      color: var(--ink); border-bottom-color: var(--edge-strong);
-    }
-    #game-over-overlay .game-over-message {
-      font-size: var(--text-lg);
-      white-space: pre-wrap;
-      line-height: 1.7;
-      max-width: 64ch;
-      letter-spacing: 0.03em;
-    }
-    /* The post-mission report (issue #1344): heading on the left, outcome on
-       the right, one grid row per report row, in the author's order. No score
-       column, no total row and no grade — the wire carries none of them. */
-    #game-over-overlay .game-over-report {
-      display: none;
-      grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-      gap: 10px 24px;
-      margin: 28px 0 0;
-      padding: 0;
-      max-width: 64ch;
-      text-align: left;
-    }
-    #game-over-overlay .game-over-report dt {
-      font-size: var(--text-md);
-      letter-spacing: var(--tracking-wide);
-      text-transform: uppercase;
-      color: var(--ink-dim);
-      white-space: nowrap;
-    }
-    #game-over-overlay .game-over-report dd {
-      margin: 0;
-      font-size: var(--text-md);
-      line-height: 1.6;
-      color: var(--ink);
-    }
-    /* The row's semantic state is the ONLY thing that varies per row, and it
-       varies by accent alone: every row gets identical weight and layout, so
-       none of them reads as the "real" result. */
-    #game-over-overlay .game-over-report dt[data-state="saved"] { color: var(--loaded); }
-    #game-over-overlay .game-over-report dt[data-state="lost"] { color: var(--fire); }
-    #game-over-overlay .game-over-report dt[data-state="partial"] { color: var(--gold); }
-    #game-over-overlay .game-over-report dt[data-state="neutral"] { color: var(--ink-dim); }
-    @media (max-width: 600px) {
-      /* On a phone the two columns stack: the same rows, the same order, and
-         the heading still reads as the label of the line under it. */
-      #game-over-overlay .game-over-report {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 4px;
-      }
-      #game-over-overlay .game-over-report dt { white-space: normal; }
-      #game-over-overlay .game-over-report dt + dd { margin-bottom: 12px; }
-    }
-    #game-over-overlay .game-over-return-btn {
-      margin-top: 32px;
-      padding: 12px 32px;
-      font-family: 'Chakra Petch', monospace;
-      font-size: var(--text-lg);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--ink);
-      background: rgba(var(--rgb-cyan), 0.12);
-      border: 1px solid var(--ink-dim);
-      border-radius: 2px;
-      cursor: pointer; min-height: var(--control-hit-min);
+      position: fixed;
+      z-index: 190;
     }
 
     /* -- Waiting-for-scenario overlay (shown after ReturnToLobby until host picks)
@@ -2233,11 +2134,18 @@
        rows underneath it, in the order the author wrote them. The rows carry no
        score, no total and no grade: see gui/game-over-view.js. -->
   <div id="game-over-overlay">
-    <div class="game-over-scenario" id="game-over-scenario"></div>
-    <div class="game-over-headline" id="game-over-headline"></div>
-    <div class="game-over-message" id="game-over-message"></div>
-    <dl class="game-over-report" id="game-over-report"></dl>
-    <button id="return-to-lobby-btn" class="game-over-return-btn" data-i18n="client.return_to_lobby">Return to Lobby</button>
+    <div class="game-over-frame">
+      <div class="game-over-scan"></div>
+      <span class="game-over-tick tl"></span><span class="game-over-tick tr"></span>
+      <span class="game-over-tick bl"></span><span class="game-over-tick br"></span>
+      <div class="game-over-body">
+        <div class="game-over-scenario" id="game-over-scenario"></div>
+        <div class="game-over-headline" id="game-over-headline"></div>
+        <div class="game-over-message" id="game-over-message"></div>
+        <dl class="game-over-report" id="game-over-report"></dl>
+        <button id="return-to-lobby-btn" class="game-over-return-btn" data-i18n="client.return_to_lobby">Return to Lobby</button>
+      </div>
+    </div>
   </div>
 
   <!-- Link banner (PRD #1023 module 4): says out loud what the dimmed console
@@ -3251,13 +3159,12 @@
           // so a host that never learned the ids — or any future ingress that
           // stops resolving them — still renders prose here.
           //
-          // This overlay is the PHONE's alone. The Viewscreen (server.html) has
-          // its own, because its rows arrive on the HUD payload rather than on
-          // a `GameOver` message and are resolved by `localiseHostPayload`
-          // before they get there. What the two surfaces genuinely share is the
-          // row NORMALISATION — `gv.rows` came out of the same exported
-          // `reportRows` server.html calls — which is the part that decides
-          // what the report says, as opposed to how it is painted.
+          // The Viewscreens (server.html, and the native host's
+          // gui/viewscreen-hud.html) draw the same overlay from the HUD payload,
+          // whose ids `localiseHostPayload` resolves before they get there. All
+          // three surfaces run the same `gameOverView` and paint through the
+          // same gui/game-over.css, so what the ending says and how it looks
+          // are each decided once.
           const reportEl = document.getElementById('game-over-report');
           if (reportEl) {
             reportEl.replaceChildren();

@@ -110,7 +110,11 @@ A scroll fallback (`overflow-y: auto` on `#station-grid`) handles rosters that d
 - `push_lobby_state` emits `LobbyStateChanged` when the authoritative lobby
   projection changes;
 - `recompute_hud_state` and `push_hud_state` emit the in-game HUD projection,
-  with a final game-over push on phase entry;
+  with a final game-over push on phase entry — that push alone carries
+  `game_over_message`, `game_over_outcome`, `scenario_title` and
+  `game_over_report`, which `server.html` and the native
+  `gui/viewscreen-hud.html` frame through the phone's own
+  `gui/game-over-view.js` and draw with the shared `gui/game-over.css`;
 - `RedAlertVignetteMaterial`, shield flash, hull shake, camera shake, and the
   reduced-motion preference remain renderer-side presentation state.
 

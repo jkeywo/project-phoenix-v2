@@ -3852,6 +3852,20 @@ pub struct ViewscreenHudState {
     /// `localiseTree` client-side. `None` while in progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_over_message: Option<String>,
+    /// The ending's declared side — `balance::Outcome::as_str`, so `"victory"`
+    /// or `"defeat"` — or absent for an ending that declared none. Set only
+    /// while the game has ended. The same flag `ServerMessage::GameOver` carries
+    /// to a phone, so the Viewscreen frames the ending through the same
+    /// gui/game-over-view.js decision a console does rather than guessing a
+    /// side from the closing prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_over_outcome: Option<String>,
+    /// The world's `[global] title` id, set only while the game has ended: the
+    /// ending names the scenario it belongs to (PRD #1023 module 4). Resolved
+    /// through the host channel's `localiseTree` boundary like every other id
+    /// in this payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_title: Option<String>,
     /// The active ship's-computer message, if any (issue #1342). Rides the
     /// existing `"hud"` channel rather than a dedicated one — this struct is
     /// already "everything the border/status-strip needs", and the banner is

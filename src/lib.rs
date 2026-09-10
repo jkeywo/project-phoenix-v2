@@ -127,6 +127,10 @@ pub mod gm_npc;
 pub mod gm_objective;
 pub mod gm_projection;
 pub mod gm_puppet;
+/// The quiet-time advisory and the crew-activity adapter behind it (issue
+/// #1436): three existing result/command/progress sources, one Background row,
+/// no keystroke telemetry.
+pub mod gm_quiet;
 /// Crew-public Game Master identities (issue #1289), kept separate from crew
 /// sessions and the player-ship fleet roster by construction.
 pub mod gm_roster;

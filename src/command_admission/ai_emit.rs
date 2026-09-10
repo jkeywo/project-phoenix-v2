@@ -14,6 +14,26 @@
 //! fallback config, and the validation call are all unchanged from the copies
 //! it replaces.
 
+/// The prefix every AI operator's token carries, and the one thing that tells a
+/// reader an admitted command came from an AI decision rather than from a seat.
+///
+/// Named here because it is already load-bearing in three places
+/// ([`super::policy::is_command_authorized`] routes on it,
+/// [`super::admit_system_commands`] resolves its route from it, and
+/// `lobby::handler` exempts it from lobby identity), and because issue #1436's
+/// crew-activity adapter is the first reader OUTSIDE admission to depend on it.
+pub const AI_TOKEN_PREFIX: &str = "ai:";
+
+/// Is this the token of an AI operator rather than a seat?
+///
+/// The complement is deliberately broad: a crew session token, the native local
+/// console token, and the absent token a peer-relayed or GM-puppeted command
+/// carries are all "not an AI decision". Advisory reads only — command authority
+/// is decided by [`super::policy::is_command_authorized`], never by this.
+pub fn is_ai_token(token: Option<&str>) -> bool {
+    token.is_some_and(|token| token.starts_with(AI_TOKEN_PREFIX))
+}
+
 /// The token an AI operator on a ship with no [`crate::entities::spawner::EntityUuid`]
 /// emits under.
 ///

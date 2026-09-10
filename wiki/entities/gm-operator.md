@@ -364,6 +364,21 @@ handler runs. `.attention_band(...)` on the control set chooses the row's band.
 Activating a beat row focuses that beat's existing mission-panel levers
 (`focusEvent`); it never fires anything.
 
+`src/gm_quiet.rs` adds the quiet-time advisory to that same queue: one
+`Background` row, never escalated by age, after an authored interval of
+SIMULATION seconds with no meaningful crew activity. `GmCrewActivity` is the
+peer-local clock and `observe_crew_activity` the adapter, reading three sources
+the simulation already keeps — an `ActionFeedback` the owning System settled
+`Applied` (which is how a completed Comms response counts), a control a seat
+worked that has no terminal result to settle (read from `AdmittedCommands`, with
+AI decisions excluded by their `ai:` token), and
+`BalanceEvent::ObjectiveChanged`. `[gm_attention] quiet_time_secs` and
+`quiet_time_disabled` are independent authored fields on the same table the
+idle-NPC advisory reads; a non-positive or non-finite interval fails the world
+load. The row names only the interval — there is no
+keystroke telemetry anywhere in the path — and carries no target, so the desk
+draws it with Snooze and no Open.
+
 `src/gm_objective.rs` resolves `[[gm_objective_palette]]` entries and handles
 `ObjectiveAction` activation, completion and failure through the ordinary
 Objective lifecycle. Authored recipient ships are separate from subject

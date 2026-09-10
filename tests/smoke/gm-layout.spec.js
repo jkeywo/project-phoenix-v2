@@ -102,6 +102,42 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   // The keyboard reaches the row's verbs, and reading one holds the list.
   await beatRow.locator('button[data-action="open"]').focus();
   expect(await page.evaluate(() => document.activeElement?.dataset?.action)).toBe('open');
+  // The quiet-time advisory (issue #1436) is the third row family in the same
+  // queue, and the one with no destination: it must read as a full sentence and
+  // offer its ONE verb, with no dead Open button beside it, still without the
+  // desk scrolling sideways at 200%.
+  await page.evaluate(() => window.__hostChannel('gm_attention', JSON.stringify({
+    occurrences: [{
+      id: 'quiet:1',
+      category: 'quiet_time',
+      band: 'background',
+      first_seen_tick: 1,
+      age_ms: 125000,
+      reason: {
+        id: 'server.gm.attention.reason.quiet_time',
+        params: { seconds: '120' },
+      },
+      target: {},
+    }],
+  })));
+  const quietRow = page.locator('#gm-attention-list li[data-occurrence-id="quiet:1"]');
+  await expect(quietRow).toBeVisible();
+  await expect(quietRow.locator('.gm-attention-band')).toHaveText(/\S/);
+  await expect(quietRow.locator('.gm-attention-reason')).toHaveText(/\S/);
+  await expect(quietRow.locator('button[data-action="snooze"]')).toBeVisible();
+  await expect(quietRow.locator('button[data-action="open"]')).toHaveCount(0);
+  const withQuiet = await page.locator('#gm-workspace').evaluate(el => ({
+    scroll: el.scrollWidth,
+    width: el.clientWidth,
+    body: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(withQuiet.scroll).toBeLessThanOrEqual(withQuiet.width);
+  expect(withQuiet.body).toBeLessThanOrEqual(withQuiet.viewport);
+  await quietRow.locator('button[data-action="snooze"]').focus();
+  expect(await page.evaluate(() => document.activeElement?.dataset?.action)).toBe('snooze');
+  // Routine attention stays in the queue: no dialog opened and no panel moved.
+  expect(await page.locator('#gm-action-confirmation[open]').count()).toBe(0);
   const doubled = testInfo.outputPath('gm-screen-1280-200pc.png');
   await page.screenshot({path:doubled});
   await testInfo.attach('GM 1280×720 at 200% text', {path:doubled,contentType:'image/png'});

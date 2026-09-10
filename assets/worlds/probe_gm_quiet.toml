@@ -1,0 +1,55 @@
+# Authored quiet-time probe for #1436.
+#
+# The interval is 2 SIMULATION seconds rather than the shipped 120 so a test can
+# actually reach a lull, and so the authored override is exercised by the same
+# world the row is read from. Everything else is ordinary: one fleet hull, one
+# speaker with a real GM Comms route (so a real crew answer can resolve the
+# row), and one GM objective palette entry (so real objective progress can).
+[global]
+seed = 1436
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+command_delay_ticks = 2
+
+[gm_attention]
+quiet_time_secs = 2.0
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_quiet.speaker"
+transform = { position = [0.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[gm_comms_route]]
+id = "quiet-route"
+label = "world.probe_gm_quiet.route"
+visibility = "selected_ships"
+senders = ["world.probe_gm_quiet.speaker"]
+attention_band = "background"
+[[gm_comms_route.hail]]
+id = "quiet-hail"
+label = "world.probe_gm_quiet.hail"
+script_path = "assets/worlds/probe_gm_quiet.toml#script.setup"
+root_fn = "quiet_offer"
+
+[[gm_objective_palette]]
+id = "gm-quiet-check"
+label = "world.probe_gm_quiet.objective"
+text = "world.probe_gm_quiet.objective"
+mandatory = false
+
+[script]
+setup = """
+fn quiet_offer(ctx) {
+    #{ message: "world.probe_gm_quiet.offer", responses: [
+        #{ text: "world.probe_gm_quiet.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn close_offer(ctx) { ctx.flags.increment("gm_quiet_closed", 1); }
+"""

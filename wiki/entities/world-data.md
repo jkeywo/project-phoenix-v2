@@ -46,7 +46,11 @@ Declarative `[[trigger]]` and `[[comms]]` blocks are rejected at load.
 `[[gm_palette]]` entries bind a template and closed authored variants for GM
 map placement; their templates join the ordinary preload/content set.
 `[[gm_role_preset]]` entries define personal presentation choices, exposed to
-the browser without changing GM authority. `src/world/config.rs` owns both
+the browser without changing GM authority. The typed `[gm_attention]` block
+tunes the GM attention queue's ADVISORY rows — the idle-NPC grace, its band and
+its off switch, and the quiet-time `quiet_time_secs` (a positive, finite count
+of simulation seconds) with its independent `quiet_time_disabled` — and can
+never suppress a technical warning. `src/world/config.rs` owns all three
 schemas; [GM Operator](./gm-operator.md) indexes their current runtime consumers.
 
 `scenario_detail_floor` is root-world-only: additive/supporting world loads reject

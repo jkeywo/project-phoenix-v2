@@ -834,7 +834,7 @@ describe('idle-NPC rows', () => {
     expect(rowIds()).toEqual(['comms:1', 'idle:npc-b:900', 'idle:npc-a:900']);
     const kinds = [...document.getElementById('gm-attention-filter-category').options]
       .map((option) => option.value);
-    expect(kinds).toEqual(['all', 'pending_comms', 'eligible_beat', 'idle_npc', 'station_health']);
+    expect(kinds).toEqual(['all', 'pending_comms', 'eligible_beat', 'idle_npc', 'station_health', 'quiet_time']);
 
     filters.setFilter('category', 'idle_npc');
     panel.returnToLive();
@@ -886,5 +886,130 @@ describe('idle-NPC rows', () => {
     // The verbs' own floor, from the shared control rule.
     const button = css.slice(css.indexOf('#gm-console.gm-desk button.btn {'));
     expect(button.slice(0, button.indexOf('}'))).toContain('min-height: var(--control-hit-min)');
+  });
+});
+
+/** One quiet-time advisory row, exactly as `src/gm_quiet.rs` publishes it. */
+function quiet(id, extra = {}) {
+  return {
+    id,
+    band: 'background',
+    category: 'quiet_time',
+    first_seen_tick: 40,
+    age_ms: 0,
+    reason: {
+      id: 'server.gm.attention.reason.quiet_time',
+      params: { seconds: '120' },
+    },
+    target: {},
+    ...extra,
+  };
+}
+
+describe('GM attention queue: the quiet-time advisory', () => {
+  it('draws the row with one verb, because it has nowhere to open', () => {
+    const { panel, onOpen } = mount();
+    panel.update(payload(quiet('quiet:1')));
+    const row = document.querySelector('#gm-attention-list li[data-occurrence-id="quiet:1"]');
+    expect(row).not.toBe(null);
+    // The band reads as a WORD, so it survives forced colours and a projector.
+    expect(row.querySelector('.gm-attention-band').textContent)
+      .toBe('server.gm.attention.band.background');
+    // The sentence names the interval and nothing about who was at a console.
+    expect(row.querySelector('.gm-attention-reason').textContent)
+      .toBe('server.gm.attention.reason.quiet_time'.replace('{seconds}', ''));
+    // One verb. A dead Open button is not kinder than no Open button: a
+    // keyboard operator would have to walk past it on every row.
+    expect(row.querySelector('button[data-action="snooze"]')).not.toBe(null);
+    expect(row.querySelector('button[data-action="open"]')).toBe(null);
+    expect(onOpen).not.toHaveBeenCalled();
+    panel.dispose();
+  });
+
+  it('interpolates the authored interval into the sentence', () => {
+    const { panel } = mount();
+    panel.update(payload(quiet('quiet:1', {
+      reason: { id: 'the crew have been quiet for {seconds} seconds', params: { seconds: '90' } },
+    })));
+    expect(document.querySelector('#gm-attention-list li .gm-attention-reason').textContent)
+      .toBe('the crew have been quiet for 90 seconds');
+    panel.dispose();
+  });
+
+  it('offers the advisory as its own filter kind without touching the banner seam', () => {
+    const { panel } = mount();
+    panel.update(payload(quiet('quiet:1'), occurrence('comms:m1')));
+    const options = [...document.getElementById('gm-attention-filter-category').options]
+      .map((option) => option.value);
+    expect(options).toContain('quiet_time');
+    // A GM who does not want the advisory can filter it away...
+    document.getElementById('gm-attention-filter-category').value = 'pending_comms';
+    document.getElementById('gm-attention-filter-category')
+      .dispatchEvent(new window.Event('change'));
+    expect(rowIds()).toEqual(['comms:m1']);
+    // ...and a technical warning is still on screen, because no filter reaches it.
+    panel.banners([{ id: 'peer-lost', message_id: 'server.gm.attention.heading', params: {} }]);
+    const banners = document.getElementById('gm-attention-banners');
+    expect(banners.hidden).toBe(false);
+    expect(banners.querySelector('[data-banner-id="peer-lost"]')).not.toBe(null);
+    panel.dispose();
+  });
+
+  it('snoozes without throwing the keyboard out of the panel', () => {
+    const { panel } = mount();
+    panel.update(payload(quiet('quiet:1'), occurrence('comms:m1')));
+    const snooze = document.querySelector(
+      '#gm-attention-list li[data-occurrence-id="quiet:1"] button[data-action="snooze"]',
+    );
+    snooze.focus();
+    snooze.click();
+    expect(rowIds()).not.toContain('quiet:1');
+    // Focus is still somewhere a Game Master can carry on from, not on <body>.
+    expect(document.getElementById('gm-attention-panel').contains(document.activeElement))
+      .toBe(true);
+    panel.dispose();
+  });
+
+  it('says in words that a held advisory has been resolved by the crew', () => {
+    const { panel } = mount();
+    panel.update(payload(quiet('quiet:1'), occurrence('comms:m1')));
+    // Hold the list by reading the conversation row.
+    document.querySelector(
+      '#gm-attention-list li[data-occurrence-id="comms:m1"] button[data-action="open"]',
+    ).click();
+    expect(panel.state().held).toBe(true);
+    // The crew did something, so the advisory left the projection while the
+    // list was held.
+    panel.update(payload(occurrence('comms:m1')));
+    const row = document.querySelector('#gm-attention-list li[data-occurrence-id="quiet:1"]');
+    expect(row.textContent).toContain('server.gm.attention.resolved');
+    expect(row.querySelector('button[data-action="snooze"]').disabled).toBe(true);
+    panel.dispose();
+  });
+
+  it('never escalates the row, whatever its age says', () => {
+    const { panel } = mount();
+    panel.update(payload(quiet('quiet:1', { age_ms: 0 })));
+    expect(bandOf('quiet:1')).toBe('background');
+    // An hour later it is the same occurrence, in the same band: the projection
+    // never republishes it in a louder one, and the panel invents nothing.
+    panel.update(payload(quiet('quiet:1', { age_ms: 3_600_000 })));
+    expect(bandOf('quiet:1')).toBe('background');
+    expect(rowIds()).toEqual(['quiet:1']);
+    panel.dispose();
+  });
+
+  it('takes a recurrence as a new row a stale snooze cannot hide', () => {
+    const { panel } = mount();
+    panel.update(payload(quiet('quiet:1')));
+    document.querySelector(
+      '#gm-attention-list li[data-occurrence-id="quiet:1"] button[data-action="snooze"]',
+    ).click();
+    expect(rowIds()).toEqual([]);
+    // The crew worked, then went quiet again. That is a different occurrence.
+    panel.update(payload());
+    panel.update(payload(quiet('quiet:2')));
+    expect(rowIds()).toEqual(['quiet:2']);
+    panel.dispose();
   });
 });

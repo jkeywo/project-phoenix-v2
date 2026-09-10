@@ -66,6 +66,7 @@ export const GM_ATTENTION_CATEGORIES = Object.freeze([
   'eligible_beat',
   'idle_npc',
   'station_health',
+  'quiet_time',
 ]);
 
 /** Ages repaint on this cadence. Slow enough to be free, fast enough that a
@@ -329,6 +330,20 @@ export function createGmAttentionPanel({
     }
   }
 
+  /**
+   * Does this row name something the desk can navigate to?
+   *
+   * Structural, not a category list: every row that has an Open destination
+   * carries it in `target` (a Comms row always names its speaker, a beat row
+   * its event), and a row whose target names nothing at all is an advisory
+   * about the session itself - the quiet-time row of issue #1436. A category
+   * this build has never heard of therefore gets the right verb without this
+   * file being taught about it.
+   */
+  const hasDestination = (occurrence) => Object
+    .values(occurrence.target || {})
+    .some((value) => value !== null && value !== undefined);
+
   function rowFor(occurrence) {
     const item = doc.createElement('li');
     item.dataset.occurrenceId = occurrence.id;
@@ -352,9 +367,24 @@ export function createGmAttentionPanel({
     reason.textContent = t(occurrence.reason.id, params);
     // `btn` is the desk's own control class, and it is what carries
     // `min-height: var(--control-hit-min)` plus the wrap-don't-shrink rules
-    // (PRD #1418 stories 5 and 9). Without it these two verbs were the only
+    // (PRD #1418 stories 5 and 9). Without it these verbs were the only
     // controls on the desk with no touch-target floor, which shows up first at
     // --a11y-text-scale: 2 where everything around them grows and they do not.
+    const snooze = doc.createElement('button');
+    snooze.type = 'button';
+    snooze.className = 'btn';
+    snooze.dataset.action = 'snooze';
+    snooze.textContent = t('server.gm.attention.snooze');
+    // A row with no target has nowhere to go - the quiet-time advisory
+    // (issue #1436) is about the session, not about a conversation, a beat or a
+    // ship. It gets no Open verb at all rather than a verb that would do
+    // nothing: a disabled control the keyboard still has to walk past is not
+    // kinder than an absent one, and a live control that does nothing is worse
+    // than both (PRD #1418 story 31 - a press must never look like an effect).
+    if (!hasDestination(occurrence)) {
+      item.append(band, age, reason, snooze);
+      return item;
+    }
     const open = doc.createElement('button');
     open.type = 'button';
     open.className = 'btn';
@@ -365,11 +395,6 @@ export function createGmAttentionPanel({
     open.textContent = t(occurrence.target.event
       ? 'server.gm.attention.open_beat'
       : 'server.gm.attention.open');
-    const snooze = doc.createElement('button');
-    snooze.type = 'button';
-    snooze.className = 'btn';
-    snooze.dataset.action = 'snooze';
-    snooze.textContent = t('server.gm.attention.snooze');
     item.append(band, age, reason, open, snooze);
     return item;
   }

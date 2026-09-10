@@ -3159,3 +3159,11 @@ server.gm.checkpoint.block.hull_differs_uncrewed,"GM named-checkpoint refusal re
 server.gm.checkpoint.block.hull_unknown,"GM named-checkpoint refusal reason; {slot} the live ship slot whose hull cannot be determined on one side, {stations} the Stations its crew hold","[The hull at ship slot {slot} could not be determined, so this saved session cannot be shown to hold its Stations ({stations}).]"
 server.gm.checkpoint.block.hull_unknown_uncrewed,GM named-checkpoint refusal reason; {slot} is a live ship slot with no human crew whose hull cannot be determined on one side,"[The hull at ship slot {slot} could not be determined, so this saved session cannot be shown to match it.]"
 server.gm.checkpoint.block.unknown,GM named-checkpoint refusal reason this build does not know; {kind} preserves the wire identity,[Unrecognized compatibility refusal ({kind}).]
+server.gm.attention.category.quiet_time,Attention queue kind for a session that has gone quiet,[Quiet time]
+server.gm.attention.reason.quiet_time,"Why a quiet-time advisory is in the queue; {seconds} is the authored interval in simulation seconds",[No effective crew activity for {seconds} simulation seconds.]
+world.probe_gm_quiet.speaker,GM quiet-time probe #1436,[Relay Buoy]
+world.probe_gm_quiet.route,GM quiet-time probe #1436,[Relay channel]
+world.probe_gm_quiet.hail,GM quiet-time probe #1436,[Relay check]
+world.probe_gm_quiet.offer,GM quiet-time probe #1436,[Relay buoy requests a status check.]
+world.probe_gm_quiet.acknowledge,GM quiet-time probe #1436,[Acknowledged.]
+world.probe_gm_quiet.objective,GM quiet-time probe #1436,[Complete the relay status check]

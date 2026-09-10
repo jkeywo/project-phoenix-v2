@@ -176,6 +176,10 @@ pub enum GmAttentionCategory {
     /// A Station or fleet hull whose human is gone (issue #1437). Always
     /// Urgent, always system-defined.
     StationHealth,
+    /// The crew has done nothing meaningful for the authored interval (issue
+    /// #1436). Always `Background`, never escalated by age — the whole rule,
+    /// and the activity adapter behind it, live in [`crate::gm_quiet`].
+    QuietTime,
 }
 
 /// The short human reason, as a String Table id plus its runtime parameters.
@@ -595,16 +599,37 @@ pub struct GmAttentionSettings {
     /// to say that.
     #[serde(default)]
     pub idle_npc_disabled: bool,
+    /// How long the whole session must go without meaningful crew activity, in
+    /// simulation seconds, before the quiet-time advisory appears (issue
+    /// #1436). Positive and finite; validated at world load.
+    ///
+    /// It takes no band: a quiet row is always
+    /// [`GmAttentionBand::Background`], which is how "age alone never escalates
+    /// it" is true by construction rather than by a rule somebody could relax.
+    #[serde(default = "default_quiet_time_secs")]
+    pub quiet_time_secs: f32,
+    /// Silence THAT advisory and nothing else, whatever the interval says. A
+    /// scenario built around a long approach does not want to be told the crew
+    /// are quiet, and must not have to change the interval — or give up any
+    /// other row — to say so.
+    #[serde(default)]
+    pub quiet_time_disabled: bool,
 }
 
 fn default_idle_npc_grace_secs() -> f32 {
     DEFAULT_IDLE_NPC_GRACE_SECS
 }
 
+fn default_quiet_time_secs() -> f32 {
+    crate::gm_quiet::DEFAULT_QUIET_SECONDS
+}
+
 impl Default for GmAttentionSettings {
     fn default() -> Self {
         Self {
             idle_npc_grace_secs: DEFAULT_IDLE_NPC_GRACE_SECS,
+            quiet_time_secs: crate::gm_quiet::DEFAULT_QUIET_SECONDS,
+            quiet_time_disabled: false,
             idle_npc_band: None,
             idle_npc_disabled: false,
         }
@@ -637,6 +662,16 @@ impl GmAttentionSettings {
                 ));
             }
         }
+        // Same argument for the quiet-time interval (issue #1436), and one more
+        // besides: `quiet_time_disabled` is the way to switch that advisory
+        // off, and it is deliberately a SEPARATE field, so a zero interval is a
+        // mistake rather than a second spelling of the disable.
+        if !(self.quiet_time_secs.is_finite() && self.quiet_time_secs > 0.0) {
+            return Err(format!(
+                "[gm_attention] quiet_time_secs = {} must be a positive, finite number of                  simulation seconds; to switch the quiet-time advisory off write                  quiet_time_disabled = true",
+                self.quiet_time_secs
+            ));
+        }
         Ok(())
     }
 
@@ -650,23 +685,39 @@ impl GmAttentionSettings {
 
     /// The authored grace as an exact whole number of simulation ticks at `hz`.
     ///
-    /// Rounded to the nearest tick and floored at one: a grace shorter than a
-    /// tick is one the fixed loop cannot express, and answering "zero ticks"
-    /// would put every NPC in the queue on the step it stopped working. The
-    /// rounding is IEEE-deterministic, so every peer turns the same authored
-    /// seconds into the same tick count.
+    /// Floored at one tick by [`ticks_at`], so a grace shorter than a step
+    /// cannot put every NPC in the queue on the step it stopped working.
     pub fn idle_grace_ticks(&self, hz: f32) -> u64 {
-        let hz = f64::from(hz);
-        let secs = f64::from(self.idle_npc_grace_secs);
-        if !(hz.is_finite() && hz > 0.0 && secs.is_finite() && secs > 0.0) {
-            return u64::MAX;
-        }
-        let ticks = (hz * secs).round();
-        if !ticks.is_finite() || ticks >= u64::MAX as f64 {
-            return u64::MAX;
-        }
-        (ticks as u64).max(1)
+        ticks_at(self.idle_npc_grace_secs, hz)
     }
+
+    /// The authored quiet-time interval as an exact whole number of simulation
+    /// ticks at `hz`, by the same rule and the same arithmetic (issue #1436).
+    pub fn quiet_time_ticks(&self, hz: f32) -> u64 {
+        ticks_at(self.quiet_time_secs, hz)
+    }
+}
+
+/// Authored seconds as an exact whole number of simulation ticks at `hz`.
+///
+/// Rounded to the nearest tick and floored at one: an interval shorter than a
+/// tick is one the fixed loop cannot express, and answering "zero ticks" would
+/// fire the advisory on the step its condition began. The rounding is
+/// IEEE-deterministic, so every peer turns the same authored seconds into the
+/// same tick count. An unusable pair answers `u64::MAX` — unreachable rather
+/// than immediate — which the load-time validation above makes unreachable in
+/// its own right.
+fn ticks_at(secs: f32, hz: f32) -> u64 {
+    let hz = f64::from(hz);
+    let secs = f64::from(secs);
+    if !(hz.is_finite() && hz > 0.0 && secs.is_finite() && secs > 0.0) {
+        return u64::MAX;
+    }
+    let ticks = (hz * secs).round();
+    if !ticks.is_finite() || ticks >= u64::MAX as f64 {
+        return u64::MAX;
+    }
+    (ticks as u64).max(1)
 }
 
 /// One NPC ship's current idle spell, in the only clock that can answer the
@@ -940,6 +991,7 @@ pub fn publish_attention_projection(
     idle: Option<Res<GmIdleNpcWatch>>,
     health: Option<Res<GmHealthWatch>>,
     mut state: ResMut<GmAttentionState>,
+    mut activity: ResMut<crate::gm_quiet::GmCrewActivity>,
     mut writer: MessageWriter<GmAttentionChanged>,
 ) {
     let names: BTreeMap<String, String> = entities
@@ -1025,6 +1077,26 @@ pub fn publish_attention_projection(
         rows.extend(health_rows(&health.alerts));
     }
 
+    // The quiet-time advisory (issue #1436). One row, always `Background`, so
+    // age can never escalate it; the interval it reports is measured in
+    // SIMULATION seconds by `crate::gm_quiet`, which is why a paused session's
+    // lull stops growing without anything here reading the pause flag.
+    if let Some(quiet) = crate::gm_quiet::quiet_row(world.as_deref(), tick.0, &mut activity) {
+        rows.push(PendingRow {
+            id: quiet.id,
+            category: GmAttentionCategory::QuietTime,
+            band: GmAttentionBand::Background,
+            reason: GmAttentionReason {
+                id: crate::gm_quiet::QUIET_REASON.to_string(),
+                params: BTreeMap::from([("seconds".to_string(), quiet.seconds.to_string())]),
+            },
+            // No target: a lull is the session's, not one ship's, and there is
+            // nothing for `Open` to navigate to. The page draws the row without
+            // that verb rather than offering one that does nothing.
+            target: GmAttentionTarget::default(),
+        });
+    }
+
     // Retire the bookkeeping for anything that stopped holding, so a recurrence
     // that somehow reused an identity still gets a fresh age rather than
     // inheriting the resolved row's.
@@ -1106,6 +1178,11 @@ impl Plugin for GmAttentionPlugin {
             // in the snapshot, because elapsed idleness is history a restored
             // world cannot recompute. See the type's own doc comment.
             .declare_state::<GmIdleNpcWatch>(StateClass::Presentation, "gm-t3-idle-npc-advisory")
+            // The crew-activity clock the quiet advisory reads (issue #1436).
+            // Registered here rather than at each host so a peer that publishes
+            // this queue always has the resource the projection reads, and so
+            // the two registration sites stay one line each.
+            .add_plugins(crate::gm_quiet::GmQuietPlugin)
             .add_message::<GmAttentionChanged>()
             .add_systems(
                 FixedLast,
@@ -1478,7 +1555,7 @@ mod tests {
         let settings = GmAttentionSettings {
             idle_npc_grace_secs: 2.0,
             idle_npc_band: Some("urgent".into()),
-            idle_npc_disabled: false,
+            ..Default::default()
         };
         assert!(idle_rows(&settings, 30.0, &watch, &names).is_empty());
 

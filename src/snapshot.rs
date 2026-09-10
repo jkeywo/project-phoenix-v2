@@ -5529,6 +5529,12 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // observe pre-restore results before the next PreUpdate recomputes them.
     world.insert_resource(gm_actions.applied_log());
     crate::gm_activity::rebase_after_restore(world);
+    // The quiet clock counts SIMULATION ticks, and the restore above just moved
+    // `SimTick` to somebody else's. Rebase it onto the restored tick so the
+    // continuation neither opens on a lull that belongs to the captured session
+    // nor carries the pre-restore one forward under its old identity
+    // (issue #1436).
+    crate::gm_quiet::rebase_after_restore(world);
     world.insert_resource(snapshot.gm_puppets.clone());
     // Rebase derived membership history to the restored authoritative set so
     // the first continuation pass cannot interpret every active target as a

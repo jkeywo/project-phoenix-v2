@@ -110,6 +110,7 @@ function percent(value) {
  *   row: (className?: string) => Element,
  *   control: (id: string, labelId: string, onClick: function) => Element,
  *   classes?: { slider?: string, readout?: string, status?: string },
+ *   phoneLimited?: boolean,
  * }} opts
  * @returns {{ repaint: () => void }} `repaint` re-reads the controller and
  *   updates the pressed states, the readout and both status lines in place.
@@ -125,6 +126,19 @@ export function renderViewscreenPresentationPanel(target, opts) {
   // (`html.phoenix-gm-page #canvas`), so two of the three effects have no
   // consumer and are NAMED rather than offered. See `gui/visual-effects.js`.
   const surface = opts.surface || 'viewscreen';
+  // Phone Viewscreen (issue #1429, PRD #1418 stories 18-19): text scale and
+  // contrast stay as they are on every surface, but the individual
+  // camera-shake/flash/decorative-motion rows below are OMITTED here rather
+  // than rendered — "Detailed individual effect controls are reserved for
+  // larger surfaces" (PRD Out of Scope). Reduce effects still applies to
+  // every effect `surface` renders (the underlying consumers are unchanged;
+  // only this panel's controls are fewer), so pressing it on a phone still
+  // writes the same conservative values a larger Viewscreen's individual
+  // sliders would. A per-setting reset for an effect this panel does not show
+  // has nothing to reset TO here, so it is correctly absent along with the row
+  // it belongs to; Reset all still reaches it, because the record it clears
+  // is the same one regardless of which controls this build shows for it.
+  const phoneLimited = !!opts.phoneLimited;
   const classes = opts.classes || {};
   const sliderClass = classes.slider || '';
   const readoutClass = classes.readout || '';
@@ -232,35 +246,43 @@ export function renderViewscreenPresentationPanel(target, opts) {
   //
   // Only the effects this surface can actually RENDER get a row. The rest get a
   // sentence saying why not, which is the whole difference between an honest
-  // omission and a control that does nothing.
-  for (const effect of applicableEffects(surface)) {
-    const effectSection = section(effectLabelId(effect));
-    const effectRow = row();
-    nodes.effects[effect] = { buttons: {} };
-    for (const choice of effectChoices(effect)) {
-      const id = VIEWSCREEN_PRESENTATION_CONTROLS.effect(effect, choice.key);
-      const el = control(id, choice.labelId, () => {
-        presentation.set(effect, choice.value);
-        paintEffect(effect);
-      });
-      nodes.effects[effect].buttons[choice.key] = el;
-      effectRow.appendChild(el);
+  // omission and a control that does nothing. On a phone Viewscreen this whole
+  // per-effect loop — and the "not offered here" sentences below it, which
+  // exist to explain an omitted INDIVIDUAL control — is skipped: there is no
+  // individual control on this build to explain the absence of.
+  if (!phoneLimited) {
+    for (const effect of applicableEffects(surface)) {
+      const effectSection = section(effectLabelId(effect));
+      const effectRow = row();
+      nodes.effects[effect] = { buttons: {} };
+      for (const choice of effectChoices(effect)) {
+        const id = VIEWSCREEN_PRESENTATION_CONTROLS.effect(effect, choice.key);
+        const el = control(id, choice.labelId, () => {
+          presentation.set(effect, choice.value);
+          paintEffect(effect);
+        });
+        nodes.effects[effect].buttons[choice.key] = el;
+        effectRow.appendChild(el);
+      }
+      effectSection.appendChild(effectRow);
+      const hintId = effectHintId(effect, surface);
+      if (hintId) effectSection.appendChild(hint(hintId));
+      const statusEl = statusLine(VIEWSCREEN_PRESENTATION_CONTROLS.effectStatus(effect));
+      nodes.effects[effect].status = statusEl;
+      effectSection.appendChild(statusEl);
+      effectSection.appendChild(resetButton(
+        VIEWSCREEN_PRESENTATION_CONTROLS.effectReset(effect),
+        effectResetId(effect),
+        effect,
+      ));
+      target.appendChild(effectSection);
     }
-    effectSection.appendChild(effectRow);
-    const hintId = effectHintId(effect, surface);
-    if (hintId) effectSection.appendChild(hint(hintId));
-    const statusEl = statusLine(VIEWSCREEN_PRESENTATION_CONTROLS.effectStatus(effect));
-    nodes.effects[effect].status = statusEl;
-    effectSection.appendChild(statusEl);
-    effectSection.appendChild(resetButton(
-      VIEWSCREEN_PRESENTATION_CONTROLS.effectReset(effect),
-      effectResetId(effect),
-      effect,
-    ));
-    target.appendChild(effectSection);
   }
 
-  // Reduce effects, and the record of what this surface has no consumer for.
+  // Reduce effects — offered on every surface, phone included: it still
+  // writes conservative values for every effect `surface` actually renders
+  // (gui/visual-effects.js), whether or not THIS panel shows an individual
+  // control for each one.
   const effectsSection = section('settings.effects.heading');
   effectsSection.appendChild(hint('settings.effects.reduce_hint'));
   const reduceRow = row();
@@ -273,11 +295,13 @@ export function renderViewscreenPresentationPanel(target, opts) {
     },
   ));
   effectsSection.appendChild(reduceRow);
-  for (const entry of inapplicableEffects(surface)) {
-    const line = hint(entry.reasonId);
-    line.setAttribute('data-control',
-      VIEWSCREEN_PRESENTATION_CONTROLS.effectAbsent(entry.effect));
-    effectsSection.appendChild(line);
+  if (!phoneLimited) {
+    for (const entry of inapplicableEffects(surface)) {
+      const line = hint(entry.reasonId);
+      line.setAttribute('data-control',
+        VIEWSCREEN_PRESENTATION_CONTROLS.effectAbsent(entry.effect));
+      effectsSection.appendChild(line);
+    }
   }
   target.appendChild(effectsSection);
 
@@ -398,6 +422,8 @@ export function renderViewscreenPresentationPanel(target, opts) {
   function repaint() {
     paintTextScale();
     paintContrast();
-    for (const effect of applicableEffects(surface)) paintEffect(effect);
+    if (!phoneLimited) {
+      for (const effect of applicableEffects(surface)) paintEffect(effect);
+    }
   }
 }

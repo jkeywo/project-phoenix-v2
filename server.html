@@ -1148,6 +1148,107 @@
       to   { opacity: 1; transform: translateY(0); }
     }
 
+    /* ── Phone Viewscreen level-3 Coordination (issue #1429, PRD #1418
+       stories 18-21) ──────────────────────────────────────────────
+       gui/phone-viewscreen.js's isPhoneViewscreen() tests the identical pair
+       of queries in JS (for the Display tab and the tap-to-open wiring
+       below) — kept in step here rather than derived from one shared source,
+       because a media query cannot be read out of a JS module and a
+       duplicated PAIR of literal thresholds is what stays reviewable; the
+       comment there names this file as its mirror. */
+    @media (orientation: portrait) and (max-width: 599px),
+           (orientation: landscape) and (max-height: 500px) {
+      /* --text-md-fixed (gui/tokens.css) divides --a11y-text-scale back out
+         of the ramp rung .chatter-bubble already used, so this bubble renders
+         at exactly the size it always has no matter the operator's chosen
+         text size — the PRD's explicit exemption for background AI-to-AI
+         chatter on a small screen. Every OTHER control on this page,
+         including the Display tab that sets that very scale, still enlarges
+         normally; only this rule and its one selector are phone-scoped. */
+      .chatter-bubble {
+        font-size: var(--text-md-fixed);
+      }
+      /* #chatter-container is pointer-events:none (the bubbles sit over the
+         3D view and must not intercept ordinary clicks there); tap-to-expand
+         re-enables it on the bubble itself, phone-only, matching the JS tap
+         wiring in the chatter script below which only attaches on a
+         phone-shaped screen. */
+      .chatter-bubble.chatter-bubble-expandable {
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      .chatter-bubble.chatter-bubble-expandable:focus-visible {
+        outline: 2px solid var(--focus-ring);
+        outline-offset: 2px;
+      }
+    }
+    /* The reading surface a tapped bubble opens (gui/phone-chatter-reader.js).
+       Mounted on every build — inert until something calls .open(), which
+       only the phone-shaped tap wiring above does — so its styling carries no
+       media guard of its own; there is nothing to show without a tap. */
+    .chatter-reader-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 211;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--space-6);
+      background: rgba(var(--rgb-void), 0.6);
+      box-sizing: border-box;
+    }
+    .chatter-reader-overlay[hidden] { display: none; }
+    .chatter-reader-panel {
+      width: min(92vw, 30rem);
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: var(--space-6);
+      background: rgba(var(--rgb-deep), 0.97);
+      border: 1px solid var(--edge);
+      border-radius: 5px;
+      color: var(--ink);
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      box-sizing: border-box;
+    }
+    .chatter-reader-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+    .chatter-reader-heading {
+      font-size: var(--text-sm); font-weight: 600;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    .chatter-reader-close {
+      padding: 4px 10px;
+      background: var(--surface-card); border: 1px solid var(--edge-strong);
+      color: var(--ink-dim); cursor: pointer;
+      font-family: inherit; font-size: var(--text-md); line-height: 1;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .chatter-reader-close:hover { background: var(--surface-high); color: var(--ink); }
+    .chatter-reader-close:focus-visible {
+      outline: 2px solid var(--focus-ring); outline-offset: 2px;
+    }
+    .chatter-reader-sender {
+      font-family: "JetBrains Mono", monospace;
+      font-size: var(--text-sm); color: var(--signal);
+      margin-bottom: var(--space-3);
+    }
+    .chatter-reader-title {
+      font-size: var(--text-lg); font-weight: 600;
+      color: var(--ink);
+      margin-bottom: var(--space-3);
+    }
+    .chatter-reader-body {
+      font-family: "JetBrains Mono", monospace;
+      font-size: var(--text-md); line-height: 1.5;
+      color: var(--ink);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
     /* ── Debug output panel (issue #939) ─────────────────────────
        The dock is now output-only: its toolbar moved into the settings cog,
        and it stays out of the layout entirely until a debug output is
@@ -2665,6 +2766,16 @@
     // presentation envelope (issue #1255); importing publishes the shared DOM
     // builders for the classic scripts below.
     import './gui/coordination-popup.js';
+    // Phone Viewscreen level-3 Coordination (issue #1429, PRD #1418 stories
+    // 18-21). Mounted unconditionally — inert until something calls .open(),
+    // which only the phone-shaped tap wiring in the classic chatter script
+    // below does — so this costs nothing on a full display. Importing
+    // gui/phone-viewscreen.js publishes window.isPhoneViewscreen for that
+    // same wiring; gui/server-settings.js's Display tab imports the named
+    // export directly rather than reading it off window.
+    import { mountPhoneChatterReader } from './gui/phone-chatter-reader.js';
+    import './gui/phone-viewscreen.js';
+    window.__phoneChatterReader = mountPhoneChatterReader(document);
     import { t, has, applyToDom, localiseTree } from './gui/strings.js';
     window.phStrings = { t, has, applyToDom, localiseTree };
     applyToDom(document);
@@ -3599,6 +3710,36 @@
     );
 
     container.appendChild(bubble);
+
+    // Phone Viewscreen (issue #1429, PRD #1418 stories 20-21): level-3
+    // Coordination stays compact here (.chatter-bubble's phone media query
+    // above) but must not become inaccessible — tap opens the same message's
+    // full text at the operator's chosen scale. Decided fresh for EACH
+    // arriving bubble rather than cached once for the page, so a rotate
+    // mid-session cannot leave an older bubble stuck non-interactive, or a
+    // newer one uselessly tappable, on the wrong shape of screen. The
+    // content is a SNAPSHOT taken right here, before this bubble can expire
+    // or be evicted — the reading surface it opens can then never drift onto
+    // a different message than the one actually tapped (PRD: "Preserve the
+    // selected message while it is open even if the live stream advances").
+    if (typeof window.isPhoneViewscreen === 'function' && window.isPhoneViewscreen(window)
+        && window.__phoneChatterReader
+        && typeof window.normalizeCoordinationPresentation === 'function') {
+      const snapshot = window.normalizeCoordinationPresentation(presentation, from_label, to_label);
+      bubble.classList.add('chatter-bubble-expandable');
+      bubble.setAttribute('role', 'button');
+      bubble.tabIndex = 0;
+      bubble.setAttribute('aria-haspopup', 'dialog');
+      bubble.setAttribute('aria-label', t('server.chatter.expand'));
+      const openReader = function () { window.__phoneChatterReader.open(snapshot); };
+      bubble.addEventListener('click', openReader);
+      bubble.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          openReader();
+        }
+      });
+    }
 
     // Track bubbles for expiry and eviction
     const entry = { el: bubble, timer: null };

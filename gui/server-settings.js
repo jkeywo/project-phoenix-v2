@@ -59,6 +59,7 @@ import {
 } from './settings-tabs.js';
 import { createViewscreenPresentation } from './viewscreen-presentation.js';
 import { renderViewscreenPresentationPanel } from './viewscreen-presentation-panel.js';
+import { isPhoneViewscreen } from './phone-viewscreen.js';
 import {
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
@@ -712,6 +713,10 @@ export function mountServerSettings(opts = {}) {
       // instead of offering two controls that would change nothing. The same
       // cog on the same page as an ordinary viewscreen offers all three.
       surface: currentHostActionContext() === GM_ACTION_CONTEXT ? 'gm' : 'viewscreen',
+      // Phone Viewscreen (issue #1429): re-checked on every build (open, tab
+      // switch, orientation change on the next open) rather than cached once
+      // at mount, the same "ask fresh" rule gui/phone-viewscreen.js documents.
+      phoneLimited: isPhoneViewscreen(win),
       section,
       hint,
       row: rowHost,

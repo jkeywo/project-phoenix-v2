@@ -1356,3 +1356,68 @@ describe('catalogue-backed outputs — absolute set, not host-local toggles', ()
     expect(control('console-latency').getAttribute('aria-pressed')).toBe('true');
   });
 });
+
+// ── Phone Viewscreen Display tab (issue #1429, PRD #1418 stories 18-19) ────
+//
+// gui/server-settings.js threads isPhoneViewscreen(win) into the shared
+// gui/viewscreen-presentation-panel.js renderer as `phoneLimited`; these
+// tests drive the whole path through mountServerSettings rather than the
+// panel renderer directly (tests/client/viewscreen-presentation-panel.test.js
+// covers that half in isolation), so a wiring regression between the two
+// modules — the option silently stopping at server-settings.js, say — fails
+// here even if the panel's own tests stay green.
+
+describe('the Display tab on a phone-shaped Viewscreen', () => {
+  const PHONE_PORTRAIT_QUERY = '(orientation: portrait) and (max-width: 599px)';
+  let origMatchMedia;
+
+  beforeEach(() => {
+    origMatchMedia = window.matchMedia;
+  });
+
+  afterEach(() => {
+    if (origMatchMedia) window.matchMedia = origMatchMedia;
+    else delete window.matchMedia;
+  });
+
+  function openDisplayTab() {
+    ({ menu: mounted } = mount());
+    mounted.open();
+    mounted.selectTab('presentation');
+  }
+
+  it('omits the individual effect rows and offers only text scale, contrast and Reduce effects', () => {
+    window.matchMedia = (q) => ({ matches: q === PHONE_PORTRAIT_QUERY });
+    openDisplayTab();
+
+    expect(control('viewscreen-text-scale')).toBeTruthy();
+    expect(control('viewscreen-contrast-default')).toBeTruthy();
+    expect(control('viewscreen-reduce-effects')).toBeTruthy();
+    for (const effect of ['shake', 'flash', 'decorative-motion']) {
+      expect(control(`viewscreen-${effect}-full`), effect).toBeNull();
+      expect(control(`viewscreen-${effect}-absent`), `${effect} absent`).toBeNull();
+    }
+  });
+
+  it('a full (non-phone) Viewscreen still shows all three individual effect rows', () => {
+    window.matchMedia = () => ({ matches: false });
+    openDisplayTab();
+
+    for (const effect of ['shake', 'flash', 'decorative-motion']) {
+      expect(control(`viewscreen-${effect}-full`), effect).toBeTruthy();
+    }
+  });
+
+  it('re-checks on every open, so a rotate between sessions is not stuck at the earlier answer', () => {
+    window.matchMedia = () => ({ matches: false });
+    openDisplayTab();
+    expect(control('viewscreen-shake-full')).toBeTruthy();
+    mounted.close();
+
+    window.matchMedia = (q) => ({ matches: q === PHONE_PORTRAIT_QUERY });
+    mounted.open();
+    mounted.selectTab('presentation');
+    expect(control('viewscreen-shake-full')).toBeNull();
+    expect(control('viewscreen-reduce-effects')).toBeTruthy();
+  });
+});

@@ -1371,6 +1371,9 @@ server.computer_message.severity.info,Viewscreen ship's-computer message banner 
 server.computer_message.severity.advisory,Viewscreen ship's-computer message banner — severity word,Advisory
 server.computer_message.severity.warning,Viewscreen ship's-computer message banner — severity word,Warning
 server.computer_message.severity.critical,Viewscreen ship's-computer message banner — severity word,Critical
+server.chatter.expand,Phone Viewscreen level-3 Coordination chatter bubble (issue #1429) — accessible label on the tap target that opens the full message at the operator's chosen text size,[Read full message]
+server.chatter_reader.heading,Phone Viewscreen Coordination reading surface (issue #1429) — heading over the expanded level-3 AI-to-AI message,[Coordination Message]
+server.chatter_reader.close,Phone Viewscreen Coordination reading surface (issue #1429) — accessible name of the button that dismisses it,[Close]
 server.unknown_scenario,Host lobby title when the selected scenario carries no title of its own,[Unknown Scenario]
 server.complexity_low,Host lobby station card — complexity pill for a Low-complexity console preset,[LOW]
 server.complexity_normal,Host lobby station card — complexity pill for any other console preset,[NORMAL]

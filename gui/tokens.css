@@ -371,6 +371,20 @@
      defined token rather than only to its inline fallback. */
   --a11y-text-scale:   1;
 
+  /* The unscaled `--text-md` rung — deliberately IMMUNE to `--a11y-text-scale`
+     (issue #1429, PRD #1418 stories 19-21). Divides the scale factor back out
+     of the ramp rung it is named after, so a consumer that must render at the
+     SAME size no matter the operator's chosen text scale can still ride the
+     shared ramp instead of restating a raw literal `design-tokens.test.js`
+     would then have to allowlist. Today's one consumer is server.html's
+     `.chatter-bubble` on a phone-shaped Viewscreen: level-3 AI-to-AI
+     Coordination chatter stays compact there so it cannot fill a small
+     screen, while every OTHER string on the same page keeps multiplying by
+     `--a11y-text-scale` as normal. Not a general escape hatch — a new
+     consumer names its own reason, in its own comment, for being the one
+     other place that stays fixed. */
+  --text-md-fixed:     calc(var(--text-md) / var(--a11y-text-scale, 1));
+
   /* SVG user-space type. A radar overlay draws into `viewBox="0 0 100 100"`,
      where a font-size is in VIEWBOX UNITS and scales with the element — so it
      is not on the CSS ramp and the px floor above does not apply to it. Its

@@ -12,15 +12,36 @@
     .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
     ph-hull-integrity { flex-shrink: 0; }
     ph-station-damage { align-self: flex-start; }
-    ph-repair-teams { flex: 1; min-height: 0; }
+    /* issue #1425: at the tightest supported geometry (the 320px-tall native
+       split-pane floor at 200% text) the hull bar, Core damage bar and the
+       Field Repair dispatch panel below (all fixed/auto height) can already
+       exceed the console's height, and a bare `min-height: 0` lets flexbox
+       award this element the ENTIRE deficit — the roster silently renders at
+       zero height rather than merely shrinking, with nothing left to scroll
+       to. A floor sized to roughly one team-card summary keeps it genuinely
+       present; `.console-body`'s own `overflow-y: auto` above then absorbs
+       any remaining overflow by scrolling. See the matching fix and longer
+       rationale on gui/destroyer/engineering.html's copy of this rule. */
+    ph-repair-teams { flex: 1; min-height: 88px; }
     /* External repair-team dispatch (issue #1161). Shown only on a hull that
        authors `[repair.external_dispatch]`. */
     .dispatch-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; }
     .dispatch-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; }
-    .dispatch-row { display: flex; align-items: center; gap: 10px; }
+    /* issue #1425: `flex-wrap: wrap` — see the matching comment on
+       gui/destroyer/helm.html's .dock-row. This row's own button can consume
+       its full width at 200% text on a narrow pane, and the status span
+       needs to drop to its own line rather than be squeezed to zero width. */
+    .dispatch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     .dispatch-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
     .dispatch-btn.working { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
-    .dispatch-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    /* issue #1425: this row is `display: flex` and a flex item's default
+       min-width is `auto`, not `0` — a long external_dispatch target_name (a
+       world entity name id, unbounded length) pushed the status text past the
+       button instead of wrapping. Matches the fix gui/cruiser/helm.html's
+       dock-status already carries for the same class of value, and mirrors
+       the equivalent fix on gui/destroyer/engineering.html's own dispatch
+       panel, which reuses its Tractor row's class (issue #1425). */
+    .dispatch-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .dispatch-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { padding: 8px; } }
   </style>

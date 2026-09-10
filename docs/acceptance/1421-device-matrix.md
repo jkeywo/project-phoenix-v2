@@ -335,3 +335,26 @@ rather than asserting a 320-wide pane at 200%, which the Rust contract in
 `docs/acceptance/1128-accessibility.md` remains the native multi-monitor HITL
 kit for the split-pane floor and its reflow/focus/contrast behavior; this
 document does not duplicate it.
+
+Issue #1425 adds `tests/smoke/engineering-operations-text-scale.spec.js` —
+Engineering + Operations (allocation, Repair, Tractor, Umbilical, Dock, and
+the External-dispatch "Transport" mechanism) carried through their DEDICATED
+and COMPOSITE Station surfaces at 100/150/200%, `tablet-650x450` and the
+native split-pane floor explicitly, browser zoom and forced colours. Its own
+file-top comment carries the full per-hull family-variant inventory (which
+of Repair/Tractor/Umbilical/Dock/`[repair.external_dispatch]` each hull's
+`assets/entities/alliance_*.toml` actually authors, and which document
+renders each) rather than duplicating it here. It also fixes a real bug this
+matrix's own `tablet-650x450`/`native-split-pane-floor` rows caught: several
+Operations-panel status rows (`.dock-status`, `.tractor-status`,
+`.dispatch-status`, `.tow-load-target`) sat in a `display: flex` row next to
+a button with no `min-width: 0`/wrap budget, so a long world-entity name (an
+unbounded-length string) either overflowed sideways or — once the button
+alone could consume the row's entire width at 200% text on a narrow pane —
+collapsed to zero rendered width instead of wrapping to its own line; and the
+destroyer/battleship Repair-team roster (`ph-repair-teams`) could render at
+literally zero height at the tightest geometry, because it was the one flex
+child in its column with `min-height: 0` competing against three auto-height
+siblings that never shrink. `docs/acceptance/1421-device-matrix.md` §2's
+landscape-tablet viewport, once an operator records it, is a fifth row worth
+adding to that spec's own `CARRIED_ON` list alongside the four already there.

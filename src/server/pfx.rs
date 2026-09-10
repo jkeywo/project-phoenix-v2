@@ -3332,28 +3332,23 @@ impl DustPfxSettings {
 
 /// Every texture the dust field can reference for `world`, for asset preload.
 ///
-/// The renderer's built-in layers are not spelled out in TOML, so walking the
+/// The renderer's default mote textures are not spelled out in TOML, so walking the
 /// world file alone would miss them and the textures would load lazily on the
 /// first mote spawn — i.e. pop in mid-flight. Resolving the config here means
 /// preload sees exactly what the emitter will ask for.
 pub fn dust_texture_paths(world: Option<&crate::world::config::WorldConfig>) -> Vec<String> {
-    let cfg = DustPfxSettings::from_world(world);
-    if !cfg.enabled {
+    let defaults = crate::world::native_render_config::PlatformRenderConfig::default();
+    let cfg = world
+        .and_then(|w| w.render.as_ref())
+        .map(crate::world::config::RenderConfig::visuals)
+        .unwrap_or(&defaults);
+    if !cfg.motes || world.and_then(|w| w.dust.as_ref()).and_then(|d| d.enabled) == Some(false) {
         return Vec::new();
     }
-    let mut out: Vec<String> = Vec::new();
-    for layer in &cfg.layers {
-        out.push(layer.texture.clone());
-        if let Some(glint) = &layer.glint_texture {
-            out.push(glint.clone());
-        }
-    }
-    if cfg.warp.enabled {
-        out.push(cfg.warp.texture.clone());
-    }
-    out.sort();
-    out.dedup();
-    out
+    let mut paths = cfg.mote_textures.to_vec();
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 /// Per-layer material handles, built lazily once the textures are known.
@@ -4087,9 +4082,9 @@ pub fn diff_torpedo_sets(
     (to_spawn, to_despawn)
 }
 
-// Native gameplay uses the approved fixed-pool motes.
+// Both render targets use the approved fixed-pool motes.
 fn legacy_dust_enabled() -> bool {
-    cfg!(target_arch = "wasm32")
+    false
 }
 
 #[cfg(test)]

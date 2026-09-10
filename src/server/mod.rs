@@ -1,7 +1,6 @@
 pub mod asset_preload;
 pub mod audio;
 pub mod bridge;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod native_visuals;
 pub mod pfx;
 pub mod radar;

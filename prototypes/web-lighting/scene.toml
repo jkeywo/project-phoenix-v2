@@ -1,0 +1,17 @@
+# [ai] Prototype tuning only; these values do not change any game world.
+camera = [0.0, 2.0, 22.0]
+star = [18.0, 12.0, -90.0]
+star_radius = 5.0
+star_illuminance = 24000.0
+ambient = 100.0
+shadow_map = 1024
+shadow_distance = 120.0
+# Starting intensity (0..3); hold - / + in the lab to adjust it live.
+flare = 3.0
+flight_speed = 8.0
+model = "models/alliance_cruiser_recreated.glb#Scene0"
+model_scale = 5.0
+motes = 440
+mote_radius = 30.0
+mote_depth = 100.0
+mote_width = 0.08

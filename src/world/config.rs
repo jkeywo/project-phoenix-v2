@@ -149,7 +149,9 @@ pub struct AmbientLightConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct RenderConfig {
-    /// Native viewscreen motes, star shadows and lens flare. Ignored by WebGL.
+    /// WebGL2 viewscreen motes, single-cascade shadows and approximate flare.
+    pub web: crate::world::native_render_config::WebRenderConfig,
+    /// Native viewscreen motes, star shadows and depth-occluded lens flare.
     pub native: crate::world::native_render_config::NativeRenderConfig,
     /// Render the 3D scene through a high-dynamic-range intermediate target
     /// before tonemapping, so light values above screen white survive to be
@@ -207,6 +209,7 @@ impl Default for RenderConfig {
         Self {
             hdr: true,
             native: crate::world::native_render_config::NativeRenderConfig::default(),
+            web: crate::world::native_render_config::WebRenderConfig::default(),
             tonemapping: TonemapChoice::default(),
             bloom: BloomConfig::default(),
             lod_fade_secs: 0.25,

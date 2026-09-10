@@ -75,7 +75,6 @@ pub struct RendererPlugin;
 
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
-        #[cfg(not(target_arch = "wasm32"))]
         app.add_plugins(crate::server::native_visuals::NativeVisualPlugin);
         // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
         // `RenderInterp` is PRESENTATION — frame-time interpolated transforms that

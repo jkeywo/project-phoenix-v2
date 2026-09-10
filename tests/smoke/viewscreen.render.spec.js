@@ -143,7 +143,8 @@ function captureRenderErrors(page) {
     errors.push(`pageerror: ${e.message}`);
   });
   page.on('console', (m) => {
-    if (m.type() !== 'error') return;
+    // Bevy's tracing output can carry ERROR inside a console.log message.
+    if (m.type() !== 'error' && !/\bERROR\b/.test(m.text())) return;
     const t = m.text();
     if (/404|Failed to load resource/i.test(t)) return;
     if (
@@ -156,7 +157,7 @@ function captureRenderErrors(page) {
 }
 
 /** Boot a world to the point the viewscreen is live, and measure it. */
-async function bootAndMeasure(context, { world, renderBlock }) {
+async function bootAndMeasure(context, { world, renderBlock, aiCrew = false }) {
   await context.route(`**/${world}`, (route) =>
     route.fulfill({ contentType: 'text/plain', body: withRenderBlock(worldToml(world), renderBlock) }),
   );
@@ -191,16 +192,21 @@ async function bootAndMeasure(context, { world, renderBlock }) {
   });
   expect(gl, 'SwiftShader supplied a WebGL2 context').toBe(true);
 
-  const hostId = await readHostPeerId(page);
-  const helm = await createTestClient(context, hostId, { name: 'Helm' });
-  await helm.send('SelectStation', { station: 'Helm' });
-  await helm.page.waitForFunction(
-    (t) => window.__messages?.some((m) => m.type === 'StationAssigned' && m.data.token === t),
-    helm.token,
-    { timeout: 30_000 },
-  );
-  await helm.send('SetReady', { ready: true });
-  await helm.waitForMessage('GameStarted', 60_000);
+  let helm;
+  if (aiCrew) {
+    await page.locator('#ai-launch-btn').click();
+  } else {
+    const hostId = await readHostPeerId(page);
+    helm = await createTestClient(context, hostId, { name: 'Helm' });
+    await helm.send('SelectStation', { station: 'Helm' });
+    await helm.page.waitForFunction(
+      (t) => window.__messages?.some((m) => m.type === 'StationAssigned' && m.data.token === t),
+      helm.token,
+      { timeout: 30_000 },
+    );
+    await helm.send('SetReady', { ready: true });
+    await helm.waitForMessage('GameStarted', 60_000);
+  }
   await page.bringToFront();
 
   await page.waitForFunction(
@@ -238,6 +244,23 @@ test.describe('viewscreen renders', () => {
     const { errors, stats } = await bootAndMeasure(context, { world: COMBAT_TEST });
     console.log(`combat_test/default pixels: ${JSON.stringify(stats)}`);
     expectViewscreenDrawn(stats, errors, 'combat_test default');
+  });
+
+  test('web motes shadows and flare draw independently of native settings', { tag: '@core' }, async ({ context }) => {
+    const downloads = [];
+    context.on('page', page => page.on('request', request => downloads.push(request.url())));
+    const { errors, stats } = await bootAndMeasure(context, {
+      world: COMBAT_TEST,
+      aiCrew: true,
+      renderBlock: '[render.native]\nmotes = false\nstar_shadows = false\nflare_intensity = 0.0\n'
+        + '[render.web]\nmotes = true\nstar_shadows = true\nflare_intensity = 3.0\n',
+    });
+    expectViewscreenDrawn(stats, errors, 'web lighting');
+    expect(downloads.some(url => url.endsWith('/shaders/web_star_flare.wgsl'))).toBe(true);
+    for (const texture of ['space_mote_streak_head', 'space_mote_streak_soft', 'space_mote_compact_core']) {
+      expect(downloads.some(url => url.endsWith(`/pfx/${texture}.png`))).toBe(true);
+    }
+    expect(downloads.some(url => url.endsWith('/shaders/star_flare.wgsl'))).toBe(false);
   });
 
   // The documented retreat from PRD #1023's HDR calibration. It is a one-line

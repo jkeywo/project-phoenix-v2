@@ -1,17 +1,22 @@
-//! Native gameplay presentation selected in the lighting lab.
+//! Shared gameplay presentation selected in the lighting lab.
 // Render-only trigonometry never feeds authoritative simulation state.
 #![allow(clippy::disallowed_methods)]
+#[cfg(not(target_arch = "wasm32"))]
 mod flare;
+#[cfg(target_arch = "wasm32")]
+#[path = "web_flare.rs"]
+mod flare;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_occlusion;
 use crate::{
     core::messages::{GamePhase, ViewMode},
     entities::{billboard::BillboardPose, spawner::StarSection, star::StarHalo},
     render_setup::GameCamera,
     server_app::LocalShip,
     ship::state::{ShipPhysics, ShipViewMode},
-    world::{config::WorldConfig, native_render_config::NativeRenderConfig},
+    world::{config::WorldConfig, native_render_config::PlatformRenderConfig},
 };
 use bevy::{
-    core_pipeline::prepass::DepthPrepass,
     light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap, NotShadowCaster},
     prelude::*,
     render::render_resource::AsBindGroup,
@@ -29,7 +34,14 @@ impl Plugin for NativeVisualPlugin {
         .init_resource::<MotePool>()
         .add_systems(Update, prepare_cameras)
         .add_systems(PostUpdate, update_motes.before(TransformSystems::Propagate))
-        .add_systems(PostUpdate, update_stars.after(TransformSystems::Propagate));
+        .add_systems(
+            PostUpdate,
+            update_stars
+                .after(TransformSystems::Propagate)
+                // Enabling a light after this set leaves extraction with no
+                // cascades for the active camera and panics on mission start.
+                .before(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades),
+        );
     }
 }
 fn prepare_cameras(
@@ -39,7 +51,11 @@ fn prepare_cameras(
     for entity in &cameras {
         commands
             .entity(entity)
-            .insert((DepthPrepass, flare::FlareSettings::default()));
+            .insert(flare::FlareSettings::default());
+        #[cfg(not(target_arch = "wasm32"))]
+        commands
+            .entity(entity)
+            .insert(bevy::core_pipeline::prepass::DepthPrepass);
     }
 }
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -64,7 +80,7 @@ impl Material for MoteMaterial {
 struct NativeMote(usize);
 #[derive(Resource, Default)]
 struct MotePool {
-    config: Option<NativeRenderConfig>,
+    config: Option<PlatformRenderConfig>,
 }
 fn visible_view(mode: &ShipViewMode) -> bool {
     matches!(mode.view_mode, ViewMode::Camera(_) | ViewMode::Cinematic)
@@ -73,7 +89,7 @@ fn visible_view(mode: &ShipViewMode) -> bool {
 fn update_motes(
     mut commands: Commands,
     world: Option<Res<WorldConfig>>,
-    defaults: Local<NativeRenderConfig>,
+    defaults: Local<PlatformRenderConfig>,
     phase: Res<State<GamePhase>>,
     mut pool: ResMut<MotePool>,
     assets: Res<AssetServer>,
@@ -86,7 +102,7 @@ fn update_motes(
     let cfg = world
         .as_ref()
         .and_then(|w| w.render.as_ref())
-        .map(|r| &r.native)
+        .map(crate::world::config::RenderConfig::visuals)
         .unwrap_or(&defaults);
     let enabled = *phase.get() == GamePhase::InProgress
         && cfg.motes
@@ -189,7 +205,7 @@ fn projected_motion(position: Vec3, velocity: Vec3) -> Vec2 {
 fn update_stars(
     mut commands: Commands,
     world: Option<Res<WorldConfig>>,
-    defaults: Local<NativeRenderConfig>,
+    defaults: Local<PlatformRenderConfig>,
     phase: Res<State<GamePhase>>,
     mut cameras: Query<
         (
@@ -204,6 +220,7 @@ fn update_stars(
     ship: Query<&ShipViewMode, With<LocalShip>>,
     mut lights: Query<(Entity, Option<&ChildOf>, &mut DirectionalLight)>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
+    #[cfg(target_arch = "wasm32")] occlusion: web_occlusion::WebOcclusion,
     noncasters: Query<
         Entity,
         (
@@ -218,7 +235,7 @@ fn update_stars(
     let cfg = world
         .as_ref()
         .and_then(|w| w.render.as_ref())
-        .map(|r| &r.native)
+        .map(crate::world::config::RenderConfig::visuals)
         .unwrap_or(&defaults);
     let Ok((camera, global, projection, mut flare)) = cameras.single_mut() else {
         return;
@@ -244,7 +261,7 @@ fn update_stars(
         if enabled {
             commands.entity(entity).insert(
                 CascadeShadowConfigBuilder {
-                    num_cascades: 3,
+                    num_cascades: if cfg!(target_arch = "wasm32") { 1 } else { 3 },
                     maximum_distance: cfg.shadow_distance.max(1.0),
                     ..default()
                 }
@@ -253,6 +270,7 @@ fn update_stars(
         }
     }
     if !active {
+        flare.shape.w = 0.0;
         return;
     }
     let Some((_, star_global, star)) = dominant else {
@@ -285,7 +303,20 @@ fn update_stars(
         ndc.z,
         cfg.flare_intensity.clamp(0.0, 3.0) * fade,
     );
-    flare.shape = Vec4::new(radius_y / p.aspect_ratio, radius_y, p.aspect_ratio, 0.0);
+    #[cfg(target_arch = "wasm32")]
+    let visibility = if flare.source.w > 0.0 {
+        occlusion.visibility(global.translation(), center, radius, flare.shape.w)
+    } else {
+        0.0
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let visibility = 0.0;
+    flare.shape = Vec4::new(
+        radius_y / p.aspect_ratio,
+        radius_y,
+        p.aspect_ratio,
+        visibility,
+    );
 }
 
 #[cfg(test)]

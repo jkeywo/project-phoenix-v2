@@ -341,9 +341,7 @@ fn discover_world_assets(
         }
     }
 
-    // Dust textures. Resolved through the renderer rather than read straight
-    // off `world.dust`, because a world that declares no `[[dust.layer]]`
-    // still gets the built-in layers and their textures.
+    // Preload the selected platform's mote textures, including default textures.
     for path in crate::server::pfx::dust_texture_paths(Some(world)) {
         if !manifest.pfx_textures.contains(&path) {
             manifest.pfx_textures.push(path);
@@ -1200,8 +1198,8 @@ mod tests {
         assert_eq!(manifest.radar_icons, vec!["radar_icons/Icon-TestShip.png"]);
     }
 
-    /// A world that declares no `[[dust.layer]]` still renders the built-in
-    /// layers, so their textures must be discovered even though the world file
+    /// A world without mote overrides still renders the built-in
+    /// textures, so they must be discovered even though the world file
     /// never names them.
     #[test]
     fn discover_base_assets_preloads_builtin_dust_textures() {
@@ -1254,22 +1252,18 @@ mod tests {
     }
 
     #[test]
-    fn discover_base_assets_preloads_declared_dust_textures() {
+    fn discover_base_assets_preloads_platform_mote_textures() {
+        let mut render = crate::world::config::RenderConfig::default();
+        render.native.mote_textures[0] = "pfx/native_mote.png".into();
+        render.web.mote_textures[0] = "pfx/web_mote.png".into();
+        let expected = render.visuals().mote_textures[0].clone();
         let world = WorldConfig {
-            dust: Some(crate::world::config::DustPfxConfig {
-                layers: vec![crate::world::config::DustLayerConfig {
-                    texture: Some("pfx/custom_mote.png".into()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }),
+            render: Some(render),
             ..Default::default()
         };
         let (manifest, _, _, _, _) = discover_base_assets(&world, &HashMap::new());
         assert!(
-            manifest
-                .pfx_textures
-                .contains(&"pfx/custom_mote.png".to_string()),
+            manifest.pfx_textures.contains(&expected),
             "got {:?}",
             manifest.pfx_textures
         );

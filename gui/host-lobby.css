@@ -971,8 +971,16 @@
    glow — `ready-pulse`'s 50% frame verbatim, inset for the same chamfer
    reason the keyframes are. Its siblings in that media block (the boot spinner,
    the red-alert vignette) are not lobby chrome and stay in server.html. */
+/* Issue #1428: decorative motion is its own preference now, so the badge's hold
+   lands on the decorative band; the media query stays as the pre-JS fallback,
+   gated on the band being absent. */
+:root[data-decorative-motion="off"] #lobby-ready-badge.go {
+  animation: none;
+  box-shadow: inset 0 0 16px rgba(var(--rgb-signal), 0.6);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  #lobby-ready-badge.go {
+  :root:not([data-decorative-motion]) #lobby-ready-badge.go {
     animation: none;
     box-shadow: inset 0 0 16px rgba(var(--rgb-signal), 0.6);
   }

@@ -96,6 +96,16 @@ function silentWindow(doc) {
   return doc.defaultView || window;
 }
 
+/**
+ * A whole record with only the named fields chosen — the rest following the
+ * machine. Since issue #1428 the record carries five effects, and spelling all
+ * five out in every `toEqual` would make each of these assertions about the
+ * SIZE of the record rather than about the field it is testing.
+ */
+function following(chosen = {}) {
+  return { ...emptyViewscreenPresentation(), ...chosen };
+}
+
 /** Put the real document back the way each cog test expects to find it. */
 function resetRealDocument() {
   document.body.innerHTML = '';
@@ -107,9 +117,15 @@ function resetRealDocument() {
 describe('the endpoint record', () => {
   it('starts out following the machine it is running on', () => {
     const record = emptyViewscreenPresentation();
-    expect(record).toEqual({ textScale: 'default', contrast: 'default' });
+    expect(record).toEqual({
+      textScale: 'default', contrast: 'default',
+      // The three visual effects (issue #1428) joined the same list, which is
+      // what made every consumer here pick them up without being edited.
+      shake: 'default', flash: 'default', decorativeMotion: 'default',
+    });
     expect(isDefaultViewscreenPresentation(record)).toBe(true);
-    expect(VIEWSCREEN_EFFECTS).toEqual(['textScale', 'contrast']);
+    expect(VIEWSCREEN_EFFECTS)
+      .toEqual(['textScale', 'contrast', 'shake', 'flash', 'decorativeMotion']);
   });
 
   it('coerces anything untrusted into a usable record rather than throwing', () => {
@@ -143,7 +159,8 @@ describe('endpoint storage', () => {
     const storage = fakeStorage();
     saveViewscreenPresentation(storage, { textScale: 1.75, contrast: 'on' });
     // A fresh read with no memory of the writer is the next launch.
-    expect(loadViewscreenPresentation(storage)).toEqual({ textScale: 1.75, contrast: 'on' });
+    expect(loadViewscreenPresentation(storage))
+      .toEqual(following({ textScale: 1.75, contrast: 'on' }));
     expect(storage.keys()).toEqual([VIEWSCREEN_PRESENTATION_KEY]);
   });
 
@@ -168,7 +185,8 @@ describe('endpoint storage', () => {
       accessibility: { presentation: { textScale: 1, contrast: 'off' } },
     }));
     expect(storage.raw(VIEWSCREEN_PRESENTATION_KEY)).toBe(before);
-    expect(loadViewscreenPresentation(storage)).toEqual({ textScale: 1.5, contrast: 'on' });
+    expect(loadViewscreenPresentation(storage))
+      .toEqual(following({ textScale: 1.5, contrast: 'on' }));
   });
 
   it('survives every other key on the endpoint being cleared', () => {
@@ -183,7 +201,8 @@ describe('endpoint storage', () => {
     for (const key of ['phoenix-save-slots', 'session-token', 'phoenix-scenario']) {
       storage.removeItem(key);
     }
-    expect(loadViewscreenPresentation(storage)).toEqual({ textScale: 2, contrast: 'on' });
+    expect(loadViewscreenPresentation(storage))
+      .toEqual(following({ textScale: 2, contrast: 'on' }));
   });
 
   it('forgets rather than fails when storage refuses', () => {
@@ -205,10 +224,10 @@ describe('resolution against the machine, and the status it reports', () => {
     // The system asks for higher contrast…
     const os = { contrast: true, textScale: 1.5 };
     expect(resolveViewscreenEffects(emptyViewscreenPresentation(), os))
-      .toEqual({ textScale: 1.5, contrast: true });
+      .toMatchObject({ textScale: 1.5, contrast: true });
     // …and the operator at the screen overrules it, both ways.
     expect(resolveViewscreenEffects({ contrast: 'off', textScale: 1 }, os))
-      .toEqual({ textScale: 1, contrast: false });
+      .toMatchObject({ textScale: 1, contrast: false });
     expect(resolveViewscreenEffects({ contrast: 'on' }, { contrast: false }).contrast).toBe(true);
   });
 
@@ -252,12 +271,22 @@ describe('the live controller', () => {
     expect(doc.documentElement.getAttribute('data-contrast')).toBe('standard');
   });
 
-  it('does not stamp motion, which this endpoint does not own yet', () => {
-    // The viewscreen's shake and flash follow `prefers-reduced-motion` today
-    // (issue #1428 owns the controls). Stamping the attribute here would
-    // out-specify that query for a setting nothing on this tab offers.
+  it('stamps the effect bands but never the motion attribute', () => {
+    // This record has no motion tri-state of its own — an unset effect follows
+    // the machine's `prefers-reduced-motion` — so stamping
+    // `data-reduced-motion` would out-specify that query for a setting the tab
+    // does not offer. The BANDS are stamped, because they are the authority the
+    // rules in gui/tokens.css switch on (issue #1428).
     presentation.set('contrast', 'on');
     expect(doc.documentElement.hasAttribute('data-reduced-motion')).toBe(false);
+    expect(doc.documentElement.getAttribute('data-flash')).toBe('full');
+    expect(doc.documentElement.getAttribute('data-decorative-motion')).toBe('full');
+    presentation.set('flash', 0);
+    expect(doc.documentElement.getAttribute('data-flash')).toBe('off');
+    expect(doc.documentElement.style.getPropertyValue('--a11y-flash-scale')).toBe('0');
+    presentation.set('flash', 0.3);
+    expect(doc.documentElement.getAttribute('data-flash')).toBe('reduced');
+    expect(doc.documentElement.style.getPropertyValue('--a11y-flash-scale')).toBe('0.3');
   });
 
   it('persists every change, so the next launch reads it back', () => {
@@ -266,7 +295,7 @@ describe('the live controller', () => {
     const nextLaunch = createViewscreenPresentation({
       doc: freshDoc(), win, store: browserViewscreenStore(storage),
     });
-    expect(nextLaunch.record()).toEqual({ textScale: 1.5, contrast: 'on' });
+    expect(nextLaunch.record()).toEqual(following({ textScale: 1.5, contrast: 'on' }));
     // …and applies it without anyone opening the menu.
     const secondDoc = freshDoc();
     createViewscreenPresentation({
@@ -280,7 +309,7 @@ describe('the live controller', () => {
     presentation.set('contrast', 'on');
 
     presentation.reset('contrast');
-    expect(presentation.record()).toEqual({ textScale: 1.5, contrast: 'default' });
+    expect(presentation.record()).toEqual(following({ textScale: 1.5 }));
     expect(loadViewscreenPresentation(storage).textScale).toBe(1.5);
 
     presentation.resetAll();
@@ -417,7 +446,7 @@ describe('the browser viewscreen’s cog', () => {
     slider.dispatchEvent(new Event('input'));
 
     control(VIEWSCREEN_PRESENTATION_CONTROLS.contrastReset).click();
-    expect(loadViewscreenPresentation(storage)).toEqual({ textScale: 1.5, contrast: 'default' });
+    expect(loadViewscreenPresentation(storage)).toEqual(following({ textScale: 1.5 }));
 
     control(VIEWSCREEN_PRESENTATION_CONTROLS.resetAll).click();
     expect(loadViewscreenPresentation(storage)).toEqual(emptyViewscreenPresentation());
@@ -560,19 +589,43 @@ describe('the native endpoint’s host-side store', () => {
     // page's tri-state, and neither side is free to invent a third.
     expect(readInjectedViewscreenPresentation({
       PhoenixViewscreenPresentation: { textScale: 1.5, contrast: true },
-    })).toEqual({ textScale: 1.5, contrast: 'on' });
+    })).toEqual(following({ textScale: 1.5, contrast: 'on' }));
     expect(readInjectedViewscreenPresentation({
       PhoenixViewscreenPresentation: { textScale: null, contrast: false },
-    })).toEqual({ textScale: 'default', contrast: 'off' });
+    })).toEqual(following({ contrast: 'off' }));
+    // The three effects cross as `0..=1` fractions or null (issue #1428), and a
+    // host older than this bundle simply omits them.
+    expect(readInjectedViewscreenPresentation({
+      PhoenixViewscreenPresentation: {
+        textScale: null, contrast: null, shake: 0, flash: 0.3, decorativeMotion: 1,
+      },
+    })).toEqual(following({ shake: 0, flash: 0.3, decorativeMotion: 1 }));
     // Nothing injected — an older host, or a machine with no settings
     // directory — is "follow this machine", not a crash.
     expect(readInjectedViewscreenPresentation({})).toBeNull();
     expect(readInjectedViewscreenPresentation(null)).toBeNull();
 
-    expect(viewscreenPresentationRecordFields({ textScale: 1.5, contrast: 'on' }))
-      .toEqual({ text_scale_percent: 150, contrast: true });
+    expect(viewscreenPresentationRecordFields(following({ textScale: 1.5, contrast: 'on' })))
+      .toEqual({
+        text_scale_percent: 150,
+        contrast: true,
+        shake_percent: null,
+        flash_percent: null,
+        decorative_motion_percent: null,
+      });
     expect(viewscreenPresentationRecordFields(emptyViewscreenPresentation()))
-      .toEqual({ text_scale_percent: null, contrast: null });
+      .toEqual({
+        text_scale_percent: null,
+        contrast: null,
+        shake_percent: null,
+        flash_percent: null,
+        decorative_motion_percent: null,
+      });
+    // An effect intensity crosses as WHOLE PERCENT, like the text size, and a
+    // chosen ZERO crosses as 0 rather than as "unset" — the distinction the
+    // host's `Option` carries all the way to `set_native_effect_intensities`.
+    expect(viewscreenPresentationRecordFields(following({ shake: 0, flash: 0.3 })))
+      .toMatchObject({ shake_percent: 0, flash_percent: 30 });
   });
 
   it('speaks the record the Rust side actually decodes', () => {

@@ -1250,6 +1250,8 @@ mod tests {
                 &crate::native_host::viewscreen_presentation::ViewscreenPresentation {
                     text_scale_percent: Some(150),
                     contrast: Some(true),
+                    shake_percent: Some(0),
+                    ..crate::native_host::viewscreen_presentation::ViewscreenPresentation::following_system()
                 },
             ),
         );
@@ -1258,6 +1260,11 @@ mod tests {
             .expect("the saved settings are seeded");
         assert!(seeded[at..].contains("\"textScale\":1.5"));
         assert!(seeded[at..].contains("\"contrast\":true"));
+        // Issue #1428: the three effects are seeded on the same assignment, so
+        // a display that was left with its shake off comes up with it off
+        // rather than shaking once before the settings mount.
+        assert!(seeded[at..].contains("\"shake\":0"));
+        assert!(seeded[at..].contains("\"flash\":null"));
         assert!(at < seeded.find("</head>").expect("a head"));
     }
 

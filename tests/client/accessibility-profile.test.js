@@ -85,7 +85,16 @@ function fakeRoot() {
 describe('profile schema', () => {
   it('a fresh profile follows the OS for every effect and offers no assistance', () => {
     expect(emptyAccessibilityProfile()).toEqual({
-      presentation: { textScale: FOLLOW_OS, contrast: FOLLOW_OS, reducedMotion: FOLLOW_OS },
+      presentation: {
+        textScale: FOLLOW_OS,
+        contrast: FOLLOW_OS,
+        reducedMotion: FOLLOW_OS,
+        // The three separate effects (issue #1428) start out following the
+        // motion preference, so a fresh profile behaves exactly as it did.
+        shake: FOLLOW_OS,
+        flash: FOLLOW_OS,
+        decorativeMotion: FOLLOW_OS,
+      },
       assistance: {},
     });
   });
@@ -97,7 +106,14 @@ describe('profile schema', () => {
       presentation: { textScale: 'huge', contrast: 'sideways', reducedMotion: EXPLICIT_ON },
       assistance: { 'not.a.function': 'request', 'helm.course-keeping': 'request' },
     })).toEqual({
-      presentation: { textScale: FOLLOW_OS, contrast: FOLLOW_OS, reducedMotion: EXPLICIT_ON },
+      presentation: {
+        textScale: FOLLOW_OS,
+        contrast: FOLLOW_OS,
+        reducedMotion: EXPLICIT_ON,
+        shake: FOLLOW_OS,
+        flash: FOLLOW_OS,
+        decorativeMotion: FOLLOW_OS,
+      },
       // Only a DECLARED function with a non-default state survives.
       assistance: { 'helm.course-keeping': ASSIST_REQUEST },
     });
@@ -296,10 +312,18 @@ describe('resolution folds explicit choice over the OS default', () => {
       textScale: 1.2,
       contrast: true,        // explicit on, despite OS off
       reducedMotion: false,  // explicit off, despite OS reduce
+      // …and the three effects follow that RESOLVED preference, not the OS's
+      // raw answer: explicitly re-allowing motion re-allows all three
+      // (issue #1428).
+      shake: 1, flash: 1, decorativeMotion: 1,
     });
-    // With everything unset, the OS defaults come through.
+    // With everything unset, the OS defaults come through — and reduce turns
+    // all three effects off, which is what shipped before they were separable.
     expect(resolveEffects(emptyAccessibilityProfile(), os)).toEqual({
-      textScale: TEXT_SCALE_DEFAULT, contrast: false, reducedMotion: true,
+      textScale: TEXT_SCALE_DEFAULT,
+      contrast: false,
+      reducedMotion: true,
+      shake: 0, flash: 0, decorativeMotion: 0,
     });
   });
 
@@ -308,7 +332,10 @@ describe('resolution folds explicit choice over the OS default', () => {
     // the OS default flows through; an explicit choice still overrides it.
     const os = { textScale: 1.3 };
     expect(resolveEffects(emptyAccessibilityProfile(), os)).toEqual({
-      textScale: 1.3, contrast: false, reducedMotion: false,
+      textScale: 1.3,
+      contrast: false,
+      reducedMotion: false,
+      shake: 1, flash: 1, decorativeMotion: 1,
     });
     const explicit = normalizeAccessibilityProfile({ presentation: { textScale: 1.2 } });
     expect(resolveEffects(explicit, os).textScale).toBeCloseTo(1.2);

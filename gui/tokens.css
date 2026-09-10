@@ -604,11 +604,11 @@
    ph-battery-bar.js is the one loop that needs it. */
 :root { --a11y-anim-play: running; }
 
-:root[data-reduced-motion="reduce"] { --a11y-anim-play: paused; }
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) { --a11y-anim-play: paused; }
 
-:root[data-reduced-motion="reduce"] *,
-:root[data-reduced-motion="reduce"] *::before,
-:root[data-reduced-motion="reduce"] *::after {
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) *,
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) *::before,
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) *::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   animation-delay: 0ms !important;
@@ -618,11 +618,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduced-motion="no-preference"]) { --a11y-anim-play: paused; }
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) {
+    --a11y-anim-play: paused;
+  }
 
-  :root:not([data-reduced-motion="no-preference"]) *,
-  :root:not([data-reduced-motion="no-preference"]) *::before,
-  :root:not([data-reduced-motion="no-preference"]) *::after {
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) *,
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) *::before,
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     animation-delay: 0ms !important;
@@ -630,6 +632,115 @@
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ── The three separate effects (issue #1428) ────────────────
+   PRD #1418 story 13: camera shake, flashes and decorative UI motion are three
+   preferences, not one. Until this block they were one — every rule above hangs
+   off `data-reduced-motion`, so an operator who could not take the viewscreen's
+   hull shake had to give up the loading spinner as well.
+
+   `gui/visual-effects.js` resolves each effect to an intensity in 0..=1 and
+   `applyEffectIntensitiesToRoot` stamps BOTH forms on every root the profile
+   reaches: a band attribute (`data-shake` / `data-flash` /
+   `data-decorative-motion`, one of `full` / `reduced` / `off`) and the raw
+   number as a custom property. Two forms because the consumers differ — CSS
+   cannot rescale an animation whose authored duration it does not know, so a
+   whole-interface rule switches on the band, while a NAMED loop that wants to
+   pulse more gently divides its own period by `--a11y-flash-scale`.
+
+   ## Why the blocks above are now gated on `:not([data-decorative-motion])`
+
+   Once JS has stamped a decorative band, that band is the authority and the
+   older attribute must step aside — otherwise an operator who asks for reduced
+   motion but explicitly keeps decorative animation would have it collapsed
+   anyway by the rule that used to be the only one. `data-reduced-motion` still
+   carries the OVERALL preference (an unset effect follows it, resolved in JS),
+   and it still drives everything that is not one of the three named effects,
+   including the whole pre-JS window and a JS-off client.
+
+   ## The three bands
+
+   `off` is exactly what `reduce` did: durations collapse, loops take one
+   iteration, and a loop that must hold a brighter frame keeps layering its own
+   override in the file that declares it. `reduced` is the genuinely gentler
+   middle the Reduce effects preset writes: loops SETTLE — one iteration, paused
+   — while one-shot transitions and entrances keep their travel, because an
+   interface that snaps between states with no transition reads as broken and
+   PRD #1418 forbids comfort that hides information.
+
+   Shake has no CSS rule of its own: the viewscreen's shake is a whole-page
+   `transform` written from `server.html`'s `__applyShake` with an offset Rust
+   already scaled by the same intensity (`ViewscreenMotion::shake_intensity`).
+   The attribute is stamped anyway so a surface, a test or a later rule can read
+   what is in force without asking JS. */
+:root {
+  --a11y-shake-scale: 1;
+  --a11y-flash-scale: 1;
+  --a11y-decorative-scale: 1;
+  /* A flash loop's RESOLVED period: its authored period divided by the flash
+     intensity, computed beside the loop it belongs to (`#phone-bezel` in
+     client.html, `#hud-vignette` in server.html) and read here and there. This
+     root value is only the fallback for a `[data-effect="flash"]` element that
+     names no period of its own. */
+  --a11y-flash-duration: 1.3s;
+}
+
+:root[data-decorative-motion="reduced"],
+:root[data-decorative-motion="off"] { --a11y-anim-play: paused; }
+
+/* Settle: a loop reaches its first frame and stays there; a transition still
+   travels. */
+:root[data-decorative-motion="reduced"] *,
+:root[data-decorative-motion="reduced"] *::before,
+:root[data-decorative-motion="reduced"] *::after {
+  animation-iteration-count: 1 !important;
+}
+
+:root[data-decorative-motion="off"] *,
+:root[data-decorative-motion="off"] *::before,
+:root[data-decorative-motion="off"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ## A flash is not decoration, so the decorative band must not claim it
+   (issue #1428)
+
+   The two blocks above are the whole-interface sweep, and `*` is exactly as
+   wide as it says: it catches EVERY element, including the two the FLASH
+   preference owns — `#phone-bezel.alert-on` (client.html) and
+   `#hud-overlay.alert-on #hud-vignette` (server.html). Neither of those pages
+   declares its loop `!important`, so before this rule the decorative band won
+   and the three effects were not in fact independent: an operator who kept
+   Flashes at Full and turned Interface animation Off silently lost the
+   red-alert pulse, and pressing Reduce effects (which writes the `reduced`
+   band) left the pulse running exactly one iteration however the flash control
+   was moved afterwards. That is the story-13 promise — reduce one effect
+   without losing the others — failing on the effect people reach for first.
+
+   So the flash loops carry a `data-effect="flash"` marker and re-assert
+   themselves here, after the sweep and at a higher specificity (0,4,0 against
+   the sweep's 0,2,0), which is what lets an `!important` beat an `!important`.
+
+   The gate is `:not([data-flash="off"])`, so this rule is only ever ADDING
+   motion the flash preference still wants: an explicit Flashes = Off leaves it
+   unmatched and each page's own `animation: none` held-frame rule stands, which
+   is how a zero-effect state keeps the red frame that says "red alert" while
+   removing the movement.
+
+   The duration is the element's OWN resolved period, `--a11y-flash-duration`,
+   computed beside the loop it belongs to (`--a11y-flash-period` divided by the
+   flash intensity: 2.8s on the bezel, 1.3s on the vignette) and read by both the
+   page's own declaration and this override — one number, in one place, rather
+   than the same division written twice and drifting. */
+:root[data-decorative-motion]:not([data-flash="off"]) [data-effect="flash"] {
+  animation-duration: var(--a11y-flash-duration) !important;
+  animation-iteration-count: infinite !important;
 }
 
 /* ── Forced colours (issue #1422) ────────────────────────────

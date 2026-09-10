@@ -291,12 +291,22 @@ function loopingAnimations(file) {
 }
 
 /**
- * The two tri-state reduced-motion prefixes the #1172 layer introduced. A
- * held-frame override keys on the bare TARGET it stills, so these come off
- * first — `:root[data-reduced-motion="reduce"] #ready-pill.go` and
- * `#ready-pill.go` are the same answer for the same loop.
+ * The reduced-motion prefixes a held-frame override may carry. A held-frame
+ * override keys on the bare TARGET it stills, so these come off first —
+ * `:root[data-reduced-motion="reduce"] #ready-pill.go` and `#ready-pill.go` are
+ * the same answer for the same loop.
+ *
+ * Since issue #1428 an override may key on one of the per-effect BANDS instead
+ * of on the overall preference: decorative motion and flash are set separately,
+ * so a spinner's hold hangs off `data-decorative-motion="off"` and the
+ * red-alert pulse's off `data-flash="off"`. The `:not([data-…])` gate the older
+ * attribute now carries is part of the prefix too — it is what makes an
+ * explicit "keep this effect" lift the rule that used to be the only one.
  */
-const MOTION_PREFIX = /^:root\[data-reduced-motion="reduce"\]\s+|^:root:not\(\[data-reduced-motion="no-preference"\]\)\s+/;
+const MOTION_PREFIX = new RegExp(
+  '^:root(?::not\\(\\[data-[a-z-]+="[a-z-]+"\\]\\)|:not\\(\\[data-[a-z-]+\\]\\)'
+  + '|\\[data-[a-z-]+="[a-z-]+"\\])+\\s+',
+);
 function bareMotionTarget(selector) {
   return selector.trim().replace(MOTION_PREFIX, '').trim();
 }
@@ -326,7 +336,10 @@ function stilledSelectors(file) {
   const out = new Map();
   cssRules(source).forEach((rule, order) => {
     const inMedia = rule.at && /prefers-reduced-motion/.test(rule.at);
-    const attrDriven = /\[data-reduced-motion="reduce"\]/.test(rule.selector);
+    // Issue #1428: an override may key on the overall preference OR on one of
+    // the three per-effect bands. Both are the operator asking for stillness.
+    const attrDriven = /\[data-(?:reduced-motion="reduce"|decorative-motion="off"|flash="off"|shake="off")\]/
+      .test(rule.selector);
     if (!inMedia && !attrDriven) return;
     const m = rule.body.match(/animation\s*:\s*none([^;]*)/);
     if (!m) return;
@@ -382,7 +395,8 @@ describe('every looping animation respects reduced motion', () => {
     let checked = 0;
     for (const rule of cssRules(lobby)) {
       const inMedia = rule.at && /prefers-reduced-motion/.test(rule.at);
-      const attrDriven = /\[data-reduced-motion="reduce"\]/.test(rule.selector);
+      const attrDriven = /\[data-(?:reduced-motion="reduce"|decorative-motion="off"|flash="off")\]/
+        .test(rule.selector);
       if (!inMedia && !attrDriven) continue;
       checked += 1;
       expect(rule.body).not.toMatch(/display\s*:\s*none/);
@@ -400,11 +414,21 @@ describe('every looping animation respects reduced motion', () => {
     // the lobby and @imported by console.css). The per-loop overrides above only
     // hold a brighter frame; THIS is what actually stops the motion.
     const tokens = fs.readFileSync(TOKENS_CSS, 'utf8');
-    // The attribute path — the resolved tri-state, authoritative once JS stamps.
-    expect(tokens).toMatch(/:root\[data-reduced-motion="reduce"\]\s*\*/);
+    // The attribute path — the resolved tri-state, authoritative once JS stamps
+    // it, and since issue #1428 gated on the DECORATIVE band being absent so an
+    // explicit "keep the animation" is not collapsed by it anyway.
+    expect(tokens).toMatch(
+      /:root\[data-reduced-motion="reduce"\]:not\(\[data-decorative-motion\]\)\s*\*/,
+    );
     // The OS-default path, gated so an explicit "allow motion" lifts it.
     expect(tokens).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
-    expect(tokens).toMatch(/:root:not\(\[data-reduced-motion="no-preference"\]\)\s*\*/);
+    expect(tokens).toMatch(
+      /:root:not\(\[data-reduced-motion="no-preference"\]\):not\(\[data-decorative-motion\]\)\s*\*/,
+    );
+    // …and the per-effect band that is the authority once it exists, in both
+    // its states: `off` collapses the loop, `reduced` settles it.
+    expect(tokens).toMatch(/:root\[data-decorative-motion="off"\]\s*\*/);
+    expect(tokens).toMatch(/:root\[data-decorative-motion="reduced"\]\s*\*/);
     // A universal reset that COLLAPSES the loop rather than deleting it, so a
     // one-shot `forwards` entrance still reaches its end frame.
     expect(tokens).toMatch(/animation-iteration-count:\s*1\s*!important/);

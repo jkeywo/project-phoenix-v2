@@ -37,14 +37,20 @@
  * the APPLICATION (this document's root only — never a console iframe, which
  * belongs to whoever is sitting at it).
  *
- * ## Scope: two effects, and why not three
+ * ## Scope: five effects
  *
- * Text scale and contrast. Motion/shake/flash are the next slice's (#1428,
- * PRD #1418 stories 13-15), which wires the effect controls to their real
- * consumers on every settings surface at once — `server.html` already drives
- * `wasm_set_reduced_motion` from `matchMedia`, and putting a half of that lever
- * here would give the room two places to ask for the same thing. Adding it is
- * one entry in [`VIEWSCREEN_EFFECTS`] plus its rows, by design.
+ * Text scale and contrast (issue #1427), then camera shake, flash/pulse and
+ * decorative motion (issue #1428, PRD #1418 stories 13-15). Adding the three
+ * was one entry each in [`VIEWSCREEN_EFFECTS`] plus their rows, exactly as this
+ * note predicted, because every consumer here iterates that list.
+ *
+ * They belong to the DISPLAY for the same reason its text size does: a camera
+ * shake is felt by everyone in the room off one screen, and the person who can
+ * least take it is not necessarily the person holding the settings. What this
+ * record does NOT own is a motion tri-state of its own — an unset effect follows
+ * the machine's `prefers-reduced-motion`, which is what `server.html` has driven
+ * `wasm_set_reduced_motion` from since issue #1173, so there is still exactly
+ * one place the room asks.
  *
  * DOM-free and window-free at import time, so vitest can import it in Node.
  */
@@ -61,6 +67,14 @@ import {
   resolveTriState,
   unavailableOsPreferences,
 } from './accessibility-profile.js';
+import {
+  EFFECT_IDS,
+  applicableEffects,
+  applyEffectIntensitiesToRoot,
+  normalizeEffectLevel,
+  reduceEffectsChoices,
+  resolveEffectIntensities,
+} from './visual-effects.js';
 
 export { FOLLOW_OS, EXPLICIT_ON, EXPLICIT_OFF };
 
@@ -90,11 +104,19 @@ export const VIEWSCREEN_PRESENTATION_VERSION = 1;
  * it: adding motion in #1428 is an entry here and a row in the panel, never a
  * fourth place that has to be found.
  */
-export const VIEWSCREEN_EFFECTS = Object.freeze(['textScale', 'contrast']);
+export const VIEWSCREEN_EFFECTS = Object.freeze(
+  ['textScale', 'contrast'].concat(EFFECT_IDS),
+);
 
-/** A fresh record: both effects follow the system this display runs on. */
+/** The effect ids whose stored value is an intensity in `0..=1` rather than a
+ *  text-scale multiplier or a contrast tri-state (issue #1428). */
+const INTENSITY_EFFECTS = new Set(EFFECT_IDS);
+
+/** A fresh record: every effect follows the system this display runs on. */
 export function emptyViewscreenPresentation() {
-  return { textScale: FOLLOW_OS, contrast: FOLLOW_OS };
+  const out = {};
+  for (const effect of VIEWSCREEN_EFFECTS) out[effect] = FOLLOW_OS;
+  return out;
 }
 
 function normalizeTri(value) {
@@ -129,6 +151,9 @@ export function normalizeViewscreenPresentation(raw) {
     : raw;
   out.textScale = normalizeScale(source.textScale);
   out.contrast = normalizeTri(source.contrast);
+  // A record written before issue #1428 carries none of these; each reads as
+  // follow-the-preference, which is exactly what that display did.
+  for (const effect of EFFECT_IDS) out[effect] = normalizeEffectLevel(source[effect]);
   return out;
 }
 
@@ -148,7 +173,10 @@ export function normalizeViewscreenPresentation(raw) {
  */
 export function presentationWithEffect(record, effect, value) {
   if (!VIEWSCREEN_EFFECTS.includes(effect)) return record;
-  const next = effect === 'textScale' ? normalizeScale(value) : normalizeTri(value);
+  let next;
+  if (effect === 'textScale') next = normalizeScale(value);
+  else if (INTENSITY_EFFECTS.has(effect)) next = normalizeEffectLevel(value);
+  else next = normalizeTri(value);
   const current = normalizeViewscreenPresentation(record);
   if (current[effect] === next) return record;
   current[effect] = next;
@@ -275,10 +303,17 @@ export function readInjectedViewscreenPresentation(w) {
   let contrast = FOLLOW_OS;
   if (raw.contrast === true) contrast = EXPLICIT_ON;
   else if (raw.contrast === false) contrast = EXPLICIT_OFF;
-  return normalizeViewscreenPresentation({
+  const injected = {
     textScale: typeof raw.textScale === 'number' ? raw.textScale : FOLLOW_OS,
     contrast,
-  });
+  };
+  // The three effects (issue #1428) arrive as `0..=1` fractions or `null`, the
+  // shape `viewscreen_presentation::presentation_script` can emit without a JSON
+  // string escaper — the same rule the text scale crosses under.
+  for (const effect of EFFECT_IDS) {
+    injected[effect] = typeof raw[effect] === 'number' ? raw[effect] : FOLLOW_OS;
+  }
+  return normalizeViewscreenPresentation(injected);
 }
 
 /**
@@ -294,11 +329,16 @@ export function readInjectedViewscreenPresentation(w) {
  */
 export function viewscreenPresentationRecordFields(record) {
   const current = normalizeViewscreenPresentation(record);
+  const percent = (value) => (value === FOLLOW_OS ? null : Math.round(Number(value) * 100));
   return {
-    text_scale_percent: current.textScale === FOLLOW_OS
-      ? null
-      : Math.round(Number(current.textScale) * 100),
+    text_scale_percent: percent(current.textScale),
     contrast: current.contrast === FOLLOW_OS ? null : current.contrast === EXPLICIT_ON,
+    // The three effects cross as WHOLE PERCENT for the reason the text size
+    // does: it is the number the operator reads on screen, and an integer
+    // cannot arrive as `NaN` (issue #1428).
+    shake_percent: percent(current.shake),
+    flash_percent: percent(current.flash),
+    decorative_motion_percent: percent(current.decorativeMotion),
   };
 }
 
@@ -317,9 +357,17 @@ export function viewscreenPresentationRecordFields(record) {
 export function resolveViewscreenEffects(record, osDefaults) {
   const current = normalizeViewscreenPresentation(record);
   const os = osDefaults || {};
+  // The display's motion preference is this MACHINE's — the viewscreen has no
+  // private operator profile to consult, so `prefers-reduced-motion` (or the
+  // host's injected read) is what an unset effect follows. An explicit choice
+  // on the Display tab overrides it in both directions, which is what lets a
+  // room keep its hull shake on a machine whose OS asked to reduce motion.
+  const reducedMotion = resolveTriState(FOLLOW_OS, os.reducedMotion);
   return {
     textScale: resolveTextScale(current.textScale, os.textScale),
     contrast: resolveTriState(current.contrast, os.contrast),
+    reducedMotion,
+    ...resolveEffectIntensities(current, reducedMotion),
   };
 }
 
@@ -339,6 +387,9 @@ export function resolveViewscreenEffects(record, osDefaults) {
  */
 export function viewscreenPresentationStatus(record, osDefaults, unavailable) {
   const current = normalizeViewscreenPresentation(record);
+  // `presentationStatus` reports an effect that follows the preference as
+  // `system` when this machine asked to reduce motion and `default` otherwise —
+  // one rule on both records, because it is one decision.
   const full = presentationStatus(
     { presentation: { ...current, reducedMotion: FOLLOW_OS } },
     osDefaults,
@@ -382,6 +433,43 @@ export function applyViewscreenEffectsToRoot(root, effects) {
   } catch (_) {
     /* detached root — best effort */
   }
+  // The three effect bands and intensities (issue #1428). `data-reduced-motion`
+  // is STILL not written here: this record has no motion tri-state of its own,
+  // and stamping it would out-specify the `prefers-reduced-motion` fallback the
+  // pre-JS window relies on. The band attributes are the authority once they
+  // exist, and gui/tokens.css gates the older rules on their absence.
+  applyEffectIntensitiesToRoot(root, effects);
+}
+
+/**
+ * Forward the two effects a RENDERER owns to the WASM viewscreen.
+ *
+ * `wasm_set_shake_intensity` / `wasm_set_flash_intensity` are the siblings of
+ * the `wasm_set_reduced_motion` seam `server.html` has driven from `matchMedia`
+ * since issue #1173 — the same edge slots, drained into `ViewscreenMotion` every
+ * frame by `viewscreen_border::sync_viewscreen_motion`, so a change takes effect
+ * without a reload and a value published before `wasm_init` is not lost.
+ *
+ * Absent bindings are a no-op, which is the ordinary case twice over: the native
+ * host lobby is an Ultralight document with no wasm at all (its renderer is fed
+ * by the host record instead), and the browser page has not attached the
+ * bindings yet when the settings first mount.
+ *
+ * @param {Window|object|null} win
+ * @param {{shake: number, flash: number}} effects
+ */
+export function publishViewscreenMotion(win, effects) {
+  if (!win || !effects) return;
+  try {
+    if (typeof win.wasm_set_shake_intensity === 'function') {
+      win.wasm_set_shake_intensity(Number(effects.shake));
+    }
+    if (typeof win.wasm_set_flash_intensity === 'function') {
+      win.wasm_set_flash_intensity(Number(effects.flash));
+    }
+  } catch (_) {
+    /* a renderer that is mid-teardown must not cost the CSS half */
+  }
 }
 
 /**
@@ -397,6 +485,7 @@ export function applyViewscreenPresentation(record, opts = {}) {
     || (typeof document !== 'undefined' ? document : null);
   const effects = resolveViewscreenEffects(record, osAccessibilityDefaults(win));
   applyViewscreenEffectsToRoot(doc && doc.documentElement, effects);
+  publishViewscreenMotion(win, effects);
   return effects;
 }
 
@@ -439,6 +528,7 @@ export function createViewscreenPresentation(opts = {}) {
   function apply() {
     const effects = resolveViewscreenEffects(record, osDefaults());
     applyViewscreenEffectsToRoot(doc && doc.documentElement, effects);
+    publishViewscreenMotion(win, effects);
     return effects;
   }
 
@@ -475,6 +565,25 @@ export function createViewscreenPresentation(opts = {}) {
     reset: (effect) => commit(presentationWithEffect(record, effect, FOLLOW_OS)),
     /** Reset all, scoped to this record and nothing else. */
     resetAll: () => commit(presentationWithDefaults(record)),
+    /**
+     * The **Reduce effects** preset (issue #1428, PRD #1418 story 14): one
+     * press writing conservative EXPLICIT values for every effect `surface` can
+     * render, so each remains individually adjustable afterwards and a
+     * per-setting reset returns just that one to following this machine.
+     *
+     * `surface` decides the scope, so pressing it on a Game Master session
+     * cannot store a camera-shake value for a page whose canvas is hidden.
+     */
+    reduceEffects: (surface = 'viewscreen') => {
+      const choices = reduceEffectsChoices(surface);
+      let next = record;
+      for (const effect of Object.keys(choices)) {
+        next = presentationWithEffect(next, effect, choices[effect]);
+      }
+      return commit(next);
+    },
+    /** The effects this surface offers controls for (issue #1428). */
+    applicable: (surface = 'viewscreen') => applicableEffects(surface),
     /** Re-apply without changing anything (boot, or a document swap). */
     apply,
   };
@@ -501,5 +610,6 @@ if (typeof window !== 'undefined') {
     readInjectedViewscreenPresentation,
     viewscreenPresentationRecordFields,
     applyViewscreenPresentation,
+    publishViewscreenMotion,
   };
 }

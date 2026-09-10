@@ -301,6 +301,21 @@ pub enum HostLobbyRecord {
         text_scale_percent: Option<u32>,
         #[serde(default)]
         contrast: Option<bool>,
+        /// Camera/page shake intensity as WHOLE PERCENT (issue #1428). `None`
+        /// is *follow this machine's motion preference*, not "off" — the same
+        /// distinction the two fields above carry, and the reason `Reduce
+        /// effects` sends `Some(30)` rather than clearing the field.
+        #[serde(default)]
+        shake_percent: Option<u32>,
+        /// Shield-flash intensity as whole percent (issue #1428).
+        #[serde(default)]
+        flash_percent: Option<u32>,
+        /// Decorative-motion intensity as whole percent (issue #1428). The host
+        /// stores it and seeds the page with it; it has no renderer consumer —
+        /// decorative motion is the document's own CSS, applied by
+        /// `gui/visual-effects.js` on the page side.
+        #[serde(default)]
+        decorative_motion_percent: Option<u32>,
     },
 }
 
@@ -396,10 +411,16 @@ mod tests {
             HostLobbyRecord::SetPresentation {
                 text_scale_percent: Some(150),
                 contrast: Some(true),
+                shake_percent: Some(30),
+                flash_percent: Some(0),
+                decorative_motion_percent: Some(40),
             },
             HostLobbyRecord::SetPresentation {
                 text_scale_percent: None,
                 contrast: None,
+                shake_percent: None,
+                flash_percent: None,
+                decorative_motion_percent: None,
             },
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
@@ -473,20 +494,29 @@ mod tests {
         // record the host cannot read.
         assert_eq!(
             HostLobbyRecord::decode(
-                r#"{"kind":"set_presentation","text_scale_percent":150,"contrast":true}"#
+                r#"{"kind":"set_presentation","text_scale_percent":150,"contrast":true,
+                    "shake_percent":30,"flash_percent":0,"decorative_motion_percent":40}"#
             ),
             Some(HostLobbyRecord::SetPresentation {
                 text_scale_percent: Some(150),
                 contrast: Some(true),
+                shake_percent: Some(30),
+                flash_percent: Some(0),
+                decorative_motion_percent: Some(40),
             })
         );
         assert_eq!(
             HostLobbyRecord::decode(
-                r#"{"kind":"set_presentation","text_scale_percent":null,"contrast":null}"#
+                r#"{"kind":"set_presentation","text_scale_percent":null,"contrast":null,
+                    "shake_percent":null,"flash_percent":null,
+                    "decorative_motion_percent":null}"#
             ),
             Some(HostLobbyRecord::SetPresentation {
                 text_scale_percent: None,
                 contrast: None,
+                shake_percent: None,
+                flash_percent: None,
+                decorative_motion_percent: None,
             })
         );
         assert_eq!(
@@ -494,6 +524,25 @@ mod tests {
             Some(HostLobbyRecord::SetPresentation {
                 text_scale_percent: None,
                 contrast: None,
+                shake_percent: None,
+                flash_percent: None,
+                decorative_motion_percent: None,
+            })
+        );
+        // A BUNDLE OLDER than this host still speaks: the three effect fields
+        // are `#[serde(default)]`, so a page that only knows about text size and
+        // contrast leaves the effects following this machine rather than failing
+        // to be read at all (issue #1428).
+        assert_eq!(
+            HostLobbyRecord::decode(
+                r#"{"kind":"set_presentation","text_scale_percent":125,"contrast":false}"#
+            ),
+            Some(HostLobbyRecord::SetPresentation {
+                text_scale_percent: Some(125),
+                contrast: Some(false),
+                shake_percent: None,
+                flash_percent: None,
+                decorative_motion_percent: None,
             })
         );
         assert_eq!(

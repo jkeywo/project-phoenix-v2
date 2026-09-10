@@ -3,6 +3,7 @@ import {
   ACCESSIBILITY_PROFILE_KEY,
   ASSIST_REQUEST,
   emptyAccessibilityProfile,
+  normalizeAccessibilityProfile,
 } from '../../gui/accessibility-profile.js';
 import { createClientSemanticActionRegistry } from '../../gui/client-semantic-actions.js';
 import {
@@ -99,7 +100,13 @@ describe('private operator profile schema', () => {
     };
     const result = prepareOperatorProfileImport(JSON.stringify(legacy), { registry });
     expect(result.status).toBe('migrated');
-    expect(result.profile.accessibility).toEqual(legacy);
+    // Normalised, so the record gains the effect fields issue #1428 added, each
+    // following the motion preference — an older export cannot be rejected for
+    // predating them, and it cannot silently arrive with an effect turned off.
+    expect(result.profile.accessibility)
+      .toEqual(normalizeAccessibilityProfile(legacy));
+    expect(result.profile.accessibility.presentation)
+      .toMatchObject(legacy.presentation);
     expect(result.profile.feedback).toEqual(FEEDBACK_PREFERENCE_DEFAULTS);
     expect(result.profile.gamepad.preferredSlot).toBeNull();
     expect(result.profile.bindings).toEqual(registry.bindingProfile());
@@ -258,7 +265,8 @@ describe('private persistence and export boundary', () => {
     });
     const loaded = loadOperatorProfile(storage, { registry });
     expect(loaded.status).toBe('migrated');
-    expect(loaded.profile.accessibility).toEqual(legacy);
+    expect(loaded.profile.accessibility).toEqual(normalizeAccessibilityProfile(legacy));
+    expect(loaded.profile.accessibility.presentation).toMatchObject(legacy.presentation);
     expect(storage.map.has(OPERATOR_PROFILE_KEY)).toBe(true);
   });
 

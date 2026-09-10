@@ -41,6 +41,18 @@ import {
   EXPLICIT_ON,
   EXPLICIT_OFF,
 } from './accessibility-profile.js';
+import {
+  EFFECT_FULL,
+  EFFECT_OFF,
+  applicableEffects,
+  effectChoiceKey,
+  effectChoices,
+  effectHintId,
+  effectLabelId,
+  effectResetId,
+  effectSlug,
+  inapplicableEffects,
+} from './visual-effects.js';
 
 /**
  * `data-control` ids, exported so a test, a smoke spec and the CSS all name the
@@ -54,6 +66,13 @@ export const VIEWSCREEN_PRESENTATION_CONTROLS = Object.freeze({
   contrastStatus: 'viewscreen-contrast-status',
   contrastReset: 'viewscreen-contrast-reset',
   resetAll: 'viewscreen-reset-all',
+  /** One stop on one effect's control row (issue #1428). */
+  effect: (effect, key) => `viewscreen-${effectSlug(effect)}-${key}`,
+  effectStatus: (effect) => `viewscreen-${effectSlug(effect)}-status`,
+  effectReset: (effect) => `viewscreen-${effectSlug(effect)}-reset`,
+  /** The sentence naming an effect this surface deliberately does not offer. */
+  effectAbsent: (effect) => `viewscreen-${effectSlug(effect)}-absent`,
+  reduceEffects: 'viewscreen-reduce-effects',
 });
 
 /** Which of the three sources a live value came from, in words. The vocabulary
@@ -100,12 +119,18 @@ function percent(value) {
  */
 export function renderViewscreenPresentationPanel(target, opts) {
   const { doc, t, presentation, section, hint, row, control } = opts;
+  // Which surface this panel is being built for (issue #1428). `viewscreen` is
+  // the shared display; `gm` is the same cog on `server.html` during a Game
+  // Master session, where the render surface is hidden outright
+  // (`html.phoenix-gm-page #canvas`), so two of the three effects have no
+  // consumer and are NAMED rather than offered. See `gui/visual-effects.js`.
+  const surface = opts.surface || 'viewscreen';
   const classes = opts.classes || {};
   const sliderClass = classes.slider || '';
   const readoutClass = classes.readout || '';
   const statusClass = classes.status || '';
 
-  const nodes = { contrast: {} };
+  const nodes = { contrast: {}, effects: {} };
 
   // ── What this tab is, and whose it is ────────────────────────────────────
   //
@@ -197,6 +222,65 @@ export function renderViewscreenPresentationPanel(target, opts) {
   ));
   target.appendChild(contrastSection);
 
+  // ── The three separate effects (issue #1428) ─────────────────────────────
+  //
+  // PRD #1418 story 13: camera shake, flashes and decorative motion are three
+  // preferences, not one. Each row is the same four stops — follow this
+  // machine's motion preference, full, gentler, off — because they are the same
+  // decision asked three times, and an operator who has learned one row has
+  // learned all three.
+  //
+  // Only the effects this surface can actually RENDER get a row. The rest get a
+  // sentence saying why not, which is the whole difference between an honest
+  // omission and a control that does nothing.
+  for (const effect of applicableEffects(surface)) {
+    const effectSection = section(effectLabelId(effect));
+    const effectRow = row();
+    nodes.effects[effect] = { buttons: {} };
+    for (const choice of effectChoices(effect)) {
+      const id = VIEWSCREEN_PRESENTATION_CONTROLS.effect(effect, choice.key);
+      const el = control(id, choice.labelId, () => {
+        presentation.set(effect, choice.value);
+        paintEffect(effect);
+      });
+      nodes.effects[effect].buttons[choice.key] = el;
+      effectRow.appendChild(el);
+    }
+    effectSection.appendChild(effectRow);
+    const hintId = effectHintId(effect, surface);
+    if (hintId) effectSection.appendChild(hint(hintId));
+    const statusEl = statusLine(VIEWSCREEN_PRESENTATION_CONTROLS.effectStatus(effect));
+    nodes.effects[effect].status = statusEl;
+    effectSection.appendChild(statusEl);
+    effectSection.appendChild(resetButton(
+      VIEWSCREEN_PRESENTATION_CONTROLS.effectReset(effect),
+      effectResetId(effect),
+      effect,
+    ));
+    target.appendChild(effectSection);
+  }
+
+  // Reduce effects, and the record of what this surface has no consumer for.
+  const effectsSection = section('settings.effects.heading');
+  effectsSection.appendChild(hint('settings.effects.reduce_hint'));
+  const reduceRow = row();
+  reduceRow.appendChild(control(
+    VIEWSCREEN_PRESENTATION_CONTROLS.reduceEffects,
+    'settings.effects.reduce',
+    () => {
+      presentation.reduceEffects(surface);
+      repaint();
+    },
+  ));
+  effectsSection.appendChild(reduceRow);
+  for (const entry of inapplicableEffects(surface)) {
+    const line = hint(entry.reasonId);
+    line.setAttribute('data-control',
+      VIEWSCREEN_PRESENTATION_CONTROLS.effectAbsent(entry.effect));
+    effectsSection.appendChild(line);
+  }
+  target.appendChild(effectsSection);
+
   // ── Reset all, scoped ────────────────────────────────────────────────────
   //
   // Its own section with its own two hints, because a panel carrying more than
@@ -286,8 +370,34 @@ export function renderViewscreenPresentationPanel(target, opts) {
     );
   }
 
+  /** One effect's pressed stop and its status line. A value between two stops —
+   *  only a hand-edited record can produce one — presses nothing and reports the
+   *  live percentage, rather than lying about which button is in force. */
+  function paintEffect(effect) {
+    const held = nodes.effects[effect];
+    if (!held) return;
+    const status = presentation.status()[effect];
+    const chosenKey = effectChoiceKey(effect, presentation.record()[effect]);
+    for (const [key, el] of Object.entries(held.buttons)) {
+      const selected = key === chosenKey;
+      el.classList.toggle('active', selected);
+      el.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
+    held.status.textContent = statusText(status, intensityText(status.value));
+  }
+
+  /** An intensity in words: the two ends are named, and anything between them
+   *  is the number, because "30%" is what the operator can act on. */
+  function intensityText(value) {
+    const n = Number(value);
+    if (n <= EFFECT_OFF) return t('settings.effects.level_off');
+    if (n >= EFFECT_FULL) return t('settings.effects.level_full');
+    return t('settings.effects.intensity_value', { value: percent(n) });
+  }
+
   function repaint() {
     paintTextScale();
     paintContrast();
+    for (const effect of applicableEffects(surface)) paintEffect(effect);
   }
 }

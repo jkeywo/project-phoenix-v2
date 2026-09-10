@@ -132,11 +132,25 @@ thread_local! {
     /// Whether the host page's reduced-motion preference
     /// (`prefers-reduced-motion: reduce`) is active, forwarded by
     /// [`wasm_set_reduced_motion`] (issue #1173). Drained each frame into the
-    /// `ViewscreenMotion` resource by `viewscreen_border::sync_reduced_motion`.
+    /// `ViewscreenMotion` resource by `viewscreen_border::sync_viewscreen_motion`.
     /// Read continuously, so an OS-level change of the preference takes effect
     /// without a page reload.
     #[cfg(target_arch = "wasm32")]
     static REDUCED_MOTION: RefCell<bool> = const { RefCell::new(false) };
+
+    /// The endpoint's camera/page shake intensity, forwarded by
+    /// [`wasm_set_shake_intensity`] (issue #1428). `None` is *nothing has been
+    /// published*, which is a different fact from a published `0.0`: the first
+    /// takes whatever the reduced-motion preference defaults to, the second is
+    /// an operator who asked for no shake and must not be overridden by it.
+    #[cfg(target_arch = "wasm32")]
+    static SHAKE_INTENSITY: RefCell<Option<f32>> = const { RefCell::new(None) };
+
+    /// The endpoint's shield-flash intensity, forwarded by
+    /// [`wasm_set_flash_intensity`] (issue #1428). Same `Option` reasoning as
+    /// [`SHAKE_INTENSITY`] above.
+    #[cfg(target_arch = "wasm32")]
+    static FLASH_INTENSITY: RefCell<Option<f32>> = const { RefCell::new(None) };
 
     /// Mirror of the `SimulationPaused` resource, written by
     /// `drain_host_controls` so `wasm_is_paused()` can answer without a Bevy
@@ -622,6 +636,22 @@ pub(super) fn read_reduced_motion() -> bool {
 
 pub(super) fn publish_reduced_motion(value: bool) {
     REDUCED_MOTION.with(|slot| *slot.borrow_mut() = value);
+}
+
+pub(super) fn read_shake_intensity() -> Option<f32> {
+    SHAKE_INTENSITY.with(|value| *value.borrow())
+}
+
+pub(super) fn publish_shake_intensity(value: f32) {
+    SHAKE_INTENSITY.with(|slot| *slot.borrow_mut() = Some(value));
+}
+
+pub(super) fn read_flash_intensity() -> Option<f32> {
+    FLASH_INTENSITY.with(|value| *value.borrow())
+}
+
+pub(super) fn publish_flash_intensity(value: f32) {
+    FLASH_INTENSITY.with(|slot| *slot.borrow_mut() = Some(value));
 }
 
 pub(super) fn publish_forcefield_level(value: f32) {

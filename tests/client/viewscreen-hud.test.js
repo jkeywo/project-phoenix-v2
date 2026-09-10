@@ -32,6 +32,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { applyToDom, getTable, localiseTree, setTable, t } from '../../gui/strings.js';
+import {
+  EFFECT_ATTRIBUTES,
+  EFFECT_IDS,
+  EFFECT_VARS,
+  applyEffectIntensitiesToRoot,
+} from '../../gui/visual-effects.js';
 import { localiseHostPayload } from '../../gui/host-channel.js';
 import { gameOverView } from '../../gui/game-over-view.js';
 
@@ -393,5 +399,92 @@ describe('the page degrades rather than going blank', () => {
 
     expect(() => window.__updateHud('not json at all')).not.toThrow();
     expect(text('v-nav')).toBe(t('server.hud_heading', { deg: '090' }));
+  });
+});
+
+describe('the host tells this document how much it may move (issue #1428)', () => {
+  // The native Viewscreen's frame, readout and red-alert vignette are THIS
+  // document, and it is not the lobby one: the presentation script injected
+  // into that document's head never reaches here, and an Ultralight view
+  // answers no `prefers-reduced-motion` query. So the three effect bands arrive
+  // over the same channel the readout does, and the prelude stamps them.
+
+  /** Every band attribute and scale property, as this document's root wears them. */
+  const stamped = (element) => ({
+    attributes: EFFECT_IDS.map((effect) => [
+      EFFECT_ATTRIBUTES[effect], element.getAttribute(EFFECT_ATTRIBUTES[effect]),
+    ]),
+    properties: EFFECT_IDS.map((effect) => [
+      EFFECT_VARS[effect], element.style.getPropertyValue(EFFECT_VARS[effect]),
+    ]),
+  });
+
+  afterEach(() => {
+    // The root outlives `document.body.innerHTML = ''`, so a stamped band would
+    // otherwise leak into the next test in this file.
+    for (const effect of EFFECT_IDS) {
+      document.documentElement.removeAttribute(EFFECT_ATTRIBUTES[effect]);
+      document.documentElement.style.removeProperty(EFFECT_VARS[effect]);
+    }
+  });
+
+  it('stamps exactly what the shared profile stamps on every other root', () => {
+    // The prelude carries its own stamper rather than importing
+    // `applyEffectIntensitiesToRoot`, because a module whose import fails never
+    // evaluates and a red-alert glow still throbbing at an operator who chose
+    // Off is the one failure that must not be survivable. This is the check
+    // that buys that resilience without letting the two drift: same input, same
+    // attributes, same properties — every stop the controls offer, the values
+    // between them, and the junk a broken push could carry.
+    const cases = [
+      { shake: 1, flash: 1, decorativeMotion: 1 },
+      { shake: 0, flash: 0, decorativeMotion: 0 },
+      { shake: 0.3, flash: 0.3, decorativeMotion: 0.4 },
+      { shake: 1, flash: 0, decorativeMotion: 0.4 },
+      { shake: 0.77, flash: 4, decorativeMotion: -1 },
+      { shake: Number.NaN, flash: 'off', decorativeMotion: undefined },
+    ];
+    for (const intensities of cases) {
+      mountPage();
+      window.__phoenixSetHudEffects(intensities);
+      const reference = document.createElement('html');
+      applyEffectIntensitiesToRoot(reference, intensities);
+      expect(stamped(document.documentElement), JSON.stringify(intensities))
+        .toEqual(stamped(reference));
+    }
+  });
+
+  it('answers the literal the host actually emits, ahead of the state', () => {
+    // The exact command `panes::hud::hud_effects_script` composes, pinned on
+    // the Rust side by `flashes_off_reaches_the_overlay_document_as_a_band_it
+    // _can_read`. Evaluated here as one script the way the host evaluates it,
+    // effects first, so the bands are in force before the alert class flips.
+    mountPage();
+    // eslint-disable-next-line no-new-func
+    new Function(
+      'window.__phoenixSetHudEffects({"shake":1.0,"flash":0.0,"decorativeMotion":1.0});'
+      + `window.__updateHud(${JSON.stringify(JSON.stringify({ red_alert: true, heading: 90 }))})`,
+    )();
+    expect(document.documentElement.getAttribute('data-flash')).toBe('off');
+    expect(document.documentElement.style.getPropertyValue('--a11y-flash-scale')).toBe('0');
+    expect(document.documentElement.getAttribute('data-decorative-motion')).toBe('full');
+    // The state half still landed: an operator who stopped the pulse has NOT
+    // stopped being told the ship is at red alert.
+    expect(document.getElementById('hud-overlay').classList.contains('alert-on')).toBe(true);
+    expect(text('v-nav')).toBe('090');
+  });
+
+  it('keeps drawing when the host never mentions effects at all', () => {
+    // An older host, or the first frames before anything is published: the
+    // document must come up exactly as it did before this channel existed.
+    mountPage();
+    push({ red_alert: true });
+    for (const effect of EFFECT_IDS) {
+      expect(document.documentElement.getAttribute(EFFECT_ATTRIBUTES[effect])).toBeNull();
+    }
+    expect(document.getElementById('hud-overlay').classList.contains('alert-on')).toBe(true);
+    // …and a malformed push is ignored rather than half-applied.
+    expect(() => window.__phoenixSetHudEffects(null)).not.toThrow();
+    expect(document.documentElement.getAttribute('data-flash')).toBeNull();
   });
 });

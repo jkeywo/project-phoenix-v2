@@ -1425,19 +1425,41 @@ fn sync_host_lobby_presence(
 }
 
 /// Cache the newest viewscreen HUD state (issue #422's `#hud-overlay`, ported to
-/// the native path) from the host's `HudStateChanged`.
+/// the native path) from the host's `HudStateChanged`, and this display's three
+/// visual-effect bands (issue #1428).
 ///
 /// The host emits `HudStateChanged` only on a real change (heading, hull,
 /// condition, red alert). Encode only a changed value; [`drive_pane_host`] sends
 /// each revision to the worker's retained slot. A state that arrives before the
 /// surface is ready therefore still reaches its first loaded frame.
+///
+/// The bands are read every frame rather than once, for the reason
+/// `viewscreen_border::sync_viewscreen_motion` reads its own source every frame:
+/// a Display-tab press must take effect without a reload. `set_effects` compares
+/// before it stores, so the ordinary frame — nobody touching the settings —
+/// bumps no revision and sends nothing.
 fn cache_hud_state(
     mut latest: ResMut<ViewscreenHudLatest>,
     mut events: MessageReader<HudStateChanged>,
+    // The three intensities `sync_viewscreen_motion` has already resolved for
+    // this display — the operator's choice where they made one, and otherwise
+    // what following this machine's motion preference means. Read rather than
+    // re-derived so the overlay's bands and the shader behind them cannot
+    // disagree. Optional because `boot` registers `HudStateChanged` on hosts
+    // that carry no `ViewscreenBorderPlugin`, and one of those has no HUD
+    // surface to stamp either.
+    motion: Option<Res<crate::server::viewscreen_border::ViewscreenMotion>>,
 ) {
     if let Some(event) = events.read().last() {
         latest.0.update(&event.json);
     }
+    latest.0.set_effects(motion.map(|motion| {
+        super::hud::hud_effects_script(
+            motion.shake_intensity,
+            motion.flash_intensity,
+            motion.decorative_intensity,
+        )
+    }));
 }
 
 /// Show the viewscreen HUD in `InProgress` and `GameOver`, hiding it otherwise.

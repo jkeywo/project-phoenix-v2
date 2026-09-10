@@ -608,6 +608,13 @@
       z-index: 15; pointer-events: none; display: block;
       border: 2px solid transparent;
       transition: border-color 0.5s ease-out, box-shadow 0.5s ease-out;
+      /* This loop's authored period and its RESOLVED one, named once so both
+         rules that need the answer — the declaration below, and the flash
+         re-assertion in gui/tokens.css that holds this loop against the
+         decorative-motion sweep (issue #1428) — read the same number rather
+         than each writing the division out and drifting. */
+      --a11y-flash-period: 2.8s;
+      --a11y-flash-duration: calc(var(--a11y-flash-period) / max(var(--a11y-flash-scale, 1), 0.05));
     }
 
     #phone-bezel.alert-on {
@@ -621,6 +628,14 @@
          always written for a loop (the comment inside says "a steady slow
          pulsing loop"); only the iteration count was missing. */
       animation: bezel-pulse 2.8s ease-in-out infinite;
+      /* The flash effect's own intensity (issue #1428). A gentler flash is a
+         SLOWER one as well as a dimmer one: the period divides by the resolved
+         `--a11y-flash-scale` (1 at full, 0.3 at the Reduce effects value), so
+         at the gentle stop this loop takes about nine seconds rather than
+         three. Floored at 0.05 so an intensity of 0 — which the band rule below
+         stops outright — can never divide by zero. Unset (no profile applied
+         yet) the var defaults to 1 and this is the 2.8s it always was. */
+      animation-duration: var(--a11y-flash-duration);
     }
 
     #phone-bezel.alert-on::after {
@@ -653,8 +668,18 @@
        it lands exactly when the profile stamps `reduce` (explicit ON, or OS
        reduce folded through the resolver) and steps aside for an explicit OFF.
        Its `data-reduced-motion` attribute plus the id/class outweigh the bare
-       loop rule above, so it wins wherever it sits. */
-    :root[data-reduced-motion="reduce"] #phone-bezel.alert-on {
+       loop rule above, so it wins wherever it sits.
+
+       Issue #1428 split flashes out of motion, so this rule now lands on the
+       FLASH band — `data-flash="off"`, which is what an explicit Off writes and
+       what a following flash resolves to under reduced motion. The
+       `data-reduced-motion` half is kept, gated `:not([data-flash])`, for the
+       window before any profile has been applied and for a client whose shell
+       stamps the older attribute alone. Between them, the state survives every
+       zero-effect combination: red alert is still a full red frame at full
+       glow, simply not moving. */
+    :root[data-reduced-motion="reduce"]:not([data-flash]) #phone-bezel.alert-on,
+    :root[data-flash="off"] #phone-bezel.alert-on {
       animation: none;
       border-color: var(--fire-hot);
       box-shadow: inset 0 0 8px var(--bezel-red),
@@ -1917,14 +1942,26 @@
        `#ready-pill.go` that starts the pulse, so it had to be written LATER to
        win — the reason these once lived last in the file. The
        `:root[data-reduced-motion="reduce"]` prefix outweighs the loop rule
-       outright, so they now win wherever they sit. */
+       outright, so they now win wherever they sit.
+
+       Issue #1428 gave decorative motion a control of its own, so each of these
+       now lands on `data-decorative-motion="off"` as well. The
+       `data-reduced-motion` half is kept, gated `:not([data-decorative-motion])`,
+       for the window before a profile has been applied — and it must be gated,
+       or an operator who reduces motion but deliberately keeps decorative
+       animation would have it stilled anyway by the rule that used to be the
+       only one. At the middle `reduced` band these do not apply at all: the
+       global layer in gui/tokens.css gives every loop one iteration, so the
+       spinner turns once and settles rather than freezing mid-arc. */
     /* The two spinners. A spinner says "still working", and a ring with one
        arc in a different colour still reads as a progress indicator that has
        stopped moving — which is honest, because the work IS proceeding.
        Removing it would leave a blank panel reading as broken, which is a
        defect this same PRD fixes elsewhere. */
-    :root[data-reduced-motion="reduce"] #asset-loading .spinner-ring,
-    :root[data-reduced-motion="reduce"] #waiting-overlay .spinner-ring {
+    :root[data-reduced-motion="reduce"]:not([data-decorative-motion]) #asset-loading .spinner-ring,
+    :root[data-reduced-motion="reduce"]:not([data-decorative-motion]) #waiting-overlay .spinner-ring,
+    :root[data-decorative-motion="off"] #asset-loading .spinner-ring,
+    :root[data-decorative-motion="off"] #waiting-overlay .spinner-ring {
       animation: none;
     }
     /* The indeterminate progress bar (issue #1368), by the same reasoning one
@@ -1935,20 +1972,23 @@
        information. It has to outrank `.ld-bar.indet .ld-fill`'s own 34%, and
        the `:root[...]` prefix is what buys that; the width is in the
        stylesheet rather than written from script precisely so this can win. */
-    :root[data-reduced-motion="reduce"] .ld-bar.indet .ld-fill {
+    :root[data-reduced-motion="reduce"]:not([data-decorative-motion]) .ld-bar.indet .ld-fill,
+    :root[data-decorative-motion="off"] .ld-bar.indet .ld-fill {
       animation: none;
       width: 100%;
       opacity: 0.4;
     }
     /* The two "you are good to go" glows, held at the peak of their own pulse
        so the ready state is still the brightest thing in the footer. */
-    :root[data-reduced-motion="reduce"] #ready-pill.go {
+    :root[data-reduced-motion="reduce"]:not([data-decorative-motion]) #ready-pill.go,
+    :root[data-decorative-motion="off"] #ready-pill.go {
       animation: none;
       /* Inset, like the loop it holds: the badge's chamfer (issue #1369) is a
          clip-path, and a clip-path clips an outer glow away to nothing. */
       box-shadow: inset 0 0 12px rgba(var(--rgb-signal), 0.5);
     }
-    :root[data-reduced-motion="reduce"] #ready-btn.armed.glow {
+    :root[data-reduced-motion="reduce"]:not([data-decorative-motion]) #ready-btn.armed.glow,
+    :root[data-decorative-motion="off"] #ready-btn.armed.glow {
       animation: none;
       /* Inset, like the loop it holds: the bar's chamfer (issue #1370) is a
          clip-path, and a clip-path clips an outer glow away to nothing. */
@@ -2244,7 +2284,11 @@
   <!-- Phone bezel frame (issue #439). CSS-only red alert glow; no images.
        The .alert-on class drives the keyframe animation (see <style>).
        Hidden by default; render() flips aria-hidden once in-game. -->
-  <div id="phone-bezel" aria-hidden="true"></div>
+  <!-- `data-effect="flash"` claims this loop for the FLASH preference (issue
+       #1428): gui/tokens.css's decorative-motion sweep is `*`-wide and would
+       otherwise still this pulse for an operator who explicitly kept flashes
+       on. The marker is what the re-assertion rule there selects. -->
+  <div id="phone-bezel" data-effect="flash" aria-hidden="true"></div>
 
 
 
@@ -4689,6 +4733,16 @@
           onAccessibilityResetPresentation: () => {
             if (typeof window.resetAccessibilityPresentation === 'function') {
               window.resetAccessibilityPresentation();
+            }
+          },
+          // Reduce effects (issue #1428): conservative EXPLICIT values for the
+          // effects this console can actually render, written in one persist so
+          // the panel never stores an intermediate profile. It is a preset and
+          // not a second master switch — every control it moves stays
+          // individually adjustable afterwards, and each keeps its own reset.
+          onAccessibilityReduceEffects: () => {
+            if (typeof window.reduceAccessibilityEffects === 'function') {
+              window.reduceAccessibilityEffects();
             }
           },
           getSemanticActions: () => semanticActionRegistry

@@ -705,6 +705,13 @@ export function mountServerSettings(opts = {}) {
       doc,
       t,
       presentation,
+      // Which surface this page IS right now (issue #1428). A Game Master
+      // session hides the render surface outright — `html.phoenix-gm-page
+      // #canvas` and `#hud-overlay` are `display: none` — so the hull shake and
+      // the red-alert vignette have no consumer here and the panel says so
+      // instead of offering two controls that would change nothing. The same
+      // cog on the same page as an ordinary viewscreen offers all three.
+      surface: currentHostActionContext() === GM_ACTION_CONTEXT ? 'gm' : 'viewscreen',
       section,
       hint,
       row: rowHost,

@@ -382,6 +382,45 @@ impl LocalHostLobby {
         host_index_html: &str,
         documents: &HostedDocuments,
     ) -> Result<(), HostLobbyDocumentError> {
+        // This display's own saved presentation record, written by the settings
+        // menu's Display tab (issues #1427 and #1428). Best-effort — a machine
+        // that will not name a settings directory simply follows its system
+        // preferences.
+        let saved = super::viewscreen_presentation::ViewscreenPresentationStore::user()
+            .map(|store| store.load())
+            .unwrap_or_default();
+        self.publish_with_presentation(host_index_html, documents, saved)
+    }
+
+    /// [`Self::publish`] with this display's saved record already in hand.
+    ///
+    /// Split out only so the seeding below is reachable from a test: reading the
+    /// file is `ViewscreenPresentationStore`'s job and is covered there, while
+    /// what a test of THIS path needs to pin is that a saved record reaches both
+    /// destinations — the page and the renderer — before anyone has pressed
+    /// anything.
+    fn publish_with_presentation(
+        &self,
+        host_index_html: &str,
+        documents: &HostedDocuments,
+        saved: super::viewscreen_presentation::ViewscreenPresentation,
+    ) -> Result<(), HostLobbyDocumentError> {
+        // The effects the RENDERER and the HUD overlay own, seeded FIRST —
+        // before the document is assembled, because the camera shake this
+        // display saved is not contingent on the lobby markup parsing
+        // (issue #1428).
+        //
+        // The CSS half of the record travels into the LOBBY document below;
+        // these cannot, because nothing on that page can reach either the
+        // camera or the separate HUD-overlay document the vignette lives in.
+        // `presentation.apply()` in host_lobby_link.js publishes the browser's
+        // motion channel, which on an Ultralight view is a no-op — there are no
+        // wasm bindings there — so without this call the process-global latch
+        // stayed UNPUBLISHED at launch and `sync_viewscreen_motion` fell back to
+        // the reduced-motion default: FULL shake on a display whose room had
+        // saved "shake off", until somebody happened to press the control again
+        // this session.
+        publish_effects_to_renderer(&saved);
         // The same machine-wide OS accessibility read every pane document gets
         // (issue #1127), by the same call: an Ultralight view has no OS-backed
         // `matchMedia`, so a `gui/` module that reads the machine's preferences
@@ -400,16 +439,11 @@ impl LocalHostLobby {
             &build_host_lobby_document(host_index_html)?,
             &prefs,
         );
-        // …and the operator's own OVERRIDE of it, saved on this machine by that
-        // same Display tab (issue #1427). Seeded the same way, for a stronger
-        // reason: an Ultralight view's storage session is ephemeral, so the page
-        // has nowhere of its own to remember this, and without the seed the
-        // shared screen would come up at the default every launch however many
-        // times the room had turned it up. Best-effort — a machine that will not
-        // name a settings directory simply follows its system preferences.
-        let saved = super::viewscreen_presentation::ViewscreenPresentationStore::user()
-            .map(|store| store.load())
-            .unwrap_or_default();
+        // The operator's own override of that OS layer, seeded the same way and
+        // for a stronger reason: an Ultralight view's storage session is
+        // ephemeral, so the page has nowhere of its own to remember this, and
+        // without the seed the shared screen would come up at the default every
+        // launch however many times the room had turned it up.
         let body = super::panes::document::inject_head_script(
             &body,
             &super::viewscreen_presentation::presentation_script(&saved),
@@ -431,6 +465,37 @@ impl LocalHostLobby {
         documents.withdraw(&self.path());
         documents.withdraw(&super::native_gm::document::document_path(&self.nonce));
     }
+}
+
+/// Hand this display's two renderer-owned effect intensities to the Bevy side
+/// (issue #1428).
+///
+/// One function with two callers, deliberately: the record loaded at LAUNCH and
+/// the record a press produces reach the renderer by the same call, so "the
+/// display comes up the way the room left it" and "the display changes the
+/// moment the control moves" cannot drift apart.
+///
+/// All THREE percents cross, though only two are the renderer's own. Shake
+/// scales the camera jitter and flash scales the shield-hit uniform; the
+/// decorative percent is CSS with no renderer consumer at all, and it crosses
+/// here because of where it has to arrive. On the web every band travels with
+/// the rest of the record into the page, which stamps its own root — but the
+/// native Viewscreen draws its frame, its readout and its red-alert vignette in
+/// a THIRD document, `gui/viewscreen-hud.html`, which is not the lobby document
+/// and which no head injection reaches. `panes::ultralight::cache_hud_state`
+/// reads the latch back and pushes all three bands to that document over the
+/// HUD channel, so this call is the only way they get there.
+///
+/// `sanitised()` first, so a hand-edited `shake_percent = 900` in the TOML
+/// arrives as the largest this build renders rather than as nonsense, matching
+/// what the store hands to the page.
+fn publish_effects_to_renderer(record: &super::viewscreen_presentation::ViewscreenPresentation) {
+    let sane = record.sanitised();
+    crate::server::bridge::set_native_effect_intensities(
+        sane.shake_percent,
+        sane.flash_percent,
+        sane.decorative_motion_percent,
+    );
 }
 
 /// Feeds the lobby surface and owns its reveal state.
@@ -1135,6 +1200,9 @@ pub(crate) fn drain_surface_records(
             HostLobbyRecord::SetPresentation {
                 text_scale_percent,
                 contrast,
+                shake_percent,
+                flash_percent,
+                decorative_motion_percent,
             } => {
                 // Issue #1427. Written straight through to this machine's own
                 // file: the page has already applied it to its own root (that is
@@ -1151,7 +1219,19 @@ pub(crate) fn drain_surface_records(
                 let record = super::viewscreen_presentation::ViewscreenPresentation {
                     text_scale_percent,
                     contrast,
+                    shake_percent,
+                    flash_percent,
+                    decorative_motion_percent,
                 };
+                // The two effects a RENDERER owns reach it now, not at the next
+                // launch (issue #1428): the page has already applied the CSS
+                // half to its own root, and a camera shake the operator just
+                // turned off must stop this frame rather than after a restart.
+                // `None` publishes nothing, which is how a per-setting reset
+                // hands the effect back to this machine's motion preference.
+                // The same call `publish` makes at launch, so a press and a
+                // restart put the renderer in the same place.
+                publish_effects_to_renderer(&record);
                 match super::viewscreen_presentation::ViewscreenPresentationStore::user() {
                     Some(store) => match store.save(&record) {
                         Ok(()) => crate::pinfo!(
@@ -2702,5 +2782,83 @@ mod tests {
             "the row that answers the press is published in that same frame: {:?}",
             surface.pushed
         );
+    }
+    #[test]
+    fn a_saved_shake_reaches_the_renderer_at_launch_not_at_the_first_press() {
+        // Issue #1428. The renderer reads its two effect intensities off a
+        // process-global latch, and until this test the ONLY writer was the
+        // `SetPresentation` arm below — a press. Nothing published the record
+        // this display had already saved, and `presentation.apply()` on the page
+        // cannot: the browser motion channel it publishes to is a no-op on an
+        // Ultralight view. So a room that had turned the hull shake off came
+        // back at FULL shake every launch, because `sync_viewscreen_motion` saw
+        // "nothing published" and fell back to the reduced-motion default.
+        use crate::server::bridge::{
+            clear_native_effect_intensities, published_effect_intensities,
+            NATIVE_EFFECT_LATCH_TEST_LOCK,
+        };
+        let _serialised = NATIVE_EFFECT_LATCH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_native_effect_intensities();
+        assert_eq!(
+            published_effect_intensities(),
+            (None, None, None),
+            "a launch starts with nothing published — that is the state this test is about"
+        );
+
+        // What the room left on this machine last session, arriving the way the
+        // host reads it: through the store, sanitised, not hand-built.
+        let dir = std::env::temp_dir().join("phoenix-1428-launch-seed");
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = super::super::viewscreen_presentation::ViewscreenPresentationStore::at(&dir);
+        store
+            .save(
+                &super::super::viewscreen_presentation::ViewscreenPresentation {
+                    shake_percent: Some(0),
+                    flash_percent: Some(0),
+                    decorative_motion_percent: Some(40),
+                    ..Default::default()
+                },
+            )
+            .expect("save");
+
+        // The launch itself. The host page is deliberately unusable: the claim
+        // is that the renderer is told what this display saved, and that is not
+        // contingent on the lobby markup assembling.
+        let lobby = LocalHostLobby::open("127.0.0.1:8080");
+        let _ = lobby.publish_with_presentation(
+            "<html><body></body></html>",
+            &crate::delivery::serve::HostedDocuments::default(),
+            store.load(),
+        );
+
+        let (shake, flash, decorative) = published_effect_intensities();
+        assert_eq!(
+            shake,
+            Some(0.0),
+            "a saved off-state reaches the renderer before anybody presses anything"
+        );
+        // Flashes = Off is the case the Display tab's copy makes a promise
+        // about on this runtime: from here it reaches the shield-flash uniform
+        // AND, through `sync_viewscreen_motion` and `cache_hud_state`, the
+        // `data-flash` band the native HUD overlay's vignette rule reads.
+        assert_eq!(
+            flash,
+            Some(0.0),
+            "a saved Flashes = Off crosses at launch, not at the first press"
+        );
+        // The third percent has no uniform: it is CSS, and on native it reaches
+        // a document (`gui/viewscreen-hud.html`) that no head injection does. It
+        // crosses on this same call because this is the only seam that carries
+        // it into the process.
+        let decorative = decorative.expect("the saved decorative band crosses too");
+        assert!(
+            (decorative - 0.4).abs() < 1e-6,
+            "decorative was {decorative}"
+        );
+
+        clear_native_effect_intensities();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

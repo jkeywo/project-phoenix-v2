@@ -284,7 +284,8 @@ host-assigned native screens retain their console tabs without release controls.
 | `phone-bezel.js` | Diegetic phone bezel chrome |
 | `console-ui.js` | Shared iframe UI primitives (`reconcileRows`, `setBtn`, `setBar`, `setAutoState`, `setText`, keyed rebuild) |
 | `accessibility-profile.js` | Private per-player presentation profile: OS defaults plus explicit overrides, resolved to `data-contrast` and `data-reduced-motion` on the shell and console roots |
-| `viewscreen-presentation.js`, `viewscreen-presentation-panel.js` | The SHARED DISPLAY's own text size and contrast (issue #1427) — a second record under `phoenix-viewscreen-presentation-v1`, endpoint-owned rather than per-player, edited on the Display tab of both viewscreen cogs and applied to that document's root only. It imports the private profile's clamps, resolvers and status vocabulary and never reads or writes its key |
+| `visual-effects.js` | The three separately settable visual effects (issue #1428) — camera/page shake, flash/pulse and decorative motion — their `0..=1` intensity vocabulary, the band attributes and custom properties they are stamped as, the Reduce effects preset, and the per-surface inventory naming each effect's real consumer or the reason a surface has none. Imported by both presentation records, so the two surfaces cannot drift |
+| `viewscreen-presentation.js`, `viewscreen-presentation-panel.js` | The SHARED DISPLAY's own text size, contrast and three visual effects (issues #1427, #1428) — a second record under `phoenix-viewscreen-presentation-v1`, endpoint-owned rather than per-player, edited on the Display tab of both viewscreen cogs and applied to that document's root only. It imports the private profile's clamps, resolvers and status vocabulary and never reads or writes its key |
 | `roving-tabindex.js` | Shared one-Tab-stop keyboard navigation for composite controls; arrows move inside the composite while actions continue through `action-map.js` |
 | `focus-trap.js` | Shared modal contract: move and trap focus, close on Escape, inert the background, then restore the invoking control |
 | `tokens.css`, `components/ph-console-styles.js` | Shared high-contrast, reduced-motion and visible-focus presentation consumed on both sides of shadow roots |
@@ -338,6 +339,31 @@ and stamps the resolved attributes onto the shell and every console root.
 `gui/tokens.css` consumes those attributes once: the high-contrast palette and
 focus-ring pair are shared tokens, while the reduced-motion layer suppresses
 looping and decorative animation across document and shadow-root boundaries.
+
+Since issue #1428 that one motion lever is three — camera/page shake, flash and
+decorative motion, resolved by `gui/visual-effects.js` and stamped as a band
+attribute plus a numeric custom property per effect. An unset effect follows the
+resolved motion preference (off under reduce), so the older `data-reduced-motion`
+attribute still carries the overall answer and still drives everything that is
+not one of the three; the rules that used to hang off it alone are gated on the
+relevant band being absent, so an explicit "keep this effect" is not collapsed by
+them. The shake and flash intensities also cross to the renderer —
+`wasm_set_shake_intensity` / `wasm_set_flash_intensity` on the browser
+viewscreen, and `set_native_effect_intensities` from the native host's saved
+record — where `src/server/viewscreen_border.rs` folds them into
+`ViewscreenMotion` each frame.
+
+The native Viewscreen is drawn by TWO documents, and both need the bands. The
+lobby document is seeded through a head injection (`presentation_script`); the
+frame, the readout and the red-alert vignette are a separate transparent
+overlay, `gui/viewscreen-hud.html`, which is served statically, reached by no
+injection, and answers no `prefers-reduced-motion` query in an Ultralight view.
+Its bands therefore ride the HUD channel it is already driven by:
+`panes::ultralight::cache_hud_state` reads the three resolved intensities off
+`ViewscreenMotion`, `panes::hud::hud_effects_script` turns them into one
+`window.__phoenixSetHudEffects(...)` statement retained alongside
+`window.__updateHud`, and that page's classic script prelude stamps the same
+attributes and properties `applyEffectIntensitiesToRoot` stamps everywhere else.
 
 The structural floor in `tests/client/interaction-floors.test.js` scans every
 console surface and rejects coarse regressions such as a surface with nothing

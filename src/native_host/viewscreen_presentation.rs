@@ -81,6 +81,15 @@ pub struct ViewscreenPresentation {
     pub text_scale_percent: Option<u32>,
     /// `Some(true)` forces higher contrast, `Some(false)` forces standard.
     pub contrast: Option<bool>,
+    /// Camera/page shake intensity as WHOLE PERCENT (issue #1428): `0` is off,
+    /// `100` is the shipped magnitude, `None` follows this machine's motion
+    /// preference. Whole percent for the reason the text size is: it is the
+    /// number the operator reads on screen, and an integer cannot be `NaN`.
+    pub shake_percent: Option<u32>,
+    /// Shield-flash intensity as whole percent (issue #1428).
+    pub flash_percent: Option<u32>,
+    /// Decorative-motion intensity as whole percent (issue #1428).
+    pub decorative_motion_percent: Option<u32>,
 }
 
 /// The supported text-size range in whole percent, derived from the one
@@ -90,6 +99,11 @@ pub struct ViewscreenPresentation {
 pub const MIN_TEXT_SCALE_PERCENT: u32 = (SUPPORTED_TEXT_SCALE_MIN * 100.0) as u32;
 /// The largest text size this build claims the viewscreen chrome reflows at.
 pub const MAX_TEXT_SCALE_PERCENT: u32 = (SUPPORTED_TEXT_SCALE_MAX * 100.0) as u32;
+
+/// The largest visual-effect intensity: an effect at 100% is the shipped one,
+/// and there is no "louder than shipped" (issue #1428). Mirrors
+/// `EFFECT_FULL` in `gui/visual-effects.js`.
+pub const MAX_EFFECT_PERCENT: u32 = 100;
 
 /// The TOML shape on disk. Separate from [`ViewscreenPresentation`] so the file
 /// format is a decision this module can change without every caller learning
@@ -101,6 +115,12 @@ struct SavedPresentation {
     text_scale_percent: Option<u32>,
     #[serde(default)]
     contrast: Option<bool>,
+    #[serde(default)]
+    shake_percent: Option<u32>,
+    #[serde(default)]
+    flash_percent: Option<u32>,
+    #[serde(default)]
+    decorative_motion_percent: Option<u32>,
 }
 
 impl ViewscreenPresentation {
@@ -113,7 +133,19 @@ impl ViewscreenPresentation {
 
     /// True when nothing has been chosen explicitly on this display.
     pub fn is_default(&self) -> bool {
-        self.text_scale_percent.is_none() && self.contrast.is_none()
+        self.text_scale_percent.is_none()
+            && self.contrast.is_none()
+            && self.effect_percents().iter().all(Option::is_none)
+    }
+
+    /// The three effect intensities in display order (issue #1428), so a caller
+    /// iterating them cannot miss one the way a hand-written list can.
+    pub fn effect_percents(&self) -> [Option<u32>; 3] {
+        [
+            self.shake_percent,
+            self.flash_percent,
+            self.decorative_motion_percent,
+        ]
     }
 
     /// The record with its text size clamped into the range this build supports.
@@ -123,11 +155,18 @@ impl ViewscreenPresentation {
     /// 300% wants the largest size this fleet claims to reflow at, and silently
     /// returning it to 100% would read as the setting not working at all.
     pub fn sanitised(self) -> Self {
+        // An effect intensity is a percentage of an effect, so its ceiling is
+        // 100 — a hand-edited `400` is a request for the largest this build
+        // renders, exactly as an out-of-range text size is (issue #1428).
+        let effect = |percent: Option<u32>| percent.map(|value| value.min(MAX_EFFECT_PERCENT));
         Self {
             text_scale_percent: self
                 .text_scale_percent
                 .map(|percent| percent.clamp(MIN_TEXT_SCALE_PERCENT, MAX_TEXT_SCALE_PERCENT)),
             contrast: self.contrast,
+            shake_percent: effect(self.shake_percent),
+            flash_percent: effect(self.flash_percent),
+            decorative_motion_percent: effect(self.decorative_motion_percent),
         }
     }
 
@@ -150,6 +189,15 @@ impl ViewscreenPresentation {
         }
         if let Some(contrast) = self.contrast {
             out.push_str(&format!("contrast = {contrast}\n"));
+        }
+        for (key, percent) in [
+            ("shake_percent", self.shake_percent),
+            ("flash_percent", self.flash_percent),
+            ("decorative_motion_percent", self.decorative_motion_percent),
+        ] {
+            if let Some(percent) = percent {
+                out.push_str(&format!("{key} = {percent}\n"));
+            }
         }
         out
     }
@@ -188,9 +236,20 @@ pub fn presentation_script(record: &ViewscreenPresentation) -> String {
         Some(false) => "false",
         None => "null",
     };
+    // The three effects cross as `0..=1` FRACTIONS, the shape
+    // `readInjectedViewscreenPresentation` normalises and the same shape the
+    // text scale crosses in — a multiplier, not the stored percent.
+    let fraction = |percent: Option<u32>| match percent {
+        Some(value) => format_scale(f64::from(value.min(MAX_EFFECT_PERCENT)) / 100.0),
+        None => "null".to_string(),
+    };
+    let shake = fraction(sane.shake_percent);
+    let flash = fraction(sane.flash_percent);
+    let decorative = fraction(sane.decorative_motion_percent);
     format!(
         "window.PhoenixViewscreenPresentation = \
-         {{\"textScale\":{scale},\"contrast\":{contrast}}};"
+         {{\"textScale\":{scale},\"contrast\":{contrast},\"shake\":{shake},\
+         \"flash\":{flash},\"decorativeMotion\":{decorative}}};"
     )
 }
 
@@ -251,6 +310,9 @@ impl ViewscreenPresentationStore {
         ViewscreenPresentation {
             text_scale_percent: saved.text_scale_percent,
             contrast: saved.contrast,
+            shake_percent: saved.shake_percent,
+            flash_percent: saved.flash_percent,
+            decorative_motion_percent: saved.decorative_motion_percent,
         }
         .sanitised()
     }
@@ -310,6 +372,7 @@ mod tests {
         let chosen = ViewscreenPresentation {
             text_scale_percent: Some(150),
             contrast: Some(true),
+            ..ViewscreenPresentation::following_system()
         };
         store.save(&chosen).expect("save");
 
@@ -329,6 +392,7 @@ mod tests {
             .save(&ViewscreenPresentation {
                 text_scale_percent: Some(175),
                 contrast: Some(false),
+                ..ViewscreenPresentation::following_system()
             })
             .expect("save");
         let mut record = store.load();
@@ -348,6 +412,7 @@ mod tests {
             .save(&ViewscreenPresentation {
                 text_scale_percent: Some(200),
                 contrast: Some(true),
+                ..ViewscreenPresentation::following_system()
             })
             .expect("save");
         assert!(store.path().exists());
@@ -362,6 +427,100 @@ mod tests {
         store
             .save(&ViewscreenPresentation::following_system())
             .expect("reset again");
+    }
+
+    #[test]
+    fn each_effect_is_saved_and_reset_on_its_own() {
+        // Issue #1428, and it is the same claim per-setting reset makes above,
+        // asked of the three effects: turning the shake off must not disturb a
+        // flash the operator softened, and handing one back to the machine must
+        // not hand the others back with it.
+        let dir = scratch("effects");
+        let store = ViewscreenPresentationStore::at(&dir);
+        store
+            .save(&ViewscreenPresentation {
+                shake_percent: Some(0),
+                flash_percent: Some(30),
+                decorative_motion_percent: Some(40),
+                ..ViewscreenPresentation::following_system()
+            })
+            .expect("save");
+
+        let mut record = store.load();
+        assert_eq!(record.shake_percent, Some(0));
+        assert_eq!(record.flash_percent, Some(30));
+        record.flash_percent = None;
+        store.save(&record).expect("save");
+
+        let reloaded = store.load();
+        assert_eq!(reloaded.flash_percent, None, "reset returns to following");
+        assert_eq!(
+            reloaded.shake_percent,
+            Some(0),
+            "a chosen zero is not a reset"
+        );
+        assert_eq!(reloaded.decorative_motion_percent, Some(40));
+    }
+
+    #[test]
+    fn a_display_with_only_its_effects_chosen_is_not_default() {
+        // The file is removed only when NOTHING is chosen; an operator who has
+        // turned the room's shake off has chosen something, and the next launch
+        // has to find it.
+        let mut record = ViewscreenPresentation::following_system();
+        assert!(record.is_default());
+        record.shake_percent = Some(0);
+        assert!(!record.is_default());
+
+        let dir = scratch("effects-only");
+        let store = ViewscreenPresentationStore::at(&dir);
+        store.save(&record).expect("save");
+        assert!(store.path().exists());
+        assert_eq!(store.load().shake_percent, Some(0));
+    }
+
+    #[test]
+    fn an_effect_beyond_full_is_clamped_to_full() {
+        let dir = scratch("effect-clamp");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join(FILE_NAME), "shake_percent = 900\n").expect("write");
+        let store = ViewscreenPresentationStore::at(&dir);
+        assert_eq!(store.load().shake_percent, Some(MAX_EFFECT_PERCENT));
+    }
+
+    #[test]
+    fn a_file_written_before_the_effects_existed_still_reads() {
+        // An older build's file names two keys. `#[serde(default)]` means the
+        // three effects arrive as "follow this machine" rather than the whole
+        // record failing to parse and the display losing its text size too.
+        let dir = scratch("older-file");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(
+            dir.join(FILE_NAME),
+            "text_scale_percent = 150\ncontrast = true\n",
+        )
+        .expect("write");
+        let record = ViewscreenPresentationStore::at(&dir).load();
+        assert_eq!(record.text_scale_percent, Some(150));
+        assert_eq!(record.effect_percents(), [None, None, None]);
+    }
+
+    #[test]
+    fn the_seed_script_carries_the_effects_as_fractions() {
+        // The page's `readInjectedViewscreenPresentation` normalises `0..=1`
+        // fractions or `null`; the host stores whole percent. The conversion
+        // happens once, here, at the seam.
+        let script = presentation_script(&ViewscreenPresentation {
+            shake_percent: Some(0),
+            flash_percent: Some(30),
+            ..ViewscreenPresentation::following_system()
+        });
+        assert!(script.contains("\"shake\":0"), "{script}");
+        assert!(script.contains("\"flash\":0.3"), "{script}");
+        assert!(script.contains("\"decorativeMotion\":null"), "{script}");
+        // The injection-safety invariant still holds: every field is a finite
+        // clamped number, a bool or null, so nothing here can close the script.
+        assert!(!script.contains("</"), "{script}");
     }
 
     #[test]
@@ -399,10 +558,11 @@ mod tests {
         let script = presentation_script(&ViewscreenPresentation {
             text_scale_percent: Some(125),
             contrast: Some(false),
+            ..ViewscreenPresentation::following_system()
         });
         assert_eq!(
             script,
-            "window.PhoenixViewscreenPresentation = {\"textScale\":1.25,\"contrast\":false};"
+            "window.PhoenixViewscreenPresentation = {\"textScale\":1.25,\"contrast\":false,\"shake\":null,\"flash\":null,\"decorativeMotion\":null};"
         );
         // The invariant the module note states, asserted rather than trusted:
         // nothing that could close the script element or open a template can
@@ -419,7 +579,7 @@ mod tests {
         // first one still moves when the OS preference does.
         assert_eq!(
             presentation_script(&ViewscreenPresentation::following_system()),
-            "window.PhoenixViewscreenPresentation = {\"textScale\":null,\"contrast\":null};"
+            "window.PhoenixViewscreenPresentation = {\"textScale\":null,\"contrast\":null,\"shake\":null,\"flash\":null,\"decorativeMotion\":null};"
         );
     }
 
@@ -428,6 +588,7 @@ mod tests {
         let script = presentation_script(&ViewscreenPresentation {
             text_scale_percent: Some(900),
             contrast: None,
+            ..ViewscreenPresentation::following_system()
         });
         assert!(script.contains(&format!("\"textScale\":{SUPPORTED_TEXT_SCALE_MAX}")));
         // …and the floor is guarded in the other direction, where there is no
@@ -435,6 +596,7 @@ mod tests {
         let tiny = presentation_script(&ViewscreenPresentation {
             text_scale_percent: Some(10),
             contrast: None,
+            ..ViewscreenPresentation::following_system()
         });
         assert!(tiny.contains(&format!("\"textScale\":{SUPPORTED_TEXT_SCALE_MIN}")));
     }

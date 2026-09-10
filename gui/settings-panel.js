@@ -69,6 +69,21 @@ import {
   osAccessibilityDefaults,
   presentationStatus,
 } from './accessibility-profile.js';
+import {
+  EFFECT_FULL,
+  EFFECT_IDS,
+  EFFECT_OFF,
+  applicableEffects,
+  effectChoiceKey,
+  effectChoices,
+  effectHintId,
+  effectLabelId,
+  effectResetId,
+  effectSlug,
+  inapplicableEffects,
+  normalizeEffectLevel,
+  reduceEffectsChoices,
+} from './visual-effects.js';
 import { activeElementOf } from './focus-trap.js';
 import {
   mountOverlayShell,
@@ -353,6 +368,13 @@ export function accessibilityView(profile) {
     textScaleValue: typeof textScale === 'number' ? textScale : 1,
     contrast: tri(pres.contrast),
     reducedMotion: tri(pres.reducedMotion),
+    // The three separate effects (issue #1428): each an intensity in `0..=1` or
+    // follow-the-preference. Carried through this view for the same reason the
+    // tri-states are — the controls paint the operator's EXPLICIT choice, and
+    // the resolved value beside it comes from `presentationStatus`.
+    effects: Object.fromEntries(
+      EFFECT_IDS.map((effect) => [effect, normalizeEffectLevel(pres[effect])]),
+    ),
   };
 }
 
@@ -438,6 +460,7 @@ function persistMasterVolume(value) {
  *   myToken?: string|null,
  *   onAccessibility?: (effect: string, value: number|string) => void,
  *   onAccessibilityResetPresentation?: () => void,   // scoped Reset all (#1422)
+ *   onAccessibilityReduceEffects?: () => void,       // Reduce effects preset (#1428)
  *   getSemanticActions?: () => Array<object>,
  *   onSemanticBinding?: (actionId: string, slot: number, binding: object,
  *     options?: {replace?: boolean}) => object,
@@ -465,6 +488,7 @@ export function mountSettings({
   myToken,
   onAccessibility: _onAccessibility,
   onAccessibilityResetPresentation: _onAccessibilityResetPresentation,
+  onAccessibilityReduceEffects: _onAccessibilityReduceEffects,
   getSemanticActions: _getSemanticActions,
   onSemanticBinding: _onSemanticBinding,
   onSemanticResetAction: _onSemanticResetAction,
@@ -786,11 +810,21 @@ export function mountSettings({
           textScale: a.textScale,
           contrast: a.contrast,
           reducedMotion: a.reducedMotion,
+          ...a.effects,
         },
       },
       osAccessibilityDefaults(win),
       unavailable,
     );
+
+    /** An intensity in words: the two ends are named, and anything between them
+     *  is the number, because "30%" is what an operator can act on. */
+    const effectIntensityText = (value) => {
+      const n = Number(value);
+      if (n <= EFFECT_OFF) return t('settings.effects.level_off');
+      if (n >= EFFECT_FULL) return t('settings.effects.level_full');
+      return t('settings.effects.intensity_value', { value: String(Math.round(n * 100)) });
+    };
 
     // Explanatory copy: names effects, states the profile is private/local, and
     // never asks for or infers a diagnosis or a reason (AC1).
@@ -893,6 +927,72 @@ export function mountSettings({
     ));
     body.appendChild(motionSec);
 
+    // ── The three separate effects (issue #1428) ─────────────────────────
+    //
+    // PRD #1418 story 13. Until this issue the Motion control above was the
+    // only lever, and it moved everything at once: an operator who could not
+    // take the red-alert bezel flashing on their own phone had to give up the
+    // loading spinner to stop it. These rows split the two apart.
+    //
+    // A CONSOLE has no camera shake — the hull shake is the viewscreen's
+    // (`viewscreen_border::apply_camera_shake`, delivered to `server.html` on
+    // the `shake` host channel), and `client.html` contains no such path at
+    // all. So there is no shake row here, and the sentence at the bottom of the
+    // section says so rather than a dead control implying otherwise. The
+    // inventory lives in `gui/visual-effects.js`.
+    for (const effect of applicableEffects('console')) {
+      const effectSec = section(effectLabelId(effect));
+      const effectRow = row('settings-rating-row');
+      const chosenKey = effectChoiceKey(effect, a.effects[effect]);
+      for (const choice of effectChoices(effect)) {
+        effectRow.appendChild(toggle(
+          'a11y-' + effectSlug(effect) + '-' + choice.key,
+          t(choice.labelId),
+          choice.key === chosenKey,
+          () => {
+            setAccessibility(effect, choice.value);
+            // Safe to rebuild: this is a button press, never a drag in flight.
+            buildContent();
+          },
+        ));
+      }
+      effectSec.appendChild(effectRow);
+      const hintId = effectHintId(effect, 'console');
+      if (hintId) effectSec.appendChild(hint(hintId));
+      effectSec.appendChild(accessibilityStatusLine(
+        'a11y-' + effectSlug(effect) + '-status',
+        status[effect],
+        effectIntensityText(status[effect].value),
+      ));
+      effectSec.appendChild(accessibilityResetButton(
+        'a11y-' + effectSlug(effect) + '-reset', effectResetId(effect), effect,
+      ));
+      body.appendChild(effectSec);
+    }
+
+    // Reduce effects, and the record of what this surface cannot render.
+    const effectsSec = section('settings.effects.heading');
+    effectsSec.appendChild(hint('settings.effects.reduce_hint'));
+    const reduce = action(t('settings.effects.reduce'), null, () => {
+      if (typeof _onAccessibilityReduceEffects === 'function') {
+        _onAccessibilityReduceEffects();
+      } else {
+        // No host hook (an old cached shell, or a standalone mount): the same
+        // outcome through the per-effect path this panel already owns.
+        const choices = reduceEffectsChoices('console');
+        for (const effect of Object.keys(choices)) setAccessibility(effect, choices[effect]);
+      }
+      buildContent();
+    });
+    reduce.setAttribute('data-control', 'a11y-reduce-effects');
+    effectsSec.appendChild(reduce);
+    for (const entry of inapplicableEffects('console')) {
+      const line = hint(entry.reasonId);
+      line.setAttribute('data-control', 'a11y-' + effectSlug(entry.effect) + '-absent');
+      effectsSec.appendChild(line);
+    }
+    body.appendChild(effectsSec);
+
     // Reset all — SCOPED to this tab's three settings (PRD #1418: "Reset all is
     // scoped to the current presentation settings, not unrelated bindings,
     // identity or save data"). The Controls tab keeps its own, separately named
@@ -908,7 +1008,7 @@ export function mountSettings({
       } else {
         // No host hook (an old cached shell, or a standalone mount): the same
         // outcome through the per-effect path this panel already owns.
-        for (const effect of ['textScale', 'contrast', 'reducedMotion']) {
+        for (const effect of ['textScale', 'contrast', 'reducedMotion'].concat(EFFECT_IDS)) {
           setAccessibility(effect, 'default');
         }
       }

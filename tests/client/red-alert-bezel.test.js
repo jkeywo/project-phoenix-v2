@@ -36,11 +36,17 @@ function ruleBody(source, selector) {
  * Since #1172 the shell no longer stills the bezel with a bare `@media`
  * block — the global layer in gui/tokens.css collapses the motion off both the
  * OS query and the stamped attribute, and this rule only HOLDS the peak. It is
- * attribute-driven (`:root[data-reduced-motion="reduce"] #phone-bezel.alert-on`)
- * so an explicit choice resolves both ways, which a bare `@media` cannot do.
+ * attribute-driven so an explicit choice resolves both ways, which a bare
+ * `@media` cannot do.
+ *
+ * Since #1428 the attribute it keys on is the FLASH band: the red-alert pulse
+ * is a flash rather than decoration, and it is set separately from the
+ * interface's animation and from the viewscreen's camera shake. The rule keeps
+ * a `data-reduced-motion` half, gated on the band being absent, for the window
+ * before any profile has been applied.
  */
 function reducedMotionBezelRule(source) {
-  const selector = ':root[data-reduced-motion="reduce"] #phone-bezel.alert-on';
+  const selector = ':root[data-flash="off"] #phone-bezel.alert-on';
   const index = source.indexOf(selector + ' {');
   if (index === -1) return null;
   const open = source.indexOf('{', index);
@@ -80,9 +86,14 @@ describe('reduced motion', () => {
     expect(rule).not.toBeNull();
     expect(rule.selector).toContain('#phone-bezel.alert-on');
     expect(rule.body).toMatch(/animation:\s*none/);
-    // #1172: driven by the stamped attribute, not a bare @media — so an
-    // explicit "allow motion" resolves the tri-state and this steps aside.
-    expect(rule.selector).toContain('data-reduced-motion="reduce"');
+    // #1172/#1428: driven by a stamped attribute, not a bare @media — so an
+    // explicit "keep the flashing" resolves and this steps aside.
+    expect(rule.selector).toContain('data-flash="off"');
+    // …and the pre-profile fallback is still there, gated so it cannot
+    // out-specify an explicit choice to keep the pulse.
+    expect(CLIENT_HTML).toContain(
+      ':root[data-reduced-motion="reduce"]:not([data-flash]) #phone-bezel.alert-on',
+    );
   });
 
   it('stills the pulse without hiding the alert', () => {

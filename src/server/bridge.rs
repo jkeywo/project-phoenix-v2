@@ -1740,7 +1740,7 @@ pub fn set_forcefield_level(level: f32) {
 /// viewscreen renderer (issue #1173). May be called before `wasm_init()` and at
 /// any time after (e.g. from the media-query `change` listener): the value is
 /// drained into `ViewscreenMotion` every frame by
-/// `viewscreen_border::sync_reduced_motion`, so a runtime change takes effect
+/// `viewscreen_border::sync_viewscreen_motion`, so a runtime change takes effect
 /// without a reload.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -1757,11 +1757,172 @@ pub fn wasm_is_reduced_motion() -> bool {
     edge::read_reduced_motion()
 }
 
-/// Read the current reduced-motion request for `sync_reduced_motion` to drain
-/// into the `ViewscreenMotion` resource each frame (issue #1173).
+/// Read the current reduced-motion request for `sync_viewscreen_motion` to
+/// drain into the `ViewscreenMotion` resource each frame (issue #1173).
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn reduced_motion_requested() -> bool {
     edge::read_reduced_motion()
+}
+
+/// Called by the viewscreen page to forward THIS DISPLAY's camera/page shake
+/// intensity (issue #1428, PRD #1418 story 13).
+///
+/// The sibling of [`wasm_set_reduced_motion`], and deliberately built the same
+/// way: it may be called before `wasm_init()` and at any time after, and
+/// `viewscreen_border::sync_viewscreen_motion` drains it every frame, so a press
+/// on the Display tab is visible on the next frame with no reload.
+///
+/// `0.0` is off and `1.0` is the shipped magnitude; the value is clamped where
+/// it is drained. Publishing ANY value — including `0.0` — takes the decision
+/// away from the reduced-motion preference, which is what makes an explicit
+/// choice override the machine's setting in both directions.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_shake_intensity(intensity: f32) {
+    edge::publish_shake_intensity(intensity);
+}
+
+/// Called by the viewscreen page to forward THIS DISPLAY's shield-flash
+/// intensity (issue #1428). The twin of [`wasm_set_shake_intensity`]; see its
+/// note for the timing and the override rule.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_flash_intensity(intensity: f32) {
+    edge::publish_flash_intensity(intensity);
+}
+
+/// Called by JS (and the viewscreen effects smoke) to read back the shake
+/// intensity the page last forwarded — the observable proof that a Display-tab
+/// choice reached the WASM render path, exactly as `wasm_is_reduced_motion`
+/// proves it for the preference (issue #1428). `-1.0` means nothing has been
+/// published, which is distinct from a published `0.0`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_shake_intensity() -> f32 {
+    edge::read_shake_intensity().unwrap_or(-1.0)
+}
+
+/// The flash half of [`wasm_shake_intensity`].
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_flash_intensity() -> f32 {
+    edge::read_flash_intensity().unwrap_or(-1.0)
+}
+
+/// What this endpoint has published about the three effect intensities, for
+/// `viewscreen_border::sync_viewscreen_motion` to fold over the reduced-motion
+/// default (issue #1428).
+///
+/// `None` per effect means nothing has been published on this endpoint.
+///
+/// The decorative one is always `None` in a browser, and that is not an
+/// omission: the page stamps its own root from the endpoint record
+/// (`gui/viewscreen-presentation.js`), so the WASM render path has nobody to
+/// tell. It is `Some` only on native, where the band has to reach a separate
+/// HUD-overlay document over the host's own channel.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn published_effect_intensities() -> (Option<f32>, Option<f32>, Option<f32>) {
+    (
+        edge::read_shake_intensity(),
+        edge::read_flash_intensity(),
+        None,
+    )
+}
+
+/// Native: the effect intensities this machine's Viewscreen settings have
+/// chosen (issue #1428).
+///
+/// Process-global atomics rather than the browser edge's thread-local cells,
+/// because on native both ends really are on different threads: the writer is
+/// `native_host::host_lobby::drain_surface_records`, answering a press in an
+/// Ultralight document, and the readers are Bevy systems Bevy is free to
+/// schedule anywhere. A thread-local would silently publish into whichever
+/// worker happened to run the write.
+///
+/// Stored as WHOLE PERCENT with `-1` for *not published*, which is the same
+/// shape the setting crosses the page/host bridge in
+/// (`HostLobbyRecord::SetPresentation`) — so nothing has to be re-encoded, and
+/// an `AtomicI32` is enough without bit-casting a float.
+///
+/// Three, not two: the first two are the renderer's (camera shake, the shield
+/// flash uniform), and the third is CSS the native Viewscreen cannot reach any
+/// other way. On the web the decorative band travels with the rest of the
+/// endpoint record into the page, which stamps its own root; the native HUD
+/// overlay (`gui/viewscreen-hud.html`) is a THIRD document that no head
+/// injection reaches, so its bands are pushed to it over the HUD channel and
+/// this is where they are read from.
+#[cfg(not(target_arch = "wasm32"))]
+mod native_effect_latch {
+    use std::sync::atomic::AtomicI32;
+
+    /// Not published: the effect follows the reduced-motion preference.
+    pub(super) const UNPUBLISHED: i32 = -1;
+
+    pub(super) static SHAKE_PERCENT: AtomicI32 = AtomicI32::new(UNPUBLISHED);
+    pub(super) static FLASH_PERCENT: AtomicI32 = AtomicI32::new(UNPUBLISHED);
+    pub(super) static DECORATIVE_PERCENT: AtomicI32 = AtomicI32::new(UNPUBLISHED);
+}
+
+/// Serialises the tests that drive the latch above.
+///
+/// The latch is process-global on purpose — writer and reader are genuinely on
+/// different threads — and `cargo test` runs this crate's unit tests as threads
+/// in ONE process. Two tests that both write and read it would race, so each of
+/// them takes this lock first and holds it across its assertions. Poisoning is
+/// ignored by the callers: a panicking test says nothing about the latch, and
+/// refusing to run the next one would turn one failure into several.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) static NATIVE_EFFECT_LATCH_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Native: return the latch to *nothing published*, for a test that has just
+/// driven it.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn clear_native_effect_intensities() {
+    set_native_effect_intensities(None, None, None);
+}
+
+/// Native: publish this machine's saved viewscreen effect intensities.
+///
+/// `None` in a field is *follow this machine's motion preference* — the same
+/// meaning an absent field has in `viewscreen-presentation.toml` and in the
+/// `SetPresentation` record — so a per-setting reset publishes `None` and the
+/// renderer goes back to following, rather than being stuck at the last number.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_native_effect_intensities(
+    shake_percent: Option<u32>,
+    flash_percent: Option<u32>,
+    decorative_motion_percent: Option<u32>,
+) {
+    use std::sync::atomic::Ordering;
+    let encode = |value: Option<u32>| {
+        value.map_or(native_effect_latch::UNPUBLISHED, |percent| {
+            percent.min(100) as i32
+        })
+    };
+    native_effect_latch::SHAKE_PERCENT.store(encode(shake_percent), Ordering::Relaxed);
+    native_effect_latch::FLASH_PERCENT.store(encode(flash_percent), Ordering::Relaxed);
+    native_effect_latch::DECORATIVE_PERCENT
+        .store(encode(decorative_motion_percent), Ordering::Relaxed);
+}
+
+/// Native: what this machine has published, for `sync_viewscreen_motion`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn published_effect_intensities() -> (Option<f32>, Option<f32>, Option<f32>) {
+    use std::sync::atomic::Ordering;
+    // A latched whole percent as a `0..=1` fraction; negative is *nothing
+    // published on this endpoint*.
+    let decode = |percent: i32| {
+        if percent < 0 {
+            None
+        } else {
+            Some(percent as f32 / 100.0)
+        }
+    };
+    (
+        decode(native_effect_latch::SHAKE_PERCENT.load(Ordering::Relaxed)),
+        decode(native_effect_latch::FLASH_PERCENT.load(Ordering::Relaxed)),
+        decode(native_effect_latch::DECORATIVE_PERCENT.load(Ordering::Relaxed)),
+    )
 }
 
 /// Native: the host's reduced-motion preference, read from the
@@ -1769,7 +1930,8 @@ pub(crate) fn reduced_motion_requested() -> bool {
 /// viewscreen has no DOM `prefers-reduced-motion`, so this env var is the native
 /// analog of the WASM host page forwarding the browser preference — it seeds
 /// `ViewscreenMotion` once at startup via
-/// `viewscreen_border::init_native_reduced_motion`. Enabled by any of
+/// `viewscreen_border::init_native_reduced_motion` (the per-effect intensities
+/// go through [`set_native_effect_intensities`] instead, which is live). Enabled by any of
 /// `1`/`true`/`yes`/`on`/`reduce` (case-insensitive); unset or anything else
 /// leaves normal motion in place.
 #[cfg(not(target_arch = "wasm32"))]

@@ -65,12 +65,18 @@ const SHAKE_DAMAGE_FULL: f32 = 30.0;
 /// baseline — normal motion is unchanged when nothing requests a reduction.
 const DEFAULT_SHAKE_INTENSITY: f32 = 1.0;
 
-/// Shield-flash intensity ceiling applied while reduced motion is active
-/// (issue #1173). `0.0` fully disables the white shield-hit flash: a sudden
-/// full-frame brightness jolt is exactly what a viewer who asked for stillness
-/// should not be given. A future comfort slider can raise this to soften rather
-/// than remove the cue.
-const REDUCED_MOTION_FLASH_CAP: f32 = 0.0;
+/// The shipped flash intensity when nothing has asked for less (issue #1428).
+const DEFAULT_FLASH_INTENSITY: f32 = 1.0;
+
+/// The shipped decorative-motion intensity when nothing has asked for less
+/// (issue #1428).
+const DEFAULT_DECORATIVE_INTENSITY: f32 = 1.0;
+
+/// The intensity an effect that FOLLOWS the motion preference takes when that
+/// preference asks for reduction. `0.0` — the same answer `shake_magnitude`
+/// and the old `REDUCED_MOTION_FLASH_CAP` gave under reduce in issue #1173, so
+/// an operator who never opens the new controls sees no change at all.
+const REDUCED_MOTION_INTENSITY: f32 = 0.0;
 
 // ── Resources ────────────────────────────────────────────────────────
 
@@ -122,15 +128,38 @@ pub struct ShakeState {
 /// the native camera jitter and the WASM whole-page translate identically.
 #[derive(Resource, Debug, Clone)]
 pub struct ViewscreenMotion {
-    /// The reduced-motion profile value. When `true`, hull-damage screen shake
-    /// (native camera jitter AND the WASM whole-page translate) is forced to
-    /// zero and the shield-hit white flash is capped to
-    /// [`REDUCED_MOTION_FLASH_CAP`].
+    /// The reduced-motion preference this endpoint reported.
+    ///
+    /// Since issue #1428 it is no longer what zeroes the shake and the flash —
+    /// the two intensities below are, and they are what the settings surfaces
+    /// write. What this still does is supply the DEFAULT those intensities take
+    /// when nothing has published one: `0.0` under reduce, `1.0` otherwise,
+    /// which is exactly the behaviour issue #1173 shipped. So a build whose
+    /// page only ever calls [`crate::server::bridge::wasm_set_reduced_motion`]
+    /// behaves as it always did, and a page that publishes intensities
+    /// overrides it in both directions — including keeping the shake on a
+    /// machine whose OS asked to reduce motion.
     pub reduced_motion: bool,
-    /// Global shake-intensity scale in `0.0..=1.0` — the comfort-slider seam
-    /// (issue #1173 AC5). Multiplies the derived shake magnitude in
-    /// [`shake_magnitude`]; a future accessibility slider drives it.
+    /// Camera/page shake intensity in `0.0..=1.0`. Multiplies the derived
+    /// magnitude in [`shake_magnitude`]; `0.0` is off. Written by
+    /// [`sync_viewscreen_motion`] from whatever the endpoint published.
     pub shake_intensity: f32,
+    /// Shield-hit white-flash intensity in `0.0..=1.0`, the separate lever
+    /// PRD #1418 story 13 asks for. Multiplies the decayed flash in
+    /// [`scaled_flash_intensity`]; `0.0` is off.
+    pub flash_intensity: f32,
+    /// Decorative interface-motion intensity in `0.0..=1.0` — the third lever
+    /// PRD #1418 story 13 asks for, and the only one of the three no renderer
+    /// reads (issue #1428).
+    ///
+    /// It is resolved here anyway, beside the two that are, because the surface
+    /// that needs it is a DOCUMENT the host has to be told about: the native
+    /// Viewscreen draws its frame and its red-alert vignette in
+    /// `gui/viewscreen-hud.html`, which no head injection reaches, so
+    /// `native_host::panes::ultralight::cache_hud_state` reads this field and
+    /// pushes all three bands to that document. On the web the page stamps its
+    /// own root from the endpoint record and nothing reads this.
+    pub decorative_intensity: f32,
 }
 
 impl Default for ViewscreenMotion {
@@ -138,6 +167,8 @@ impl Default for ViewscreenMotion {
         Self {
             reduced_motion: false,
             shake_intensity: DEFAULT_SHAKE_INTENSITY,
+            flash_intensity: DEFAULT_FLASH_INTENSITY,
+            decorative_intensity: DEFAULT_DECORATIVE_INTENSITY,
         }
     }
 }
@@ -254,10 +285,9 @@ impl Plugin for ViewscreenBorderPlugin {
         // WASM host forwards `prefers-reduced-motion` live; the native build
         // seeds the preference once at startup from the environment. Both write
         // the same `ViewscreenMotion` resource the shake/flash systems read.
-        #[cfg(target_arch = "wasm32")]
         app.add_systems(
             Update,
-            sync_reduced_motion
+            sync_viewscreen_motion
                 .before(apply_camera_shake)
                 .before(drive_vignette_intensity),
         );
@@ -266,17 +296,58 @@ impl Plugin for ViewscreenBorderPlugin {
     }
 }
 
-/// WASM: drain the host page's reduced-motion preference into
-/// [`ViewscreenMotion`] each frame (issue #1173). The host page forwards
-/// `prefers-reduced-motion: reduce` through
-/// [`crate::server::bridge::wasm_set_reduced_motion`]; reading it every frame
-/// (rather than once at init) lets an OS-level change take effect without a
-/// page reload.
-#[cfg(target_arch = "wasm32")]
-fn sync_reduced_motion(mut motion: ResMut<ViewscreenMotion>) {
-    let requested = crate::server::bridge::reduced_motion_requested();
-    if motion.reduced_motion != requested {
-        motion.reduced_motion = requested;
+/// Drain what the endpoint has published about motion into [`ViewscreenMotion`]
+/// every frame (issues #1173 and #1428).
+///
+/// Three values arrive from the same seam and are resolved by one rule:
+///
+///  * the reduced-motion preference — on WASM the host page's
+///    `prefers-reduced-motion: reduce` through
+///    [`crate::server::bridge::wasm_set_reduced_motion`]; on native the value
+///    [`init_native_reduced_motion`] seeded once from the environment;
+///  * a published shake intensity, a published flash intensity and a published
+///    decorative-motion intensity, each `Option` because *nothing published* and
+///    *published as zero* are different facts. The first takes the preference's
+///    default; the second is an operator who asked for silence and must not be
+///    overridden by anything.
+///
+/// The third is resolved here rather than where it is consumed so that one rule
+/// answers all three: the native HUD-overlay document's bands would otherwise
+/// disagree with the shader beside them on a display following the machine.
+///
+/// Read every frame rather than once at init so a change — an OS preference
+/// flipped, a Display-tab press — takes effect without a reload. Guarded
+/// assignment, so a frame that changes nothing does not wake Bevy's change
+/// detection for three resources' worth of readers.
+fn sync_viewscreen_motion(mut motion: ResMut<ViewscreenMotion>) {
+    #[cfg(target_arch = "wasm32")]
+    let reduced = crate::server::bridge::reduced_motion_requested();
+    // Native has no live preference query: `init_native_reduced_motion` read the
+    // environment seam once at startup, and that is what the resource holds.
+    #[cfg(not(target_arch = "wasm32"))]
+    let reduced = motion.reduced_motion;
+
+    let (shake, flash, decorative) = crate::server::bridge::published_effect_intensities();
+    let following = if reduced {
+        REDUCED_MOTION_INTENSITY
+    } else {
+        DEFAULT_SHAKE_INTENSITY
+    };
+    let next_shake = shake.unwrap_or(following).clamp(0.0, 1.0);
+    let next_flash = flash.unwrap_or(following).clamp(0.0, 1.0);
+    let next_decorative = decorative.unwrap_or(following).clamp(0.0, 1.0);
+
+    if motion.reduced_motion != reduced {
+        motion.reduced_motion = reduced;
+    }
+    if motion.shake_intensity != next_shake {
+        motion.shake_intensity = next_shake;
+    }
+    if motion.flash_intensity != next_flash {
+        motion.flash_intensity = next_flash;
+    }
+    if motion.decorative_intensity != next_decorative {
+        motion.decorative_intensity = next_decorative;
     }
 }
 
@@ -533,14 +604,15 @@ fn apply_camera_shake(
     // Prune entries outside the rolling window.
     shake.entries.retain(|&(t, _)| now - t <= SHAKE_WINDOW_SECS);
 
-    // Sum hull damage in the window and derive magnitude. Under reduced motion
-    // the pure helper returns exactly `0.0`, so BOTH the native camera-jitter
-    // branch and the WASM whole-page-translate branch below collapse to the
-    // no-shake path (issue #1173). The comfort-slider scale
-    // (`ViewscreenMotion::shake_intensity`) is applied here too, giving future
-    // sliders a seam without touching either apply branch.
+    // Sum hull damage in the window and derive magnitude. The whole
+    // motion-comfort decision is already inside `motion.shake_intensity`
+    // (issue #1428): an intensity of `0.0` — whether the operator turned shake
+    // off outright or is following a preference that asks for reduction —
+    // returns exactly `0.0` here, so BOTH the native camera-jitter branch and
+    // the WASM whole-page-translate branch below collapse to the no-shake path.
+    // Neither branch has a comfort rule of its own to keep in step.
     let total_hull: f32 = shake.entries.iter().map(|&(_, h)| h).sum();
-    let magnitude = shake_magnitude(total_hull, motion.shake_intensity, motion.reduced_motion);
+    let magnitude = shake_magnitude(total_hull, motion.shake_intensity);
 
     if magnitude > 0.01 {
         let mut rng = rand::rng();
@@ -586,11 +658,12 @@ fn drive_vignette_intensity(
         return;
     };
 
-    // Decay flash intensity toward zero, then cap it for reduced motion: a
-    // sudden full-frame white jolt is capped/disabled under the profile
-    // (issue #1173). Normal motion passes the decayed value through unchanged.
+    // Decay flash intensity toward zero, then scale it by the endpoint's flash
+    // setting (issue #1428): a sudden full-frame white jolt is the effect with a
+    // photosensitivity cost, so it has a lever of its own rather than riding the
+    // motion preference. `1.0` passes the decayed value through unchanged.
     flash.intensity = (flash.intensity - time.delta_secs() * FLASH_DECAY_RATE).max(0.0);
-    material.flash_intensity = capped_flash_intensity(flash.intensity, motion.reduced_motion);
+    material.flash_intensity = scaled_flash_intensity(flash.intensity, motion.flash_intensity);
 
     // CSS owns the red-alert vignette now; keep the Bevy ring dark.
     material.intensity = 0.0;
@@ -606,29 +679,33 @@ fn drive_vignette_intensity(
 /// Derive the per-frame hull-shake magnitude — CSS pixels on WASM, world units
 /// on native — from the rolling window's total hull damage (issue #1173).
 ///
-/// `intensity` is the comfort-slider scale ([`ViewscreenMotion::shake_intensity`],
-/// AC5); `reduced` is the reduced-motion profile value and forces the result to
-/// exactly `0.0`. Both render paths call this, so the reduced-motion decision
-/// and the intensity seam apply identically whether the shake moves a camera or
-/// the whole page. Kept pure (no Bevy, no RNG) so `cargo test` covers the
-/// zero-under-reduced and intensity-scaling logic without a GPU.
-pub fn shake_magnitude(total_hull_damage: f32, intensity: f32, reduced: bool) -> f32 {
-    if reduced {
-        return 0.0;
-    }
+/// `intensity` is [`ViewscreenMotion::shake_intensity`], the resolved comfort
+/// scale in `0.0..=1.0` — `0.0` is off and returns exactly `0.0` regardless of
+/// damage. Issue #1428 removed the separate `reduced` flag this used to take:
+/// the reduced-motion preference is now folded into the intensity by
+/// [`sync_viewscreen_motion`], so there is ONE number deciding how far the
+/// picture moves rather than a flag and a scale that could disagree — and an
+/// operator who explicitly keeps the shake on a reduce-motion machine gets it.
+///
+/// Both render paths call this, so the decision applies identically whether the
+/// shake moves a camera or the whole page. Kept pure (no Bevy, no RNG) so
+/// `cargo test` covers it without a GPU.
+pub fn shake_magnitude(total_hull_damage: f32, intensity: f32) -> f32 {
     let saturated = (total_hull_damage / SHAKE_DAMAGE_FULL).clamp(0.0, 1.0);
     saturated * SHAKE_MAX_MAGNITUDE * intensity.clamp(0.0, 1.0)
 }
 
-/// Cap the shield-hit white flash under reduced motion (issue #1173). Normal
-/// motion passes the flash through unchanged; reduced motion clamps it down to
-/// [`REDUCED_MOTION_FLASH_CAP`] (`0.0` = disabled).
-pub fn capped_flash_intensity(raw: f32, reduced: bool) -> f32 {
-    if reduced {
-        raw.min(REDUCED_MOTION_FLASH_CAP)
-    } else {
-        raw
-    }
+/// Scale the shield-hit white flash by the endpoint's flash setting
+/// (issue #1428, replacing issue #1173's reduced-motion cap).
+///
+/// `intensity` is [`ViewscreenMotion::flash_intensity`]: `1.0` passes the
+/// decayed value through unchanged, `0.0` disables the flash outright, and the
+/// values between are a genuinely dimmer jolt rather than a switch. The
+/// reduced-motion preference reaches this the same way it reaches the shake —
+/// as the default intensity a following effect takes — so the old behaviour
+/// (no flash at all under reduce) is what an unpublished endpoint still gets.
+pub fn scaled_flash_intensity(raw: f32, intensity: f32) -> f32 {
+    raw * intensity.clamp(0.0, 1.0)
 }
 
 /// Convert a ship yaw in radians to a 0–359 integer compass bearing.
@@ -1044,66 +1121,73 @@ mod tests {
         );
     }
 
-    // ── reduced motion: shake_magnitude (issue #1173) ────────────────
+    // ── motion comfort: shake_magnitude (issues #1173, #1428) ────────
 
     #[test]
     fn shake_scales_with_damage_and_saturates() {
-        // Normal motion, full intensity: linear up to the full-hit threshold,
-        // then clamped to the max magnitude.
-        let half = shake_magnitude(SHAKE_DAMAGE_FULL / 2.0, 1.0, false);
+        // Full intensity: linear up to the full-hit threshold, then clamped to
+        // the max magnitude.
+        let half = shake_magnitude(SHAKE_DAMAGE_FULL / 2.0, 1.0);
         assert!((half - SHAKE_MAX_MAGNITUDE * 0.5).abs() < 1e-6);
-        let full = shake_magnitude(SHAKE_DAMAGE_FULL, 1.0, false);
+        let full = shake_magnitude(SHAKE_DAMAGE_FULL, 1.0);
         assert!((full - SHAKE_MAX_MAGNITUDE).abs() < 1e-6);
         // Beyond the threshold it does not keep growing.
-        let over = shake_magnitude(SHAKE_DAMAGE_FULL * 10.0, 1.0, false);
+        let over = shake_magnitude(SHAKE_DAMAGE_FULL * 10.0, 1.0);
         assert!((over - SHAKE_MAX_MAGNITUDE).abs() < 1e-6);
     }
 
     #[test]
-    fn shake_is_zero_under_reduced_motion() {
-        // The reduced-motion profile forces exactly zero regardless of damage
-        // or intensity — the AC1 guarantee for BOTH render paths.
-        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL, 1.0, true), 0.0);
-        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL * 100.0, 1.0, true), 0.0);
-        assert_eq!(shake_magnitude(5.0, 0.5, true), 0.0);
+    fn shake_off_is_exactly_zero_at_any_damage() {
+        // Issue #1428: "off" is an intensity of zero and it is absolute — the
+        // AC1 guarantee for BOTH render paths, now reached by one number rather
+        // than by a flag beside a scale.
+        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL, 0.0), 0.0);
+        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL * 100.0, 0.0), 0.0);
+        assert_eq!(shake_magnitude(5.0, 0.0), 0.0);
     }
 
     #[test]
-    fn shake_intensity_is_the_comfort_slider_seam() {
-        // AC5: intensity scales the magnitude linearly, so a future slider can
-        // dial it between full and off without any other change.
-        let base = shake_magnitude(SHAKE_DAMAGE_FULL, 1.0, false);
-        let half = shake_magnitude(SHAKE_DAMAGE_FULL, 0.5, false);
-        let off = shake_magnitude(SHAKE_DAMAGE_FULL, 0.0, false);
+    fn shake_intensity_dials_between_full_and_off() {
+        // The gentler stop is a genuinely smaller movement, not a switch.
+        let base = shake_magnitude(SHAKE_DAMAGE_FULL, 1.0);
+        let half = shake_magnitude(SHAKE_DAMAGE_FULL, 0.5);
         assert!((half - base * 0.5).abs() < 1e-6);
-        assert_eq!(off, 0.0);
         // Out-of-range intensity is clamped, never amplified past the max.
-        let over = shake_magnitude(SHAKE_DAMAGE_FULL, 4.0, false);
+        let over = shake_magnitude(SHAKE_DAMAGE_FULL, 4.0);
         assert!((over - SHAKE_MAX_MAGNITUDE).abs() < 1e-6);
     }
 
     #[test]
     fn no_damage_no_shake() {
-        assert_eq!(shake_magnitude(0.0, 1.0, false), 0.0);
+        assert_eq!(shake_magnitude(0.0, 1.0), 0.0);
     }
 
-    // ── reduced motion: capped_flash_intensity (issue #1173) ─────────
+    // ── motion comfort: scaled_flash_intensity (issues #1173, #1428) ─
 
     #[test]
-    fn flash_passes_through_at_normal_motion() {
-        // AC4: normal motion is unchanged — the decayed value is untouched.
-        assert_eq!(capped_flash_intensity(1.0, false), 1.0);
-        assert_eq!(capped_flash_intensity(0.42, false), 0.42);
-        assert_eq!(capped_flash_intensity(0.0, false), 0.0);
+    fn flash_passes_through_at_full_intensity() {
+        // Nothing asked for less: the decayed value is untouched.
+        assert_eq!(scaled_flash_intensity(1.0, 1.0), 1.0);
+        assert_eq!(scaled_flash_intensity(0.42, 1.0), 0.42);
+        assert_eq!(scaled_flash_intensity(0.0, 1.0), 0.0);
     }
 
     #[test]
-    fn flash_is_capped_under_reduced_motion() {
-        // AC2: the white shield flash is capped/disabled under reduced motion.
-        assert_eq!(capped_flash_intensity(1.0, true), REDUCED_MOTION_FLASH_CAP);
-        assert_eq!(capped_flash_intensity(0.7, true), REDUCED_MOTION_FLASH_CAP);
-        // Already below the cap → unchanged (the min never raises it).
-        assert_eq!(capped_flash_intensity(0.0, true), 0.0);
+    fn flash_off_removes_the_jolt_entirely() {
+        assert_eq!(scaled_flash_intensity(1.0, 0.0), 0.0);
+        assert_eq!(scaled_flash_intensity(0.7, 0.0), 0.0);
+    }
+
+    #[test]
+    fn flash_intensity_dims_rather_than_switching() {
+        // Issue #1428 replaced the all-or-nothing cap with a scale, so the
+        // gentler stop still shows a shield hit — dimmer, not absent. That is
+        // the "essential feedback survives a reduced effect" half of story 15.
+        let dimmed = scaled_flash_intensity(1.0, 0.3);
+        assert!((dimmed - 0.3).abs() < 1e-6);
+        assert!(dimmed > 0.0, "a gentler flash is still a visible flash");
+        // Out-of-range intensity cannot amplify the jolt.
+        assert_eq!(scaled_flash_intensity(1.0, 4.0), 1.0);
     }
 
     #[test]
@@ -1111,13 +1195,147 @@ mod tests {
         let m = ViewscreenMotion::default();
         assert!(!m.reduced_motion);
         assert_eq!(m.shake_intensity, DEFAULT_SHAKE_INTENSITY);
-        // The default must leave shake untouched from the pre-#1173 formula.
+        assert_eq!(m.flash_intensity, DEFAULT_FLASH_INTENSITY);
+        // The default must leave both effects untouched from the pre-#1173
+        // formulas.
         assert!(
-            (shake_magnitude(SHAKE_DAMAGE_FULL, m.shake_intensity, m.reduced_motion)
-                - SHAKE_MAX_MAGNITUDE)
-                .abs()
+            (shake_magnitude(SHAKE_DAMAGE_FULL, m.shake_intensity) - SHAKE_MAX_MAGNITUDE).abs()
                 < 1e-6
         );
+        assert_eq!(scaled_flash_intensity(0.8, m.flash_intensity), 0.8);
+    }
+
+    #[test]
+    fn following_the_preference_is_what_reduced_motion_used_to_do() {
+        // The resolution `sync_viewscreen_motion` performs, stated as the rule
+        // it is: an effect that has published nothing takes the preference's
+        // default, and that default under reduce is exactly zero — so a build
+        // whose page only ever calls `wasm_set_reduced_motion` behaves as it did
+        // before issue #1428 split the lever in three.
+        let following = |reduced: bool| {
+            if reduced {
+                REDUCED_MOTION_INTENSITY
+            } else {
+                DEFAULT_SHAKE_INTENSITY
+            }
+        };
+        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL, following(true)), 0.0);
+        assert_eq!(scaled_flash_intensity(1.0, following(true)), 0.0);
+        assert!(shake_magnitude(SHAKE_DAMAGE_FULL, following(false)) > 0.0);
+        assert_eq!(scaled_flash_intensity(1.0, following(false)), 1.0);
+    }
+
+    #[test]
+    fn an_explicit_intensity_outranks_the_preference_in_both_directions() {
+        // The point of the `Option`: a published value is the operator's, and a
+        // published `0.0` is a choice rather than an absence. Both are honoured
+        // over whatever the machine's preference would have defaulted to.
+        let resolve = |published: Option<f32>, reduced: bool| {
+            let following = if reduced {
+                REDUCED_MOTION_INTENSITY
+            } else {
+                DEFAULT_SHAKE_INTENSITY
+            };
+            published.unwrap_or(following).clamp(0.0, 1.0)
+        };
+        // Keep the shake on a machine whose OS asked to reduce motion.
+        assert!(shake_magnitude(SHAKE_DAMAGE_FULL, resolve(Some(1.0), true)) > 0.0);
+        // Turn it off on a machine whose OS asked for nothing.
+        assert_eq!(
+            shake_magnitude(SHAKE_DAMAGE_FULL, resolve(Some(0.0), false)),
+            0.0
+        );
+        // Publishing nothing follows.
+        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL, resolve(None, true)), 0.0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_decorative_band_the_hud_overlay_is_stamped_from_follows_the_same_rule() {
+        // The third effect has no uniform and no camera, but the native
+        // Viewscreen still has to be told about it: its frame, readout and
+        // red-alert vignette are a separate DOCUMENT, and
+        // `panes::ultralight::cache_hud_state` stamps that document from this
+        // resource. Resolved here, beside the two the renderer owns, so a
+        // display following the machine cannot end up with a glow that
+        // disagrees with the shader behind it.
+        use crate::server::bridge::{
+            clear_native_effect_intensities, set_native_effect_intensities,
+            NATIVE_EFFECT_LATCH_TEST_LOCK,
+        };
+        use bevy::ecs::system::RunSystemOnce;
+
+        let _serialised = NATIVE_EFFECT_LATCH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clear_native_effect_intensities();
+
+        let mut app = App::new();
+        app.init_resource::<ViewscreenMotion>();
+        let resolved = |app: &mut App| {
+            app.world_mut().run_system_once(sync_viewscreen_motion).ok();
+            app.world().resource::<ViewscreenMotion>().clone()
+        };
+
+        // Nothing published, and a machine that asked for nothing: full.
+        let motion = resolved(&mut app);
+        assert_eq!(motion.decorative_intensity, DEFAULT_DECORATIVE_INTENSITY);
+
+        // An explicit off is the operator's, and beats the machine either way.
+        set_native_effect_intensities(Some(100), Some(100), Some(0));
+        assert_eq!(resolved(&mut app).decorative_intensity, 0.0);
+
+        // Following, on a machine that asked to reduce, is exactly zero — what
+        // `data-reduced-motion` did on its own before the lever was split.
+        clear_native_effect_intensities();
+        app.world_mut()
+            .resource_mut::<ViewscreenMotion>()
+            .reduced_motion = true;
+        assert_eq!(
+            resolved(&mut app).decorative_intensity,
+            REDUCED_MOTION_INTENSITY
+        );
+
+        // …and an explicit KEEP survives that same machine, which is the
+        // direction a one-lever build could not express.
+        set_native_effect_intensities(None, None, Some(100));
+        assert_eq!(resolved(&mut app).decorative_intensity, 1.0);
+
+        clear_native_effect_intensities();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_native_latch_carries_a_choice_and_a_reset() {
+        use crate::server::bridge::{
+            published_effect_intensities, set_native_effect_intensities,
+            NATIVE_EFFECT_LATCH_TEST_LOCK,
+        };
+
+        // The latch is process-global, and the host-lobby test that seeds it
+        // from a saved record shares it; one lock keeps the two off each other.
+        let _serialised = NATIVE_EFFECT_LATCH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // Whole percent in, fractions out — the shape the setting already
+        // crosses the page/host bridge in (issue #1428).
+        set_native_effect_intensities(Some(30), Some(0), Some(40));
+        let (shake, flash, decorative) = published_effect_intensities();
+        assert!((shake.expect("a published shake") - 0.3).abs() < 1e-6);
+        assert_eq!(
+            flash,
+            Some(0.0),
+            "a published zero is a choice, not an absence"
+        );
+        // The third effect rides the same latch but is nobody's uniform: it is
+        // the band the native HUD overlay's document is stamped with.
+        assert!((decorative.expect("a published band") - 0.4).abs() < 1e-6);
+
+        // A per-setting reset publishes nothing again, so the effect goes back
+        // to following the machine rather than sticking at its last number.
+        set_native_effect_intensities(None, None, None);
+        assert_eq!(published_effect_intensities(), (None, None, None));
     }
 
     // ── compute_hud_state ────────────────────────────────────────────

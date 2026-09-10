@@ -868,10 +868,25 @@
                   inset 0 0 80px 0 rgba(var(--rgb-fire), 0.18);
       opacity: 0;
       transition: opacity .25s ease;
+      /* This loop's authored period and its RESOLVED one, named once so both
+         rules that need the answer — the declaration below, and the flash
+         re-assertion in gui/tokens.css that holds this loop against the
+         decorative-motion sweep (issue #1428) — read the same number rather
+         than each writing the division out and drifting. */
+      --a11y-flash-period: 1.3s;
+      --a11y-flash-duration: calc(var(--a11y-flash-period) / max(var(--a11y-flash-scale, 1), 0.05));
     }
     #hud-overlay.alert-on #hud-vignette {
       opacity: 1;
       animation: hud-pulse 1.3s ease-in-out infinite;
+      /* The flash effect's own intensity (issue #1428). A gentler flash pulses
+         SLOWER as well as less often: the period divides by the resolved
+         `--a11y-flash-scale`, so the Reduce effects value (0.3) turns a 1.3s
+         throb into a four-second breath. Floored at 0.05 so an intensity of 0 —
+         which the band rule below stops outright — cannot divide by zero. Unset
+         (no endpoint record applied yet) the var is 1 and this is the 1.3s it
+         has always been. */
+      animation-duration: var(--a11y-flash-duration);
     }
     /* Reduced motion (PRD #1023 module 3). The viewscreen is a television
        in a room full of people, so a looping glow is exactly what a viewer
@@ -880,9 +895,31 @@
        red-alert vignette keeps its full opacity, the spinner keeps its arc.
        The lobby ready badge's half of this block moved to gui/host-lobby.css
        with the rest of the lobby's rules (issue #1325). */
+    /* Issue #1428 split this room's one motion cue into three preferences the
+       Display tab sets separately, so each half of the pair below now lands on
+       its OWN band — the flash on `data-flash`, the spinner on
+       `data-decorative-motion` — and an operator who cannot take the red-alert
+       throb keeps the spinner that tells them the scenario is still loading.
+
+       Each loop is still held at the frame that carries its meaning rather than
+       switched off: the vignette keeps its full opacity, so a room reading a
+       ship at red alert off this screen reads it exactly as before, and the
+       spinner keeps its arc.
+
+       The `@media` pair stays as the pre-JS fallback, gated on the band
+       attribute being absent: `gui/viewscreen-presentation.js` stamps both the
+       moment the settings mount, and once it has, the endpoint's own record is
+       the authority — including when it says to KEEP an effect this machine's
+       OS asked to reduce. */
+    :root[data-flash="off"] #hud-overlay.alert-on #hud-vignette {
+      animation: none;
+      opacity: 1;
+    }
+    :root[data-decorative-motion="off"] .spinner-ring { animation: none; }
+
     @media (prefers-reduced-motion: reduce) {
-      .spinner-ring { animation: none; }
-      #hud-overlay.alert-on #hud-vignette {
+      :root:not([data-decorative-motion]) .spinner-ring { animation: none; }
+      :root:not([data-flash]) #hud-overlay.alert-on #hud-vignette {
         animation: none;
         opacity: 1;
       }
@@ -2471,7 +2508,12 @@
            Also hosts the viewscreen border frame (corners/edges/caps/status-strip)
            from raw/gui/borders/demo.html — assets served from gui/borders/. -->
       <div id="hud-overlay">
-        <div id="hud-vignette"></div>
+        <!-- `data-effect="flash"` claims this loop for the FLASH preference
+             (issue #1428): gui/tokens.css's decorative-motion sweep is `*`-wide
+             and would otherwise still the red-alert throb for an operator who
+             explicitly kept flashes on. The marker is what the re-assertion rule
+             there selects. -->
+        <div id="hud-vignette" data-effect="flash"></div>
 
         <!-- Viewscreen border frame (tiled edges) -->
         <div class="vs-edge top"></div>
@@ -3185,6 +3227,21 @@
       shell.style.transform = 'translate(' + x + 'px,' + y + 'px)';
       shell.style.willChange = 'transform';
     }
+  };
+
+  /**
+   * Re-resolve this endpoint's presentation record and push its two renderer
+   * effects across the wasm seam (issue #1428).
+   *
+   * The record and the resolution both belong to
+   * `gui/viewscreen-presentation.js`; this only says WHEN. Two moments need it
+   * that the settings panel cannot cover: the wasm bindings arriving after the
+   * cog mounted, and the machine's `prefers-reduced-motion` changing under a
+   * record that follows it.
+   */
+  window.__republishViewscreenMotion = function() {
+    const settings = window.__serverSettings;
+    if (settings && settings.presentation) settings.presentation.apply();
   };
 
   window.__updateHud = function(json) {
@@ -7705,6 +7762,15 @@ function finishInit() {
   // reduced-motion smoke prove the value reached the WASM render path.
   window.wasm_set_reduced_motion = wasmBindings.wasm_set_reduced_motion;
   window.wasm_is_reduced_motion = wasmBindings.wasm_is_reduced_motion;
+  // The two effects the RENDERER owns, separately (issue #1428, PRD #1418
+  // story 13): this display's camera/page shake and its shield-flash intensity.
+  // Siblings of the pair above and published the same way, so a Display-tab
+  // press is on the next frame with no reload; the readbacks are what a smoke
+  // spec uses to prove the choice actually crossed into the render path.
+  window.wasm_set_shake_intensity = wasmBindings.wasm_set_shake_intensity;
+  window.wasm_set_flash_intensity = wasmBindings.wasm_set_flash_intensity;
+  window.wasm_shake_intensity = wasmBindings.wasm_shake_intensity;
+  window.wasm_flash_intensity = wasmBindings.wasm_flash_intensity;
   // Performance capture (issue #868). Read-only: it returns what the wasm
   // collector has sampled so far and changes nothing in the running page.
   window.wasm_perf_capture = wasmBindings.wasm_perf_capture;
@@ -8165,13 +8231,28 @@ async function startServer() {
   if (typeof wasm_set_reduced_motion === 'function' && typeof window.matchMedia === 'function') {
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     wasm_set_reduced_motion(motionQuery.matches);
-    const onMotionChange = (e) => wasm_set_reduced_motion(e.matches);
+    const onMotionChange = (e) => {
+      wasm_set_reduced_motion(e.matches);
+      // The endpoint's own effect settings resolve AGAINST this preference, so
+      // an OS change has to re-resolve them — otherwise a display following the
+      // machine would keep the intensities it worked out at load.
+      window.__republishViewscreenMotion();
+    };
     if (typeof motionQuery.addEventListener === 'function') {
       motionQuery.addEventListener('change', onMotionChange);
     } else if (typeof motionQuery.addListener === 'function') {
       motionQuery.addListener(onMotionChange); // older WebKit
     }
   }
+
+  // This display's own shake and flash settings (issue #1428). The settings cog
+  // mounts — and applies the saved record to this document's root — long before
+  // the wasm bindings exist, so the CSS half of the record is already in force
+  // and the RENDERER half has had nothing to publish to. Re-apply here, once the
+  // bindings are attached and before `wasm_init`, so the first drawn frame
+  // already honours what the room chose; after this the panel's own writes go
+  // straight through `publishViewscreenMotion`.
+  window.__republishViewscreenMotion();
 
   // Logging: ?log= sets category levels, ?log_entity= restricts to named
   // entities. Same syntax as phoenix-headless --log / --log-entity, parsed by
@@ -8414,7 +8495,15 @@ window.addEventListener('TrunkApplicationStarted', () => {
        window binding published by the classic scripts above. -->
   <script type="module">
     import { mountServerSettings } from './gui/server-settings.js';
-    mountServerSettings();
+    // Held on `window` (issue #1428) so the classic scripts above can ask this
+    // endpoint's presentation record to re-resolve itself: the cog mounts after
+    // them, and both the wasm bindings arriving and the machine's motion
+    // preference changing have to reach the renderer through this same record
+    // rather than through a second copy of the resolution.
+    window.__serverSettings = mountServerSettings();
+    if (typeof window.__republishViewscreenMotion === 'function') {
+      window.__republishViewscreenMotion();
+    }
   </script>
 </body>
 </html>

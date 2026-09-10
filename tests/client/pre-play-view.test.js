@@ -918,8 +918,15 @@ describe('client.html, the loading surface it draws', () => {
       );
       expect(rule, `no .spinner-ring rule for #${surface}`).not.toBeNull();
       expect(rule[1]).toMatch(/animation:\s*spin/);
+      // Issue #1428 gave decorative motion a control of its own, so the hold
+      // hangs off that band; the older attribute keeps its half, gated on the
+      // band being absent, for the window before a profile has been applied.
       expect(CLIENT_HTML).toContain(
-        `:root[data-reduced-motion="reduce"] #${surface} .spinner-ring`,
+        `:root[data-decorative-motion="off"] #${surface} .spinner-ring`,
+      );
+      expect(CLIENT_HTML).toContain(
+        ':root[data-reduced-motion="reduce"]:not([data-decorative-motion]) '
+        + `#${surface} .spinner-ring`,
       );
     }
   });
@@ -944,9 +951,9 @@ describe('client.html, the loading surface it draws', () => {
     }
   });
 
-  it('stops the indeterminate sweep under reduced motion, and keeps the bar', () => {
+  it('stops the indeterminate sweep when interface animation is off, and keeps the bar', () => {
     const override = CLIENT_HTML.match(
-      /:root\[data-reduced-motion="reduce"\] \.ld-bar\.indet \.ld-fill \{([^}]*)\}/,
+      /:root\[data-decorative-motion="off"\] \.ld-bar\.indet \.ld-fill \{([^}]*)\}/,
     );
     expect(override, 'the sweep has no reduced-motion counterpart').not.toBeNull();
     expect(override[1]).toMatch(/animation:\s*none/);

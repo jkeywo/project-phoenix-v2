@@ -184,9 +184,11 @@ describe('explicit choices, system defaults and the difference between them', ()
     const p = emptyAccessibilityProfile();
     expect(p.presentation).toEqual({
       textScale: FOLLOW_OS, contrast: FOLLOW_OS, reducedMotion: FOLLOW_OS,
+      shake: FOLLOW_OS, flash: FOLLOW_OS, decorativeMotion: FOLLOW_OS,
     });
     expect(resolveEffects(p, {})).toEqual({
       textScale: TEXT_SCALE_DEFAULT, contrast: false, reducedMotion: false,
+      shake: 1, flash: 1, decorativeMotion: 1,
     });
   });
 
@@ -195,6 +197,8 @@ describe('explicit choices, system defaults and the difference between them', ()
     // Follow-system adopts all three.
     expect(resolveEffects(emptyAccessibilityProfile(), os)).toEqual({
       textScale: 1.25, contrast: true, reducedMotion: true,
+      // …including the three effects issue #1428 split out, which follow it.
+      shake: 0, flash: 0, decorativeMotion: 0,
     });
     // Explicit values win, including explicitly turning an effect OFF that the
     // system asked for.
@@ -203,6 +207,9 @@ describe('explicit choices, system defaults and the difference between them', ()
     p = profileWithPresentation(p, 'reducedMotion', EXPLICIT_ON);
     expect(resolveEffects(p, os)).toEqual({
       textScale: 2.0, contrast: false, reducedMotion: true,
+      // Explicitly asking to reduce motion turns the three effects off, exactly
+      // as an OS asking for it does — one resolved preference, one answer.
+      shake: 0, flash: 0, decorativeMotion: 0,
     });
   });
 
@@ -308,10 +315,14 @@ describe('resets are scoped (PRD #1418 story 17)', () => {
     expect(after.assistance['tactical.target-selection']).toBe('request');
   });
 
-  it('Reset all returns the three presentation effects and nothing else', () => {
+  it('Reset all returns every presentation effect and nothing else', () => {
     const after = profileWithPresentationDefaults(loaded());
+    // Six effects since issue #1428, and the scope held without anybody adding
+    // them to a list here: `profileWithPresentationDefaults` iterates
+    // PRESENTATION_EFFECTS, which is where the three arrived.
     expect(after.presentation).toEqual({
       textScale: FOLLOW_OS, contrast: FOLLOW_OS, reducedMotion: FOLLOW_OS,
+      shake: FOLLOW_OS, flash: FOLLOW_OS, decorativeMotion: FOLLOW_OS,
     });
     // Assistance overrides are not presentation and are not swept up.
     expect(after.assistance['tactical.target-selection']).toBe('request');

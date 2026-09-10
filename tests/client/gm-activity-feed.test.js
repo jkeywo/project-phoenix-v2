@@ -218,6 +218,49 @@ function pauseGmEvent(data = {}, action = {}) {
   }, { ships: [], links: [] });
 }
 
+/** One ordered faction pair's hostility (issue #1442), the typed adapter. */
+function setFactionHostility(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' },
+      correlation: 'faction-1',
+      action: {
+        type: 'set_faction_hostility',
+        faction: 'Alliance',
+        enemy: 'Harrow',
+        hostile: true,
+        ...action,
+      },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 9, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
+/** One equal GM's reversal of another's earlier action (issue #1442). */
+function undoGmAction(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-beta', name: 'Blake' },
+      correlation: 'undo-1',
+      action: {
+        type: 'undo_gm_action',
+        original_operator: { id: 'gm-alpha', name: 'Morgan' },
+        original_correlation: 'faction-1',
+        ...action,
+      },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 10, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
 function allCategories() {
   return [
     damage(),
@@ -444,6 +487,50 @@ describe('GM activity feed pure adapter', () => {
       .toBeUndefined();
     expect(parseGmActivityFeed(payload([pauseGmEvent({}, { event: '' })]))).toBeUndefined();
   });
+
+  it('accepts a faction relation and an attributed undo without a pause fallback', () => {
+    const parsed = parseGmActivityFeed(payload([
+      setFactionHostility(),
+      // A refusal moved no pair, so it records the faction alone.
+      setFactionHostility(
+        { correlation: 'faction-2', outcome: 'refused', reason: 'unknown-faction' },
+        { enemy: undefined, hostile: false },
+      ),
+      undoGmAction(),
+    ]));
+    expect(parsed.entries.map((row) => row.detail.data.action)).toEqual([
+      {
+        type: 'set_faction_hostility', faction: 'Alliance', enemy: 'Harrow', hostile: true,
+      },
+      { type: 'set_faction_hostility', faction: 'Alliance', hostile: false },
+      {
+        type: 'undo_gm_action',
+        original_operator: { id: 'gm-alpha', name: 'Morgan' },
+        original_correlation: 'faction-1',
+      },
+    ]);
+    // Neither family is the absolute session toggle, so neither may parse into
+    // one: `active` is not part of the contract and cannot ride along.
+    for (const row of parsed.entries) {
+      expect(row.detail.data.action).not.toHaveProperty('active');
+    }
+    // The same payload-wide strictness every other family gets.
+    expect(parseGmActivityFeed(payload([setFactionHostility({}, { faction: '' })])))
+      .toBeUndefined();
+    expect(parseGmActivityFeed(payload([setFactionHostility({}, { hostile: 'yes' })])))
+      .toBeUndefined();
+    expect(parseGmActivityFeed(payload([setFactionHostility({}, { enemy: '' })])))
+      .toBeUndefined();
+    // An undo that cannot name WHOSE action it reversed is rejected rather
+    // than rendered half-attributed: both operators are the point of the row.
+    expect(parseGmActivityFeed(payload([undoGmAction({}, { original_operator: undefined })])))
+      .toBeUndefined();
+    expect(parseGmActivityFeed(payload([undoGmAction({}, {
+      original_operator: { id: '', name: 'Morgan' },
+    })]))).toBeUndefined();
+    expect(parseGmActivityFeed(payload([undoGmAction({}, { original_correlation: '' })])))
+      .toBeUndefined();
+  });
 });
 
 describe('GM activity feed presentation and selection links', () => {
@@ -584,6 +671,56 @@ describe('GM activity feed presentation and selection links', () => {
       .toContain('{palette}');
     expect(realStrings.has('server.gm.activity.action_reason.unknown-gm-palette-entry'))
       .toBe(true);
+  });
+
+  it('names the moved faction pair and both operators of an undo (issue #1442)', () => {
+    const withdrawn = setFactionHostility({ correlation: 'faction-2' }, { hostile: false });
+    const refused = setFactionHostility(
+      { correlation: 'faction-3', outcome: 'refused', reason: 'unknown-faction' },
+      { enemy: undefined },
+    );
+    expect(harness.feed.update(payload(
+      [setFactionHostility(), withdrawn, refused, undoGmAction()],
+      16,
+    ))).toBe(true);
+    const rows = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rows).toHaveLength(4);
+    expect(rows[0].textContent)
+      .toContain('server.gm.activity.action.faction_hostile:Alliance/Harrow');
+    // Standing a hostility down is its own sentence, not the same one negated.
+    expect(rows[1].textContent)
+      .toContain('server.gm.activity.action.faction_friendly:Alliance/Harrow');
+    // A refusal moved no pair, so it names the faction alone rather than
+    // claiming a relation against an enemy nobody was named against.
+    expect(rows[2].textContent)
+      .toContain('server.gm.activity.action.faction_hostile_unnamed:Alliance/');
+    expect(rows[2].textContent)
+      .toContain('server.gm.activity.action_reason.unknown-faction');
+    // Both operators on the one shared row: the undoing GM is the row's own
+    // operator and the one whose action was reversed is named in the sentence.
+    expect(rows[3].textContent)
+      .toContain('server.gm.activity.action.undo_gm_action:Morgan/faction-1');
+    expect(rows[3].textContent).toContain('Blake');
+    // The bug this pins: before these families had their own arms they fell
+    // through to the catch-all and every GM read "Morgan paused the session"
+    // for a faction change or an undo.
+    for (const row of rows) {
+      expect(row.textContent).not.toContain('server.gm.activity.action.pause:');
+      expect(row.textContent).not.toContain('server.gm.activity.action.resume:');
+    }
+    expect(realStrings.get('server.gm.activity.action.faction_hostile')).toContain('{enemy}');
+    expect(realStrings.get('server.gm.activity.action.faction_friendly')).toContain('{enemy}');
+    expect(realStrings.get('server.gm.activity.action.faction_hostile_unnamed'))
+      .toContain('{faction}');
+    expect(realStrings.get('server.gm.activity.action.faction_friendly_unnamed'))
+      .toContain('{faction}');
+    expect(realStrings.get('server.gm.activity.action.undo_gm_action')).toContain('{operator}');
+    for (const reason of [
+      'unknown-faction', 'unknown-gm-action', 'inverse-unsupported',
+      'inverse-facts-mismatch', 'affected-state-changed', 'already-inverted',
+    ]) {
+      expect(realStrings.has(`server.gm.activity.action_reason.${reason}`)).toBe(true);
+    }
   });
 
   it('names Objective actions with scope and refusal copy without borrowing an event verb', () => {

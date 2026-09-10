@@ -60,9 +60,10 @@ describe('server GM session page seam', () => {
 
   it('wires the gm_session Host Channel into accessible page controls', () => {
     expect(WORKSPACE).toContain("import { createGmSessionControls } from './gm-session-controls.js'");
-    // The channel still reaches the Session controls first; the saved-history
-    // reader (issue #1441) rides the same payload after it.
-    expect(WORKSPACE).toMatch(/gm_session:\s+function\(p\) \{ gmSessionControls\.update\(p\);/);
+    // The channel still reaches the Session controls first; the faction control
+    // and the saved-history reader (issues #1441/#1442) ride the same payload
+    // after it, rather than opening channels of their own.
+    expect(WORKSPACE).toMatch(/gm_session:\s+function\(p\) \{\s+gmSessionControls\.update\(p\);\s+gmFactionPanel\.update\(p\);\s+gmJournalPanel\.update\(p\);/);
     expect(WORKSPACE).toContain('win.__hostSemanticActions = hostSemanticActions');
     expect(WORKSPACE).toContain('win.__hostActionFeedback = hostActionFeedback');
     expect(WORKSPACE).toContain('win.__hostGmSessionReset = gmSessionControls.reset');

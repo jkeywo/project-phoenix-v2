@@ -2067,8 +2067,29 @@
           <p id="gm-despawn-feedback" role="status" aria-live="polite"></p>
           <ol id="gm-despawn-results" aria-live="polite"></ol>
         </section>
+        <!-- GM faction relations (issue #1442). A narrow adapter over the
+             authored faction registry: two authored names and one absolute
+             hostility value, never free text and never a UUID. -->
+        <section id="gm-faction-panel" role="region" aria-labelledby="gm-faction-heading">
+          <h2 id="gm-faction-heading" data-i18n="server.gm.faction.heading"></h2>
+          <p id="gm-faction-empty" data-i18n="server.gm.faction.empty"></p>
+          <div id="gm-faction-controls">
+            <label class="gm-activity-filter" for="gm-faction-source">
+              <span data-i18n="server.gm.faction.source"></span>
+              <select id="gm-faction-source"></select>
+            </label>
+            <label class="gm-activity-filter" for="gm-faction-enemy">
+              <span data-i18n="server.gm.faction.enemy"></span>
+              <select id="gm-faction-enemy"></select>
+            </label>
+          </div>
+          <p id="gm-faction-relation"></p>
+          <button id="gm-faction-apply" type="button"></button>
+          <p id="gm-faction-feedback" role="status" aria-live="polite"></p>
+        </section>
         <!-- Saved GM action history (issue #1441). A reader over the ONE
-             canonical journal published on `gm_session`; it submits nothing. -->
+             canonical journal published on `gm_session`; #1442 adds the Undo
+             control, which submits an ordinary typed GM action. -->
         <section id="gm-journal" role="region" aria-labelledby="gm-journal-heading">
           <h2 id="gm-journal-heading" data-i18n="server.gm.journal.heading"></h2>
           <div id="gm-journal-filters">
@@ -2099,6 +2120,8 @@
             <p id="gm-journal-detail-target"></p>
             <p id="gm-journal-detail-outcome"></p>
             <div id="gm-journal-inverse"></div>
+            <button id="gm-journal-undo" type="button" hidden></button>
+            <p id="gm-journal-undo-feedback" role="status" aria-live="polite"></p>
           </div>
         </section>
         <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
@@ -4083,6 +4106,33 @@
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine', operator_id: operator.id,
         correlation: request.correlation, target: request.target, doctrine: request.doctrine })) !== false;
+    };
+    window.__hostSetFactionHostility = function(request) {
+      const operator = window.__hostLocalGm();
+      if (!operator || !request || request.operator_id !== operator.id
+          || typeof request.faction !== 'string' || typeof request.enemy !== 'string'
+          || typeof request.hostile !== 'boolean'
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_faction_hostility',
+        operator_id: operator.id, correlation: request.correlation, faction: request.faction,
+        enemy: request.enemy, hostile: request.hostile })) !== false;
+    };
+    // The inverse (issue #1442). `expected` is the `affected` object the journal
+    // projection published, forwarded VERBATIM: this seam must not reshape it,
+    // because the canonical reducer compares it against the recorded fact to
+    // decide whether the page was reading the truth.
+    window.__hostUndoGmAction = function(request) {
+      const operator = window.__hostLocalGm();
+      if (!operator || !request || request.operator_id !== operator.id
+          || typeof request.original !== 'string' || !request.original
+          || typeof request.original_operator !== 'string' || !request.original_operator
+          || !Number.isSafeInteger(request.original_sequence) || request.original_sequence < 0
+          || !request.expected || typeof request.expected !== 'object'
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ action: 'undo_gm_action',
+        operator_id: operator.id, correlation: request.correlation, original: request.original,
+        original_operator: request.original_operator,
+        original_sequence: request.original_sequence, expected: request.expected })) !== false;
     };
     window.__hostDespawnEntity = function(request) {
       const operator = localGm();

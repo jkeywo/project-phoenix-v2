@@ -259,6 +259,8 @@ pub fn validate_station_action(
         | GmAction::SetSystemDisabled { .. }
         | GmAction::TransmitComms { .. }
         | GmAction::SetEventPaused { .. }
+        | GmAction::SetFactionHostility { .. }
+        | GmAction::UndoGmAction { .. }
         | GmAction::ArmGmEventSkip { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
         | GmAction::IssueStationCommand { station, .. } => station,
@@ -310,6 +312,8 @@ pub fn validate_station_action(
         | GmAction::SetSystemDisabled { .. }
         | GmAction::TransmitComms { .. }
         | GmAction::SetEventPaused { .. }
+        | GmAction::SetFactionHostility { .. }
+        | GmAction::UndoGmAction { .. }
         | GmAction::ArmGmEventSkip { .. } => unreachable!(),
     }
 }
@@ -1264,6 +1268,8 @@ station = "tactical"
                     comms_recipients: None,
                     observer: None,
                     npc_doctrine: None,
+                    affected: None,
+                    undo_of: None,
                 })
                 .unwrap();
             let provisional_log = journal.applied_log();

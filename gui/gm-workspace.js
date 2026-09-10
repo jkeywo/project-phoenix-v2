@@ -22,6 +22,7 @@ import { createGmAttentionPanel } from './gm-attention-panel.js';
 import { createGmAttentionFilters } from './gm-attention-filters.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
 import { createGmJournalPanel } from './gm-journal-panel.js';
+import { createGmFactionPanel } from './gm-faction-panel.js';
 import {
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
@@ -90,11 +91,23 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   // journal the Session controls settle their own results against — it rides
   // the `gm_session` projection rather than opening a second channel, because
   // it is not a second log.
+  //
+  // It also carries the Undo control (issue #1442): the inverse is an ordinary
+  // typed GM action, so it is submitted through the same late-bound host
+  // adapter every other panel uses and its answer arrives as a row of this same
+  // journal. The confirmation controller is bound below, once it exists.
+  let gmConfirmationsRef = null;
   const gmJournalPanel = createGmJournalPanel({
     doc: doc,
     t,
     getOperatorName: (id) => typeof win.__hostGmName === 'function'
       ? win.__hostGmName(id) : id,
+    getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
+    submitUndo: (request) => typeof win.__hostUndoGmAction === 'function'
+      && win.__hostUndoGmAction(request),
+    confirmAction: (request) => (gmConfirmationsRef
+      ? gmConfirmationsRef.request(request)
+      : request.accept()),
   });
   win.__hostGmJournalState = gmJournalPanel.state;
   win.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
@@ -104,6 +117,19 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   try { operatorStorage = win.localStorage; } catch (_) { /* Settings reports unavailable storage. */ }
   const gmConfirmationProfile = createGmConfirmationProfile({ storage: operatorStorage, registry: hostSemanticActions });
   const gmConfirmations = createGmConfirmationController({ doc: doc, t, profile: gmConfirmationProfile });
+  gmConfirmationsRef = gmConfirmations;
+  // The faction-relation control (issue #1442): the only GM surface that can
+  // move a hostility, and the source of the actions the journal's Undo
+  // reverses. It reads the authored roster off this same `gm_session` payload.
+  const gmFactionPanel = createGmFactionPanel({
+    doc: doc,
+    t,
+    getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
+    submit: (request) => typeof win.__hostSetFactionHostility === 'function'
+      && win.__hostSetFactionHostility(request),
+    confirmAction: gmConfirmations.request,
+  });
+  win.__hostGmFactionState = gmFactionPanel.state;
   win.__hostGmConfirmationProfile = gmConfirmationProfile;
   win.__hostGmConfirmations = gmConfirmations;
   hostSemanticActions.setConfirmationHandler(({ definition, accept }) => gmConfirmations.request({
@@ -314,7 +340,11 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
         shell.refresh(null, gmStationPuppet.state().projection);
       }
     },
-    gm_session:   function(p) { gmSessionControls.update(p); gmJournalPanel.update(p); },
+    gm_session:   function(p) {
+      gmSessionControls.update(p);
+      gmFactionPanel.update(p);
+      gmJournalPanel.update(p);
+    },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
     gm_attention: function(p) { gmAttentionPanel.update(p); },
@@ -330,11 +360,14 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmCommsPanel.refreshAdmission();
       gmSpawnPanel.refreshAdmission();
       gmStationPuppet.refresh();
+      gmFactionPanel.refreshAdmission();
+      gmJournalPanel.refreshAdmission();
       win.__hostGmEffectRefresh();
     },
     reset() {
       gmAttentionPanel.reset();
       gmSessionControls.reset();
+      gmFactionPanel.reset();
       gmJournalPanel.reset();
       win.__hostGmMissionReset();
       gmCommsPanel.reset();

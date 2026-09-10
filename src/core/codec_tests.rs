@@ -1223,6 +1223,100 @@ fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
     );
 }
 
+/// The two action families issue #1442 added cross the Host Channel in their
+/// own vocabulary, and survive the round trip unchanged.
+///
+/// Pinned here beside the shape test above because this is the seam the browser
+/// parses: `gui/gm-activity-feed.js` accepts exactly these keys, and a family
+/// that silently reshaped — or fell back onto `set_session_paused`, which is
+/// what it did before it had an arm of its own — would tell every GM that a
+/// colleague paused the session when they changed a faction relation.
+#[test]
+fn encode_gm_activity_feed_pins_the_faction_and_inverse_action_shapes() {
+    use crate::gm_activity::{
+        GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityDetail,
+        GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityPublicIdentity,
+    };
+    let alex = GmActivityPublicIdentity {
+        id: "gm-alex".into(),
+        name: "Alex".into(),
+    };
+    let row = |correlation: &str,
+               operator: &GmActivityPublicIdentity,
+               action: GmActivityAction,
+               outcome: GmActivityActionOutcome,
+               reason: Option<&str>| GmActivityEntry {
+        tick: 42,
+        category: GmActivityCategory::GmAction,
+        ships: vec![],
+        links: vec![],
+        detail: GmActivityDetail::GmAction(GmActivityGmAction {
+            operator: operator.clone(),
+            correlation: correlation.into(),
+            action,
+            outcome,
+            reason: reason.map(str::to_owned),
+            order: Some(crate::gm_action::GmActionOrder::new(
+                crate::command_admission::log::HostSlot(1),
+                9,
+            )),
+        }),
+    };
+    let payload = GmActivityFeedPayload {
+        capacity: 128,
+        entries: vec![
+            row(
+                "faction-1",
+                &alex,
+                GmActivityAction::SetFactionHostility {
+                    faction: "Alliance".into(),
+                    enemy: Some("Harrow".into()),
+                    hostile: true,
+                },
+                GmActivityActionOutcome::Applied,
+                None,
+            ),
+            // A refusal moved no pair, so `enemy` is absent rather than empty —
+            // and every pre-#1442 fact keeps its exact shape for the same
+            // `skip_serializing_if` reason.
+            row(
+                "faction-2",
+                &alex,
+                GmActivityAction::SetFactionHostility {
+                    faction: "Alliance".into(),
+                    enemy: None,
+                    hostile: false,
+                },
+                GmActivityActionOutcome::Refused,
+                Some("unknown-faction"),
+            ),
+            row(
+                "undo-1",
+                &GmActivityPublicIdentity {
+                    id: "gm-blake".into(),
+                    name: "Blake".into(),
+                },
+                GmActivityAction::UndoGmAction {
+                    original_operator: alex.clone(),
+                    original_correlation: "faction-1".into(),
+                },
+                GmActivityActionOutcome::Applied,
+                None,
+            ),
+        ],
+    };
+    let wire = encode_gm_activity_feed(&payload).unwrap();
+    assert_eq!(
+        wire,
+        r#"{"capacity":128,"entries":[{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alex","name":"Alex"},"correlation":"faction-1","action":{"type":"set_faction_hostility","faction":"Alliance","enemy":"Harrow","hostile":true},"outcome":"applied","reason":null,"order":{"sequence":9,"origin":1}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alex","name":"Alex"},"correlation":"faction-2","action":{"type":"set_faction_hostility","faction":"Alliance","hostile":false},"outcome":"refused","reason":"unknown-faction","order":{"sequence":9,"origin":1}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-blake","name":"Blake"},"correlation":"undo-1","action":{"type":"undo_gm_action","original_operator":{"id":"gm-alex","name":"Alex"},"original_correlation":"faction-1"},"outcome":"applied","reason":null,"order":{"sequence":9,"origin":1}}}}]}"#
+    );
+    // Round trip: what a peer reads back is what was published, including the
+    // absent `enemy` a refusal carries.
+    let decoded: GmActivityFeedPayload = serde_json::from_str(&wire).unwrap();
+    assert_eq!(decoded, payload);
+    assert!(!wire.contains("set_session_paused"));
+}
+
 /// `encode_chatter` must JSON-escape quotes/backslashes in the labels and in
 /// any text carried inside the payload — the pre-#818 hand-rolled `format!`
 /// encoder did this by hand; serde now owns it. Round-trips through

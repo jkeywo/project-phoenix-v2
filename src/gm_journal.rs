@@ -18,9 +18,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::gm_action::{
-    GmActionKind, GmActionLog, GmActionOutcome, GmActionRefusalReason, LoggedGmAction,
-    MAX_GM_ACTIONS_PER_RUN,
+    GmActionKind, GmActionLog, GmActionOutcome, GmActionRefusalReason, GmAffectedField,
+    GmUndoReference, LoggedGmAction, MAX_GM_ACTIONS_PER_RUN,
 };
+
+/// `skip_serializing_if` for a `bool` that is absent when false.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 /// How many of the journal's terminal facts one projection carries.
 ///
@@ -51,11 +56,37 @@ pub struct GmJournalEntry {
     pub outcome: GmActionOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<GmActionRefusalReason>,
+    /// The EXACT field this action changed and the values on either side of it
+    /// (issue #1442), for the families that have a typed inverse.
+    ///
+    /// Present only on an `Applied` fact of such a family — the journal records
+    /// it nowhere else, because nowhere else is there a true pair to record.
+    /// The page echoes this value back verbatim when it asks for an inverse,
+    /// which is what lets the canonical reducer refuse a request built on a
+    /// stale reading rather than acting on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affected: Option<GmAffectedField>,
+    /// The original action this fact reversed (issue #1442), when it is itself
+    /// an inverse. Its operator id is the SECOND operator on that history: the
+    /// one who acted, beside `operator_id`, who undid it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undo_of: Option<GmUndoReference>,
+    /// Whether an applied inverse of THIS entry already exists.
+    ///
+    /// Derived from the same canonical log rather than stored, so it cannot
+    /// disagree with it, and published because otherwise every reader would
+    /// have to re-derive it — including one that offers an Undo control and
+    /// would otherwise offer it twice.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub inverted: bool,
 }
 
 impl GmJournalEntry {
     /// Project one durable fact, dropping everything that is not public.
-    pub fn from_logged(entry: &LoggedGmAction) -> Self {
+    ///
+    /// `inverted` is supplied by the caller because it is a fact about the
+    /// whole log, not about this entry.
+    pub fn from_logged(entry: &LoggedGmAction, inverted: bool) -> Self {
         Self {
             operator_id: entry.operator_id.clone(),
             correlation: entry.correlation.as_str().to_string(),
@@ -65,6 +96,9 @@ impl GmJournalEntry {
             sequence: entry.order.map(|order| order.sequence),
             outcome: entry.outcome,
             reason: entry.reason,
+            affected: entry.affected.clone(),
+            undo_of: entry.undo_of.clone(),
+            inverted,
         }
     }
 }
@@ -92,11 +126,34 @@ pub fn journal_projection(log: &GmActionLog) -> GmJournalProjection {
         .iter()
         .filter(|entry| entry.outcome != GmActionOutcome::Pending)
         .collect();
+    // Which originals an APPLIED inverse has already reversed. Taken over the
+    // whole log rather than the window: an undo that has scrolled out of the
+    // presentation bound still happened, and an entry that stopped saying so
+    // would invite a second undo the reducer would only refuse.
+    //
+    // Keyed on (operator, correlation), not correlation alone: a correlation is
+    // scoped to the operator that minted it (`GmActionJournal::grant_for`
+    // refuses a duplicate only within one operator's own lane), so two GMs may
+    // legitimately both be running a "faction-1". Matching on the bare string
+    // would mark the OTHER operator's untouched action as already reversed and
+    // hide its Undo control, which `undo_precheck` would then happily allow.
+    let inverted: std::collections::BTreeSet<(&str, &str)> = log
+        .entries()
+        .iter()
+        .filter(|entry| entry.outcome == GmActionOutcome::Applied)
+        .filter_map(|entry| entry.undo_of.as_ref())
+        .map(|undo| (undo.operator_id.as_str(), undo.correlation.as_str()))
+        .collect();
     let total = terminal.len();
     let window = terminal
         .iter()
         .skip(total.saturating_sub(GM_JOURNAL_WINDOW))
-        .map(|entry| GmJournalEntry::from_logged(entry))
+        .map(|entry| {
+            GmJournalEntry::from_logged(
+                entry,
+                inverted.contains(&(entry.operator_id.as_str(), entry.correlation.as_str())),
+            )
+        })
         .collect();
     GmJournalProjection {
         capacity: MAX_GM_ACTIONS_PER_RUN,

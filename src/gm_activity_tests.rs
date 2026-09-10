@@ -451,6 +451,8 @@ fn logged(
         objective_recipients: None,
         comms_recipients: None,
         npc_doctrine: None,
+        affected: None,
+        undo_of: None,
     }
 }
 
@@ -1609,4 +1611,105 @@ fn absent_browser_gm_ignores_events() {
         .write(damage(SHIP_A, None, "region", 2.0));
     fixed_then_publish(&mut app);
     assert!(take(&mut app).is_empty());
+}
+
+/// The two families issue #1442 added name THEMSELVES in the shared feed.
+///
+/// Before they had their own arms in the projection's `(kind, verb)` table both
+/// fell to the catch-all, whose sentence is chosen by `requested_active` alone:
+/// every GM's feed then read "gm-alex paused the session" for a faction change
+/// and for an undo. This is the one surface where an attributed sentence about
+/// a COLLEAGUE has to be true, so the false row is worse than no row.
+#[test]
+fn faction_and_inverse_facts_are_never_published_as_a_session_pause() {
+    use crate::gm_action::{
+        GmActionId, GmActionKind, GmActionOutcome, GmActionRefusalReason, GmAffectedField,
+        GmUndoReference,
+    };
+    let mut state = GmActivityState::default();
+    // Establish the cursor first, exactly as the live publisher does: a fresh
+    // state publishes nothing for facts that predate it.
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+
+    // Applied: the pair it moved is on the durable fact, so the row can name
+    // both halves of the relation.
+    let mut applied = logged("gm-alex", "faction-1", GmActionOutcome::Applied, None);
+    applied.action_kind = GmActionKind::FactionRelation;
+    applied.target = Some("Alliance".into());
+    applied.requested_active = true;
+    applied.affected = Some(GmAffectedField::FactionHostility {
+        faction: "Alliance".into(),
+        enemy: "Harrow".into(),
+        before: false,
+        after: true,
+    });
+    results.push(applied);
+
+    // Refused: nothing moved, so no pair was recorded and none is invented.
+    let mut refused = logged(
+        "gm-alex",
+        "faction-2",
+        GmActionOutcome::Refused,
+        Some(GmActionRefusalReason::UnknownFaction),
+    );
+    refused.action_kind = GmActionKind::FactionRelation;
+    refused.target = Some("Alliance".into());
+    refused.requested_active = false;
+    results.push(refused);
+
+    // The inverse carries the original's identity, which is what puts BOTH
+    // operators on the one row.
+    let mut inverse = logged("gm-blake", "undo-1", GmActionOutcome::Applied, None);
+    inverse.action_kind = GmActionKind::ActionUndo;
+    inverse.undo_of = Some(GmUndoReference {
+        operator_id: "gm-alex".into(),
+        correlation: GmActionId::new("faction-1").unwrap(),
+        sequence: 7,
+    });
+    results.push(inverse);
+
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    let actions: Vec<GmActivityAction> = entries
+        .iter()
+        .map(|entry| match &entry.detail {
+            GmActivityDetail::GmAction(detail) => detail.action.clone(),
+            other => panic!("expected GM action detail, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(entries.len(), 3);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, GmActivityAction::SetSessionPaused { .. })),
+        "no #1442 family may be published as somebody's session pause: {actions:?}"
+    );
+    assert!(
+        actions.contains(&GmActivityAction::SetFactionHostility {
+            faction: "Alliance".into(),
+            enemy: Some("Harrow".into()),
+            hostile: true,
+        }),
+        "the applied relation names the ordered pair it moved: {actions:?}"
+    );
+    assert!(
+        actions.contains(&GmActivityAction::SetFactionHostility {
+            faction: "Alliance".into(),
+            enemy: None,
+            hostile: false,
+        }),
+        "a refusal names the faction alone: {actions:?}"
+    );
+    assert!(
+        actions.contains(&GmActivityAction::UndoGmAction {
+            original_operator: GmActivityPublicIdentity {
+                id: "gm-alex".into(),
+                name: "gm-alex".into(),
+            },
+            original_correlation: "faction-1".into(),
+        }),
+        "the inverse names whose action it reversed: {actions:?}"
+    );
+    // Same bound every family gets: one publication per terminal fact.
+    assert!(terminal_action_entries(&mut state, None, Some(&results), None, None).is_empty());
 }

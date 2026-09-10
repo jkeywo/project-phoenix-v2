@@ -54,6 +54,7 @@ impl Plugin for ShipPlugin {
             .init_resource::<crate::gm_puppet::PreviousStationPuppetTargets>()
             .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
             .init_resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .init_resource::<crate::gm_faction::GmFactionOverrides>()
             .init_resource::<crate::gm_puppet::PendingGmStationFeedbackRoutes>()
             .init_resource::<crate::gm_puppet::StationPuppetActivity>()
             .configure_sets(
@@ -383,6 +384,15 @@ impl Plugin for ShipPlugin {
             crate::gm_effect::apply_gm_direct_effects
                 .in_set(crate::sim_sets::FixedStep::ApplyGmDirectEffects)
                 .in_set(crate::sim_sets::SimSet::Damage),
+        )
+        // A GM withdrawal of a faction hostility (issue #1442) drops the
+        // tactical locks it just made friendly, in the same phase and
+        // immediately before the other writer of that lock.
+        .add_systems(
+            FixedUpdate,
+            crate::gm_faction::revalidate_gm_faction_locks
+                .in_set(crate::sim_sets::FixedStep::RevalidateGmFactionLocks)
+                .in_set(crate::sim_sets::SimSet::Input),
         )
         .add_systems(
             FixedUpdate,

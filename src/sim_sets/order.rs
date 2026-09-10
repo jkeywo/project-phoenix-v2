@@ -55,6 +55,7 @@ pub(crate) enum FixedStep {
     HandleSetPhaserMode,
     HandleSetPhaserFrequency,
     HandleSetTorpedoVolleyTarget,
+    RevalidateGmFactionLocks,
     AiTargetSelection,
     HandleSetTarget,
     TickNpcAutoMatchFrequency,
@@ -264,6 +265,9 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             HandleSetPhaserMode,
             HandleSetPhaserFrequency,
             HandleSetTorpedoVolleyTarget,
+            // A GM withdrawal of a hostility must drop stranded tactical locks
+            // before the retention tier gets to keep one (issue #1442).
+            RevalidateGmFactionLocks,
             AiTargetSelection,
             HandleSetTarget,
             TickNpcAutoMatchFrequency,

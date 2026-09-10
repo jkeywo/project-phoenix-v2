@@ -137,6 +137,36 @@ function normaliseAction(value) {
       && value.event.length > 0 && typeof value.active === 'boolean') {
     return { type: value.type, event: value.event, active: value.active };
   }
+  // One ordered faction pair's hostility was moved (issue #1442). `enemy` is
+  // absent on a refusal and a No-op, which record no affected pair — the row
+  // then names the faction alone rather than a relation nobody was named in.
+  if (value.type === 'set_faction_hostility'
+      && typeof value.faction === 'string' && value.faction.length > 0
+      && typeof value.hostile === 'boolean'
+      && (value.enemy === undefined || value.enemy === null
+        || (typeof value.enemy === 'string' && value.enemy.length > 0))) {
+    return {
+      type: value.type,
+      faction: value.faction,
+      hostile: value.hostile,
+      ...(typeof value.enemy === 'string' && value.enemy ? { enemy: value.enemy } : {}),
+    };
+  }
+  // One earlier GM action was reversed by an equal GM (issue #1442). A row that
+  // cannot name whose action it reversed is REJECTED rather than rendered
+  // half-attributed: this is the shared feed, and the whole point of the row is
+  // that both operators are on it.
+  if (value.type === 'undo_gm_action'
+      && typeof value.original_correlation === 'string'
+      && value.original_correlation.length > 0) {
+    const original = normalisePublicIdentity(value.original_operator);
+    if (!original) return undefined;
+    return {
+      type: value.type,
+      original_operator: original,
+      original_correlation: value.original_correlation,
+    };
+  }
   return undefined;
 }
 
@@ -458,6 +488,19 @@ export function createGmActivityFeed({
         } else if (detail.action.type === 'spawn_palette_entity') {
           action = t('server.gm.activity.action.spawn_palette_entity', {
             palette: detail.action.palette,
+          });
+        } else if (detail.action.type === 'set_faction_hostility') {
+          // Four sentences, not one with a blank: a refusal and a No-op carry
+          // no enemy, and "made X hostile to " is not a thing that happened.
+          action = t(
+            `server.gm.activity.action.faction_${detail.action.hostile ? 'hostile' : 'friendly'}${detail.action.enemy ? '' : '_unnamed'}`,
+            { faction: detail.action.faction, enemy: detail.action.enemy ?? '' },
+          );
+        } else if (detail.action.type === 'undo_gm_action') {
+          action = t('server.gm.activity.action.undo_gm_action', {
+            operator: detail.action.original_operator.name
+              || detail.action.original_operator.id,
+            correlation: detail.action.original_correlation,
           });
         } else if (detail.action.type === 'set_event_paused') {
           action = t(

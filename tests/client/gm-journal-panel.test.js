@@ -100,9 +100,14 @@ it('renders the real applied, no-op and refused facts with public attribution an
   expect(document.getElementById('gm-journal-empty').hidden).toBe(true);
 });
 
-it('states up front that this build can undo nothing at all', () => {
+it('states up front which families this build can undo', () => {
   expect(document.getElementById('gm-journal-inverse-support').textContent)
-    .toBe(t('server.gm.journal.inverse_support_none'));
+    .toBe(t('server.gm.journal.inverse_support_some', {
+      kinds: [
+        t('server.gm.journal.kind.npc_doctrine'),
+        t('server.gm.journal.kind.faction_relation'),
+      ].join(', '),
+    }));
 });
 
 it('reports the honest total when the durable journal is longer than the published window', () => {
@@ -275,4 +280,195 @@ it('resets to an empty history at a run boundary', () => {
   expect(rows()).toHaveLength(0);
   expect(panel.state().selected).toBeNull();
   expect(document.getElementById('gm-journal-empty').hidden).toBe(false);
+});
+
+
+// ── The typed inverse control (issue #1442) ─────────────────────────────────
+
+/** One real applied doctrine row, with the affected pair the reducer records. */
+const DOCTRINE = entry({
+  correlation: 'act-9',
+  action_kind: 'npc-doctrine',
+  target: 'courier-1',
+  tick: 20,
+  sequence: 9,
+  outcome: 'applied',
+  affected: { 'npc-doctrine': { entity: 'courier-1', before: null, after: 'north' } },
+});
+
+function undoPanel({ operator = { id: 'gm-sam' }, submitUndo = () => true, confirmAction } = {}) {
+  const parsed = new DOMParser().parseFromString(pageSource, 'text/html');
+  document.body.replaceChildren(parsed.getElementById('gm-journal'));
+  return createGmJournalPanel({
+    doc: document,
+    t,
+    getOperatorName: (id) => NAMES[id] || id,
+    getOperator: () => operator,
+    submitUndo,
+    confirmAction: confirmAction || ((request) => request.accept()),
+    schedule: () => 1,
+    cancelSchedule: () => {},
+  });
+}
+
+const undoButton = () => document.getElementById('gm-journal-undo');
+
+it('offers Undo only for an applied entry whose family and recorded pair support one', () => {
+  const panel2 = undoPanel();
+  panel2.update(payload([
+    DOCTRINE,
+    // Applied, but a family with no typed inverse.
+    entry({ correlation: 'act-10', action_kind: 'direct-effect', sequence: 10 }),
+    // Right family, but nothing changed, so no pair was recorded.
+    entry({ correlation: 'act-11', action_kind: 'npc-doctrine', sequence: 11, outcome: 'no-op' }),
+    // Right family and applied, but another GM already reversed it.
+    entry({
+      correlation: 'act-12',
+      action_kind: 'npc-doctrine',
+      sequence: 12,
+      affected: { 'npc-doctrine': { entity: 'courier-2', before: 'east', after: 'north' } },
+      inverted: true,
+    }),
+  ]));
+  const offered = [];
+  for (const row of rows()) {
+    row.click();
+    offered.push([row.dataset.correlation, !undoButton().hidden]);
+  }
+  expect(offered).toEqual([
+    ['act-9', true],
+    ['act-10', false],
+    ['act-11', false],
+    ['act-12', false],
+  ]);
+  panel2.destroy();
+});
+
+it('submits the recorded pair verbatim with the original public identity', () => {
+  const sent = [];
+  const panel2 = undoPanel({ submitUndo: (request) => { sent.push(request); return true; } });
+  panel2.update(payload([DOCTRINE]));
+  rows()[0].click();
+  undoButton().click();
+  expect(sent).toHaveLength(1);
+  const request = sent[0];
+  expect(request.action).toBe('undo_gm_action');
+  expect(request.operator_id).toBe('gm-sam');
+  expect(request.original).toBe('act-9');
+  expect(request.original_operator).toBe('gm-alex');
+  expect(request.original_sequence).toBe(9);
+  // Byte-for-byte what the projection published: the reducer compares this
+  // against the canonical fact to refuse a stale reading.
+  expect(request.expected).toEqual(DOCTRINE.affected);
+  expect(typeof request.correlation).toBe('string');
+  expect(document.getElementById('gm-journal-undo-feedback').textContent)
+    .toBe(t('server.gm.journal.undo_pending'));
+  panel2.destroy();
+});
+
+it('reports the canonical answer from the journal itself, not a second feed', () => {
+  let sent = null;
+  const panel2 = undoPanel({ submitUndo: (request) => { sent = request; return true; } });
+  panel2.update(payload([DOCTRINE]));
+  rows()[0].click();
+  undoButton().click();
+  // The refusal arrives as an ordinary row of the ONE journal.
+  panel2.update(payload([
+    { ...DOCTRINE },
+    entry({
+      operator_id: 'gm-sam',
+      correlation: sent.correlation,
+      action_kind: 'action-undo',
+      sequence: 10,
+      outcome: 'refused',
+      reason: 'affected-state-changed',
+    }),
+  ]));
+  expect(document.getElementById('gm-journal-undo-feedback').textContent)
+    .toBe(t('server.gm.journal.undo_refused'));
+  expect(panel2.pending()).toBeNull();
+  // And the reason is readable on that entry, in words.
+  rows()[1].click();
+  expect(document.getElementById('gm-journal-detail-outcome').textContent)
+    .toContain(t('server.gm.session.reason.affected_state_changed'));
+  panel2.destroy();
+});
+
+it('routes the press through the configurable confirmation and sends nothing when cancelled', () => {
+  const requests = [];
+  let sent = 0;
+  const panel2 = undoPanel({
+    submitUndo: () => { sent += 1; return true; },
+    confirmAction: (request) => { requests.push(request); return true; },
+  });
+  panel2.update(payload([DOCTRINE]));
+  rows()[0].click();
+  undoButton().click();
+  expect(sent).toBe(0);
+  expect(requests[0].category).toBe('action.undo');
+  expect(requests[0].defaultMode).toBe('confirm-preview');
+  // The preview a `confirm-preview` policy renders states the thing a restored
+  // value cannot do.
+  expect(requests[0].preview()).toContain(t('server.gm.inverse.witnessed_note'));
+  requests[0].onCancel();
+  expect(requests[0].accept()).toBe(false);
+  expect(sent).toBe(0);
+  panel2.destroy();
+});
+
+it('shows the same consequence sentences with no dialog at all', () => {
+  // `immediate` is a legitimate private policy. The detail region still carries
+  // the whole explanation, so configuring the step away never hides it
+  // (PRD #1418 story 30).
+  const panel2 = undoPanel({ confirmAction: (request) => request.accept() });
+  panel2.update(payload([DOCTRINE]));
+  rows()[0].click();
+  const detail = document.getElementById('gm-journal-detail').textContent;
+  expect(detail).toContain(t('server.gm.inverse.witnessed_note'));
+  expect(detail).toContain(t('server.gm.inverse.doctrine_authored'));
+  expect(detail).toContain(t('server.gm.inverse.doctrine_value', { doctrine: 'north' }));
+  expect(detail).toContain(t('server.gm.inverse.available'));
+  panel2.destroy();
+});
+
+it('keeps the selected entry, its Undo control and focus across a republish', () => {
+  const panel2 = undoPanel();
+  panel2.update(payload([DOCTRINE, entry({ correlation: 'act-13', sequence: 13 })]));
+  rows()[0].click();
+  rows()[0].focus();
+  expect(document.activeElement.dataset.correlation).toBe('act-9');
+  panel2.update(payload([
+    DOCTRINE,
+    entry({ correlation: 'act-13', sequence: 13 }),
+    entry({ correlation: 'act-14', sequence: 14 }),
+  ]));
+  expect(panel2.state().selected.correlation).toBe('act-9');
+  expect(document.activeElement.dataset.correlation).toBe('act-9');
+  expect(undoButton().hidden).toBe(false);
+  panel2.destroy();
+});
+
+it('reads an unrecognised future affected field without claiming to describe it', () => {
+  const panel2 = undoPanel();
+  expect(panel2.update(payload([
+    entry({
+      correlation: 'act-15',
+      action_kind: 'npc-doctrine',
+      sequence: 15,
+      affected: { 'something-new': { value: 1 } },
+    }),
+  ]))).toBe(true);
+  rows()[0].click();
+  const values = [...document.querySelectorAll('#gm-journal-inverse dd')]
+    .map((node) => node.textContent);
+  expect(values[0]).toBe(t('server.gm.inverse.state_uncaptured'));
+  panel2.destroy();
+});
+
+it('rejects a malformed undo reference rather than rendering half a history', () => {
+  const panel2 = undoPanel();
+  expect(panel2.update(payload([
+    entry({ correlation: 'act-16', undo_of: { operator_id: 'gm-alex' } }),
+  ]))).toBe(false);
+  panel2.destroy();
 });

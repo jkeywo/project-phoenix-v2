@@ -15,11 +15,17 @@
  * dialog — the journal is routine attention, not an interruption.
  */
 import { wireText } from './strings.js';
+import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { GM_ACTION_REFUSAL_REASON_LABELS } from './gm-action-reasons.js';
 import {
   createGmInversePreview,
+  gmAffectedFieldText,
+  gmInverseAvailability,
   gmInverseSupportedKinds,
 } from './gm-inverse-preview.js';
+
+/** The T2 confirmation category an Undo selects. Registered centrally. */
+export const GM_UNDO_CONFIRMATION = Object.freeze({ category: 'action.undo', defaultMode: 'confirm-preview' });
 
 const OUTCOMES = Object.freeze(['applied', 'no-op', 'refused']);
 /** Outcome ids contain a hyphen; String Table ids do not. */
@@ -54,6 +60,8 @@ export const GM_JOURNAL_ACTION_KIND_LABELS = Object.freeze({
   'system-restore': 'server.gm.journal.kind.system_restore',
   comms: 'server.gm.journal.kind.comms',
   'npc-doctrine': 'server.gm.journal.kind.npc_doctrine',
+  'faction-relation': 'server.gm.journal.kind.faction_relation',
+  'action-undo': 'server.gm.journal.kind.action_undo',
 });
 
 const text = (value) => typeof value === 'string' && value.length > 0;
@@ -66,7 +74,11 @@ function normaliseEntry(value) {
       || !count(value.tick)
       || (value.target !== undefined && !text(value.target))
       || (value.sequence !== undefined && !count(value.sequence))
-      || (value.reason !== undefined && !text(value.reason))) return undefined;
+      || (value.reason !== undefined && !text(value.reason))
+      || (value.inverted !== undefined && typeof value.inverted !== 'boolean')
+      || (value.affected !== undefined
+        && (!value.affected || typeof value.affected !== 'object'))
+      || (value.undo_of !== undefined && !normaliseUndoReference(value.undo_of))) return undefined;
   return {
     operator_id: value.operator_id,
     correlation: value.correlation,
@@ -76,6 +88,26 @@ function normaliseEntry(value) {
     ...(value.target === undefined ? {} : { target: value.target }),
     ...(value.sequence === undefined ? {} : { sequence: value.sequence }),
     ...(value.reason === undefined ? {} : { reason: value.reason }),
+    // The affected pair travels VERBATIM. This panel never rebuilds it: what it
+    // sends back when a GM asks for an inverse has to be byte-for-byte what the
+    // canonical journal recorded, because that comparison is exactly what
+    // refuses a request built on a stale reading (issue #1442).
+    ...(value.affected === undefined ? {} : { affected: value.affected }),
+    ...(value.undo_of === undefined
+      ? {}
+      : { undo_of: normaliseUndoReference(value.undo_of) }),
+    inverted: value.inverted === true,
+  };
+}
+
+/** The public identity of the original an inverse reversed. */
+function normaliseUndoReference(value) {
+  if (!value || typeof value !== 'object' || !text(value.operator_id)
+      || !text(value.correlation) || !count(value.sequence)) return undefined;
+  return {
+    operator_id: value.operator_id,
+    correlation: value.correlation,
+    sequence: value.sequence,
   };
 }
 
@@ -129,11 +161,32 @@ export function filterGmJournalEntries(entries, { operator = 'all', outcome = 'a
   ));
 }
 
+/**
+ * Whether this build can offer an Undo control for one journal row.
+ *
+ * Every clause is a fact the CANONICAL journal published, not a local guess:
+ * the action really applied, it recorded the affected pair an inverse needs,
+ * nothing has already reversed it, and this build has a typed inverse for its
+ * family. The reducer re-checks all of it at the apply tick — this only decides
+ * whether to show a control at all, because a control that cannot work is worse
+ * than none.
+ */
+export function gmJournalEntryIsUndoable(entry) {
+  return !!entry && entry.outcome === 'applied' && !!entry.affected && entry.inverted !== true
+    && gmInverseAvailability(entry.action_kind).supported;
+}
+
 export function createGmJournalPanel({
   doc = globalThis.document,
   t = (id) => id,
   displayText = wireText,
   getOperatorName = (id) => id,
+  getOperator = () => null,
+  submitUndo = () => false,
+  confirmAction = (request) => request.accept(),
+  correlation = createActionCorrelation,
+  schedule = globalThis.setTimeout,
+  cancelSchedule = globalThis.clearTimeout,
   inversePreview = null,
 } = {}) {
   const el = (suffix) => doc && doc.getElementById(`gm-journal-${suffix}`);
@@ -151,10 +204,14 @@ export function createGmJournalPanel({
   const outcomeLine = el('detail-outcome');
   const inverseHost = el('inverse');
   const inverseSupport = el('inverse-support');
+  const undoButton = el('undo');
+  const undoFeedback = el('undo-feedback');
   const inverse = inversePreview || createGmInversePreview({ doc, t, displayText });
 
   let state = { capacity: 0, total: 0, entries: [] };
   let selectedKey = null;
+  let pending = null;
+  let timer = null;
 
   if (region) {
     region.setAttribute('role', 'region');
@@ -183,6 +240,11 @@ export function createGmJournalPanel({
       });
   }
   if (clearButton) clearButton.textContent = t('server.gm.journal.filter.clear');
+  if (undoButton) undoButton.textContent = t('server.gm.journal.undo');
+  if (undoFeedback) {
+    undoFeedback.setAttribute('role', 'status');
+    undoFeedback.setAttribute('aria-live', 'polite');
+  }
   if (outcomeFilter) {
     for (const option of outcomeFilter.options) {
       option.textContent = t(option.value === 'all'
@@ -220,11 +282,90 @@ export function createGmJournalPanel({
 
   const selected = () => state.entries.find((entry) => gmJournalEntryKey(entry) === selectedKey);
 
+  // Words, never colour alone, and never a dialog: an inverse that is still
+  // waiting for its canonical answer is routine attention (#1418 stories 6/31).
+  function undoFeedbackState(value) {
+    if (!undoFeedback) return;
+    undoFeedback.dataset.state = value || '';
+    undoFeedback.textContent = value ? t(`server.gm.journal.undo_${value}`) : '';
+  }
+
+  function clearPending() {
+    if (timer !== null) cancelSchedule(timer);
+    timer = null;
+    pending = null;
+  }
+
+  /**
+   * Ask the canonical reducer to reverse the selected entry.
+   *
+   * The request carries the original's PUBLIC identity and the recorded pair
+   * verbatim. Nothing here decides the outcome: a target that moved, a second
+   * GM who got there first and a stale reading are all answered at the apply
+   * tick, and this surface only reports what came back.
+   */
+  function requestUndo() {
+    const entry = selected();
+    const operator = getOperator();
+    if (!entry || !operator || pending || !gmJournalEntryIsUndoable(entry)) return false;
+    const described = gmAffectedFieldText(entry.affected, t, displayText);
+    const description = t('server.gm.journal.undo_confirm', {
+      operator: operatorName(entry.operator_id),
+      action: actionText(entry),
+      order: orderText(entry),
+      change: described
+        ? t('server.gm.journal.undo_change', { before: described.after, after: described.before })
+        : t('server.gm.inverse.state_uncaptured'),
+    });
+    const captured = Object.freeze({
+      action: 'undo_gm_action',
+      operator_id: operator.id,
+      original: entry.correlation,
+      original_operator: entry.operator_id,
+      original_sequence: entry.sequence,
+      expected: entry.affected,
+    });
+    let consumed = false;
+    return confirmAction({
+      ...GM_UNDO_CONFIRMATION,
+      intent: captured,
+      description,
+      // The consequence sentences a GM must be able to read even when their own
+      // policy skips the confirmation step: the preview repeats them, and the
+      // detail region below shows the same text with no dialog at all.
+      preview: () => `${description} ${t('server.gm.inverse.witnessed_note')}`,
+      onCancel() { consumed = true; },
+      accept() {
+        if (consumed) return false;
+        consumed = true;
+        if (pending || getOperator()?.id !== captured.operator_id) return false;
+        const request = { ...captured, correlation: correlation() };
+        let accepted = false;
+        try { accepted = submitUndo(request) !== false; } catch (_) { accepted = false; }
+        if (!accepted) {
+          undoFeedbackState('refused');
+          return false;
+        }
+        pending = request;
+        undoFeedbackState('pending');
+        paintDetail();
+        timer = schedule(() => {
+          timer = null;
+          pending = null;
+          undoFeedbackState('timed_out');
+          paintDetail();
+        }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
+        return true;
+      },
+    }) !== false;
+  }
+
   function paintDetail() {
     const entry = selected();
     if (detail) detail.hidden = !entry;
     if (!entry) {
       inverse.clear(inverseHost);
+      if (undoButton) undoButton.hidden = true;
       for (const node of [summary, targetLine, outcomeLine]) if (node) node.textContent = '';
       return;
     }
@@ -249,17 +390,35 @@ export function createGmJournalPanel({
         })
         : t('server.gm.journal.detail_outcome', { outcome: outcomeText(entry) });
     }
-    // The inverse story is presented from the SAME component #1442 will use,
-    // and it says out loud that no undo exists for this family yet.
+    // The inverse story, from the shared component: the before/after pair the
+    // canonical journal recorded, what the action technically did, what crews
+    // already witnessed, and whether an inverse exists.
     inverse.render(inverseHost, {
       actionKind: entry.action_kind,
       target: entry.target,
+      affected: entry.affected,
       technical: entry.outcome === 'applied'
         ? t('server.gm.inverse.technical_applied', { tick: String(entry.tick) })
         : t(entry.outcome === 'no-op'
           ? 'server.gm.inverse.technical_no_op'
           : 'server.gm.inverse.technical_refused'),
     });
+    if (undoButton) {
+      // Hidden rather than disabled when no inverse can run: the eligibility
+      // sentence above already says why, and a dead control in a live event is
+      // worse than no control (PRD #1418 story 29).
+      const offerable = gmJournalEntryIsUndoable(entry) && !!getOperator();
+      undoButton.hidden = !offerable;
+      undoButton.disabled = !offerable || !!pending;
+      undoButton.setAttribute('aria-label', t('server.gm.journal.undo_entry', {
+        action: actionText(entry),
+        operator: operatorName(entry.operator_id),
+        order: orderText(entry),
+      }));
+    }
+    if (entry.inverted && undoFeedback && !pending && !undoFeedback.dataset.state) {
+      undoFeedback.textContent = t('server.gm.journal.undo_already');
+    }
   }
 
   function paintSelection() {
@@ -391,6 +550,16 @@ export function createGmJournalPanel({
     const next = parseGmJournalProjection(payload);
     if (!next) return false;
     state = next;
+    // The canonical answer arrives as an ordinary journal row, because an
+    // inverse IS an ordinary journal entry. No second result feed.
+    const terminal = pending && state.entries.find((entry) => (
+      entry.operator_id === pending.operator_id && entry.correlation === pending.correlation
+    ));
+    if (terminal) {
+      clearPending();
+      undoFeedbackState(terminal.outcome === 'applied' ? 'applied'
+        : terminal.outcome === 'no-op' ? 'no_op' : 'refused');
+    }
     render();
     return true;
   }
@@ -402,6 +571,8 @@ export function createGmJournalPanel({
   }
 
   function reset() {
+    clearPending();
+    undoFeedbackState('');
     state = { capacity: 0, total: 0, entries: [] };
     selectedKey = null;
     if (operatorFilter) operatorFilter.value = 'all';
@@ -413,6 +584,7 @@ export function createGmJournalPanel({
   operatorFilter?.addEventListener('change', onFilter);
   outcomeFilter?.addEventListener('change', onFilter);
   clearButton?.addEventListener('click', clearFilters);
+  undoButton?.addEventListener('click', requestUndo);
   render();
 
   return {
@@ -420,6 +592,8 @@ export function createGmJournalPanel({
     select,
     clearFilters,
     reset,
+    requestUndo,
+    refreshAdmission: paintDetail,
     inverseAvailability: () => inverse.state(),
     state: () => ({
       capacity: state.capacity,
@@ -427,10 +601,13 @@ export function createGmJournalPanel({
       entries: state.entries.map((entry) => ({ ...entry })),
       selected: selected() ? { ...selected() } : null,
     }),
+    pending: () => (pending ? { ...pending } : null),
     destroy: () => {
+      clearPending();
       operatorFilter?.removeEventListener('change', onFilter);
       outcomeFilter?.removeEventListener('change', onFilter);
       clearButton?.removeEventListener('click', clearFilters);
+      undoButton?.removeEventListener('click', requestUndo);
     },
   };
 }

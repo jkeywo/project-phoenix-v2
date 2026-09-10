@@ -336,6 +336,127 @@ impl NpcDoctrineControl<'_, '_> {
         (GmActionOutcome::Applied, None)
     }
 
+    /// The GM doctrine `target` is currently running, for the inverse path.
+    ///
+    /// `None` for "no such NPC on this peer"; `Some(None)` for an NPC running
+    /// its OWN authored doctrine, which has no palette id at all. The two are
+    /// deliberately different answers: an inverse that could not tell them
+    /// apart would restore a baseline onto an entity that never existed.
+    pub fn applied_doctrine(&self, target: &str) -> Option<Option<String>> {
+        self.ships
+            .iter()
+            .find(|(uuid, ..)| uuid.0 == target)
+            .map(|(_, _, _, _, state, ..)| state.0.as_ref().map(|state| state.id.clone()))
+    }
+
+    /// Restore `target` to the doctrine it ran before an earlier GM action
+    /// replaced it (issue #1442).
+    ///
+    /// `expected_current` is what that earlier action LEFT running. It is
+    /// compared against live state here, at the canonical apply tick: if
+    /// anything has moved this entity's doctrine since — another GM, a scenario
+    /// trigger, a Rhai effect — the inverse is refused rather than overwriting
+    /// the newer decision. Everything else about the entity may have changed
+    /// freely; only this field is consulted.
+    ///
+    /// `restore` is the palette id to return to, or `None` for the entity's own
+    /// authored doctrine, which is replayed from the baseline captured when the
+    /// first GM doctrine landed. Nothing is fabricated: a palette id whose
+    /// entry the world has since withdrawn is refused, not approximated.
+    pub fn revert(
+        &mut self,
+        runtime: &WorldContentRuntime,
+        target: &str,
+        expected_current: Option<&str>,
+        restore: Option<&str>,
+    ) -> (GmActionOutcome, Option<GmActionRefusalReason>) {
+        // A profile the world has withdrawn cannot be restored, and saying so
+        // before touching the entity keeps the refusal free of side effects.
+        let profile = match restore {
+            None => None,
+            Some(id) => {
+                match runtime
+                    .gm_npc_doctrine_palette
+                    .iter()
+                    .find(|profile| profile.id == id)
+                {
+                    Some(profile) => Some(profile),
+                    None => {
+                        return (
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::UnknownNpcDoctrine),
+                        )
+                    }
+                }
+            }
+        };
+        let anchors = self.world_config.as_ref().map(|config| &config.anchors);
+        let Some((_, tags, config, mut behaviour, mut state, fleet, civilian, cursors, _)) =
+            self.ships.iter_mut().find(|(uuid, ..)| uuid.0 == target)
+        else {
+            return (
+                GmActionOutcome::Refused,
+                Some(if self.identities.iter().any(|uuid| uuid.0 == target) {
+                    GmActionRefusalReason::NpcDoctrineIncompatible
+                } else {
+                    GmActionRefusalReason::UnknownEntity
+                }),
+            );
+        };
+        if state.0.as_ref().map(|state| state.id.as_str()) != expected_current {
+            return (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::AffectedStateChanged),
+            );
+        }
+        // Restoring an authored baseline needs the baseline, which only an
+        // applied GM doctrine carries. Without one there is nothing recorded to
+        // go back to, and inventing the entity's current doctrine as its
+        // "original" would be a fabricated fact.
+        let Some(applied) = state.0.clone() else {
+            return (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::AffectedStateChanged),
+            );
+        };
+        if let Some(profile) = profile {
+            if !compatible(
+                profile, target, tags, fleet, civilian, &config.0, runtime, anchors,
+            ) {
+                return (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::NpcDoctrineIncompatible),
+                );
+            }
+        }
+        let next = profile
+            .map(|profile| profile.doctrine.clone())
+            .unwrap_or_else(|| applied.baseline.clone());
+        if let Some(mut cursors) = cursors {
+            // A replaced standing route starts at its own first waypoint,
+            // exactly as `apply` does. Unrelated mission-objective progress
+            // stays intact.
+            cursors.0.retain(|cursor| {
+                !behaviour
+                    .0
+                    .doctrine
+                    .iter()
+                    .chain(&next)
+                    .any(|objective| objective.id == cursor.objective_id)
+            });
+        }
+        behaviour.0.doctrine = next.clone();
+        state.0 = profile.map(|profile| AppliedNpcDoctrine {
+            id: profile.id.clone(),
+            doctrine: next,
+            // The pre-GM baseline is captured once and carried through every
+            // later change, so reverting twice still lands on the authored
+            // doctrine rather than on an intermediate GM choice.
+            baseline: applied.baseline.clone(),
+        });
+        (GmActionOutcome::Applied, None)
+    }
+
     pub fn projection(
         &self,
         runtime: &WorldContentRuntime,

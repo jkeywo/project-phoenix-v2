@@ -14,6 +14,8 @@ import {
   GM_INVERSE_SUPPORT,
   GM_INVERSE_PLANNED,
   GM_INVERSE_OUT_OF_SCOPE,
+  GM_INVERSE_SUPPORTED,
+  gmAffectedFieldText,
 } from '../../gui/gm-inverse-preview.js';
 import { buildTable, setTable, t } from '../../gui/strings.js';
 
@@ -44,19 +46,58 @@ it('answers for every action family the canonical journal can record', () => {
   expect(Object.keys(GM_INVERSE_SUPPORT).sort()).toEqual(kinds.sort());
   for (const kind of kinds) {
     const availability = gmInverseAvailability(kind);
-    expect(availability.supported).toBe(false);
-    expect([GM_INVERSE_PLANNED, GM_INVERSE_OUT_OF_SCOPE]).toContain(availability.status);
+    expect([GM_INVERSE_SUPPORTED, GM_INVERSE_PLANNED, GM_INVERSE_OUT_OF_SCOPE])
+      .toContain(availability.status);
+    expect(availability.supported).toBe(availability.status === GM_INVERSE_SUPPORTED);
     expect(t(availability.reasonId)).not.toMatch(/^⟨/);
   }
 });
 
-it('claims no undo support at all in this build, and says which families are merely planned', () => {
-  expect(gmInverseSupportedKinds()).toEqual([]);
-  for (const planned of ['world-spawn', 'world-despawn', 'npc-doctrine']) {
+it('claims undo support for exactly the two families the reducer can reverse', () => {
+  // Issue #1442 builds the NPC-doctrine and faction-relation inverses. Spawn
+  // and despawn remain PLANNED, and nothing else may claim support.
+  expect(gmInverseSupportedKinds().sort()).toEqual(['faction-relation', 'npc-doctrine']);
+  for (const planned of ['world-spawn', 'world-despawn']) {
     expect(gmInverseAvailability(planned).status).toBe(GM_INVERSE_PLANNED);
   }
   expect(gmInverseAvailability('direct-effect').status).toBe(GM_INVERSE_OUT_OF_SCOPE);
   expect(gmInverseAvailability('comms').status).toBe(GM_INVERSE_OUT_OF_SCOPE);
+  // An undo of an undo is a redo, and is refused as a matter of vocabulary.
+  expect(gmInverseAvailability('action-undo').status).toBe(GM_INVERSE_OUT_OF_SCOPE);
+});
+
+it('describes a recorded affected field in words on both sides', () => {
+  const preview = createGmInversePreview({ doc: document, t });
+  preview.render(host, {
+    actionKind: 'npc-doctrine',
+    affected: { 'npc-doctrine': { entity: 'courier-1', before: null, after: 'north' } },
+  });
+  const values = [...host.querySelectorAll('dd')].map((node) => node.textContent);
+  // Subject, before, after — the `None` side says the entity's own authored
+  // doctrine rather than reading as "nothing" or "unknown".
+  expect(values[0]).toContain('courier-1');
+  expect(values[1]).toBe(t('server.gm.inverse.doctrine_authored'));
+  expect(values[2]).toBe(t('server.gm.inverse.doctrine_value', { doctrine: 'north' }));
+  const eligibility = host.querySelector('.gm-inverse-eligibility');
+  expect(eligibility.dataset.supported).toBe('true');
+  expect(eligibility.textContent).toContain(t('server.gm.inverse.available'));
+  // Even a supported inverse states what cannot be undone.
+  expect(host.textContent).toContain(t('server.gm.inverse.witnessed_note'));
+});
+
+it('names the ordered faction pair rather than implying a mutual relationship', () => {
+  const described = gmAffectedFieldText(
+    { 'faction-hostility': { faction: 'Alliance', enemy: 'Harrow', before: false, after: true } },
+    t,
+  );
+  expect(described.subject).toBe(
+    t('server.gm.inverse.subject_relation', { faction: 'Alliance', enemy: 'Harrow' }),
+  );
+  expect(described.before).toBe(t('server.gm.inverse.hostility_neutral'));
+  expect(described.after).toBe(t('server.gm.inverse.hostility_hostile'));
+  // An unrecognised future field is not guessed at.
+  expect(gmAffectedFieldText({ 'something-new': { value: 1 } }, t)).toBeNull();
+  expect(gmAffectedFieldText(undefined, t)).toBeNull();
 });
 
 it('renders unavailable eligibility as readable words, not only a data attribute', () => {

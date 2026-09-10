@@ -1316,6 +1316,50 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
             doctrine: bounded_gm_target_id(object.get("doctrine")?.as_str()?)?,
         },
+        // Exactly `{operator_id, correlation, action, faction, enemy,
+        // hostile}` (issue #1442). The two identities are authored faction
+        // reference NAMES, bounded exactly as every other GM target id is, and
+        // `hostile` is absolute rather than a toggle.
+        "set_faction_hostility"
+            if object.len() == 6
+                && object.contains_key("faction")
+                && object.contains_key("enemy")
+                && object.contains_key("hostile") =>
+        {
+            let action = crate::gm_action::GmAction::SetFactionHostility {
+                faction: bounded_gm_target_id(object.get("faction")?.as_str()?)?,
+                enemy: bounded_gm_target_id(object.get("enemy")?.as_str()?)?,
+                hostile: object.get("hostile")?.as_bool()?,
+            };
+            // A faction hostile to itself is refused HERE rather than at the
+            // apply tick, for the qualified-event-id reason: a request that can
+            // only ever be refused must not become a canonical grant.
+            action.validate().ok()?;
+            action
+        }
+        // Exactly `{operator_id, correlation, action, original,
+        // original_operator, original_sequence, expected}` (issue #1442).
+        //
+        // `expected` is the `affected` object the journal projection published,
+        // echoed back verbatim. The page never constructs one: it re-sends what
+        // it was told, which is precisely what lets the canonical reducer
+        // compare the request against the fact and refuse a stale reading.
+        "undo_gm_action"
+            if object.len() == 7
+                && object.contains_key("original")
+                && object.contains_key("original_operator")
+                && object.contains_key("original_sequence")
+                && object.contains_key("expected") =>
+        {
+            let action = crate::gm_action::GmAction::UndoGmAction {
+                original: serde_json::from_value(object.get("original")?.clone()).ok()?,
+                original_operator: object.get("original_operator")?.as_str()?.to_string(),
+                original_sequence: object.get("original_sequence")?.as_u64()?,
+                expected: serde_json::from_value(object.get("expected")?.clone()).ok()?,
+            };
+            action.validate().ok()?;
+            action
+        }
         "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
         },

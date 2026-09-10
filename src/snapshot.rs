@@ -39,6 +39,7 @@
 //! | `StationPuppets` | [`PhoenixSnapshot::gm_puppets`] |
 //! | accepted pending GM Station commands | [`PhoenixSnapshot::gm_station_commands`] |
 //! | armed GM direct damage/heal effects (with their Station/System scope) | [`PhoenixSnapshot::gm_direct_effects`] |
+//! | GM-attributed faction hostility overrides | [`PhoenixSnapshot::gm_faction_overrides`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
 //! | `GamePhase` | [`PhoenixSnapshot::phase`] |
@@ -623,7 +624,16 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// restored damaged hull does not invent or forget a pending drive cancel.
 /// It also carries current token-free mesh crew authority; standalone restores
 /// retain their fresh crew policy.
-pub const SNAPSHOT_FORMAT: u32 = 33;
+/// `34` — #1442 carries GM-attributed faction hostility overrides. This one
+/// DOES bump, unlike the additive fields that argue their way out of it above:
+/// the faction registry is rebuilt from `assets/factions/*.toml` on every load,
+/// so a pre-#1442 save of a run in which a GM made two factions hostile
+/// restores a world where they are not — while the journal that save also
+/// carries still reports that action as Applied. That is the "silently wrong,
+/// and indistinguishable from correct" shape, and no content-digest argument
+/// rescues it: the GM action moved the world without moving a single authored
+/// file.
+pub const SNAPSHOT_FORMAT: u32 = 34;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2503,6 +2513,20 @@ pub struct PhoenixSnapshot {
     /// already claiming an exact hull amount and a lethal flag.
     #[serde(default)]
     pub gm_direct_effects: crate::gm_effect::PendingGmDirectEffects,
+    /// Faction hostilities a GM moved in this run, with the value each pair
+    /// held before any GM touched it (issue #1442).
+    ///
+    /// The registry itself is authored content, rebuilt from
+    /// `assets/factions/*.toml` on load and covered by `content_digest`; what
+    /// cannot be rebuilt is the GM's own decisions over it, which is exactly
+    /// what this carries. `before` travels with `current` so a restore of an
+    /// OLDER save can revert a pair the live run has since moved, rather than
+    /// leaving a later hostility standing under an earlier journal.
+    ///
+    /// The variant-order hazard does not apply: every field is a `String` or a
+    /// `bool`.
+    #[serde(default)]
+    pub gm_faction_overrides: crate::gm_faction::GmFactionOverrides,
     /// Exact Objective lifecycle/authored state, excluding presentation transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub objective_records: Vec<crate::objectives::ObjectiveRecord>,
@@ -2674,6 +2698,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .unwrap_or_default(),
         gm_direct_effects: world
             .get_resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .cloned()
+            .unwrap_or_default(),
+        gm_faction_overrides: world
+            .get_resource::<crate::gm_faction::GmFactionOverrides>()
             .cloned()
             .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
@@ -5464,6 +5492,11 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // live Station/System admission and are part of the captured boundary.
     world.insert_resource(snapshot.gm_station_commands.clone());
     world.insert_resource(snapshot.gm_direct_effects.clone());
+    // Re-apply the save's GM faction decisions to the live registry, and revert
+    // any pair this run moved that the save never did. Doing this through the
+    // ordinary `add_enemy`/`remove_enemy` vocabulary keeps restore and the live
+    // action on one path.
+    crate::gm_faction::restore_overrides(world, &snapshot.gm_faction_overrides);
     if !snapshot.objective_records.is_empty()
         || world.contains_resource::<crate::world::server::ObjectiveManagerRes>()
     {

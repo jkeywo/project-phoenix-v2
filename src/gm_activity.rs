@@ -206,6 +206,36 @@ pub enum GmActivityAction {
     ArmGmEventSkip {
         event: String,
     },
+    /// One ordered faction pair's hostility was moved by a GM (issue #1442).
+    ///
+    /// Its own variant for [`Self::SetEventPaused`]'s reason: a relation change
+    /// is not a session pause, and `requested_active` alone cannot tell the two
+    /// apart. `hostile` is the absolute state the operator asked for, so the
+    /// feed says "made hostile" or "stood down" rather than "toggled".
+    SetFactionHostility {
+        faction: String,
+        /// The other half of the ordered pair, read off the durable
+        /// [`crate::gm_action::LoggedGmAction::affected`] fact.
+        ///
+        /// Absent when the action never reached a pair at all: a refusal (a
+        /// name the setting never authored) and a No-op (the relation already
+        /// held that way) record no affected field, and naming an enemy the
+        /// fact does not carry would be a guess about what an operator did.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enemy: Option<String>,
+        hostile: bool,
+    },
+    /// One earlier GM action was reversed by an equal GM (issue #1442).
+    ///
+    /// Both operators are on the row: the undoing GM is the entry's own
+    /// `operator`, and the one whose action was reversed is named here. The
+    /// shared feed is exactly where an attributed sentence about ANOTHER
+    /// operator has to be true, so this is a variant rather than a fall-through
+    /// onto a pause the operator never asked for.
+    UndoGmAction {
+        original_operator: GmActivityPublicIdentity,
+        original_correlation: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -463,6 +493,18 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // one tick and order sort by WHICH lever was pulled — the levers do
         // opposite things and their rows must not collapse onto each other.
         GmActivityAction::ArmGmEventSkip { event } => (6, false, event.as_str()),
+        // The faction whose own enemies list moved disambiguates two relation
+        // rows at one tick and order, and `hostile` takes the boolean slot so
+        // making hostile and standing down never collapse onto each other.
+        GmActivityAction::SetFactionHostility {
+            faction, hostile, ..
+        } => (15, *hostile, faction.as_str()),
+        // An inverse sorts by the correlation it reversed: two inverses of two
+        // different originals are two different rows.
+        GmActivityAction::UndoGmAction {
+            original_correlation,
+            ..
+        } => (16, false, original_correlation.as_str()),
     }
 }
 
@@ -1183,6 +1225,12 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::UnavailableCommsIdentity => "unavailable-comms-identity",
         Reason::UnavailableCommsRecipient => "unavailable-comms-recipient",
         Reason::UnavailableCommsHail => "unavailable-comms-hail",
+        Reason::UnknownFaction => "unknown-faction",
+        Reason::UnknownGmAction => "unknown-gm-action",
+        Reason::InverseUnsupported => "inverse-unsupported",
+        Reason::InverseFactsMismatch => "inverse-facts-mismatch",
+        Reason::AffectedStateChanged => "affected-state-changed",
+        Reason::AlreadyInverted => "already-inverted",
     }
 }
 
@@ -1447,7 +1495,52 @@ fn terminal_action_entries(
                                 palette: fact.target.clone()?,
                             }
                         }
-                        _ => GmActivityAction::SetSessionPaused {
+                        // The typed, attributed faction adapter (issue #1442).
+                        // `target` is the faction whose own enemies list moved
+                        // and `requested_active` the absolute hostility asked
+                        // for; the other half of the pair is only on an
+                        // `Applied` fact's recorded affected field, so a
+                        // refusal and a No-op name the faction alone rather
+                        // than inventing an enemy nobody was named against.
+                        (crate::gm_action::GmActionKind::FactionRelation, _) => {
+                            GmActivityAction::SetFactionHostility {
+                                faction: fact.target.clone()?,
+                                enemy: match &fact.affected {
+                                    Some(crate::gm_action::GmAffectedField::FactionHostility {
+                                        enemy,
+                                        ..
+                                    }) => Some(enemy.clone()),
+                                    _ => None,
+                                },
+                                hostile: fact.requested_active,
+                            }
+                        }
+                        // The typed inverse (issue #1442). Every producer of an
+                        // inverse fact attaches `undo_of` — the live apply path
+                        // and the ingress refusal both derive it from the
+                        // action — so `None` is the same hypothetical hole a
+                        // targetless event fact is, and dropping the row beats
+                        // publishing a reversal of nobody's action.
+                        (crate::gm_action::GmActionKind::ActionUndo, _) => {
+                            let undone = fact.undo_of.as_ref()?;
+                            GmActivityAction::UndoGmAction {
+                                original_operator: gm_operator(&undone.operator_id, roster),
+                                original_correlation: undone.correlation.as_str().to_owned(),
+                            }
+                        }
+                        // Session pause is the one family whose sentence is
+                        // chosen by `requested_active` alone. The two Station
+                        // families share this row's shape today and have their
+                        // own Station surfaces; every other family above names
+                        // itself. Written out rather than left as a wildcard so
+                        // the next family that mutates the world cannot compile
+                        // while being published as somebody's session pause.
+                        (
+                            crate::gm_action::GmActionKind::SessionPause
+                            | crate::gm_action::GmActionKind::StationPuppet
+                            | crate::gm_action::GmActionKind::StationCommand,
+                            _,
+                        ) => GmActivityAction::SetSessionPaused {
                             active: fact.requested_active,
                         },
                     },

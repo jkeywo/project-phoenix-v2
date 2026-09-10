@@ -264,3 +264,23 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-attention-resolved:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
 #gm-console.gm-desk #gm-attention-banners { display: grid; gap: var(--space-2); }
 #gm-console.gm-desk #gm-attention-banners p { border: 1px solid var(--gold); padding: var(--space-3); margin: 0; }
+
+/* ── GM faction relations + Undo control (issue #1442) ──────────────────
+   Both are reading-and-deciding surfaces, so they follow the journal's rule:
+   wrap and stack rather than shrink, keep every control at the shared hit
+   floor, and never rely on colour alone — the readout says "hostile" or "not
+   hostile" in words and `data-hostile` is only a second, redundant signal. */
+#gm-console.gm-desk #gm-faction-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+#gm-console.gm-desk #gm-faction-controls .gm-activity-filter { min-width: 0; flex: 1 1 8em; }
+#gm-console.gm-desk #gm-faction-controls select { min-width: 0; width: 100%; }
+#gm-console.gm-desk #gm-faction-relation { margin: var(--space-2) 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk #gm-faction-relation[data-hostile="true"] { color: var(--fire-bright); }
+#gm-console.gm-desk #gm-faction-apply,
+#gm-console.gm-desk #gm-journal-undo {
+  min-height: var(--control-hit-min); height: auto; width: 100%;
+  padding: var(--space-2) var(--space-3); white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-journal-undo:focus-visible,
+#gm-console.gm-desk #gm-faction-apply:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk #gm-journal-undo-feedback,
+#gm-console.gm-desk #gm-faction-feedback { margin: var(--space-2) 0 0 0; overflow-wrap: anywhere; }

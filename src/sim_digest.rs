@@ -589,6 +589,19 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
         acc = fold_str(acc, "gm-direct-effects");
         acc = fold_serde(acc, effects);
     }
+    // GM-attributed faction hostility (issue #1442), folded ONLY once a GM has
+    // actually moved a relation. `gm-direct-effects`' rule, for its reason:
+    // every world that never uses the surface keeps the digest it had before
+    // this landed, and authored `add_faction_enemy` triggers — which are
+    // content, replayed by the trigger pipeline — are deliberately not recorded
+    // here and so do not move any existing run.
+    if let Some(overrides) = world
+        .get_resource::<crate::gm_faction::GmFactionOverrides>()
+        .filter(|overrides| !overrides.is_empty())
+    {
+        acc = fold_str(acc, "gm-faction-overrides");
+        acc = fold_serde(acc, overrides);
+    }
 
     // SimRng: the FULL state, not a probe draw. `RunFingerprint` takes one draw
     // per stream because it has no serde shape to lean on; the record puts

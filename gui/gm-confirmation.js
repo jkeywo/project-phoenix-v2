@@ -38,6 +38,18 @@ export const GM_CONFIRMATION_CATEGORIES = Object.freeze([
   category('objective.fail', 'confirm'),
   category('npc.directive', 'immediate'),
   category('comms.send', 'immediate'),
+  // A faction relation changes who shoots whom, which is a decision a live GM
+  // should not be able to make with a stray click; it is not lethal by itself,
+  // so a plain confirmation rather than a preview.
+  category('faction.relation', 'confirm'),
+  // Reversing another operator's action defaults to the preview mode, because
+  // the consequences a GM has to weigh are not the ones the button implies: the
+  // preview distinguishes the technical change from what crews already
+  // witnessed, which a restored value cannot un-see. The mode remains the
+  // operator's own private choice (#1418 story 30) - the same sentences are
+  // rendered in the journal detail region under every policy, including
+  // `immediate`, so configuring the step away never hides the consequences.
+  category('action.undo', 'confirm-preview'),
 ]);
 const categories = new Map(GM_CONFIRMATION_CATEGORIES.map((entry) => [entry.id, entry]));
 
@@ -57,6 +69,8 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   SetSystemDisabled: ['system.disable', 'system.restore'],
   TransmitComms: ['comms.send'],
   SetNpcDoctrine: ['npc.directive'],
+  SetFactionHostility: ['faction.relation'],
+  UndoGmAction: ['action.undo'],
 }).map(([action, ids]) => [action, Object.freeze(ids.map(gmConfirmationMetadata))])));
 
 /** Registration must name a real category, including its accepted default. */

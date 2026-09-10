@@ -76,7 +76,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   // the desk's detail/reading column, it already stacks and scrolls its own
   // sections, and that is what keeps the journal legible at 200% text rather
   // than competing for one of the fixed grid cells.
-  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-station-pending', 'gm-station-controls', 'gm-despawn-panel', 'gm-journal');
+  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-station-pending', 'gm-station-controls', 'gm-despawn-panel', 'gm-faction-panel', 'gm-journal');
   const stationSurface = element('section', 'gm-station-surface');
   stationSurface.hidden = true;
   move(stationSurface, 'gm-station-frame', 'gm-station-activity-heading', 'gm-station-activity');

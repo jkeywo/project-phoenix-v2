@@ -10,15 +10,18 @@
  *  - what the action technically did, versus what crews already witnessed. A
  *    restored hull does not un-see an explosion, and no surface built on this
  *    component is allowed to imply otherwise (PRD #1418 story 29);
- *  - whether an inverse exists AT ALL. Today none does, for any family. Saying
- *    so plainly, with the reason, is the whole contract: a greyed-out Undo
- *    button that a GM might press in a crisis would be worse than no button.
+ *  - whether an inverse exists AT ALL. Two families now have one (issue #1442:
+ *    NPC doctrine and faction relations); every other family says plainly, with
+ *    the reason, that it does not. A greyed-out Undo button a GM might press in
+ *    a crisis would be worse than no button.
  *
  * It renders presentation only. It submits nothing, owns no state and never
  * opens a dialog.
  */
 import { wireText } from './strings.js';
 
+/** An inverse this build really performs. */
+export const GM_INVERSE_SUPPORTED = 'supported';
 /** An inverse this project intends to build, but has not built yet. */
 export const GM_INVERSE_PLANNED = 'planned';
 /** An inverse that is not coming, with the reason it cannot exist. */
@@ -26,6 +29,11 @@ export const GM_INVERSE_OUT_OF_SCOPE = 'out-of-scope';
 /** An action family this build does not recognise at all. */
 export const GM_INVERSE_UNKNOWN = 'unknown';
 
+const SUPPORTED = (reasonId) => ({
+  supported: true,
+  status: GM_INVERSE_SUPPORTED,
+  reasonId,
+});
 const PLANNED = (reasonId) => ({
   supported: false,
   status: GM_INVERSE_PLANNED,
@@ -45,13 +53,18 @@ const OUT_OF_SCOPE = (reasonId) => ({
  * `planned` families are the ones PRD #1420 scopes an inverse for; every other
  * entry states why reversing it is not a thing that can be built.
  *
- * `supported` is `false` on every row today. When the first inverse lands it
- * flips here and the presentation below follows without another surface change.
+ * A `supported` row is a claim this build can make good on: the canonical
+ * reducer has a typed inverse for it AND the journal records the exact
+ * before/after pair that inverse needs. Everything else states why not.
  */
 export const GM_INVERSE_SUPPORT = Object.freeze({
-  'npc-doctrine': PLANNED('server.gm.inverse.unavailable.planned'),
+  'npc-doctrine': SUPPORTED('server.gm.inverse.supported.npc_doctrine'),
+  'faction-relation': SUPPORTED('server.gm.inverse.supported.faction_relation'),
   'world-spawn': PLANNED('server.gm.inverse.unavailable.planned'),
   'world-despawn': PLANNED('server.gm.inverse.unavailable.planned'),
+  // An inverse is itself an ordinary journal entry, and reversing one would be
+  // a redo rather than an undo. Ask for the state you want instead.
+  'action-undo': OUT_OF_SCOPE('server.gm.inverse.unavailable.inverse'),
   'session-pause': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'station-puppet': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'objective-control': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
@@ -90,6 +103,48 @@ export function gmInverseSupportedKinds() {
   return Object.entries(GM_INVERSE_SUPPORT)
     .filter(([, value]) => value.supported)
     .map(([kind]) => kind);
+}
+
+/**
+ * Describe one `GmAffectedField` as the pair of sentences the preview shows.
+ *
+ * The shape is the wire's own externally tagged enum, echoed straight out of
+ * the journal projection, so this reads it rather than re-deriving it. An
+ * unrecognised variant returns `null`: the caller then renders its own
+ * "this caller captured no state" fallback instead of inventing a description
+ * of a field this build does not know.
+ */
+export function gmAffectedFieldText(affected, t = (id) => id, displayText = wireText) {
+  if (!affected || typeof affected !== 'object') return null;
+  const doctrine = affected['npc-doctrine'];
+  if (doctrine && typeof doctrine === 'object' && typeof doctrine.entity === 'string') {
+    const value = (id) => (typeof id === 'string' && id.length > 0
+      ? t('server.gm.inverse.doctrine_value', { doctrine: displayText(id, id) })
+      : t('server.gm.inverse.doctrine_authored'));
+    return {
+      subject: t('server.gm.inverse.subject_entity', {
+        entity: displayText(doctrine.entity, doctrine.entity),
+      }),
+      before: value(doctrine.before),
+      after: value(doctrine.after),
+    };
+  }
+  const relation = affected['faction-hostility'];
+  if (relation && typeof relation === 'object'
+      && typeof relation.faction === 'string' && typeof relation.enemy === 'string') {
+    const value = (hostile) => t(hostile
+      ? 'server.gm.inverse.hostility_hostile'
+      : 'server.gm.inverse.hostility_neutral');
+    return {
+      subject: t('server.gm.inverse.subject_relation', {
+        faction: displayText(relation.faction, relation.faction),
+        enemy: displayText(relation.enemy, relation.enemy),
+      }),
+      before: value(relation.before === true),
+      after: value(relation.after === true),
+    };
+  }
+  return null;
 }
 
 export function createGmInversePreview({
@@ -133,11 +188,17 @@ export function createGmInversePreview({
     container.replaceChildren();
     const list = doc.createElement('dl');
     list.className = 'gm-inverse-rows';
-    const state = (value) => (typeof value === 'string' && value.length > 0
+    // A caller may hand over the wire `affected` object verbatim; describing it
+    // here keeps the one vocabulary for before/after in one place.
+    const described = gmAffectedFieldText(descriptor?.affected, t, displayText);
+    const state = (value, fallback) => (typeof value === 'string' && value.length > 0
       ? displayText(value, value)
-      : t('server.gm.inverse.state_uncaptured'));
-    row(list, 'server.gm.inverse.before', state(descriptor?.before));
-    row(list, 'server.gm.inverse.after', state(descriptor?.after));
+      : (fallback || t('server.gm.inverse.state_uncaptured')));
+    if (described) {
+      row(list, 'server.gm.inverse.subject', described.subject);
+    }
+    row(list, 'server.gm.inverse.before', state(descriptor?.before, described?.before));
+    row(list, 'server.gm.inverse.after', state(descriptor?.after, described?.after));
     row(
       list,
       'server.gm.inverse.technical',

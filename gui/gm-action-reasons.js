@@ -39,6 +39,14 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'unavailable-comms-recipient': 'server.gm.comms.reason.recipient',
   'unavailable-comms-hail': 'server.gm.comms.reason.hail',
   'world-unavailable': 'server.gm.session.reason.world_unavailable',
+  // The typed inverse family (issue #1442). Each names exactly one thing that
+  // was wrong, because "undo failed" is not an answer a GM can act on.
+  'unknown-faction': 'server.gm.session.reason.unknown_faction',
+  'unknown-gm-action': 'server.gm.session.reason.unknown_gm_action',
+  'inverse-unsupported': 'server.gm.session.reason.inverse_unsupported',
+  'inverse-facts-mismatch': 'server.gm.session.reason.inverse_facts_mismatch',
+  'affected-state-changed': 'server.gm.session.reason.affected_state_changed',
+  'already-inverted': 'server.gm.session.reason.already_inverted',
 });
 
 /** The immediate browser-to-WASM ingress refusal, which has no wire reason. */

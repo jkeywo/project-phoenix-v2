@@ -210,6 +210,151 @@ pub enum GmAction {
         target: String,
         doctrine: String,
     },
+    /// Set one ordered faction pair's hostility to an ABSOLUTE value (#1442).
+    ///
+    /// `faction` and `enemy` are authored reference `name`s — the identity
+    /// `add_faction_enemy` already uses — resolved against the live
+    /// [`crate::ai::faction::FactionRegistry`] at the apply tick, so a GM never
+    /// hand-edits a UUID and never invents a relation the setting did not
+    /// author factions for. Hostility is asymmetric by construction: this moves
+    /// `faction`'s own enemies list and says nothing about `enemy`'s.
+    ///
+    /// Absolute rather than a toggle, for [`Self::SetSessionPaused`]'s reason:
+    /// two GMs pressing at once must not depend on arrival order for the state
+    /// the pair ends up in.
+    ///
+    /// APPENDED after every earlier variant, never inserted: the grant is
+    /// postcard-encoded into the deterministic digest, which writes an enum by
+    /// variant index.
+    SetFactionHostility {
+        faction: String,
+        enemy: String,
+        hostile: bool,
+    },
+    /// Reverse one earlier, still-reversible GM action (issue #1442).
+    ///
+    /// A typed inverse rather than "the same action with the old value": the
+    /// journal has to record that this was an UNDO, of WHICH action, and by
+    /// WHOM, so that both operators appear in the one saved history and a
+    /// second inverse of the same original can be refused rather than silently
+    /// applied twice.
+    ///
+    /// `expected` is the before/after pair the requesting GM was actually
+    /// looking at. It is checked against the original's own recorded
+    /// [`LoggedGmAction::affected`] (so a stale page cannot reverse something
+    /// else) AND against live state at the apply tick (so an intervening change
+    /// is refused rather than overwritten). `original_operator` and
+    /// `original_sequence` are the public identity the journal projection
+    /// publishes; the private [`GmActionOrder::origin`] is deliberately not
+    /// part of the request.
+    ///
+    /// APPENDED for [`Self::SetFactionHostility`]'s reason.
+    UndoGmAction {
+        original: GmActionId,
+        original_operator: String,
+        original_sequence: u64,
+        expected: GmAffectedField,
+    },
+}
+
+/// The exact affected field one GM action changed, with its before and after
+/// values (issue #1442).
+///
+/// This is the fact an inverse is built on, and the fact a GM reads before
+/// choosing one. It is deliberately per-FIELD rather than a whole-state
+/// snapshot: revalidation at the apply tick must refuse a conflicting change to
+/// *this* field while allowing every unrelated change to the same entity, and a
+/// blob comparison could not tell those apart.
+///
+/// Externally tagged (serde's default) because the durable journal is folded
+/// into the deterministic digest through postcard, which cannot encode an
+/// internally tagged enum.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GmAffectedField {
+    /// The applied NPC doctrine palette id on one entity.
+    ///
+    /// `None` is the entity's OWN authored doctrine, which has no palette id at
+    /// all — not "unknown". Reverting to it restores the baseline
+    /// [`crate::gm_npc::AppliedNpcDoctrine`] captured when the first GM
+    /// doctrine landed.
+    NpcDoctrine {
+        entity: String,
+        before: Option<String>,
+        after: Option<String>,
+    },
+    /// Whether `faction` lists `enemy` as hostile. Asymmetric by construction.
+    FactionHostility {
+        faction: String,
+        enemy: String,
+        before: bool,
+        after: bool,
+    },
+}
+
+impl GmAffectedField {
+    /// The same fact with its two sides swapped — what an inverse of it does.
+    pub fn inverted(&self) -> Self {
+        match self {
+            Self::NpcDoctrine {
+                entity,
+                before,
+                after,
+            } => Self::NpcDoctrine {
+                entity: entity.clone(),
+                before: after.clone(),
+                after: before.clone(),
+            },
+            Self::FactionHostility {
+                faction,
+                enemy,
+                before,
+                after,
+            } => Self::FactionHostility {
+                faction: faction.clone(),
+                enemy: enemy.clone(),
+                before: *after,
+                after: *before,
+            },
+        }
+    }
+
+    /// Whether the two sides differ. A recorded fact whose sides are equal
+    /// describes no change and cannot be reversed.
+    pub fn is_change(&self) -> bool {
+        match self {
+            Self::NpcDoctrine { before, after, .. } => before != after,
+            Self::FactionHostility { before, after, .. } => before != after,
+        }
+    }
+
+    fn bounded(&self) -> bool {
+        let ok = |value: &str| {
+            !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+        };
+        match self {
+            Self::NpcDoctrine {
+                entity,
+                before,
+                after,
+            } => ok(entity) && before.as_deref().is_none_or(ok) && after.as_deref().is_none_or(ok),
+            Self::FactionHostility { faction, enemy, .. } => ok(faction) && ok(enemy),
+        }
+    }
+}
+
+/// The original action an inverse reversed, recorded on the inverse's own
+/// durable fact (issue #1442).
+///
+/// Both operators therefore appear in the ONE saved journal: the undoing GM as
+/// [`LoggedGmAction::operator_id`], the original GM here. Only public identity
+/// travels — the correlation, the operator id the roster names and the
+/// contiguous sequence — never the [`GmActionOrder::origin`] host slot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmUndoReference {
+    pub operator_id: String,
+    pub correlation: GmActionId,
+    pub sequence: u64,
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -259,6 +404,14 @@ pub enum GmActionKind {
     ContactNormal,
     Comms,
     NpcDoctrine,
+    /// One ordered faction pair's hostility (issue #1442). Appended, like every
+    /// variant after the first: this kind rides the durable journal, which is
+    /// postcard-folded into the digest by variant INDEX.
+    FactionRelation,
+    /// A typed inverse of an earlier action (issue #1442). Its own family
+    /// rather than the family it reverses, so the journal panel can present an
+    /// undo AS an undo and a second inverse of one original is refusable.
+    ActionUndo,
 }
 
 impl GmActionKind {
@@ -283,8 +436,17 @@ impl GmActionKind {
             | Self::ContactConceal
             | Self::ContactNormal
             | Self::Comms
+            // The faction whose OWN enemies list moves. The other half of the
+            // pair rides `LoggedGmAction::affected` rather than being folded
+            // into an invented joined spelling of one identity.
+            | Self::FactionRelation
             | Self::NpcDoctrine => true,
-            Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
+            // An inverse names no world identity: what it acted on is the
+            // original action, recorded on `LoggedGmAction::undo_of`.
+            Self::SessionPause
+            | Self::StationPuppet
+            | Self::StationCommand
+            | Self::ActionUndo => false,
         }
     }
 }
@@ -338,6 +500,8 @@ impl GmAction {
             | Self::SetSystemDisabled { .. }
             | Self::TransmitComms { .. }
             | Self::SetEventPaused { .. }
+            | Self::SetFactionHostility { .. }
+            | Self::UndoGmAction { .. }
             | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. }
             | Self::IssueStationCommand { ship, .. }
@@ -369,8 +533,14 @@ impl GmAction {
             Self::SpawnPaletteEntity { palette, .. } => Some(palette.as_str()),
             Self::ObjectiveAction { objective, .. } => Some(objective),
             Self::TransmitComms { transmission } => Some(&transmission.sender),
+            // The faction whose own enemies list moves. The enemy half is on
+            // the durable `affected` fact, where the inverse reads it.
+            Self::SetFactionHostility { faction, .. } => Some(faction.as_str()),
             Self::SetSessionPaused { .. }
             | Self::SetStationPuppet { .. }
+            // An inverse names an ACTION, not a world identity; `undo_of`
+            // carries that identity on the durable fact.
+            | Self::UndoGmAction { .. }
             | Self::IssueStationCommand { .. } => None,
         }
     }
@@ -389,6 +559,24 @@ impl GmAction {
             Self::SetNpcDoctrine { target, doctrine } if bounded(target) && bounded(doctrine) => {
                 Ok(())
             }
+            // A faction may not be made hostile to itself: the registry would
+            // accept it and `is_enemy` would then report every member of that
+            // faction as its own enemy, which no authored world can express.
+            Self::SetFactionHostility { faction, enemy, .. }
+                if bounded(faction) && bounded(enemy) && faction != enemy =>
+            {
+                Ok(())
+            }
+            // A recorded fact whose two sides are equal describes no change, so
+            // there is nothing an inverse of it could do. Refusing it as an
+            // INVALID action keeps it out of the canonical journal entirely,
+            // rather than admitting a request whose only possible answer is a
+            // refusal at the apply tick.
+            Self::UndoGmAction {
+                original_operator,
+                expected,
+                ..
+            } if bounded(original_operator) && expected.bounded() && expected.is_change() => Ok(()),
             Self::DespawnEntity { target } if bounded(target) => Ok(()),
             Self::ObjectiveAction {
                 objective,
@@ -507,6 +695,8 @@ impl GmAction {
             },
             Self::TransmitComms { .. } => GmActionKind::Comms,
             Self::SetNpcDoctrine { .. } => GmActionKind::NpcDoctrine,
+            Self::SetFactionHostility { .. } => GmActionKind::FactionRelation,
+            Self::UndoGmAction { .. } => GmActionKind::ActionUndo,
         }
     }
 
@@ -527,6 +717,8 @@ impl GmAction {
             | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
+            | Self::SetFactionHostility { .. }
+            | Self::UndoGmAction { .. }
             | Self::ArmGmEventSkip { .. } => None,
         }
     }
@@ -541,6 +733,30 @@ impl GmAction {
     pub fn npc_doctrine(&self) -> Option<String> {
         match self {
             Self::SetNpcDoctrine { doctrine, .. } => Some(doctrine.clone()),
+            _ => None,
+        }
+    }
+    /// The original action an inverse names (issue #1442), for the durable
+    /// fact. `None` for every family that reverses nothing.
+    pub fn undo_reference(&self) -> Option<GmUndoReference> {
+        match self {
+            Self::UndoGmAction {
+                original,
+                original_operator,
+                original_sequence,
+                ..
+            } => Some(GmUndoReference {
+                operator_id: original_operator.clone(),
+                correlation: original.clone(),
+                sequence: *original_sequence,
+            }),
+            _ => None,
+        }
+    }
+    /// The before/after facts an inverse was requested against (issue #1442).
+    pub fn expected_affected(&self) -> Option<&GmAffectedField> {
+        match self {
+            Self::UndoGmAction { expected, .. } => Some(expected),
             _ => None,
         }
     }
@@ -590,6 +806,8 @@ impl GmAction {
             | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
+            | Self::SetFactionHostility { .. }
+            | Self::UndoGmAction { .. }
             | Self::ArmGmEventSkip { .. }
             // Not session pause: a paused EVENT stops one authored condition
             // being evaluated and leaves the simulation running.
@@ -618,6 +836,8 @@ impl GmAction {
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::SetNpcDoctrine { .. }
+            | Self::SetFactionHostility { .. }
+            | Self::UndoGmAction { .. }
             | Self::TransmitComms { .. } => None,
         }
     }
@@ -625,6 +845,9 @@ impl GmAction {
     pub fn requested_active(&self) -> bool {
         match self {
             Self::SetSystemDisabled { disabled, .. } => *disabled,
+            // The absolute hostility asked for, exactly as a Pause carries the
+            // absolute pause state it asked for.
+            Self::SetFactionHostility { hostile, .. } => *hostile,
             Self::SetSessionPaused { active }
             | Self::SetStationPuppet { active, .. }
             | Self::SetEventPaused { active, .. } => *active,
@@ -642,6 +865,9 @@ impl GmAction {
             | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
+            // An undo is always a request to make something happen; WHAT it
+            // makes true is `expected.before`, on the action itself.
+            | Self::UndoGmAction { .. }
             | Self::ArmGmEventSkip { .. } => true,
         }
     }
@@ -1076,6 +1302,31 @@ pub enum GmActionRefusalReason {
     UnavailableCommsHail,
     UnknownNpcDoctrine,
     NpcDoctrineIncompatible,
+    /// Neither authored faction `name` in a [`GmAction::SetFactionHostility`]
+    /// resolves against the live registry at the apply tick (issue #1442).
+    ///
+    /// Appended for [`Self::UnknownGmEvent`]'s reason, which every reason after
+    /// it shares: the journal is folded through postcard, which encodes an enum
+    /// by VARIANT INDEX.
+    UnknownFaction,
+    /// No canonical journal entry carries the identity a
+    /// [`GmAction::UndoGmAction`] named — wrong correlation, wrong operator or
+    /// wrong sequence — so there is nothing to reverse (issue #1442).
+    UnknownGmAction,
+    /// The named original exists but cannot be reversed: it changed nothing
+    /// (No-op or Refused), or its family records no affected field.
+    InverseUnsupported,
+    /// The requesting GM's before/after facts are not the ones the canonical
+    /// journal recorded, so the page was reading a stale or foreign history.
+    /// The inverse is refused rather than applied against different facts.
+    InverseFactsMismatch,
+    /// The affected field no longer holds what the original action left: a
+    /// later change (by anyone, GM or simulation) intervened. Unrelated changes
+    /// to the same entity are deliberately NOT this refusal.
+    AffectedStateChanged,
+    /// An applied inverse of that same original already exists. Two GMs racing
+    /// to undo one action get one undo and one truthful refusal.
+    AlreadyInverted,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -1170,6 +1421,29 @@ pub struct LoggedGmAction {
     pub observer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub npc_doctrine: Option<String>,
+    /// The EXACT field this action changed, with the value on either side of
+    /// it (issue #1442).
+    ///
+    /// Recorded only on an `Applied` fact of a family that has a typed inverse,
+    /// because that is the only case in which the pair is both true and usable:
+    /// a No-op changed nothing and a Refusal never ran. It is what the inverse
+    /// path revalidates against at its own apply tick, and what the GM reads
+    /// before choosing one.
+    ///
+    /// `Option` plus `skip_serializing_if` is [`Self::effect`]'s device for
+    /// [`Self::effect`]'s reason: every fact of every older family stays
+    /// byte-identical to its pre-#1442 shape, so no existing world's digest
+    /// moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affected: Option<GmAffectedField>,
+    /// The original action THIS fact reversed (issue #1442).
+    ///
+    /// Present only on an inverse. Together with [`Self::operator_id`] it puts
+    /// both operators — the one who acted and the one who undid it — in the one
+    /// saved journal, with no second log and no mutation of the original entry,
+    /// which stays exactly as it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undo_of: Option<GmUndoReference>,
 }
 
 impl LoggedGmAction {
@@ -1200,7 +1474,21 @@ impl LoggedGmAction {
             comms_recipients: None,
             observer: None,
             npc_doctrine: None,
+            affected: None,
+            undo_of: None,
         }
+    }
+
+    /// Attach the exact affected field this fact changed (issue #1442).
+    pub fn with_affected(mut self, affected: Option<GmAffectedField>) -> Self {
+        self.affected = affected;
+        self
+    }
+
+    /// Attach the original action this fact reversed (issue #1442).
+    pub fn with_undo_of(mut self, undo_of: Option<GmUndoReference>) -> Self {
+        self.undo_of = undo_of;
+        self
     }
 
     /// Attach the action's stable target identity to a refusal built above.
@@ -1285,6 +1573,10 @@ impl LoggedGmAction {
         )
         .with_comms_recipients(request.action.comms_recipients())
         .with_npc_doctrine(request.action.npc_doctrine())
+        // An inverse refused at ingress must still say WHICH action it meant to
+        // reverse, for `target`'s reason: this fact is derived from the request
+        // because there is no grant to look one up from.
+        .with_undo_of(request.action.undo_reference())
     }
 }
 
@@ -1674,6 +1966,7 @@ impl GmActionJournal {
             || result.objective_recipients != grant.action.objective_recipients()
             || result.comms_recipients != grant.action.comms_recipients()
             || result.npc_doctrine != grant.action.npc_doctrine()
+            || result.undo_of != grant.action.undo_reference()
             || result.target.as_deref() != grant.action.target_id()
             || result.observer != grant.action.observer_id()
             || (matches!(grant.action, GmAction::SetSystemDisabled { .. })
@@ -1859,6 +2152,11 @@ impl GmActionJournal {
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. }
                         | GmAction::SetNpcDoctrine { .. }
+                        // A faction relation and an inverse have no latch to
+                        // fold forward here either: both are recorded by the
+                        // state they left, which this reducer does not hold.
+                        | GmAction::SetFactionHostility { .. }
+                        | GmAction::UndoGmAction { .. }
                         | GmAction::TransmitComms { .. } => {}
                     }
                 }
@@ -1929,6 +2227,8 @@ impl GmActionJournal {
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
                 | GmAction::SetNpcDoctrine { .. }
+                | GmAction::SetFactionHostility { .. }
+                | GmAction::UndoGmAction { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
@@ -1950,6 +2250,12 @@ impl GmActionJournal {
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
                 npc_doctrine: grant.action.npc_doctrine(),
+                // The affected before/after pair is measured against the LIVE
+                // world at the apply tick, which this fixture reducer has none
+                // of. Guessing one would put a fabricated fact under an inverse
+                // that revalidates against it, so it stays absent.
+                affected: None,
+                undo_of: grant.action.undo_reference(),
             });
         }
         GmActionLog { entries, paused }
@@ -2037,6 +2343,8 @@ impl GmActionJournal {
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
                 | GmAction::SetNpcDoctrine { .. }
+                | GmAction::SetFactionHostility { .. }
+                | GmAction::UndoGmAction { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
@@ -2058,6 +2366,12 @@ impl GmActionJournal {
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
                 npc_doctrine: grant.action.npc_doctrine(),
+                // The affected before/after pair is measured against the LIVE
+                // world at the apply tick, which this fixture reducer has none
+                // of. Guessing one would put a fabricated fact under an inverse
+                // that revalidates against it, so it stays absent.
+                affected: None,
+                undo_of: grant.action.undo_reference(),
             });
         }
         GmActionLog { entries, paused }
@@ -2158,6 +2472,16 @@ pub struct GmSessionProjection {
     /// host's `{"paused":true}` bootstrap) readable.
     #[serde(default)]
     pub journal: crate::gm_journal::GmJournalProjection,
+    /// Every live faction and the factions it currently treats as hostile
+    /// (issue #1442), so the GM faction control names authored factions rather
+    /// than inviting free text.
+    ///
+    /// It rides this existing session channel for the journal's reason: it is
+    /// read by the same panel column, it changes when a GM faction action
+    /// applies, and a second channel for one list would be a second thing to
+    /// keep in step. `#[serde(default)]` keeps a pre-#1442 payload readable.
+    #[serde(default)]
+    pub factions: Vec<crate::gm_faction::GmFactionRow>,
 }
 
 #[derive(Resource, Clone, Debug, Default)]
@@ -2237,9 +2561,11 @@ pub fn projection(
     paused: bool,
     log: &GmActionLog,
     refusals: &LocalGmActionRefusals,
+    factions: Option<&crate::ai::faction::FactionRegistry>,
 ) -> GmSessionProjection {
     GmSessionProjection {
         paused,
+        factions: crate::gm_faction::faction_rows(factions),
         results: projected_results(GmActionKind::SessionPause, log, refusals),
         // Canonical facts only. Supplemental local refusals (`refusals`) are
         // page-local diagnostics that no snapshot carries, so admitting them
@@ -2255,10 +2581,16 @@ pub fn publish_session_projection(
     paused: Res<SimulationPaused>,
     log: Res<GmActionLog>,
     refusals: Res<LocalGmActionRefusals>,
+    factions: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     mut last: ResMut<LastGmSessionProjection>,
     mut writer: MessageWriter<crate::console_bridge::GmSessionChanged>,
 ) {
-    let next = projection(paused.0, &log, &refusals);
+    let next = projection(
+        paused.0,
+        &log,
+        &refusals,
+        factions.as_deref().map(|registry| &registry.0),
+    );
     if last.0.as_ref() == Some(&next) {
         return;
     }
@@ -2306,6 +2638,85 @@ fn station_grant_outlives_operator(
     losses
         .agreed_tick(grant.from)
         .is_none_or(|loss_tick| grant.apply_tick > loss_tick)
+}
+
+/// Whether one canonical journal fact can still be reversed, and whether the
+/// requesting GM was looking at the truth when they asked (issue #1442).
+///
+/// Split out of the reducer so the whole answer is one readable list of
+/// refusals, each naming exactly one thing that can be wrong. Every check reads
+/// the CANONICAL journal, never the request: an inverse must not be able to
+/// assert its own justification.
+///
+/// The live-state half of revalidation is deliberately NOT here. It differs per
+/// affected field (an NPC doctrine lives on an entity, a hostility lives in the
+/// registry) and both need world access this function does not take, so the
+/// reducer performs it against `expected.before` immediately below.
+pub(crate) fn undo_precheck(
+    journal: &GmActionJournal,
+    original: &GmActionId,
+    original_operator: &str,
+    original_sequence: u64,
+    expected: &GmAffectedField,
+) -> Result<(), GmActionRefusalReason> {
+    let results = journal.applied_results();
+    // The identity has to match on all three published fields. Correlation
+    // alone would be enough for the journal, but a page that has drifted onto a
+    // different run would then silently reverse whatever now holds that
+    // correlation.
+    let Some(fact) = results.iter().find(|entry| {
+        entry.correlation == *original
+            && entry.operator_id == original_operator
+            && entry.order.map(|order| order.sequence) == Some(original_sequence)
+    }) else {
+        return Err(GmActionRefusalReason::UnknownGmAction);
+    };
+    // A No-op changed nothing and a Refusal never ran; a family with no
+    // recorded affected field has nothing an inverse could restore. All three
+    // are the same answer to a GM: that entry is not reversible.
+    if fact.outcome != GmActionOutcome::Applied {
+        return Err(GmActionRefusalReason::InverseUnsupported);
+    }
+    // Undoing an undo is out of scope, and this is where that has to be TRUE
+    // rather than merely displayed: `gui/gm-inverse-preview.js` already declines
+    // to offer the control over an `action-undo` row, and a reducer that
+    // accepted the request anyway would let a page built from a stale
+    // projection — or a peer replaying the log — walk a chain of reversals the
+    // surface never shows and no GM ever saw offered. Append-only discipline:
+    // to put back what an undo undid, ask for the change again as its own
+    // attributed action, so both steps stay on the one saved journal.
+    if fact.action_kind == GmActionKind::ActionUndo {
+        return Err(GmActionRefusalReason::InverseUnsupported);
+    }
+    let Some(recorded) = fact.affected.as_ref() else {
+        return Err(GmActionRefusalReason::InverseUnsupported);
+    };
+    // The requester's before/after must be the ones the journal recorded. This
+    // is what refuses a stale page: the row may have been re-used, re-rendered
+    // or read out of a projection that has since been rewound by a restore.
+    if recorded != expected {
+        return Err(GmActionRefusalReason::InverseFactsMismatch);
+    }
+    // Any GM may reverse any eligible action, and two may ask at once. The
+    // first ordered request wins; the second is told the truth rather than
+    // applying a second inverse over the top of the first.
+    //
+    // Matched on the same three published fields the original was found by, for
+    // the same reason: a correlation is scoped to the operator that minted it
+    // (see `GmActionJournal::grant_for`), so on the bare string alone one GM's
+    // undo of THEIR "faction-1" would report every other operator's "faction-1"
+    // as already reversed and make it permanently unreversible.
+    if results.iter().any(|entry| {
+        entry.outcome == GmActionOutcome::Applied
+            && entry.undo_of.as_ref().is_some_and(|undo| {
+                undo.correlation == *original
+                    && undo.operator_id == original_operator
+                    && undo.sequence == original_sequence
+            })
+    }) {
+        return Err(GmActionRefusalReason::AlreadyInverted);
+    }
+    Ok(())
 }
 
 /// Recompute and apply every due action. It runs before the mesh gate, which
@@ -2366,10 +2777,16 @@ pub fn apply_due_actions(
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
-    (removal_targets, mut objective_control, mut native_authority): (
+    // Grouped into the trailing tuple because this system is already at Bevy's
+    // parameter ceiling. The faction control (issue #1442) is the read/write
+    // seam over `FactionRegistryResource`; it performs the same two registry
+    // calls and the same AI target re-validation the authored
+    // `add_faction_enemy` trigger action does.
+    (removal_targets, mut objective_control, mut native_authority, mut factions): (
         crate::gm_despawn::RemovalQuery,
         crate::gm_objective::ObjectiveControl,
         Option<ResMut<NativeGmAuthority>>,
+        crate::gm_faction::GmFactionControl,
     ),
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
@@ -2389,6 +2806,10 @@ pub fn apply_due_actions(
         // Only the directed world-effect family fills this in; every other
         // family's durable fact keeps its exact pre-#1310 shape.
         let mut resolved_effect: Option<crate::gm_effect::GmDirectEffectResult> = None;
+        // The EXACT field this action changed, recorded only when it actually
+        // changed one (issue #1442). This is what an inverse revalidates
+        // against, so a guess here would be worse than nothing.
+        let mut affected: Option<GmAffectedField> = None;
         // The NARROWED scope a directed effect named, `None` for the whole
         // entity and for every other family — see `LoggedGmAction::effect_scope`.
         let requested_scope = grant.action.effect_scope();
@@ -2401,11 +2822,130 @@ pub fn apply_due_actions(
         );
         let (outcome, reason) = match &grant.action {
             GmAction::SetNpcDoctrine { target, doctrine } => match content.as_deref() {
-                Some(runtime) => ship_access.p3().apply(runtime, target, doctrine),
+                Some(runtime) => {
+                    // Read the live doctrine BEFORE the mutation: the applied
+                    // palette id it replaces is the one fact an inverse needs,
+                    // and `None` is the entity's own authored doctrine rather
+                    // than an unknown one.
+                    let before = ship_access.p3().applied_doctrine(target);
+                    let result = ship_access.p3().apply(runtime, target, doctrine);
+                    if result.0 == GmActionOutcome::Applied {
+                        affected = Some(GmAffectedField::NpcDoctrine {
+                            entity: target.clone(),
+                            before: before.flatten(),
+                            after: Some(doctrine.clone()),
+                        });
+                    }
+                    result
+                }
                 None => (
                     GmActionOutcome::Refused,
                     Some(GmActionRefusalReason::UnknownNpcDoctrine),
                 ),
+            },
+            // The typed, attributed faction adapter (issue #1442). Absolute,
+            // like a Pause: `hostile` is the state the pair ends up in, not a
+            // toggle, so two GMs pressing at once agree on the answer.
+            GmAction::SetFactionHostility {
+                faction,
+                enemy,
+                hostile,
+            } => match factions.set_hostile(faction, enemy, *hostile) {
+                crate::gm_faction::GmFactionOutcome::Applied { before } => {
+                    affected = Some(GmAffectedField::FactionHostility {
+                        faction: faction.clone(),
+                        enemy: enemy.clone(),
+                        before,
+                        after: *hostile,
+                    });
+                    (GmActionOutcome::Applied, None)
+                }
+                crate::gm_faction::GmFactionOutcome::NoOp { .. } => (GmActionOutcome::NoOp, None),
+                crate::gm_faction::GmFactionOutcome::UnknownFaction => (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownFaction),
+                ),
+                // No registry at all: nothing downstream could ever hold this
+                // relation, so refusing is the only honest terminal answer.
+                crate::gm_faction::GmFactionOutcome::Unavailable => (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownFaction),
+                ),
+            },
+            // The typed inverse (issue #1442). Every check below happens HERE,
+            // at the canonical apply tick against live state, never against
+            // what the requesting page could see when the button was pressed.
+            GmAction::UndoGmAction {
+                original,
+                original_operator,
+                original_sequence,
+                expected,
+            } => match undo_precheck(
+                &journal,
+                original,
+                original_operator,
+                *original_sequence,
+                expected,
+            ) {
+                Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+                Ok(()) => {
+                    let restored = expected.inverted();
+                    let result = match &restored {
+                        GmAffectedField::NpcDoctrine {
+                            entity,
+                            before,
+                            after,
+                        } => match content.as_deref() {
+                            Some(runtime) => ship_access.p3().revert(
+                                runtime,
+                                entity,
+                                before.as_deref(),
+                                after.as_deref(),
+                            ),
+                            None => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownNpcDoctrine),
+                            ),
+                        },
+                        GmAffectedField::FactionHostility {
+                            faction,
+                            enemy,
+                            before,
+                            after,
+                        } => match factions.hostile(faction, enemy) {
+                            None => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownFaction),
+                            ),
+                            // The affected FIELD moved since the original
+                            // applied. Every unrelated relation, and every
+                            // unrelated change to these same factions, is
+                            // deliberately not consulted.
+                            Some(live) if live != *before => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::AffectedStateChanged),
+                            ),
+                            Some(_) => match factions.set_hostile(faction, enemy, *after) {
+                                crate::gm_faction::GmFactionOutcome::Applied { .. } => {
+                                    (GmActionOutcome::Applied, None)
+                                }
+                                crate::gm_faction::GmFactionOutcome::NoOp { .. } => {
+                                    (GmActionOutcome::NoOp, None)
+                                }
+                                _ => (
+                                    GmActionOutcome::Refused,
+                                    Some(GmActionRefusalReason::UnknownFaction),
+                                ),
+                            },
+                        },
+                    };
+                    // The inverse's OWN durable fact says what IT changed,
+                    // which is the original's pair the other way round.
+                    if result.0 == GmActionOutcome::Applied {
+                        affected = Some(restored);
+                    }
+                    result
+                }
             },
             GmAction::ObjectiveAction {
                 objective,
@@ -2742,6 +3282,8 @@ pub fn apply_due_actions(
                             comms_recipients: None,
                             observer: None,
                             npc_doctrine: None,
+                            affected: None,
+                            undo_of: None,
                         })
                         .expect("live GM result matches its canonical grant");
                     continue;
@@ -2938,6 +3480,8 @@ pub fn apply_due_actions(
                         comms_recipients: None,
                         observer: None,
                         npc_doctrine: None,
+                        affected: None,
+                        undo_of: None,
                     };
                     journal
                         .record_applied_result(result)
@@ -3023,6 +3567,8 @@ pub fn apply_due_actions(
                             comms_recipients: None,
                             observer: None,
                             npc_doctrine: None,
+                            affected: None,
+                            undo_of: None,
                         };
                         journal
                             .record_applied_result(result)
@@ -3118,6 +3664,8 @@ pub fn apply_due_actions(
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
                 npc_doctrine: grant.action.npc_doctrine(),
+                affected,
+                undo_of: grant.action.undo_reference(),
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -5513,6 +6061,8 @@ station = "helm"
             comms_recipients: None,
             observer: None,
             npc_doctrine: None,
+            affected: None,
+            undo_of: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -5533,6 +6083,8 @@ station = "helm"
             comms_recipients: None,
             observer: None,
             npc_doctrine: None,
+            affected: None,
+            undo_of: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -5561,6 +6113,8 @@ station = "helm"
             comms_recipients: None,
             observer: None,
             npc_doctrine: None,
+            affected: None,
+            undo_of: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -5600,6 +6154,8 @@ station = "helm"
                 comms_recipients: None,
                 observer: None,
                 npc_doctrine: None,
+                affected: None,
+                undo_of: None,
             }),
             Err("pending GM result is not a Station command"),
         );
@@ -5623,7 +6179,7 @@ station = "helm"
                 .unwrap();
         }
         let log = journal.log_through(500);
-        let bounded = projection(false, &log, &LocalGmActionRefusals::default());
+        let bounded = projection(false, &log, &LocalGmActionRefusals::default(), None);
         assert!(bounded
             .results
             .iter()
@@ -5646,6 +6202,7 @@ station = "helm"
             false,
             world.resource::<GmActionLog>(),
             world.resource::<LocalGmActionRefusals>(),
+            None,
         );
         let exact = retried
             .results

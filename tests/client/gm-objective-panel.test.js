@@ -150,3 +150,27 @@ it('preserves keyboard focus through identical updates and cancels a preview wit
   document.querySelector('#gm-objective-confirmation').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   expect(panel.confirm()).toBe(false); expect(document.activeElement).toBe(button('activate'));
 });
+
+it('narrows the list to the selected ship and lists everything again for a non-ship or no selection', () => {
+  const { panel } = mount({ getShipName: (id) => id === 'ship-a' ? 'Courier' : 'Raider' });
+  panel.update(payload({ objective_palette: [authored(), authored({ id: 'ambush', recipients: ['ship-b'] }),
+    authored({ id: 'survive', recipients: [] })] }));
+  const listed = () => [...document.querySelectorAll('#gm-objective-list li')].map((row) => row.dataset.objective);
+  expect(listed()).toEqual(['rescue', 'ambush', 'survive']);
+  expect(document.getElementById('gm-objective-scope').hidden).toBe(true);
+  panel.select({ entity_id: 'ship-b', kind: 'npc_ship', name: 'Raider' });
+  expect(listed()).toEqual(['ambush', 'survive']);
+  expect(document.getElementById('gm-objective-scope').hidden).toBe(false);
+  expect(document.getElementById('gm-objective-scope').textContent).toContain('Raider');
+  expect(panel.state().scope).toBe('ship-b');
+  panel.select({ entity_id: 'ship-c', kind: 'npc_ship', name: 'Stranger' });
+  panel.update(payload({ objective_palette: [authored()] }));
+  expect(listed()).toEqual([]);
+  expect(document.getElementById('gm-objective-empty').hidden).toBe(false);
+  expect(document.getElementById('gm-objective-empty').textContent).toContain('Stranger');
+  panel.select({ entity_id: 'field', kind: 'asteroid_field', name: 'Belt' });
+  expect(listed()).toEqual(['rescue']);
+  expect(panel.state().scope).toBeNull();
+  panel.select(null);
+  expect(document.getElementById('gm-objective-scope').hidden).toBe(true);
+});

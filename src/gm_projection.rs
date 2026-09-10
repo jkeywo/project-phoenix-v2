@@ -62,6 +62,10 @@ pub enum GmEntityKind {
     Region,
     AsteroidField,
     AuthoredAsteroid,
+    /// A planet, moon or star: a landmark blip the crew radars already draw
+    /// from its `[radar_appearance]`, which the GM map was silently dropping
+    /// because nothing here classified it.
+    Celestial,
 }
 
 /// Authoritative broad status carried by the local projection.
@@ -483,6 +487,11 @@ fn world_kind(
         Some(GmEntityKind::Structure)
     } else if named_asteroid && has_tag(tags, EntityTag::Asteroid) {
         Some(GmEntityKind::AuthoredAsteroid)
+    } else if has_tag(tags, EntityTag::Planet)
+        || has_tag(tags, EntityTag::Moon)
+        || has_tag(tags, EntityTag::Star)
+    {
+        Some(GmEntityKind::Celestial)
     } else {
         None
     }
@@ -1221,6 +1230,38 @@ mod tests {
         assert_eq!(payload.entities[0].status.hull_percent, None);
         assert_eq!(payload.entities[0].status.condition_percent, None);
         assert_eq!(payload.entities[0].radar.icon.as_deref(), Some("ship"));
+    }
+
+    /// A planet carries no region shape, no infrastructure and no structure
+    /// tag, so before this it fell through `world_kind` to `None` and never
+    /// reached the GM map at all (GM console feedback: "the planet in
+    /// combat_test didn't show up in the radar").
+    #[test]
+    fn planet_tag_projects_a_celestial_blip_with_its_radar_appearance() {
+        const PLANET_ID: &str = "00000000-0000-4000-8000-000000000007";
+        let mut app = app();
+        app.world_mut().spawn((
+            EntityUuid(PLANET_ID.into()),
+            EntityName("entity.planet_ecumenopolis.name".into()),
+            Transform::from_xyz(500.0, 0.0, -120.0),
+            EntityTagsSection(vec![EntityTag::Planet.as_str().into(), "habitable".into()]),
+            RadarAppearanceSection(RadarAppearanceConfig {
+                icon: Some("planet".into()),
+                colour: Some(vec![1.0, 0.8, 0.4]),
+                size: Some(33.0),
+                region_colour: None,
+            }),
+        ));
+
+        app.world_mut().run_schedule(FixedLast);
+        let payload = take(&mut app).pop().expect("absolute celestial projection");
+        assert_eq!(payload.entities.len(), 1);
+        assert_eq!(payload.entities[0].entity_id, PLANET_ID);
+        assert_eq!(payload.entities[0].kind, GmEntityKind::Celestial);
+        assert_eq!(payload.entities[0].position, [500.0, 0.0, -120.0]);
+        assert!(payload.entities[0].geometry.is_none());
+        assert_eq!(payload.entities[0].radar.icon.as_deref(), Some("planet"));
+        assert_eq!(payload.entities[0].radar.size, Some(33.0));
     }
 
     #[test]

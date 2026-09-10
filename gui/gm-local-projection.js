@@ -10,6 +10,7 @@ const ENTITY_KINDS = new Set([
   'region',
   'asteroid_field',
   'authored_asteroid',
+  'celestial',
 ]);
 const REGION_KINDS = new Set(['hazard', 'region', 'asteroid_field']);
 

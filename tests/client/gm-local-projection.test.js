@@ -330,6 +330,32 @@ describe('GM omniscient local projection', () => {
     expect(state.range).toBe(600);
   });
 
+  it('draws a celestial body as a sized blip from its radar appearance', () => {
+    const planet = entity({
+      entity_id: '00000000-0000-4000-8000-000000000007',
+      kind: 'celestial',
+      position: [500, 0, -120],
+      status: {
+        hull_percent: null,
+        condition_percent: null,
+        destroyed: false,
+        hull_current_milli_hp: null,
+        hull_max_milli_hp: null,
+      },
+      radar: { icon: 'planet', colour: [1, 0.8, 0.4], size: 33, region_colour: null },
+    });
+    expect(harness.projection.update(payload([entity(), planet]))).toBe(true);
+    const state = buildGmMapState([entity(), planet]);
+    expect(state.blips.map((entry) => entry.uuid)).toEqual([PLAYER_ID, planet.entity_id]);
+    expect(state.blips[1]).toMatchObject({
+      kind: 'celestial',
+      icon: 'planet',
+      color: [1, 0.8, 0.4],
+      radar_size: 33,
+      stance: 'unknown',
+    });
+  });
+
   it('keeps selection by stable identity while absolute position and status refresh', () => {
     expect(harness.projection.update(payload([entity()]))).toBe(true);
     expect(harness.projection.select(PLAYER_ID)).toBe(true);

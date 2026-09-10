@@ -251,6 +251,30 @@ pub enum PaneInput {
     Unfocus,
 }
 
+/// Pixels one wheel notch (one "line" of scroll) moves a pane's page.
+///
+/// A wheel reports its travel in lines, not pixels — a notch is `1.0` — and
+/// the view scrolls by pixel, so forwarding the raw line count scrolled the GM
+/// console ONE PIXEL per notch (GM console feedback: "scrolling the panel on
+/// the right with the mouse wheel is very slow"). Chrome moves 100px a notch
+/// on Windows and Firefox three lines of ~19px; this sits between them so a
+/// desk panel of a few hundred pixels crosses in a handful of notches.
+pub const WHEEL_LINE_PIXELS: f32 = 60.0;
+
+impl PaneInput {
+    /// The [`PaneInput::Scroll`] a wheel report becomes. `line_units` says the
+    /// deltas count notches rather than pixels (a touchpad reports pixels and
+    /// is passed through unchanged); rounding rather than truncating keeps a
+    /// sub-notch tick from vanishing to zero.
+    pub fn scroll_from_wheel(line_units: bool, dx: f32, dy: f32) -> Self {
+        let scale = if line_units { WHEEL_LINE_PIXELS } else { 1.0 };
+        PaneInput::Scroll {
+            dx: (dx * scale).round() as i32,
+            dy: (dy * scale).round() as i32,
+        }
+    }
+}
+
 /// One instruction for the side that owns the views.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaneCommand {
@@ -1591,6 +1615,38 @@ impl<R: PaneRuntime> PaneLoop<R> {
             iteration_ms: total_ns as f64 / 1_000_000.0,
             starved: 0,
         }));
+    }
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+
+    #[test]
+    fn a_wheel_notch_scrolls_a_line_of_pixels_not_one_pixel() {
+        assert_eq!(
+            PaneInput::scroll_from_wheel(true, 0.0, -1.0),
+            PaneInput::Scroll {
+                dx: 0,
+                dy: -(WHEEL_LINE_PIXELS as i32)
+            }
+        );
+        assert_eq!(
+            PaneInput::scroll_from_wheel(true, 0.0, 2.5),
+            PaneInput::Scroll { dx: 0, dy: 150 }
+        );
+    }
+
+    #[test]
+    fn pixel_reports_pass_through_and_sub_notch_ticks_survive_rounding() {
+        assert_eq!(
+            PaneInput::scroll_from_wheel(false, 12.0, -37.0),
+            PaneInput::Scroll { dx: 12, dy: -37 }
+        );
+        assert_eq!(
+            PaneInput::scroll_from_wheel(true, 0.0, 0.1),
+            PaneInput::Scroll { dx: 0, dy: 6 }
+        );
     }
 }
 

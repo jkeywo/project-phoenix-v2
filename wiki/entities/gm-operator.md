@@ -40,6 +40,22 @@ Bar. The authentic Station iframe remains outside the desk
 at 1280×720, with its existing console URL and command adapter. Inspector tabs
 present the existing knowledge comparison, without adding a new projection.
 
+After an action shortcut jumps the Inspector down to a control, a sticky
+`#gm-inspector-back` button offers the way back to the selection card; it
+hides again once the card is in view. The Objectives list narrows to the ship
+the map has selected (`gm-objective-panel.js` `select`): rows whose recipients
+are empty address every ship and stay listed, any non-ship selection lists
+everything. Desk panels show a thin, always-visible scrollbar in both Chrome
+and the native Ultralight pane, and the desk floors its type at 14px body /
+12px labels with dim headings lifted to `--ink`. On the native pane a wheel
+notch arrives in line units and is converted to `WHEEL_LINE_PIXELS` (60px) by
+`PaneInput::scroll_from_wheel` in `src/native_host/panes/pane_thread.rs`; the
+raw notch count was previously sent as pixels, scrolling one pixel per notch.
+
+`gm_projection.rs` classifies a `planet`, `moon` or `star` tagged world entity
+as `GmEntityKind::Celestial`, a blip drawn from its `[radar_appearance]`;
+before that a planet fell through `world_kind` and never reached the GM map.
+
 ## Identity and roster
 
 The fleet owner mints two separate identities for a GM:

@@ -141,9 +141,24 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
       const control = get(target);
       control?.scrollIntoView?.({ block: 'nearest' });
       (control?.matches('input,select,button') ? control : control?.querySelector('button'))?.focus({ preventScroll: true });
+      back.hidden = false;
     });
     shortcuts.append(button);
   }
+  // The way back up from a quick action's control: a sticky button at the
+  // top of the inspector, shown only after a jump and cleared once the
+  // selection card is in view again (whether by this button or by scrolling).
+  const back = element('button', 'gm-inspector-back', 'server.gm.shell.back_to_selection');
+  back.type = 'button';
+  back.hidden = true;
+  inspector.prepend(back);
+  back.addEventListener('click', () => {
+    back.hidden = true;
+    if (typeof inspector.scrollTo === 'function') inspector.scrollTo({ top: 0 }); else inspector.scrollTop = 0;
+    get('gm-entity-card')?.scrollIntoView?.({ block: 'start' });
+    tabs.querySelector('button[aria-selected="true"]')?.focus({ preventScroll: true });
+  });
+  inspector.addEventListener('scroll', () => { if (!back.hidden && inspector.scrollTop < 8) back.hidden = true; });
   let gms = [];
   let entities = [];
   let selected = null;

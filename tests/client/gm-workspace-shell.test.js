@@ -68,3 +68,16 @@ it('keeps the observing ship selector available without changing the action targ
   expect(chooser.value).toBe('crew');
   expect(selectEntity).not.toHaveBeenCalled();
 });
+it('offers a sticky way back to the selection card after a quick action jumps the inspector', () => {
+  mount();
+  const inspector = document.getElementById('gm-inspector');
+  const back = document.getElementById('gm-inspector-back');
+  expect(inspector.firstElementChild).toBe(back);
+  expect(back.hidden).toBe(true);
+  inspector.scrollTo = vi.fn();
+  [...document.querySelectorAll('#gm-action-grid button')].find(b => b.getAttribute('aria-controls') === 'gm-objective-panel').click();
+  expect(back.hidden).toBe(false);
+  back.click();
+  expect(back.hidden).toBe(true);
+  expect(inspector.scrollTo).toHaveBeenCalledWith({ top: 0 });
+});

@@ -80,7 +80,7 @@ use bevy::camera::{ClearColorConfig, RenderTarget};
 use bevy::core_pipeline::core_2d::graph::Core2d;
 use bevy::image::Image;
 use bevy::input::keyboard::{KeyCode, KeyboardInput};
-use bevy::input::mouse::{AccumulatedMouseScroll, MouseButton};
+use bevy::input::mouse::{AccumulatedMouseScroll, MouseButton, MouseScrollUnit};
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
@@ -1942,15 +1942,18 @@ fn route_pointer_input(
         }
     }
 
-    // Scroll goes to the pane under the cursor.
+    // Scroll goes to the pane under the cursor. A wheel reports lines (one
+    // notch = 1.0) and the view scrolls by pixel, so the notch count is
+    // converted before it is sent — see `PaneInput::scroll_from_wheel`.
     if scroll.delta != Vec2::ZERO {
         if let Some((_, _, _, Some(hit))) = cursor {
             host.send(PaneCommand::Input {
                 id: hit.pane,
-                input: PaneInput::Scroll {
-                    dx: scroll.delta.x as i32,
-                    dy: scroll.delta.y as i32,
-                },
+                input: PaneInput::scroll_from_wheel(
+                    scroll.unit == MouseScrollUnit::Line,
+                    scroll.delta.x,
+                    scroll.delta.y,
+                ),
             });
         }
     }

@@ -38,6 +38,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   let gmSystem = null;
   let gmDespawn = null;
   let gmNpc = null;
+  let gmObjectivePanel = null;
   const gmProjection = createGmLocalProjection({
     doc: doc,
     t,
@@ -48,6 +49,9 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       if (gmContact) gmContact.select(entity);
       if (gmSystem) gmSystem.select(entity);
       if (gmNpc) gmNpc.select(entity);
+      // Objectives narrow to the selected ship; the mission panel's events
+      // stay scenario-wide.
+      if (gmObjectivePanel) gmObjectivePanel.select(entity);
     },
   });
   const gmActivity = createGmActivityFeed({
@@ -114,7 +118,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     getOperatorName: (id) => typeof win.__hostGmName === 'function'
       ? win.__hostGmName(id) : id,
   });
-  const gmObjectivePanel = createGmObjectivePanel({ doc: doc, t, actionFeedback: hostActionFeedback,
+  gmObjectivePanel = createGmObjectivePanel({ doc: doc, t, actionFeedback: hostActionFeedback,
     confirmAction: gmConfirmations.request,
     getOperator: () => win.__hostLocalGm?.() || null,
     getOperatorName: (id) => win.__hostGmName?.(id) || id,

@@ -58,6 +58,12 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
   let pending = null;
   let timer = null;
   let opener = null;
+  // The ship the map has selected, when it is a ship. The list then narrows
+  // to the Objectives that address it (an empty recipient list addresses
+  // every ship); any other selection, or none, lists everything.
+  let scopeShip = null;
+  const SHIP_KINDS = new Set(['player_ship', 'npc_ship']);
+  const inScope = (row) => !scopeShip || row.recipients.length === 0 || row.recipients.includes(scopeShip.id);
   const text = (value, params) => has(value) ? t(value, params) : value;
   const scopeText = (recipients) => recipients.length ? recipients.map(getShipName).join(', ')
     : t('server.gm.objective.all_ships');
@@ -131,6 +137,37 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
     refreshAdmission(); return true;
   }
+  // The scope note sits between the heading and the list. Built here rather
+  // than in the markup so every host of this panel gets it without a second
+  // template edit; hidden whenever the list is unscoped.
+  function scopeNote() {
+    let note = el('scope');
+    if (!note && el('list')) {
+      note = doc.createElement('p'); note.id = 'gm-objective-scope'; note.hidden = true;
+      el('list').before(note);
+    }
+    return note;
+  }
+  function renderScope(shown, total) {
+    const note = scopeNote();
+    if (note) {
+      note.hidden = !scopeShip;
+      note.textContent = scopeShip ? t('server.gm.objective.scope_ship', { ship: scopeShip.name }) : '';
+      note.dataset.ship = scopeShip ? scopeShip.id : '';
+    }
+    if (el('empty')) {
+      el('empty').hidden = shown > 0;
+      el('empty').textContent = scopeShip && total > 0
+        ? t('server.gm.objective.empty_ship', { ship: scopeShip.name }) : t('server.gm.objective.empty');
+    }
+  }
+  function select(entity) {
+    const next = entity && SHIP_KINDS.has(entity.kind) && nonempty(entity.entity_id)
+      ? { id: entity.entity_id, name: text(entity.name) || entity.entity_id } : null;
+    if ((next && next.id) === (scopeShip && scopeShip.id) && (next && next.name) === (scopeShip && scopeShip.name)) return;
+    scopeShip = next;
+    renderRows();
+  }
   function renderRows() {
     const list = el('list');
     if (!list) return;
@@ -138,8 +175,10 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     const focused = list.contains(doc.activeElement) ? { ...doc.activeElement.dataset } : null;
     list.replaceChildren();
     const live = new Map(projection.objectives.map((row) => [row.id, row]));
-    const rows = projection.palette.map((row) => ({ ...row, ...(live.get(row.id) || {}), palette: true }));
-    for (const row of projection.objectives) if (!projection.palette.some((p) => p.id === row.id)) rows.push(row);
+    const every = projection.palette.map((row) => ({ ...row, ...(live.get(row.id) || {}), palette: true }));
+    for (const row of projection.objectives) if (!projection.palette.some((p) => p.id === row.id)) every.push(row);
+    const rows = every.filter(inScope);
+    renderScope(rows.length, every.length);
     for (const objective of rows) {
       const row = doc.createElement('li'); row.dataset.objective = objective.id;
       row.dataset.status = objective.status || 'Unstarted'; row.className = 'gm-objective-row';
@@ -166,7 +205,6 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
       }
       list.appendChild(row);
     }
-    if (el('empty')) el('empty').hidden = rows.length > 0;
     refreshAdmission();
     if (focused) [...list.querySelectorAll('button')].find((b) => b.dataset.objective === focused.objective
       && b.dataset.verb === focused.verb)?.focus();
@@ -217,5 +255,6 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     if (event.key === 'Escape') { event.preventDefault(); closePreview(true); }
   });
   renderRows();
-  return { update, confirm, reset, refreshAdmission, state: () => ({ ...projection, preview, pending }) };
+  return { update, confirm, reset, refreshAdmission, select,
+    state: () => ({ ...projection, preview, pending, scope: scopeShip ? scopeShip.id : null }) };
 }

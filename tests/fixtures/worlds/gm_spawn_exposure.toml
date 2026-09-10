@@ -1,0 +1,57 @@
+# Fixture for the GM spawn-undo sensor-exposure cutoff (issue #1443).
+#
+# Two player-crewed hulls sitting still at known coordinates, and a placeable
+# courier the GM palette can put anywhere. The distances are deliberately
+# extreme rather than marginal: the cruiser's authored `[ai_profile]
+# sensor_range` is 350, so a placement at 60 is unambiguously inside every
+# player hull's horizon and one at 30 000 is unambiguously outside all of them
+# even if a hull drifts.
+#
+# The second hull overlaps the first on purpose. Union coverage has to count one
+# second per second no matter how many ships are watching, and two hulls fifty
+# units apart is the case that would double-count if it did not.
+[global]
+seed = 1443
+title = "GM spawn exposure fixture"
+description = "Placeable content and the player hulls that can see it."
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+# The second watcher. Authored with the `player` tag rather than injected,
+# because `player_ship_identity` only injects onto the hull a seat is placed on;
+# both routes are the same replicated fact to the exposure counter.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "Consort"
+transform = { position = [50.0, 0.0, 0.0] }
+overrides = { name = "Consort", display_name = "Consort", tags = [
+  "ship",
+  "player",
+], behaviour = { doctrine = [] } }
+
+[[gm_palette]]
+id = "courier"
+label = "Relief courier"
+template_path = "assets/entities/alliance_courier.toml"
+name_prefix = "gm_courier"
+# The bare entry keeps the template's own tags, so it is NOT `gm_removable` and
+# the ordinary safe-removal policy refuses to take it back. That is the "all its
+# other checks pass" half of the rule, exercised from its failing side.
+[[gm_palette.variant]]
+id = "removable"
+label = "Relief courier (removable)"
+overrides = { tags = [
+  "ship",
+  "gm_removable",
+], behaviour = { doctrine = [] } }

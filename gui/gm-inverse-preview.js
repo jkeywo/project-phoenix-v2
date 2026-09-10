@@ -10,10 +10,17 @@
  *  - what the action technically did, versus what crews already witnessed. A
  *    restored hull does not un-see an explosion, and no surface built on this
  *    component is allowed to imply otherwise (PRD #1418 story 29);
- *  - whether an inverse exists AT ALL. Two families now have one (issue #1442:
- *    NPC doctrine and faction relations); every other family says plainly, with
- *    the reason, that it does not. A greyed-out Undo button a GM might press in
- *    a crisis would be worse than no button.
+ *  - whether an inverse exists AT ALL. Three families now have one (issue
+ *    #1442: NPC doctrine and faction relations; issue #1443: a placement);
+ *    every other family says plainly, with the reason, that it does not. A
+ *    greyed-out Undo button a GM might press in a crisis would be worse than no
+ *    button.
+ *
+ * A placement adds a fourth honest thing to say: how long crews have had it in
+ * sensor range, and that at two cumulative simulation seconds the chance to
+ * take it back is gone for good (issue #1443, PRD #1420 story 4). That is a
+ * fact about ONE entry rather than about its family, so it arrives per row and
+ * narrows the family answer rather than replacing it.
  *
  * It renders presentation only. It submits nothing, owns no state and never
  * opens a dialog.
@@ -28,11 +35,22 @@ export const GM_INVERSE_PLANNED = 'planned';
 export const GM_INVERSE_OUT_OF_SCOPE = 'out-of-scope';
 /** An action family this build does not recognise at all. */
 export const GM_INVERSE_UNKNOWN = 'unknown';
+/**
+ * An inverse this build performs, whose window on THIS entry has closed.
+ *
+ * Distinct from `out-of-scope`, and the distinction matters to a GM: the family
+ * is reversible and the next placement will be too. This one was seen.
+ */
+export const GM_INVERSE_EXPIRED = 'expired';
 
-const SUPPORTED = (reasonId) => ({
+const SUPPORTED = (reasonId, exposure = false) => ({
   supported: true,
   status: GM_INVERSE_SUPPORTED,
   reasonId,
+  // Whether an entry of this family can only be offered once its live exposure
+  // is known. A placement can: the answer changes second by second, and a
+  // control offered without it would be a guess.
+  exposure,
 });
 const PLANNED = (reasonId) => ({
   supported: false,
@@ -60,7 +78,7 @@ const OUT_OF_SCOPE = (reasonId) => ({
 export const GM_INVERSE_SUPPORT = Object.freeze({
   'npc-doctrine': SUPPORTED('server.gm.inverse.supported.npc_doctrine'),
   'faction-relation': SUPPORTED('server.gm.inverse.supported.faction_relation'),
-  'world-spawn': PLANNED('server.gm.inverse.unavailable.planned'),
+  'world-spawn': SUPPORTED('server.gm.inverse.supported.world_spawn', true),
   'world-despawn': PLANNED('server.gm.inverse.unavailable.planned'),
   // An inverse is itself an ordinary journal entry, and reversing one would be
   // a redo rather than an undo. Ask for the state you want instead.
@@ -85,9 +103,54 @@ const UNKNOWN_KIND = Object.freeze({
   reasonId: 'server.gm.inverse.unavailable.unknown',
 });
 
-/** What undo can do about one action kind. Never throws on an unknown kind. */
-export function gmInverseAvailability(actionKind) {
+/**
+ * The live sensor-exposure status of one placement, as `GmSpawnExposureStatus`
+ * puts it on the wire.
+ *
+ * Strict: a partial or malformed object is `null`, never a half-believed one.
+ * Absence is a real answer here — this peer may keep no stopwatch — and the
+ * caller must treat it as "not known" rather than as "not exposed".
+ */
+export function normaliseGmSpawnExposure(value) {
+  if (!value || typeof value !== 'object') return null;
+  const ms = (n) => Number.isSafeInteger(n) && n >= 0;
+  if (!ms(value.exposed_ms) || !ms(value.limit_ms) || typeof value.latched !== 'boolean') {
+    return null;
+  }
+  return { exposed_ms: value.exposed_ms, limit_ms: value.limit_ms, latched: value.latched };
+}
+
+/**
+ * What undo can do about one action kind, narrowed by this entry's own live
+ * exposure. Never throws on an unknown kind or a malformed status.
+ *
+ * The family table decides whether an inverse can exist; `exposure` decides
+ * whether THIS one may still be asked for. Neither is authority: the canonical
+ * reducer answers again at the apply tick, and this only decides whether it is
+ * honest to offer a control.
+ */
+export function gmInverseAvailability(actionKind, exposure) {
   const entry = (typeof actionKind === 'string' && GM_INVERSE_SUPPORT[actionKind]) || UNKNOWN_KIND;
+  if (!entry.supported || !entry.exposure) return { action_kind: actionKind, ...entry };
+  const seen = normaliseGmSpawnExposure(exposure);
+  if (!seen) {
+    return {
+      action_kind: actionKind,
+      supported: false,
+      status: GM_INVERSE_UNKNOWN,
+      reasonId: 'server.gm.inverse.unavailable.exposure_unknown',
+      exposure: true,
+    };
+  }
+  if (seen.latched) {
+    return {
+      action_kind: actionKind,
+      supported: false,
+      status: GM_INVERSE_EXPIRED,
+      reasonId: 'server.gm.inverse.unavailable.sensor_exposure',
+      exposure: true,
+    };
+  }
   return { action_kind: actionKind, ...entry };
 }
 
@@ -127,6 +190,19 @@ export function gmAffectedFieldText(affected, t = (id) => id, displayText = wire
       }),
       before: value(doctrine.before),
       after: value(doctrine.after),
+    };
+  }
+  const placement = affected['spawned-entity'];
+  if (placement && typeof placement === 'object' && typeof placement.name === 'string') {
+    const value = (present) => t(present
+      ? 'server.gm.inverse.presence_present'
+      : 'server.gm.inverse.presence_absent');
+    return {
+      subject: t('server.gm.inverse.subject_placement', {
+        name: displayText(placement.name, placement.name),
+      }),
+      before: value(placement.before === true),
+      after: value(placement.after === true),
     };
   }
   const relation = affected['faction-hostility'];
@@ -180,7 +256,7 @@ export function createGmInversePreview({
    * only, by `GM_INVERSE_SUPPORT` in the eligibility row below.
    */
   function render(container, descriptor) {
-    const availability = gmInverseAvailability(descriptor?.actionKind);
+    const availability = gmInverseAvailability(descriptor?.actionKind, descriptor?.exposure);
     if (!container) {
       last = availability;
       return availability;
@@ -215,6 +291,28 @@ export function createGmInversePreview({
         ? descriptor.witnessed
         : t('server.gm.inverse.witnessed_note'),
     );
+    // How much of the two seconds is gone, in words and in numbers, whether or
+    // not the window is still open. A GM deciding whether to take a placement
+    // back needs the count BEFORE it runs out, not the refusal after.
+    // Gated on the FAMILY having a window, not merely on a payload arriving: a
+    // doctrine change has no two-second clock, and drawing one over it would
+    // invent a deadline the reducer does not enforce.
+    const seen = availability.exposure ? normaliseGmSpawnExposure(descriptor?.exposure) : null;
+    if (seen) {
+      const secs = (ms) => (ms / 1000).toFixed(1);
+      const exposure = row(
+        list,
+        'server.gm.inverse.exposure',
+        seen.latched
+          ? t('server.gm.inverse.exposure_elapsed', { limit: secs(seen.limit_ms) })
+          : t('server.gm.inverse.exposure_remaining', {
+            elapsed: secs(seen.exposed_ms),
+            limit: secs(seen.limit_ms),
+          }),
+        'gm-inverse-exposure',
+      );
+      exposure.dataset.latched = String(seen.latched);
+    }
     const eligibility = row(
       list,
       'server.gm.inverse.eligibility',

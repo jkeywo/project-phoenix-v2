@@ -290,6 +290,24 @@ pub enum GmAffectedField {
         before: bool,
         after: bool,
     },
+    /// Whether the entity one GM placement created stands in the world
+    /// (issue #1443).
+    ///
+    /// APPENDED after [`Self::FactionHostility`], never inserted, for the
+    /// reason this enum's own docs give: it rides the postcard-folded journal,
+    /// which writes an enum by variant index.
+    ///
+    /// The subject is the placement's deterministic scenario NAME
+    /// ([`crate::gm_spawn::PendingGmSpawn::derive_name`]), not a uuid, and that
+    /// is what makes the fact recordable at all: the reducer runs in
+    /// `PreUpdate` and decides the name there, while the uuid is not minted
+    /// until the ordinary trigger pipeline drains the arm in `FixedUpdate`.
+    /// Every peer derives the same name from the same canonical sequence.
+    SpawnedEntity {
+        name: String,
+        before: bool,
+        after: bool,
+    },
 }
 
 impl GmAffectedField {
@@ -316,6 +334,15 @@ impl GmAffectedField {
                 before: *after,
                 after: *before,
             },
+            Self::SpawnedEntity {
+                name,
+                before,
+                after,
+            } => Self::SpawnedEntity {
+                name: name.clone(),
+                before: *after,
+                after: *before,
+            },
         }
     }
 
@@ -325,6 +352,7 @@ impl GmAffectedField {
         match self {
             Self::NpcDoctrine { before, after, .. } => before != after,
             Self::FactionHostility { before, after, .. } => before != after,
+            Self::SpawnedEntity { before, after, .. } => before != after,
         }
     }
 
@@ -339,6 +367,7 @@ impl GmAffectedField {
                 after,
             } => ok(entity) && before.as_deref().is_none_or(ok) && after.as_deref().is_none_or(ok),
             Self::FactionHostility { faction, enemy, .. } => ok(faction) && ok(enemy),
+            Self::SpawnedEntity { name, .. } => ok(name),
         }
     }
 }
@@ -1327,6 +1356,13 @@ pub enum GmActionRefusalReason {
     /// An applied inverse of that same original already exists. Two GMs racing
     /// to undo one action get one undo and one truthful refusal.
     AlreadyInverted,
+    /// The GM placement named by a [`GmAction::UndoGmAction`] has already spent
+    /// two cumulative simulation seconds inside a player ship's sensor range
+    /// (issue #1443, PRD #1420 story 4), so taking it back is refused —
+    /// permanently, whether or not it is still in range now.
+    ///
+    /// Appended for [`Self::UnknownGmEvent`]'s reason.
+    SensorExposureElapsed,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -2562,6 +2598,8 @@ pub fn projection(
     log: &GmActionLog,
     refusals: &LocalGmActionRefusals,
     factions: Option<&crate::ai::faction::FactionRegistry>,
+    exposure: Option<&crate::gm_exposure::GmSpawnExposure>,
+    hz: f32,
 ) -> GmSessionProjection {
     GmSessionProjection {
         paused,
@@ -2571,7 +2609,7 @@ pub fn projection(
         // page-local diagnostics that no snapshot carries, so admitting them
         // here would put rows in the saved history that a restore could never
         // reproduce — exactly the abandoned-timeline residue #1441 forbids.
-        journal: crate::gm_journal::journal_projection(log),
+        journal: crate::gm_journal::journal_projection(log, exposure, hz),
     }
 }
 
@@ -2582,6 +2620,11 @@ pub fn publish_session_projection(
     log: Res<GmActionLog>,
     refusals: Res<LocalGmActionRefusals>,
     factions: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    // Live spawn-undo eligibility (issue #1443). `Option` because the pure
+    // journal fixtures publish this projection without a simulation, and the
+    // authored rate because the page reads the cutoff in seconds, never ticks.
+    exposure: Option<Res<crate::gm_exposure::GmSpawnExposure>>,
+    world: Option<Res<crate::world::config::WorldConfig>>,
     mut last: ResMut<LastGmSessionProjection>,
     mut writer: MessageWriter<crate::console_bridge::GmSessionChanged>,
 ) {
@@ -2590,6 +2633,11 @@ pub fn publish_session_projection(
         &log,
         &refusals,
         factions.as_deref().map(|registry| &registry.0),
+        exposure.as_deref(),
+        world.as_deref().map_or_else(
+            || crate::entities::config::GlobalConfig::default().sim_tick_hz,
+            |world| world.global.sim_tick_hz,
+        ),
     );
     if last.0.as_ref() == Some(&next) {
         return;
@@ -2719,6 +2767,97 @@ pub(crate) fn undo_precheck(
     Ok(())
 }
 
+/// Take one GM placement back out of the world (issue #1443).
+///
+/// Split out of the reducer for [`undo_precheck`]'s reason: the answer is a
+/// readable list in which every branch names exactly one thing that can be
+/// wrong. Every check happens HERE, at the canonical apply tick, against live
+/// state — never against what the requesting page could see.
+///
+/// `name` is the placement's deterministic scenario name, and the whole
+/// function is a function of it plus live state, so two peers replaying the
+/// same journal reach the same answer.
+pub(crate) fn spawn_inverse(
+    name: &str,
+    exposure: Option<&crate::gm_exposure::GmSpawnExposure>,
+    content: Option<&mut crate::world::server::WorldContentRuntime>,
+    removal_targets: &crate::gm_despawn::RemovalQuery,
+) -> (GmActionOutcome, Option<GmActionRefusalReason>) {
+    use crate::gm_exposure::GmSpawnUndoEligibility;
+    // No stopwatch in this app at all: there is no evidence either way, and
+    // inventing eligibility out of its absence is the one thing this must not
+    // do.
+    let Some(exposure) = exposure else {
+        return (
+            GmActionOutcome::Refused,
+            Some(GmActionRefusalReason::InverseUnsupported),
+        );
+    };
+    match exposure.eligibility(name) {
+        GmSpawnUndoEligibility::Unwatched => {
+            return (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::InverseUnsupported),
+            )
+        }
+        GmSpawnUndoEligibility::Exposed => {
+            return (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::SensorExposureElapsed),
+            )
+        }
+        GmSpawnUndoEligibility::Eligible => {}
+    }
+    let Some(runtime) = content else {
+        return (
+            GmActionOutcome::Refused,
+            Some(GmActionRefusalReason::WorldUnavailable),
+        );
+    };
+    // The placement is armed and the ordinary trigger pipeline has not drained
+    // it yet -- the reducer runs in `PreUpdate` and the drain in `FixedUpdate`,
+    // one step apart. Nothing exists, so withdrawing the arm IS the inverse,
+    // and it is a strictly smaller act than spawning and then removing.
+    if let Some(index) = runtime
+        .pending_gm_spawns
+        .iter()
+        .position(|pending| pending.name == name)
+    {
+        runtime.pending_gm_spawns.remove(index);
+        return (GmActionOutcome::Applied, None);
+    }
+    // Authored name mappings outlive a removal on purpose (see
+    // `gm_despawn::remove_entity`), so an ABSENT one means this placement never
+    // landed at all.
+    let Some(uuid) = runtime.name_to_uuid.get(name).cloned() else {
+        return (
+            GmActionOutcome::Refused,
+            Some(GmActionRefusalReason::AffectedStateChanged),
+        );
+    };
+    // Already queued for removal: the ordinary despawn family's own idempotency
+    // answer, so a double request agrees with itself.
+    if runtime.pending_gm_despawns.contains(&uuid) {
+        return (GmActionOutcome::NoOp, None);
+    }
+    match crate::gm_despawn::validate_target(removal_targets, &uuid) {
+        // "Nothing carries that uuid" IS the affected field having moved: the
+        // placement no longer stands, which is what a GM needs told.
+        Err(GmActionRefusalReason::UnknownEntity) => (
+            GmActionOutcome::Refused,
+            Some(GmActionRefusalReason::AffectedStateChanged),
+        ),
+        // Every other safe-removal answer travels unchanged: `ProtectedEntity`
+        // means the authored policy declines to remove this, and being placed
+        // by a GM two ticks ago does not exempt it.
+        Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+        Ok(()) => {
+            runtime.pending_gm_despawns.push(uuid);
+            (GmActionOutcome::Applied, None)
+        }
+    }
+}
+
 /// Recompute and apply every due action. It runs before the mesh gate, which
 /// may add its own hold after a GM resume; resume therefore removes only the GM
 /// pause and never overrides recovery/model-readiness holds.
@@ -2782,11 +2921,16 @@ pub fn apply_due_actions(
     // seam over `FactionRegistryResource`; it performs the same two registry
     // calls and the same AI target re-validation the authored
     // `add_faction_enemy` trigger action does.
-    (removal_targets, mut objective_control, mut native_authority, mut factions): (
+    (removal_targets, mut objective_control, mut native_authority, mut factions, mut exposure): (
         crate::gm_despawn::RemovalQuery,
         crate::gm_objective::ObjectiveControl,
         Option<ResMut<NativeGmAuthority>>,
         crate::gm_faction::GmFactionControl,
+        // The sensor-exposure stopwatch for GM placements (issue #1443).
+        // `Option` for every other product resource's reason: the pure journal
+        // fixtures and the replay harness run this exact production reducer
+        // without a world to place anything in.
+        Option<ResMut<crate::gm_exposure::GmSpawnExposure>>,
     ),
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
@@ -2938,6 +3082,34 @@ pub fn apply_due_actions(
                                 ),
                             },
                         },
+                        // Taking back a placement (issue #1443). The exposure
+                        // cutoff is asked FIRST and the ordinary safe-removal
+                        // policy second, because they answer different
+                        // questions: "may this still be taken back at all" and
+                        // "is this a thing a GM is allowed to remove at all".
+                        // Firing and damage are deliberately not consulted --
+                        // PRD #1420 makes exposure the one cutoff, and a hull
+                        // close enough to shoot is already inside somebody's
+                        // range.
+                        //
+                        // The pattern is literal: a placement's recorded pair is
+                        // `before: false, after: true`, so its inverse is
+                        // exactly this shape and anything else is a fact no
+                        // spawn ever wrote.
+                        GmAffectedField::SpawnedEntity {
+                            name,
+                            before: true,
+                            after: false,
+                        } => spawn_inverse(
+                            name,
+                            exposure.as_deref(),
+                            content.as_deref_mut(),
+                            &objective_control.removal_targets,
+                        ),
+                        GmAffectedField::SpawnedEntity { .. } => (
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::InverseUnsupported),
+                        ),
                     };
                     // The inverse's OWN durable fact says what IT changed,
                     // which is the original's pair the other way round.
@@ -3318,6 +3490,22 @@ pub fn apply_due_actions(
                             entry,
                             grant.order.sequence,
                         );
+                        // The EXACT field this placement changes: whether an
+                        // entity stands under that deterministic name. Recorded
+                        // BEFORE the arm is pushed, because the name is the one
+                        // fact an inverse can revalidate against (issue #1443).
+                        affected = Some(GmAffectedField::SpawnedEntity {
+                            name: name.clone(),
+                            before: false,
+                            after: true,
+                        });
+                        // Start the exposure stopwatch at the canonical apply
+                        // tick, not when the entity appears: the two are one
+                        // fixed step apart and a placement must never be
+                        // unwatched in between.
+                        if let Some(exposure) = exposure.as_deref_mut() {
+                            exposure.watch(&name);
+                        }
                         content
                             .pending_gm_spawns
                             .push(crate::gm_spawn::PendingGmSpawn {
@@ -6179,7 +6367,14 @@ station = "helm"
                 .unwrap();
         }
         let log = journal.log_through(500);
-        let bounded = projection(false, &log, &LocalGmActionRefusals::default(), None);
+        let bounded = projection(
+            false,
+            &log,
+            &LocalGmActionRefusals::default(),
+            None,
+            None,
+            60.0,
+        );
         assert!(bounded
             .results
             .iter()
@@ -6203,6 +6398,8 @@ station = "helm"
             world.resource::<GmActionLog>(),
             world.resource::<LocalGmActionRefusals>(),
             None,
+            None,
+            60.0,
         );
         let exact = retried
             .results

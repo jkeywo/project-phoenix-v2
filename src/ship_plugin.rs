@@ -55,6 +55,7 @@ impl Plugin for ShipPlugin {
             .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
             .init_resource::<crate::gm_effect::PendingGmDirectEffects>()
             .init_resource::<crate::gm_faction::GmFactionOverrides>()
+            .init_resource::<crate::gm_exposure::GmSpawnExposure>()
             .init_resource::<crate::gm_puppet::PendingGmStationFeedbackRoutes>()
             .init_resource::<crate::gm_puppet::StationPuppetActivity>()
             .configure_sets(
@@ -100,7 +101,23 @@ impl Plugin for ShipPlugin {
                 StateClass::Derived,
                 "visiting-station-placement-state",
             )
-            .declare_state::<ScenarioDetailFloor>(StateClass::Derived, "visiting-station-resolver");
+            .declare_state::<ScenarioDetailFloor>(StateClass::Derived, "visiting-station-resolver")
+            // The two GM records `sim_digest::world_digest` folds WHOLE (issue
+            // #1442's faction overrides, issue #1443's exposure stopwatch), so
+            // both are `Folded` rather than `DeferredFold`: `fold_serde` walks
+            // the entire value, every field included. The fold is skipped while
+            // the record is EMPTY — which is the default value, and therefore
+            // the same fold an untouched run has always had — so a world that
+            // never uses either surface keeps the digest it had before they
+            // landed.
+            .declare_state::<crate::gm_faction::GmFactionOverrides>(
+                StateClass::Folded,
+                "gm-t3-typed-inverse-actions",
+            )
+            .declare_state::<crate::gm_exposure::GmSpawnExposure>(
+                StateClass::Folded,
+                "gm-t3-spawn-undo-exposure",
+            );
         }
         // The AI host spine's read-only world context (issue #1207): the six
         // per-axis helm systems and `ai_policy_state_tick` in this plugin now
@@ -388,6 +405,14 @@ impl Plugin for ShipPlugin {
         // A GM withdrawal of a faction hostility (issue #1442) drops the
         // tactical locks it just made friendly, in the same phase and
         // immediately before the other writer of that lock.
+        // Sensor exposure of GM placements (issue #1443). `FixedLast`, before
+        // the tick advances, so it counts once per simulation step and a paused
+        // world counts nothing. Ungated: this is authoritative state the digest
+        // compares, so every peer must run it, GM surface or no GM surface.
+        .add_systems(
+            FixedLast,
+            crate::gm_exposure::observe_gm_spawn_exposure.before(crate::sim_tick::advance_sim_tick),
+        )
         .add_systems(
             FixedUpdate,
             crate::gm_faction::revalidate_gm_faction_locks

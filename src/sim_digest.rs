@@ -602,6 +602,19 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
         acc = fold_str(acc, "gm-faction-overrides");
         acc = fold_serde(acc, overrides);
     }
+    // Sensor exposure of GM placements and its permanent undo latch (issue
+    // #1443). Authoritative: it decides whether an inverse may run, so two
+    // peers that disagree about it would disagree about the world, and the
+    // ordinary mesh comparator has to catch that. Folded only once a GM has
+    // actually placed something, for `gm-faction-overrides`' reason — a run
+    // that never uses the surface keeps the digest it had before this landed.
+    if let Some(exposure) = world
+        .get_resource::<crate::gm_exposure::GmSpawnExposure>()
+        .filter(|exposure| !exposure.is_empty())
+    {
+        acc = fold_str(acc, "gm-spawn-exposure");
+        acc = fold_serde(acc, exposure);
+    }
 
     // SimRng: the FULL state, not a probe draw. `RunFingerprint` takes one draw
     // per stream because it has no serde shape to lean on; the record puts

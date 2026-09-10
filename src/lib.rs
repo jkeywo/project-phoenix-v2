@@ -118,6 +118,7 @@ pub mod gm_despawn;
 pub mod gm_effect;
 pub mod gm_event;
 /// The typed, attributed GM adapter over faction hostility (issue #1442).
+pub mod gm_exposure;
 pub mod gm_faction;
 pub mod gm_health;
 pub mod gm_join;

@@ -79,14 +79,31 @@ pub struct GmJournalEntry {
     /// would otherwise offer it twice.
     #[serde(default, skip_serializing_if = "is_false")]
     pub inverted: bool,
+    /// How long the entity a `world-spawn` placed has stood inside a player
+    /// ship's sensor range, and whether the two-second cutoff has closed
+    /// (issue #1443).
+    ///
+    /// Present only on a row that placed something and only while this peer
+    /// keeps the stopwatch. It is CURRENT eligibility, republished as it moves,
+    /// so a GM reads "1.4 s of 2.0 s" rather than discovering at the apply tick
+    /// that the window shut. It decides nothing: the canonical reducer answers
+    /// again at the apply tick, and a preview that has gone stale is refused
+    /// there rather than honoured here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_exposure: Option<crate::gm_exposure::GmSpawnExposureStatus>,
 }
 
 impl GmJournalEntry {
     /// Project one durable fact, dropping everything that is not public.
     ///
     /// `inverted` is supplied by the caller because it is a fact about the
-    /// whole log, not about this entry.
-    pub fn from_logged(entry: &LoggedGmAction, inverted: bool) -> Self {
+    /// whole log, not about this entry; `spawn_exposure` for the same reason —
+    /// it is a fact about the live world, which the journal does not hold.
+    pub fn from_logged(
+        entry: &LoggedGmAction,
+        inverted: bool,
+        spawn_exposure: Option<crate::gm_exposure::GmSpawnExposureStatus>,
+    ) -> Self {
         Self {
             operator_id: entry.operator_id.clone(),
             correlation: entry.correlation.as_str().to_string(),
@@ -99,6 +116,7 @@ impl GmJournalEntry {
             affected: entry.affected.clone(),
             undo_of: entry.undo_of.clone(),
             inverted,
+            spawn_exposure,
         }
     }
 }
@@ -120,7 +138,11 @@ pub struct GmJournalProjection {
 /// `Pending` facts are excluded: an action whose authentic consumer has not yet
 /// answered has no terminal outcome to attribute, and the journal panel's whole
 /// claim is that every row it shows really happened.
-pub fn journal_projection(log: &GmActionLog) -> GmJournalProjection {
+pub fn journal_projection(
+    log: &GmActionLog,
+    exposure: Option<&crate::gm_exposure::GmSpawnExposure>,
+    hz: f32,
+) -> GmJournalProjection {
     let terminal: Vec<&LoggedGmAction> = log
         .entries()
         .iter()
@@ -149,9 +171,20 @@ pub fn journal_projection(log: &GmActionLog) -> GmJournalProjection {
         .iter()
         .skip(total.saturating_sub(GM_JOURNAL_WINDOW))
         .map(|entry| {
+            // Only a placement has an exposure clock, and the name it runs
+            // against is the one the placement's own recorded fact carries —
+            // read from the journal rather than re-derived, so the row a GM
+            // reads and the fact the reducer revalidates are the same fact.
+            let spawn_exposure = match entry.affected.as_ref() {
+                Some(GmAffectedField::SpawnedEntity { name, .. }) => exposure
+                    .and_then(|exposure| exposure.get(name))
+                    .map(|record| crate::gm_exposure::GmSpawnExposureStatus::new(record, hz)),
+                _ => None,
+            };
             GmJournalEntry::from_logged(
                 entry,
                 inverted.contains(&(entry.operator_id.as_str(), entry.correlation.as_str())),
+                spawn_exposure,
             )
         })
         .collect();
@@ -196,7 +229,7 @@ mod tests {
 
     #[test]
     fn projects_public_attribution_without_transport_identity() {
-        let projection = journal_projection(&applied([pause(1, true)]));
+        let projection = journal_projection(&applied([pause(1, true)]), None, 60.0);
         let row = &projection.entries[0];
         assert_eq!(row.operator_id, "gm-2");
         assert_eq!(row.correlation, "corr-1");
@@ -231,8 +264,11 @@ mod tests {
     #[test]
     fn reports_the_real_applied_and_no_op_outcomes_in_canonical_order() {
         // Pause, pause again (nothing to change), resume.
-        let projection =
-            journal_projection(&applied([pause(1, true), pause(2, true), pause(3, false)]));
+        let projection = journal_projection(
+            &applied([pause(1, true), pause(2, true), pause(3, false)]),
+            None,
+            60.0,
+        );
         assert_eq!(projection.total, 3);
         assert_eq!(projection.capacity, MAX_GM_ACTIONS_PER_RUN);
         assert_eq!(
@@ -252,9 +288,11 @@ mod tests {
     #[test]
     fn trims_the_oldest_rows_while_still_reporting_the_full_total() {
         let count = GM_JOURNAL_WINDOW as u64 + 5;
-        let projection = journal_projection(&applied(
-            (1..=count).map(|n| pause(n, !n.is_multiple_of(2))),
-        ));
+        let projection = journal_projection(
+            &applied((1..=count).map(|n| pause(n, !n.is_multiple_of(2)))),
+            None,
+            60.0,
+        );
         assert_eq!(projection.total, count as usize);
         assert_eq!(projection.entries.len(), GM_JOURNAL_WINDOW);
         assert_eq!(projection.entries[0].sequence, Some(6));

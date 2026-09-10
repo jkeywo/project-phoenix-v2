@@ -40,6 +40,7 @@
 //! | accepted pending GM Station commands | [`PhoenixSnapshot::gm_station_commands`] |
 //! | armed GM direct damage/heal effects (with their Station/System scope) | [`PhoenixSnapshot::gm_direct_effects`] |
 //! | GM-attributed faction hostility overrides | [`PhoenixSnapshot::gm_faction_overrides`] |
+//! | sensor exposure of GM placements, with its permanent undo latch | [`PhoenixSnapshot::gm_spawn_exposure`] |
 //! | per-NPC elapsed idleness behind the GM idle advisory | [`PhoenixSnapshot::gm_idle_npcs`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
@@ -634,7 +635,7 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// and indistinguishable from correct" shape, and no content-digest argument
 /// rescues it: the GM action moved the world without moving a single authored
 /// file.
-pub const SNAPSHOT_FORMAT: u32 = 34;
+pub const SNAPSHOT_FORMAT: u32 = 35;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2538,6 +2539,19 @@ pub struct PhoenixSnapshot {
     /// `bool`.
     #[serde(default)]
     pub gm_faction_overrides: crate::gm_faction::GmFactionOverrides,
+    /// How long each GM placement has stood inside a player ship's sensor
+    /// range, and whether its undo latch has closed (issue #1443).
+    ///
+    /// Authoritative history, not a repaint. The latch is a PERMANENT refusal
+    /// and the count that produced it is cumulative over the whole run, so
+    /// neither can be recomputed from a restored world: a resume that dropped
+    /// them would hand a GM back an undo the crews had already had two seconds
+    /// to see, and would make eligibility a function of when somebody saved.
+    ///
+    /// The variant-order hazard does not apply: every field is a `String`, a
+    /// `u64` or a `bool`.
+    #[serde(default)]
+    pub gm_spawn_exposure: crate::gm_exposure::GmSpawnExposure,
     /// How long each NPC ship has had nothing to do (issue #1435).
     ///
     /// The one piece of the GM attention queue that travels. The occurrences
@@ -2735,6 +2749,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .unwrap_or_default(),
         gm_faction_overrides: world
             .get_resource::<crate::gm_faction::GmFactionOverrides>()
+            .cloned()
+            .unwrap_or_default(),
+        gm_spawn_exposure: world
+            .get_resource::<crate::gm_exposure::GmSpawnExposure>()
             .cloned()
             .unwrap_or_default(),
         gm_idle_npcs: world
@@ -5551,6 +5569,11 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // ordinary `add_enemy`/`remove_enemy` vocabulary keeps restore and the live
     // action on one path.
     crate::gm_faction::restore_overrides(world, &snapshot.gm_faction_overrides);
+    // The exposure stopwatch and its latch (issue #1443). Inserted absolutely,
+    // like every other captured authoritative resource: a placement the save
+    // never made must not keep a counter this run started, and a latch the save
+    // DID carry must come back closed.
+    world.insert_resource(snapshot.gm_spawn_exposure.clone());
     // The idle-NPC stopwatch (issue #1435), only into a peer that actually keeps
     // one. Inserting it on a peer with no attention queue would create a
     // resource no system maintains, which is worse than the honest absence:

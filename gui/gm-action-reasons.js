@@ -47,6 +47,8 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'inverse-facts-mismatch': 'server.gm.session.reason.inverse_facts_mismatch',
   'affected-state-changed': 'server.gm.session.reason.affected_state_changed',
   'already-inverted': 'server.gm.session.reason.already_inverted',
+  // The one cutoff on taking a placement back (issue #1443).
+  'sensor-exposure-elapsed': 'server.gm.session.reason.sensor_exposure_elapsed',
 });
 
 /** The immediate browser-to-WASM ingress refusal, which has no wire reason. */

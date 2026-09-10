@@ -1231,6 +1231,7 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::InverseFactsMismatch => "inverse-facts-mismatch",
         Reason::AffectedStateChanged => "affected-state-changed",
         Reason::AlreadyInverted => "already-inverted",
+        Reason::SensorExposureElapsed => "sensor-exposure-elapsed",
     }
 }
 

@@ -106,6 +106,7 @@ it('states up front which families this build can undo', () => {
       kinds: [
         t('server.gm.journal.kind.npc_doctrine'),
         t('server.gm.journal.kind.faction_relation'),
+        t('server.gm.journal.kind.world_spawn'),
       ].join(', '),
     }));
 });
@@ -470,5 +471,199 @@ it('rejects a malformed undo reference rather than rendering half a history', ()
   expect(panel2.update(payload([
     entry({ correlation: 'act-16', undo_of: { operator_id: 'gm-alex' } }),
   ]))).toBe(false);
+  panel2.destroy();
+});
+
+// ── The placement inverse and its two-second window (issue #1443) ────────────
+
+/** One real applied placement row, with the pair and the clock Rust publishes. */
+function placement(overrides = {}, exposure = { exposed_ms: 400, limit_ms: 2000, latched: false }) {
+  return entry({
+    correlation: 'act-20',
+    action_kind: 'world-spawn',
+    target: 'courier',
+    tick: 40,
+    sequence: 20,
+    outcome: 'applied',
+    affected: { 'spawned-entity': { name: 'gm_courier_20', before: false, after: true } },
+    ...(exposure == null ? {} : { spawn_exposure: exposure }),
+    ...overrides,
+  });
+}
+
+it('offers Undo for a placement only while its window is open', () => {
+  const panel2 = undoPanel();
+  panel2.update(payload([
+    placement(),
+    // The same placement two seconds later: the offer is withdrawn for good.
+    placement(
+      { correlation: 'act-21', sequence: 21 },
+      { exposed_ms: 2000, limit_ms: 2000, latched: true },
+    ),
+    // A session that reports no clock at all cannot honestly offer the control.
+    placement({ correlation: 'act-22', sequence: 22 }, null),
+  ]));
+  const offered = [];
+  for (const row of rows()) {
+    row.click();
+    offered.push([row.dataset.correlation, !undoButton().hidden]);
+  }
+  expect(offered).toEqual([['act-20', true], ['act-21', false], ['act-22', false]]);
+  panel2.destroy();
+});
+
+it('shows the exposure clock and the reason on the selected placement', () => {
+  const panel2 = undoPanel();
+  panel2.update(payload([placement()]));
+  rows()[0].click();
+  const inverse = document.getElementById('gm-journal-inverse');
+  expect(inverse.textContent)
+    .toContain(t('server.gm.inverse.exposure_remaining', { elapsed: '0.4', limit: '2.0' }));
+  expect(inverse.textContent).toContain(t('server.gm.inverse.subject_placement', {
+    name: 'gm_courier_20',
+  }));
+  // Consequence information is present with no dialog opened at all, which is
+  // what a GM whose confirmation policy is `immediate` has to be able to read.
+  expect(inverse.textContent).toContain(t('server.gm.inverse.witnessed_note'));
+
+  panel2.update(payload([
+    placement({}, { exposed_ms: 2000, limit_ms: 2000, latched: true }),
+  ]));
+  const shut = document.getElementById('gm-journal-inverse');
+  expect(shut.querySelector('.gm-inverse-eligibility').dataset.status).toBe('expired');
+  // Words, not colour alone.
+  expect(shut.textContent).toContain(t('server.gm.inverse.unavailable.sensor_exposure'));
+  panel2.destroy();
+});
+
+it('submits the placement pair verbatim and never echoes the clock back', () => {
+  let sent = null;
+  const panel2 = undoPanel({ submitUndo: (request) => { sent = request; return true; } });
+  panel2.update(payload([placement()]));
+  rows()[0].click();
+  undoButton().click();
+  expect(sent.action).toBe('undo_gm_action');
+  expect(sent.original).toBe('act-20');
+  expect(sent.original_operator).toBe('gm-alex');
+  expect(sent.original_sequence).toBe(20);
+  expect(sent.expected).toEqual(placement().affected);
+  // Exposure is a fact about the world, which the reducer reads for itself.
+  expect(Object.keys(sent)).not.toContain('spawn_exposure');
+  expect(Object.keys(sent)).not.toContain('exposure');
+  panel2.destroy();
+});
+
+it('reports the canonical exposure refusal in words when the window shut first', () => {
+  const panel2 = undoPanel({ submitUndo: () => true });
+  panel2.update(payload([placement()]));
+  rows()[0].click();
+  undoButton().click();
+  // The answer arrives as an ordinary journal row, as every GM answer does.
+  panel2.update(payload([
+    placement({ inverted: false }),
+    entry({
+      operator_id: 'gm-sam',
+      correlation: panel2.pending() ? panel2.pending().correlation : 'x',
+      action_kind: 'action-undo',
+      sequence: 21,
+      tick: 41,
+      outcome: 'refused',
+      reason: 'sensor-exposure-elapsed',
+    }),
+  ]));
+  expect(document.getElementById('gm-journal-undo-feedback').textContent)
+    .toBe(t('server.gm.journal.undo_refused'));
+  panel2.destroy();
+});
+
+it('rejects a malformed exposure status rather than rendering half a row', () => {
+  const panel2 = undoPanel();
+  expect(panel2.update(payload([
+    placement({}, { exposed_ms: 400, limit_ms: 2000 }),
+  ]))).toBe(false);
+  expect(parseGmJournalProjection(payload([placement({}, { exposed_ms: '400' })]))).toBeUndefined();
+  panel2.destroy();
+});
+
+// ── The #1418 usability contract this feature ships with ────────────────────
+
+it('keeps the placement window readable and operable at 200% text', () => {
+  // The scale the presentation profile sets. jsdom lays out nothing, so what
+  // is under test here is the BEHAVIOUR the contract asks for at that scale:
+  // status in words, no pop-up, and a control that stays where the operator
+  // put their hands while the clock republishes underneath them.
+  document.documentElement.style.setProperty('--a11y-text-scale', '2');
+  const dialogs = [];
+  const panel2 = undoPanel({
+    confirmAction: (request) => { dialogs.push(request); return request.accept(); },
+  });
+  panel2.update(payload([placement(), entry({ correlation: 'act-30', sequence: 30 })]));
+  rows()[0].click();
+  rows()[0].focus();
+  expect(document.activeElement.dataset.correlation).toBe('act-20');
+
+  // The clock advances. Routine attention: no dialog, no panel switch, and
+  // nothing moves under the operator's hands (PRD #1418 stories 23/26/31).
+  for (const exposed of [600, 900, 1400, 1900]) {
+    panel2.update(payload([
+      placement({}, { exposed_ms: exposed, limit_ms: 2000, latched: false }),
+      entry({ correlation: 'act-30', sequence: 30 }),
+    ]));
+    expect(document.activeElement.dataset.correlation).toBe('act-20');
+    expect(panel2.state().selected.correlation).toBe('act-20');
+    expect(undoButton().hidden).toBe(false);
+  }
+  expect(dialogs).toHaveLength(0);
+  expect(document.querySelector('dialog[open]')).toBeNull();
+
+  // Status is carried by sentences, not only by `data-*` or colour: strip
+  // every data attribute and the meaning survives.
+  const inverse = document.getElementById('gm-journal-inverse');
+  for (const node of inverse.querySelectorAll('*')) {
+    for (const name of [...node.getAttributeNames()]) {
+      if (name.startsWith('data-')) node.removeAttribute(name);
+    }
+  }
+  expect(inverse.textContent)
+    .toContain(t('server.gm.inverse.exposure_remaining', { elapsed: '1.9', limit: '2.0' }));
+  expect(inverse.textContent).toContain(t('server.gm.inverse.available'));
+
+  // The window shuts. The control goes, the sentence explains why, the
+  // selection and focus still belong to the operator, and still no dialog.
+  panel2.update(payload([
+    placement({}, { exposed_ms: 2000, limit_ms: 2000, latched: true }),
+    entry({ correlation: 'act-30', sequence: 30 }),
+  ]));
+  expect(document.activeElement.dataset.correlation).toBe('act-20');
+  expect(panel2.state().selected.correlation).toBe('act-20');
+  expect(undoButton().hidden).toBe(true);
+  expect(document.getElementById('gm-journal-inverse').textContent)
+    .toContain(t('server.gm.inverse.unavailable.sensor_exposure'));
+  expect(dialogs).toHaveLength(0);
+  document.documentElement.style.removeProperty('--a11y-text-scale');
+  panel2.destroy();
+});
+
+it('gives the placement Undo control a reachable name and the shipped hit floor', () => {
+  const css = read('gui/gm-workspace.css');
+  // The control is sized in tokens rather than pixels, so it grows with the
+  // text rather than clipping it at 200% (PRD #1418 stories 1/2).
+  expect(css).toMatch(/#gm-journal-undo[\s\S]{0,200}min-height: var\(--control-hit-min\)/);
+  expect(css).toMatch(/#gm-journal-undo[\s\S]{0,200}white-space: normal/);
+  // The exposure row reflows with the rest of the description list, and its
+  // shut state is marked by more than a hue.
+  expect(css).toContain('.gm-inverse-exposure[data-latched="true"]');
+
+  const panel2 = undoPanel();
+  panel2.update(payload([placement()]));
+  rows()[0].click();
+  expect(undoButton().getAttribute('aria-label')).toBe(t('server.gm.journal.undo_entry', {
+    action: t('server.gm.journal.action_target', {
+      action: t('server.gm.journal.kind.world_spawn'),
+      target: 'courier',
+    }),
+    operator: 'Alex',
+    order: t('server.gm.journal.order', { tick: '40', sequence: '20' }),
+  }));
   panel2.destroy();
 });

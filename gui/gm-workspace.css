@@ -241,6 +241,16 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-inverse-rows dt { color: var(--ink-dim); }
 #gm-console.gm-desk .gm-inverse-rows dd { margin: 0 0 var(--space-2) 0; overflow-wrap: anywhere; }
 #gm-console.gm-desk .gm-inverse-eligibility { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); }
+/* The two-second window on taking a placement back (issue #1443). The edge is
+   a SECOND signal beside the sentence, never the only one, and it thickens
+   rather than changing hue alone once the window has shut — so a forced-colour
+   or monochrome rendering still separates "still open" from "gone" (PRD #1418
+   story 6). The row inherits the wrapping `dd` rule above, so it reflows at
+   --a11y-text-scale: 2 instead of truncating. */
+#gm-console.gm-desk .gm-inverse-exposure { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); }
+#gm-console.gm-desk .gm-inverse-exposure[data-latched="true"] {
+  border-left-width: 6px; border-left-color: var(--fire-bright); font-weight: 600;
+}
 
 /* ── Attention queue (issue #1433) ──────────────────────────────────────
    Every rung is a token multiple so the whole panel keeps working at

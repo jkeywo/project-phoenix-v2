@@ -22,6 +22,7 @@ import {
   gmAffectedFieldText,
   gmInverseAvailability,
   gmInverseSupportedKinds,
+  normaliseGmSpawnExposure,
 } from './gm-inverse-preview.js';
 
 /** The T2 confirmation category an Undo selects. Registered centrally. */
@@ -78,6 +79,8 @@ function normaliseEntry(value) {
       || (value.inverted !== undefined && typeof value.inverted !== 'boolean')
       || (value.affected !== undefined
         && (!value.affected || typeof value.affected !== 'object'))
+      || (value.spawn_exposure !== undefined
+        && !normaliseGmSpawnExposure(value.spawn_exposure))
       || (value.undo_of !== undefined && !normaliseUndoReference(value.undo_of))) return undefined;
   return {
     operator_id: value.operator_id,
@@ -93,6 +96,13 @@ function normaliseEntry(value) {
     // canonical journal recorded, because that comparison is exactly what
     // refuses a request built on a stale reading (issue #1442).
     ...(value.affected === undefined ? {} : { affected: value.affected }),
+    // Live eligibility of a placement (issue #1443), republished as the clock
+    // runs. Unlike `affected` this is NOT echoed back with the request: it is a
+    // fact about the world, and the reducer reads its own copy at the apply
+    // tick rather than trusting a page's reading of it.
+    ...(value.spawn_exposure === undefined
+      ? {}
+      : { spawn_exposure: normaliseGmSpawnExposure(value.spawn_exposure) }),
     ...(value.undo_of === undefined
       ? {}
       : { undo_of: normaliseUndoReference(value.undo_of) }),
@@ -173,7 +183,7 @@ export function filterGmJournalEntries(entries, { operator = 'all', outcome = 'a
  */
 export function gmJournalEntryIsUndoable(entry) {
   return !!entry && entry.outcome === 'applied' && !!entry.affected && entry.inverted !== true
-    && gmInverseAvailability(entry.action_kind).supported;
+    && gmInverseAvailability(entry.action_kind, entry.spawn_exposure).supported;
 }
 
 export function createGmJournalPanel({
@@ -397,6 +407,7 @@ export function createGmJournalPanel({
       actionKind: entry.action_kind,
       target: entry.target,
       affected: entry.affected,
+      exposure: entry.spawn_exposure,
       technical: entry.outcome === 'applied'
         ? t('server.gm.inverse.technical_applied', { tick: String(entry.tick) })
         : t(entry.outcome === 'no-op'

@@ -3082,6 +3082,16 @@ server.gm.inverse.hostility_neutral,GM undo/restore preview; the faction did not
 server.gm.inverse.supported.npc_doctrine,GM undo/restore preview reason; the doctrine this action replaced was recorded and can be restored,"[The doctrine this replaced was recorded, and can be restored if nothing else has changed it.]"
 server.gm.inverse.supported.faction_relation,GM undo/restore preview reason; the exact faction pair and its previous value were recorded,"[The exact relation and its previous value were recorded, and can be restored if nothing else has changed it.]"
 server.gm.inverse.unavailable.inverse,"GM undo/restore preview reason; the entry is itself an undo, and reversing one would be a redo",[This entry is itself an undo. Reverse the original action again rather than this record.]
+server.gm.inverse.supported.world_spawn,GM undo/restore preview reason; a placement can be taken back while crews have not had it in sensor range for two seconds,"[The placement can be taken back while it has spent under two seconds in a crew's sensor range, if the usual removal rules allow it.]"
+server.gm.inverse.unavailable.sensor_exposure,GM undo/restore preview reason; the placement has spent the full two seconds in sensor range so undo is refused permanently,[Crews have had this in sensor range for two seconds. It can no longer be taken back.]
+server.gm.inverse.unavailable.exposure_unknown,GM undo/restore preview reason; this session is not reporting how long the placement has been in sensor range,[This session is not reporting how long crews have had this in sensor range. Undo cannot be offered without it.]
+server.gm.inverse.subject_placement,GM undo/restore preview subject; {name} the scenario name of the entity a GM placed,[Whether the placement {name} is in the world]
+server.gm.inverse.presence_present,GM undo/restore preview; the placed entity is in the world,[In the world]
+server.gm.inverse.presence_absent,GM undo/restore preview; the placed entity is not in the world,[Not in the world]
+server.gm.inverse.exposure,GM undo/restore preview; how long crews have had the placement in sensor range,[Seen by crews]
+server.gm.inverse.exposure_remaining,GM undo/restore preview; {elapsed} and {limit} seconds of cumulative sensor exposure so far,[{elapsed} s of {limit} s in a crew's sensor range.]
+server.gm.inverse.exposure_elapsed,GM undo/restore preview; {limit} the cumulative seconds of sensor exposure that have now been reached,[{limit} s in a crew's sensor range. The chance to take this back has passed.]
+server.gm.session.reason.sensor_exposure_elapsed,GM action refusal; the placement had already spent two seconds in a player ship's sensor range,[Crews had this in sensor range for two seconds before the undo applied. It stands.]
 server.gm.session.reason.unknown_faction,GM action refusal; no authored faction answers to one of the two names,[No authored faction answers to that name.]
 server.gm.session.reason.unknown_gm_action,GM action refusal; the history entry an undo named is not in the canonical journal,[That action is not in this run's saved history.]
 server.gm.session.reason.inverse_unsupported,"GM action refusal; the named action changed nothing, or its family records no reversible state","[That action cannot be reversed. It changed nothing, or its family records no state to restore.]"

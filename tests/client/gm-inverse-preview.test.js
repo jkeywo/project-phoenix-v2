@@ -15,7 +15,10 @@ import {
   GM_INVERSE_PLANNED,
   GM_INVERSE_OUT_OF_SCOPE,
   GM_INVERSE_SUPPORTED,
+  GM_INVERSE_UNKNOWN,
+  GM_INVERSE_EXPIRED,
   gmAffectedFieldText,
+  normaliseGmSpawnExposure,
 } from '../../gui/gm-inverse-preview.js';
 import { buildTable, setTable, t } from '../../gui/strings.js';
 
@@ -33,6 +36,14 @@ function rustActionKinds() {
     .map((variant) => variant.replace(/(?<!^)([A-Z])/g, '-$1').toLowerCase());
 }
 
+/** A placement crews have had for half a second: the window is open. */
+const OPEN = Object.freeze({ exposed_ms: 500, limit_ms: 2000, latched: false });
+/** The same placement once the cutoff has closed. */
+const SHUT = Object.freeze({ exposed_ms: 2000, limit_ms: 2000, latched: true });
+const PLACED = Object.freeze({
+  'spawned-entity': { name: 'gm_courier_7', before: false, after: true },
+});
+
 let host;
 beforeEach(() => {
   setTable(realStrings);
@@ -45,7 +56,9 @@ it('answers for every action family the canonical journal can record', () => {
   expect(kinds.length).toBeGreaterThan(10);
   expect(Object.keys(GM_INVERSE_SUPPORT).sort()).toEqual(kinds.sort());
   for (const kind of kinds) {
-    const availability = gmInverseAvailability(kind);
+    // A family whose answer depends on this entry's live exposure is asked
+    // with one, so the table's own answer is what is under test here.
+    const availability = gmInverseAvailability(kind, OPEN);
     expect([GM_INVERSE_SUPPORTED, GM_INVERSE_PLANNED, GM_INVERSE_OUT_OF_SCOPE])
       .toContain(availability.status);
     expect(availability.supported).toBe(availability.status === GM_INVERSE_SUPPORTED);
@@ -53,11 +66,13 @@ it('answers for every action family the canonical journal can record', () => {
   }
 });
 
-it('claims undo support for exactly the two families the reducer can reverse', () => {
-  // Issue #1442 builds the NPC-doctrine and faction-relation inverses. Spawn
-  // and despawn remain PLANNED, and nothing else may claim support.
-  expect(gmInverseSupportedKinds().sort()).toEqual(['faction-relation', 'npc-doctrine']);
-  for (const planned of ['world-spawn', 'world-despawn']) {
+it('claims undo support for exactly the families the reducer can reverse', () => {
+  // Issue #1442 builds the NPC-doctrine and faction-relation inverses, #1443
+  // the placement one. Despawn remains PLANNED and nothing else may claim
+  // support.
+  expect(gmInverseSupportedKinds().sort())
+    .toEqual(['faction-relation', 'npc-doctrine', 'world-spawn']);
+  for (const planned of ['world-despawn']) {
     expect(gmInverseAvailability(planned).status).toBe(GM_INVERSE_PLANNED);
   }
   expect(gmInverseAvailability('direct-effect').status).toBe(GM_INVERSE_OUT_OF_SCOPE);
@@ -193,4 +208,92 @@ it('clears back to nothing so a deselected entry leaves no stale explanation', (
   preview.clear(host);
   expect(host.childElementCount).toBe(0);
   expect(preview.state()).toBeNull();
+});
+
+// ── The placement inverse and its two-second window (issue #1443) ────────────
+
+it('names the placement and says plainly whether it is in the world', () => {
+  const described = gmAffectedFieldText(PLACED, t);
+  expect(described.subject).toBe(
+    t('server.gm.inverse.subject_placement', { name: 'gm_courier_7' }),
+  );
+  expect(described.before).toBe(t('server.gm.inverse.presence_absent'));
+  expect(described.after).toBe(t('server.gm.inverse.presence_present'));
+});
+
+it('offers the placement inverse while the window is open, and says how much is left', () => {
+  const preview = createGmInversePreview({ doc: document, t });
+  const availability = preview.render(host, {
+    actionKind: 'world-spawn',
+    affected: PLACED,
+    exposure: OPEN,
+  });
+  expect(availability.supported).toBe(true);
+  const exposure = host.querySelector('.gm-inverse-exposure');
+  expect(exposure.dataset.latched).toBe('false');
+  // The count in words and numbers, before it runs out rather than after.
+  expect(exposure.textContent)
+    .toBe(t('server.gm.inverse.exposure_remaining', { elapsed: '0.5', limit: '2.0' }));
+  expect(host.querySelector('.gm-inverse-eligibility').textContent)
+    .toContain(t('server.gm.inverse.available'));
+});
+
+it('withdraws the offer once crews have had the placement for two seconds', () => {
+  const preview = createGmInversePreview({ doc: document, t });
+  const availability = preview.render(host, {
+    actionKind: 'world-spawn',
+    affected: PLACED,
+    exposure: SHUT,
+  });
+  expect(availability.supported).toBe(false);
+  expect(availability.status).toBe(GM_INVERSE_EXPIRED);
+  const eligibility = host.querySelector('.gm-inverse-eligibility');
+  expect(eligibility.dataset.supported).toBe('false');
+  expect(eligibility.textContent).toContain(t('server.gm.inverse.unavailable.sensor_exposure'));
+  expect(host.querySelector('.gm-inverse-exposure').dataset.latched).toBe('true');
+  expect(host.querySelector('.gm-inverse-exposure').textContent)
+    .toBe(t('server.gm.inverse.exposure_elapsed', { limit: '2.0' }));
+  // The family is still reversible in general; this one was seen. The two
+  // sentences must not be confused.
+  expect(eligibility.textContent).not.toContain(t('server.gm.inverse.unavailable.planned'));
+});
+
+it('offers nothing for a placement whose exposure this session is not reporting', () => {
+  const preview = createGmInversePreview({ doc: document, t });
+  for (const exposure of [undefined, null, {}, { exposed_ms: 1, limit_ms: 2 },
+    { exposed_ms: -1, limit_ms: 2000, latched: false },
+    { exposed_ms: 1, limit_ms: 2000, latched: 'no' }]) {
+    const availability = preview.render(host, {
+      actionKind: 'world-spawn',
+      affected: PLACED,
+      exposure,
+    });
+    expect(availability.supported).toBe(false);
+    expect(availability.status).toBe(GM_INVERSE_UNKNOWN);
+    expect(host.querySelector('.gm-inverse-eligibility').textContent)
+      .toContain(t('server.gm.inverse.unavailable.exposure_unknown'));
+    // No half-believed clock either.
+    expect(host.querySelector('.gm-inverse-exposure')).toBeNull();
+  }
+});
+
+it('parses an exposure status strictly rather than half-believing one', () => {
+  expect(normaliseGmSpawnExposure(OPEN)).toEqual({ ...OPEN });
+  expect(normaliseGmSpawnExposure({ ...OPEN, exposed_ms: 1.5 })).toBeNull();
+  expect(normaliseGmSpawnExposure('2000')).toBeNull();
+  expect(normaliseGmSpawnExposure(null)).toBeNull();
+});
+
+it('never lets an exposure clock reach a family that has no window', () => {
+  const preview = createGmInversePreview({ doc: document, t });
+  // A doctrine change is reversible for as long as nothing else moves it; a
+  // stray exposure payload must not shorten that or draw a clock.
+  const availability = preview.render(host, {
+    actionKind: 'npc-doctrine',
+    affected: { 'npc-doctrine': { entity: 'courier-1', before: null, after: 'north' } },
+    exposure: SHUT,
+  });
+  expect(availability.supported).toBe(true);
+  expect(host.querySelector('.gm-inverse-eligibility').textContent)
+    .toContain(t('server.gm.inverse.available'));
 });

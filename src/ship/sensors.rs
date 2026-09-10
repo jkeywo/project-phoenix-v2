@@ -463,7 +463,7 @@ pub fn tick_sensors_frequency_hint(
 /// An NPC carries its own `AiProfile.sensor_range` (`[ai_profile] sensor_range`
 /// in the entity TOML), so prefer that and fall back to the console config only
 /// for ships that have no AI profile at all.
-fn effective_sensor_range(
+pub(crate) fn effective_sensor_range(
     profile: Option<&crate::ai::server::AiProfile>,
     console_range: f32,
     modifiers: &crate::modifiers::ShipModifiers,

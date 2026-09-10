@@ -1363,6 +1363,16 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
         "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
         },
+        // Exactly `{operator_id, correlation, action, candidate}` (issue
+        // #1446). The candidate is an opaque slot id in the requesting peer's
+        // own catalogue, bounded exactly as every other GM id is: it is never
+        // joined to a directory, and `bounded_gm_target_id` is what keeps a
+        // path-shaped string out of the canonical journal.
+        "request_live_restore" if object.len() == 4 && object.contains_key("candidate") => {
+            crate::gm_action::GmAction::RequestLiveRestore {
+                candidate: bounded_gm_target_id(object.get("candidate")?.as_str()?)?,
+            }
+        }
         "spawn_palette_entity"
             if object.len() == 7
                 && object.contains_key("palette")

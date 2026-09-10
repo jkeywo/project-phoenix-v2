@@ -182,6 +182,33 @@ describe('the mounted catalogue', () => {
     expect(name.textContent).not.toBe('autosave');
   });
 
+  // The recovery checkpoint a GM live restore (#1446) takes before it replaces
+  // the world is an ordinary manual row in this list, and `src/gm_restore.rs`
+  // names it with the String Table id `RECOVERY_CHECKPOINT_NAME` because that
+  // crate has no locale. Every place this catalogue prints a name resolves it,
+  // or a player opening Load reads `server.gm.restore.recovery_name` verbatim.
+  it('renders an engine-named row through its authored sentence, never the id', async () => {
+    const recovery = {
+      ...READY,
+      slot_id: 'manual-recovery',
+      display_name: 'server.gm.restore.recovery_name',
+    };
+    const { controller } = fixture([recovery]);
+    await controller.ready;
+    const authored = t('server.gm.restore.recovery_name');
+
+    const name = document.querySelector('[data-slot-id="manual-recovery"] .save-slot-name');
+    expect(name.textContent).toBe(authored);
+    expect(name.textContent).not.toContain('server.gm.restore.recovery_name');
+
+    select('manual-recovery');
+    expect(document.getElementById('save-slot-rename').value).toBe(authored);
+
+    document.querySelector('[data-save-action="delete"]').click();
+    expect(document.getElementById('save-slots-confirm-text').textContent)
+      .toBe(t('server.save_slots.delete_confirm', { name: authored }));
+  });
+
   it('cannot start an incompatible or unreadable row but starts the exact compatible row', async () => {
     const { controller, starts } = fixture([
       MOVED,

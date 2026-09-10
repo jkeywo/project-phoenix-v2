@@ -255,6 +255,29 @@ pub enum GmAction {
         original_sequence: u64,
         expected: GmAffectedField,
     },
+    /// Ask for this live session to be rewound onto one saved checkpoint
+    /// (issue #1446).
+    ///
+    /// `candidate` is a slot id in the REQUESTING peer's own catalogue, which
+    /// is the only catalogue a single-simulation-peer restore can reach: the
+    /// peer that holds the simulation is the peer that holds the saves. It is
+    /// carried as a bounded opaque id, never as a file path.
+    ///
+    /// Applying it ARMS [`crate::gm_restore::GmLiveRestore`] and holds the
+    /// session; the peer-local driver then captures the recovery checkpoint,
+    /// revalidates the candidate against the CURRENT content and seating, and
+    /// loads it. Only the two answers that must be ORDERED are decided here —
+    /// "this session has more than one simulation peer" and "a restore is
+    /// already running" — because those are the two a second GM pressing at the
+    /// same tick must get a deterministic answer to. Candidate eligibility is
+    /// deliberately revalidated later, at execution, against live state.
+    ///
+    /// APPENDED after every earlier variant, never inserted: the grant is
+    /// postcard-encoded into the deterministic digest, which writes an enum by
+    /// variant INDEX.
+    RequestLiveRestore {
+        candidate: String,
+    },
 }
 
 /// The exact affected field one GM action changed, with its before and after
@@ -476,6 +499,10 @@ pub enum GmActionKind {
     /// rather than the family it reverses, so the journal panel can present an
     /// undo AS an undo and a second inverse of one original is refusable.
     ActionUndo,
+    /// A request to rewind this live session onto a saved checkpoint
+    /// (issue #1446). Appended, for the postcard variant-index reason every
+    /// kind after the first shares.
+    LiveRestore,
 }
 
 impl GmActionKind {
@@ -510,6 +537,11 @@ impl GmActionKind {
             Self::SessionPause
             | Self::StationPuppet
             | Self::StationCommand
+            // The candidate a live restore names is a slot id in the
+            // REQUESTING peer's own private catalogue. It is deliberately not
+            // a public target: the activity feed would render it as a world
+            // identity, and one peer's storage key is not one.
+            | Self::LiveRestore
             | Self::ActionUndo => false,
         }
     }
@@ -566,6 +598,7 @@ impl GmAction {
             | Self::SetEventPaused { .. }
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
+            | Self::RequestLiveRestore { .. }
             | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. }
             | Self::IssueStationCommand { ship, .. }
@@ -605,6 +638,8 @@ impl GmAction {
             // An inverse names an ACTION, not a world identity; `undo_of`
             // carries that identity on the durable fact.
             | Self::UndoGmAction { .. }
+            // The private catalogue key stays off the durable public fact.
+            | Self::RequestLiveRestore { .. }
             | Self::IssueStationCommand { .. } => None,
         }
     }
@@ -642,6 +677,11 @@ impl GmAction {
                 ..
             } if bounded(original_operator) && expected.bounded() && expected.is_change() => Ok(()),
             Self::DespawnEntity { target } if bounded(target) => Ok(()),
+            // A slot id is an opaque catalogue key, bounded exactly as every
+            // other GM id is. It is never a path: `bounded` refuses control
+            // characters and anything over 128 bytes, and nothing downstream
+            // joins it to a directory.
+            Self::RequestLiveRestore { candidate } if bounded(candidate) => Ok(()),
             Self::ObjectiveAction {
                 objective,
                 recipients,
@@ -761,6 +801,7 @@ impl GmAction {
             Self::SetNpcDoctrine { .. } => GmActionKind::NpcDoctrine,
             Self::SetFactionHostility { .. } => GmActionKind::FactionRelation,
             Self::UndoGmAction { .. } => GmActionKind::ActionUndo,
+            Self::RequestLiveRestore { .. } => GmActionKind::LiveRestore,
         }
     }
 
@@ -783,6 +824,7 @@ impl GmAction {
             | Self::TransmitComms { .. }
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
+            | Self::RequestLiveRestore { .. }
             | Self::ArmGmEventSkip { .. } => None,
         }
     }
@@ -872,6 +914,10 @@ impl GmAction {
             | Self::TransmitComms { .. }
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
+            // A restore HOLDS the session, but it is not the pause lever: the
+            // hold is a consequence of the restore, and the GM's own explicit
+            // resume afterwards is an ordinary `SetSessionPaused`.
+            | Self::RequestLiveRestore { .. }
             | Self::ArmGmEventSkip { .. }
             // Not session pause: a paused EVENT stops one authored condition
             // being evaluated and leaves the simulation running.
@@ -902,6 +948,7 @@ impl GmAction {
             | Self::SetNpcDoctrine { .. }
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
+            | Self::RequestLiveRestore { .. }
             | Self::TransmitComms { .. } => None,
         }
     }
@@ -932,6 +979,9 @@ impl GmAction {
             // An undo is always a request to make something happen; WHAT it
             // makes true is `expected.before`, on the action itself.
             | Self::UndoGmAction { .. }
+            // A restore is always a request to make something happen; WHICH
+            // checkpoint rides the action, not this boolean.
+            | Self::RequestLiveRestore { .. }
             | Self::ArmGmEventSkip { .. } => true,
         }
     }
@@ -1410,6 +1460,18 @@ pub enum GmActionRefusalReason {
     /// GM's contact override on the same observer/target pair. Refused rather
     /// than overwritten, and refused as a whole rather than applied in part.
     RestoreReferenceConflict,
+    /// A live restore was asked for in a session with more than one simulation
+    /// peer (issue #1446). The bounded first delivery is a single-peer one, and
+    /// this refusal is how that bound is VISIBLE rather than half-attempted:
+    /// the readiness countdown, nonresponder disconnect and all-peers digest
+    /// agreement a multi-peer restore needs are #1447's.
+    ///
+    /// Appended for [`Self::UnknownGmEvent`]'s reason: the journal is folded
+    /// through postcard, which encodes an enum by VARIANT INDEX.
+    MultipleSimulationPeers,
+    /// A live restore was asked for while one is already running (issue #1446).
+    /// The first accepted ordered request wins; every concurrent one gets this.
+    LiveRestoreInProgress,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -2241,6 +2303,17 @@ impl GmActionJournal {
                         | GmAction::SetFactionHostility { .. }
                         | GmAction::UndoGmAction { .. }
                         | GmAction::TransmitComms { .. } => {}
+                        // An accepted live restore HOLDS the session (issue
+                        // #1446): the reducer stops the world in the same
+                        // breath as it arms the peer-local driver. This
+                        // projection has to say so, because it is what decides
+                        // where the NEXT proposal is scheduled — a projection
+                        // that still read Running would put every later grant,
+                        // the GM's own Resume included, one tick past a clock
+                        // this hold has already stopped. What the restore
+                        // PRODUCED is still no latch: that is the whole
+                        // restored world, not a value to carry forward.
+                        GmAction::RequestLiveRestore { .. } => paused = true,
                     }
                 }
                 entries.push(result.clone());
@@ -2313,6 +2386,13 @@ impl GmActionJournal {
                 | GmAction::SetFactionHostility { .. }
                 | GmAction::UndoGmAction { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
+                // The same hold, PROJECTED: a request this prefix has not
+                // applied yet will stop the world when it does, and that is
+                // what decides where the grant after it may be scheduled.
+                GmAction::RequestLiveRestore { .. } => {
+                    paused = true;
+                    GmActionOutcome::Applied
+                }
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -2429,6 +2509,14 @@ impl GmActionJournal {
                 | GmAction::SetFactionHostility { .. }
                 | GmAction::UndoGmAction { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
+                // The applied fold's hold, in the reducer-free projection: an
+                // admitted live restore stops the world, so whatever this
+                // prefix schedules after it must land on the stopped boundary
+                // here too.
+                GmAction::RequestLiveRestore { .. } => {
+                    paused = true;
+                    GmActionOutcome::Applied
+                }
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -2978,7 +3066,19 @@ pub fn apply_due_actions(
     // seam over `FactionRegistryResource`; it performs the same two registry
     // calls and the same AI target re-validation the authored
     // `add_faction_enemy` trigger action does.
-    (removal_targets, mut objective_control, mut native_authority, mut factions, mut exposure): (
+    // The live-restore arm (issue #1446) rides the same trailing tuple, and is
+    // deliberately the ONLY thing this reducer needs to decide a restore: the
+    // peer count and the live seating are mirrored onto it each frame
+    // (`gm_restore::publish_restore_context`) so the two answers that must be
+    // canonically ORDERED can be given here without four more resources.
+    (
+        removal_targets,
+        mut objective_control,
+        mut native_authority,
+        mut factions,
+        mut exposure,
+        mut restore,
+    ): (
         crate::gm_despawn::RemovalQuery,
         crate::gm_objective::ObjectiveControl,
         Option<ResMut<NativeGmAuthority>>,
@@ -2988,6 +3088,7 @@ pub fn apply_due_actions(
         // fixtures and the replay harness run this exact production reducer
         // without a world to place anything in.
         Option<ResMut<crate::gm_exposure::GmSpawnExposure>>,
+        Option<ResMut<crate::gm_restore::GmLiveRestore>>,
     ),
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
@@ -3775,6 +3876,46 @@ pub fn apply_due_actions(
                     Some(GmActionRefusalReason::NotGameMaster),
                 )
             }
+            // A restore that is already capturing or loading owns the hold.
+            // Resuming underneath it would run the world the restore is about
+            // to overwrite, so the resume is refused BY NAME rather than
+            // silently dropped — and a reported outcome does not hold: the
+            // GM's own explicit resume afterwards is exactly this action.
+            GmAction::SetSessionPaused { active: false }
+                if restore
+                    .as_deref()
+                    .is_some_and(|restore| restore.phase().holds_session()) =>
+            {
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::LiveRestoreInProgress),
+                )
+            }
+            // The bounded first delivery (issue #1446). Applying this ARMS the
+            // peer-local driver and holds the session; the driver captures the
+            // recovery checkpoint and revalidates the candidate against live
+            // state before anything is loaded.
+            GmAction::RequestLiveRestore { candidate } => match restore.as_deref_mut() {
+                None => (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::WorldUnavailable),
+                ),
+                Some(restore) => match restore.admit_request() {
+                    Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+                    Ok(()) => {
+                        restore.accept(crate::gm_restore::AcceptedRestore {
+                            operator_id: grant.operator_id.clone(),
+                            correlation: grant.correlation.as_str().to_string(),
+                            candidate_slot: candidate.clone(),
+                            requested_tick: now,
+                        });
+                        // Visibly held BEFORE anything is captured or loaded
+                        // (PRD #1420 story 11).
+                        paused.0 = true;
+                        (GmActionOutcome::Applied, None)
+                    }
+                },
+            },
             GmAction::SetSessionPaused { active } if paused.0 == *active => {
                 (GmActionOutcome::NoOp, None)
             }
@@ -4122,7 +4263,7 @@ pub fn sequence_owner_proposal(
     now: u64,
     ready_through: u64,
     current_paused: bool,
-    technical_join_hold: bool,
+    live_hold: bool,
 ) -> Result<GmActionGrant, GmActionRefusalReason> {
     proposal.validate()?;
     if let Some(existing) = journal.grant_for(&proposal.operator_id, &proposal.correlation) {
@@ -4141,11 +4282,12 @@ pub fn sequence_owner_proposal(
         .recovery_generation_boundary(proposal.from, recovery_generation)
         .unwrap_or(0);
     let projected_paused = journal.projected_pause();
-    let apply_tick = if projected_paused || (current_paused && technical_join_hold) {
-        // A technical join hold can make the live session paused even when the
-        // durable GM prefix last projected Running. Resume must land at this
-        // stopped logical boundary; scheduling it at `ready + 1` would require
-        // the very tick the hold forbids and deadlock forever.
+    let apply_tick = if projected_paused || (current_paused && live_hold) {
+        // A live hold — a technical join hold, a native screen pause, or a
+        // settled live restore (issue #1446) — can make the session paused even
+        // when the durable GM prefix last projected Running. Resume must land at
+        // this stopped logical boundary; scheduling it at `ready + 1` would
+        // require the very tick the hold forbids and deadlock forever.
         journal.last_apply_tick().unwrap_or(now).max(now)
     } else {
         ready_through.saturating_add(1).max(now).max(
@@ -4305,12 +4447,22 @@ fn submit_bound(
     let paused = world
         .get_resource::<SimulationPaused>()
         .is_some_and(|paused| paused.0);
-    let technical_join_hold = world
+    // Every live hold that stops the clock WITHOUT a canonical pause of its
+    // own. A held world cannot reach `ready + 1`, so a proposal made under one
+    // of these has to land on the stopped boundary instead (see
+    // `sequence_owner_proposal`). A settled live restore (issue #1446) belongs
+    // here for exactly the technical join hold's reason: the world is paused,
+    // the restored journal is the CANDIDATE's and carries no record of the
+    // hold, and the GM's explicit Resume is the one grant that must become due.
+    let live_hold = world
         .get_resource::<crate::gm_join::GmJoinPauseHold>()
         .is_some_and(crate::gm_join::GmJoinPauseHold::active)
         || world
             .get_resource::<NativeGmAuthority>()
-            .is_some_and(|a| a.screen_pause);
+            .is_some_and(|a| a.screen_pause)
+        || world
+            .get_resource::<crate::gm_restore::GmLiveRestore>()
+            .is_some_and(|restore| restore.phase().holds_world());
     let owner = if native {
         local
     } else {
@@ -4348,7 +4500,7 @@ fn submit_bound(
             now,
             ready_through,
             paused,
-            technical_join_hold,
+            live_hold,
         )
     };
     let grant = match sequenced {

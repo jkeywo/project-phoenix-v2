@@ -54,6 +54,10 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   // restore would put back now holds someone else's newer decision.
   'restore-identity-occupied': 'server.gm.session.reason.restore_identity_occupied',
   'restore-reference-conflict': 'server.gm.session.reason.restore_reference_conflict',
+  // The bounded single-simulation-peer live restore (issue #1446). Both name
+  // exactly what the GM has to do next: wait, or stop trying until #1447.
+  'multiple-simulation-peers': 'server.gm.session.reason.multiple_simulation_peers',
+  'live-restore-in-progress': 'server.gm.session.reason.live_restore_in_progress',
 });
 
 /** The immediate browser-to-WASM ingress refusal, which has no wire reason. */

@@ -20,6 +20,7 @@ const ACTIONS = Object.freeze({
   __hostSetNpcDoctrine: 'set_npc_doctrine',
   __hostSetFactionHostility: 'set_faction_hostility',
   __hostUndoGmAction: 'undo_gm_action',
+  __hostRequestLiveRestore: 'request_live_restore',
   __hostSetStationPuppet: 'set_station_puppet',
   __hostIssueStationCommand: 'issue_station_command',
 });

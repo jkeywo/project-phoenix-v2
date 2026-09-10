@@ -46,6 +46,9 @@ export const GM_HEALTH_STATES = Object.freeze([
 export const GM_HEALTH_ALERT_KINDS = Object.freeze([
   'station_disconnected', 'ship_peer_lost', 'operator_disconnected',
   'recovery_in_progress', 'recovery_failed',
+  // The live-restore states (issue #1446), reported through this same banner
+  // rather than a second restore-only surface.
+  'live_restore_in_progress', 'live_restore_settled',
 ]);
 
 /** The String Table id naming one state. */
@@ -168,11 +171,17 @@ export function parseGmHealthProjection(payload) {
     failed: value.recovery.failed === true,
   } : null;
 
+  // The live restore (issue #1446), carried through unchanged for
+  // `gui/gm-restore-control.js` to read: this adapter validates the payload
+  // shape and does not interpret a phase.
+  const restore = value.restore && typeof value.restore === 'object' ? { ...value.restore } : null;
+
   return {
     tick,
     paused: value.paused === true,
     input_delay_ticks: Number.isSafeInteger(value.input_delay_ticks) ? value.input_delay_ticks : null,
     recovery,
+    restore,
     peers,
     stations,
     operators,

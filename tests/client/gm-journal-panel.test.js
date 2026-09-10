@@ -263,6 +263,28 @@ it('keeps an unrecognised future action family visible with its wire identity', 
     .toContain(t('server.gm.inverse.unavailable.unknown'));
 });
 
+// A refused live restore (issue #1446) leaves a PERMANENT journal row — the
+// multi-peer refusal and the concurrent-request refusal both do — so this
+// build's own most consequential family must be named here rather than fall
+// through the forward-compatibility hatch above and read as unrecognised.
+it('names a refused live restore as the restore family, not an unknown one', () => {
+  panel.update(payload([entry({
+    action_kind: 'live-restore',
+    outcome: 'refused',
+    reason: 'multiple-simulation-peers',
+  })]));
+  expect(rowText(0)[2]).toBe(t('server.gm.journal.kind.live_restore'));
+  expect(rowText(0)[2]).not.toBe(t('server.gm.journal.kind_unknown', { kind: 'live-restore' }));
+  rows()[0].click();
+  expect(document.getElementById('gm-journal-detail-outcome').textContent)
+    .toBe(t('server.gm.journal.detail_outcome_reason', {
+      outcome: t('server.gm.journal.outcome.refused'),
+      reason: t('server.gm.session.reason.multiple_simulation_peers'),
+    }));
+  expect(document.getElementById('gm-journal-inverse').textContent)
+    .toContain(t('server.gm.inverse.unavailable.live_restore'));
+});
+
 it('parses a JSON string payload and keys rows by their canonical identity', () => {
   const parsed = parseGmJournalProjection(JSON.stringify(payload(HISTORY)));
   expect(parsed.entries).toHaveLength(3);

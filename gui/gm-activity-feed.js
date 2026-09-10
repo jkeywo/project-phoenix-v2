@@ -167,6 +167,10 @@ function normaliseAction(value) {
       original_correlation: value.original_correlation,
     };
   }
+  // A live restore was asked for (issue #1446). No payload at all: the
+  // candidate is a key in one peer's private catalogue, and the shared feed
+  // records that a restore was requested, by whom, and what came of it.
+  if (value.type === 'request_live_restore') return { type: value.type };
   return undefined;
 }
 
@@ -502,6 +506,8 @@ export function createGmActivityFeed({
               || detail.action.original_operator.id,
             correlation: detail.action.original_correlation,
           });
+        } else if (detail.action.type === 'request_live_restore') {
+          action = t('server.gm.activity.action.request_live_restore');
         } else if (detail.action.type === 'set_event_paused') {
           action = t(
             detail.action.active

@@ -314,11 +314,14 @@ it('reads only the catalogue it was handed, and offers no way to reach another p
   expect(api.list).toHaveBeenCalledTimes(2);
   expect(api.list.mock.calls.every((call) => call.length === 0)).toBe(true);
   expect(Object.keys(panel)).not.toContain('listForOperator');
-  // ...and nothing here restores, renames, exports or deletes: the panel says
-  // in the page that it only reports compatibility.
-  expect(document.querySelectorAll('#gm-checkpoint button')).toHaveLength(
-    1 + rowsIn().length,
-  );
+  // ...and this panel still renames, exports and deletes nothing, and restores
+  // nothing itself: its own controls are Bookmark plus one button per candidate
+  // row. Issue #1446's restore control is a separate component in its own
+  // `#gm-restore` group, with its own confirmation and its own typed action, so
+  // it is excluded from this count rather than counted as a panel control.
+  expect(document.querySelectorAll('#gm-checkpoint button:not(#gm-restore button)'))
+    .toHaveLength(1 + rowsIn().length);
+  expect(Object.keys(panel)).not.toContain('restore');
   expect(document.getElementById('gm-checkpoint-restore-note').textContent)
     .toBe(t('server.gm.checkpoint.restore_note'));
 });
@@ -396,6 +399,26 @@ it('gives every candidate row a spoken name carrying its verdict', async () => {
     name: 'Another world',
     verdict: t('server.gm.checkpoint.ineligible'),
   }));
+});
+
+it('reads an engine-named row as its authored sentence, in the row and the detail', async () => {
+  // `src/gm_restore.rs` bookmarks the recovery checkpoint it takes before a
+  // live restore (#1446) under the String Table id `RECOVERY_CHECKPOINT_NAME`,
+  // because that crate has no locale. That row is an ordinary candidate here,
+  // so the picker resolves the name instead of showing a GM the raw id.
+  const id = 'server.gm.restore.recovery_name';
+  await mount({ rows: [row({ slot_id: 'slot-recovery', display_name: id })] });
+  const authored = t(id);
+  expect(authored).not.toBe(id);
+
+  expect(rowsIn()[0].querySelector('.gm-checkpoint-name').textContent).toBe(authored);
+  expect(rowsIn()[0].getAttribute('aria-label')).toBe(t('server.gm.checkpoint.select', {
+    name: authored,
+    verdict: t('server.gm.checkpoint.eligible'),
+  }));
+
+  rowsIn()[0].click();
+  expect(document.getElementById('gm-checkpoint-detail-name').textContent).toBe(authored);
 });
 
 it('never blanks an unreadable row, it says what it does not know', async () => {

@@ -159,6 +159,16 @@ pub enum GmHealthAlertKind {
     RecoveryInProgress,
     /// A recovery ended without healing the split, honestly reported.
     RecoveryFailed,
+    /// A live restore is in flight: the world is deliberately held while a
+    /// recovery checkpoint is captured and a candidate loaded (issue #1446).
+    /// A hold, not a fault — and a technical condition the GM who did NOT
+    /// press it still has to be able to see.
+    LiveRestoreInProgress,
+    /// A live restore reported an outcome and the session is still held for an
+    /// explicit resume (issue #1446). Carried as an alert rather than a quiet
+    /// panel line because "this world is not the one you were running" is
+    /// exactly what no filter, snooze or reading hold may take away.
+    LiveRestoreSettled,
 }
 
 impl GmHealthAlertKind {
@@ -169,8 +179,13 @@ impl GmHealthAlertKind {
             Self::StationDisconnected | Self::ShipPeerLost | Self::OperatorDisconnected => {
                 GmHealthState::Disconnected
             }
-            Self::RecoveryInProgress => GmHealthState::Recovering,
+            Self::RecoveryInProgress | Self::LiveRestoreInProgress => GmHealthState::Recovering,
             Self::RecoveryFailed => GmHealthState::Disconnected,
+            // A settled restore is a HELD world, not a lost one. Reporting it
+            // at `Disconnected` would put a successful restore on the desk in
+            // the same words as a peer that dropped, and the failure half is
+            // already spelled out by its own sentence.
+            Self::LiveRestoreSettled => GmHealthState::Paused,
         }
     }
 
@@ -268,6 +283,29 @@ pub struct GmRecoveryHealth {
     pub failed: bool,
 }
 
+/// What a live restore is doing, if one is (issue #1446).
+///
+/// Reported through the SAME banner every other technical condition uses —
+/// there is no second restore panel and no protocol-specific user flow — and
+/// carries no candidate slot id: which private catalogue row a GM picked is
+/// their storage key, not fleet health.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GmLiveRestoreHealth {
+    /// The wire phase, which is also the `data-phase` the page draws with.
+    pub phase: String,
+    /// The crew-public GM operator who asked. Never a session token.
+    pub operator: String,
+    /// Whether the session is held by the restore itself, as opposed to held
+    /// by a reported outcome waiting for an explicit resume.
+    pub working: bool,
+    /// The tick the restored world is held at, once there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored_tick: Option<u64>,
+    /// The String Table id naming what went wrong, absent on success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+}
+
 /// The whole public health picture, absolute.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct GmHealthProjection {
@@ -282,6 +320,9 @@ pub struct GmHealthProjection {
     pub input_delay_ticks: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<GmRecoveryHealth>,
+    /// A live restore in flight or held for resume (issue #1446).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore: Option<GmLiveRestoreHealth>,
     pub peers: Vec<GmPeerHealth>,
     pub stations: Vec<GmStationHealth>,
     pub operators: Vec<GmOperatorHealth>,
@@ -344,6 +385,10 @@ pub const SHIP_PEER_LOST_REASON: &str = "server.gm.health.reason.ship_peer_lost"
 pub const OPERATOR_DISCONNECTED_REASON: &str = "server.gm.health.reason.operator_disconnected";
 pub const RECOVERY_IN_PROGRESS_REASON: &str = "server.gm.health.reason.recovery_in_progress";
 pub const RECOVERY_FAILED_REASON: &str = "server.gm.health.reason.recovery_failed";
+/// The live-restore sentences (issue #1446). One per phase, because "a restore
+/// is happening" and "the world you are looking at is the restored one, held"
+/// are different things to tell a facilitator.
+pub const LIVE_RESTORE_PHASE_REASON_PREFIX: &str = "server.gm.health.reason.live_restore";
 
 /// One hull the fleet put in the world, as the projection sees it.
 struct ShipRow {
@@ -406,6 +451,87 @@ fn recovery_alert(status: &crate::lockstep::recovery::RecoveryStatus) -> Pending
     }
 }
 
+/// The health row and banner one live restore explains itself with.
+///
+/// Pure over [`crate::gm_restore::GmLiveRestore`] so every phase's sentence is
+/// testable without standing up a real save catalogue. Idle is `None`: a desk
+/// with no restore on it says nothing about restores.
+fn live_restore_health(
+    restore: &crate::gm_restore::GmLiveRestore,
+) -> Option<(GmLiveRestoreHealth, PendingAlert)> {
+    use crate::gm_restore::GmRestorePhase;
+
+    let phase = restore.phase();
+    if phase == GmRestorePhase::Idle {
+        return None;
+    }
+    let request = restore.request();
+    let operator = request.map_or(String::new(), |request| request.operator_id.clone());
+    let failure = restore
+        .failure()
+        .map(|failure| failure.label_id().to_string());
+    let (reason_id, kind) = match phase {
+        GmRestorePhase::Idle => unreachable!("filtered above"),
+        GmRestorePhase::Accepted | GmRestorePhase::CapturingRecovery => (
+            "server.gm.health.reason.live_restore_capturing",
+            GmHealthAlertKind::LiveRestoreInProgress,
+        ),
+        GmRestorePhase::Loading => (
+            "server.gm.health.reason.live_restore_loading",
+            GmHealthAlertKind::LiveRestoreInProgress,
+        ),
+        GmRestorePhase::Restored => (
+            "server.gm.health.reason.live_restore_restored",
+            GmHealthAlertKind::LiveRestoreSettled,
+        ),
+        GmRestorePhase::RolledBack => (
+            "server.gm.health.reason.live_restore_rolled_back",
+            GmHealthAlertKind::LiveRestoreSettled,
+        ),
+        GmRestorePhase::Failed => (
+            "server.gm.health.reason.live_restore_failed",
+            GmHealthAlertKind::LiveRestoreSettled,
+        ),
+    };
+    // Parameter values are authored ids the page resolves at its own boundary
+    // (see `GmHealthReason`), which is exactly what lets a failure's own
+    // sentence be nested inside the banner's without this crate holding a
+    // locale.
+    let mut params = vec![
+        ("operator", operator.clone()),
+        (
+            "tick",
+            restore
+                .restored_tick()
+                .map_or_else(String::new, |tick| tick.to_string()),
+        ),
+    ];
+    if let Some(detail) = failure.clone() {
+        params.push(("detail", detail));
+    }
+    let key = format!(
+        "live-restore:{}:{}",
+        request.map_or(0, |request| request.requested_tick),
+        phase.as_wire()
+    );
+    Some((
+        GmLiveRestoreHealth {
+            phase: phase.as_wire().to_string(),
+            operator,
+            working: phase.in_flight(),
+            restored_tick: restore.restored_tick(),
+            failure,
+        },
+        PendingAlert {
+            key,
+            kind,
+            reason: GmHealthReason::new(reason_id, params),
+            ship: None,
+            station: None,
+        },
+    ))
+}
+
 /// Decide one peer's state from the facts the barrier already keeps.
 ///
 /// Pure, and separated so the four-way distinction can be tested without a
@@ -452,6 +578,7 @@ pub fn publish_health_projection(
     sessions: Option<Res<Sessions>>,
     paused: Option<Res<SimulationPaused>>,
     recovery: Option<Res<RecoveryState>>,
+    restore: Option<Res<crate::gm_restore::GmLiveRestore>>,
     ships: Query<(
         &EntityUuid,
         Option<&EntityName>,
@@ -723,6 +850,13 @@ pub fn publish_health_projection(
     if let Some(status) = recovery_status.as_ref() {
         alerts.push(recovery_alert(status));
     }
+    let restore_health = restore
+        .as_deref()
+        .and_then(live_restore_health)
+        .map(|(health, alert)| {
+            alerts.push(alert);
+            health
+        });
 
     // Bookkeeping: a key that stopped holding is forgotten, and a key that
     // starts holding again takes a new generation, so its id — and therefore
@@ -774,6 +908,7 @@ pub fn publish_health_projection(
         paused,
         input_delay_ticks: session.map(|session| session.delay()),
         recovery: recovery_health,
+        restore: restore_health,
         peers,
         stations,
         operators: operator_rows,

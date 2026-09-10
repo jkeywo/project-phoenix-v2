@@ -236,6 +236,16 @@ pub enum GmActivityAction {
         original_operator: GmActivityPublicIdentity,
         original_correlation: String,
     },
+    /// A GM asked for this live session to be rewound onto a saved checkpoint
+    /// (issue #1446).
+    ///
+    /// The candidate's slot id is deliberately NOT here. It is a key in ONE
+    /// peer's private catalogue, and the shared activity feed is the last place
+    /// a storage key belongs; what the crew-facing history owes is that a
+    /// restore was asked for, by whom, and what came of it. Its own variant for
+    /// [`Self::SetFactionHostility`]'s reason: a restore is not a session
+    /// pause, even though it holds the session.
+    RequestLiveRestore,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -505,6 +515,11 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
             original_correlation,
             ..
         } => (16, false, original_correlation.as_str()),
+        // Its own rank, with no third component: the candidate's slot id is
+        // deliberately not on this row (see the variant), and two restore
+        // requests at one tick and order are already separated by the
+        // operator and correlation the entry itself carries.
+        GmActivityAction::RequestLiveRestore => (17, false, ""),
     }
 }
 
@@ -1192,6 +1207,8 @@ fn gm_outcome(outcome: crate::gm_action::GmActionOutcome) -> Option<GmActivityAc
 fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static str {
     use crate::gm_action::GmActionRefusalReason as Reason;
     match reason {
+        Reason::MultipleSimulationPeers => "multiple-simulation-peers",
+        Reason::LiveRestoreInProgress => "live-restore-in-progress",
         Reason::NotInFleet => "not-in-fleet",
         Reason::NotGameMaster => "not-game-master",
         Reason::OperatorMismatch => "operator-mismatch",
@@ -1538,6 +1555,9 @@ fn terminal_action_entries(
                         // itself. Written out rather than left as a wildcard so
                         // the next family that mutates the world cannot compile
                         // while being published as somebody's session pause.
+                        (crate::gm_action::GmActionKind::LiveRestore, _) => {
+                            GmActivityAction::RequestLiveRestore
+                        }
                         (
                             crate::gm_action::GmActionKind::SessionPause
                             | crate::gm_action::GmActionKind::StationPuppet

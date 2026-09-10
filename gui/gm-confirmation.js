@@ -50,6 +50,13 @@ export const GM_CONFIRMATION_CATEGORIES = Object.freeze([
   // rendered in the journal detail region under every policy, including
   // `immediate`, so configuring the step away never hides the consequences.
   category('action.undo', 'confirm-preview'),
+  // A live restore discards everything that happened after the checkpoint. It
+  // is the one GM decision whose consequences a crew cannot un-see, so it takes
+  // the preview mode: the preview names the concrete candidate and its tick,
+  // and says that current assignments are kept. As with every other category
+  // the mode stays the operator's own private choice (#1418 story 30), and the
+  // same sentences are rendered in the control's own summary under `immediate`.
+  category('world.restore', 'confirm-preview'),
 ]);
 const categories = new Map(GM_CONFIRMATION_CATEGORIES.map((entry) => [entry.id, entry]));
 
@@ -71,6 +78,7 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   SetNpcDoctrine: ['npc.directive'],
   SetFactionHostility: ['faction.relation'],
   UndoGmAction: ['action.undo'],
+  RequestLiveRestore: ['world.restore'],
 }).map(([action, ids]) => [action, Object.freeze(ids.map(gmConfirmationMetadata))])));
 
 /** Registration must name a real category, including its accepted default. */

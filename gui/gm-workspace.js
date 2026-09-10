@@ -26,6 +26,7 @@ import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
 import { createGmJournalPanel } from './gm-journal-panel.js';
 import { createGmFactionPanel } from './gm-faction-panel.js';
 import { createGmCheckpointPanel } from './gm-checkpoint-panel.js';
+import { createGmRestoreControl } from './gm-restore-control.js';
 import {
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
@@ -119,6 +120,9 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   // window seam because the classic host script installs it after this module
   // island; an absent API leaves the panel readable and its controls inert
   // rather than throwing at mount.
+  // Declared before the checkpoint panel so its selection callback can reach
+  // it; assigned after the confirmation controller exists.
+  let gmRestoreControl = null;
   const gmCheckpointPanel = createGmCheckpointPanel({
     doc: doc,
     t,
@@ -129,6 +133,10 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
         ? win.__hostGmCheckpointCreate(name) : ''),
     },
     canCapture: () => win.__saveSlotsCaptureAvailable === true,
+    // The restore control (issue #1446) sits under the SAME candidate list, so
+    // the row a GM previewed is the row they restore: a second picker could
+    // hold a different selection from the one whose reasons are on screen.
+    onSelect: () => gmRestoreControl?.refresh(),
   });
   win.__hostGmCheckpointPanel = gmCheckpointPanel;
   win.__hostGmCheckpointState = gmCheckpointPanel.state;
@@ -265,6 +273,18 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     doc: doc, t, has,
     banners: (alerts) => gmAttentionPanel.banners(alerts),
   });
+  gmRestoreControl = createGmRestoreControl({
+    doc: doc,
+    t,
+    getCandidate: () => gmCheckpointPanel.state().selected,
+    getOperator: () => (typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null),
+    submitRestore: (request) => typeof win.__hostRequestLiveRestore === 'function'
+      && win.__hostRequestLiveRestore(request),
+    submitResume: (correlation) => typeof win.__hostSetSessionPaused === 'function'
+      && win.__hostSetSessionPaused(false, correlation),
+    confirmAction: gmConfirmations.request,
+  });
+  win.__hostGmRestoreState = gmRestoreControl.state;
   gmHealthPanelRef = gmHealthPanel;
   win.__hostGmHealthState = gmHealthPanel.state;
   const gmSpawnPanel = createGmSpawnPanel({
@@ -398,11 +418,18 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmSessionControls.update(p);
       gmFactionPanel.update(p);
       gmJournalPanel.update(p);
+      // A refused restore request never reaches the health projection — no
+      // restore started — so its answer is read off the ONE canonical journal.
+      let session = p;
+      if (typeof session === 'string') {
+        try { session = JSON.parse(session); } catch (_) { session = null; }
+      }
+      gmRestoreControl.settleJournal(session?.journal?.entries);
     },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
     gm_attention: function(p) { gmAttentionPanel.update(p); },
-    gm_health:    function(p) { gmHealthPanel.update(p); },
+    gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
@@ -418,6 +445,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmFactionPanel.refreshAdmission();
       gmJournalPanel.refreshAdmission();
       gmCheckpointPanel.refresh();
+      gmRestoreControl.refresh();
       win.__hostGmEffectRefresh();
     },
     reset() {
@@ -427,6 +455,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmFactionPanel.reset();
       gmJournalPanel.reset();
       gmCheckpointPanel.reset();
+      gmRestoreControl.reset();
       win.__hostGmMissionReset();
       gmCommsPanel.reset();
       gmSpawnPanel.reset();

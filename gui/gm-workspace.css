@@ -367,6 +367,28 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
   margin: 0; padding-left: var(--space-4); display: grid; gap: var(--space-1);
   overflow-wrap: anywhere;
 }
+/* Live restore (issue #1446). The phase is a SENTENCE in #gm-restore-status;
+   `data-phase` on the group and the tone colour are decoration on top of it,
+   so a forced-colour mode loses the emphasis and keeps the meaning. Both
+   buttons keep a --control-hit-min floor and wrap at 200% rather than
+   shrinking the operator's text. */
+#gm-console.gm-desk #gm-restore {
+  display: grid; gap: var(--space-2); padding-top: var(--space-3);
+  border-top: 1px solid var(--edge); min-width: 0;
+}
+#gm-console.gm-desk #gm-restore-note { color: var(--ink-dim); margin: 0; }
+#gm-console.gm-desk #gm-restore-summary { margin: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk #gm-restore-actions {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+}
+#gm-console.gm-desk #gm-restore-actions button {
+  min-height: var(--control-hit-min); flex: 0 1 auto; max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-restore-status { margin: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk #gm-restore-status[data-tone="failed"] { color: var(--fire-bright); }
+#gm-console.gm-desk #gm-restore-status[data-tone="pending"] { color: var(--gold); }
+#gm-console.gm-desk #gm-restore-status[data-tone="ok"] { color: var(--cyan); }
 /* ── Technical health and its banners (issue #1437) ─────────────────────
    Everything here reads as WORDS. `data-state` and colour are decoration on
    top of a translated noun, so forced colours and a monochrome display lose

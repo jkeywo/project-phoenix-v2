@@ -992,6 +992,19 @@ pub fn register_lockstep(app: &mut App) {
             // queue is empty on any host that has lost nobody, which is every
             // host in a healthy fleet and every solo run.
             .declare_state::<host_loss::PendingHostLoss>(StateClass::Timer, "fleet-lockstep-state")
+            // The peer-local live-restore driver (issue #1446). `Presentation`
+            // — it is one operator's own orchestration of a peer-local
+            // operation: a phase, the attributed request that started it, the
+            // recovery slot id in this browser's private catalogue and the
+            // failure to explain. Nothing in it is state of the world, and
+            // everything it CAUSES (the hold, the restored world, the fence
+            // generation) lands in state that is already classified. It is
+            // deliberately neither captured nor folded — a restore that
+            // survived its own snapshot would re-arm itself on resume.
+            .declare_state::<crate::gm_restore::GmLiveRestore>(
+                StateClass::Presentation,
+                "gm-action-state",
+            )
             .declare_state::<SlotClaimSequence>(StateClass::Timer, "fleet-lockstep-state");
     }
     app.init_resource::<FleetRoster>()
@@ -1009,6 +1022,10 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<crate::gm_puppet::StationPuppetActivity>()
         .init_resource::<crate::gm_action::GmActionLog>()
         .init_resource::<crate::gm_action::LocalGmActionRefusals>()
+        // Peer-local live-restore orchestration (issue #1446). Deliberately NOT
+        // declared to `authoritative`: it is neither captured nor folded, and
+        // `publish_restore_context` only mirrors state it does not own.
+        .init_resource::<crate::gm_restore::GmLiveRestore>()
         .init_resource::<crate::gm_action::LastGmSessionProjection>()
         .init_resource::<crate::gm_event::LastGmMissionProjection>()
         .init_resource::<crate::gm_spawn::LastGmSpawnProjection>()
@@ -1027,7 +1044,17 @@ pub fn register_lockstep(app: &mut App) {
             (
                 apply_mesh_inbox,
                 crate::gm_contact::prune,
+                // Mirror the peer count and live seating the reducer's own
+                // parameter budget cannot reach, immediately before it reads
+                // them (issue #1446).
+                crate::gm_restore::publish_restore_context,
                 crate::gm_action::apply_due_actions,
+                // The live-restore driver (issue #1446) sits immediately after
+                // the reducer that arms it and before the barrier, for the same
+                // reason #1118's does: it needs the freshest canonical state,
+                // and a world it is about to overwrite must not have run this
+                // frame's fixed steps first.
+                crate::gm_restore::drive_live_restore,
                 recovery::drive_recovery,
                 slot_recovery::drive_slot_recovery,
                 gate_lockstep_ticks,

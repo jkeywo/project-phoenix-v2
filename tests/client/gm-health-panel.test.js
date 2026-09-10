@@ -448,7 +448,10 @@ describe('authored advisory config cannot reach the technical treatment', () => 
     const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
     expect(workspace).toContain('renderBanners: (rows, container) => gmHealthBanner.render(rows, container)');
     expect(workspace).toContain('banners: (alerts) => gmAttentionPanel.banners(alerts)');
-    expect(workspace).toContain('gm_health:    function(p) { gmHealthPanel.update(p); }');
+    // The live restore (issue #1446) reads the SAME projection rather than
+    // opening a second channel for its own state.
+    expect(workspace).toContain(
+      'gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); }');
     // The banner's hull action is the SAME selection the map already answers to.
     expect(workspace).toContain('gmProjection.select(alert.ship.entity_id)');
   });

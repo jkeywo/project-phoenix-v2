@@ -30,7 +30,7 @@ import {
   normalizeCandidatePreflight,
   paintCandidatePreflight,
 } from './gm-checkpoint-preflight.js';
-import { captureAvailableForPhase } from './save-slots.js';
+import { captureAvailableForPhase, slotName } from './save-slots.js';
 
 const text = (value) => (value == null ? '' : String(value));
 
@@ -91,6 +91,7 @@ export function createGmCheckpointPanel({
   api = null,
   canCapture = () => false,
   now = () => new Date(),
+  onSelect = () => {},
 } = {}) {
   const el = (suffix) => doc && doc.getElementById(`gm-checkpoint-${suffix}`);
   const region = doc && doc.getElementById('gm-checkpoint');
@@ -213,7 +214,7 @@ export function createGmCheckpointPanel({
     button.setAttribute('aria-pressed', String(row.slotId === state.selectedId));
     const displayName = row.kind === 'autosave'
       ? t('server.gm.checkpoint.autosave')
-      : row.displayName;
+      : slotName(row.displayName);
     button.setAttribute('aria-label', t('server.gm.checkpoint.select', {
       name: displayName,
       verdict,
@@ -247,7 +248,7 @@ export function createGmCheckpointPanel({
     if (detailName) {
       detailName.textContent = row.kind === 'autosave'
         ? t('server.gm.checkpoint.autosave')
-        : row.displayName;
+        : slotName(row.displayName);
     }
     if (detailRecord) {
       detailRecord.textContent = t('server.gm.checkpoint.row_detail', {
@@ -317,6 +318,9 @@ export function createGmCheckpointPanel({
     if (next === state.selectedId) return next !== null;
     state.selectedId = next;
     render();
+    // The live-restore control (issue #1446) reads THIS selection, so it is
+    // told when it moves rather than polling a panel it does not own.
+    try { onSelect(selected()); } catch (_) { /* a listener must not break selection. */ }
     return next !== null;
   }
 

@@ -304,7 +304,17 @@ impl SaveSlotService {
         self.manual_refusals.push_back(refusal);
     }
 
-    fn persist(&mut self, pending: PendingStoredRun) {
+    /// Write one captured run into this peer's Store and record the outcome.
+    ///
+    /// Public because a HELD world is already a stable capture boundary and a
+    /// caller that holds it must be able to take a save without waiting for a
+    /// fixed tick that the hold itself has stopped: the live restore in
+    /// `crate::gm_restore` pauses first and then captures its recovery
+    /// checkpoint, which the `FixedLast` scheduler could never deliver. It is
+    /// the SAME write the scheduler performs — same manual/autosave routing,
+    /// same display-name consumption, same outcome FIFO — so nothing about the
+    /// stored row differs from a bookmark's.
+    pub fn persist(&mut self, pending: PendingStoredRun) {
         let decision = pending.decision;
         let result = match &decision.slot {
             CaptureSlot::RollingAutosave => save_slots::write_autosave(&self.store(), &pending.run),

@@ -471,6 +471,29 @@ pub fn gate_and_restore_against(
     gate_and_restore_against_with_readiness(world, text, current, false, false)
 }
 
+/// [`gate_and_restore`] for a world that will never become readier on its own.
+///
+/// The ordinary entry point waits for the whole captured roster to be STANDING
+/// ([`snapshot::ready_to_restore`]) because a bootstrapping receiver is about to
+/// be handed better hulls than [`snapshot::restore`] could build — see that
+/// predicate's own note. A rewind of a LIVE, HELD session is the opposite
+/// situation: the world it is overwriting has been running for minutes, its
+/// bootstrap finished long ago, and the rows the candidate names that are no
+/// longer standing are ones a destruction or a GM removal took away and nothing
+/// will bring back. Worse, the hold that makes the rewind safe also stops
+/// `FixedUpdate`, so a caller that waited would wait forever.
+///
+/// So this asks #863's second question instead — [`snapshot::ready_to_rebuild`]:
+/// build what the world cannot produce, and let a row that carries no
+/// [`SpawnOrigin`](crate::world::spawn_origin::SpawnOrigin) surface as a
+/// reported [`MeshRestoreOutcome::Incomplete`] the caller can roll back from,
+/// rather than as a silent wait. Everything else — the version gate, the
+/// rollback checkpoint, the digest check — is the same code on the same path.
+pub fn gate_and_restore_rebuilding(world: &mut World, text: &str) -> MeshRestoreOutcome {
+    let current = snapshot::versions(&crate::content_ledger::frozen_or_live());
+    gate_and_restore_against_with_readiness(world, text, &current, true, false)
+}
+
 fn gate_and_restore_against_with_readiness(
     world: &mut World,
     text: &str,

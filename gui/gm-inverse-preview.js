@@ -100,6 +100,11 @@ export const GM_INVERSE_SUPPORT = Object.freeze({
   'station-command': OUT_OF_SCOPE('server.gm.inverse.unavailable.consumed'),
   'event-control': OUT_OF_SCOPE('server.gm.inverse.unavailable.consumed'),
   'direct-effect': OUT_OF_SCOPE('server.gm.inverse.unavailable.folded'),
+  // A restore (#1446) replaced the entire world, including the journal this
+  // entry would have to be read back out of. There is no value to write back
+  // and nothing that could be called an inverse; the way back is another
+  // restore, which is a fresh decision rather than a reversal of this one.
+  'live-restore': OUT_OF_SCOPE('server.gm.inverse.unavailable.live_restore'),
   comms: OUT_OF_SCOPE('server.gm.inverse.unavailable.witnessed'),
 });
 

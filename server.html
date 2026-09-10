@@ -2330,6 +2330,23 @@
             <p id="gm-checkpoint-detail-record"></p>
             <div id="gm-checkpoint-detail-preflight"></div>
           </div>
+          <!-- Single-simulation-peer live restore (issue #1446). The candidate
+               is whatever the list above has selected; the phase and every
+               failure come back on the SAME `gm_health` projection the
+               unfilterable technical banner reads, so a facilitator who did
+               not press Restore still sees the world being replaced. -->
+          <div id="gm-restore" role="group" aria-labelledby="gm-restore-heading">
+            <h3 id="gm-restore-heading" data-i18n="server.gm.restore.heading"></h3>
+            <p id="gm-restore-note" data-i18n="server.gm.restore.note"></p>
+            <p id="gm-restore-summary"></p>
+            <div id="gm-restore-actions">
+              <button id="gm-restore-apply" type="button"
+                data-i18n="server.gm.restore.apply"></button>
+              <button id="gm-restore-resume" type="button"
+                data-i18n="server.gm.restore.resume"></button>
+            </div>
+            <p id="gm-restore-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          </div>
         </section>
         <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
           <h2 id="gm-comms-heading" data-i18n="server.gm.comms.heading"></h2>
@@ -4399,6 +4416,24 @@
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_contact_override', ship: request.ship, target: request.target, mode: request.mode }));
+    };
+    /**
+     * Submit one attributed live-restore request (issue #1446).
+     *
+     * `candidate` is a slot id in THIS browser's own catalogue, which is the
+     * only catalogue a single-simulation-peer restore can reach. The seam
+     * neither composes one nor reads storage: it forwards the id the checkpoint
+     * picker read back out of that same catalogue.
+     */
+    window.__hostRequestLiveRestore = function(request) {
+      const operator = window.__hostLocalGm();
+      if (!operator || !request || request.operator_id !== operator.id
+          || typeof request.candidate !== 'string' || !request.candidate
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ action: 'request_live_restore',
+        operator_id: operator.id, correlation: request.correlation,
+        candidate: request.candidate })) !== false;
     };
     window.__hostSetNpcDoctrine = function(request) {
       const operator = window.__hostLocalGm();

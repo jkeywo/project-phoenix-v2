@@ -61,7 +61,15 @@ export {
   isSemanticModifierEvent,
   semanticModifierCode,
 } from './semantic-controls-remapper.js';
-import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP, unavailableOsPreferences } from './accessibility-profile.js';
+import {
+  TEXT_SCALE_MIN,
+  TEXT_SCALE_MAX,
+  TEXT_SCALE_STEP,
+  unavailableOsPreferences,
+  osAccessibilityDefaults,
+  presentationStatus,
+} from './accessibility-profile.js';
+import { activeElementOf } from './focus-trap.js';
 import {
   mountOverlayShell,
   renderSettingsOverlay,
@@ -428,6 +436,8 @@ function persistMasterVolume(value) {
  *   audioEl?: object|null,       // legacy single-channel argument
  *   audioEls?: Array,            // every audio channel master volume scales
  *   myToken?: string|null,
+ *   onAccessibility?: (effect: string, value: number|string) => void,
+ *   onAccessibilityResetPresentation?: () => void,   // scoped Reset all (#1422)
  *   getSemanticActions?: () => Array<object>,
  *   onSemanticBinding?: (actionId: string, slot: number, binding: object,
  *     options?: {replace?: boolean}) => object,
@@ -454,6 +464,7 @@ export function mountSettings({
   getManual,
   myToken,
   onAccessibility: _onAccessibility,
+  onAccessibilityResetPresentation: _onAccessibilityResetPresentation,
   getSemanticActions: _getSemanticActions,
   onSemanticBinding: _onSemanticBinding,
   onSemanticResetAction: _onSemanticResetAction,
@@ -717,21 +728,84 @@ export function mountSettings({
     return rowEl;
   }
 
+  // Which of the three sources a live effect came from, in words (issue #1422).
+  // `explicit` / `system` / `default` are `presentationStatus`'s vocabulary, not
+  // this module's; mapping them here keeps the copy in the String Table and the
+  // decision in the resolver.
+  const A11Y_SOURCE_LABELS = {
+    explicit: 'settings.accessibility.source_explicit',
+    system: 'settings.accessibility.source_system',
+    default: 'settings.accessibility.source_default',
+  };
+
+  /**
+   * The live readout under one control: the value now in force and where it came
+   * from. `role="status"` with a polite live region, so a screen-reader operator
+   * dragging the slider or pressing an option hears the result rather than
+   * having to go looking for it — this is the "status reachable" half of the
+   * control/status pair PRD #1418 asks for.
+   */
+  function accessibilityStatusLine(controlId, entry, valueText) {
+    const el = doc.createElement('div');
+    el.className = 'settings-section-hint settings-a11y-status';
+    el.setAttribute('data-control', controlId);
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.textContent = t('settings.accessibility.status', {
+      value: valueText,
+      source: t(entry.available === false
+        ? 'settings.accessibility.source_unread'
+        : A11Y_SOURCE_LABELS[entry.source] || A11Y_SOURCE_LABELS.default),
+    });
+    return el;
+  }
+
+  /** A per-setting reset: this effect returns to following the system, and no
+   *  other value in the profile is read or written (issue #1422). */
+  function accessibilityResetButton(controlId, labelId, effect) {
+    const el = action(t(labelId), null, () => {
+      setAccessibility(effect, 'default');
+      buildContent();
+    });
+    el.setAttribute('data-control', controlId);
+    return el;
+  }
+
   function buildAccessibilityTab(body, view) {
     const a = view.accessibility;
+    const win = doc.defaultView;
+    const unavailable = unavailableOsPreferences(win);
+    // Resolved here rather than in `buildSettingsState`: reading the OS default
+    // layer means touching matchMedia / the host-injected globals, and that
+    // state builder is a pure function every other tab shares. The profile it
+    // reads is the SAME explicit-choice view the controls paint from, so a
+    // status line cannot disagree with the control above it.
+    const status = presentationStatus(
+      {
+        presentation: {
+          textScale: a.textScale,
+          contrast: a.contrast,
+          reducedMotion: a.reducedMotion,
+        },
+      },
+      osAccessibilityDefaults(win),
+      unavailable,
+    );
 
     // Explanatory copy: names effects, states the profile is private/local, and
     // never asks for or infers a diagnosis or a reason (AC1).
     const intro = section('settings.accessibility.presentation');
     intro.appendChild(hint('settings.accessibility.intro_hint'));
     intro.appendChild(hint('settings.accessibility.local_hint'));
-    if (unavailableOsPreferences(doc.defaultView).length) {
+    if (unavailable.length) {
       intro.appendChild(hint('settings.accessibility.os_unavailable'));
     }
     body.appendChild(intro);
 
     // Text size — the observable effect proven end to end (AC3). Drives
     // --a11y-text-scale on every console :root via the client-local path.
+    // The slider's range is the shared contract (100%-200% since issue #1422);
+    // it is read from the constants, never restated here.
     const textSec = section('settings.accessibility.text_scale');
     const scaleRow = row('settings-vol-row');
 
@@ -742,33 +816,40 @@ export function mountSettings({
     slider.step = String(TEXT_SCALE_STEP);
     slider.value = String(a.textScaleValue);
     slider.setAttribute('data-control', 'a11y-text-scale');
+    slider.setAttribute('aria-label', t('settings.accessibility.text_scale'));
 
     const label = doc.createElement('span');
     label.className = 'settings-vol-label';
-    const paint = () => {
-      label.textContent = t('settings.accessibility.text_scale_value', {
-        value: String(Math.round(Number(slider.value) * 100)),
-      });
-    };
+    const percent = (value) => String(Math.round(Number(value) * 100));
+    const valueText = (value) => t('settings.accessibility.text_scale_value', {
+      value: percent(value),
+    });
+    const statusEl = accessibilityStatusLine(
+      'a11y-text-scale-status', status.textScale, valueText(status.textScale.value),
+    );
     // `input`, not `change`: the console text must resize under the finger, and
-    // we do NOT rebuild the panel (that would drop the drag) — the readout is
-    // updated locally, exactly as the master-volume slider does.
+    // we do NOT rebuild the panel (that would drop the drag) — the readout and
+    // the status line are updated in place, exactly as the master-volume slider
+    // updates its own. Dragging the slider IS an explicit choice, so the source
+    // half of the status line is settled without re-reading the profile.
     slider.addEventListener('input', function () {
       setAccessibility('textScale', Number(this.value));
-      paint();
+      label.textContent = valueText(this.value);
+      statusEl.textContent = t('settings.accessibility.status', {
+        value: valueText(this.value),
+        source: t('settings.accessibility.source_explicit'),
+      });
     });
-    paint();
+    label.textContent = valueText(slider.value);
 
     scaleRow.appendChild(slider);
     scaleRow.appendChild(label);
     textSec.appendChild(scaleRow);
     textSec.appendChild(hint('settings.accessibility.text_scale_hint'));
-    textSec.appendChild(
-      action(t('settings.accessibility.text_scale_reset'), null, () => {
-        setAccessibility('textScale', 'default');
-        buildContent();
-      }),
-    );
+    textSec.appendChild(statusEl);
+    textSec.appendChild(accessibilityResetButton(
+      'a11y-text-scale-reset', 'settings.accessibility.text_scale_reset', 'textScale',
+    ));
     body.appendChild(textSec);
 
     // Contrast — tri-state: follow the OS, force more, or force standard.
@@ -779,6 +860,16 @@ export function mountSettings({
       ['off', 'settings.accessibility.contrast_standard'],
     ]));
     contrastSec.appendChild(hint('settings.accessibility.contrast_hint'));
+    contrastSec.appendChild(accessibilityStatusLine(
+      'a11y-contrast-status',
+      status.contrast,
+      t(status.contrast.value
+        ? 'settings.accessibility.contrast_more'
+        : 'settings.accessibility.contrast_standard'),
+    ));
+    contrastSec.appendChild(accessibilityResetButton(
+      'a11y-contrast-reset', 'settings.accessibility.contrast_reset', 'contrast',
+    ));
     body.appendChild(contrastSec);
 
     // Motion — tri-state: follow the OS, reduce, or allow full motion even when
@@ -790,7 +881,42 @@ export function mountSettings({
       ['off', 'settings.accessibility.motion_allow'],
     ]));
     motionSec.appendChild(hint('settings.accessibility.reduced_motion_hint'));
+    motionSec.appendChild(accessibilityStatusLine(
+      'a11y-motion-status',
+      status.reducedMotion,
+      t(status.reducedMotion.value
+        ? 'settings.accessibility.motion_reduce'
+        : 'settings.accessibility.motion_allow'),
+    ));
+    motionSec.appendChild(accessibilityResetButton(
+      'a11y-motion-reset', 'settings.accessibility.reduced_motion_reset', 'reducedMotion',
+    ));
     body.appendChild(motionSec);
+
+    // Reset all — SCOPED to this tab's three settings (PRD #1418: "Reset all is
+    // scoped to the current presentation settings, not unrelated bindings,
+    // identity or save data"). The Controls tab keeps its own, separately named
+    // Reset All for key bindings; the hints below say plainly which is which,
+    // because two buttons called "Reset all" on one panel is exactly how an
+    // operator loses a binding profile trying to undo a text size.
+    const resetSec = section('settings.accessibility.reset_all_heading');
+    resetSec.appendChild(hint('settings.accessibility.reset_all_hint'));
+    resetSec.appendChild(hint('settings.accessibility.reset_all_scope_hint'));
+    const resetAll = action(t('settings.accessibility.reset_all'), null, () => {
+      if (typeof _onAccessibilityResetPresentation === 'function') {
+        _onAccessibilityResetPresentation();
+      } else {
+        // No host hook (an old cached shell, or a standalone mount): the same
+        // outcome through the per-effect path this panel already owns.
+        for (const effect of ['textScale', 'contrast', 'reducedMotion']) {
+          setAccessibility(effect, 'default');
+        }
+      }
+      buildContent();
+    });
+    resetAll.setAttribute('data-control', 'a11y-reset-presentation');
+    resetSec.appendChild(resetAll);
+    body.appendChild(resetSec);
   }
 
   function buildOperatorProfileSection(body, capabilities) {
@@ -1039,7 +1165,46 @@ export function mountSettings({
 
   // ── Panel ────────────────────────────────────────────────────────────────
 
+  /**
+   * The `data-control` id of whatever is focused inside the overlay right now,
+   * or null (issue #1422).
+   *
+   * Every rebuild throws the whole panel away (`renderSettingsOverlay` starts
+   * with `overlay.innerHTML = ''`), so a control that repaints itself on press
+   * — a tri-state option, a per-setting reset — destroys the very node the
+   * keyboard was standing on and drops focus to the document body. The
+   * operator is then outside the modal, mid-task, with no visible cursor. A
+   * `data-control` id is the panel's own stable name for a control across
+   * rebuilds, so it is what focus is restored BY.
+   */
+  function focusedControlId() {
+    try {
+      const el = activeElementOf(doc);
+      if (!el || typeof el.getAttribute !== 'function') return null;
+      if (typeof overlay.contains === 'function' && !overlay.contains(el)) return null;
+      return el.getAttribute('data-control');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** Put focus back on the control with `controlId`, if the rebuild produced
+   *  one. A control that legitimately went away (a tab changed, a gated section
+   *  disappeared) simply leaves focus where the trap put it. */
+  function restoreFocusedControl(controlId) {
+    if (!controlId) return;
+    try {
+      const el = typeof overlay.querySelector === 'function'
+        ? overlay.querySelector('[data-control="' + controlId + '"]')
+        : null;
+      if (el && typeof el.focus === 'function') el.focus();
+    } catch (_) {
+      /* a stub DOM without querySelector/focus — nothing to restore onto */
+    }
+  }
+
   function buildContent() {
+    const restoreTo = focusedControlId();
     const view = buildSettingsState({
       state: getState ? getState() : {},
       myToken,
@@ -1063,6 +1228,7 @@ export function mountSettings({
       tabs: view.tabs.map(tab => ({ ...tab, render: renderers[tab.id] })),
       activeTab, onSelect: selectTab, prefix: 'settings',
     });
+    restoreFocusedControl(restoreTo);
   }
 
   function visibleGamepadStatus(gamepad) {

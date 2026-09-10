@@ -39,7 +39,8 @@ multi-monitor Windows dev box.
       ```
 
       Under `Accessibility:` it prints the OS defaults it read (text scale,
-      contrast, reduced motion), the supported text-scaling range (`1x to 1.5x`),
+      contrast, reduced motion), the supported text-scaling range (`1x to 2x`
+      since issue #1422; `1x to 1.5x` on any build predating it),
       and — once you pass a `--profile` — a per-pane line saying whether each pane
       preserves its console **to the supported maximum** or is **TOO SMALL**.
 

@@ -151,20 +151,18 @@ export const DEVICE_MATRIX = Object.freeze([
     height: 320,
     kind: 'split-pane',
     orientation: 'landscape',
-    source: 'src/native_host/setup_accessibility.rs MIN_CONSOLE_LOGICAL_WIDTH_PX / MIN_CONSOLE_LOGICAL_HEIGHT_PX = 320 logical px, at text-scale 1.0x — a per-pane floor, both dimensions fixed at that scale; the WIDTH floor scales linearly with text scale up to SUPPORTED_TEXT_SCALE_MAX (1.5x today, so 480px at max) while the height floor stays fixed because consoles scroll vertically. MAX_PANES_PER_STATION = 2 (src/native_host/bridge_profile.rs) bounds how many such panes one Station may split into; default split direction is side-by-side (PaneSplit::SideBySide, src/native_host/bridge_layout.rs).',
+    source: 'src/native_host/setup_accessibility.rs MIN_CONSOLE_LOGICAL_WIDTH_PX / MIN_CONSOLE_LOGICAL_HEIGHT_PX = 320 logical px, at text-scale 1.0x — a per-pane floor, both dimensions fixed at that scale; the WIDTH floor scales linearly with text scale up to SUPPORTED_TEXT_SCALE_MAX (2.0x since issue #1422, so 640px at max) while the height floor stays fixed because consoles scroll vertically. MAX_PANES_PER_STATION = 2 (src/native_host/bridge_profile.rs) bounds how many such panes one Station may split into; default split direction is side-by-side (PaneSplit::SideBySide, src/native_host/bridge_layout.rs).',
   },
 ]);
 
 // ── TEXT_SCALES ──────────────────────────────────────────────────────────
 //
 // PRD #1418 Testing Decisions: "exercise 100%, 150% and 200% with realistic
-// long text and dense states." 1.5x (150%) is the client's CURRENT shipped
-// ceiling (gui/accessibility-profile.js TEXT_SCALE_MAX) and the native
-// mirror's CURRENT ceiling (src/native_host/setup_accessibility.rs
-// SUPPORTED_TEXT_SCALE_MAX); 2.0x (200%) is PRD #1418's target that later T3
-// issues raise the ceiling to — kept here as the regression case those
-// issues and this acceptance kit exercise against, not a claim that 200% is
-// selectable today.
+// long text and dense states." Since issue #1422 all three are SELECTABLE:
+// gui/accessibility-profile.js TEXT_SCALE_MAX and its native mirror
+// src/native_host/setup_accessibility.rs SUPPORTED_TEXT_SCALE_MAX are both
+// 2.0. 1.5x is kept as the mid-range regression case (and as the ceiling every
+// pre-#1422 recorded acceptance run used), not as a ceiling.
 export const TEXT_SCALES = Object.freeze([1, 1.5, 2]);
 
 // ── BROWSER_ZOOMS ────────────────────────────────────────────────────────

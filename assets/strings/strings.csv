@@ -1092,6 +1092,17 @@ settings.accessibility.contrast_more,Phone client Accessibility tab — contrast
 settings.accessibility.contrast_standard,Phone client Accessibility tab — contrast option that forces standard contrast,Standard
 settings.accessibility.motion_reduce,Phone client Accessibility tab — motion option that forces reduced motion on,Reduce
 settings.accessibility.motion_allow,Phone client Accessibility tab — motion option that allows full motion even when the device asks to reduce it,Allow
+settings.accessibility.status,"Phone client Accessibility tab — live readout under one presentation control. {value} is the value now in force; {source} is where it came from.","[{value} — {source}]"
+settings.accessibility.source_explicit,"Phone client Accessibility tab — status source when the operator chose this value here, overriding any system preference","your choice"
+settings.accessibility.source_system,"Phone client Accessibility tab — status source when the setting follows the device and the device supplied this value","from system settings"
+settings.accessibility.source_default,"Phone client Accessibility tab — status source when the setting follows the device and the device asked for nothing, so the built-in default applies","default"
+settings.accessibility.source_unread,"Phone client Accessibility tab — status source when a system preference could not be read, so the built-in default is standing in for it","system preference unavailable"
+settings.accessibility.contrast_reset,"Phone client Accessibility tab — button that returns contrast to following the system, leaving the other presentation settings alone","[Reset Contrast]"
+settings.accessibility.reduced_motion_reset,"Phone client Accessibility tab — button that returns motion to following the system, leaving the other presentation settings alone","[Reset Motion]"
+settings.accessibility.reset_all_heading,"Phone client Accessibility tab — heading over the scoped reset-everything control","Reset Presentation"
+settings.accessibility.reset_all,"Phone client Accessibility tab — button returning text size, contrast and motion to following the system","[Reset Presentation Settings]"
+settings.accessibility.reset_all_hint,"Phone client Accessibility tab — says what the scoped reset does: all three presentation settings return to following the device","[Returns text size, contrast and motion to following your device.]"
+settings.accessibility.reset_all_scope_hint,"Phone client Accessibility tab — states what the scoped reset deliberately does NOT touch, so it is not confused with the Controls tab Reset All","[Your controls, key bindings and saved games are not affected.]"
 station.rating.std.name,Display name of the Std station rating (identifier in TOML),STANDARD
 station.rating.simplified.name,Display name of the Simplified station rating,SIMPLIFIED
 station.rating.backfill.name,"Display name of the implicit Backfill rating (station unmanned, AI operates all its systems)",BACKFILL (AI)

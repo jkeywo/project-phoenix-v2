@@ -56,7 +56,18 @@ pub const SUPPORTED_TEXT_SCALE_MIN: f64 = 1.0;
 
 /// The largest supported text-scale multiplier. Mirrors `TEXT_SCALE_MAX` in
 /// `gui/accessibility-profile.js`.
-pub const SUPPORTED_TEXT_SCALE_MAX: f64 = 1.5;
+///
+/// Raised from `1.5` to `2.0` by issue #1422 (PRD #1418: "provide usable in-app
+/// text enlargement through 200%"). The two numbers are one contract, so this
+/// is not a free edit: the reflow demand below is
+/// [`MIN_CONSOLE_LOGICAL_WIDTH_PX`] × this multiplier, so a split pane must now
+/// hold **640** logical pixels of width rather than 480 before
+/// [`bridge_preserves_all_consoles`] will stand behind it. That is the whole
+/// cost of the change on this side — the height floor is fixed, for the reason
+/// [`MIN_CONSOLE_LOGICAL_HEIGHT_PX`] gives — and
+/// [`the_supported_extremes_match_the_client`] is the guard that keeps the pair
+/// from drifting apart again.
+pub const SUPPORTED_TEXT_SCALE_MAX: f64 = 2.0;
 
 // ── reflow headroom (acceptance criterion 1) ─────────────────────────────────
 
@@ -72,6 +83,11 @@ pub const SUPPORTED_TEXT_SCALE_MAX: f64 = 1.5;
 /// logical pixels is the classic narrow-phone width the consoles already reflow
 /// within; a pane narrower than this at a given text scale is the one case where
 /// "no overlap" stops holding.
+///
+/// The constant itself is the demand at the IDENTITY scale and does not move
+/// with [`SUPPORTED_TEXT_SCALE_MAX`]: it describes how the consoles are
+/// authored, and text scaling multiplies it rather than redefining it. At the
+/// 200% ceiling issue #1422 raised, the demand is 640 logical pixels per pane.
 pub const MIN_CONSOLE_LOGICAL_WIDTH_PX: u32 = 320;
 
 /// The smallest **logical** height a console stays operable in. Below this even a

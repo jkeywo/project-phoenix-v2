@@ -179,6 +179,20 @@
        consoles' and whose `--dim` sat below the contrast floor. Retired into
        the shared ramp; tests/client/console-tokens.test.js keeps it retired. */
     html, body { margin: 0; padding: 0; background: var(--surface-abyss); color: var(--ink); font-family: monospace; }
+
+    /* The root every `rem` on the SHELL is relative to, multiplied by the
+       private Accessibility profile's text-scale effect (issue #1422) — the
+       same arithmetic gui/console.css already does inside each console iframe,
+       which is the point: `window.applyAccessibilityProfile()` stamps
+       --a11y-text-scale on this document's :root AND on every mounted console
+       root, so ONE choice now enlarges the lobby, the Station Bar, the
+       settings overlay, the connection banner and the consoles together.
+
+       Before this rule the shell had no root size at all and rode the
+       browser's 13px monospace default, so every `--text-*` rung around the
+       consoles ignored the setting. --root-size-shell is that 13px written
+       down (gui/tokens.css), so the identity scale renders exactly as before. */
+    html { font-size: calc(var(--root-size-shell) * var(--a11y-text-scale, 1)); }
     body { box-sizing: border-box; }
     label { display: block; margin-bottom: 0.5rem; font-size: var(--text-md); }
     input[type="text"] { display: block; width: 100%; box-sizing: border-box;
@@ -479,7 +493,26 @@
         flex-direction: column; overflow-x: hidden; overflow-y: auto;
         min-height: 0; align-items: stretch;
       }
-      #station-hero-tabs button { width: 100%; flex: 0 0 auto; }
+      /* Wrapped rather than clipped, for the same reason #station-hero-details
+         below is: the rail is short of WIDTH, never of height. The base rule's
+         `white-space: nowrap; overflow: hidden` is the STRIP's, where a tab is
+         shrink-wrapped to its label and a second line would push the row past
+         the 44px touch floor. In the rail the tab is already full width and the
+         tabs column scrolls, so a name that outgrows the rail's ~84px of label
+         box has somewhere to go — and must be given it, because the shell root
+         now scales with the operator's text setting (issue #1422) and the
+         battleship's "Navigation" needs ~107px at 200%. Clipping it there would
+         silently truncate a Station name at exactly the setting that exists to
+         make it readable. `overflow-wrap: anywhere` so a single long authored
+         name breaks too rather than overflowing its box; below the phone
+         threshold HERO_BAR_CODE_QUERY has already switched the tabs to the
+         hull's three-letter short codes, so this only ever wraps real names.
+         tests/smoke/text-scale-power-workflow.spec.js measures every tab's
+         label against its box at every text scale. */
+      #station-hero-tabs button {
+        width: 100%; flex: 0 0 auto;
+        white-space: normal; overflow-wrap: anywhere;
+      }
       /* Ordinary horizontal text at the foot of the rail. It used to be rotated
          because it stood BESIDE a column of tabs with only a sliver of width;
          under the column above it has the rail's full 132px and reads
@@ -4645,6 +4678,17 @@
           onAccessibility: (effect, value) => {
             if (typeof window.setAccessibilityPresentation === 'function') {
               window.setAccessibilityPresentation(effect, value);
+            }
+          },
+          // Scoped Reset all (issue #1422): the three presentation effects
+          // return to following the system in ONE persist, so the panel never
+          // writes three intermediate profiles. Bindings, gamepad tuning,
+          // feedback preferences, GM confirmation policy and every scenario
+          // save are untouched — persistOperatorProfile() re-snapshots them
+          // from their own owners.
+          onAccessibilityResetPresentation: () => {
+            if (typeof window.resetAccessibilityPresentation === 'function') {
+              window.resetAccessibilityPresentation();
             }
           },
           getSemanticActions: () => semanticActionRegistry

@@ -57,8 +57,9 @@ completeness (not the PRD's named starting set):
 
 - `MIN_CONSOLE_LOGICAL_WIDTH_PX = MIN_CONSOLE_LOGICAL_HEIGHT_PX = 320` logical
   px — the smallest pane a console stays operable in, **at text-scale 1.0×**.
-  The width floor scales linearly with the text-scale multiplier (so 480px at
-  today's `SUPPORTED_TEXT_SCALE_MAX = 1.5×`); the height floor is fixed,
+  The width floor scales linearly with the text-scale multiplier (so 640px at
+  `SUPPORTED_TEXT_SCALE_MAX = 2.0×`, raised from 1.5× by issue #1422); the
+  height floor is fixed,
   because consoles absorb extra vertical content by scrolling
   (`overflow-y: auto`), not by growing the floor.
 - `MAX_PANES_PER_STATION = 2` (`src/native_host/bridge_profile.rs`) — a
@@ -280,6 +281,26 @@ the three `cruiser-*-responsive.spec.js` files, `lobby-responsive.spec.js`,
 — none of them import `tests/fixtures/device-matrix.mjs` yet (they predate
 it); a later T3 issue that adds new responsive/accessibility coverage should
 import the shared lists above instead of hand-copying viewport numbers again.
+
+Issue #1422 is the first that does. It adds:
+
+- `tests/smoke/text-scale-power-workflow.spec.js` — the Power allocation
+  workflow carried through the shell, its console iframe and the allocation
+  controls, driven from `DEVICE_MATRIX` × `TEXT_SCALES` (100/150/200%), with
+  browser zoom as a **separate** pass over `BROWSER_ZOOMS` (emulated the way a
+  browser does it: CSS viewport ÷ zoom, device pixel ratio × zoom) and contrast
+  / forced colours through `page.emulateMedia`. It asserts reachability of every
+  control and status, that nothing shrinks as the scale rises, and that the
+  authoritative order a control sends is unchanged by the text size.
+- `tests/client/accessibility-200-percent.test.js` — the profile behaviour
+  behind it: defaults, explicit override, migration, reconnect, live preview,
+  per-setting reset and the presentation-scoped Reset all.
+
+Note the split-pane row is a per-pane **floor quoted at 1.0×**, not a device:
+`MIN_CONSOLE_LOGICAL_WIDTH_PX` scales with the text multiplier, so the smoke
+spec exercises it at 320 × the scale under test (640 px at the 200% ceiling)
+rather than asserting a 320-wide pane at 200%, which the Rust contract in
+`src/native_host/setup_accessibility.rs` explicitly reports as TOO SMALL.
 `docs/acceptance/1128-accessibility.md` remains the native multi-monitor HITL
 kit for the split-pane floor and its reflow/focus/contrast behavior; this
 document does not duplicate it.

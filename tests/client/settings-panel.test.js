@@ -30,6 +30,7 @@ import {
   operatorProfileStatusView,
 } from '../../gui/settings-panel.js';
 import { setBuildFlags, isDemoBuild } from '../../gui/build-flags.js';
+import { TEXT_SCALE_MAX } from '../../gui/accessibility-profile.js';
 import {
   TABS,
   CLIENT_ACCESSIBILITY_TABS,
@@ -54,6 +55,8 @@ const repoFile = (rel) =>
 const CLIENT_HTML = repoFile('client.html');
 /** The consoles' shared stylesheet, which reserves the cog's corner for it. */
 const CONSOLE_CSS = repoFile('gui/console.css');
+/** The shared token vocabulary — the shell's own root size lives here. */
+const TOKENS_CSS = repoFile('gui/tokens.css');
 /** Shared page chrome (issue #1227) — client.html mounts it rather than
  *  inlining the fullscreen icon-sync logic itself. */
 const PAGE_CHROME_JS = repoFile('gui/page-chrome.js');
@@ -726,21 +729,42 @@ describe('client.html', () => {
   // `top`/`left`/`width`/`height` it declares and compares that against the
   // gutters the occluded surfaces declare. That is arithmetic over source
   // text, not layout. It cannot see a transform, an absolutely-positioned
-  // child that escapes its container's padding box, a rule in a file it does
-  // not read, or a root font-size other than the browser default (which the
-  // first assertion below at least checks nobody has changed). What it does
-  // catch is the regression that actually happened here — a gutter tightened
-  // back under the cog — and it catches it in every console at once.
+  // child that escapes its container's padding box, or a rule in a file it
+  // does not read. What it does catch is the regression that actually happened
+  // here — a gutter tightened back under the cog — and it catches it in every
+  // console at once.
+  //
+  // The root font-size is no longer a fixed browser default. Since issue #1422
+  // the shell scales with the private profile's text setting
+  // (`html { font-size: calc(var(--root-size-shell) * var(--a11y-text-scale)) }`),
+  // so a `rem` in the cog's rule is worth anything from the shell baseline up
+  // to that baseline times the supported ceiling. Clearance has to hold at the
+  // size the operator can actually select, so the conversion below uses the
+  // CEILING — the worst case — rather than a default nobody is pinned to. The
+  // cog's four geometry properties happen to all be px today, which is why the
+  // number does not currently move the result; the two assertions in `cogRect`
+  // pin the source of both halves so it cannot drift silently.
 
-  const ROOT_FONT_PX = 16;
+  /** gui/tokens.css `--root-size-shell` — the shell's baseline root size. */
+  const SHELL_ROOT_PX = 13;
+  /** The largest a `rem` in the shell can be: baseline x the exposed ceiling. */
+  const ROOT_FONT_PX = SHELL_ROOT_PX * TEXT_SCALE_MAX;
 
   /** The cog's rectangle in CSS px, read from client.html's own declarations. */
   function cogRect() {
-    // rem values below only mean 16px while nothing restyles the root.
+    // A rem below is only worth ROOT_FONT_PX while these two hold: the token
+    // still declares the baseline this assumes, and the shell still multiplies
+    // exactly that token by the text scale.
     expect(
-      CLIENT_HTML.match(/(^|[\s>])html\s*\{[^}]*font-size/),
-      'client.html restyles the root font-size, so the rem maths below is wrong',
-    ).toBeNull();
+      TOKENS_CSS.match(new RegExp(`--root-size-shell:\\s*${SHELL_ROOT_PX}px`)),
+      'gui/tokens.css moved --root-size-shell — the rem maths below is wrong',
+    ).not.toBeNull();
+    expect(
+      CLIENT_HTML.match(
+        /html\s*\{\s*font-size:\s*calc\(var\(--root-size-shell\)\s*\*\s*var\(--a11y-text-scale/,
+      ),
+      'client.html no longer scales the shell root from --root-size-shell',
+    ).not.toBeNull();
 
     const rule = settingsBtnRule();
     const px = (prop) => {

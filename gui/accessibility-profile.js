@@ -55,11 +55,25 @@ export const TEXT_SCALE_VAR = '--a11y-text-scale';
 
 // ── Presentation effect vocabulary ──────────────────────────────────────────
 
-/** Text-scale slider bounds (whole-percent stops from 100% to 150%). The
- *  resolver clamps to a wider absolute range so a hand-edited record cannot
- *  push the root font-size somewhere unusable. */
+/** Text-scale slider bounds — whole-percent stops from 100% to **200%**
+ *  (issue #1422, PRD #1418: "provide usable in-app text enlargement through
+ *  200%"). The exposed ceiling was 150% until that PRD; raising it is a change
+ *  to a CONTRACT, not just a number, because the native bridge reasons over the
+ *  same range: `SUPPORTED_TEXT_SCALE_MIN`/`MAX` in
+ *  `src/native_host/setup_accessibility.rs` mirror these two, and the drift
+ *  guard `the_supported_extremes_match_the_client` pins the pair. A pane's
+ *  reflow demand is `MIN_CONSOLE_LOGICAL_WIDTH_PX x scale`, so 200% asks a
+ *  split pane for 640 logical px of width rather than 480.
+ *
+ *  `TEXT_SCALE_FLOOR`/`CEIL` remain the absolute clamp a hand-edited or
+ *  host-injected record is coerced into. The ceiling is now the SAME number as
+ *  the slider maximum — deliberately: 200% is the largest scale this client
+ *  claims its consoles reflow at, so a record asking for 300% is clamped to the
+ *  largest supported value rather than honoured into a layout nobody has
+ *  verified. The floor still guards the other direction, where there is no
+ *  exposed control at all. */
 export const TEXT_SCALE_MIN = 1.0;
-export const TEXT_SCALE_MAX = 1.5;
+export const TEXT_SCALE_MAX = 2.0;
 export const TEXT_SCALE_STEP = 0.05;
 export const TEXT_SCALE_DEFAULT = 1.0;
 const TEXT_SCALE_FLOOR = 0.5;
@@ -174,6 +188,34 @@ export function profileWithPresentation(profile, effect, value) {
   const current = normalizeAccessibilityProfile(profile);
   if (current.presentation[effect] === next) return profile;
   current.presentation[effect] = next;
+  return current;
+}
+
+/**
+ * Profile with EVERY presentation effect returned to its documented default —
+ * follow-the-system for all three — and nothing else touched (issue #1422).
+ *
+ * This is the whole of "Reset all" on a presentation surface, and its SCOPE is
+ * the point (PRD #1418: "Reset all is scoped to the current presentation
+ * settings, not unrelated bindings, identity or save data"). It rebuilds the
+ * `presentation` block only; the `assistance` overrides ride through untouched,
+ * and everything outside this profile — semantic bindings, gamepad tuning,
+ * feedback preferences, GM confirmation policy, scenario saves, the operator's
+ * identity — is not reachable from here at all, by construction rather than by
+ * a careful list.
+ *
+ * Returns the SAME input reference when every effect is already at its default,
+ * so a caller can skip a persist / re-apply, exactly like
+ * `profileWithPresentation`.
+ *
+ * @param {object} profile
+ */
+export function profileWithPresentationDefaults(profile) {
+  const current = normalizeAccessibilityProfile(profile);
+  const alreadyDefault = PRESENTATION_EFFECTS
+    .every((effect) => current.presentation[effect] === FOLLOW_OS);
+  if (alreadyDefault) return profile;
+  for (const effect of PRESENTATION_EFFECTS) current.presentation[effect] = FOLLOW_OS;
   return current;
 }
 
@@ -388,6 +430,63 @@ export function resolveEffects(profile, osDefaults) {
   };
 }
 
+/**
+ * Where each presentation effect's live value actually CAME FROM, alongside the
+ * value itself — the honest answer to "is this my choice, my system's, or the
+ * built-in default?" (issue #1422; PRD #1418 stories 9 and 16).
+ *
+ * The stored profile alone cannot answer that. `default` in the record means
+ * *follow the system*, and the system may be saying something (Windows asked
+ * for 150% text, the browser reports `prefers-reduced-motion: reduce`) or
+ * saying nothing at all. Those are three different states behind one stored
+ * value, and a settings surface that prints only the resolved number tells the
+ * operator nothing about whether changing their OS would move it:
+ *
+ *   - `explicit`  — the operator chose this value here. It overrides the system
+ *                   in BOTH directions (see `resolveTriState`).
+ *   - `system`    — following the system, and the system supplied this value.
+ *   - `default`   — following the system, and the system asked for nothing, so
+ *                   the documented built-in default applies.
+ *
+ * `available` is `false` when the host tried to read this preference natively
+ * and failed (`unavailableOsPreferences`). That is deliberately distinct from a
+ * successful read of a neutral value: "we could not ask" is not "the answer was
+ * no", and only the first of those is worth telling the operator about.
+ *
+ * Pure and never throws — it composes the same resolver the application path
+ * uses, so a status line cannot disagree with what is actually on screen.
+ *
+ * @param {object} profile
+ * @param {{ reducedMotion?: boolean, contrast?: boolean, textScale?: number }} [osDefaults]
+ * @param {string[]} [unavailable] effect ids whose native read failed
+ * @returns {{ [effect: string]: { value: number|boolean, source: 'explicit'|'system'|'default', available: boolean } }}
+ */
+export function presentationStatus(profile, osDefaults, unavailable) {
+  const p = normalizeAccessibilityProfile(profile);
+  const os = osDefaults || {};
+  const effects = resolveEffects(p, os);
+  const missing = new Set(Array.isArray(unavailable) ? unavailable : []);
+  const sourceOf = (effect) => {
+    if (p.presentation[effect] !== FOLLOW_OS) return 'explicit';
+    // Following the system: `system` only when the system actually SAID
+    // something. A silent OS is the documented default, not a system value.
+    const signal = effect === 'textScale' ? os.textScale != null : os[effect] === true;
+    return signal ? 'system' : 'default';
+  };
+  const out = {};
+  for (const effect of PRESENTATION_EFFECTS) {
+    const source = sourceOf(effect);
+    out[effect] = {
+      value: effects[effect],
+      source,
+      // An unreadable OS preference cannot invalidate an explicit choice — that
+      // value never depended on the read.
+      available: source === 'explicit' ? true : !missing.has(effect),
+    };
+  }
+  return out;
+}
+
 // ── Application onto document roots ──────────────────────────────────────────
 
 /**
@@ -544,6 +643,33 @@ if (typeof window !== 'undefined') {
     } else {
       // The compatibility path is used by the standalone module tests and by
       // an old cached shell that has not loaded operator-profile.js yet.
+      let storage = null;
+      try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
+      saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    }
+    return window.applyAccessibilityProfile();
+  };
+
+  /**
+   * Return EVERY presentation effect to its documented default, persist, and
+   * re-apply (issue #1422). The scoped "Reset all" the settings surface offers.
+   *
+   * It goes through the same `persistOperatorProfile()` hook a single-effect
+   * change does, which is what keeps the scope honest: that hook snapshots the
+   * live bindings, gamepad tuning, feedback preferences and GM confirmation
+   * policy from their own owners and writes them back unchanged. This function
+   * never reads or names them, so it cannot clear one by accident, and it has
+   * no path at all to scenario saves or to the operator's identity.
+   */
+  window.resetAccessibilityPresentation = function resetPresentation() {
+    const sim = window.simState;
+    if (!sim) return undefined;
+    sim.accessibilityProfile = normalizeAccessibilityProfile(
+      profileWithPresentationDefaults(sim.accessibilityProfile),
+    );
+    if (typeof window.persistOperatorProfile === 'function') {
+      window.persistOperatorProfile();
+    } else {
       let storage = null;
       try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
       saveAccessibilityProfile(storage, sim.accessibilityProfile);

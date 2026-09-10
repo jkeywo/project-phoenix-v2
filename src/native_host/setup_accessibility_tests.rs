@@ -85,7 +85,13 @@ fn the_supported_extremes_match_the_client() {
     // If the client range changes, this must change with it — the reflow check
     // reasons over the range the page can actually produce.
     assert_eq!(SUPPORTED_TEXT_SCALE_MIN, 1.0);
-    assert_eq!(SUPPORTED_TEXT_SCALE_MAX, 1.5);
+    // 2.0 since issue #1422 (PRD #1418's "usable in-app text enlargement
+    // through 200%"). If gui/accessibility-profile.js moves TEXT_SCALE_MAX
+    // again, this assertion fails first and the reflow-headroom checks below —
+    // which reason over MIN_CONSOLE_LOGICAL_WIDTH_PX x this multiplier — are
+    // re-derived with it rather than silently standing behind a range the page
+    // can no longer produce.
+    assert_eq!(SUPPORTED_TEXT_SCALE_MAX, 2.0);
 }
 
 // ── reflow headroom (acceptance criterion 1) ─────────────────────────────────
@@ -186,10 +192,63 @@ fn rects_overlap(a: &PaneRect, b: &PaneRect) -> bool {
 }
 
 #[test]
+fn the_two_hundred_percent_ceiling_demands_640_logical_px_of_pane_width() {
+    // Issue #1422 raised the exposed ceiling to 200%, and the ONLY thing that
+    // changes on this side is the width demand: a pane is preserved at the new
+    // maximum exactly when it holds MIN_CONSOLE_LOGICAL_WIDTH_PX x 2.0 = 640
+    // logical pixels. Pinned as a boundary rather than restated as arithmetic,
+    // so a later change to either the constant or the ceiling has to come and
+    // look at this line.
+    let at = |w: f64| PaneContentBox {
+        logical_width: w,
+        logical_height: 1080.0,
+    };
+    assert!(at(640.0).preserves_console_across_supported_scaling());
+    assert!(!at(639.0).preserves_console_across_supported_scaling());
+    // The old 150% ceiling would have accepted 480; it must not any more, or
+    // the raise is cosmetic.
+    assert!(!at(480.0).preserves_console_across_supported_scaling());
+    assert!(at(480.0).preserves_console_at_scale(1.5));
+    // The height floor is deliberately NOT multiplied: consoles scroll.
+    assert!(PaneContentBox {
+        logical_width: 640.0,
+        logical_height: 320.0,
+    }
+    .preserves_console_across_supported_scaling());
+}
+
+#[test]
+fn the_tightest_supported_split_still_holds_both_consoles_at_two_hundred_percent() {
+    // The narrowest logical pane any `supported_geometries()` profile produces
+    // is a side-by-side split of a 1920x1080 monitor at Windows 150% scaling:
+    // 1280 logical px halved is 640 — exactly the 200% demand. This is the case
+    // that decides whether the new ceiling is supportable on the authored
+    // bridge at all, so it is named rather than left inside the loop above.
+    let g = geometry(1920, 1080, 0, 0, 1.5);
+    let order = bridge_focus_order(&bridge(vec![station(
+        "tight",
+        g,
+        PaneSplit::SideBySide,
+        &["Ada", "Grace"],
+    )]));
+    assert_eq!(order.len(), 2);
+    for pane in &order {
+        let b = pane.content_box();
+        assert_eq!(b.logical_width, 640.0, "pane {} box {b:?}", pane.label);
+        assert!(
+            pane.preserves_console(),
+            "pane {} must still hold its console at 200% ({b:?})",
+            pane.label
+        );
+    }
+}
+
+#[test]
 fn the_check_rejects_a_pane_too_small_at_the_maximum() {
     // The predicate must be a real gate, not vacuously true: a two-pane
     // side-by-side split on a small 640×480 monitor gives each pane a 320-wide
-    // box, which the maximum text scale (×1.5 → 480 demand) no longer holds.
+    // box, which the maximum text scale (×2.0 → 640 demand, issue #1422) no
+    // longer holds.
     let order = bridge_focus_order(&bridge(vec![station(
         "small",
         geometry(640, 480, 0, 0, 1.0),
@@ -203,7 +262,7 @@ fn the_check_rejects_a_pane_too_small_at_the_maximum() {
     );
     assert!(
         !b.preserves_console_at_scale(SUPPORTED_TEXT_SCALE_MAX),
-        "must fail at 1.5x: {b:?}"
+        "must fail at 2.0x: {b:?}"
     );
     assert!(!order[0].preserves_console());
     assert!(!bridge_preserves_all_consoles(&bridge(vec![station(
@@ -364,7 +423,10 @@ fn the_report_states_the_os_defaults_and_supported_range() {
     assert!(report.contains("Accessibility:"));
     assert!(report.contains("contrast on"));
     assert!(report.contains("reduced motion on"));
-    assert!(report.contains("1x to 1.5x"));
+    // The exposed range the operator is told about, since issue #1422 raised
+    // the ceiling to 200%. Spelled out rather than formatted from the constants
+    // so the printed report is pinned, not merely self-consistent.
+    assert!(report.contains("1x to 2x"), "{report}");
     assert!(report.contains("No profile resolved"));
 }
 

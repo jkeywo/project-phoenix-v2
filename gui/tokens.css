@@ -328,6 +328,21 @@
   --root-size-portrait:   clamp(11px, 3vw, 15px);
   --root-size-landscape:  clamp(13px, 1.65vw, 16px);
 
+  /* The SHELL's root (client.html: the lobby, the Station Bar, the settings
+     overlay, the disconnect banner). Named here in issue #1422 because the
+     shell had no root size of its own at all — it inherited the browser's
+     13px monospace default, so --a11y-text-scale reached every console iframe
+     and stopped at the page around them. That made settings, errors and
+     overlays the least readable parts of an enlarged interface, which is
+     precisely what PRD #1418 story 4 forbids.
+
+     13px is that inherited default written down, so the shell renders at
+     exactly the size it always has when no scaling is applied; client.html
+     multiplies it by --a11y-text-scale. It is a token rather than a literal so
+     a designer can retune the shell's baseline without touching the scaling
+     arithmetic. */
+  --root-size-shell:      13px;
+
   /* ── Accessibility (issue #1102) ────────────────────────────────
      The private per-player Accessibility profile (gui/accessibility-profile.js)
      drives these at runtime. `--a11y-text-scale` multiplies the console root
@@ -596,5 +611,58 @@
     transition-duration: 0.001ms !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ── Forced colours (issue #1422) ────────────────────────────
+   Windows High Contrast — and any other forced-colours mode — is the BROWSER
+   repainting the page in the user's own palette. It is not a Phoenix setting
+   and Phoenix does not get a vote: PRD #1418 is explicit that "a Phoenix
+   contrast selection is not permission to defeat browser-enforced colours".
+   Until this block, `gui/`, `client.html` and `server.html` referenced
+   `forced-colors` nowhere at all, and two things broke silently in that mode:
+
+     1. FOCUS. The UA drops `box-shadow` outright in forced colours, and the
+        chamfered half of the control family (`.btn` / `.mini-btn`, which is
+        every power stepper) draws its focus ring as an INSET box-shadow after
+        setting `outline: none` — because a chamfer clip-path eats an outset
+        outline. So those controls kept the `outline: none` and lost the ring
+        entirely: a keyboard operator in high contrast could not see where they
+        were. The shadow-DOM half of that repair lives in
+        `gui/components/ph-console-styles.js`, which is the sheet adopted
+        inside each component; this block does the token half.
+
+     2. EDGES. Region separation that leans on the surface ramp disappears when
+        every background collapses to `Canvas`. The palette below re-points the
+        edge tokens at `CanvasText`, so a border authored as
+        `1px solid var(--edge-faint)` is drawn in the user's real ink instead of
+        a near-invisible graphite that the UA would then override anyway.
+
+   The selector deliberately lists `:root[data-contrast="more"]` alongside
+   `:root`: the high-contrast palette above is more specific, so matching it
+   here is what stops a Phoenix contrast choice from out-specifying the forced
+   palette. Custom properties are not themselves subject to the forced-colours
+   override, so naming system colours in them is what carries the user's palette
+   through to every `var()` consumer — including across shadow boundaries, which
+   a class rule in this file cannot reach.
+
+   `--a11y-text-scale` is untouched here: text size is an orthogonal preference
+   and a forced palette says nothing about it. */
+@media (forced-colors: active) {
+  :root,
+  :root[data-contrast="more"] {
+    /* The focus ring follows the system's own selection colour, and thickens:
+       in a forced palette the ring is the ONLY thing distinguishing the focused
+       control from its neighbours, since every fill is the same `Canvas`. */
+    --focus-ring:          Highlight;
+    --focus-ring-contrast: Highlight;
+    --focus-ring-width:    3px;
+
+    /* Edges — every divider and control boundary in the user's ink. */
+    --edge-faint:          CanvasText;
+    --edge:                CanvasText;
+    --edge-control:        CanvasText;
+    --edge-strong:         CanvasText;
+    --edge-bright:         CanvasText;
   }
 }

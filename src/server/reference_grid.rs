@@ -51,6 +51,7 @@ use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 
+use crate::core::messages::ViewMode;
 use crate::reference_grid::ReferenceGridConfig;
 use crate::server_app::LocalShip;
 
@@ -231,6 +232,20 @@ pub fn decide_patch_action(
     }
 }
 
+/// The height the patch rides at for the view mode the local ship is in.
+///
+/// Only the first-person `Camera` mode gets its own height (`first_person_plane_y`,
+/// falling back to `plane_y` when the hull authors none): its eye is at hull
+/// height, where the shared floor cuts through the picture. Cinematic sits
+/// above the hull and the overlay modes draw 2D UI over the same scene, so
+/// all of those keep the authored `plane_y`.
+pub fn plane_y_for_view(config: &ReferenceGridConfig, view_mode: Option<&ViewMode>) -> f32 {
+    match view_mode {
+        Some(ViewMode::Camera(_)) => config.first_person_plane_y.unwrap_or(config.plane_y),
+        _ => config.plane_y,
+    }
+}
+
 // ── Systems ───────────────────────────────────────────────────────────────
 
 /// Resolve the local hull's `[reference_grid]` once, at startup, out of the
@@ -287,21 +302,29 @@ pub(crate) fn resolve_reference_grid_config(
 fn sync_reference_grid_patch(
     mut commands: Commands,
     tuning: Res<ReferenceGridTuning>,
-    ship: Query<&Transform, (With<LocalShip>, Without<ReferenceGridPatch>)>,
+    ship: Query<
+        (&Transform, Option<&crate::ship::state::ShipViewMode>),
+        (With<LocalShip>, Without<ReferenceGridPatch>),
+    >,
     mut patch: Query<(Entity, &mut Transform), With<ReferenceGridPatch>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ReferenceGridMaterial>>,
 ) {
-    let ship_xz = ship
-        .iter()
-        .next()
-        .map(|transform| transform.translation.xz());
+    let local = ship.iter().next();
+    let ship_xz = local.map(|(transform, _)| transform.translation.xz());
+    let view_mode = local.and_then(|(_, mode)| mode.map(|mode| &mode.view_mode));
     let existing = patch.iter_mut().next();
 
-    // The plane rides at the authored `plane_y` — below the hull, so the grid
-    // reads as a floor rather than a lattice co-planar with the ship. Absent a
-    // table (only reachable via Despawn/Idle) this is never consulted.
-    let plane_y = tuning.0.map(|config| config.plane_y).unwrap_or(0.0);
+    // The plane rides at the authored height for the current view mode — below
+    // the hull, so the grid reads as a floor rather than a lattice co-planar
+    // with the ship, and lower still in first person (`plane_y_for_view`).
+    // Re-read every frame, so a mode switch moves the patch with no state of
+    // its own. Absent a table (only reachable via Despawn/Idle) this is never
+    // consulted.
+    let plane_y = tuning
+        .0
+        .map(|config| plane_y_for_view(&config, view_mode))
+        .unwrap_or(0.0);
 
     match decide_patch_action(ship_xz, tuning.0.is_some(), existing.is_some()) {
         PatchAction::Idle => {}
@@ -453,6 +476,34 @@ mod tests {
         let material = material_from_config(&config);
         assert_eq!(material.minor_half_width_px, 1.5);
         assert_eq!(material.major_half_width_px, 2.5);
+    }
+
+    // ── Per-view height ───────────────────────────────────────────────────
+
+    #[test]
+    fn first_person_takes_its_own_height_when_authored() {
+        let config = ReferenceGridConfig {
+            plane_y: -0.5,
+            first_person_plane_y: Some(-6.0),
+            ..Default::default()
+        };
+        let first_person = ViewMode::Camera(crate::core::messages::CameraView::default());
+        assert_eq!(plane_y_for_view(&config, Some(&first_person)), -6.0);
+        // Every other mode — and no mode at all — keeps the shared floor.
+        assert_eq!(plane_y_for_view(&config, Some(&ViewMode::Cinematic)), -0.5);
+        assert_eq!(plane_y_for_view(&config, Some(&ViewMode::Radar)), -0.5);
+        assert_eq!(plane_y_for_view(&config, None), -0.5);
+    }
+
+    #[test]
+    fn first_person_falls_back_to_plane_y_when_unauthored() {
+        let config = ReferenceGridConfig {
+            plane_y: -0.5,
+            first_person_plane_y: None,
+            ..Default::default()
+        };
+        let first_person = ViewMode::Camera(crate::core::messages::CameraView::default());
+        assert_eq!(plane_y_for_view(&config, Some(&first_person)), -0.5);
     }
 
     #[test]

@@ -174,6 +174,13 @@ pub struct ReferenceGridConfig {
     /// at this `y`; negative sits it below the ship like a floor.
     #[serde(default = "default_plane_y")]
     pub plane_y: f32,
+    /// World-space height of the grid plane while the viewscreen is in the
+    /// first-person `Camera` mode. There the eye sits at hull height, so a
+    /// plane half a unit under the hull slices straight through the view;
+    /// dropping it further reads as a floor again. `None` (the default)
+    /// keeps `plane_y` in every mode.
+    #[serde(default)]
+    pub first_person_plane_y: Option<f32>,
     /// Minor line width in pixels.
     #[serde(default = "default_minor_line_width_px")]
     pub minor_line_width_px: f32,
@@ -196,6 +203,7 @@ impl Default for ReferenceGridConfig {
             fade_band: default_fade_band(),
             fade_exponent: default_fade_exponent(),
             plane_y: default_plane_y(),
+            first_person_plane_y: None,
             minor_line_width_px: default_minor_line_width_px(),
             major_line_width_px: default_major_line_width_px(),
         }

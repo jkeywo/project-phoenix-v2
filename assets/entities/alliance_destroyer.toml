@@ -1613,6 +1613,11 @@ fade_exponent = 2.5
 # so it reads as a floor slightly beneath the ship rather than a lattice
 # co-planar with it; the follow system parks the patch at this y.
 plane_y = -0.5
+# [ai] Height of the plane in the first-person camera only. That eye sits at
+# hull height, where a floor half a unit down cuts straight across the view;
+# six units down it reads as a deck again. Cinematic and the overlays keep
+# plane_y.
+first_person_plane_y = -6.0
 # Line widths in PIXELS, not world units. A world-space width makes near lines
 # slabs and far lines sub-pixel shimmer, and this grid is read at every distance
 # at once. Major lines are barely wider — brightness is what separates them.
@@ -1621,11 +1626,16 @@ major_line_width_px = 1.6
 
 [cinematic_camera]
 position = [0, 6, 12]
-default_pitch_deg = 12
+default_pitch_deg = 16
 entity_look_range = 50
 look_ahead_distance = 80
 hysteresis_secs = 3
 yaw_follow_deg_per_sec = 45
+# [ai] Aim point lowered (world units) so the hull rises toward the lower
+# third of the frame instead of crowding the bottom edge. The pitch above was
+# steepened in step: both lower where the camera looks, the pitch across the
+# whole no-target view and this offset also when tracking a target.
+look_target_y_offset = -3
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 # Every sound this ship makes. Playback is server-side only (the host page's

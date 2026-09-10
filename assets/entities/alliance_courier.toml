@@ -294,11 +294,16 @@ icon = "ship"
 # camera on the shared viewscreen.
 [cinematic_camera]
 position = [0, 6, 12]
-default_pitch_deg = 12
+default_pitch_deg = 16
 entity_look_range = 50
 look_ahead_distance = 80
 hysteresis_secs = 3
 yaw_follow_deg_per_sec = 45
+# [ai] Aim point lowered (world units) so the hull rises toward the lower
+# third of the frame instead of crowding the bottom edge. The pitch above was
+# steepened in step: both lower where the camera looks, the pitch across the
+# whole no-target view and this offset also when tracking a target.
+look_target_y_offset = -3
 
 # ── Shields ──────────────────────────────────────────────────────────────────
 # Two arcs, fore and aft. Captain controls them through shields-system.

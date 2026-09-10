@@ -524,6 +524,13 @@ pub struct CinematicCameraConfig {
     /// camera intentionally lags behind and lets the ship's turn be visible.
     #[serde(default = "default_cinematic_yaw_follow_rate")]
     pub yaw_follow_deg_per_sec: f32,
+    /// World units added to the aim point's Y in every cinematic branch —
+    /// the default look-ahead point and the ship/target midpoint alike.
+    /// The hull always sits BELOW the aim point (the camera is above and
+    /// behind it), so with `0` it crowds the bottom edge of the frame; a
+    /// negative value aims lower and lifts the hull toward the lower third.
+    #[serde(default = "default_cinematic_look_target_y_offset")]
+    pub look_target_y_offset: f32,
 }
 
 fn default_cinematic_pitch() -> f32 {
@@ -540,4 +547,7 @@ fn default_cinematic_hysteresis() -> f32 {
 }
 fn default_cinematic_yaw_follow_rate() -> f32 {
     45.0
+}
+fn default_cinematic_look_target_y_offset() -> f32 {
+    0.0
 }

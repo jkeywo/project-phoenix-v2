@@ -800,6 +800,9 @@ fn cinematic_camera(
     let pitch_rad = cfg.default_pitch_deg.to_radians();
     let default_look = Vec3::new(0.0, -pitch_rad.sin(), -pitch_rad.cos());
     let look_ahead = cfg.look_ahead_distance;
+    // Framing bias shared by both branches below: the hull is always under
+    // the aim point, so lowering the aim point is what lifts it in frame.
+    let frame_bias = Vec3::Y * cfg.look_target_y_offset;
 
     // ── Collect entity snapshot for all non-local entities ──────────
     let local_uuid_str = local_q.single().ok().map(|u| u.0.clone());
@@ -868,7 +871,7 @@ fn cinematic_camera(
 
                 // Pitch from camera position toward midpoint.
                 transform.translation = yawed_pos;
-                transform.look_at(midpoint, Vec3::Y);
+                transform.look_at(midpoint + frame_bias, Vec3::Y);
                 return;
             }
         }
@@ -876,7 +879,7 @@ fn cinematic_camera(
 
     // No target (or target not found): look ahead with default pitch.
     transform.translation = camera_pos;
-    let look_target = camera_pos + yaw_rot * (default_look * look_ahead);
+    let look_target = camera_pos + yaw_rot * (default_look * look_ahead) + frame_bias;
     transform.look_at(look_target, Vec3::Y);
 }
 

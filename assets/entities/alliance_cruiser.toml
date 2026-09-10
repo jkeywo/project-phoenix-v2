@@ -1793,7 +1793,7 @@ yaw_follow_deg_per_sec = 45
 # third of the frame instead of crowding the bottom edge. The pitch above was
 # steepened in step: both lower where the camera looks, the pitch across the
 # whole no-target view and this offset also when tracking a target.
-look_target_y_offset = -4
+look_target_y_offset = -6
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 # Every sound this ship makes. Playback is server-side only (the host page's

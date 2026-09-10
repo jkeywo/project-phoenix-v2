@@ -1484,6 +1484,10 @@ mod tests {
     /// `gui/host-landing.css` breaks a test in THIS file, and a copy of that
     /// number kept here would move with it and prove nothing.
     fn declared(sheet: &str, selector: &str, prop: &str) -> Vec<u32> {
+        /// The ancestor guard the host sheets put on their portrait rules so a
+        /// phone locked to landscape never takes them (server.html sets the
+        /// attribute; this document does not, so the rules DO apply here).
+        const LANDSCAPE_LOCK_GUARD: &str = "html:not([data-phx-force-landscape])";
         let opener = format!("{selector} {{");
         let mut out = Vec::new();
         let mut at = 0usize;
@@ -1493,13 +1497,15 @@ mod tests {
             let end = body + sheet[body..].find('}').expect("unterminated CSS rule");
             at = end;
             // The selector must OPEN its line, or `.landing-statusbar {` would
-            // also match `.landing-statusbar .landing-sep {`'s tail.
-            if !sheet[..start]
-                .chars()
-                .rev()
-                .take_while(|c| *c != '\n')
-                .all(|c| c == ' ')
-            {
+            // also match `.landing-statusbar .landing-sep {`'s tail. The one
+            // ancestor allowed before it is the phone landscape lock's guard:
+            // the portrait rules are written `html:not([data-phx-force-landscape])
+            // .landing-statusbar { … }` so they stay inert on server.html, and
+            // the number in such a rule is still the number this file keeps
+            // the ground in step with.
+            let line_start = sheet[..start].rfind('\n').map_or(0, |i| i + 1);
+            let before = sheet[line_start..start].trim();
+            if !(before.is_empty() || before == LANDSCAPE_LOCK_GUARD) {
                 continue;
             }
             for decl in sheet[body..end].split(';') {

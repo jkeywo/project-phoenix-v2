@@ -64,24 +64,32 @@ multi-monitor form):
 ```
 
 In each pane, open the console **Settings** and find the **text size** control
-(the `--a11y-text-scale` slider). Do the following at **both** the minimum
-(`1.0×`) and the **maximum** (`1.5×`) text scale.
+(the `--a11y-text-scale` slider). Do the following at the minimum (`1.0×`), the
+former ceiling (`1.5×`) and the **actual maximum this build supports**
+(`2.0×` since issue #1422 — a two-pane monitor now needs 640 logical px per
+pane at the ceiling, not the 480px the checklist below originally named; a
+build predating #1422 still tops out at 1.5×/480px, so record which ceiling
+the tested build actually exposes).
 
 ### A-two-pane (the layout above)
 
 - [ ] **Minimum scale (1.0×).** Every control on each console is visible and
       operable; no label is clipped, no two controls overlap.
-- [ ] **Maximum scale (1.5×).** Text grows on every string at once. The console
+- [ ] **Former ceiling (1.5×).** Text grows on every string at once. The console
       **reflows**: rows re-wrap and the pane scrolls vertically where needed — but
       **no control is unreachable** (scroll to it) and **no two controls overlap**
       horizontally. Confirm this on *both* panes, left and right.
+- [ ] **Actual maximum (2.0×, #1422).** Repeat the 1.5× check at the real
+      ceiling. This is the scale issue #1432's integrated acceptance pass
+      names for the native rig — do not stop at 1.5× and call the 200%
+      criterion met.
 - [ ] **The seam is unaffected.** The two panes still meet cleanly at the split;
       enlarging text in one pane does not push its content over the other.
 
 ### A-one-pane
 
 Author (or launch) a **one-pane** Station — one console filling a monitor — and
-repeat the two scale checks. A single full-monitor pane has the most room, so
+repeat the scale checks. A single full-monitor pane has the most room, so
 this is the easy case; confirm it anyway, because acceptance criterion 1 names
 *both* one- and two-pane layouts.
 
@@ -93,9 +101,12 @@ this is the easy case; confirm it anyway, because acceptance criterion 1 names
 
 - [ ] One pane, **1.0×**: complete and clean.
 - [ ] One pane, **1.5×**: reflows, everything reachable, nothing overlapping.
+- [ ] One pane, **2.0×** (#1422 ceiling): reflows, everything reachable,
+      nothing overlapping.
 
 > If a pane ever reports **TOO SMALL** in the `--setup` Accessibility section,
-> that monitor is genuinely too small for that split at 1.5× — use one pane or a
+> that monitor is genuinely too small for that split at the scale tested
+> (480px demand at 1.5×, 640px at the actual 2.0× ceiling) — use one pane or a
 > larger display. That is the tool telling you the truth, not a failure of this
 > step.
 

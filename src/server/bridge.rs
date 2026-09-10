@@ -55,15 +55,16 @@ use {
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
-        GmAttentionChanged, GmCommsChanged, GmEntityProjectionChanged, GmMissionChanged,
-        GmSessionChanged, GmSpawnChanged, GmStationProjectionChanged, HudStateChanged,
-        LobbyStateChanged,
+        GmAttentionChanged, GmCommsChanged, GmEntityProjectionChanged, GmHealthChanged,
+        GmMissionChanged, GmSessionChanged, GmSpawnChanged, GmStationProjectionChanged,
+        HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec},
     crate::core::messages::{self, DeliveryClass},
     crate::entities::config_cache::ConfigCachePlugin,
     crate::gm_activity::GmActivityPlugin,
     crate::gm_attention::GmAttentionPlugin,
+    crate::gm_health::GmHealthPlugin,
     crate::gm_projection::{BrowserGameMaster, GmProjectionPlugin},
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
@@ -536,10 +537,13 @@ pub mod host_channels {
     /// The Game Master attention queue (issue #1433) — the bounded advisory
     /// list of pending conversations and, later, other waiting conditions.
     pub const GM_ATTENTION: &str = "gm_attention";
+    /// Public technical peer/Station/tick health (issue #1437) — the readable
+    /// panel and the unfilterable connection/recovery banners.
+    pub const GM_HEALTH: &str = "gm_health";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 15] = [
+    pub const ALL: [&str; 16] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -555,6 +559,7 @@ pub mod host_channels {
         GM_SPAWN,
         GM_COMMS,
         GM_ATTENTION,
+        GM_HEALTH,
     ];
 }
 
@@ -838,7 +843,12 @@ pub fn wasm_init() {
     if is_browser_gm {
         app.insert_resource(BrowserGameMaster);
     }
-    app.add_plugins((GmProjectionPlugin, GmActivityPlugin, GmAttentionPlugin));
+    app.add_plugins((
+        GmProjectionPlugin,
+        GmActivityPlugin,
+        GmAttentionPlugin,
+        GmHealthPlugin,
+    ));
 
     app.insert_resource(log_config)
         .add_plugins(crate::logging::LoggingPlugin);
@@ -997,6 +1007,7 @@ pub fn wasm_init() {
                 .after(crate::gm_spawn::publish_spawn_projection)
                 .after(crate::gm_comms::publish_comms_projection)
                 .after(crate::gm_attention::publish_attention_projection)
+                .after(crate::gm_health::publish_health_projection)
                 .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
             publish_live_seating,
@@ -4306,10 +4317,11 @@ fn flush_host_channels(
     mut gm_spawn: MessageReader<GmSpawnChanged>,
     mut gm_comms: MessageReader<GmCommsChanged>,
     mut gm_attention: MessageReader<GmAttentionChanged>,
+    mut gm_health: MessageReader<GmHealthChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 13] = [
+    let message_batches: [(&str, Vec<String>); 14] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4387,6 +4399,13 @@ fn flush_host_channels(
             gm_attention
                 .read()
                 .filter_map(|event| codec::encode_gm_attention_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_HEALTH,
+            gm_health
+                .read()
+                .filter_map(|event| codec::encode_gm_health_projection(&event.payload).ok())
                 .collect(),
         ),
     ];
@@ -5296,6 +5315,7 @@ spawn_on = "game_start"
                 host_channels::GM_SPAWN,
                 host_channels::GM_COMMS,
                 host_channels::GM_ATTENTION,
+                host_channels::GM_HEALTH,
             ]
         );
     }

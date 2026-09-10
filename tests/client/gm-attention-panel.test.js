@@ -834,7 +834,7 @@ describe('idle-NPC rows', () => {
     expect(rowIds()).toEqual(['comms:1', 'idle:npc-b:900', 'idle:npc-a:900']);
     const kinds = [...document.getElementById('gm-attention-filter-category').options]
       .map((option) => option.value);
-    expect(kinds).toEqual(['all', 'pending_comms', 'eligible_beat', 'idle_npc']);
+    expect(kinds).toEqual(['all', 'pending_comms', 'eligible_beat', 'idle_npc', 'station_health']);
 
     filters.setFilter('category', 'idle_npc');
     panel.returnToLive();

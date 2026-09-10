@@ -102,6 +102,34 @@ impl RecoveryState {
         self.active.is_some()
     }
 
+    /// A read-only public view of the recovery in flight, for the Game Master
+    /// health panel (issue #1437).
+    ///
+    /// Deliberately a projection rather than a borrow of `ActiveRecovery`: the
+    /// GM desk is told *that* the fleet is holding, at which boundary, and which
+    /// peers are restoring — never the private plan, the command window or the
+    /// canonical digest. `None` means this host has no recovery tracked.
+    pub fn status(&self) -> Option<RecoveryStatus> {
+        match &self.active {
+            Some(ActiveRecovery::InProgress { plan, resolved, .. }) => {
+                Some(RecoveryStatus::InProgress {
+                    divergence_tick: plan.divergence_tick,
+                    boundary_tick: plan.boundary_tick,
+                    recovering: plan.recovering.clone(),
+                    resolved: *resolved,
+                })
+            }
+            Some(ActiveRecovery::Failed {
+                divergence_tick,
+                boundary_tick,
+            }) => Some(RecoveryStatus::Failed {
+                divergence_tick: *divergence_tick,
+                boundary_tick: *boundary_tick,
+            }),
+            None => None,
+        }
+    }
+
     /// The tick this host must not run past yet, or `None` if it is free.
     fn hold_boundary(&self) -> Option<u64> {
         match &self.active {
@@ -110,6 +138,83 @@ impl RecoveryState {
             }
             _ => None,
         }
+    }
+}
+
+/// What an observer may be told about a recovery in flight (issue #1437).
+///
+/// An enum rather than a struct with a `failed` flag, so the two conditions
+/// cannot borrow each other's numbers: a terminal failure has no boundary the
+/// fleet is holding at and no peers restoring, and an in-flight recovery is
+/// never asked for a tick it does not have. Every tick here comes from the
+/// recovery this host actually tracked; none is a placeholder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RecoveryStatus {
+    /// A recoverable divergence: the fleet is holding while the canonical
+    /// record is transferred.
+    InProgress {
+        /// The earliest checkpoint tick the fleet disagreed on.
+        divergence_tick: u64,
+        /// The tick every host holds at while the transfer completes.
+        boundary_tick: u64,
+        /// The peers that are restoring the canonical record.
+        recovering: Vec<HostSlot>,
+        /// This host has done its part and lifted its boundary hold.
+        resolved: bool,
+    },
+    /// The recovery ended without healing the split. Terminal.
+    Failed {
+        /// The tick the fleet disagreed on — the same tick the diagnostic
+        /// artifact records, so the warning a Game Master reads names the real
+        /// divergence rather than a stand-in.
+        divergence_tick: u64,
+        /// The boundary the fleet held at, when a plan got far enough to name
+        /// one. `None` when no safe leader was ever elected, so nothing was
+        /// ever held and there is no boundary to report.
+        boundary_tick: Option<u64>,
+    },
+}
+
+impl RecoveryStatus {
+    /// The tick the fleet disagreed on. Both conditions know it.
+    pub fn divergence_tick(&self) -> u64 {
+        match self {
+            Self::InProgress {
+                divergence_tick, ..
+            }
+            | Self::Failed {
+                divergence_tick, ..
+            } => *divergence_tick,
+        }
+    }
+
+    /// The boundary the fleet holds (or held) at, if there is one.
+    pub fn boundary_tick(&self) -> Option<u64> {
+        match self {
+            Self::InProgress { boundary_tick, .. } => Some(*boundary_tick),
+            Self::Failed { boundary_tick, .. } => *boundary_tick,
+        }
+    }
+
+    /// The peers restoring the canonical record; empty once the attempt ended.
+    pub fn recovering(&self) -> &[HostSlot] {
+        match self {
+            Self::InProgress { recovering, .. } => recovering,
+            Self::Failed { .. } => &[],
+        }
+    }
+
+    /// This host has done its part and lifted its boundary hold.
+    pub fn resolved(&self) -> bool {
+        match self {
+            Self::InProgress { resolved, .. } => *resolved,
+            Self::Failed { .. } => true,
+        }
+    }
+
+    /// The recovery ended without healing the split.
+    pub fn failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
     }
 }
 
@@ -127,10 +232,16 @@ enum ActiveRecovery {
         resolved: bool,
     },
     /// A clean failure — no safe leader, or a leader record that would not gate.
-    /// Terminal: recorded once (the tick and reason live in the [`RecoveryLog`]
+    /// Terminal: recorded once (the full reason lives in the [`RecoveryLog`]
     /// diagnostic), holds nothing, and is not re-decided, so a persistent
-    /// unrecoverable split is reported without a re-attempt storm.
-    Failed,
+    /// unrecoverable split is reported without a re-attempt storm. It carries
+    /// the divergence it is about so the public status can name it.
+    Failed {
+        /// The tick the fleet disagreed on.
+        divergence_tick: u64,
+        /// The boundary a plan named, if one was ever agreed.
+        boundary_tick: Option<u64>,
+    },
 }
 
 /// Every recovery event this host has recorded (issue #1118, AC5).
@@ -349,7 +460,12 @@ fn begin_recovery(world: &mut World, local: HostSlot, delay: u64) {
                 window.tick,
             );
             world.resource_mut::<RecoveryLog>().entries.push(diagnostic);
-            world.resource_mut::<RecoveryState>().active = Some(ActiveRecovery::Failed);
+            // No leader was elected, so no boundary was ever agreed: the public
+            // status reports the divergence and says so.
+            world.resource_mut::<RecoveryState>().active = Some(ActiveRecovery::Failed {
+                divergence_tick: window.tick,
+                boundary_tick: None,
+            });
         }
     }
 }
@@ -533,7 +649,10 @@ fn finish_recovery(
         // The divergence stands; leave the ledger so it is not silently forgotten,
         // and become terminal so this host does not keep re-arming for a record
         // that will not gate.
-        world.resource_mut::<RecoveryState>().active = Some(ActiveRecovery::Failed);
+        world.resource_mut::<RecoveryState>().active = Some(ActiveRecovery::Failed {
+            divergence_tick: plan.divergence_tick,
+            boundary_tick: Some(boundary),
+        });
         return;
     }
 
@@ -721,6 +840,69 @@ mod tests {
                 active: sequence % 2 == 1,
             },
         }
+    }
+
+    /// What an observer may be told about a recovery (issue #1437): that the
+    /// fleet is holding, where, and how many peers are restoring — never the
+    /// canonical digest, the elected leader or the command window.
+    #[test]
+    fn the_public_status_reports_the_hold_without_the_plan() {
+        let mut state = RecoveryState::default();
+        assert_eq!(state.status(), None);
+
+        let plan = recovery_plan::RecoveryPlan {
+            divergence_tick: 240,
+            last_agreed_tick: Some(220),
+            boundary_tick: 260,
+            canonical_digest: 0xDEAD_BEEF,
+            leader: HostSlot(1),
+            recovering: vec![HostSlot(3)],
+            digests: std::collections::BTreeMap::new(),
+        };
+        state.active = Some(ActiveRecovery::InProgress {
+            plan: plan.clone(),
+            role: RecoveryRole::Bystander,
+            record_tick: None,
+            resolved: false,
+        });
+        let status = state.status().expect("a recovery is in flight");
+        assert_eq!(status.divergence_tick(), 240);
+        assert_eq!(status.boundary_tick(), Some(260));
+        assert_eq!(status.recovering(), [HostSlot(3)]);
+        assert!(!status.resolved());
+        assert!(!status.failed());
+
+        // A leader record that would not gate: `finish_recovery` becomes terminal,
+        // and the public status must still name the REAL divergence and boundary —
+        // driven through the production path, not hand-built, because a hand-built
+        // status cannot catch a placeholder written at the assignment site.
+        let mut world = World::new();
+        world.init_resource::<RecoveryState>();
+        world.init_resource::<RecoveryLog>();
+        world.init_resource::<MeshRestoreArm>();
+        world.init_resource::<MeshAgreement>();
+        world.init_resource::<CommandLog>();
+        finish_recovery(
+            &mut world,
+            HostSlot(2),
+            &plan,
+            plan.boundary_tick,
+            RecoveryResult::NoValidRecord {
+                refusal: "the leader record would not gate".to_string(),
+            },
+        );
+        let failed = world
+            .resource::<RecoveryState>()
+            .status()
+            .expect("a failed recovery is still tracked");
+        assert!(failed.failed());
+        assert_eq!(
+            failed.divergence_tick(),
+            240,
+            "the terminal warning names the divergence it is about, never tick 0"
+        );
+        assert_eq!(failed.boundary_tick(), Some(260));
+        assert!(failed.recovering().is_empty());
     }
 
     /// The diagnostic artifact round-trips through RON and refuses a foreign

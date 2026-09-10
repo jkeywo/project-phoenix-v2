@@ -33,7 +33,9 @@ use project_phoenix::command_admission::{CommandDelay, CommandLog, HostSlot};
 use project_phoenix::core::messages::{ClientMessage, StationId, SystemControlPayload, SystemId};
 use project_phoenix::headless::{build_headless_app, run, world_digest, HeadlessArgs};
 use project_phoenix::lobby::{InboundMessage, Sessions};
-use project_phoenix::lockstep::recovery::{RecoveryLog, RecoveryResult, RecoveryState};
+use project_phoenix::lockstep::recovery::{
+    RecoveryLog, RecoveryResult, RecoveryState, RecoveryStatus,
+};
 use project_phoenix::lockstep::{
     capture_run, drain_mesh_restore, frames_for, join_fleet, FleetRoster, FleetShip, MeshAgreement,
     MeshFrame, MeshInbox, MeshOutbox, MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver,
@@ -150,6 +152,11 @@ impl Host {
 
     fn recovery_active(&self) -> bool {
         self.app.world().resource::<RecoveryState>().is_active()
+    }
+
+    /// The public, GM-readable view of this host's recovery (issue #1437).
+    fn recovery_status(&self) -> Option<RecoveryStatus> {
+        self.app.world().resource::<RecoveryState>().status()
     }
 
     fn last_restore(&self) -> Option<MeshRestoreOutcome> {
@@ -430,6 +437,33 @@ fn a_two_host_split_fails_cleanly_without_overwriting_either_world() {
             diag.result
         );
         assert_eq!(diag.leader, None, "host {i}: no leader was elected");
+
+        // The public status a Game Master's health banner reads (issue #1437)
+        // must name the REAL divergence this host recorded. A placeholder here
+        // would render "the divergence at tick 0 could not be repaired" on the
+        // one region a facilitator cannot filter, snooze or hold away.
+        let status = host
+            .recovery_status()
+            .unwrap_or_else(|| panic!("host {i} tracks the failed recovery"));
+        assert!(status.failed(), "host {i}: reported as a failure");
+        assert_eq!(
+            status.divergence_tick(),
+            diag.divergence_tick,
+            "host {i}: the public status names the divergence the diagnostic recorded"
+        );
+        assert!(
+            status.divergence_tick() > 0,
+            "host {i}: a real divergence is never tick 0"
+        );
+        assert_eq!(
+            status.boundary_tick(),
+            None,
+            "host {i}: no leader was elected, so no boundary was ever held at"
+        );
+        assert!(
+            status.recovering().is_empty(),
+            "host {i}: nobody is restoring"
+        );
     }
 
     // Step both a little further, in lockstep, and confirm the fleet is STILL

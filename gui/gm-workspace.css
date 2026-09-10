@@ -35,13 +35,15 @@
 #gm-console.gm-desk #gm-session-heading, #gm-console.gm-desk #gm-session-log-heading,
 #gm-console.gm-desk #gm-session-log { display: none; }
 #gm-console.gm-desk #gm-session-actions { gap: var(--space-2); }
-/* Four rows of grid, three rows of panel: the map and the inspector span the
-   first two so the left column can carry the roster AND the M4 attention queue
-   (issue #1433) without stealing height from anything else. */
+/* The map and the inspector span the flexible rows so the left column can
+   carry the roster, the M4 attention queue (issue #1433) and the technical
+   health panel (issue #1437) without stealing height from anything else. Every
+   panel scrolls its own overflow, which is what keeps the desk honest at
+   --a11y-text-scale: 2 instead of shrinking the operator's chosen text. */
 #gm-console.gm-desk #gm-workspace {
   display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) 236px; gap: var(--space-5); padding: var(--space-5);
-  height: calc(100vh - 88px); min-height: 580px; flex: 0 0 auto;
+  grid-template-rows: repeat(3, minmax(0, 1fr)) 236px; gap: var(--space-5); padding: var(--space-5);
+  height: calc(100vh - 88px); min-height: 640px; flex: 0 0 auto;
 }
 #gm-console.gm-desk #gm-workspace > section {
   min-width: 0; min-height: 0; max-width: none; padding: var(--space-5);
@@ -50,11 +52,12 @@
 }
 #gm-console.gm-desk #gm-roster { grid-area: 1 / 1; }
 #gm-console.gm-desk #gm-attention-panel { grid-area: 2 / 1; }
-#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 3 / 3; overflow: hidden; }
-#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3 / 3 / 4; }
-#gm-console.gm-desk #gm-mission-panel { grid-area: 3 / 1; }
-#gm-console.gm-desk #gm-comms-panel { grid-area: 3 / 2; }
-#gm-console.gm-desk #gm-activity { grid-area: 3 / 3; }
+#gm-console.gm-desk #gm-health-panel { grid-area: 3 / 1; }
+#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 4 / 3; overflow: hidden; }
+#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3 / 4 / 4; }
+#gm-console.gm-desk #gm-mission-panel { grid-area: 4 / 1; }
+#gm-console.gm-desk #gm-comms-panel { grid-area: 4 / 2; }
+#gm-console.gm-desk #gm-activity { grid-area: 4 / 3; }
 #gm-console.gm-desk #gm-entity-map { flex: 1; min-height: 0; height: auto; width: 100%; background: var(--surface-abyss); }
 #gm-console.gm-desk #gm-map-legend { font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-selection-chip { color: var(--gold); font-family: var(--font-mono); }
@@ -344,3 +347,37 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
   margin: 0; padding-left: var(--space-4); display: grid; gap: var(--space-1);
   overflow-wrap: anywhere;
 }
+/* ── Technical health and its banners (issue #1437) ─────────────────────
+   Everything here reads as WORDS. `data-state` and colour are decoration on
+   top of a translated noun, so forced colours and a monochrome display lose
+   the emphasis and keep the meaning (PRD #1418 story 27). Rows wrap and the
+   panel scrolls at 200% rather than reducing the operator's text. */
+#gm-console.gm-desk #gm-health-groups { display: grid; gap: var(--space-4); min-width: 0; }
+#gm-console.gm-desk .gm-health-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+#gm-console.gm-desk .gm-health-group li {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3); border: 1px solid var(--edge);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-health-name { flex: 1 1 8ch; min-width: 0; }
+#gm-console.gm-desk .gm-health-state { letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk .gm-health-detail { font-family: var(--font-mono); color: var(--ink-dim); }
+#gm-console.gm-desk .gm-health-group li[data-state="stale"] .gm-health-state,
+#gm-console.gm-desk .gm-health-group li[data-state="recovering"] .gm-health-state { color: var(--gold); }
+#gm-console.gm-desk .gm-health-group li[data-state="disconnected"] { border-left-width: var(--space-2); }
+#gm-console.gm-desk .gm-health-group li[data-state="disconnected"] .gm-health-state { color: var(--gold); }
+#gm-console.gm-desk #gm-health-summary[data-state="disconnected"],
+#gm-console.gm-desk #gm-health-summary[data-state="recovering"] { color: var(--gold); }
+/* The sample tick, beside the announced summary rather than in it. */
+#gm-console.gm-desk #gm-health-tick {
+  font-family: var(--font-mono); color: var(--ink-dim); margin: 0;
+}
+/* The programmatic landing for a banner with no hull of its own to open. */
+#gm-console.gm-desk #gm-health-summary:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk .gm-health-banner {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-health-banner-state { letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-health-banner-message { flex: 1 1 12ch; min-width: 0; }
+#gm-console.gm-desk .gm-health-banner[data-state="disconnected"] { border-width: 2px; }

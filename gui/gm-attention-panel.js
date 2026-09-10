@@ -41,8 +41,14 @@
  * hidden by a filter, a snooze or a hold — a held list that can conceal "the
  * fleet lost a peer" is the failure PRD #1418 story 25 names. They render into
  * their own region through [`banners`], which is deliberately outside the
- * filter/hold path: it takes rows, it draws rows. #1437 fills it; this issue
- * establishes that it cannot be filtered.
+ * filter/hold path: it takes rows, it draws rows.
+ *
+ * Issue #1437 fills it. This panel still OWNS the region — that is what makes
+ * "no filter, snooze or hold can reach it" a property of one place rather than
+ * a promise every caller has to keep — but it does not decide what a technical
+ * warning looks like. The `renderBanners` hook does that, and on the GM desk it
+ * is `gui/gm-health-banner.js`, the same component the M5 live-restore surfaces
+ * (#1446/#1447) mount elsewhere.
  */
 
 import {
@@ -55,7 +61,12 @@ import {
 
 /** Categories this build draws. Unknown categories still render (the reason id
  * carries the meaning); this list only seeds the filter's option order. */
-export const GM_ATTENTION_CATEGORIES = Object.freeze(['pending_comms', 'eligible_beat', 'idle_npc']);
+export const GM_ATTENTION_CATEGORIES = Object.freeze([
+  'pending_comms',
+  'eligible_beat',
+  'idle_npc',
+  'station_health',
+]);
 
 /** Ages repaint on this cadence. Slow enough to be free, fast enough that a
  * sixty-second snooze visibly expires. */
@@ -125,6 +136,26 @@ export function formatAttentionAge(ms) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+/**
+ * The banner renderer a panel with no host-supplied one falls back to: one
+ * paragraph per row, from a String Table id and its parameters. Deliberately
+ * minimal — it exists so the region is never blank when nobody has wired the
+ * health component, not as a second design of what a warning looks like.
+ */
+export function defaultRenderBanners(rows, container, { doc = globalThis.document, t = (id) => id } = {}) {
+  const list = rows.filter(
+    (row) => row && typeof row.id === 'string' && typeof row.message_id === 'string',
+  );
+  container.replaceChildren(...list.map((row) => {
+    const item = doc.createElement('p');
+    item.dataset.bannerId = row.id;
+    item.textContent = t(row.message_id, row.params && typeof row.params === 'object' ? row.params : {});
+    return item;
+  }));
+  container.hidden = list.length === 0;
+  return list.length;
+}
+
 export function createGmAttentionPanel({
   doc = globalThis.document,
   t = (id) => id,
@@ -132,6 +163,7 @@ export function createGmAttentionPanel({
   filters = createGmAttentionFilters(),
   now = () => Date.now(),
   onOpen = () => {},
+  renderBanners = defaultRenderBanners,
   schedule = (fn, ms) => setInterval(fn, ms),
   cancelSchedule = (handle) => clearInterval(handle),
 } = {}) {
@@ -527,20 +559,12 @@ export function createGmAttentionPanel({
    * The technical-banner seam (issue #1437). Rows given here are drawn
    * verbatim: no filter, no snooze, no hold. A GM cannot hide these from
    * themselves, deliberately or accidentally.
+   *
+   * The region belongs to this panel; the drawing belongs to `renderBanners`.
    */
   function banners(rows) {
     if (!bannerEl) return 0;
-    const list = (Array.isArray(rows) ? rows : []).filter(
-      (row) => row && typeof row.id === 'string' && typeof row.message_id === 'string',
-    );
-    bannerEl.replaceChildren(...list.map((row) => {
-      const item = doc.createElement('p');
-      item.dataset.bannerId = row.id;
-      item.textContent = t(row.message_id, row.params && typeof row.params === 'object' ? row.params : {});
-      return item;
-    }));
-    bannerEl.hidden = list.length === 0;
-    return list.length;
+    return renderBanners(Array.isArray(rows) ? rows : [], bannerEl, { doc, t });
   }
 
   function onListClick(event) {
@@ -599,7 +623,10 @@ export function createGmAttentionPanel({
     held = false;
     selectedId = null;
     if (listEl) listEl.replaceChildren();
-    if (bannerEl) { bannerEl.replaceChildren(); bannerEl.hidden = true; }
+    // Through the same seam, so a renderer that keeps its own bookkeeping
+    // (the health component reconciles rather than rebuilds) is told the
+    // region is empty instead of finding its nodes gone from under it.
+    banners([]);
     render();
   }
 

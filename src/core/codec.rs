@@ -1594,6 +1594,15 @@ pub fn encode_gm_attention_projection(
     serde_json::to_string(payload)
 }
 
+/// Absolute local GM technical health (issue #1437). Same contract as the
+/// attention queue: String Table reason ids and their parameters cross
+/// verbatim, and the page resolves them at its own presentation boundary.
+pub fn encode_gm_health_projection(
+    payload: &crate::gm_health::GmHealthProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn decode_native_gm_record(
     json: &str,

@@ -138,3 +138,11 @@ pub struct GmCommsChanged {
 pub struct GmAttentionChanged {
     pub payload: crate::gm_attention::GmAttentionProjection,
 }
+
+/// Page-local absolute Game Master technical health (issue #1437). Like every
+/// other GM projection this is Host Channel data only: it never enters the peer
+/// wire, a snapshot or the authoritative digest.
+#[derive(bevy::prelude::Message)]
+pub struct GmHealthChanged {
+    pub payload: crate::gm_health::GmHealthProjection,
+}

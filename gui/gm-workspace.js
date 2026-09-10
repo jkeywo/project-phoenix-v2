@@ -20,6 +20,8 @@ import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
 import { createGmAttentionPanel } from './gm-attention-panel.js';
 import { createGmAttentionFilters } from './gm-attention-filters.js';
+import { createGmHealthBanner } from './gm-health-banner.js';
+import { createGmHealthPanel } from './gm-health-panel.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
 import { createGmJournalPanel } from './gm-journal-panel.js';
 import { createGmFactionPanel } from './gm-faction-panel.js';
@@ -219,9 +221,24 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     getOperatorId: () => (typeof win.__hostLocalGm === 'function' ? (win.__hostLocalGm()?.id ?? null) : null),
     onChange: () => repaintGmAttention(),
   });
+  // Public technical health (issue #1437). Three late-bound edges, because the
+  // two halves guard different things and neither may own both: the attention
+  // panel owns the banner REGION (nothing an operator does to the queue can
+  // reach it), the health component owns what a warning LOOKS like, and the
+  // health panel owns the readable table and feeds the region from the same
+  // parsed alerts it counts in its own summary.
+  let gmHealthPanelRef = null;
+  const gmHealthBanner = createGmHealthBanner({
+    doc: doc, t,
+    onAction: (alert) => {
+      if (alert.ship) { gmProjection.select(alert.ship.entity_id); return; }
+      gmHealthPanelRef?.focus();
+    },
+  });
   const gmAttentionPanel = createGmAttentionPanel({
     doc: doc, t, has,
     filters: gmAttentionFilters,
+    renderBanners: (rows, container) => gmHealthBanner.render(rows, container),
     // Opening a row is a NAVIGATION to something that already exists on this
     // desk — the authored conversation route, (issue #1434) the authored beat's
     // own mission-panel row carrying the Fire/Pause/Skip its author declared, or
@@ -244,6 +261,12 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   win.__hostGmAttentionState = gmAttentionPanel.state;
   win.__hostGmAttentionRestore = gmAttentionFilters.restore;
   win.__hostGmAttentionBanners = gmAttentionPanel.banners;
+  const gmHealthPanel = createGmHealthPanel({
+    doc: doc, t, has,
+    banners: (alerts) => gmAttentionPanel.banners(alerts),
+  });
+  gmHealthPanelRef = gmHealthPanel;
+  win.__hostGmHealthState = gmHealthPanel.state;
   const gmSpawnPanel = createGmSpawnPanel({
     doc: doc,
     win: win,
@@ -379,6 +402,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
     gm_attention: function(p) { gmAttentionPanel.update(p); },
+    gm_health:    function(p) { gmHealthPanel.update(p); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
@@ -398,6 +422,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     },
     reset() {
       gmAttentionPanel.reset();
+      gmHealthPanel.reset();
       gmSessionControls.reset();
       gmFactionPanel.reset();
       gmJournalPanel.reset();

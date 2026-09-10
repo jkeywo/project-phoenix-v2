@@ -3,7 +3,7 @@
 //!
 //! One advisory projection answers "what is waiting for a Game Master right
 //! now". It reads facts the simulation already owns and publishes them onto the
-//! page-local `gm_attention` Host Channel. Three producers today:
+//! page-local `gm_attention` Host Channel. Four producers today:
 //!
 //! * **Pending Comms** (#1433) — the ordinary Comms inbox and the authored
 //!   `[[gm_comms_route]]` table.
@@ -12,6 +12,8 @@
 //! * **Idle NPCs** (#1435) — an NPC ship that has been given nothing to do for
 //!   an authored grace of SIMULATION time. See the idle-advisory section
 //!   further down.
+//! * **Station health** (#1437) — the public technical health picture
+//!   [`crate::gm_health`] takes from the lockstep barrier.
 //!
 //! # What this is NOT
 //!
@@ -79,9 +81,17 @@
 //! or, for the idle advisory, in the `[gm_attention]` table
 //! ([`GmAttentionSettings`]). The band is GM-facing triage only: it does not
 //! touch `CommsPriority`, delivery, routing, when a beat fires, or anything a
-//! crew console renders. Technical warnings (issue #1437) are not occurrences at
-//! all and take no authored band — see the banner seam in
-//! `gui/gm-attention-panel.js`.
+//! crew console renders.
+//!
+//! Station health (issue #1437) is the one producer with no authored band at
+//! all: a Station or fleet hull whose human has dropped is always `Urgent`,
+//! decided by [`crate::gm_health`], and there is no `[[gm_*]]` key anywhere
+//! that can lower it, rename it or turn it off. That asymmetry is PRD #1419's —
+//! an author tunes their own advisory items, while the technical treatment is
+//! system-defined — and it is why the guarantee that a Game Master cannot hide
+//! a connection failure from themselves is held by the separate unfilterable
+//! banner region beside the list (`#gm-attention-banners`), not by the queue
+//! row itself; see the banner seam in `gui/gm-attention-panel.js`.
 
 use std::collections::BTreeMap;
 
@@ -91,6 +101,7 @@ use serde::{Deserialize, Serialize};
 use crate::comms::server::CommsInboxRes;
 use crate::console_bridge::GmAttentionChanged;
 use crate::entities::spawner::{EntityName, EntityUuid};
+use crate::gm_health::{GmHealthAlert, GmHealthWatch};
 use crate::gm_projection::GmEntityReference;
 use crate::world::config::WorldConfig;
 
@@ -145,9 +156,15 @@ impl GmAttentionBand {
     }
 }
 
-/// Why a row is in the queue. `#1437`'s technical banners are deliberately NOT
-/// a category — see the module note on the banner seam in
-/// `gui/gm-attention-panel.js`.
+/// Why a row is in the queue.
+///
+/// `StationHealth` (issue #1437) is the one category whose band is system-fixed
+/// at [`GmAttentionBand::Urgent`] and whose rows no authored table can invent,
+/// re-band or suppress. It is deliberately still a category, and therefore
+/// still filterable *in the list*: the guarantee that a Game Master cannot hide
+/// a connection failure from themselves is held by the unfilterable banner
+/// region beside the list (`#gm-attention-banners`), not by making one row type
+/// un-narrowable in a triage tool.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum GmAttentionCategory {
@@ -156,6 +173,9 @@ pub enum GmAttentionCategory {
     EligibleBeat,
     /// An NPC ship that has been given nothing to do (issue #1435).
     IdleNpc,
+    /// A Station or fleet hull whose human is gone (issue #1437). Always
+    /// Urgent, always system-defined.
+    StationHealth,
 }
 
 /// The short human reason, as a String Table id plus its runtime parameters.
@@ -250,8 +270,9 @@ struct FirstSeen {
 }
 
 /// This peer's own attention bookkeeping. `Presentation`: derived entirely from
-/// the Comms inbox, the authored route table and the ordinary trigger table,
-/// all already classified, and read by nothing authoritative.
+/// the Comms inbox, the authored route table, the ordinary trigger table and
+/// the health projection, all already classified, and read by nothing
+/// authoritative.
 #[derive(Resource, Default)]
 pub struct GmAttentionState {
     first_seen: BTreeMap<String, FirstSeen>,
@@ -869,6 +890,39 @@ fn idle_rows(
         .collect()
 }
 
+// ── Station health advisory (issue #1437) ─────────────────────────────────────
+
+/// Turn the Station-scoped half of the technical health projection (issue
+/// #1437) into queue rows.
+///
+/// The band is not a parameter and not authored: a Station whose human has
+/// dropped is Urgent, decided here, and there is no `[[gm_*]]` key anywhere
+/// that can lower it, rename it or turn it off. That is the difference between
+/// the advisory items an author tunes and the technical treatment PRD #1419
+/// calls system-defined.
+fn health_rows(alerts: &[GmHealthAlert]) -> Vec<PendingRow> {
+    alerts
+        .iter()
+        .filter(|alert| alert.kind.is_station_attention())
+        .map(|alert| PendingRow {
+            id: format!("health:{}", alert.id),
+            category: GmAttentionCategory::StationHealth,
+            band: GmAttentionBand::Urgent,
+            reason: GmAttentionReason {
+                id: alert.reason.id.clone(),
+                params: alert.reason.params.clone(),
+            },
+            target: GmAttentionTarget {
+                route: None,
+                ship: alert.ship.clone(),
+                sender: None,
+                conversation: None,
+                event: None,
+            },
+        })
+        .collect()
+}
+
 /// Publish the absolute attention queue onto the page-local Host Channel when
 /// it changes. Never emits an unchanged payload: a GM desk that repainted a
 /// held list sixty times a second would defeat the reading stability this whole
@@ -884,6 +938,7 @@ pub fn publish_attention_projection(
     real: Option<Res<Time<Real>>>,
     sim_time: Option<Res<Time>>,
     idle: Option<Res<GmIdleNpcWatch>>,
+    health: Option<Res<GmHealthWatch>>,
     mut state: ResMut<GmAttentionState>,
     mut writer: MessageWriter<GmAttentionChanged>,
 ) {
@@ -961,6 +1016,13 @@ pub fn publish_attention_projection(
             |world| world.global.sim_tick_hz,
         );
         rows.extend(idle_rows(&settings, hz, watch, &names));
+    }
+    // The technical half (issue #1437). It rides this same queue rather than a
+    // second list because a facilitator triages ONE ordered set of things that
+    // are waiting; the banner region beside it is the part that cannot be
+    // filtered, snoozed or held.
+    if let Some(health) = health.as_deref().and_then(GmHealthWatch::last) {
+        rows.extend(health_rows(&health.alerts));
     }
 
     // Retire the bookkeeping for anything that stopped holding, so a recurrence

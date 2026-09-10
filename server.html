@@ -2229,6 +2229,21 @@
           <div id="gm-attention-list"></div>
           <p id="gm-attention-empty" role="status" data-i18n="server.gm.attention.empty"></p>
         </section>
+        <!-- Public technical health (issue #1437). A READER: peers, Station
+             assignments and tick freshness, each row stating its condition as
+             a word rather than a colour. The unfilterable warning region for
+             the same facts is #gm-attention-banners above; this panel is where
+             a Game Master reads the detail behind one. -->
+        <section id="gm-health-panel" role="region" aria-labelledby="gm-health-heading">
+          <h2 id="gm-health-heading" data-i18n="server.gm.health.heading"></h2>
+          <p id="gm-health-summary" role="status" aria-live="polite" aria-atomic="true"></p>
+          <!-- The tick this sample was taken at, OUTSIDE the live region: it
+               changes on every republish, and announcing it would make routine
+               simulation intrusive (PRD #1418). -->
+          <p id="gm-health-tick" class="gm-health-tick"></p>
+          <div id="gm-health-groups"></div>
+          <p id="gm-health-empty" role="status" data-i18n="server.gm.health.empty"></p>
+        </section>
         <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
           <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
           <ul id="gm-spawn-palette" role="list"></ul>

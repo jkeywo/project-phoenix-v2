@@ -38,6 +38,20 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   await expect(page.locator('#gm-attention-panel')).toBeVisible();
   await expect(page.locator('#gm-attention-heading')).toBeVisible();
   await expect(page.locator('#gm-attention-filter-band')).toBeVisible();
+  // The technical health panel (issue #1437) is on the same landscape desk and
+  // holds the same contract: it reads at 200% and its rows wrap rather than
+  // shrink. Its warning region is rendered into #gm-attention-banners above,
+  // which is asserted here to be reachable rather than clipped away.
+  await expect(page.locator('#gm-health-panel')).toBeVisible();
+  await expect(page.locator('#gm-health-heading')).toBeVisible();
+  await expect(page.locator('#gm-health-summary')).toBeVisible();
+  const health = await page.locator('#gm-health-panel').evaluate(el => ({
+    scroll: el.scrollWidth,
+    width: el.clientWidth,
+    fontPx: parseFloat(getComputedStyle(el).fontSize),
+  }));
+  expect(health.scroll).toBeLessThanOrEqual(health.width + 1);
+  expect(health.fontPx).toBeGreaterThanOrEqual(28);
   const scaled = await page.locator('#gm-workspace').evaluate(el => ({
     width: el.clientWidth,
     scroll: el.scrollWidth,

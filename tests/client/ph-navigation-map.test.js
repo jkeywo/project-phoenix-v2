@@ -488,6 +488,43 @@ describe('PhNavigationMap', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
+  // ── Pending placement is not hue-only (PRD #1418 story 6, issue #1423) ──
+  //
+  // Armed pick mode used to differ from the resting state by colour alone
+  // (cyan -> gold). jsdom does not cascade shadow-root styles at all (see the
+  // established convention in tests/client/ph-damage-detail.test.js), so the
+  // shape/text cue is asserted against the component's own declaration, and
+  // the class toggle itself is asserted behaviourally against the real
+  // arm/disarm path.
+  describe('picking (pending) is not hue-only', () => {
+    it('declares a non-colour cue for the armed Set Waypoint button', () => {
+      const h = setup();
+      // `:not([data-ph-shared])` is the component's own sheet — the shared
+      // control family jsdom's `adoptedStyleSheets` fallback appends FIRST as
+      // a plain `<style data-ph-shared>` carries none of this component's
+      // rules (see tests/client/ph-damage-detail.test.js).
+      const style = h.el.shadowRoot.querySelector('style:not([data-ph-shared])').textContent;
+      const rule = style.match(/\.wp-btn\.active\s*\{[^}]*\}/);
+      expect(rule).not.toBeNull();
+      expect(rule[0]).toMatch(/border-style:\s*dashed/);
+      // The button's own text grows an ellipsis while armed — a cue a
+      // screen reader and a forced-colours viewer both still get.
+      expect(style).toMatch(/\.wp-btn\.active::after\s*\{\s*content:\s*'\\2026'/);
+    });
+
+    it('toggles the active class on the button itself when pick mode arms and disarms', () => {
+      const h = setup();
+      h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
+      h.tickRaf();
+      const btn = h.el.shadowRoot.getElementById('btn-set-waypoint');
+      expect(btn.classList.contains('active')).toBe(false);
+      btn.click();
+      expect(btn.classList.contains('active')).toBe(true);
+      btn.click();
+      expect(btn.classList.contains('active')).toBe(false);
+    });
+  });
+
   it('tap on blip selects it and Set as Waypoint sends an anchored waypoint', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
@@ -738,6 +775,62 @@ describe('PhNavigationMap', () => {
       const draws = h.fakeCtx._calls.fillText.filter((f) => f.text === 'WP');
       expect(draws.length).toBeGreaterThan(0);
       expect(draws[0].font).toBe('20px "JetBrains Mono", monospace');
+    });
+
+    // ── Operator text scale (PRD #1418 story 3, issue #1423) ────────────
+    //
+    // The chart is genuinely spatial — its grid, blip positions and pan/zoom
+    // are untouched by the operator's text-scale choice (PRD #1418's map
+    // exception). The NAMES painted over it are prose, not spatial content,
+    // and a `<canvas>` font string sits outside the CSS ramp entirely, so
+    // nothing reached them until this multiplier.
+
+    it('grows the blip name label with the operator text scale, independent of chart zoom', () => {
+      const h = setup();
+      h.el.style.setProperty('--a11y-text-scale', '2');
+      h.el.state = {
+        blips: [{ uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' }],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+      // 12 base x 2 dpr x 1 zoomFont x 2 text scale = 48px.
+      const draws = h.fakeCtx._calls.fillText.filter((f) => f.text === 'Alpha');
+      expect(draws[0].font).toBe('48px "JetBrains Mono", monospace');
+    });
+
+    it('grows the waypoint WP label and a region name with the same operator text scale', () => {
+      const h = setup();
+      h.el.style.setProperty('--a11y-text-scale', '1.5');
+      h.el.state = {
+        blips: [],
+        regions: [{ uuid: 'r1', x: -2000, z: 0, shape: 'sphere', radius: 500, color: [0.2, 0.4, 0.8], name: 'Kaleth Nebula' }],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+        waypoint: { x: 2000, z: 1000 },
+      };
+      h.tickRaf();
+      // 10 base x 2 dpr x 1 zoomFont x 1.5 text scale = 30px.
+      const wp = h.fakeCtx._calls.fillText.filter((f) => f.text === 'WP');
+      expect(wp[0].font).toBe('30px "JetBrains Mono", monospace');
+      // Regions share the blip name's 12px base: 12 x 2 x 1.5 = 36px.
+      const region = h.fakeCtx._calls.fillText.filter((f) => f.text === 'Kaleth Nebula');
+      expect(region[0].font).toBe('36px "JetBrains Mono", monospace');
+    });
+
+    it('renders labels at their unscaled size with no accessibility profile applied', () => {
+      const h = setup();
+      h.el.state = {
+        blips: [{ uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' }],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+      const draws = h.fakeCtx._calls.fillText.filter((f) => f.text === 'Alpha');
+      expect(draws[0].font).toBe('24px "JetBrains Mono", monospace');
     });
 
     it('blip names are not drawn when zoomed out below the label floor', () => {

@@ -360,6 +360,43 @@ describe('PhRadar', () => {
     expect(three.fakeCtx.font).toBe('33px "JetBrains Mono", monospace');
   });
 
+  // ── Operator text scale (PRD #1418 story 3, issue #1423) ──────────────
+  //
+  // A `<canvas>` font string sits outside the CSS ramp: nothing in
+  // gui/console.css reaches a value baked into a draw call, which is how
+  // contact labels and the range-ring scale readout came to render at a fixed
+  // size regardless of the operator's chosen text scale. The scope's own
+  // geometry (rings, blip positions) stays exactly where PRD #1418's map
+  // exception says it may — only the TEXT painted over it grows.
+
+  it('grows blip labels and the range-ring scale readout with the operator text scale', () => {
+    const h = setup({ dpr: 1 });
+    h.el.style.setProperty('--a11y-text-scale', '2');
+    h.el.state = {
+      blips: [{ uuid: 'a', radar_x: 0, radar_y: 0, label: 'HARROW' }],
+      range: 5000,
+    };
+    h.tickRaf();
+    // 11px floor x 1 dpr x 2x text scale.
+    expect(h.fakeCtx.font).toBe('22px "JetBrains Mono", monospace');
+  });
+
+  it('composes the text scale with device pixel ratio rather than replacing it', () => {
+    const h = setup({ dpr: 3 });
+    h.el.style.setProperty('--a11y-text-scale', '1.5');
+    h.el.state = { blips: [{ uuid: 'a', radar_x: 0, radar_y: 0, label: 'HARROW' }] };
+    h.tickRaf();
+    // 11 x 3 dpr x 1.5 text scale = 49.5, rounded.
+    expect(h.fakeCtx.font).toBe('50px "JetBrains Mono", monospace');
+  });
+
+  it('falls back to the unscaled floor with no accessibility profile applied (default 1x)', () => {
+    const h = setup({ dpr: 1 });
+    h.el.state = { blips: [{ uuid: 'a', radar_x: 0, radar_y: 0, label: 'HARROW' }] };
+    h.tickRaf();
+    expect(h.fakeCtx.font).toBe('11px "JetBrains Mono", monospace');
+  });
+
   it('keeps the blip tap target at its CSS size on a high-DPI screen', () => {
     const hits = [];
     const h = setup({ dpr: 3, cssSize: 300, sendAction: (a, p) => hits.push([a, p]) });

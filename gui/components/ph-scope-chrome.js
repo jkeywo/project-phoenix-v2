@@ -253,6 +253,39 @@ export function phPx(el, name, fallback) {
 export const TEXT_MIN_FALLBACK_PX = 11;
 
 /**
+ * The operator's live text-scale multiplier (`--a11y-text-scale`), resolved
+ * against a real element the same way `phPx` resolves a length.
+ *
+ * A `<canvas>` font string sits outside the CSS ramp entirely — nothing in
+ * `gui/console.css` reaches a value baked into a draw call — which is how the
+ * radar's and the navigation chart's own contact-name labels came to render at
+ * a fixed size regardless of the operator's chosen text scale (PRD #1418
+ * story 3: "spatial content retains its meaning while its labels ... remain
+ * readable"). Multiplying a canvas font size by this value is the one seam
+ * that lets 200% text reach those labels: the MAP stays genuinely spatial
+ * (blip positions, chart pan/zoom, grid geometry are untouched), only the
+ * TEXT painted onto it grows.
+ *
+ * `--a11y-text-scale` is a bare number (not a length), so this deliberately
+ * does not reuse `phPx`'s px-only contract — it is the sibling read, not a
+ * caller of it.
+ *
+ * @param {Element} el
+ * @param {number} fallback   the multiplier to use where nothing can resolve
+ *   it (Node, jsdom, or a document with no accessibility profile applied)
+ * @returns {number}
+ */
+export function textScaleOf(el, fallback = 1) {
+  if (!el || typeof getComputedStyle !== 'function') return fallback;
+  let style;
+  try { style = getComputedStyle(el); } catch (_) { return fallback; }
+  if (!style || typeof style.getPropertyValue !== 'function') return fallback;
+  const raw = (style.getPropertyValue('--a11y-text-scale') || '').trim();
+  const scale = parseFloat(raw);
+  return Number.isFinite(scale) && scale > 0 ? scale : fallback;
+}
+
+/**
  * Pick a "nice" spacing for range rings: 1, 2 or 5 times a power of ten.
  *
  * The dormant gui/radar-widget.js drew three rings at a fixed 33 / 66 / 100 %

@@ -5,7 +5,7 @@
 import '../strings-boot.js';
 import { phColor } from './ph-console-styles.js';
 import {
-  ringPlan, scaleReadout, phPx, TEXT_MIN_FALLBACK_PX,
+  ringPlan, scaleReadout, phPx, TEXT_MIN_FALLBACK_PX, textScaleOf,
 } from './ph-scope-chrome.js';
 import { PhElement, phDefine } from './ph-element.js';
 
@@ -44,6 +44,15 @@ export class PhRadar extends PhElement {
   // and must NOT be scaled again. gui/components/ph-navigation-map.js reached
   // the same conclusion independently for its label fonts.
   #px = 1;
+
+  // The operator's text-scale multiplier as of the last frame this scope
+  // actually painted. Read once per rAF tick (see `#rafLoop`) so a live
+  // change — dragging the settings slider while this console is open —
+  // reaches the canvas the same frame it reaches every rem-based string,
+  // rather than waiting for some UNRELATED state push to next set
+  // `needsRender`. A CSS custom property changing is not itself a DOM
+  // mutation this element observes, so nothing else would notice.
+  #lastTextScale = NaN;
 
   template() {
     return [
@@ -121,6 +130,11 @@ export class PhRadar extends PhElement {
   }
 
   #rafLoop() {
+    const scale = textScaleOf(this);
+    if (scale !== this.#lastTextScale) {
+      this.#lastTextScale = scale;
+      this.needsRender = true;
+    }
     if (this.needsRender) this.#render();
     this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
@@ -278,9 +292,14 @@ export class PhRadar extends PhElement {
     this.needsRender = false;
   }
 
-  /** The type floor in BUFFER pixels — `--text-min`, scaled for the backing store. */
+  /**
+   * The type floor in BUFFER pixels — `--text-min`, scaled for the backing
+   * store AND for the operator's chosen text scale (PRD #1418 story 3; see
+   * `textScaleOf`). The scope's contacts, rings and grid stay exactly where
+   * they are — this only grows the TEXT drawn over them.
+   */
   #labelFontPx(px) {
-    return Math.round(phPx(this, '--text-min', TEXT_MIN_FALLBACK_PX) * px);
+    return Math.round(phPx(this, '--text-min', TEXT_MIN_FALLBACK_PX) * px * textScaleOf(this));
   }
 
   /**

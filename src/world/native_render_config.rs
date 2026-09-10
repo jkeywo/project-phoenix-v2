@@ -57,6 +57,19 @@ visual_config!(WebRenderConfig, 1024, 120.0);
 pub type PlatformRenderConfig = NativeRenderConfig;
 #[cfg(target_arch = "wasm32")]
 pub type PlatformRenderConfig = WebRenderConfig;
+impl crate::world::config::RenderConfig {
+    pub fn visuals(&self) -> &PlatformRenderConfig {
+        #[cfg(target_arch = "wasm32")]
+        {
+            &self.web
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            &self.native
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,18 +99,5 @@ mod tests {
             custom.native.mote_count,
             NativeRenderConfig::default().mote_count
         );
-    }
-}
-
-impl crate::world::config::RenderConfig {
-    pub fn visuals(&self) -> &PlatformRenderConfig {
-        #[cfg(target_arch = "wasm32")]
-        {
-            &self.web
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            &self.native
-        }
     }
 }

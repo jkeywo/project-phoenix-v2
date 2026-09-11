@@ -758,6 +758,62 @@
   }
 }
 
+/* ── Rotated phone (server/viewscreen held upright) ───────────────────── */
+/*
+ * `data-phx-force-landscape` (server.html) rotates a truly portrait phone
+ * into this file's landscape rules via a CSS transform, but `@media` still
+ * reads the true, unrotated viewport, so a rotated phone stays `orientation:
+ * portrait` and `width` at the true (narrow, pre-rotation) value — never
+ * the wide, post-rotation one. Its effective (post-rotation) width is the
+ * true viewport HEIGHT, so the same compact layout applies here, keyed on
+ * `max-height` instead of `max-width`, and scoped IN rather than excluded.
+ * A genuinely wide rotated screen (true height >= 720px, e.g. a tablet) is
+ * left on the wide layout above. Kept as an exact duplicate of the block
+ * above (mirrored selector/condition only) so the two never drift apart
+ * silently.
+ */
+@media (orientation: portrait) and (max-height: 720px) {
+  html[data-phx-force-landscape] .lobby-body {
+    flex-direction: column;
+    overflow: auto;
+  }
+  html[data-phx-force-landscape] .lobby-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    overflow-y: visible;
+  }
+  html[data-phx-force-landscape] .lobby-grid-column {
+    flex: 0 0 auto;
+  }
+  html[data-phx-force-landscape] .lobby-grid .station-card.empty.per-slot { display: none; }
+  html[data-phx-force-landscape] .reserved-aggregate.active { display: block; }
+  html[data-phx-force-landscape] .lobby-rail {
+    width: auto;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--edge-faint);
+    padding-left: 0;
+    padding-top: 0.75rem;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  html[data-phx-force-landscape] .lobby-rail-spacer { display: none; }
+  html[data-phx-force-landscape] .lobby-status-hint {
+    text-align: left;
+    border-top: none;
+    padding-top: 0;
+  }
+  html[data-phx-force-landscape] .lobby-rail-section {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  html[data-phx-force-landscape] .lobby-status-block {
+    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
 /* ── Bridge monitor row (issue #1330) ─────────────────────────────────
    One button per connected monitor, in the lobby rail. It is the first
    CONTROL on this surface — the native host composites this same lobby onto

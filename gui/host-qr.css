@@ -201,3 +201,14 @@
     width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
   }
 }
+/* Rotated phone (server/viewscreen held upright): `data-phx-force-landscape`
+   rotates a truly portrait phone into this file's wide rules via a CSS
+   transform, but `@media` still reads the true, unrotated viewport, so its
+   effective (post-rotation) width is the true viewport HEIGHT — same
+   layout, keyed on `max-height` instead of `max-width`, scoped IN rather
+   than excluded. */
+@media (orientation: portrait) and (max-height: 800px) {
+  html[data-phx-force-landscape] #overlay.pre-scenario {
+    width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
+  }
+}

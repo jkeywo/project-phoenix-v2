@@ -1005,6 +1005,17 @@ pub fn register_lockstep(app: &mut App) {
                 StateClass::Presentation,
                 "gm-action-state",
             )
+            // The multi-peer live-restore lane (issue #1447). `ClearedAtFold` in
+            // the same sense the snapshot receiver is: a transport buffer that
+            // holds a handful of readiness/agreement frames between the mesh
+            // drain and the driver that consumes them in the same frame, and is
+            // empty everywhere else. Nothing in it is state of the world -
+            // every fact a frame carries is folded into `GmLiveRestore`, which
+            // is itself neither captured nor folded.
+            .declare_state::<crate::gm_restore::GmRestoreInbox>(
+                StateClass::ClearedAtFold,
+                "gm-action-state",
+            )
             .declare_state::<SlotClaimSequence>(StateClass::Timer, "fleet-lockstep-state");
     }
     app.init_resource::<FleetRoster>()
@@ -1026,6 +1037,10 @@ pub fn register_lockstep(app: &mut App) {
         // declared to `authoritative`: it is neither captured nor folded, and
         // `publish_restore_context` only mirrors state it does not own.
         .init_resource::<crate::gm_restore::GmLiveRestore>()
+        // The multi-peer live-restore lane (issue #1447). Peeled off the mesh
+        // drain so readiness, load reports and the terminal settle stay
+        // deliverable while a held world starves `FixedUpdate`.
+        .init_resource::<crate::gm_restore::GmRestoreInbox>()
         .init_resource::<crate::gm_action::LastGmSessionProjection>()
         .init_resource::<crate::gm_event::LastGmMissionProjection>()
         .init_resource::<crate::gm_spawn::LastGmSpawnProjection>()
@@ -1398,6 +1413,13 @@ pub struct StartGrantAdmission<'w, 's> {
     gm_journal: ResMut<'w, crate::gm_action::GmActionJournal>,
     gm_paused: Res<'w, crate::gm_action::SimulationPaused>,
     gm_join_hold: Option<Res<'w, crate::gm_join::GmJoinPauseHold>>,
+    /// The owner's own live-restore state (issues #1446/#1447). Read only to
+    /// gate what may ENTER the journal, never to decide a folded outcome.
+    gm_restore: Option<Res<'w, crate::gm_restore::GmLiveRestore>>,
+    /// The multi-peer live-restore lane (issue #1447), peeled off the ordinary
+    /// mesh drain so it stays deliverable while a held world starves
+    /// `FixedUpdate` - the same argument the GM-action and join lanes make.
+    gm_restore_inbox: ResMut<'w, crate::gm_restore::GmRestoreInbox>,
     gm_results: ResMut<'w, crate::gm_action::LocalGmActionRefusals>,
     gm_puppets: Res<'w, crate::gm_puppet::StationPuppets>,
     gm_station_ships: Query<
@@ -1510,6 +1532,7 @@ pub fn apply_mesh_inbox(
                 snapshot_relay::receive_chunk(&mut join_lane.snapshot_rx, &chunk, &log);
             }
             MeshFrame::GmJoin(frame) => join_lane.inbox.push(frame),
+            MeshFrame::GmRestore(frame) => start_admission.gm_restore_inbox.push(frame),
             MeshFrame::HostLoss(loss) if private_candidate => {
                 let topology = authentication_roster
                     .as_ref()
@@ -1931,7 +1954,15 @@ pub fn apply_mesh_inbox(
                                 start_admission
                                     .gm_join_hold
                                     .as_deref()
-                                    .is_some_and(crate::gm_join::GmJoinPauseHold::active),
+                                    .is_some_and(crate::gm_join::GmJoinPauseHold::active)
+                                    || start_admission
+                                        .gm_restore
+                                        .as_deref()
+                                        .is_some_and(|restore| restore.phase().holds_world()),
+                                start_admission
+                                    .gm_restore
+                                    .as_deref()
+                                    .is_some_and(|restore| restore.phase().in_flight()),
                             )
                         });
                         let decision = match sequenced {
@@ -2022,6 +2053,10 @@ pub fn apply_mesh_inbox(
             // join lane; keep the main command/digest switch exhaustive while
             // that lane is registered beside the snapshot relay.
             MeshFrame::GmJoin(_) => {}
+            // Peeled into the live-restore lane above, for the join lane's
+            // reason: a restore HOLDS the world, so its frames must not sit
+            // behind a fixed schedule that is not running.
+            MeshFrame::GmRestore(_) => {}
         }
     }
 }

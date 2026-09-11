@@ -755,6 +755,46 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 }),
             ),
         },
+        // The multi-peer live-restore lane (issue #1447). The restore's shared
+        // identity is the canonical order of the accepted request, carried as
+        // its two parts so a decoder cannot mistake one restore for another.
+        MeshFrame::GmRestore(frame) => {
+            let order = frame.restore();
+            let mut body = serde_json::json!({
+                "from": frame.from().0,
+                "tick": 0,
+                "restore_origin": order.origin.0,
+                "restore_sequence": order.sequence,
+            });
+            let tick = match frame {
+                crate::gm_restore::GmRestoreFrame::Ready { .. } => {
+                    body["kind"] = serde_json::json!("ready");
+                    0
+                }
+                crate::gm_restore::GmRestoreFrame::Loaded { tick, digest, .. } => {
+                    body["kind"] = serde_json::json!("loaded");
+                    body["tick"] = serde_json::json!(tick);
+                    body["digest"] = serde_json::json!(format!("{digest:016x}"));
+                    *tick
+                }
+                crate::gm_restore::GmRestoreFrame::Unable { failure, .. } => {
+                    body["kind"] = serde_json::json!("unable");
+                    body["failure"] = serde_json::to_value(failure)?;
+                    0
+                }
+                crate::gm_restore::GmRestoreFrame::Settle {
+                    commit, failure, ..
+                } => {
+                    body["kind"] = serde_json::json!("settle");
+                    body["commit"] = serde_json::json!(commit);
+                    if let Some(failure) = failure {
+                        body["failure"] = serde_json::to_value(failure)?;
+                    }
+                    0
+                }
+            };
+            (tick, body)
+        }
     };
     Ok(serde_json::json!({
         MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
@@ -1065,6 +1105,40 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                 _ => return None,
             };
             Some(MeshFrame::GmJoin(frame))
+        }
+        crate::lockstep::frame::TYPE_GM_RESTORE => {
+            use crate::gm_restore::GmRestoreFrame;
+            let from = HostSlot(u32::try_from(body.get("from")?.as_u64()?).ok()?);
+            let restore = crate::gm_action::GmActionOrder::new(
+                HostSlot(u32::try_from(body.get("restore_origin")?.as_u64()?).ok()?),
+                body.get("restore_sequence")?.as_u64()?,
+            );
+            let failure = |body: &serde_json::Value| {
+                body.get("failure")
+                    .and_then(|value| serde_json::from_value(value.clone()).ok())
+            };
+            let frame = match body.get("kind")?.as_str()? {
+                "ready" => GmRestoreFrame::Ready { from, restore },
+                "loaded" => GmRestoreFrame::Loaded {
+                    from,
+                    restore,
+                    tick: body.get("tick")?.as_u64()?,
+                    digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
+                },
+                "unable" => GmRestoreFrame::Unable {
+                    from,
+                    restore,
+                    failure: failure(&body)?,
+                },
+                "settle" => GmRestoreFrame::Settle {
+                    from,
+                    restore,
+                    commit: body.get("commit")?.as_bool()?,
+                    failure: failure(&body),
+                },
+                _ => return None,
+            };
+            Some(MeshFrame::GmRestore(frame))
         }
         _ => None,
     }
@@ -2039,6 +2113,63 @@ mod mesh_frame_tests {
             );
             assert!(text.contains("\"t\":\"gm-join\""), "{text}");
             assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+        }
+    }
+
+    /// The multi-peer live-restore lane crosses the JS wire intact (issue
+    /// #1447), carrying the canonical order that says WHICH restore each frame
+    /// belongs to - and carrying no candidate slot id, because which private
+    /// catalogue row a GM picked is their storage key and not fleet traffic.
+    #[test]
+    fn live_restore_frames_round_trip_on_the_shared_envelope() {
+        use crate::gm_action::GmActionOrder;
+        use crate::gm_restore::{GmRestoreFailure, GmRestoreFrame};
+
+        let restore = GmActionOrder::new(HostSlot(3), 11);
+        let frames = [
+            GmRestoreFrame::Ready {
+                from: HostSlot(2),
+                restore,
+            },
+            GmRestoreFrame::Loaded {
+                from: HostSlot(2),
+                restore,
+                tick: 418,
+                digest: 0xdead_beef_0bad_c0de,
+            },
+            GmRestoreFrame::Unable {
+                from: HostSlot(1),
+                restore,
+                failure: GmRestoreFailure::TransferIncomplete {
+                    detail: "the candidate never finished arriving".into(),
+                },
+            },
+            GmRestoreFrame::Settle {
+                from: HostSlot(3),
+                restore,
+                commit: false,
+                failure: Some(GmRestoreFailure::PeerDigestMismatch { peers: 2 }),
+            },
+            GmRestoreFrame::Settle {
+                from: HostSlot(3),
+                restore,
+                commit: true,
+                failure: None,
+            },
+        ];
+        for frame in frames {
+            let wire = MeshFrame::GmRestore(frame.clone());
+            let text = super::encode_mesh_frame(&wire).expect("encodes");
+            assert!(
+                text.contains(&format!("\"m\":{HOST_MESH_PROTOCOL}")),
+                "the revision travels: {text}"
+            );
+            assert!(text.contains("\"t\":\"gm-restore\""), "{text}");
+            assert!(
+                !text.contains("\"candidate\""),
+                "a catalogue key is one peer's storage, never fleet traffic: {text}"
+            );
+            assert_eq!(super::decode_mesh_frame(&text), Some(wire));
         }
     }
 

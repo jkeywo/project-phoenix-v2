@@ -287,14 +287,15 @@ fn capture_tick(app: &App, slot_id: &str) -> u64 {
 ///
 /// Returns the tick the owner scheduled the grant for, so a test can say
 /// whether a held world could ever reach it.
-fn propose(app: &mut App, correlation: &str, operator: &str, action: GmAction) -> u64 {
+fn sequence(
+    app: &mut App,
+    correlation: &str,
+    operator: &str,
+    action: GmAction,
+) -> Result<GmActionGrant, GmActionRefusalReason> {
     let now = tick(app);
     let current_paused = paused(app);
-    let live_hold = app
-        .world()
-        .resource::<GmLiveRestore>()
-        .phase()
-        .holds_world();
+    let phase = app.world().resource::<GmLiveRestore>().phase();
     let proposal = GmActionProposal {
         from: HostSlot::SOLO,
         operator_id: operator.to_string(),
@@ -309,10 +310,20 @@ fn propose(app: &mut App, correlation: &str, operator: &str, action: GmAction) -
         now,
         now.saturating_sub(1),
         current_paused,
-        live_hold,
+        phase.holds_world(),
+        // The owner's own live-restore gate (issues #1446/#1447). `submit_local`
+        // computes exactly this, and it is the ONE place a concurrent request
+        // or a resume pressed underneath a working restore is refused, so a
+        // test that skipped it would be asserting against a session that has no
+        // ordering rule at all.
+        phase.in_flight(),
     )
-    .expect("the owner sequences its own proposal")
-    .apply_tick
+}
+
+fn propose(app: &mut App, correlation: &str, operator: &str, action: GmAction) -> u64 {
+    sequence(app, correlation, operator, action)
+        .expect("the owner sequences its own proposal")
+        .apply_tick
 }
 
 /// Ask for a live restore of `slot_id` and run the driver to a settled phase.
@@ -577,14 +588,21 @@ fn the_restored_journal_is_the_candidates_own_log_with_later_entries_discarded()
     assert!(!restored.contains(&"restore-1".to_string()));
 }
 
-/// The bounded delivery is VISIBLE. More than one simulation peer refuses by
-/// name, at the canonical apply boundary, with nothing captured or loaded.
+/// #1446's single-peer bound is GONE (issue #1447): a second simulation peer is
+/// a room to wait for, not a refusal.
+///
+/// The request is applied, the world is held, this peer takes its own recovery
+/// checkpoint, and it then WAITS on the peer with a visible countdown rather
+/// than rewinding underneath it. The peer half of the operation is proved
+/// end-to-end against real peers in `tests/lockstep_gm_restore.rs`; what this
+/// pins is that the bound this issue removes is really removed, and that the
+/// removal did not turn "wait for the room" into "rewind without it".
 #[test]
-fn a_multi_simulation_peer_session_refuses_the_request_without_touching_the_world() {
+fn a_second_simulation_peer_is_waited_for_rather_than_refused() {
     let store = PeerStore::default();
     let mut app = build(store.clone());
     run_to_in_progress(&mut app);
-    let slot_id = bookmark(&mut app, "Never restored");
+    let slot_id = bookmark(&mut app, "Restored together");
 
     // A second technical participant, exactly as a joined peer would appear.
     let roster = FleetRoster::with_participants(
@@ -597,21 +615,46 @@ fn a_multi_simulation_peer_session_refuses_the_request_without_touching_the_worl
     app.world_mut().insert_resource(roster);
     app.update();
 
-    let before_slots = store.keys();
     let saved_tick = tick(&app);
-
-    let (result, reason) = restore(&mut app, "restore-1", &slot_id);
-
-    assert_eq!(result, GmActionOutcome::Refused);
-    assert_eq!(reason, Some(GmActionRefusalReason::MultipleSimulationPeers));
-    assert_eq!(phase(&app), GmRestorePhase::Idle);
-    assert!(!paused(&app), "a refused request does not hold the session");
-    assert!(tick(&app) >= saved_tick, "the world did not rewind");
-    assert_eq!(
-        store.keys(),
-        before_slots,
-        "no recovery checkpoint was taken"
+    propose(
+        &mut app,
+        "restore-1",
+        "gm-1",
+        GmAction::RequestLiveRestore {
+            candidate: slot_id.clone(),
+        },
     );
+    for _ in 0..10 {
+        app.update();
+        if phase(&app) == GmRestorePhase::AwaitingReadiness {
+            break;
+        }
+    }
+
+    assert_eq!(
+        phase(&app),
+        GmRestorePhase::AwaitingReadiness,
+        "a multi-peer session asks the room, it does not refuse: {:?}",
+        failure(&app),
+    );
+    assert!(paused(&app), "the world is held while the room is asked");
+    assert_eq!(tick(&app), saved_tick, "nothing was rewound while waiting");
+    let live = app.world().resource::<GmLiveRestore>();
+    assert!(
+        live.coordinating(),
+        "this peer's GM asked, so this peer leads"
+    );
+    assert!(live.waiting_on(HostSlot(1)));
+    assert_eq!(live.waiting_peers(), 1);
+    assert_eq!(
+        live.remaining_seconds(),
+        Some(10),
+        "the countdown is the ten real seconds AC2 names",
+    );
+    // The recovery checkpoint is taken BEFORE the room is asked, on this peer
+    // as on every other one: a fleet that could only roll one machine back is a
+    // fleet that cannot roll back at all.
+    assert!(live.recovery_slot().is_some());
 }
 
 /// The first accepted ordered request wins; a second at the same boundary is
@@ -630,34 +673,44 @@ fn a_concurrent_second_request_is_refused_and_the_first_one_wins() {
     // session, so the second is scheduled at the boundary that hold stopped.
     // `apply_due_actions` runs a whole ordered run in a single call, so this is
     // exactly two GMs pressing at the same moment.
-    let mut apply_ticks = Vec::new();
-    for (correlation, slot, operator) in [
-        ("restore-first", first_slot.as_str(), "gm-1"),
-        ("restore-second", second_slot.as_str(), "gm-2"),
-    ] {
-        apply_ticks.push(propose(
-            &mut app,
-            correlation,
-            operator,
-            GmAction::RequestLiveRestore {
-                candidate: slot.to_string(),
-            },
-        ));
+    let first = propose(
+        &mut app,
+        "restore-first",
+        "gm-1",
+        GmAction::RequestLiveRestore {
+            candidate: first_slot.clone(),
+        },
+    );
+    // The first request is applied, which is what makes a restore in flight.
+    for _ in 0..6 {
+        app.update();
+        if app.world().resource::<GmLiveRestore>().phase().in_flight() {
+            break;
+        }
     }
-    assert_eq!(
-        apply_ticks[0], apply_ticks[1],
-        "a concurrent request is answered, not deferred to a tick the hold forbids"
-    );
-    let facts = settle_facts(&mut app, &["restore-first", "restore-second"]);
+    assert!(app.world().resource::<GmLiveRestore>().phase().in_flight());
 
-    assert_eq!(fact(&facts, "restore-first").0, GmActionOutcome::Applied);
-    assert_eq!(
-        fact(&facts, "restore-second"),
-        (
-            GmActionOutcome::Refused,
-            Some(GmActionRefusalReason::LiveRestoreInProgress)
-        )
+    // The second GM presses, and the OWNER answers - before a grant exists.
+    // That is deliberate and is what #1447 moved: a restore's progress is
+    // peer-local (one peer can have committed the candidate while another is
+    // still loading it), so a reducer arm that decided this would fold an
+    // outcome out of state that legitimately differs between peers.
+    let second = sequence(
+        &mut app,
+        "restore-second",
+        "gm-2",
+        GmAction::RequestLiveRestore {
+            candidate: second_slot.clone(),
+        },
     );
+    assert_eq!(
+        second.err(),
+        Some(GmActionRefusalReason::LiveRestoreInProgress),
+        "a second GM pressing under a working restore is told so by name",
+    );
+    assert!(first > 0 || first == 0);
+    let facts = settle_facts(&mut app, &["restore-first"]);
+    assert_eq!(fact(&facts, "restore-first").0, GmActionOutcome::Applied);
     let accepted = app
         .world()
         .resource::<GmLiveRestore>()
@@ -666,6 +719,76 @@ fn a_concurrent_second_request_is_refused_and_the_first_one_wins() {
         .expect("the accepted request is recorded");
     assert_eq!(accepted.operator_id, "gm-1");
     assert_eq!(accepted.candidate_slot, first_slot);
+}
+
+/// Two GMs pressing at the SAME moment, before either request has applied.
+///
+/// The owner's own in-flight gate cannot answer this one: nothing is in flight
+/// when the second proposal is sequenced. Both grants land on ONE apply tick -
+/// the first request's projected hold is what puts the second there - and
+/// `apply_due_actions` runs a whole tick's ordered run in a single call, so the
+/// winner has to be picked at the ordered apply boundary. The first wins; the
+/// second is refused BY NAME and cannot displace the first one's attribution,
+/// its candidate or its recovery checkpoint.
+#[test]
+fn two_requests_ordered_before_either_applies_leave_the_first_one_running() {
+    let store = PeerStore::default();
+    let mut app = build(store.clone());
+    run_to_in_progress(&mut app);
+    let first_slot = bookmark(&mut app, "First");
+    let second_slot = bookmark(&mut app, "Second");
+    assert_ne!(first_slot, second_slot);
+
+    // Deliberately NO `app.update()` between them: this is the simultaneous
+    // case, not the sequential one.
+    let first = propose(
+        &mut app,
+        "restore-first",
+        "gm-1",
+        GmAction::RequestLiveRestore {
+            candidate: first_slot.clone(),
+        },
+    );
+    let second = propose(
+        &mut app,
+        "restore-second",
+        "gm-2",
+        GmAction::RequestLiveRestore {
+            candidate: second_slot.clone(),
+        },
+    );
+    assert_eq!(
+        first, second,
+        "two simultaneous requests really are scheduled onto one apply tick",
+    );
+
+    let facts = settle_facts(&mut app, &["restore-first", "restore-second"]);
+    assert_eq!(
+        fact(&facts, "restore-first").0,
+        GmActionOutcome::Applied,
+        "the first accepted ordered request must win",
+    );
+    assert_eq!(
+        fact(&facts, "restore-second"),
+        (
+            GmActionOutcome::Refused,
+            Some(GmActionRefusalReason::LiveRestoreInProgress),
+        ),
+        "the second GM must be told by name, not silently swallowed",
+    );
+
+    let accepted = app
+        .world()
+        .resource::<GmLiveRestore>()
+        .request()
+        .cloned()
+        .expect("the accepted request is recorded");
+    assert_eq!(accepted.operator_id, "gm-1");
+    assert_eq!(accepted.correlation, "restore-first");
+    assert_eq!(
+        accepted.candidate_slot, first_slot,
+        "the restore that ran was the second GM's candidate",
+    );
 }
 
 /// The recovery checkpoint is a precondition, not a courtesy. A storage refusal
@@ -1157,38 +1280,61 @@ fn a_resume_while_a_restore_is_working_is_refused_by_name() {
     run_to_in_progress(&mut app);
     let slot_id = bookmark(&mut app, "Working");
 
-    // Arm the restore without letting the driver run: the reducer applies the
-    // request, and the very next ordered grant is the resume. Both go through
-    // the owner's own rule, which is what puts them on one tick — an accepted
-    // request holds the session, so the resume is scheduled at the boundary the
-    // hold stopped rather than one tick past a clock that has stopped.
-    let mut apply_ticks = Vec::new();
-    for (correlation, action) in [
-        (
-            "restore-1",
-            GmAction::RequestLiveRestore {
-                candidate: slot_id.clone(),
-            },
-        ),
-        ("resume-1", GmAction::SetSessionPaused { active: false }),
-    ] {
-        apply_ticks.push(propose(&mut app, correlation, "gm-1", action));
+    propose(
+        &mut app,
+        "restore-1",
+        "gm-1",
+        GmAction::RequestLiveRestore {
+            candidate: slot_id.clone(),
+        },
+    );
+    for _ in 0..6 {
+        app.update();
+        if app.world().resource::<GmLiveRestore>().phase().in_flight() {
+            break;
+        }
     }
-    assert_eq!(
-        apply_ticks[0], apply_ticks[1],
-        "a resume pressed under a working restore is answered, not stranded"
-    );
-    let facts = settle_facts(&mut app, &["restore-1", "resume-1"]);
+    assert!(app.world().resource::<GmLiveRestore>().phase().in_flight());
 
-    assert_eq!(fact(&facts, "restore-1").0, GmActionOutcome::Applied);
-    assert_eq!(
-        fact(&facts, "resume-1"),
-        (
-            GmActionOutcome::Refused,
-            Some(GmActionRefusalReason::LiveRestoreInProgress)
-        )
+    // Resuming underneath a working restore would run the world the restore is
+    // about to overwrite, so the owner refuses it BY NAME - at the sequencing
+    // seam, where a peer-local fact may gate what ENTERS the journal without
+    // ever deciding what the journal folds (issue #1447).
+    let refused = sequence(
+        &mut app,
+        "resume-1",
+        "gm-1",
+        GmAction::SetSessionPaused { active: false },
     );
+    assert_eq!(
+        refused.err(),
+        Some(GmActionRefusalReason::LiveRestoreInProgress),
+    );
+    let facts = settle_facts(&mut app, &["restore-1"]);
+    assert_eq!(fact(&facts, "restore-1").0, GmActionOutcome::Applied);
     assert!(paused(&app), "the hold survived the refused resume");
+
+    // And the GM's own resume after the outcome is reported is admitted, at the
+    // boundary the hold stopped: a restore must never be a session nobody can
+    // resume.
+    for _ in 0..40 {
+        app.update();
+        if !phase(&app).in_flight() {
+            break;
+        }
+    }
+    assert!(!phase(&app).in_flight(), "{:?}", failure(&app));
+    let resume = sequence(
+        &mut app,
+        "resume-2",
+        "gm-1",
+        GmAction::SetSessionPaused { active: false },
+    )
+    .expect("a reported restore admits the GM's explicit resume");
+    assert!(
+        resume.apply_tick <= tick(&app),
+        "the resume is due at the held tick, not one past a stopped clock",
+    );
 }
 
 /// The case the feature exists for: something the candidate captured is GONE

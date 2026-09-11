@@ -267,6 +267,19 @@ pub struct GmPeerHealth {
     pub behind_ticks: Option<u64>,
     /// Whether this row is the peer the operator is sitting at.
     pub local: bool,
+    /// A live restore is waiting on this peer to answer (issue #1447).
+    ///
+    /// The countdown on the restore row says how long is left; this says WHO
+    /// the room is waiting for, in the peer vocabulary the desk already reads.
+    /// Absent on every ordinary row, so a session with no restore in flight is
+    /// byte-identical to its pre-#1447 shape.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restore_waiting: bool,
+    /// This peer did not answer in time and was disconnected so the rest of the
+    /// room could carry on (issue #1447). It rejoins through the ordinary
+    /// snapshot recovery, on its own, and is never resumed automatically.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restore_excluded: bool,
 }
 
 /// What a recovery in flight is doing, if one is.
@@ -304,6 +317,27 @@ pub struct GmLiveRestoreHealth {
     /// The String Table id naming what went wrong, absent on success.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
+    /// The `{peers}` the failure's own sentence takes, for the failures that
+    /// are about the room rather than this peer (issue #1447). A sentence whose
+    /// placeholder nothing fills reaches the desk with a brace in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_peers: Option<u32>,
+    /// Whole REAL seconds left before this peer stops waiting on the room
+    /// (issue #1447). Absent when nothing is being waited for, which is what
+    /// lets the desk draw a countdown only while there is one to draw.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub countdown_seconds: Option<u64>,
+    /// How many peers have still to answer. Counted, never named by slot - the
+    /// `peers` rows carry `restore_waiting` for the naming.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub waiting_peers: usize,
+    /// How many peers this restore disconnected for not answering.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub excluded_peers: usize,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 /// The whole public health picture, absolute.
@@ -459,7 +493,7 @@ fn recovery_alert(status: &crate::lockstep::recovery::RecoveryStatus) -> Pending
 fn live_restore_health(
     restore: &crate::gm_restore::GmLiveRestore,
 ) -> Option<(GmLiveRestoreHealth, PendingAlert)> {
-    use crate::gm_restore::GmRestorePhase;
+    use crate::gm_restore::{GmRestoreFailure, GmRestorePhase};
 
     let phase = restore.phase();
     if phase == GmRestorePhase::Idle {
@@ -470,14 +504,25 @@ fn live_restore_health(
     let failure = restore
         .failure()
         .map(|failure| failure.label_id().to_string());
+    let failure_peers = restore.failure().and_then(GmRestoreFailure::peers);
     let (reason_id, kind) = match phase {
         GmRestorePhase::Idle => unreachable!("filtered above"),
         GmRestorePhase::Accepted | GmRestorePhase::CapturingRecovery => (
             "server.gm.health.reason.live_restore_capturing",
             GmHealthAlertKind::LiveRestoreInProgress,
         ),
+        // Waiting on the room, with the countdown and the peers it is waiting
+        // for on the same row (issue #1447).
+        GmRestorePhase::AwaitingReadiness => (
+            "server.gm.health.reason.live_restore_readiness",
+            GmHealthAlertKind::LiveRestoreInProgress,
+        ),
         GmRestorePhase::Loading => (
             "server.gm.health.reason.live_restore_loading",
+            GmHealthAlertKind::LiveRestoreInProgress,
+        ),
+        GmRestorePhase::AwaitingAgreement => (
+            "server.gm.health.reason.live_restore_agreement",
             GmHealthAlertKind::LiveRestoreInProgress,
         ),
         GmRestorePhase::Restored => (
@@ -509,6 +554,14 @@ fn live_restore_health(
     if let Some(detail) = failure.clone() {
         params.push(("detail", detail));
     }
+    params.push((
+        "seconds",
+        restore
+            .remaining_seconds()
+            .map_or_else(String::new, |seconds| seconds.to_string()),
+    ));
+    params.push(("peers", restore.waiting_peers().to_string()));
+    params.push(("excluded", restore.excluded_peers().to_string()));
     let key = format!(
         "live-restore:{}:{}",
         request.map_or(0, |request| request.requested_tick),
@@ -521,6 +574,10 @@ fn live_restore_health(
             working: phase.in_flight(),
             restored_tick: restore.restored_tick(),
             failure,
+            failure_peers,
+            countdown_seconds: restore.remaining_seconds(),
+            waiting_peers: restore.waiting_peers(),
+            excluded_peers: restore.excluded_peers(),
         },
         PendingAlert {
             key,
@@ -722,6 +779,12 @@ pub fn publish_health_projection(
             state,
             behind_ticks,
             local: is_local,
+            restore_waiting: restore
+                .as_deref()
+                .is_some_and(|restore| restore.waiting_on(*slot)),
+            restore_excluded: restore
+                .as_deref()
+                .is_some_and(|restore| restore.excluded(*slot)),
         });
     }
 
@@ -1004,6 +1067,8 @@ mod tests {
                 state: GmHealthState::Live,
                 behind_ticks: None,
                 local: true,
+                restore_waiting: false,
+                restore_excluded: false,
             }],
             ..Default::default()
         };

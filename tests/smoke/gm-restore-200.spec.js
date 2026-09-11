@@ -9,8 +9,14 @@ import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
 const GM_VIEWPORT = DEVICE_MATRIX.find((row) => row.id === 'desktop-1280x720-gm');
 const MAX_TEXT_SCALE = Math.max(...TEXT_SCALES);
 
-// Single-simulation-peer live restore at the GM console's smallest supported
-// landscape viewport with text at 200% (issues #1446 / #1418).
+// Live restore at the GM console's smallest supported landscape viewport with
+// text at 200% (issues #1446 / #1447 / #1418).
+//
+// One simulation peer, which after #1447 is not a special case but the smallest
+// room: the same phases run, the readiness step passes straight through because
+// there is nobody to wait for, and no countdown is drawn. The multi-peer half
+// is proved against three real simulations in `tests/lockstep_gm_restore.rs`,
+// which is the only place three peers can be stood up at once.
 //
 // A REAL restore, on the real page: a real bookmark through the ordinary save
 // machinery, then the typed `request_live_restore` action through real GM
@@ -101,6 +107,9 @@ test('a GM restores a checkpoint and resumes it at 200% text on 1280x720',
     await expect(restore).toHaveAttribute('data-phase', 'restored');
     const statusText = await page.locator('#gm-restore-status').textContent();
     expect(statusText.trim().length).toBeGreaterThan(0);
+    // And no countdown was ever drawn: this room has nobody to wait for, and a
+    // countdown with nothing behind it reads as a stall (#1447).
+    expect(await restore.getAttribute('data-countdown')).toBe(null);
 
     // The same fact reaches the unfilterable technical banner (#1437), so a GM
     // who did not press it still sees that the world was replaced.

@@ -1,11 +1,21 @@
 /**
- * The single-simulation-peer live-restore control (issue #1446).
+ * The live-restore control (issues #1446 and #1447).
  *
  * A GM has already previewed and selected a candidate in the checkpoint panel
  * (#1445). This control is the one place that asks for that candidate to be
  * loaded, and it is deliberately thin: it submits the typed, attributed
  * `request_live_restore` action and then READS the answer off the projection
  * every other technical condition arrives on. It decides nothing.
+ *
+ * # Waiting on the room (issue #1447)
+ *
+ * A rewind of a session with more than one simulation peer has two waits in it,
+ * and a facilitator standing at the desk has to be able to plan around both. So
+ * the status line carries a COUNTDOWN in whole seconds and a count of the peers
+ * still to answer, and the peer rows on the health panel carry
+ * `restore_waiting` so the room can be named rather than counted. Neither is a
+ * pop-up and neither is a spinner: a wait a GM cannot read is a wait that feels
+ * like a hang.
  *
  * # Why the state comes from the health projection
  *
@@ -46,11 +56,14 @@ export const GM_RESTORE_CONFIRMATION = Object.freeze({
 
 /** Every phase `GmRestorePhase::as_wire` may report. */
 export const GM_RESTORE_PHASES = Object.freeze([
-  'idle', 'accepted', 'capturing-recovery', 'loading', 'restored', 'rolled-back', 'failed',
+  'idle', 'accepted', 'capturing-recovery', 'awaiting-readiness', 'loading',
+  'awaiting-agreement', 'restored', 'rolled-back', 'failed',
 ]);
 
 /** Phases in which the world is being changed and no new request may be made. */
-const WORKING_PHASES = new Set(['accepted', 'capturing-recovery', 'loading']);
+const WORKING_PHASES = new Set([
+  'accepted', 'capturing-recovery', 'awaiting-readiness', 'loading', 'awaiting-agreement',
+]);
 
 /** The String Table id naming one phase. */
 export function restorePhaseLabelId(phase) {
@@ -75,6 +88,7 @@ export function parseGmRestoreState(payload) {
     return { phase: 'idle', operator: '', working: false, restoredTick: null, failure: null, paused: projection.paused };
   }
   const phase = GM_RESTORE_PHASES.includes(row.phase) ? row.phase : 'idle';
+  const counted = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
   return {
     phase,
     operator: typeof row.operator === 'string' ? row.operator : '',
@@ -84,9 +98,45 @@ export function parseGmRestoreState(payload) {
     working: row.working === true && WORKING_PHASES.has(phase),
     restoredTick: Number.isSafeInteger(row.restored_tick) ? row.restored_tick : null,
     failure: typeof row.failure === 'string' && row.failure.length > 0 ? row.failure : null,
+    // The `{peers}` that failure's own sentence takes, when it has one.
+    failurePeers: counted(row.failure_peers),
+    // The two numbers a wait is readable by (issue #1447). A countdown is only
+    // meaningful while something is actually being waited for, so an absent or
+    // nonsense value is `null` rather than a zero that would read as "now".
+    countdown: Number.isSafeInteger(row.countdown_seconds) && row.countdown_seconds >= 0
+      ? row.countdown_seconds
+      : null,
+    waitingPeers: counted(row.waiting_peers),
+    excludedPeers: counted(row.excluded_peers),
     paused: projection.paused,
+    // Which peers, named the way the health panel names them. A GM waiting on
+    // the room should not have to count rows to find out who is missing.
+    waitingFor: Array.isArray(projection.peers)
+      ? projection.peers.filter((peer) => peer && peer.restore_waiting === true)
+        .map((peer) => peer.id).filter((id) => typeof id === 'string' && id.length > 0)
+      : [],
+    excludedFor: Array.isArray(projection.peers)
+      ? projection.peers.filter((peer) => peer && peer.restore_excluded === true)
+        .map((peer) => peer.id).filter((id) => typeof id === 'string' && id.length > 0)
+      : [],
   };
 }
+
+/** The empty state, so a reset and a first paint say the same thing. */
+const IDLE_STATE = Object.freeze({
+  phase: 'idle',
+  operator: '',
+  working: false,
+  restoredTick: null,
+  failure: null,
+  failurePeers: 0,
+  countdown: null,
+  waitingPeers: 0,
+  excludedPeers: 0,
+  paused: false,
+  waitingFor: [],
+  excludedFor: [],
+});
 
 export function createGmRestoreControl({
   doc = globalThis.document,
@@ -108,9 +158,7 @@ export function createGmRestoreControl({
   const restoreButton = el('apply');
   const resumeButton = el('resume');
 
-  let state = {
-    phase: 'idle', operator: '', working: false, restoredTick: null, failure: null, paused: false,
-  };
+  let state = { ...IDLE_STATE };
   let pending = null;
   let timer = null;
   let localRefusal = '';
@@ -137,6 +185,25 @@ export function createGmRestoreControl({
   const canResume = () => !!getOperator() && !pending
     && !state.working && state.phase !== 'idle' && state.paused;
 
+  /**
+   * Mark one control pressable or not, WITHOUT taking focus off the operator.
+   *
+   * `aria-disabled` always tells the truth. The native `disabled` attribute is
+   * withheld from a button that currently holds focus, because disabling the
+   * focused node drops focus to the document body - and a rewind has five
+   * working steps, so a GM who tabbed to Resume and then watched the restore
+   * work would silently lose their place mid-operation (PRD #1418 story 29).
+   * Both handlers already refuse when the control is not pressable, so a
+   * focused, aria-disabled button is inert rather than a trap; the next render
+   * after focus moves away disables it natively like any other.
+   */
+  function setPressable(button, pressable) {
+    if (!button) return;
+    button.setAttribute('aria-disabled', String(!pressable));
+    const focused = doc && doc.activeElement === button;
+    button.disabled = !pressable && !focused;
+  }
+
   function setStatus(tone, message) {
     if (!status) return;
     status.dataset.tone = tone;
@@ -144,14 +211,34 @@ export function createGmRestoreControl({
     status.hidden = message === '';
   }
 
-  /** The phase sentence, plus whatever the phase itself has to add. */
+  /**
+   * The phase sentence, plus whatever the phase itself has to add.
+   *
+   * The wait sentences are appended rather than folded into the phase string so
+   * that the phase a screen reader hears first is always the same words for the
+   * same step, and the countdown that follows is the part that changes.
+   */
   function phaseText() {
     const base = t(restorePhaseLabelId(state.phase), {
       operator: state.operator,
       tick: state.restoredTick === null ? '' : String(state.restoredTick),
     });
-    if (!state.failure) return base;
-    return `${base} ${t(state.failure)}`;
+    const parts = [base];
+    if (state.working && state.countdown !== null && state.waitingPeers > 0) {
+      parts.push(t('server.gm.restore.waiting', {
+        peers: String(state.waitingPeers),
+        seconds: String(state.countdown),
+        names: state.waitingFor.join(', '),
+      }));
+    }
+    if (state.excludedPeers > 0) {
+      parts.push(t('server.gm.restore.excluded', {
+        peers: String(state.excludedPeers),
+        names: state.excludedFor.join(', '),
+      }));
+    }
+    if (state.failure) parts.push(t(state.failure, { peers: String(state.failurePeers) }));
+    return parts.join(' ');
   }
 
   /**
@@ -186,17 +273,23 @@ export function createGmRestoreControl({
   }
 
   function render() {
-    if (region) region.dataset.phase = state.phase;
+    if (region) {
+      region.dataset.phase = state.phase;
+      // Read by the 200% layout and by tests: a countdown that exists only
+      // inside a sentence cannot be styled, and a value of `0` is a real
+      // countdown reading rather than an absent one.
+      if (state.working && state.countdown !== null) {
+        region.dataset.countdown = String(state.countdown);
+        region.dataset.waiting = String(state.waitingPeers);
+      } else {
+        delete region.dataset.countdown;
+        delete region.dataset.waiting;
+      }
+    }
     if (summary) summary.textContent = candidateSummary();
-    if (restoreButton) {
-      restoreButton.disabled = !canRequest();
-      restoreButton.setAttribute('aria-disabled', String(!canRequest()));
-    }
-    if (resumeButton) {
-      resumeButton.hidden = false;
-      resumeButton.disabled = !canResume();
-      resumeButton.setAttribute('aria-disabled', String(!canResume()));
-    }
+    setPressable(restoreButton, canRequest());
+    if (resumeButton) resumeButton.hidden = false;
+    setPressable(resumeButton, canResume());
     if (localRefusal) {
       setStatus('failed', localRefusal);
       return;
@@ -345,9 +438,7 @@ export function createGmRestoreControl({
   function reset() {
     clearPending();
     localRefusal = '';
-    state = {
-      phase: 'idle', operator: '', working: false, restoredTick: null, failure: null, paused: false,
-    };
+    state = { ...IDLE_STATE };
     render();
   }
 

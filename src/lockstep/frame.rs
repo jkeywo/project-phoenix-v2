@@ -75,7 +75,13 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// symptom but a divergence.
 // Revision 12 also carries the frozen Station ratings through the lobby mesh;
 // revision 11's JavaScript would discard them before Rust could seed a ship.
-pub const HOST_MESH_PROTOCOL: u32 = 12;
+// Revision 13 adds [`crate::gm_restore::GmRestoreFrame`] — the readiness,
+// per-peer load report and terminal settle of a multi-peer live restore
+// (issue #1447). A revision-12 host would hold its world on the canonical
+// request, never answer the readiness ask, and be excluded as a nonresponder
+// while the revision-13 hosts rewound without it: a fleet split with no
+// symptom, which is exactly the class of change this revision refuses whole.
+pub const HOST_MESH_PROTOCOL: u32 = 13;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -278,6 +284,10 @@ pub enum MeshFrame {
     GmAction(crate::gm_action::GmActionFrame),
     /// First-time mid-session GM pause/transfer/admission protocol (#1293).
     GmJoin(crate::gm_join::GmJoinFrame),
+    /// Multi-peer live-restore readiness, load reports and the terminal settle
+    /// (issue #1447). Like every other running-mission frame it is minted and
+    /// read only by Rust; `gui/host-mesh.js` ferries it opaquely.
+    GmRestore(crate::gm_restore::GmRestoreFrame),
 }
 
 impl MeshFrame {
@@ -291,6 +301,7 @@ impl MeshFrame {
             MeshFrame::SlotClaim(f) => f.from,
             MeshFrame::GmAction(f) => f.wire_from(),
             MeshFrame::GmJoin(f) => f.wire_from(),
+            MeshFrame::GmRestore(f) => f.from(),
         }
     }
 
@@ -304,6 +315,7 @@ impl MeshFrame {
             MeshFrame::SlotClaim(_) => TYPE_SLOT_CLAIM,
             MeshFrame::GmAction(_) => TYPE_GM_ACTION,
             MeshFrame::GmJoin(_) => TYPE_GM_JOIN,
+            MeshFrame::GmRestore(_) => TYPE_GM_RESTORE,
         }
     }
 }
@@ -322,6 +334,8 @@ pub const TYPE_SLOT_CLAIM: &str = "slot-claim";
 pub const TYPE_GM_ACTION: &str = "gm-action";
 /// The `t` value a [`MeshFrame::GmJoin`] carries on the JS wire.
 pub const TYPE_GM_JOIN: &str = "gm-join";
+/// The `t` value a [`MeshFrame::GmRestore`] carries on the JS wire (issue #1447).
+pub const TYPE_GM_RESTORE: &str = "gm-restore";
 
 #[cfg(test)]
 mod tests {
@@ -390,6 +404,21 @@ mod tests {
                 claim_seq: 7,
                 tick: 512,
             }),
+            // The multi-peer live-restore lane (issue #1447). Included here for
+            // the same reason every other frame is: a frame that cannot survive
+            // being written down cannot cross a mesh either.
+            MeshFrame::GmRestore(crate::gm_restore::GmRestoreFrame::Settle {
+                from: HostSlot(1),
+                restore: crate::gm_action::GmActionOrder::new(HostSlot(3), 4),
+                commit: false,
+                failure: Some(crate::gm_restore::GmRestoreFailure::PeerDigestMismatch { peers: 1 }),
+            }),
+            MeshFrame::GmRestore(crate::gm_restore::GmRestoreFrame::Loaded {
+                from: HostSlot(2),
+                restore: crate::gm_action::GmActionOrder::new(HostSlot(3), 4),
+                tick: 512,
+                digest: 0x0bad_c0de,
+            }),
             MeshFrame::GmAction(crate::gm_action::GmActionFrame::Granted(
                 crate::gm_action::GmActionGrant {
                     from: HostSlot(2),
@@ -422,7 +451,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 12,
+            HOST_MESH_PROTOCOL, 13,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

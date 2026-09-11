@@ -105,6 +105,12 @@ export function parseGmHealthProjection(payload) {
       state: rowState,
       behind_ticks: Number.isSafeInteger(row.behind_ticks) && row.behind_ticks >= 0 ? row.behind_ticks : null,
       local: row.local === true,
+      // A live restore is waiting on this peer, or has stopped waiting on it
+      // and disconnected it (issue #1447). Absent on every ordinary row, and
+      // read by `gui/gm-restore-control.js` so the room can be NAMED rather
+      // than counted.
+      restore_waiting: row.restore_waiting === true,
+      restore_excluded: row.restore_excluded === true,
     });
   }
 

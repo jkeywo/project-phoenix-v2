@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// The single-simulation-peer live-restore control (issue #1446), mounted on the
+// The live-restore control (issues #1446 and #1447), mounted on the
 // REAL `server.html` markup with the REAL String Table, driven by the exact
 // `gm_health` payload `src/gm_health.rs` publishes and the exact catalogue-row
 // shape `bridge::save_slot_js` publishes.
@@ -45,16 +45,25 @@ function row(overrides = {}) {
 }
 
 /** One `gm_health` payload exactly as `GmHealthProjection` serialises. */
-function health(restore, { paused = true } = {}) {
+function health(restore, { paused = true, peers } = {}) {
   return {
     tick: 1400,
     paused,
-    peers: [{ id: 'gm:gm-1', operators: ['gm-1'], state: 'live', local: true }],
+    peers: peers ?? [{ id: 'gm:gm-1', operators: ['gm-1'], state: 'live', local: true }],
     stations: [],
     operators: [],
     alerts: [],
     ...(restore ? { restore } : {}),
   };
+}
+
+/** The peer rows a multi-peer restore publishes while it waits (issue #1447). */
+function room({ waiting = [], excluded = [] } = {}) {
+  return [
+    { id: 'gm:gm-1', operators: ['gm-1'], state: 'live', local: true },
+    ...waiting.map((id) => ({ id, state: 'live', local: false, restore_waiting: true })),
+    ...excluded.map((id) => ({ id, state: 'disconnected', local: false, restore_excluded: true })),
+  ];
 }
 
 let control;
@@ -341,4 +350,172 @@ it('registers its confirmation category centrally with the preview default', () 
   expect(category?.defaultMode).toBe('confirm-preview');
   expect(GM_ACTION_CONFIRMATION_METADATA.RequestLiveRestore)
     .toEqual([{ confirmationCategory: 'world.restore', confirmationDefault: 'confirm-preview' }]);
+});
+
+
+// ── Waiting on the room (issue #1447) ───────────────────────────────────────
+
+it('counts the room down in whole seconds and names the peers it waits for', async () => {
+  await mount();
+  select('slot-a');
+  control.update(health(
+    {
+      phase: 'awaiting-readiness',
+      operator: 'gm-1',
+      working: true,
+      countdown_seconds: 7,
+      waiting_peers: 2,
+    },
+    { peers: room({ waiting: ['ship:hull-b', 'peer:3'] }) },
+  ));
+
+  expect(region().dataset.phase).toBe('awaiting-readiness');
+  // A countdown that exists only inside a sentence cannot be styled, and a
+  // facilitator reading a 200% layout needs it as a value as well as prose.
+  expect(region().dataset.countdown).toBe('7');
+  expect(region().dataset.waiting).toBe('2');
+  const text = status().textContent;
+  expect(text).toContain(t('server.gm.restore.phase.awaiting_readiness'));
+  expect(text).toContain('7');
+  expect(text).toContain('ship:hull-b');
+  expect(text).toContain('peer:3');
+  // Routine progress is a readable line, never an interruption (#1418).
+  expect(status().getAttribute('role')).toBe('status');
+  expect(status().getAttribute('aria-live')).toBe('polite');
+});
+
+it('says which peers were disconnected for not answering, and that they rejoin', async () => {
+  await mount();
+  select('slot-a');
+  control.update(health(
+    {
+      phase: 'restored',
+      operator: 'gm-1',
+      working: false,
+      restored_tick: 1200,
+      excluded_peers: 1,
+    },
+    { peers: room({ excluded: ['ship:hull-b'] }) },
+  ));
+
+  const text = status().textContent;
+  expect(text).toContain(t('server.gm.restore.phase.restored', { tick: '1200' }));
+  expect(text).toContain('ship:hull-b');
+  expect(status().dataset.tone).toBe('ok');
+  // A disconnected peer is not a reason to hide the Resume the GM now needs.
+  expect(resumeButton().disabled).toBe(false);
+});
+
+it('drops a countdown the moment the phase settles, rather than freezing one on screen', async () => {
+  await mount();
+  select('slot-a');
+  control.update(health({
+    phase: 'awaiting-agreement', operator: 'gm-1', working: true,
+    countdown_seconds: 3, waiting_peers: 1,
+  }, { peers: room({ waiting: ['ship:hull-b'] }) }));
+  expect(region().dataset.countdown).toBe('3');
+
+  control.update(health({
+    phase: 'rolled-back', operator: 'gm-1', working: false,
+    failure: 'server.gm.restore.failed.peer_digest', failure_peers: 2,
+  }));
+  expect(region().dataset.countdown).toBe(undefined);
+  expect(region().dataset.waiting).toBe(undefined);
+  expect(status().dataset.tone).toBe('failed');
+  // The failure's own sentence is rendered WITH its number: a placeholder
+  // nothing fills reaches the desk as a brace.
+  expect(status().textContent).toContain(t('server.gm.restore.failed.peer_digest', { peers: '2' }));
+  expect(status().textContent).not.toContain('{peers}');
+});
+
+it('knows every phase the host can report, and gives each one a sentence', async () => {
+  // A closed list on both sides: a phase this build does not know would fall
+  // back to "no restore is running" while a world was being replaced.
+  for (const phase of [
+    'idle', 'accepted', 'capturing-recovery', 'awaiting-readiness', 'loading',
+    'awaiting-agreement', 'restored', 'rolled-back', 'failed',
+  ]) {
+    expect(parseGmRestoreState(health({ phase, operator: 'gm-1', working: false })).phase)
+      .toBe(phase);
+    expect(has(restorePhaseLabelId(phase))).toBe(true);
+  }
+  // And the three waiting phases really are working phases, so no new request
+  // and no resume is offered underneath one.
+  for (const phase of ['awaiting-readiness', 'loading', 'awaiting-agreement']) {
+    expect(parseGmRestoreState(health({ phase, operator: 'gm-1', working: true })).working)
+      .toBe(true);
+  }
+});
+
+it('has an authored sentence for every failure the host can report', () => {
+  for (const id of [
+    'server.gm.restore.failed.recovery_capture',
+    'server.gm.restore.failed.ineligible',
+    'server.gm.restore.failed.unreadable',
+    'server.gm.restore.failed.load_refused',
+    'server.gm.restore.failed.digest',
+    'server.gm.restore.failed.incomplete',
+    'server.gm.restore.failed.fence',
+    'server.gm.restore.failed.rollback',
+    'server.gm.restore.failed.peer_load',
+    'server.gm.restore.failed.peer_digest',
+    'server.gm.restore.failed.transfer',
+    'server.gm.restore.failed.coordinator_lost',
+  ]) {
+    expect(has(id)).toBe(true);
+  }
+});
+
+it('keeps both controls the same nodes through every step of a multi-peer rewind', async () => {
+  // PRD #1418 story 29: a keyboard operator holding focus must never be holding
+  // a replaced node, and a rewind of a room has five working steps in it.
+  await mount();
+  select('slot-a');
+  const apply = applyButton();
+  const resume = resumeButton();
+  // A GM whose last restore was rolled back, standing on Resume, when a second
+  // rewind starts under them. Resume is pressable at that moment, which is what
+  // makes losing it mid-operation possible at all.
+  control.update(health({
+    phase: 'rolled-back', operator: 'gm-1', working: false,
+    failure: 'server.gm.restore.failed.transfer',
+  }));
+  resume.focus();
+  expect(document.activeElement).toBe(resume);
+
+  const opened = [];
+  const dialogs = new MutationObserver(() => opened.push(1));
+  dialogs.observe(document.body, { childList: true, subtree: true });
+
+  for (const [phase, extra] of [
+    ['accepted', {}],
+    ['capturing-recovery', {}],
+    ['awaiting-readiness', { countdown_seconds: 9, waiting_peers: 2 }],
+    ['loading', { countdown_seconds: 4, waiting_peers: 1 }],
+    ['awaiting-agreement', { countdown_seconds: 2, waiting_peers: 1 }],
+    ['restored', { restored_tick: 1200 }],
+  ]) {
+    control.update(health(
+      { phase, operator: 'gm-1', working: phase !== 'restored', ...extra },
+      { peers: room({ waiting: ['ship:hull-b'] }) },
+    ));
+    expect(applyButton()).toBe(apply);
+    expect(resumeButton()).toBe(resume);
+    expect(status().textContent.length).toBeGreaterThan(0);
+  }
+  dialogs.disconnect();
+  // Routine attention does not open pop-ups (#1418 story 31): the whole
+  // operation reported itself in one status line.
+  expect(document.getElementById('gm-action-confirmation')).toBe(null);
+  expect(document.activeElement).toBe(resume);
+});
+
+it('shows no countdown in a session with nobody to wait for', async () => {
+  // A solo session runs the same phases. A countdown drawn with nothing behind
+  // it would read as a stall on the one topology that never waits.
+  await mount();
+  select('slot-a');
+  control.update(health({ phase: 'loading', operator: 'gm-1', working: true }));
+  expect(region().dataset.countdown).toBe(undefined);
+  expect(status().textContent).toBe(t('server.gm.restore.phase.loading'));
 });

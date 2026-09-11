@@ -1460,17 +1460,34 @@ pub enum GmActionRefusalReason {
     /// GM's contact override on the same observer/target pair. Refused rather
     /// than overwritten, and refused as a whole rather than applied in part.
     RestoreReferenceConflict,
-    /// A live restore was asked for in a session with more than one simulation
-    /// peer (issue #1446). The bounded first delivery is a single-peer one, and
-    /// this refusal is how that bound is VISIBLE rather than half-attempted:
-    /// the readiness countdown, nonresponder disconnect and all-peers digest
-    /// agreement a multi-peer restore needs are #1447's.
+    /// RETIRED by issue #1447, and kept only because this enum is append-only.
     ///
-    /// Appended for [`Self::UnknownGmEvent`]'s reason: the journal is folded
-    /// through postcard, which encodes an enum by VARIANT INDEX.
+    /// #1446's bounded first delivery refused a live restore in a session with
+    /// more than one simulation peer, because the readiness countdown, the
+    /// nonresponder disconnect and the all-peers digest agreement a multi-peer
+    /// restore needs did not exist yet. They do now
+    /// ([`crate::gm_restore`]), so nothing produces this any more — but a
+    /// journal written by a #1446 build still names it, and the variant INDEX
+    /// is part of the postcard encoding the digest folds.
     MultipleSimulationPeers,
-    /// A live restore was asked for while one is already running (issue #1446).
-    /// The first accepted ordered request wins; every concurrent one gets this.
+    /// A live restore is running, so this decision cannot be taken (issues
+    /// #1446, #1447). Given by two seams that answer two different questions.
+    ///
+    /// The OWNER answers "may anything be sequenced while a restore runs?" in
+    /// [`sequence_owner_proposal`], before a grant exists — because a grant
+    /// minted during the flight would land on the held boundary and be applied
+    /// before the rewind on one peer and after it on another, or vanish with
+    /// the journal it was written into. That refusal is deliberately NOT folded:
+    /// it depends on peer-local restore progress, which legitimately differs
+    /// between peers, so it is broadcast as [`GmActionFrame::Refused`] and never
+    /// becomes a grant.
+    ///
+    /// The REDUCER answers "did this canonical prefix already admit a restore?"
+    /// for a second [`GmAction::RequestLiveRestore`] — two GMs pressing at the
+    /// same moment are scheduled onto the same apply tick, which is behind the
+    /// owner's gate, so only an ordered answer at the apply boundary can pick a
+    /// winner. It reads [`GmActionJournal::live_restore_admitted`], which is
+    /// replicated journal state, so every peer folds the same outcome.
     LiveRestoreInProgress,
 }
 
@@ -1872,6 +1889,41 @@ impl GmActionJournal {
 
     pub fn applied_results(&self) -> &[LoggedGmAction] {
         &self.applied_results
+    }
+
+    /// Whether this canonical prefix has already ADMITTED a live restore that
+    /// no explicit Resume has closed (issues #1446, #1447).
+    ///
+    /// The ordering answer "the first accepted request wins, every concurrent
+    /// one is refused" has to be given where every peer reaches the same
+    /// conclusion, and it cannot be given from
+    /// [`crate::gm_restore::GmLiveRestore`]: a restore's PROGRESS is peer-local
+    /// — one peer can have committed the candidate while another is still
+    /// loading it — so a folded outcome that read it would have two peers
+    /// disagreeing about the same grant. This reads only the replicated journal
+    /// — the applied prefix and the outcomes recorded against it, which every
+    /// peer holds identically — so it folds identically everywhere.
+    ///
+    /// The closing event is the GM's own explicit Resume and nothing else,
+    /// because that is the one canonical fact that means the operation is over
+    /// on EVERY peer. A reported outcome will not do: a restore that has
+    /// settled here may still be in flight next door, and admitting a second
+    /// request then would clear that peer's orchestration mid-rewind. A
+    /// successful restore needs no closing event at all — it installs the
+    /// candidate's own journal, which never contained this request.
+    pub fn live_restore_admitted(&self) -> bool {
+        let mut admitted = false;
+        for result in &self.applied_results {
+            if result.outcome != GmActionOutcome::Applied {
+                continue;
+            }
+            match result.action_kind {
+                GmActionKind::LiveRestore => admitted = true,
+                GmActionKind::SessionPause if !result.requested_active => admitted = false,
+                _ => {}
+            }
+        }
+        admitted
     }
 
     /// Every retained canonical slot-recovery generation boundary.
@@ -3876,45 +3928,57 @@ pub fn apply_due_actions(
                     Some(GmActionRefusalReason::NotGameMaster),
                 )
             }
-            // A restore that is already capturing or loading owns the hold.
-            // Resuming underneath it would run the world the restore is about
-            // to overwrite, so the resume is refused BY NAME rather than
-            // silently dropped — and a reported outcome does not hold: the
-            // GM's own explicit resume afterwards is exactly this action.
-            GmAction::SetSessionPaused { active: false }
-                if restore
-                    .as_deref()
-                    .is_some_and(|restore| restore.phase().holds_session()) =>
-            {
-                (
-                    GmActionOutcome::Refused,
-                    Some(GmActionRefusalReason::LiveRestoreInProgress),
-                )
-            }
-            // The bounded first delivery (issue #1446). Applying this ARMS the
-            // peer-local driver and holds the session; the driver captures the
-            // recovery checkpoint and revalidates the candidate against live
-            // state before anything is loaded.
+            // The first accepted ordered request wins; a concurrent one is
+            // refused BY NAME (PRD #1420; issues #1446/#1447).
+            //
+            // This is the ONE answer that has to be given here rather than at
+            // the owner's sequencing seam, because two GMs pressing at the same
+            // moment are deterministically scheduled onto the SAME apply tick —
+            // the unapplied first request already projects the hold, so the
+            // second proposal is scheduled at that same held boundary — and
+            // `apply_due_actions` runs a whole tick's ordered run in one call.
+            // The owner's `restore_in_flight` gate cannot see the first request
+            // yet at proposal time, so without this the second `accept()` would
+            // clear the first one's recovery slot, live world and attribution
+            // mid-flight and the room would run the SECOND GM's candidate.
+            //
+            // It is decided from the replicated JOURNAL — "this canonical
+            // prefix already admitted a restore no explicit Resume has closed"
+            // — and never from `GmLiveRestore`, whose progress is peer-local.
+            // Every peer folds the same prefix, so every peer records the same
+            // Refused, which is exactly the split #1447 moved the other two
+            // refusals to the owner to avoid.
+            GmAction::RequestLiveRestore { .. } if journal.live_restore_admitted() => (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::LiveRestoreInProgress),
+            ),
+            // Arm the peer-local driver and hold the session (issues
+            // #1446/#1447). Deliberately unconditional apart from the guard
+            // above and "this build has no restore driver at all": whether
+            // anything ELSE may be sequenced while a restore runs is decided by
+            // the owner in `sequence_owner_proposal`, before a grant exists. A
+            // reducer arm that decided that from peer-local restore progress
+            // would have two peers at different steps of the same restore
+            // disagreeing about the same grant.
             GmAction::RequestLiveRestore { candidate } => match restore.as_deref_mut() {
                 None => (
                     GmActionOutcome::Refused,
                     Some(GmActionRefusalReason::WorldUnavailable),
                 ),
-                Some(restore) => match restore.admit_request() {
-                    Err(reason) => (GmActionOutcome::Refused, Some(reason)),
-                    Ok(()) => {
-                        restore.accept(crate::gm_restore::AcceptedRestore {
-                            operator_id: grant.operator_id.clone(),
-                            correlation: grant.correlation.as_str().to_string(),
-                            candidate_slot: candidate.clone(),
-                            requested_tick: now,
-                        });
-                        // Visibly held BEFORE anything is captured or loaded
-                        // (PRD #1420 story 11).
-                        paused.0 = true;
-                        (GmActionOutcome::Applied, None)
-                    }
-                },
+                Some(restore) => {
+                    restore.accept(crate::gm_restore::AcceptedRestore {
+                        operator_id: grant.operator_id.clone(),
+                        correlation: grant.correlation.as_str().to_string(),
+                        candidate_slot: candidate.clone(),
+                        requested_tick: now,
+                        initiator: grant.from,
+                        order: grant.order,
+                    });
+                    // Visibly held BEFORE anything is captured or loaded
+                    // (PRD #1420 story 11).
+                    paused.0 = true;
+                    (GmActionOutcome::Applied, None)
+                }
             },
             GmAction::SetSessionPaused { active } if paused.0 == *active => {
                 (GmActionOutcome::NoOp, None)
@@ -4264,6 +4328,7 @@ pub fn sequence_owner_proposal(
     ready_through: u64,
     current_paused: bool,
     live_hold: bool,
+    restore_in_flight: bool,
 ) -> Result<GmActionGrant, GmActionRefusalReason> {
     proposal.validate()?;
     if let Some(existing) = journal.grant_for(&proposal.operator_id, &proposal.correlation) {
@@ -4272,6 +4337,28 @@ pub fn sequence_owner_proposal(
         } else {
             Err(GmActionRefusalReason::ConflictingGrant)
         };
+    }
+    // A live restore is in flight, so NOTHING may be sequenced into the journal
+    // until it settles (issues #1446/#1447).
+    //
+    // This gate is HERE, on the one machine that mints grants, and deliberately
+    // not in `apply_due_actions`. A restore's progress is peer-local — one peer
+    // can have committed the candidate while another is still loading it — so a
+    // reducer arm that consulted it would decide a FOLDED outcome from state
+    // that legitimately differs between peers, and two peers would disagree
+    // about whether the same grant was Applied or Refused. The owner is a single
+    // machine; a refusal it decides is broadcast as `GmActionFrame::Refused`,
+    // which never becomes a grant and is therefore never folded.
+    //
+    // It is also the fence AC4 asks for, at the only place a fence can be
+    // complete: a grant minted during the flight would land on the held boundary
+    // and be applied before the rewind on one peer and after it on another —
+    // or, on a successful restore, vanish with the journal it was written into.
+    // Refusing the whole window is the only answer that is the same everywhere,
+    // and it is visible: the GM is told by name, in the shared vocabulary, that
+    // a restore is running.
+    if restore_in_flight {
+        return Err(GmActionRefusalReason::LiveRestoreInProgress);
     }
 
     if journal.is_empty() {
@@ -4463,6 +4550,13 @@ fn submit_bound(
         || world
             .get_resource::<crate::gm_restore::GmLiveRestore>()
             .is_some_and(|restore| restore.phase().holds_world());
+    // Whether a live restore is mid-flight on THIS machine. Read here, at the
+    // owner's own sequencing seam, for the reason `sequence_owner_proposal`
+    // spells out: a peer-local fact may gate what enters the journal, never
+    // what the journal folds.
+    let restore_in_flight = world
+        .get_resource::<crate::gm_restore::GmLiveRestore>()
+        .is_some_and(|restore| restore.phase().in_flight());
     let owner = if native {
         local
     } else {
@@ -4501,6 +4595,7 @@ fn submit_bound(
             ready_through,
             paused,
             live_hold,
+            restore_in_flight,
         )
     };
     let grant = match sequenced {
@@ -6049,9 +6144,17 @@ station = "helm"
             correlation: GmActionId::new("after-recovery").unwrap(),
             action: GmAction::SetSessionPaused { active: true },
         };
-        let grant =
-            sequence_owner_proposal(&mut journal, &proposal, HostSlot(1), 20, 20, false, false)
-                .unwrap();
+        let grant = sequence_owner_proposal(
+            &mut journal,
+            &proposal,
+            HostSlot(1),
+            20,
+            20,
+            false,
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(grant.recovery_generation, 1);
         assert_eq!(grant.apply_tick, 30);
     }
@@ -6187,8 +6290,9 @@ station = "helm"
             correlation: GmActionId::new("resume").unwrap(),
             action: GmAction::SetSessionPaused { active: false },
         };
-        let resume = sequence_owner_proposal(&mut canonical, &resume, owner, 20, 20, true, false)
-            .expect("owner sequences resume");
+        let resume =
+            sequence_owner_proposal(&mut canonical, &resume, owner, 20, 20, true, false, false)
+                .expect("owner sequences resume");
         assert_eq!(resume.apply_tick, 20);
 
         // This proposal was concurrent in product time but reached the owner
@@ -6199,9 +6303,17 @@ station = "helm"
             correlation: GmActionId::new("late-pause").unwrap(),
             action: GmAction::SetSessionPaused { active: true },
         };
-        let late_pause =
-            sequence_owner_proposal(&mut canonical, &late_pause, owner, 20, 20, true, false)
-                .expect("owner sequences late proposal");
+        let late_pause = sequence_owner_proposal(
+            &mut canonical,
+            &late_pause,
+            owner,
+            20,
+            20,
+            true,
+            false,
+            false,
+        )
+        .expect("owner sequences late proposal");
         assert_eq!(late_pause.apply_tick, 21);
 
         let mut early_delivery = GmActionJournal::default();
@@ -6229,8 +6341,9 @@ station = "helm"
             action: GmAction::SetSessionPaused { active: false },
         };
         let mut canonical = GmActionJournal::default();
-        let resume = sequence_owner_proposal(&mut canonical, &proposal, owner, 20, 20, true, true)
-            .expect("the owner sequences the typed Resume at the stopped boundary");
+        let resume =
+            sequence_owner_proposal(&mut canonical, &proposal, owner, 20, 20, true, true, false)
+                .expect("the owner sequences the typed Resume at the stopped boundary");
 
         let mut receiver = GmActionJournal::default();
         insert_replicated_grant(&mut receiver, true, resume)
@@ -6261,8 +6374,9 @@ station = "helm"
             action: GmAction::SetSessionPaused { active: false },
         };
 
-        let grant = sequence_owner_proposal(&mut canonical, &resume, owner, 42, 99, true, true)
-            .expect("the technical hold accepts an explicit Resume");
+        let grant =
+            sequence_owner_proposal(&mut canonical, &resume, owner, 42, 99, true, true, false)
+                .expect("the technical hold accepts an explicit Resume");
         assert_eq!(
             grant.apply_tick, 42,
             "the action cannot wait for a future tick the join hold forbids"

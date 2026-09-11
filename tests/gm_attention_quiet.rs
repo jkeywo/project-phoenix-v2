@@ -398,6 +398,21 @@ struct AiProbe {
     admitted: usize,
 }
 
+/// What `emit_ai_steering` needs off each fleet hull to run the production
+/// emit seam: the hull's identity, who controls its systems, its configuration
+/// and the tick's admitted-command buffer.
+type AiSteeringHulls<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static EntityUuid>,
+        &'static phoenix::ship::components::ShipSystemControlSources,
+        Option<&'static phoenix::ship::components::ShipConfigComponent>,
+        &'static mut AdmittedCommands,
+    ),
+    With<FleetSlotOf>,
+>;
+
 /// Emit one AI helm command per tick through the production AI seam.
 ///
 /// `.after(AdmissionSet)` for the reason every AI decide system is: admission
@@ -405,15 +420,7 @@ struct AiProbe {
 /// pushed before it is wiped.
 fn emit_ai_steering(
     sessions: Res<phoenix::lobby::Sessions>,
-    mut ships: Query<
-        (
-            Option<&EntityUuid>,
-            &phoenix::ship::components::ShipSystemControlSources,
-            Option<&phoenix::ship::components::ShipConfigComponent>,
-            &mut AdmittedCommands,
-        ),
-        With<FleetSlotOf>,
-    >,
+    mut ships: AiSteeringHulls,
     mut probe: ResMut<AiProbe>,
 ) {
     if probe.commands == 0 {

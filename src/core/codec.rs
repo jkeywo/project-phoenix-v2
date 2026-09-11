@@ -1128,13 +1128,13 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                 "unable" => GmRestoreFrame::Unable {
                     from,
                     restore,
-                    failure: failure(&body)?,
+                    failure: failure(body)?,
                 },
                 "settle" => GmRestoreFrame::Settle {
                     from,
                     restore,
                     commit: body.get("commit")?.as_bool()?,
-                    failure: failure(&body),
+                    failure: failure(body),
                 },
                 _ => return None,
             };

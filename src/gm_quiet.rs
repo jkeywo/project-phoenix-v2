@@ -125,7 +125,7 @@ pub const QUIET_REASON: &str = "server.gm.attention.reason.quiet_time";
 /// `Presentation`: derived from results, the command log and the balance stream,
 /// all already classified, and read by nothing authoritative. It is not folded
 /// into the digest, not captured in a snapshot and never leaves this page.
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Default)]
 pub struct GmCrewActivity {
     /// The [`SimTick`] of the last meaningful crew activity this peer observed.
     last_activity_tick: u64,
@@ -134,16 +134,6 @@ pub struct GmCrewActivity {
     ordinal: u64,
     /// Was the row published at the previous look?
     open: bool,
-}
-
-impl Default for GmCrewActivity {
-    fn default() -> Self {
-        Self {
-            last_activity_tick: 0,
-            ordinal: 0,
-            open: false,
-        }
-    }
 }
 
 impl GmCrewActivity {

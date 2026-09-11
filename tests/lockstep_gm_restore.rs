@@ -52,7 +52,7 @@ use project_phoenix::sim_tick::SimTick;
 /// covers a real mission rather than an empty world.
 const WORLD: &str = "assets/worlds/probe_fleet_trio.toml";
 const SHIP: &str = "assets/entities/alliance_cruiser.toml";
-const SEED: u64 = 1_447_2026;
+const SEED: u64 = 14_472_026;
 
 /// Two crewed ship hosts and one stationless Game Master peer. The GM owns a
 /// simulation like any other participant, so it holds, rewinds and agrees like

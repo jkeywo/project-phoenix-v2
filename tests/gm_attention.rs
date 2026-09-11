@@ -294,7 +294,7 @@ fn a_world_authored_hail_addressed_at_no_hull_reads_as_fleet_wide() {
         Some("world.probe_gm_attention.speaker_fleet")
     );
     assert!(
-        row.reason.params.get("ship").is_none(),
+        !row.reason.params.contains_key("ship"),
         "no ship parameter at all: {:?}",
         row.reason.params
     );

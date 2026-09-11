@@ -32,7 +32,7 @@ use project_phoenix::sim_tick::SimTick;
 use project_phoenix::snapshot::StoredRun;
 
 const WORLD: &str = "assets/worlds/duel.toml";
-const SEED: u64 = 1_445_2026;
+const SEED: u64 = 14_452_026;
 /// The hull `build` boots on, via `--side-a cruiser`.
 const BOOTED_HULL: &str = "assets/entities/alliance_cruiser.toml";
 /// A hull this session is demonstrably NOT flying.

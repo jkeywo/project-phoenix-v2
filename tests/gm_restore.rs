@@ -38,7 +38,7 @@ use project_phoenix::save_slots_store::{
 use project_phoenix::sim_tick::SimTick;
 
 const WORLD: &str = "assets/worlds/duel.toml";
-const SEED: u64 = 1_446_2026;
+const SEED: u64 = 14_462_026;
 /// A hull this session is demonstrably NOT flying.
 const OTHER_HULL: &str = "assets/entities/alliance_destroyer.toml";
 
@@ -708,7 +708,6 @@ fn a_concurrent_second_request_is_refused_and_the_first_one_wins() {
         Some(GmActionRefusalReason::LiveRestoreInProgress),
         "a second GM pressing under a working restore is told so by name",
     );
-    assert!(first > 0 || first == 0);
     let facts = settle_facts(&mut app, &["restore-first"]);
     assert_eq!(fact(&facts, "restore-first").0, GmActionOutcome::Applied);
     let accepted = app
@@ -719,6 +718,10 @@ fn a_concurrent_second_request_is_refused_and_the_first_one_wins() {
         .expect("the accepted request is recorded");
     assert_eq!(accepted.operator_id, "gm-1");
     assert_eq!(accepted.candidate_slot, first_slot);
+    assert_eq!(
+        accepted.requested_tick, first,
+        "the restore still in flight is the FIRST request's, held from the tick          that request applied at",
+    );
 }
 
 /// Two GMs pressing at the SAME moment, before either request has applied.

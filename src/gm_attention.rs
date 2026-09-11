@@ -1313,7 +1313,7 @@ mod tests {
         assert_eq!(rows[0].reason.params.get("sender").unwrap(), "speaker");
         // No blank parameter at all: the sentence that reads this id does not
         // mention a ship, so carrying an empty one would be a lie in waiting.
-        assert!(rows[0].reason.params.get("ship").is_none());
+        assert!(!rows[0].reason.params.contains_key("ship"));
         assert!(rows[0].target.ship.is_none());
     }
 

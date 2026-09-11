@@ -1248,6 +1248,19 @@ pub fn decode_gm_roster(raw: &str) -> Option<crate::gm_roster::GmRoster> {
     crate::gm_roster::GmRoster::try_new(operators).ok()
 }
 
+/// Encode the local peer's own bound GM operator row for the host page.
+///
+/// The read-back half of the standalone binding
+/// ([`crate::gm_solo::local_gm_operator`]): the page must not fabricate the id
+/// its actions are attributed to, so it reads the exact row the simulation
+/// bound. Same `{ id, name, connected, ready }` shape the page sends the other
+/// way through [`decode_gm_roster`]; `""` means this peer may not act.
+pub fn encode_local_gm_operator(operator: Option<&crate::gm_roster::GmOperator>) -> String {
+    operator
+        .and_then(|operator| serde_json::to_string(operator).ok())
+        .unwrap_or_default()
+}
+
 /// Decode the one privileged browser-GM action ingress (issue #1292).
 /// Unknown fields are refused so this narrow route cannot accidentally become
 /// a generic host mutation surface.

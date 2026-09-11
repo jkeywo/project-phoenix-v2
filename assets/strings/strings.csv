@@ -2391,6 +2391,7 @@ server.gm.start.unready,GM control that withdraws this operator's readiness,[Unr
 server.gm.start.force,GM control that requests an attributed start without waiting for readiness. Validation still applies,[Force start]
 server.gm.start.summary,GM collective readiness summary. {ready} and {connected} are participant counts,[{ready} of {connected} participants ready]
 server.gm.start.standalone,GM start controls when this game master IS the whole session — no fleet peers to wait for,[Standalone session · start when ready]
+server.gm.operator.standalone,Display name for the operator of a standalone session — the game master who IS the session and never typed a name for a fleet to show,[Game Master]
 server.gm.start.waiting_policy,GM start controls before the first owner-computed policy arrives,[Waiting for fleet readiness…]
 server.gm.start.force_applied,Accessible result after a GM force-start request is accepted. {name} is the public operator name,[Start authorised by {name}.]
 server.gm.start.force_applied_locally,Accessible final result after an attributed GM force-start grant is accepted by the local simulation. {name} is the public operator name,[Start authorised by {name}; this host accepted the grant.]

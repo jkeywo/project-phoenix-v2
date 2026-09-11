@@ -2,7 +2,7 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+sources: [src/gm_solo.rs, src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-08
 ---
 
@@ -82,6 +82,28 @@ selection persists with that operator's private reconnectable identity. The
 current controller filters the map, inspector and activity panels and the
 Pause/Resume quick actions. Presets never change action authority or enter
 `GmOperator`, a public roster, a snapshot, or a digest.
+
+### A game master with no fleet
+
+The landing's Host as GM route opens a session in which the game master IS the
+session: one browser peer, one simulation, the hull it picked on the landing
+flown by AI backfill, and nobody else on the wire. There is no fleet owner to
+mint anything, so `src/gm_solo.rs` binds the identity instead. `wasm_prepare_game_master(standalone)`
+tells the profile which route booted it, and a standalone one installs a
+one-participant `FleetRoster` whose single `FleetGm` names `gm-1` on its own
+slot plus the matching connected, unready `GmRoster` row. Admission is then the
+ordinary path — `gm_action::submit_local` resolves `gm_operator(local)` and
+checks public presence exactly as it does for a fleet GM.
+
+`server.html`'s `localGm()` reads that bound row back through
+`wasm_local_gm_operator()` rather than deriving one from a fleet handle it does
+not have, so the page and the reducer cannot disagree about who is acting; the
+display name is the page's own String Table row `server.gm.operator.standalone`,
+because this route never asks for a name. A peer that already carries a fleet
+roster or a lockstep wait-set is never rebound, and
+`gm_solo::preserved_standalone_presence` keeps a solo peer's own row when the
+page publishes the empty fleet projection it publishes for a session with no
+fleet.
 
 ## Private confirmation choices
 

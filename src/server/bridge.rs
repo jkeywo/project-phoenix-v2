@@ -571,10 +571,31 @@ pub mod host_channels {
 /// Select the explicit production rendererless browser GM profile. The page
 /// calls this before [`wasm_init`]; it deliberately does not depend on
 /// `navigator.webdriver`.
+///
+/// `standalone` is the one thing this profile cannot work out for itself. Both
+/// GM routes reach it — the landing's `host_gm` route, where the game master IS
+/// the session, and a game master about to join somebody else's fleet — and only
+/// the page knows which was chosen. A standalone peer binds its own operator
+/// identity at boot ([`crate::gm_solo`]); a joining candidate must NOT, because
+/// its identity is the one the fleet's digest-proven Commit gives it and its
+/// private bootstrap requires a still-default roster.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_prepare_game_master() {
+pub fn wasm_prepare_game_master(standalone: bool) {
     edge::publish_gm_host_boot_requested(true);
+    edge::publish_gm_solo_boot_requested(standalone);
+}
+
+/// This peer's own bound GM operator row, exactly as the simulation holds it.
+///
+/// `{ id, name, connected, ready }` JSON, or `""` when this peer may not act as
+/// a game master. The host page gates every GM control on this rather than on a
+/// locally invented identity, so a live control and an accepted action are the
+/// same fact — see [`crate::gm_solo::local_gm_operator`].
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_local_gm_operator() -> String {
+    edge::read_local_gm_operator()
 }
 
 /// Read-only identity of the profile actually composed by [`wasm_init`].
@@ -847,6 +868,13 @@ pub fn wasm_init() {
 
     if is_browser_gm {
         app.insert_resource(BrowserGameMaster);
+        // A STANDALONE game master is the whole session, so nothing else will
+        // ever tell this simulation who its operator is. Bind it here, before
+        // any surface can paint, so the desk is live from the first frame
+        // rather than after a transition the page would have to notice.
+        if edge::read_gm_solo_boot_requested() {
+            crate::gm_solo::bind_standalone_game_master(app.world_mut());
+        }
     }
     app.add_plugins((
         GmProjectionPlugin,
@@ -1019,6 +1047,9 @@ pub fn wasm_init() {
             publish_sim_tick,
             publish_live_seating,
             publish_god_mode,
+            // Before the host channels, so the page never paints a GM desk
+            // from a mirror this frame has not refreshed yet.
+            publish_local_gm_operator.before(flush_host_channels),
             publish_instagib,
             publish_pause_mirror,
             publish_gm_join_status,
@@ -1527,6 +1558,24 @@ fn apply_gm_roster_replacement(
     world: &mut World,
     mut replacement: crate::gm_roster::GmRoster,
 ) -> bool {
+    // A STANDALONE game master's own presence is not the page's to remove. The
+    // page publishes this roster as the projection of a FLEET, so a session
+    // with no fleet publishes the empty one — and that used to land on top of
+    // the binding `gm_solo` made at boot, leaving every control on the desk
+    // admitted by identity and refused for absence. See
+    // `preserved_standalone_presence`: a fleet peer's replacement is untouched.
+    if let Some(kept) = world
+        .get_resource::<crate::lockstep::FleetRoster>()
+        .and_then(|fleet| {
+            crate::gm_solo::preserved_standalone_presence(
+                fleet,
+                world.get_resource::<crate::gm_roster::GmRoster>(),
+                &replacement,
+            )
+        })
+    {
+        replacement = kept;
+    }
     if let Some(current) = world.get_resource::<crate::gm_roster::GmRoster>() {
         replacement.clear_reconnected_readiness(current);
     }
@@ -4370,6 +4419,24 @@ fn publish_god_mode(god_mode: Option<Res<crate::server_app::GodMode>>) {
     edge::publish_god_mode_mirror(active);
 }
 
+/// Mirror this peer's own bound GM operator row for `wasm_local_gm_operator()`.
+///
+/// Pure read of the two authoritative resources privileged admission binds
+/// against, published every frame rather than latched at boot: a peer that
+/// joins a fleet, loses its public presence or is restored from a record must
+/// not keep answering with an identity it no longer has. Same pattern as
+/// `publish_god_mode`.
+#[cfg(target_arch = "wasm32")]
+fn publish_local_gm_operator(
+    fleet: Option<Res<crate::lockstep::FleetRoster>>,
+    gms: Option<Res<crate::gm_roster::GmRoster>>,
+) {
+    let operator = crate::gm_solo::resolve_local_gm_operator(fleet.as_deref(), gms.as_deref());
+    edge::publish_local_gm_operator(crate::core::codec::encode_local_gm_operator(
+        operator.as_ref(),
+    ));
+}
+
 /// Drains the queued instagib toggles each frame into the [`crate::server_app::Instagib`] Resource
 /// (issue #1181). Unlike `drain_god_mode_toggle` it flips the Resource directly
 /// rather than crossing command admission — instagib is a raw host cheat, not a
@@ -4863,6 +4930,68 @@ spawn_on = "game_start"
         let gm = &app.world().resource::<GmRoster>().operators()[0];
         assert!(gm.connected);
         assert!(!gm.ready, "a reconnect always returns unready");
+    }
+
+    /// The host page publishes the crew-public GM roster as the projection of a
+    /// FLEET, so a session with no fleet publishes the empty array — at boot,
+    /// before `wasm_init` has even bound anything, and again whenever a fleet
+    /// closes. That replacement used to unseat a standalone game master's own
+    /// bound presence, which left every control on its desk admitted by identity
+    /// and refused for absence.
+    #[test]
+    fn a_standalone_game_masters_own_presence_survives_the_pages_empty_roster() {
+        use crate::gm_roster::GmRoster;
+        use crate::lobby::OutboundMessage;
+
+        let mut app = App::new();
+        app.add_message::<OutboundMessage>()
+            .insert_resource(crate::lockstep::FleetRoster::default())
+            .init_resource::<GmRoster>();
+        crate::gm_solo::bind_standalone_game_master(app.world_mut()).expect("a solo peer binds");
+
+        apply_gm_roster_replacement(app.world_mut(), GmRoster::default());
+
+        assert!(app
+            .world()
+            .resource::<GmRoster>()
+            .is_connected(crate::gm_solo::SOLO_GM_OPERATOR_ID));
+        assert!(crate::gm_solo::local_gm_operator(app.world()).is_some());
+    }
+
+    /// The same replacement on a FLEET peer is applied exactly as published —
+    /// the page's projection is the roster there, and an emptied one is a real
+    /// fact about the fleet.
+    #[test]
+    fn a_fleet_peers_empty_roster_is_applied_unchanged() {
+        use crate::command_admission::HostSlot;
+        use crate::gm_roster::{GmOperator, GmRoster};
+        use crate::lobby::OutboundMessage;
+
+        let mut app = App::new();
+        app.add_message::<OutboundMessage>()
+            .insert_resource(
+                crate::lockstep::FleetRoster::with_participants_and_gms(
+                    Vec::new(),
+                    vec![HostSlot(1), HostSlot(2)],
+                    vec![crate::lockstep::FleetGm {
+                        host: HostSlot(2),
+                        operator_id: "gm-2".into(),
+                    }],
+                    HostSlot(2),
+                    HostSlot(1),
+                )
+                .expect("a stationless fleet GM participant"),
+            )
+            .insert_resource(
+                GmRoster::try_new(vec![GmOperator::new("gm-2".into(), "Morgan".into(), true)])
+                    .unwrap(),
+            );
+
+        assert!(apply_gm_roster_replacement(
+            app.world_mut(),
+            GmRoster::default()
+        ));
+        assert!(app.world().resource::<GmRoster>().is_empty());
     }
 
     #[test]

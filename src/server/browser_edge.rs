@@ -96,6 +96,16 @@ thread_local! {
     /// Explicit production GM-page boot request. This is set by the page before
     /// `wasm_init` and takes precedence over the WebDriver probe.
     static GM_HOST_BOOT_REQUESTED: RefCell<bool> = const { RefCell::new(false) };
+    /// Whether that GM page is the landing's STANDALONE `host_gm` route — the
+    /// game master that IS its own session — rather than one about to join
+    /// somebody else's fleet. Both routes boot the same profile, so only the
+    /// page can answer this, and only a standalone peer binds its own operator.
+    static GM_SOLO_BOOT_REQUESTED: RefCell<bool> = const { RefCell::new(false) };
+    /// Mirrors this peer's own bound GM operator row each frame so
+    /// `wasm_local_gm_operator()` can read back the identity the SIMULATION
+    /// bound without touching the Bevy World. Written by
+    /// `publish_local_gm_operator`; `""` means this peer may not act as a GM.
+    static LOCAL_GM_OPERATOR: RefCell<String> = const { RefCell::new(String::new()) };
     /// Read-only browser smoke/diagnostic mirror of the profile actually used.
     static ACTIVE_BOOT_PROFILE: RefCell<&'static str> = const { RefCell::new("not-started") };
 
@@ -828,6 +838,27 @@ pub(super) fn increment_pending_god_mode_toggles() {
 
 pub(super) fn publish_gm_host_boot_requested(value: bool) {
     GM_HOST_BOOT_REQUESTED.with(|slot| *slot.borrow_mut() = value);
+}
+
+pub(super) fn read_gm_solo_boot_requested() -> bool {
+    GM_SOLO_BOOT_REQUESTED.with(|value| *value.borrow())
+}
+
+pub(super) fn publish_gm_solo_boot_requested(value: bool) {
+    GM_SOLO_BOOT_REQUESTED.with(|slot| *slot.borrow_mut() = value);
+}
+
+pub(super) fn publish_local_gm_operator(value: String) {
+    LOCAL_GM_OPERATOR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if *slot != value {
+            *slot = value;
+        }
+    });
+}
+
+pub(super) fn read_local_gm_operator() -> String {
+    LOCAL_GM_OPERATOR.with(|value| value.borrow().clone())
 }
 
 pub(super) fn read_fleet_join_generation() -> u64 {

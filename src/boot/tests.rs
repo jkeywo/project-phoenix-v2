@@ -162,6 +162,42 @@ fn all_five_profiles_register_the_same_asset_and_message_floor() {
     crate::content_ledger::reset();
 }
 
+/// The standalone game master's binding, on the real profile its page boots.
+///
+/// `wasm_init` runs `bind_standalone_game_master` against exactly this App,
+/// immediately after `boot::build` and before the simulation plugins install
+/// their own solo placeholder. So this is the composition the browser gets: a
+/// `browser-game-master` build with no fleet behind it has no operator at all,
+/// binding gives it the one its own privileged admission resolves, and the
+/// placeholder that arrives later does not take it away again.
+#[test]
+fn a_fleetless_game_master_profile_binds_the_operator_its_own_admission_resolves() {
+    let mut gm = build(plan_for(BootProfile::BrowserGameMaster)).expect("browser-gm build");
+    assert!(crate::gm_solo::local_gm_operator(gm.world()).is_none());
+
+    let bound = crate::gm_solo::bind_standalone_game_master(gm.world_mut())
+        .expect("a fleetless GM profile binds its own operator");
+    assert_eq!(bound.id, crate::gm_solo::SOLO_GM_OPERATOR_ID);
+
+    // What `register_lockstep` does to every App. It must not replace a roster
+    // that already names this peer's operator.
+    gm.init_resource::<crate::lockstep::FleetRoster>();
+
+    let world = gm.world();
+    let roster = world.resource::<crate::lockstep::FleetRoster>();
+    assert_eq!(
+        roster.gm_operator(roster.local()),
+        Some(crate::gm_solo::SOLO_GM_OPERATOR_ID)
+    );
+    assert_eq!(roster.len(), 1, "the landing's hull still has its ship row");
+    assert_eq!(
+        crate::gm_solo::local_gm_operator(world).map(|row| row.id),
+        Some(crate::gm_solo::SOLO_GM_OPERATOR_ID.to_string()),
+        "and the page reads back exactly what admission will bind"
+    );
+    crate::content_ledger::reset();
+}
+
 #[test]
 fn the_render_stack_is_taken_only_by_the_profiles_that_name_a_renderer() {
     let headless = build(plan_for(BootProfile::Headless)).expect("headless build");

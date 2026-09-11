@@ -4114,8 +4114,38 @@
       return role === 'gm' ? 'gm' : 'ship';
     }
 
+    /**
+     * This peer's own bound operator row when it is a STANDALONE game master —
+     * the `host_gm` landing route, where the game master IS the session.
+     *
+     * Read back from the simulation rather than invented here. A fleetless GM
+     * has no roster to read an identity out of, and the page inventing one
+     * would be the page and the reducer disagreeing about who is acting: every
+     * action would be ingested and then silently refused. `src/gm_solo.rs`
+     * binds the id into the same two resources privileged admission checks, and
+     * this is the read-back of exactly that, so a control this admits is a
+     * control whose action will apply.
+     *
+     * The DISPLAY name is the page's, from the String Table: this route asks
+     * for a scenario and a hull, never a name, so the simulation holds none.
+     */
+    function standaloneGm() {
+      if (!gmStandalone() || typeof window.wasm_local_gm_operator !== 'function') return null;
+      let row = null;
+      try { row = JSON.parse(window.wasm_local_gm_operator() || 'null'); } catch (_) { return null; }
+      if (!row || typeof row.id !== 'string' || !row.id || row.connected !== true) return null;
+      return {
+        id: row.id,
+        name: row.name || t('server.gm.operator.standalone'),
+        connected: true,
+        ready: !!row.ready,
+      };
+    }
+
     /** The admitted local GM row, or null before/after authenticated presence. */
     function localGm() {
+      const standalone = standaloneGm();
+      if (standalone) return standalone;
       if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) !== 'gm'
           || !fleetHandle.operatorId || fleetHandle.gmJoinCandidate) return null;
       const gms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
@@ -5041,13 +5071,19 @@
       if (sessionStart) {
         sessionStart.hidden = !(fleetRole === 'gm' && gmStandalone() && fleetLobbyPhase === 'Lobby');
       }
+      // The operator strip a fleet GM gets from `publishGmRoster`, for the
+      // session that has no fleet to publish one. Display only: the authority
+      // half is the binding Rust made, and this page never writes it back.
+      const standalone = standaloneGm();
+      if (standalone) window.__hostGmShellMetadata?.({ gms: [standalone] });
       if (!controls || !readyBtn || !forceBtn) return;
-      // A STANDALONE game master has no fleet and therefore no `localGm()` —
-      // `localGm` reads the fleet roster, and there is no roster when this peer
-      // is the whole session. It still needs a way to start, and there is
-      // nobody to be ready FOR: readiness is a collective answer, so the Ready
-      // control is not merely disabled here but absent, and the policy line
-      // says what this session is instead of reporting 0 of 0 participants.
+      // A STANDALONE game master has no fleet, so there is no mesh start policy
+      // and nobody to be ready FOR: readiness is a collective answer, so the
+      // Ready control is not merely disabled here but absent, and the policy
+      // line says what this session is instead of reporting 0 of 0
+      // participants. It IS admitted — `standaloneGm()` reads the operator the
+      // simulation bound it — which is why every other control on this desk is
+      // live; only the collective ones are missing, and they say why.
       if (fleetRole === 'gm' && gmStandalone()) {
         controls.setAttribute('aria-hidden', 'false');
         readyBtn.hidden = true;
@@ -7955,6 +7991,10 @@ function finishInit() {
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
   window.wasm_prepare_game_master = wasmBindings.wasm_prepare_game_master;
   window.wasm_boot_profile = wasmBindings.wasm_boot_profile;
+  // This peer's OWN bound GM operator row, as the simulation holds it. The
+  // page gates every GM control on this rather than on an identity it made up,
+  // so a live control and an accepted action are one fact (`src/gm_solo.rs`).
+  window.wasm_local_gm_operator = wasmBindings.wasm_local_gm_operator;
   // Reduced motion (issue #1173): the viewscreen forwards the host's
   // `prefers-reduced-motion` preference to the renderer so hull-damage screen
   // shake and the shield-hit white flash honour it. The getter lets the
@@ -8262,7 +8302,12 @@ function finishInit() {
   // decided: no renderer (`SimPluginOptions { render: false }`) and no
   // viewscreen (`html.phoenix-gm-page #canvas`).
   if (window.__phoenixGmPage) {
-    window.wasm_prepare_game_master();
+    // The one thing the profile cannot work out for itself: BOTH GM routes
+    // boot it, and only a standalone one — the game master that IS its own
+    // session — binds its own operator. A joining candidate must not: its
+    // identity is the one the fleet's Commit gives it, and its private
+    // bootstrap requires a still-default roster.
+    window.wasm_prepare_game_master(gmStandalone());
     if (typeof window.__hostGmRolePresetsSetAvailable === 'function') {
       window.__hostGmRolePresetsSetAvailable(
         typeof window.wasm_get_gm_role_presets === 'function'

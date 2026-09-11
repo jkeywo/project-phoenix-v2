@@ -335,6 +335,49 @@ impl FleetRoster {
         })
     }
 
+    /// The one-peer roster of a STANDALONE game master — the landing's `host_gm`
+    /// route, where the game master IS the session.
+    ///
+    /// That peer runs the only simulation, owns the authored hull its operator
+    /// picked on the landing (flown by AI backfill — see
+    /// `crate::lobby::server::update_session_with_config`), and holds the public
+    /// operator identity its own privileged actions are attributed to. Binding
+    /// that identity here is what lets the ordinary admission path in
+    /// [`crate::gm_action::submit_local`] resolve
+    /// `gm_operator(local)`; without it a game-master-only session could look at
+    /// its world but never act on it.
+    ///
+    /// Deliberately NOT [`Self::with_participants_and_gms`], which refuses a GM
+    /// bound to a slot that also hosts a ship. That is a MESH rule: in a fleet
+    /// every frame is authenticated per technical slot, so a ship host must never
+    /// be able to claim an operator id it does not own, and a GM peer is a
+    /// stationless second host. A session of ONE has no sibling to authenticate
+    /// against and no second slot to be — it is both halves — so the rule has
+    /// nothing to protect there and refusing would only mean the desk stays
+    /// dead. Anything with more than one participant still goes through the mesh
+    /// constructor and still obeys the rule.
+    ///
+    /// `operator_id` is bounded exactly as a mesh binding is, so an unusable id
+    /// fails closed here rather than at the first refused action.
+    pub fn solo_game_master(operator_id: impl Into<String>) -> Option<Self> {
+        let operator_id = operator_id.into();
+        if operator_id.is_empty()
+            || operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
+        {
+            return None;
+        }
+        Some(Self {
+            ships: vec![FleetShip::new(HostSlot::SOLO)],
+            participants: vec![HostSlot::SOLO],
+            gms: vec![FleetGm {
+                host: HostSlot::SOLO,
+                operator_id,
+            }],
+            local: HostSlot::SOLO,
+            owner: HostSlot::SOLO,
+        })
+    }
+
     /// The ships, in the order they take the world's GameStart ship spawns.
     pub fn ships(&self) -> &[FleetShip] {
         &self.ships

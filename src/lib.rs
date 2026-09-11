@@ -3,6 +3,14 @@
 // common in game-development patterns.
 #![forbid(unsafe_code)]
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
+// `server::browser_edge`'s single `thread_local!` block is the browser build's
+// whole staging area, and `thread_local!` expands one `static` at a time
+// recursively — so its depth is the number of slots in the block. Past ~60 the
+// default limit of 128 is reached and the wasm build alone fails to compile
+// (`browser_edge` is `#[cfg(target_arch = "wasm32")]`, so no native gate sees
+// it). Raised rather than split so the next slot added there does not re-break
+// a build only `trunk build` exercises.
+#![recursion_limit = "256"]
 
 // Declared early: the `plog!` family is `#[macro_export]`ed, and the helper
 // macros they expand to must be defined before any module that uses them.

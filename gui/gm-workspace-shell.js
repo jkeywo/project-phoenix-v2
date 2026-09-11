@@ -1,5 +1,27 @@
-/** Presentation only: both hosts compose their existing presenters into one desk. */
+/** Presentation only: both hosts compose their existing presenters into one desk.
+ *
+ * The composition is the design canvas's "After M5 - facilitation + operations"
+ * artboard (PRD #930): one bar, three columns, two rows, six REGIONS. A region
+ * is the artboard's panel frame; the sections inside it are the blocks that
+ * frame holds. Nothing changed column against the After-M3 screen this file
+ * already drew - each milestone adds panels to the column that already held
+ * its kind. */
 import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
+import { healthStateLabelId } from './gm-health-banner.js';
+import { formatAttentionAge } from './gm-attention-panel.js';
+
+/** Workload levels that are a claim about a PERSON, worst last. A hull's word
+ * is the worst of these across its Stations; a hull whose Stations are all
+ * Backfill (or all Offline) says that instead, and a hull the advisory has not
+ * published rows for says nothing at all. */
+export const GM_ROSTER_WORKLOAD_RANK = Object.freeze(['underused', 'engaged', 'overloaded']);
+
+/** The three views that share the desk's centre-bottom region, in tab order. */
+export const GM_DESK_LOG_VIEWS = Object.freeze([
+  ['comms', 'gm-comms-panel'],
+  ['activity', 'gm-activity'],
+  ['journal', 'gm-journal'],
+]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   const root = doc.getElementById('gm-console');
@@ -30,6 +52,16 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   const peers = element('span', 'gm-peer-summary');
   bar.insertBefore(clock, get('gm-role-preset-label'));
   bar.insertBefore(peers, get('gm-role-preset-label'));
+  // The artboard's bar pills (Tick / Quiet / Checkpoint). Each one is drawn
+  // ONLY from a payload that has actually landed - gm_health for the tick,
+  // gm_attention's quiet-time occurrence, this browser's own checkpoint
+  // catalogue - so a pill that is missing is a fact this desk does not have
+  // rather than one it invented. There is deliberately no "60 Hz" and no
+  // "2 min ago": neither a rate nor a wall-clock age is on any projection.
+  const healthPills = element('div', 'gm-health-pills');
+  healthPills.setAttribute('role', 'group');
+  healthPills.setAttribute('aria-label', t('server.gm.shell.pills'));
+  bar.insertBefore(healthPills, get('gm-role-preset-label'));
   const lethal = element('label', 'gm-lethal-label', 'server.gm.shell.lethal');
   const modes = element('select', 'gm-lethal-mode');
   for (const mode of ['immediate', 'confirm', 'confirm-preview']) {
@@ -64,14 +96,40 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   if (win.__phoenixGmPage || doc.documentElement.classList.contains('phoenix-gm-page')) {
     move(roster, 'manual-save-panel');
   }
-  desk.prepend(roster);
-  // `gm-widgets` is last on purpose: the authored widget region (issue #1439)
-  // is a full-width row BELOW the fixed desk grid, present only while the
-  // effective role preset composes one. gui/gm-widgets-panel.js owns its
-  // `hidden` state, which is why it is absent from GM_ROLE_PRESET_PANEL_IDS —
+  const region = (id, stacked) => {
+    const el = element('div', id);
+    el.className = stacked ? 'gm-desk-region gm-desk-stack' : 'gm-desk-region';
+    return el;
+  };
+  const brief = region('gm-desk-brief', true);
+  const detail = region('gm-desk-detail', true);
+  const logRegion = region('gm-desk-log', false);
+  // The map is NEVER reparented: moving it would disconnect
+  // <ph-navigation-map> and cancel its render loop. The regions are placed
+  // around the cell it already occupies, and the panels move into regions that
+  // are already in the document so `getElementById` keeps finding them.
+  const mapPanel = get('gm-map-panel');
+  for (const id of ['gm-map-panel', 'gm-mission-panel', 'gm-health-panel']) {
+    get(id)?.classList.add('gm-desk-region');
+  }
+  desk.insertBefore(brief, mapPanel);
+  mapPanel.after(detail);
+  detail.after(get('gm-mission-panel'), logRegion, get('gm-health-panel'));
+  // Left: what is waiting, who is flying it, and whatever the world authored.
+  // `gm-widgets` is last on purpose — gui/gm-widgets-panel.js owns its
+  // `hidden` state, which is why it is absent from GM_ROLE_PRESET_PANEL_IDS:
   // a second writer there would race it, exactly as it would for the Station
   // puppet's controls.
-  move(desk, 'gm-attention-panel', 'gm-health-panel', 'gm-workload-panel', 'gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-widgets');
+  move(brief, 'gm-attention-panel');
+  brief.append(roster);
+  move(brief, 'gm-workload-panel', 'gm-widgets');
+  // Right: the selected hull, then the checkpoints a live event is recovered
+  // from (issues #1445/#1446) at the bottom of the column, as the artboard
+  // draws them. The restore control travels inside #gm-checkpoint.
+  move(detail, 'gm-inspector', 'gm-checkpoint');
+  // Centre-bottom: Comms, the activity feed and the saved action journal share
+  // ONE region behind a tab strip.
+  move(logRegion, 'gm-comms-panel', 'gm-activity', 'gm-journal');
   get('gm-comms-text')?.parentElement.classList.add('gm-comms-draft');
   const sessionHistory = element('details', 'gm-session-history');
   sessionHistory.append(element('summary', null, 'server.gm.session.log_heading'));
@@ -82,11 +140,73 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   // the desk's detail/reading column, it already stacks and scrolls its own
   // sections, and that is what keeps the journal legible at 200% text rather
   // than competing for one of the fixed grid cells.
-  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-station-pending', 'gm-station-controls', 'gm-despawn-panel', 'gm-faction-panel', 'gm-journal', 'gm-checkpoint');
+  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-station-pending', 'gm-station-controls', 'gm-despawn-panel', 'gm-faction-panel');
   const stationSurface = element('section', 'gm-station-surface');
   stationSurface.hidden = true;
   move(stationSurface, 'gm-station-frame', 'gm-station-activity-heading', 'gm-station-activity');
   root.append(stationSurface);
+  // The centre-bottom tab strip. It switches views with `data-log-view` on the
+  // region and NEVER with `hidden` on the panels: `hidden` on Comms and
+  // Activity belongs to the role preset (gui/gm-role-presets.js,
+  // GM_ROLE_PRESET_PANEL_IDS), and two writers on one attribute is the race
+  // the authored widget region is deliberately kept out of. A preset that
+  // hides a panel hides its TAB, which this shell owns.
+  const logTabs = element('div', 'gm-desk-log-tabs');
+  logTabs.setAttribute('role', 'tablist');
+  logTabs.setAttribute('aria-label', t('server.gm.shell.log_tabs'));
+  logRegion.prepend(logTabs);
+  let logView = GM_DESK_LOG_VIEWS[0][0];
+  function setLogView(view) {
+    logView = view;
+    logRegion.dataset.logView = view;
+    for (const [name] of GM_DESK_LOG_VIEWS) {
+      const button = get(`gm-log-tab-${name}`);
+      if (!button) continue;
+      button.setAttribute('aria-selected', String(name === view));
+      button.tabIndex = name === view ? 0 : -1;
+    }
+  }
+  for (const [view, panelId] of GM_DESK_LOG_VIEWS) {
+    const panel = get(panelId);
+    const button = element('button', `gm-log-tab-${view}`, `server.gm.shell.log.${view}`);
+    button.type = 'button';
+    button.setAttribute('role', 'tab');
+    button.dataset.logView = view;
+    if (panel) {
+      button.setAttribute('aria-controls', panelId);
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', button.id);
+    }
+    button.addEventListener('keydown', event => {
+      const buttons = [...logTabs.children].filter(node => !node.hidden);
+      const index = buttons.indexOf(button);
+      if (index < 0) return;
+      const next = event.key === 'ArrowRight' ? (index + 1) % buttons.length
+        : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : null;
+      if (next !== null) { event.preventDefault(); buttons[next].click(); buttons[next].focus(); }
+    });
+    button.addEventListener('click', () => setLogView(view));
+    logTabs.append(button);
+  }
+  setLogView(logView);
+  /** Keep the strip honest about what the effective role preset is showing. A
+   * hidden panel has no tab, and an operator standing on a tab that just went
+   * away lands on the first view that is still there. */
+  function reconcileLogTabs() {
+    let fallback = null;
+    let visible = false;
+    for (const [view, panelId] of GM_DESK_LOG_VIEWS) {
+      const panel = get(panelId);
+      const button = get(`gm-log-tab-${view}`);
+      if (!button) continue;
+      const available = !!panel && !panel.hidden;
+      if (button.hidden !== !available) button.hidden = !available;
+      if (available && fallback === null) fallback = view;
+      if (available && view === logView) visible = true;
+    }
+    if (!visible && fallback !== null) setLogView(fallback);
+  }
   const tabs = element('div', 'gm-inspector-tabs');
   tabs.setAttribute('role', 'tablist');
   const knowledge = get('gm-knowledge-panel');
@@ -162,16 +282,22 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   back.type = 'button';
   back.hidden = true;
   inspector.prepend(back);
+  // The scroll box is the REGION, not the inspector: the post-M5 right-hand
+  // column holds the inspector and the checkpoints in one frame, and only the
+  // frame scrolls (gui/gm-workspace.css explains why a second nested scroller
+  // there is a correctness problem, not a layout preference).
+  const detailScroller = inspector.closest('.gm-desk-region') || inspector;
   back.addEventListener('click', () => {
     back.hidden = true;
-    if (typeof inspector.scrollTo === 'function') inspector.scrollTo({ top: 0 }); else inspector.scrollTop = 0;
+    if (typeof detailScroller.scrollTo === 'function') detailScroller.scrollTo({ top: 0 }); else detailScroller.scrollTop = 0;
     get('gm-entity-card')?.scrollIntoView?.({ block: 'start' });
     tabs.querySelector('button[aria-selected="true"]')?.focus({ preventScroll: true });
   });
-  inspector.addEventListener('scroll', () => { if (!back.hidden && inspector.scrollTop < 8) back.hidden = true; });
+  detailScroller.addEventListener('scroll', () => { if (!back.hidden && detailScroller.scrollTop < 8) back.hidden = true; });
   let gms = [];
   let entities = [];
   let selected = null;
+  let pillSignature = null;
   let stationProjection = { ships: [] };
   let rosterSignature = '';
   const segments = [get('gm-role-preset-select'), modes].filter(Boolean).map(select => {
@@ -201,8 +327,77 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
     return paint;
   });
   const label = value => has(value) ? t(value) : value;
+  /** One workload WORD for a hull, from the rows issue #1438 actually
+   * published for its Stations. Never invented: a hull with no rows gets no
+   * pill, which is what a scenario with the advisory disabled looks like. */
+  function workloadWord(entityId) {
+    const rows = (win.__hostGmWorkloadState?.() || [])
+      .filter(row => row?.ship?.entity_id === entityId);
+    if (!rows.length) return null;
+    const counted = rows.filter(row => GM_ROSTER_WORKLOAD_RANK.includes(row.level));
+    if (counted.length) {
+      return counted.reduce((worst, row) => (
+        GM_ROSTER_WORKLOAD_RANK.indexOf(row.level) > GM_ROSTER_WORKLOAD_RANK.indexOf(worst)
+          ? row.level : worst), GM_ROSTER_WORKLOAD_RANK[0]);
+    }
+    return rows.every(row => row.level === rows[0].level) ? rows[0].level : null;
+  }
+  /** The bar's health pills. Signature-guarded like the roster: an unchanged
+   * bar is never rebuilt, so nothing under an operator's pointer moves. */
+  function paintHealthPills() {
+    const nodes = [];
+    const health = win.__hostGmHealthState?.();
+    const projection = health?.projection;
+    // A gm_health payload that has actually landed says SOMETHING: a peer, a
+    // Station, an operator, an alert or a deliberate pause. An untouched
+    // projection is the panel's own empty seed and claims nothing.
+    if (projection && (projection.peers.length || projection.stations.length
+      || projection.operators.length || projection.alerts.length || projection.paused)) {
+      const pill = element('span');
+      pill.dataset.pill = 'tick';
+      pill.dataset.state = health.worst;
+      pill.textContent = t('server.gm.shell.pill.tick', { state: t(healthStateLabelId(health.worst)) });
+      nodes.push(pill);
+    }
+    const quiet = (win.__hostGmAttentionState?.().occurrences || [])
+      .find(row => row.category === 'quiet_time');
+    if (quiet) {
+      const pill = element('span');
+      pill.dataset.pill = 'quiet';
+      pill.textContent = t('server.gm.shell.pill.quiet', { age: formatAttentionAge(quiet.age_ms) });
+      nodes.push(pill);
+    }
+    // The LAST checkpoint is the one with the highest capture tick, not
+    // whichever row the catalogue happened to hand back first.
+    const checkpoints = win.__hostGmCheckpointState?.().rows || [];
+    const latest = checkpoints.reduce((best, row) => {
+      const tick = Number.parseInt(row.captureTick, 10);
+      const bestTick = best ? Number.parseInt(best.captureTick, 10) : Number.NaN;
+      if (!Number.isFinite(tick)) return best;
+      return !Number.isFinite(bestTick) || tick > bestTick ? row : best;
+    }, null) || checkpoints[0] || null;
+    if (latest) {
+      const pill = element('span');
+      pill.dataset.pill = 'checkpoint';
+      pill.textContent = t('server.gm.shell.pill.checkpoint', {
+        name: latest.kind === 'autosave' ? t('server.gm.checkpoint.autosave') : latest.displayName,
+        tick: latest.captureTick || t('server.gm.checkpoint.unknown_tick'),
+      });
+      nodes.push(pill);
+    }
+    const signature = nodes.map(node => `${node.dataset.pill}:${node.dataset.state || ''}:${node.textContent}`).join('|');
+    if (signature === pillSignature) return;
+    pillSignature = signature;
+    healthPills.replaceChildren(...nodes);
+  }
   function paintRoster() {
-    const signature = JSON.stringify([entities.map(({ entity_id, name, kind, faction }) => ({ entity_id, name, kind, faction })), stationProjection.ships.map(ship => [ship.ship_id, ship.stations, ship.ship_config?.station_systems, ship.control_sources]), gms]);
+    // Only the DERIVED word goes in, never the advisory itself: a gm_workload
+    // row carries `sustained_secs`, which moves about once a simulated second
+    // while any Station holds demand. Folding the raw projection in here would
+    // rebuild every roster button a second — discarding a mousedown held on a
+    // row, dropping hover and active state, and losing a screen reader's place
+    // in the ship list — for a pill whose word had not changed.
+    const signature = JSON.stringify([entities.map(({ entity_id, name, kind, faction }) => ({ entity_id, name, kind, faction })), stationProjection.ships.map(ship => [ship.ship_id, ship.stations, ship.ship_config?.station_systems, ship.control_sources]), gms, entities.map(({ entity_id }) => workloadWord(entity_id))]);
     if (signature === rosterSignature) return;
     rosterSignature = signature;
     const focused = doc.activeElement?.dataset?.entityId;
@@ -234,7 +429,19 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
           pill.dataset.rating = station.rating;
           pills.append(pill);
         }
-        row.append(pills); ships.append(row);
+        row.append(pills);
+        // The artboard's workload word beside a crewed hull (issue #1438 data,
+        // not a second advisory): a WORD, with the panel below still carrying
+        // the evidence behind it.
+        const level = workloadWord(entity.entity_id);
+        if (level) {
+          const word = element('span');
+          word.className = 'gm-roster-workload';
+          word.dataset.level = level;
+          word.textContent = t(`server.gm.workload.state.${level}`);
+          row.append(word);
+        }
+        ships.append(row);
       }
     }
     if (focused) [...ships.querySelectorAll('button')].find(button => button.dataset.entityId === focused)?.focus({ preventScroll: true });
@@ -260,14 +467,34 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
       button.append(background, label);
     });
   }
-  const observer = new win.MutationObserver(styleButtons);
-  observer.observe(root, { childList: true, subtree: true });
+  const observer = new win.MutationObserver(() => { styleButtons(); reconcileLogTabs(); });
+  // `hidden` is watched as well as the tree: the role preset toggles Comms and
+  // Activity without any other signal reaching this shell, and a tab for a
+  // panel the preset has put away is a control that leads nowhere.
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
   styleButtons();
+  reconcileLogTabs();
   get('gm-station-toggle')?.addEventListener('click', () => {
     if (!get('gm-station-frame').hidden) stationSurface.scrollIntoView?.({ block: 'start' });
   });
   return {
     dispose() { observer.disconnect(); css.remove(); },
+    /** Bring one of the centre region's three views to the front.
+     *
+     * A view that is not current is `display: none`, so anything inside it is
+     * unfocusable and unclickable — which would silently break the navigations
+     * the desk already has: the attention queue opening an authored Comms
+     * route, or any later surface pointing at the action log. Callers ask for
+     * the PANEL they are about to touch and this resolves the view; a panel the
+     * effective role preset has put away is left alone, because a preset
+     * hiding a panel is a decision, not an accident. */
+    showLog(panelId) {
+      const entry = GM_DESK_LOG_VIEWS.find(([, id]) => id === panelId);
+      const panel = entry && get(panelId);
+      if (!entry || !panel || panel.hidden) return false;
+      setLogView(entry[0]);
+      return true;
+    },
     metadata(value) { gms = value.gms || []; paintRoster(); },
     selection(entity) {
       selected = entity?.entity_id || null;
@@ -300,6 +527,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
       const armed = win.__hostGmSpawnState?.().arming;
       armedChip.hidden = !armed;
       armedChip.textContent = armed ? t('server.gm.shell.armed', { palette: armed }) : '';
+      paintHealthPills();
+      reconcileLogTabs();
       paintRoster();
     },
   };

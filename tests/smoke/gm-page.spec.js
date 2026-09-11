@@ -61,6 +61,9 @@ test('prepared GM event admits crew and delivers Comms to both live Fleet hulls'
   expect(recipients.map(row => row.fleet_slot).sort()).toEqual([1, 2]);
   expect(new Set(recipients.map(row => row.id)).size).toBe(2);
   const text = 'Prepared Fleet Comms receipt';
+  // Comms shares the desk's centre region with the activity feed and the
+  // action log behind one tab strip (the post-M5 screen).
+  await gm.locator('#gm-log-tab-comms').click();
   await gm.locator('#gm-comms-route').selectOption('starbase-selected');
   await gm.locator('#gm-comms-recipients').selectOption(recipients.map(row => row.id));
   await gm.locator('#gm-comms-text').fill(text);
@@ -246,6 +249,8 @@ test('GM Comms preserves exact text and recipient dialogue through ordinary crew
   const crewPage = await reconnectRealCrew(context, crews[0].host, token, 'comms');
   const crewFrame = crewPage.frameLocator('#comms-iframe');
   const send = async (page, recipients, text) => {
+    // Comms shares the centre region behind one tab strip (post-M5 screen).
+    await page.locator('#gm-log-tab-comms').click();
     await page.locator('#gm-comms-route').selectOption('selected');
     await page.locator('#gm-comms-recipients').selectOption(recipients);
     await page.locator('#gm-comms-text').fill(text);
@@ -282,6 +287,7 @@ test('GM Comms preserves exact text and recipient dialogue through ordinary crew
   await otherGm.waitForFunction(correlation => window.__hostGmCommsState().results
     .some(row => row.correlation === correlation && row.outcome === 'applied'), second.correlation);
 
+  await gm.locator('#gm-log-tab-comms').click();
   await gm.locator('#gm-comms-recipients').selectOption([alpha]);
   await gm.locator('#gm-comms-hail').selectOption('offer');
   const beforeHail = await gm.evaluate(() => window.__hostGmCommsState().results
@@ -580,6 +586,8 @@ test('a GM activates and resolves authored Objectives through the real mission p
   await expect(gm.locator('#gm-objective-results li[data-correlation="scope-objective-smoke"]')).toHaveAttribute('data-outcome', 'refused');
   await expect(row(completeId)).toHaveAttribute('data-status', 'Completed');
   await expect(row(failId)).toHaveAttribute('data-status', 'Failed');
+  // The activity feed shares the centre region behind one tab strip.
+  await gm.locator('#gm-log-tab-activity').click();
   const activity = gm.locator('#gm-activity-list [data-category="gm_action"]');
   await expect(activity.filter({ hasText: completeId }).first()).toBeVisible();
   expect(shipErrors).toEqual([]); expect(gmErrors).toEqual([]);
@@ -1577,7 +1585,9 @@ test('a GM damages and repairs one Entity through the typed action path', { tag:
   await expect(applied).toHaveAttribute('data-destroyed', 'false');
 
   // The crew-facing consequence is the ORDINARY damage row, from the same
-  // unconditional balance event a beam hit produces.
+  // unconditional balance event a beam hit produces. The feed shares the
+  // desk's centre region behind one tab strip (the post-M5 screen).
+  await page.locator('#gm-log-tab-activity').click();
   await expect(page.locator('#gm-activity-list [data-category="damage"]').first())
     .toBeVisible({ timeout: 30_000 });
   // And the GM's own attributed row names what it hit.
@@ -1818,6 +1828,7 @@ test('a GM damages and repairs one Station and one System without touching their
   )).toHaveCount(0);
 
   // And the GM activity feed names the Station the applied hit was aimed at.
+  await page.locator('#gm-log-tab-activity').click();
   await expect(
     page.locator('#gm-activity-list [data-category="gm_action"]')
       .filter({ hasText: ts('server.gm.activity.action.direct_effect_station', { scope: 'captain' }) })
@@ -2265,6 +2276,9 @@ test('real damage and destruction stay ordered bounded and selectable after remo
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
+  // The activity feed shares the desk's centre region behind one tab strip
+  // (the post-M5 screen), so it is selected before its rows are operated.
+  await page.locator('#gm-log-tab-activity').click();
   await page.waitForFunction(() => {
     const feed = window.__hostGmActivityState?.();
     return feed?.entries?.some((entry) => entry.category === 'damage')

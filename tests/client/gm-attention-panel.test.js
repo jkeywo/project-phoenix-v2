@@ -61,7 +61,7 @@ function memoryStorage() {
   };
 }
 
-function mount({ filters, onOpen = vi.fn(), doc = document } = {}) {
+function mount({ filters, onOpen = vi.fn(), onAge = vi.fn(), doc = document } = {}) {
   doc.body.innerHTML = MARKUP;
   const panel = createGmAttentionPanel({
     doc,
@@ -69,8 +69,9 @@ function mount({ filters, onOpen = vi.fn(), doc = document } = {}) {
     has: (id) => typeof id === 'string' && id.startsWith('server.'),
     filters: filters || createGmAttentionFilters(),
     onOpen,
+    onAge,
   });
-  return { panel, onOpen };
+  return { panel, onOpen, onAge };
 }
 
 const rowIds = (doc = document) => [...doc.querySelectorAll('#gm-attention-list li')]
@@ -925,6 +926,30 @@ describe('GM attention queue: the quiet-time advisory', () => {
     expect(row.querySelector('button[data-action="snooze"]')).not.toBe(null);
     expect(row.querySelector('button[data-action="open"]')).toBe(null);
     expect(onOpen).not.toHaveBeenCalled();
+    panel.dispose();
+  });
+
+  it('keeps ageing the lull row when nothing republishes, and says so', () => {
+    const { panel, onAge } = mount();
+    // The start of a lull, five seconds in. Rust will not publish again while
+    // only the age changes, and `src/gm_quiet.rs` holds one id and one
+    // authored `seconds` for the whole lull, so this is the last payload the
+    // page will see until the crew do something.
+    panel.update(payload(quiet('quiet:1', { age_ms: 5000 })));
+    expect(panel.state().occurrences[0].age_ms).toBe(5000);
+    expect(document.querySelector('#gm-attention-list li .gm-attention-age').textContent)
+      .toBe(t('server.gm.attention.age', { clock: '0:05' }));
+    // Two silent minutes.
+    vi.advanceTimersByTime(120_000);
+    // The row on screen and the wait any OTHER surface reads off this panel
+    // are the same clock: a bar pill fed `state()` cannot disagree with the
+    // row it sits above.
+    expect(document.querySelector('#gm-attention-list li .gm-attention-age').textContent)
+      .toBe(t('server.gm.attention.age', { clock: '2:05' }));
+    expect(panel.state().occurrences[0].age_ms).toBe(125_000);
+    // And such a surface is told when to repaint, because in a lull there is
+    // no payload to tell it.
+    expect(onAge).toHaveBeenCalledTimes(120);
     panel.dispose();
   });
 

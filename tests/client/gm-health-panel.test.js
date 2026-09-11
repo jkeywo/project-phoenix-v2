@@ -449,9 +449,11 @@ describe('authored advisory config cannot reach the technical treatment', () => 
     expect(workspace).toContain('renderBanners: (rows, container) => gmHealthBanner.render(rows, container)');
     expect(workspace).toContain('banners: (alerts) => gmAttentionPanel.banners(alerts)');
     // The live restore (issue #1446) reads the SAME projection rather than
-    // opening a second channel for its own state.
+    // opening a second channel for its own state. The desk shell rides along
+    // because the post-M5 bar carries a tick-health pill; it is a third READER
+    // of this one payload, never a second channel.
     expect(workspace).toContain(
-      'gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); }');
+      'gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); shell.refresh(); }');
     // The banner's hull action is the SAME selection the map already answers to.
     expect(workspace).toContain('gmProjection.select(alert.ship.entity_id)');
   });

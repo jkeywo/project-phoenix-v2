@@ -35,14 +35,18 @@
 #gm-console.gm-desk #gm-session-heading, #gm-console.gm-desk #gm-session-log-heading,
 #gm-console.gm-desk #gm-session-log { display: none; }
 #gm-console.gm-desk #gm-session-actions { gap: var(--space-2); }
-/* Five rows of grid, four rows of panel: the map and the inspector span the
-   first four so the left column can carry the roster, the M4 attention queue
-   (issue #1433), the technical health panel (issue #1437) AND the
-   Station-workload advisory (issue #1438) without stealing height from
-   anything else. Every one of them scrolls in place, which is what keeps the
-   desk usable at --a11y-text-scale: 2 (PRD #1418). */
+/* The post-M5 desk (PRD #930, canvas artboard "After M5 - facilitation +
+   operations"): ONE bar and three columns over two rows, six REGIONS rather
+   than nine grid cells. A region is the panel frame; the sections inside it
+   are blocks that stack and scroll within it, which is how the artboard draws
+   Attention/Roster/authored widgets as one left-hand panel and
+   Comms/Activity/Action log as one tabbed centre panel. Nothing changed
+   column: every later milestone adds panels to the column that already held
+   its kind, which is the canvas note "each later screen adds panels rather
+   than moving them". Every one of them scrolls in place, which is what keeps
+   the desk usable at --a11y-text-scale: 2 (PRD #1418). */
 #gm-console.gm-desk #gm-workspace {
-  display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px;
+  display: grid; grid-template-columns: 320px minmax(0, 1fr) 340px;
   /* Every row keeps a FLOOR that scales with the operator’s text size (PRD
      #1418, issue #1438): four 1fr rows of a fixed-height desk leave the left
      column about one line each at --a11y-text-scale: 2 — a heading and a
@@ -58,24 +62,96 @@
      still never scrolls sideways, which is the contract the smoke spec asserts
      — alongside the vertical fit at both default-text viewports, which is what
      pins the definite height. */
-  grid-template-rows: repeat(4, minmax(7.5em, 1fr)) minmax(236px, auto);
+  /* The artboard's 250px second row, expressed so it can never eat the first.
+     `auto` as a maximum would let the lower row grow to its max-content during
+     grid's maximize step - which runs BEFORE flexible tracks are sized - and
+     leave the map/inspector row at its zero floor. A flexible maximum keeps
+     the lower row in proportion (about 31% of the desk) with the artboard
+     height as a hard base, and that base rises with the operator's text size
+     so a 200% mission panel is a panel rather than a heading and a clipped
+     row. */
+  grid-template-rows: minmax(0, 1fr) minmax(max(250px, 14em), 0.45fr);
   gap: var(--space-5); padding: var(--space-5);
   height: max(580px, calc(100vh - 88px)); flex: 0 0 auto;
 }
-#gm-console.gm-desk #gm-workspace > section {
+#gm-console.gm-desk #gm-workspace > .gm-desk-region {
   min-width: 0; min-height: 0; max-width: none; padding: var(--space-5);
   background: var(--surface-panel); border: 1px solid var(--edge);
   display: flex; flex-direction: column; gap: var(--space-4); overflow: auto;
 }
-#gm-console.gm-desk #gm-roster { grid-area: 1 / 1; }
-#gm-console.gm-desk #gm-attention-panel { grid-area: 2 / 1; }
-#gm-console.gm-desk #gm-health-panel { grid-area: 3 / 1; }
-#gm-console.gm-desk #gm-workload-panel { grid-area: 4 / 1; }
-#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 5 / 3; overflow: hidden; }
-#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3 / 5 / 4; }
-#gm-console.gm-desk #gm-mission-panel { grid-area: 5 / 1; }
-#gm-console.gm-desk #gm-comms-panel { grid-area: 5 / 2; }
-#gm-console.gm-desk #gm-activity { grid-area: 5 / 3; }
+/* A stacked region (left column, right column). The REGION is the one scroll
+   box; the sections inside it are laid out at their own height and never open
+   a second one.
+   That is a correctness rule, not a taste one. A panel that scrolls inside a
+   region that scrolls inside #gm-console puts four nested scroll boxes between
+   a bounded list (#gm-checkpoint-list, #gm-journal-list) and the page, and a
+   row in the innermost one can then be scrolled into view at every level and
+   still not be at the point a click lands: tests/smoke/gm-checkpoint-200.spec.js
+   caught exactly that, as a checkpoint row whose own sibling summary line
+   intercepted every click at 200% text. One region scroller keeps the chain the
+   same depth the After-M3 desk had, where the column WAS the panel. */
+#gm-console.gm-desk .gm-desk-stack > section {
+  flex: 0 0 auto; min-width: 0; overflow: visible;
+  border: 0; background: none; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+#gm-console.gm-desk #gm-desk-brief { grid-area: 1 / 1; }
+#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2; overflow: hidden; }
+#gm-console.gm-desk #gm-desk-detail { grid-area: 1 / 3; }
+#gm-console.gm-desk #gm-mission-panel { grid-area: 2 / 1; }
+#gm-console.gm-desk #gm-desk-log { grid-area: 2 / 2; }
+#gm-console.gm-desk #gm-health-panel { grid-area: 2 / 3; }
+/* Comms, Activity and the saved action journal share the centre region behind
+   one tab strip. The strip switches views with `data-log-view` and never with
+   `hidden`, because `hidden` on Comms and Activity belongs to the role preset
+   (gui/gm-role-presets.js, GM_ROLE_PRESET_PANEL_IDS) - two writers on one
+   attribute is exactly the race the widget region is kept out of. A preset
+   that hides a panel hides its TAB instead, which the shell owns. */
+/* Like the stacked regions above, the log region is the ONE scroll box: the
+   strip stays put while the view under it scrolls, and the view itself opens
+   no second scroller. */
+#gm-console.gm-desk #gm-desk-log-tabs {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  position: sticky; top: 0; z-index: 2; background: var(--surface-raised);
+}
+#gm-console.gm-desk #gm-desk-log-tabs button {
+  flex: 1 1 8ch; letter-spacing: var(--tracking-tight); text-transform: none; overflow-wrap: normal;
+}
+#gm-console.gm-desk #gm-desk-log > section {
+  display: none; flex: 0 0 auto; min-width: 0; overflow: visible;
+  border: 0; background: none; padding: 0;
+}
+#gm-console.gm-desk #gm-desk-log[data-log-view="comms"] > #gm-comms-panel { display: grid; }
+#gm-console.gm-desk #gm-desk-log[data-log-view="activity"] > #gm-activity,
+#gm-console.gm-desk #gm-desk-log[data-log-view="journal"] > #gm-journal {
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+/* The bar's health pills (artboard: Tick / Quiet / Checkpoint). Each is drawn
+   only when the live payload behind it exists, so a missing pill is a missing
+   fact rather than an invented one. Every pill states its condition as a WORD;
+   the colours are decoration on top of that (PRD #1418 story 6). */
+#gm-console.gm-desk #gm-health-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+#gm-console.gm-desk #gm-health-pills span {
+  border: 1px solid var(--edge); padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono); font-size: max(12px, var(--text-sm));
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-health-pills span[data-pill="tick"][data-state="live"] { color: var(--cyan); }
+#gm-console.gm-desk #gm-health-pills span[data-pill="tick"]:not([data-state="live"]) {
+  color: var(--gold); border-color: var(--gold);
+}
+#gm-console.gm-desk #gm-health-pills span[data-pill="checkpoint"] { color: var(--gold); }
+/* The workload word beside a crewed hull in the roster (issue #1438 data on
+   the artboard's Roster rows). A word, never a colour alone, and Overloaded
+   also thickens its edge so a forced palette keeps the distinction. */
+#gm-console.gm-desk .gm-roster-workload {
+  border-left: 3px solid var(--edge-bright); padding-left: var(--space-2);
+  letter-spacing: var(--tracking-wide); color: var(--gold);
+  font-size: max(12px, var(--text-sm));
+}
+#gm-console.gm-desk .gm-roster-workload[data-level="overloaded"] { border-left-width: var(--space-2); }
+#gm-console.gm-desk .gm-roster-workload[data-level="backfill"],
+#gm-console.gm-desk .gm-roster-workload[data-level="offline"] { color: var(--ink-dim); }
 #gm-console.gm-desk #gm-entity-map { flex: 1; min-height: 0; height: auto; width: 100%; background: var(--surface-abyss); }
 #gm-console.gm-desk #gm-map-legend { font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-selection-chip { color: var(--gold); font-family: var(--font-mono); }
@@ -128,12 +204,11 @@
 }
 @media (max-width: 1000px) {
   #gm-console.gm-desk #gm-workspace { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
-  #gm-console.gm-desk #gm-workspace > section { grid-area: auto; max-height: 600px; }
+  #gm-console.gm-desk #gm-workspace > .gm-desk-region { grid-area: auto; max-height: 600px; }
   #gm-console.gm-desk #gm-map-panel { height: 480px; }
 }
 #gm-console.gm-desk .gm-station-bar { padding-left: var(--settings-cog-keepout, var(--space-5)); padding-right: var(--space-5); }
 #gm-console.gm-desk #gm-role-preset-label { flex: 0 1 auto; max-width: 200px; }
-#gm-console.gm-desk #gm-workspace > #gm-comms-panel { display: grid; }
 #gm-console.gm-desk #manual-save-panel { position: static; width: 100%; max-width: none; padding: var(--space-4) 0; background: transparent; border: 0; }
 #gm-console.gm-desk #gm-entity-identity { font-family: var(--font-mono); font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-comms-panel[data-empty="true"] > label,
@@ -172,7 +247,7 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-session-state { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
 #gm-console.gm-desk #gm-inspector-tabs button { letter-spacing: var(--tracking-tight); text-transform: none; overflow-wrap: normal; }
 #gm-console.gm-desk #gm-operator-identity { max-width: 100px; font-size: var(--text-xs); color: var(--gold); }
-#gm-console.gm-desk #gm-workspace > section {
+#gm-console.gm-desk #gm-workspace > .gm-desk-region {
   background: linear-gradient(180deg, var(--surface-raised), var(--surface-base));
   clip-path: polygon(var(--cham-panel) 0, calc(100% - var(--cham-panel)) 0, 100% var(--cham-panel), 100% calc(100% - var(--cham-panel)), calc(100% - var(--cham-panel)) 100%, var(--cham-panel) 100%, 0 calc(100% - var(--cham-panel)), 0 var(--cham-panel));
 }
@@ -215,7 +290,9 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
    Chrome (121+) takes the standard properties and ignores the -webkit-
    pseudo-elements; the native Ultralight pane (WebKit) is the reverse. Both
    end in the same thin, always-visible thumb. */
-#gm-console.gm-desk #gm-workspace > section,
+#gm-console.gm-desk #gm-workspace > .gm-desk-region,
+#gm-console.gm-desk .gm-desk-stack > section,
+#gm-console.gm-desk #gm-desk-log > section,
 #gm-console.gm-desk #gm-station-surface,
 #gm-console.gm-desk .gm-knowledge-category,
 #gm-console.gm-desk #gm-objective-results {
@@ -473,17 +550,14 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-workload-status:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
 
 /* ── The typed world-authored widget region (issue #1439) ────────────────
-   A full-width row BELOW the fixed five-row desk grid, drawn only while the
-   effective role preset composes one — `gui/gm-widgets-panel.js` owns the
-   `hidden` attribute. It lands in an IMPLICIT row, so a scenario that authors
-   no widget leaves the desk exactly as it was: no sixth track is reserved, no
-   height is taken from the panels above, and the vertical fit the smoke spec
-   pins at both default-text viewports is untouched. With widgets the desk
-   grows past its definite height and #gm-console scrolls VERTICALLY, which is
-   the same thing it already does at --a11y-text-scale: 2 (server.html:
-   overflow-y: auto). It never scrolls sideways: every card is a min-width: 0
-   auto-fit track that wraps at 200% instead of squeezing. */
-#gm-console.gm-desk #gm-widgets { grid-area: 6 / 1 / 7 / 4; }
+   The post-M5 screen puts it where the artboard does: the last block of the
+   LEFT region, under Attention and the Roster, which is where a world's own
+   mission panel belongs (the artboard's illustrative "Skyhook claimants").
+   `gui/gm-widgets-panel.js` still owns the `hidden` attribute, so a scenario
+   that authors no widget leaves the left column exactly as it was and the
+   vertical fit the smoke spec pins at both default-text viewports is
+   untouched. It never scrolls sideways: every card is a min-width: 0 auto-fit
+   track that wraps at 200% instead of squeezing. */
 #gm-console.gm-desk #gm-widgets-list {
   list-style: none; margin: 0; padding: 0; min-width: 0;
   display: grid; gap: var(--space-4);

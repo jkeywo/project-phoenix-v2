@@ -67,6 +67,9 @@ test('GM faction change and its undo stay readable and operable at 200% text on 
 
     // The journal row for it offers an Undo, with the before/after pair spelled
     // out and the "already witnessed" sentence that is never suppressible.
+    // The action log shares the centre region behind one tab strip (the
+    // post-M5 screen); bring it to the front the way an operator does.
+    await page.locator('#gm-log-tab-journal').click();
     const row = page.locator('.gm-journal-row[data-outcome="applied"]').last();
     await row.click();
     const eligibility = page.locator('#gm-journal-inverse .gm-inverse-eligibility');

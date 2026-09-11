@@ -267,9 +267,23 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     // nothing here chooses, offers or issues an order on the operator's behalf.
     onOpen: (occurrence) => {
       if (occurrence.target.ship) gmProjection.select(occurrence.target.ship.entity_id);
-      if (occurrence.target.route) gmCommsPanel.focusRoute(occurrence.target.route);
+      // Comms shares the desk's centre region with the activity feed and the
+      // action log (the post-M5 screen), so the route has to be ON SCREEN
+      // before it can be focused — a `display: none` panel has nothing to
+      // focus. The shell resolves the view; the panel still does the pointing.
+      if (occurrence.target.route) {
+        shell.showLog('gm-comms-panel');
+        gmCommsPanel.focusRoute(occurrence.target.route);
+      }
       if (occurrence.target.event) gmMissionPanel.focusEvent(occurrence.target.event.id);
     },
+    // The bar's Quiet pill is the same wait the queue's own lull row shows, so
+    // it has to advance on the queue's cadence. A lull publishes nothing — the
+    // advisory keeps one id and one `seconds` param for its whole duration —
+    // so without this the pill would be painted once and then sit frozen
+    // beside a row counting up. Presentation only: the tick repaints the bar
+    // from state the panel already holds.
+    onAge: () => shell.refresh(),
   });
   repaintGmAttention = gmAttentionPanel.repaint;
   win.__hostGmAttentionState = gmAttentionPanel.state;
@@ -459,9 +473,13 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
-    gm_attention: function(p) { gmAttentionPanel.update(p); gmWidgetsPanel.repaint(); },
-    gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); },
-    gm_workload:  function(p) { gmWorkloadPanel.update(p); gmWidgetsPanel.repaint(); },
+    // The desk's bar carries a pill per advisory (the post-M5 screen), and
+    // the roster carries the workload word, so each of these three also
+    // repaints the shell. Both paints are signature-guarded, so an unchanged
+    // bar or roster is never rebuilt under an operator's pointer.
+    gm_attention: function(p) { gmAttentionPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
+    gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); shell.refresh(); },
+    gm_workload:  function(p) { gmWorkloadPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
@@ -476,7 +494,9 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmStationPuppet.refresh();
       gmFactionPanel.refreshAdmission();
       gmJournalPanel.refreshAdmission();
-      gmCheckpointPanel.refresh();
+      // The catalogue read is asynchronous; the bar's Checkpoint pill is
+      // painted once it has actually come back rather than a refresh behind.
+      Promise.resolve(gmCheckpointPanel.refresh()).then(() => shell.refresh(), () => {});
       gmRestoreControl.refresh();
       win.__hostGmEffectRefresh();
     },

@@ -36,10 +36,33 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
   await expect(page.locator('#gm-roster-ships button').first()).toBeVisible();
   await page.locator('#gm-roster-ships button').first().click();
+  // The post-M5 screen (PRD #930, canvas artboard "After M5 - facilitation +
+  // operations"): six regions in reading order, three columns over two rows.
+  expect(await page.locator('#gm-workspace > *').evaluateAll(nodes => nodes.map(node => node.id)))
+    .toEqual(['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail',
+      'gm-mission-panel', 'gm-desk-log', 'gm-health-panel']);
   for (const [width,height] of [[1440,900],[1280,720]]) {
     await page.setViewportSize({width,height});
     await page.locator('#gm-console').evaluate(el=>el.scrollTop=0);
     await expect(page.locator('#gm-workspace')).toBeVisible();
+    // Three columns over two rows, measured rather than declared: each column
+    // shares a left edge and each row shares a top edge, at BOTH viewports.
+    const boxes = {};
+    for (const id of ['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail',
+      'gm-mission-panel', 'gm-desk-log', 'gm-health-panel']) {
+      await expect(page.locator(`#${id}`)).toBeVisible();
+      boxes[id] = await page.locator(`#${id}`).boundingBox();
+    }
+    expect(Math.round(boxes['gm-desk-brief'].x), `${width}: left column`)
+      .toBe(Math.round(boxes['gm-mission-panel'].x));
+    expect(Math.round(boxes['gm-map-panel'].x), `${width}: centre column`)
+      .toBe(Math.round(boxes['gm-desk-log'].x));
+    expect(Math.round(boxes['gm-desk-detail'].x), `${width}: right column`)
+      .toBe(Math.round(boxes['gm-health-panel'].x));
+    expect(Math.round(boxes['gm-desk-brief'].y), `${width}: top row`)
+      .toBe(Math.round(boxes['gm-desk-detail'].y));
+    expect(boxes['gm-mission-panel'].y, `${width}: second row is below the first`)
+      .toBeGreaterThan(boxes['gm-desk-brief'].y);
     const geometry = await page.locator('#gm-workspace').evaluate(el=>({
       width:el.clientWidth, scroll:el.scrollWidth,
       height:el.clientHeight, scrollHeight:el.scrollHeight,
@@ -53,6 +76,19 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     // above the fold while the horizontal contract above still passes.
     expect(geometry.height).toBeLessThanOrEqual(height);
     expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.height + 1);
+    // Comms, the activity feed and the saved action journal share the centre
+    // region behind one tab strip, at both viewports.
+    await expect(page.locator('#gm-comms-panel')).toBeVisible();
+    await expect(page.locator('#gm-journal')).toBeHidden();
+    await page.locator('#gm-log-tab-journal').click();
+    await expect(page.locator('#gm-journal')).toBeVisible();
+    await expect(page.locator('#gm-comms-panel')).toBeHidden();
+    // The switch is `data-log-view` on the region, never `hidden` on a panel:
+    // that attribute belongs to the role preset (GM_ROLE_PRESET_PANEL_IDS), and
+    // two writers on one attribute is exactly the race this avoids.
+    expect(await page.locator('#gm-comms-panel').evaluate(el => el.hasAttribute('hidden'))).toBe(false);
+    await page.locator('#gm-log-tab-comms').click();
+    await expect(page.locator('#gm-comms-panel')).toBeVisible();
     const screenshot = testInfo.outputPath(`gm-screen-${width}.png`);
     await page.screenshot({path:screenshot});
     await testInfo.attach(`GM ${width}×${height}`, {path:screenshot,contentType:'image/png'});
@@ -133,6 +169,11 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   // The keyboard reaches the row's verbs, and reading one holds the list.
   await beatRow.locator('button[data-action="open"]').focus();
   expect(await page.evaluate(() => document.activeElement?.dataset?.action)).toBe('open');
+  // Reading a row HOLDS the queue (issue #1433): a list an operator is
+  // standing in must not rebuild under them, so the projection pushed below
+  // would land behind the held beat row and nothing after it would ever be
+  // drawn. The next case wants the live list, so it returns to live through
+  // the panel's own control, exactly as an operator would.
   // The quiet-time advisory (issue #1436) is the third row family in the same
   // queue, and the one with no destination: it must read as a full sentence and
   // offer its ONE verb, with no dead Open button beside it, still without the
@@ -151,8 +192,44 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
       target: {},
     }],
   })));
+  // Focus is still standing on the beat row above, so that push did NOT
+  // rebuild the list under the operator — issue #1433's reading hold, which is
+  // the behaviour PRD #1418 story 4 asks for, and which every case after this
+  // one depends on being released deliberately rather than silently.
+  await page.waitForFunction(() => window.__hostGmAttentionState().held === true);
+  await expect(page.locator('#gm-attention-list li[data-occurrence-id="quiet:1"]')).toHaveCount(0);
+  // The operator's own word that the presentation may catch up.
+  await page.locator('#gm-attention-live').click();
+  await page.waitForFunction(() => window.__hostGmAttentionState().held === false);
   const quietRow = page.locator('#gm-attention-list li[data-occurrence-id="quiet:1"]');
   await expect(quietRow).toBeVisible();
+  // …and the bar states it as a pill, from that same occurrence's own age.
+  // No pill is invented: the desk draws one only for a fact a live payload
+  // carries, which is why there is no rate and no wall-clock checkpoint age.
+  const quietPill = page.locator('#gm-health-pills span[data-pill="quiet"]');
+  await expect(quietPill).toBeVisible();
+  // Read the pill and the row it summarises together: they are the same live
+  // clock, because the QUEUE ages both. Rust does not republish on age alone,
+  // and a lull keeps one occurrence id for its whole duration, so a pill
+  // painted from the payload's own `age_ms` would sit frozen at the sampled
+  // 2:05 while the row beside it counted on.
+  const readClocks = () => page.evaluate(() => {
+    const seconds = (node) => {
+      const match = node && node.textContent.match(/(\d+):(\d\d)/);
+      return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+    };
+    return {
+      pill: seconds(document.querySelector('#gm-health-pills span[data-pill="quiet"]')),
+      row: seconds(document.querySelector(
+        '#gm-attention-list li[data-occurrence-id="quiet:1"] .gm-attention-age')),
+    };
+  });
+  const clocks = await readClocks();
+  expect(clocks.row).toBeGreaterThanOrEqual(125);
+  expect(Math.abs(clocks.pill - clocks.row)).toBeLessThanOrEqual(1);
+  // And it keeps counting with no further payload at all.
+  await expect.poll(async () => (await readClocks()).pill, { timeout: 8000 })
+    .toBeGreaterThan(clocks.pill);
   await expect(quietRow.locator('.gm-attention-band')).toHaveText(/\S/);
   await expect(quietRow.locator('.gm-attention-reason')).toHaveText(/\S/);
   await expect(quietRow.locator('button[data-action="snooze"]')).toBeVisible();
@@ -245,6 +322,46 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   }));
   expect(withWidgets.scroll).toBeLessThanOrEqual(withWidgets.width);
   expect(withWidgets.body).toBeLessThanOrEqual(withWidgets.viewport);
+  // The bar's tick-health pill, from a REAL gm_health payload on the same
+  // channel the health panel reads — one reader more, never a second channel.
+  await page.evaluate(() => window.__hostChannel('gm_health', JSON.stringify({
+    tick: 4821,
+    paused: false,
+    peers: [{ id: 'peer:1', state: 'stale', behind_ticks: 4, operators: [] }],
+    stations: [],
+    operators: [],
+    alerts: [],
+  })));
+  const tickPill = page.locator('#gm-health-pills span[data-pill="tick"]');
+  await expect(tickPill).toBeVisible();
+  // A WORD, not a colour: the pill says which condition the tick is in.
+  await expect(tickPill).toHaveText(/\S/);
+  expect(await tickPill.getAttribute('data-state')).toBe('stale');
+  // The whole bar is still one bar at 200%: it wraps, it does not scroll.
+  const bar = await page.locator('#gm-console > header').evaluate(el => ({
+    scroll: el.scrollWidth, width: el.clientWidth,
+  }));
+  expect(bar.scroll).toBeLessThanOrEqual(bar.width + 1);
+  // The checkpoint column and its restore control are on the right-hand region
+  // at 200%, which is where the artboard puts them.
+  await expect(page.locator('#gm-desk-detail > #gm-checkpoint')).toBeVisible();
+  await expect(page.locator('#gm-checkpoint-bookmark')).toBeVisible();
+  expect(await page.locator('#gm-checkpoint-bookmark').evaluate(el =>
+    el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+  // Every tab in the centre strip stays pressable at 200%, and each view
+  // scrolls inside its own region rather than widening the desk.
+  for (const view of ['comms', 'activity', 'journal']) {
+    const tab = page.locator(`#gm-log-tab-${view}`);
+    await expect(tab).toBeVisible();
+    expect(await tab.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    await tab.click();
+    const region = await page.locator('#gm-desk-log').evaluate(el => ({
+      scroll: el.scrollWidth, width: el.clientWidth,
+    }));
+    expect(region.scroll, `${view}: centre region width at 200%`)
+      .toBeLessThanOrEqual(region.width + 1);
+  }
+  await page.locator('#gm-log-tab-comms').click();
   const doubled = testInfo.outputPath('gm-screen-1280-200pc.png');
   await page.screenshot({path:doubled});
   await testInfo.attach('GM 1280×720 at 200% text', {path:doubled,contentType:'image/png'});

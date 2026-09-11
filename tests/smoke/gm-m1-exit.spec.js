@@ -1278,6 +1278,7 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     ]));
     for (const category of REQUIRED_FEED_CATEGORIES) {
       expect(categoryCounts[category]).toBeGreaterThan(0);
+      await gmOne.locator('#gm-log-tab-activity').click();
       await expect(gmOne.locator(`.gm-activity-entry[data-category="${category}"]`).first())
         .toBeVisible();
     }

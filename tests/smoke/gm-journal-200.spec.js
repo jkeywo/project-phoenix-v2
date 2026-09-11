@@ -41,6 +41,14 @@ test('GM saved action history stays readable and operable at 200% text on 1280x7
     await page.locator('#gm-session-pause').click();
     await page.waitForFunction(() => (window.__hostGmJournalState?.().entries.length || 0) > 0);
 
+    // The action log shares the desk's centre region with Comms and the
+    // activity feed behind one tab strip (the post-M5 screen), so it is
+    // brought to the front the way an operator brings it: by its own tab,
+    // which is itself part of the 200% contract this spec is about.
+    const logTab = page.locator('#gm-log-tab-journal');
+    await expect(logTab).toBeVisible();
+    expect((await logTab.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    await logTab.click();
     const journal = page.locator('#gm-journal');
     await expect(journal).toBeVisible();
     // Panels wrap, stack and scroll; they never scroll sideways or shrink text.

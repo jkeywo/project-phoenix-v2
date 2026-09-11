@@ -164,6 +164,11 @@ export function createGmAttentionPanel({
   filters = createGmAttentionFilters(),
   now = () => Date.now(),
   onOpen = () => {},
+  // The queue's own age tick, offered to whoever else is drawing one of these
+  // waits. The panel is the only thing on the page that knows how old a row
+  // really is (see `state()`), and in a lull nothing republishes, so a
+  // consumer with no tick of its own would simply stop counting.
+  onAge = () => {},
   renderBanners = defaultRenderBanners,
   schedule = (fn, ms) => setInterval(fn, ms),
   cancelSchedule = (handle) => clearInterval(handle),
@@ -578,6 +583,7 @@ export function createGmAttentionPanel({
       }
       paintStatus();
     }
+    onAge();
   }
 
   /**
@@ -690,7 +696,14 @@ export function createGmAttentionPanel({
       selectedId,
       newCount: pendingIds.size,
       rendered: [...rendered],
-      occurrences: live.map((row) => ({ ...row })),
+      // Aged HERE, not handed on as the projection sampled it. Rust
+      // deliberately does not republish on age alone (`src/gm_attention.rs`:
+      // "age alone is not a change ... let the page age its own rows from the
+      // last honest sample"), and the quiet-time advisory holds one stable id
+      // for a whole lull, so a consumer given the raw `age_ms` would freeze at
+      // the age of the last payload while the row beside it counted up. The
+      // bar's Quiet pill is exactly that consumer.
+      occurrences: live.map((row) => ({ ...row, age_ms: ageMsOf(row.id) })),
       filters: filters.state(),
     }),
   };

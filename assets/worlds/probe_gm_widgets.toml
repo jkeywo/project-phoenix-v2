@@ -12,6 +12,13 @@ seed = 1439
 title = "world.patrol.global.title"
 description = "world.patrol.global.description"
 
+# The Harrow below carries the Ironveil patrol doctrine, which names these two
+# waypoints; a world that fields the hull has to declare them or the doctrine
+# directive resolves against nothing.
+[anchors]
+ironveil_patrol_a = [180.0, 0.0, -140.0]
+ironveil_patrol_b = [180.0, 0.0, -420.0]
+
 [[entity]]
 template_path = "assets/entities/alliance_cruiser.toml"
 id = "fleet-ship-1"

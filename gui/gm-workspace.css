@@ -471,3 +471,58 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-workload-demands li { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
 #gm-console.gm-desk .gm-workload-note, #gm-console.gm-desk .gm-workload-building { margin: 0; color: var(--ink-dim); }
 #gm-console.gm-desk #gm-workload-status:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+/* ── The typed world-authored widget region (issue #1439) ────────────────
+   A full-width row BELOW the fixed five-row desk grid, drawn only while the
+   effective role preset composes one — `gui/gm-widgets-panel.js` owns the
+   `hidden` attribute. It lands in an IMPLICIT row, so a scenario that authors
+   no widget leaves the desk exactly as it was: no sixth track is reserved, no
+   height is taken from the panels above, and the vertical fit the smoke spec
+   pins at both default-text viewports is untouched. With widgets the desk
+   grows past its definite height and #gm-console scrolls VERTICALLY, which is
+   the same thing it already does at --a11y-text-scale: 2 (server.html:
+   overflow-y: auto). It never scrolls sideways: every card is a min-width: 0
+   auto-fit track that wraps at 200% instead of squeezing. */
+#gm-console.gm-desk #gm-widgets { grid-area: 6 / 1 / 7 / 4; }
+#gm-console.gm-desk #gm-widgets-list {
+  list-style: none; margin: 0; padding: 0; min-width: 0;
+  display: grid; gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(22ch, 100%), 1fr));
+}
+#gm-console.gm-desk #gm-widgets-list > li {
+  display: grid; gap: var(--space-3); align-content: start;
+  border: 1px solid var(--edge); padding: var(--space-4);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-widget-heading { margin: 0; font-size: var(--text-sm); letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-widget-summary, #gm-console.gm-desk .gm-widget-narrowing,
+#gm-console.gm-desk .gm-widget-empty, #gm-console.gm-desk .gm-widget-unavailable,
+#gm-console.gm-desk .gm-widget-note { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk .gm-widget-narrowing, #gm-console.gm-desk .gm-widget-empty,
+#gm-console.gm-desk .gm-widget-unavailable { color: var(--ink-dim); }
+#gm-console.gm-desk .gm-widget-attention-rows,
+#gm-console.gm-desk .gm-widget-workload-rows {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); min-width: 0;
+}
+#gm-console.gm-desk .gm-widget-attention-rows li,
+#gm-console.gm-desk .gm-widget-workload-rows li {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: baseline;
+  border-left: 3px solid var(--edge-bright); padding-left: var(--space-2);
+  min-width: 0; overflow-wrap: anywhere;
+}
+/* Urgent and overloaded are marked by WEIGHT of edge as well as by the word
+   each row already carries, so forced colours lose nothing (PRD #1418). */
+#gm-console.gm-desk .gm-widget-attention-rows li[data-band="urgent"],
+#gm-console.gm-desk .gm-widget-workload-rows li[data-level="overloaded"] { border-left-width: var(--space-2); }
+#gm-console.gm-desk .gm-widget-band, #gm-console.gm-desk .gm-widget-level {
+  letter-spacing: var(--tracking-wide); color: var(--gold);
+}
+#gm-console.gm-desk .gm-widget-reason, #gm-console.gm-desk .gm-widget-station { flex: 1 1 12ch; min-width: 0; }
+/* The buttons wrap rather than squeezing, and keep the shared hit floor: a
+   widget button is a second press of a shipped control, not a smaller one. */
+#gm-console.gm-desk .gm-widget-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); min-width: 0; }
+#gm-console.gm-desk .gm-widget-actions button { flex: 1 1 12ch; min-height: var(--control-hit-min); min-width: 0; }
+#gm-console.gm-desk .gm-widget-actions button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+@media (max-width: 1000px) {
+  #gm-console.gm-desk #gm-widgets { grid-area: auto; }
+}

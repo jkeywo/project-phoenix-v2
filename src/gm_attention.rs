@@ -182,6 +182,54 @@ pub enum GmAttentionCategory {
     QuietTime,
 }
 
+impl GmAttentionCategory {
+    /// The authored spelling, which is also the wire spelling and the id a
+    /// browser filter carries.
+    pub fn as_authored(self) -> &'static str {
+        match self {
+            Self::PendingComms => "pending_comms",
+            Self::EligibleBeat => "eligible_beat",
+            Self::IdleNpc => "idle_npc",
+            Self::StationHealth => "station_health",
+            Self::QuietTime => "quiet_time",
+        }
+    }
+
+    /// Every category, in queue-vocabulary order. The one list a validator
+    /// checks an authored reference against, so a new producer cannot be added
+    /// without the authoring vocabulary growing with it.
+    pub fn all() -> [Self; 5] {
+        [
+            Self::PendingComms,
+            Self::EligibleBeat,
+            Self::IdleNpc,
+            Self::StationHealth,
+            Self::QuietTime,
+        ]
+    }
+
+    /// Parse one authored reference. Exact and lower-case, for
+    /// [`GmAttentionBand::from_authored`]'s reason: a world naming a category
+    /// this build does not produce is a world whose author believed something
+    /// that is not true, and quietly widening their filter to everything is
+    /// how a preset ships showing rows nobody chose.
+    pub fn from_authored(value: &str) -> Option<Self> {
+        Self::all()
+            .into_iter()
+            .find(|category| category.as_authored() == value)
+    }
+
+    /// Every category an author may write, for an error message that tells
+    /// them what to write instead.
+    pub fn authored_vocabulary() -> String {
+        Self::all()
+            .iter()
+            .map(|category| format!("'{}'", category.as_authored()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 /// The short human reason, as a String Table id plus its runtime parameters.
 ///
 /// Never prose: the projection has no locale, and the values are themselves

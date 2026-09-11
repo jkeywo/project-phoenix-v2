@@ -2410,6 +2410,18 @@
           <ul id="gm-workload-list" role="list"></ul>
           <p id="gm-workload-empty" role="status" data-i18n="server.gm.workload.empty"></p>
         </section>
+        <!-- The typed world-authored widget region (issue #1439). Composed
+             from the EFFECTIVE role preset's `[[gm_role_preset.widget]]`
+             blocks: a filtered attention list, a Station workload summary,
+             existing permitted GM action buttons and an authored note, and
+             nothing else. gui/gm-widgets-panel.js owns the `hidden` attribute
+             here, so a scenario that authors no widget has no region at all.
+             There is no path from authored content to markup: a note is a
+             String Table id rendered through textContent. -->
+        <section id="gm-widgets" role="region" aria-labelledby="gm-widgets-heading" hidden>
+          <h2 id="gm-widgets-heading" data-i18n="server.gm.widget.heading"></h2>
+          <ul id="gm-widgets-list" role="list"></ul>
+        </section>
         <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
           <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
           <ul id="gm-spawn-palette" role="list"></ul>

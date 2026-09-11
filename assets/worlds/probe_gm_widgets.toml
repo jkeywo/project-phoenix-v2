@@ -1,0 +1,89 @@
+# Typed world-authored GM widget probe for #1439 (PRD #1419 story 13).
+#
+# Two role presets over ONE desk's worth of surfaces. `tactical` composes all
+# four supported widget types; `narrative` composes a differently narrowed
+# attention widget and a note. Nothing here is authority: a preset is personal
+# presentation a Game Master selects for themselves, and a widget selects among
+# surfaces this build already draws (see src/world/config.rs's
+# GmRolePresetWidget). There is no field in this file in which markup, a script
+# or a new GM permission could arrive.
+[global]
+seed = 1439
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_gm_widgets.escort"
+transform = { position = [180.0, 0.0, -140.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_widgets.relay"
+transform = { position = [0.0, 0.0, -140.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+# ── The tactical desk: all four widget types ─────────────────────────────
+[[gm_role_preset]]
+id = "tactical"
+label = "world.probe_gm_widgets.preset.tactical"
+
+# Authored DEFAULT filters over the one attention controller (issue #1433).
+# They seed that operator's own band/category/ship narrowing when they select
+# this preset; nothing here filters a second time, and a snooze or a filter the
+# operator changes afterwards is theirs and outlives the default.
+[[gm_role_preset.widget]]
+id = "urgent-traffic"
+type = "attention"
+label = "world.probe_gm_widgets.widget.urgent_traffic"
+band = "urgent"
+category = "pending_comms"
+
+[[gm_role_preset.widget]]
+id = "seats"
+type = "workload"
+label = "world.probe_gm_widgets.widget.seats"
+
+# Existing permitted GM action buttons, repeated where this role can reach
+# them. The widget activates the shipped control by id, so the confirmation
+# category, the admission check and the action feedback are the ones that
+# button already had.
+[[gm_role_preset.widget]]
+id = "session-levers"
+type = "actions"
+label = "world.probe_gm_widgets.widget.session_levers"
+actions = ["gm-session-pause", "gm-session-resume"]
+
+# An authored note is a String Table id, never prose and never markup.
+[[gm_role_preset.widget]]
+id = "brief"
+type = "note"
+label = "world.probe_gm_widgets.widget.brief"
+text = "world.probe_gm_widgets.note.brief"
+
+# ── The narrative desk: a different default narrowing, same controller ───
+[[gm_role_preset]]
+id = "narrative"
+label = "world.probe_gm_widgets.preset.narrative"
+
+# `ship` names a world entity the way [[gm_role_preset]].contacts does. The
+# browser resolves that name against the live queue when the preset is
+# selected, because the queue's own ship facet is a runtime entity id.
+[[gm_role_preset.widget]]
+id = "quiet-watch"
+type = "attention"
+label = "world.probe_gm_widgets.widget.quiet_watch"
+band = "background"
+ship = "world.probe_gm_widgets.escort"
+
+[[gm_role_preset.widget]]
+id = "brief"
+type = "note"
+label = "world.probe_gm_widgets.widget.brief"
+text = "world.probe_gm_widgets.note.narrative"

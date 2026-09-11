@@ -566,7 +566,9 @@ describe('private filters and their session scope', () => {
     // the wiring itself is read rather than mounted; the behaviour it produces
     // is the test above.
     const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
-    expect(workspace).toContain('onChange: () => repaintGmAttention()');
+    // Issue #1439 put the authored widget region on the SAME change, because
+    // it mirrors the same private filters and must not go stale behind them.
+    expect(workspace).toContain('onChange: () => { repaintGmAttention(); repaintGmWidgets(); }');
     expect(workspace).toContain('repaintGmAttention = gmAttentionPanel.repaint;');
   });
 });

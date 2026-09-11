@@ -209,6 +209,42 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   }));
   expect(withWorkload.scroll).toBeLessThanOrEqual(withWorkload.width);
   expect(withWorkload.body).toBeLessThanOrEqual(withWorkload.viewport);
+  // The typed world-authored widget region (issue #1439) is composed from the
+  // preset the operator selects, so it is driven the way an operator drives it:
+  // the authored list goes in through the SAME `wasm_get_gm_role_presets`
+  // payload seam the page uses, and the role is chosen from the real selector.
+  // The composition is the shipped probe world's, shared with
+  // tests/gm_widgets.rs and tests/client/gm-widgets-panel.test.js.
+  const authoredPresets = fs.readFileSync(
+    path.resolve(__dirname, '../fixtures/gm-widgets-presets.json'), 'utf8');
+  await page.evaluate((payload) => window.__hostGmRolePresetsSetAvailable(payload), authoredPresets);
+  await page.locator('#gm-role-preset-select').selectOption('tactical');
+  await expect(page.locator('#gm-widgets')).toBeVisible();
+  for (const id of ['urgent-traffic', 'seats', 'session-levers', 'brief']) {
+    await expect(page.locator(`#gm-widgets-list li[data-widget-id="${id}"]`)).toBeVisible();
+  }
+  // The note is TEXT: it reads as a sentence and the card grows no elements.
+  const note = page.locator('#gm-widgets-list li[data-widget-id="brief"] .gm-widget-note');
+  await expect(note).toHaveText(/\S/);
+  expect(await note.evaluate(el => el.children.length)).toBe(0);
+  // An authored action button is the shipped control, pressed from here: it is
+  // keyboard-reachable at 200% and hands the press to #gm-session-pause.
+  const lever = page.locator('#gm-widgets-list button[data-widget-action="gm-session-pause"]');
+  await expect(lever).toBeVisible();
+  await lever.focus();
+  expect(await page.evaluate(() => document.activeElement?.dataset?.widgetAction))
+    .toBe('gm-session-pause');
+  const hit = await lever.evaluate(el => el.getBoundingClientRect().height);
+  expect(hit).toBeGreaterThanOrEqual(44);
+  // And the desk still never scrolls sideways with the region on it.
+  const withWidgets = await page.locator('#gm-workspace').evaluate(el => ({
+    scroll: el.scrollWidth,
+    width: el.clientWidth,
+    body: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(withWidgets.scroll).toBeLessThanOrEqual(withWidgets.width);
+  expect(withWidgets.body).toBeLessThanOrEqual(withWidgets.viewport);
   const doubled = testInfo.outputPath('gm-screen-1280-200pc.png');
   await page.screenshot({path:doubled});
   await testInfo.attach('GM 1280×720 at 200% text', {path:doubled,contentType:'image/png'});

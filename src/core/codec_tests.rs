@@ -6077,6 +6077,8 @@ fn gm_roster_decoder_requires_the_exact_ready_field() {
 fn gm_role_preset_encoder_round_trips_authored_order_and_facets() {
     use crate::world::config::GmRolePresetEntry;
 
+    use crate::world::config::GmRolePresetWidget;
+
     let presets = vec![
         GmRolePresetEntry {
             id: "tactical".to_string(),
@@ -6084,6 +6086,13 @@ fn gm_role_preset_encoder_round_trips_authored_order_and_facets() {
             panels: vec!["gm-map-panel".to_string(), "gm-activity".to_string()],
             quick_actions: vec!["gm-session-pause".to_string()],
             contacts: vec!["enemy_frigate".to_string()],
+            widget: vec![GmRolePresetWidget {
+                id: "urgent-only".to_string(),
+                kind: "attention".to_string(),
+                label: "world.fs.gm_widget.urgent_only.label".to_string(),
+                band: Some("urgent".to_string()),
+                ..Default::default()
+            }],
         },
         GmRolePresetEntry {
             id: "narrative".to_string(),
@@ -6103,8 +6112,23 @@ fn gm_role_preset_encoder_round_trips_authored_order_and_facets() {
         serde_json::json!(["gm-session-pause"])
     );
     assert_eq!(value[0]["contacts"], serde_json::json!(["enemy_frigate"]));
+    // The authored widget composition (issue #1439) crosses to the browser on
+    // the SAME payload, keyed `type` rather than `kind`, and carries only the
+    // facets its own type owns — `gui/gm-widgets-panel.js` reads exactly this.
+    assert_eq!(
+        value[0]["widget"],
+        serde_json::json!([{
+            "id": "urgent-only",
+            "type": "attention",
+            "label": "world.fs.gm_widget.urgent_only.label",
+            "band": "urgent",
+        }])
+    );
     assert_eq!(value[1]["id"], "narrative");
     assert_eq!(value[1]["panels"], serde_json::json!([]));
+    // A preset with no widgets says nothing about widgets at all, so a build
+    // that never authored one sends the payload it always sent.
+    assert!(value[1].get("widget").is_none());
 
     let decoded: Vec<GmRolePresetEntry> = serde_json::from_str(&encoded).unwrap();
     assert_eq!(decoded, presets);

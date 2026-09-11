@@ -23,6 +23,7 @@ import { createGmAttentionFilters } from './gm-attention-filters.js';
 import { createGmHealthBanner } from './gm-health-banner.js';
 import { createGmHealthPanel } from './gm-health-panel.js';
 import { createGmWorkloadPanel } from './gm-workload-panel.js';
+import { createGmWidgetsPanel } from './gm-widgets-panel.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
 import { createGmJournalPanel } from './gm-journal-panel.js';
 import { createGmFactionPanel } from './gm-faction-panel.js';
@@ -224,11 +225,15 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   // reconnect restores the operator's bands and snoozes into a queue that goes
   // on showing the old rows until membership happens to change.
   let repaintGmAttention = () => {};
+  // The authored widget region (issue #1439) mirrors the same private filter
+  // state, so it repaints on the same change. Late-bound for the same reason
+  // the queue's repaint is: the controller is built before either consumer.
+  let repaintGmWidgets = () => {};
   const gmAttentionFilters = createGmAttentionFilters({
     storage: operatorStorage,
     getSessionId: () => (typeof win.__hostGmSessionId === 'function' ? win.__hostGmSessionId() : null),
     getOperatorId: () => (typeof win.__hostLocalGm === 'function' ? (win.__hostLocalGm()?.id ?? null) : null),
-    onChange: () => repaintGmAttention(),
+    onChange: () => { repaintGmAttention(); repaintGmWidgets(); },
   });
   // Public technical health (issue #1437). Three late-bound edges, because the
   // two halves guard different things and neither may own both: the attention
@@ -292,6 +297,21 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   // it takes no callbacks because there is nothing on it to act with.
   const gmWorkloadPanel = createGmWorkloadPanel({ doc: doc, t, has });
   win.__hostGmWorkloadState = gmWorkloadPanel.state;
+  // The typed world-authored widget region (issue #1439). It composes from the
+  // surfaces above rather than from the Host Channel: the attention queue's own
+  // parsed occurrences, the workload advisory's own parsed rows, the ONE
+  // private filter controller and the shipped GM action buttons. Nothing it
+  // draws can disagree with the panel it mirrors, and nothing it draws is a
+  // new action — see gui/gm-widgets-panel.js.
+  const gmWidgetsPanel = createGmWidgetsPanel({
+    doc: doc, t, has,
+    filters: gmAttentionFilters,
+    readAttention: () => gmAttentionPanel.state(),
+    readWorkload: () => gmWorkloadPanel.state(),
+    repaintAttention: () => repaintGmAttention(),
+  });
+  repaintGmWidgets = gmWidgetsPanel.repaint;
+  win.__hostGmWidgetsState = gmWidgetsPanel.state;
   const gmSpawnPanel = createGmSpawnPanel({
     doc: doc,
     win: win,
@@ -340,6 +360,12 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
         win.__hostGmRolePresetChanged(presetId);
       }
     },
+    // The authored widget composition follows the EFFECTIVE preset (issue
+    // #1439), including the fallback to the built-in All a removed preset
+    // resolves to — All authors no widgets, so the region goes away on its own.
+    // Only the operator's own live switch carries the authored default filters
+    // with it; a reconnect restores what they actually left behind.
+    onEffective: (preset, context) => gmWidgetsPanel.setPreset(preset, context),
   });
   win.__hostGmRolePresetsSetAvailable = gmRolePresets.setAvailablePresets;
   win.__hostGmRolePresetsRestore = gmRolePresets.restore;
@@ -433,14 +459,14 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
-    gm_attention: function(p) { gmAttentionPanel.update(p); },
+    gm_attention: function(p) { gmAttentionPanel.update(p); gmWidgetsPanel.repaint(); },
     gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); },
-    gm_workload:  function(p) { gmWorkloadPanel.update(p); },
+    gm_workload:  function(p) { gmWorkloadPanel.update(p); gmWidgetsPanel.repaint(); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
     handlers,
-    dispose() { gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); shell.dispose(); },
+    dispose() { gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       shell.refresh();
       gmSessionControls.refreshAdmission();
@@ -458,6 +484,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmAttentionPanel.reset();
       gmHealthPanel.reset();
       gmWorkloadPanel.reset();
+      gmWidgetsPanel.reset();
       gmSessionControls.reset();
       gmFactionPanel.reset();
       gmJournalPanel.reset();

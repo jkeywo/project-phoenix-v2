@@ -3979,6 +3979,291 @@ fn a_world_with_no_gm_role_preset_table_has_none() {
     assert!(cfg.gm_role_presets.is_empty());
 }
 
+// ── Typed world-authored GM widgets (issue #1439) ────────────────────────
+
+/// The four supported widgets, one preset, authored order preserved.
+const FOUR_WIDGETS: &str = r#"
+[[gm_role_preset]]
+id = "tactical"
+label = "world.fs.gm_role_preset.tactical.label"
+
+[[gm_role_preset.widget]]
+id = "urgent-only"
+type = "attention"
+label = "world.fs.gm_widget.urgent.label"
+band = "urgent"
+category = "pending_comms"
+ship = "raider_one"
+
+[[gm_role_preset.widget]]
+id = "seats"
+type = "workload"
+label = "world.fs.gm_widget.seats.label"
+ship = "raider_one"
+
+[[gm_role_preset.widget]]
+id = "levers"
+type = "actions"
+label = "world.fs.gm_widget.levers.label"
+actions = ["gm-session-pause", "gm-session-resume"]
+
+[[gm_role_preset.widget]]
+id = "brief"
+type = "note"
+label = "world.fs.gm_widget.brief.label"
+text = "world.fs.gm_widget.brief.text"
+"#;
+
+#[test]
+fn parse_world_reads_the_four_supported_widget_types_in_authored_order() {
+    let cfg = parse_world(FOUR_WIDGETS).expect("must parse");
+    let widgets = &cfg.gm_role_presets[0].widget;
+    assert_eq!(
+        widgets.iter().map(|w| w.kind.as_str()).collect::<Vec<_>>(),
+        vec!["attention", "workload", "actions", "note"]
+    );
+    assert_eq!(
+        widgets.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(),
+        vec!["urgent-only", "seats", "levers", "brief"]
+    );
+    assert_eq!(widgets[0].band.as_deref(), Some("urgent"));
+    assert_eq!(widgets[0].category.as_deref(), Some("pending_comms"));
+    assert_eq!(widgets[0].ship.as_deref(), Some("raider_one"));
+    assert_eq!(widgets[1].ship.as_deref(), Some("raider_one"));
+    assert_eq!(
+        widgets[2].actions,
+        vec![
+            "gm-session-pause".to_string(),
+            "gm-session-resume".to_string()
+        ]
+    );
+    assert_eq!(
+        widgets[3].text.as_deref(),
+        Some("world.fs.gm_widget.brief.text")
+    );
+    // Every label is a strings.csv id, never English (AGENTS.md rule 11).
+    assert!(widgets.iter().all(|w| w.label.starts_with("world.")));
+}
+
+/// Replace one key of [`FOUR_WIDGETS`] and expect the load to be refused,
+/// returning the message so each case can assert on its own words.
+fn refuse_widget(from: &str, to: &str) -> String {
+    let toml = FOUR_WIDGETS.replace(from, to);
+    assert_ne!(
+        toml, FOUR_WIDGETS,
+        "the substitution '{from}' matched nothing"
+    );
+    parse_world(&toml).expect_err("this world must be refused")
+}
+
+#[test]
+fn parse_world_refuses_an_unknown_widget_type_naming_the_preset_and_the_index() {
+    let err = refuse_widget("type = \"note\"", "type = \"scoreboard\"");
+    assert!(err.contains("scoreboard"), "names what was written: {err}");
+    assert!(
+        err.contains("[[gm_role_preset]] #0 'tactical'"),
+        "names the preset: {err}"
+    );
+    assert!(
+        err.contains("[[gm_role_preset.widget]] #3"),
+        "names the widget index: {err}"
+    );
+    // And says what may be written instead, so the author can act on it.
+    for kind in ["attention", "workload", "actions", "note"] {
+        assert!(err.contains(kind), "offers '{kind}': {err}");
+    }
+}
+
+#[test]
+fn parse_world_refuses_widget_references_this_build_cannot_honour() {
+    // A band, a category and a GM action the build does not have are all
+    // "invalid references": each fails the load naming the value and the place.
+    let band = refuse_widget("band = \"urgent\"", "band = \"critical\"");
+    assert!(
+        band.contains("critical") && band.contains("'background'"),
+        "{band}"
+    );
+    assert!(band.contains("[[gm_role_preset.widget]] #0"), "{band}");
+
+    let category = refuse_widget("category = \"pending_comms\"", "category = \"rumours\"");
+    assert!(
+        category.contains("rumours") && category.contains("idle_npc"),
+        "{category}"
+    );
+
+    let action = refuse_widget("\"gm-session-resume\"", "\"gm-despawn-confirm\"");
+    assert!(
+        action.contains("gm-despawn-confirm"),
+        "names the id: {action}"
+    );
+    assert!(action.contains("action #1"), "names which action: {action}");
+    assert!(
+        action.contains("gm-session-pause"),
+        "names the registry: {action}"
+    );
+}
+
+#[test]
+fn parse_world_refuses_a_facet_key_on_the_wrong_widget_type() {
+    // Accepting these would be the worst outcome the typed schema exists to
+    // prevent: a world that loads, a card that renders, and a setting the
+    // author wrote that does nothing at all.
+    let on_note = refuse_widget(
+        "text = \"world.fs.gm_widget.brief.text\"",
+        "text = \"world.fs.gm_widget.brief.text\"\nband = \"urgent\"",
+    );
+    assert!(
+        on_note.contains("'note' widget") && on_note.contains("band/category"),
+        "{on_note}"
+    );
+
+    let on_actions = refuse_widget(
+        "actions = [\"gm-session-pause\", \"gm-session-resume\"]",
+        "actions = [\"gm-session-pause\"]\nship = \"raider_one\"",
+    );
+    assert!(
+        on_actions.contains("'actions' widget") && on_actions.contains("ship"),
+        "{on_actions}"
+    );
+
+    let on_workload = refuse_widget(
+        "id = \"seats\"\ntype = \"workload\"",
+        "id = \"seats\"\ntype = \"workload\"\ntext = \"world.fs.gm_widget.brief.text\"",
+    );
+    assert!(
+        on_workload.contains("'workload' widget") && on_workload.contains("text"),
+        "{on_workload}"
+    );
+}
+
+#[test]
+fn parse_world_refuses_a_note_that_is_not_a_string_table_id() {
+    // The note contract, enforced at load rather than escaped at render: a
+    // note is an id the String Table owns, so there is no authored world in
+    // which markup, a script or raw prose reaches the GM desk at all.
+    for attempt in [
+        "<b>Watch the port flank</b>",
+        "<script>alert(1)</script>",
+        "Watch the port flank",
+        "javascript:alert(1)",
+    ] {
+        let err = refuse_widget(
+            "text = \"world.fs.gm_widget.brief.text\"",
+            &format!("text = \"{attempt}\""),
+        );
+        assert!(
+            err.contains("strings.csv id"),
+            "'{attempt}' must be refused as prose/markup: {err}"
+        );
+        assert!(err.contains("[[gm_role_preset.widget]] #3"), "{err}");
+    }
+}
+
+#[test]
+fn parse_world_refuses_widgets_with_no_id_no_label_and_no_content() {
+    let no_id = refuse_widget("id = \"levers\"", "id = \"  \"");
+    assert!(no_id.contains("empty id"), "{no_id}");
+
+    let no_label = refuse_widget("label = \"world.fs.gm_widget.seats.label\"", "label = \"\"");
+    assert!(no_label.contains("empty label"), "{no_label}");
+
+    let no_actions = refuse_widget(
+        "actions = [\"gm-session-pause\", \"gm-session-resume\"]",
+        "actions = []",
+    );
+    assert!(no_actions.contains("no actions"), "{no_actions}");
+
+    let twice = refuse_widget(
+        "actions = [\"gm-session-pause\", \"gm-session-resume\"]",
+        "actions = [\"gm-session-pause\", \"gm-session-pause\"]",
+    );
+    assert!(twice.contains("twice"), "{twice}");
+}
+
+#[test]
+fn parse_world_refuses_a_duplicate_widget_id_within_one_preset() {
+    // The id is what the rendered card is keyed by, so two of them are two
+    // cards competing for one place — the `[[gm_role_preset]]` argument, one
+    // level down.
+    let err = refuse_widget("id = \"seats\"", "id = \"urgent-only\"");
+    assert!(err.contains("duplicate widget id 'urgent-only'"), "{err}");
+    assert!(
+        err.contains("#0") && err.contains("#1"),
+        "names both: {err}"
+    );
+}
+
+#[test]
+fn two_presets_may_reuse_a_widget_id_because_a_card_belongs_to_its_preset() {
+    // Only ONE preset is ever effective on a desk, so a shared widget id is a
+    // shared vocabulary between roles rather than a collision.
+    let toml = format!(
+        "{FOUR_WIDGETS}\n[[gm_role_preset]]\nid = \"narrative\"\n\
+         label = \"world.fs.gm_role_preset.narrative.label\"\n\n\
+         [[gm_role_preset.widget]]\nid = \"brief\"\ntype = \"note\"\n\
+         label = \"world.fs.gm_widget.brief.label\"\n\
+         text = \"world.fs.gm_widget.brief.text\"\n"
+    );
+    let cfg = parse_world(&toml).expect("must parse");
+    assert_eq!(cfg.gm_role_presets[1].widget[0].id, "brief");
+}
+
+#[test]
+fn the_widget_action_registry_matches_the_buttons_the_browser_draws() {
+    // The registry is validated in Rust and applied in the browser, so the two
+    // lists have to be the same list. Read the shipped module rather than
+    // restating it: a build that grows a GM action button must grow both.
+    let js = std::fs::read_to_string("gui/gm-role-presets.js").expect("shipped module");
+    let start = js
+        .find("GM_ROLE_PRESET_QUICK_ACTION_IDS = Object.freeze([")
+        .expect("the browser's quick-action registry");
+    let body = &js[start..start + js[start..].find("]);").expect("closed list")];
+    for id in super::GM_WIDGET_ACTION_IDS {
+        assert!(
+            body.contains(&format!("'{id}'")),
+            "GM_WIDGET_ACTION_IDS has '{id}' and gui/gm-role-presets.js does not"
+        );
+    }
+    let in_js = body.matches('\'').count() / 2;
+    assert_eq!(
+        in_js,
+        super::GM_WIDGET_ACTION_IDS.len(),
+        "gui/gm-role-presets.js draws {in_js} GM action buttons and \
+         GM_WIDGET_ACTION_IDS validates {} of them",
+        super::GM_WIDGET_ACTION_IDS.len()
+    );
+}
+
+#[test]
+fn the_shipped_widget_probe_world_loads_with_its_authored_composition() {
+    // The authored-world half of acceptance criterion 6: a real file on disk,
+    // through the ordinary loader, with the four widgets and two presets the
+    // browser tests then drive.
+    let toml = std::fs::read_to_string("assets/worlds/probe_gm_widgets.toml")
+        .expect("the probe world ships");
+    let cfg = parse_world(&toml).expect("the probe world must load");
+    let ids = cfg
+        .gm_role_presets
+        .iter()
+        .map(|preset| preset.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["tactical", "narrative"]);
+    assert_eq!(
+        cfg.gm_role_presets[0]
+            .widget
+            .iter()
+            .map(|w| w.kind.as_str())
+            .collect::<Vec<_>>(),
+        vec!["attention", "workload", "actions", "note"]
+    );
+    // The narrative desk authors a different default narrowing over the SAME
+    // controller — which is what "two GMs, different presets" is made of.
+    assert_eq!(
+        cfg.gm_role_presets[1].widget[0].band.as_deref(),
+        Some("background")
+    );
+}
+
 #[test]
 fn parse_world_reads_the_gm_palette_table_in_authored_order() {
     let toml = r#"

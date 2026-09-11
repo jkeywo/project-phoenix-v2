@@ -23,12 +23,17 @@ it('keeps shared control identities in the nine desk regions and the authentic i
   expect(document.querySelector('#gm-inspector #gm-station-toggle')).not.toBeNull();
   expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
-  // Nine: #1433 added the attention queue, #1437 the technical health panel
-  // and #1438 the Station-workload advisory, each a first-class desk region
-  // rather than a strip inside another panel.
+  // Ten: #1433 added the attention queue, #1437 the technical health panel,
+  // #1438 the Station-workload advisory and #1439 the authored widget region,
+  // each a first-class desk region rather than a strip inside another panel.
+  // The widget region is LAST because it is a full-width row below the fixed
+  // desk grid, drawn only while the effective role preset composes one.
   expect([...document.querySelectorAll('#gm-workspace > section')].map(section => section.id))
     .toEqual(['gm-roster', 'gm-map-panel', 'gm-inspector', 'gm-attention-panel',
-      'gm-health-panel', 'gm-workload-panel', 'gm-mission-panel', 'gm-comms-panel', 'gm-activity']);
+      'gm-health-panel', 'gm-workload-panel', 'gm-mission-panel', 'gm-comms-panel',
+      'gm-activity', 'gm-widgets']);
+  // And it starts hidden, so a scenario that authors no widget has no region.
+  expect(document.getElementById('gm-widgets').hidden).toBe(true);
   // The #1437 technical-banner seam lives inside the QUEUE, not inside the
   // health panel: it has to sit beside the list a Game Master reads and filters,
   // which is the surface it exists to be un-hideable from.

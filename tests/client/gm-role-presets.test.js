@@ -33,14 +33,17 @@ describe('parseGmRolePresets (pure loader)', () => {
         panels: ['gm-map-panel', 'gm-activity'],
         quickActions: ['gm-session-pause'],
         contacts: ['enemy_frigate'],
+        // A preset that authors no [[gm_role_preset.widget]] composes no
+        // widget region at all (issue #1439) — the shipped case.
+        widgets: [],
       },
-      { id: 'narrative', label: '', panels: [], quickActions: [], contacts: [] },
+      { id: 'narrative', label: '', panels: [], quickActions: [], contacts: [], widgets: [] },
     ]);
   });
 
   it('accepts a JSON string, exactly what wasm_get_gm_role_presets returns', () => {
     expect(parseGmRolePresets(JSON.stringify([NARRATIVE]))).toEqual([
-      { id: 'narrative', label: '', panels: [], quickActions: [], contacts: [] },
+      { id: 'narrative', label: '', panels: [], quickActions: [], contacts: [], widgets: [] },
     ]);
   });
 
@@ -62,7 +65,7 @@ describe('parseGmRolePresets (pure loader)', () => {
       { id: 42 },
     ]);
     expect(presets).toEqual([
-      { id: 'narrative', label: '', panels: [], quickActions: [], contacts: [] },
+      { id: 'narrative', label: '', panels: [], quickActions: [], contacts: [], widgets: [] },
     ]);
   });
 
@@ -168,7 +171,9 @@ describe('createGmRolePresets (DOM controller)', () => {
     mount();
     const onSelect = vi.fn();
     const controller = createGmRolePresets({ doc: document, onSelect });
-    expect(controller.state()).toEqual({ presets: [], desiredId: null, effectivePresetId: 'all' });
+    expect(controller.state()).toEqual({
+      presets: [], desiredId: null, effectivePresetId: 'all', effective: GM_ALL_ROLE_PRESET,
+    });
     for (const id of [...GM_ROLE_PRESET_PANEL_IDS, ...GM_ROLE_PRESET_QUICK_ACTION_IDS]) {
       expect(document.getElementById(id).hidden).toBe(false);
     }

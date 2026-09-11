@@ -65,7 +65,13 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
     move(roster, 'manual-save-panel');
   }
   desk.prepend(roster);
-  move(desk, 'gm-attention-panel', 'gm-health-panel', 'gm-workload-panel', 'gm-mission-panel', 'gm-comms-panel', 'gm-activity');
+  // `gm-widgets` is last on purpose: the authored widget region (issue #1439)
+  // is a full-width row BELOW the fixed desk grid, present only while the
+  // effective role preset composes one. gui/gm-widgets-panel.js owns its
+  // `hidden` state, which is why it is absent from GM_ROLE_PRESET_PANEL_IDS —
+  // a second writer there would race it, exactly as it would for the Station
+  // puppet's controls.
+  move(desk, 'gm-attention-panel', 'gm-health-panel', 'gm-workload-panel', 'gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-widgets');
   get('gm-comms-text')?.parentElement.classList.add('gm-comms-draft');
   const sessionHistory = element('details', 'gm-session-history');
   sessionHistory.append(element('summary', null, 'server.gm.session.log_heading'));

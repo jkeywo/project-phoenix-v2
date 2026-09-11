@@ -1,0 +1,57 @@
+[
+  {
+    "id": "tactical",
+    "label": "world.probe_gm_widgets.preset.tactical",
+    "panels": [],
+    "quick_actions": [],
+    "contacts": [],
+    "widget": [
+      {
+        "id": "urgent-traffic",
+        "type": "attention",
+        "label": "world.probe_gm_widgets.widget.urgent_traffic",
+        "band": "urgent",
+        "category": "pending_comms"
+      },
+      {
+        "id": "seats",
+        "type": "workload",
+        "label": "world.probe_gm_widgets.widget.seats"
+      },
+      {
+        "id": "session-levers",
+        "type": "actions",
+        "label": "world.probe_gm_widgets.widget.session_levers",
+        "actions": ["gm-session-pause", "gm-session-resume"]
+      },
+      {
+        "id": "brief",
+        "type": "note",
+        "label": "world.probe_gm_widgets.widget.brief",
+        "text": "world.probe_gm_widgets.note.brief"
+      }
+    ]
+  },
+  {
+    "id": "narrative",
+    "label": "world.probe_gm_widgets.preset.narrative",
+    "panels": [],
+    "quick_actions": [],
+    "contacts": [],
+    "widget": [
+      {
+        "id": "quiet-watch",
+        "type": "attention",
+        "label": "world.probe_gm_widgets.widget.quiet_watch",
+        "band": "background",
+        "ship": "world.probe_gm_widgets.escort"
+      },
+      {
+        "id": "brief",
+        "type": "note",
+        "label": "world.probe_gm_widgets.widget.brief",
+        "text": "world.probe_gm_widgets.note.narrative"
+      }
+    ]
+  }
+]

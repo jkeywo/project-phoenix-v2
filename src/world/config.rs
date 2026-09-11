@@ -891,6 +891,249 @@ pub struct GmRolePresetEntry {
     pub quick_actions: Vec<String>,
     #[serde(default)]
     pub contacts: Vec<String>,
+    /// The preset's authored widget composition (issue #1439). Singular to
+    /// match the `[[gm_role_preset.widget]]` array-of-tables key, the same way
+    /// `gm_role_preset` itself is. Empty is the shipped case: a preset that
+    /// authors no widget composes no widget region at all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub widget: Vec<GmRolePresetWidget>,
+}
+
+/// The `type` of a `[[gm_role_preset.widget]]` that shows the GM attention
+/// queue narrowed by authored default filters (issue #1439).
+pub const GM_WIDGET_TYPE_ATTENTION: &str = "attention";
+/// The `type` that summarises the Station-workload advisory (issue #1438).
+pub const GM_WIDGET_TYPE_WORKLOAD: &str = "workload";
+/// The `type` that repeats existing permitted GM action buttons.
+pub const GM_WIDGET_TYPE_ACTIONS: &str = "actions";
+/// The `type` that shows one authored String Table sentence.
+pub const GM_WIDGET_TYPE_NOTE: &str = "note";
+
+/// Every widget `type` this build draws, in the order the authoring
+/// documentation lists them. Closed on purpose: a world naming a fifth type is
+/// a world whose author expected a surface that does not exist, and drawing
+/// nothing for it would be a silently empty card on a live desk.
+pub const GM_WIDGET_TYPES: [&str; 4] = [
+    GM_WIDGET_TYPE_ATTENTION,
+    GM_WIDGET_TYPE_WORKLOAD,
+    GM_WIDGET_TYPE_ACTIONS,
+    GM_WIDGET_TYPE_NOTE,
+];
+
+/// The registry an `actions` widget's ids are validated against: the GM action
+/// buttons this build actually draws and that already carry their own T2
+/// confirmation and action feedback.
+///
+/// A widget button never issues a `GmAction` itself — it activates the shipped
+/// control by this id (`gui/gm-widgets-panel.js`), so the confirmation
+/// category, the admission check and the feedback lifecycle are the ones that
+/// button already had. That is what makes "only existing permitted actions"
+/// structural rather than a promise: there is no code path in which an authored
+/// id becomes a new verb. The list mirrors `GM_ROLE_PRESET_QUICK_ACTION_IDS` in
+/// `gui/gm-role-presets.js`, and a test in `src/world/config_tests.rs` reads
+/// that file and fails if the two drift.
+pub const GM_WIDGET_ACTION_IDS: [&str; 2] = ["gm-session-pause", "gm-session-resume"];
+
+/// One scenario-authored `[[gm_role_preset.widget]]` block (issue #1439, PRD
+/// #1419 story 13).
+///
+/// A widget is composition, never capability. It selects among four surfaces
+/// this build already draws and hands them authored defaults; it cannot carry
+/// markup, a script, a style, a new action or a new permission, because there
+/// is no field in which any of those could arrive. That is the whole reason
+/// this is a typed table rather than an author-supplied fragment.
+///
+/// ```toml
+/// [[gm_role_preset]]
+/// id = "tactical"
+/// label = "world.fs.gm_role_preset.tactical.label"
+///
+/// [[gm_role_preset.widget]]
+/// id = "urgent-only"
+/// type = "attention"
+/// label = "world.fs.gm_widget.urgent_only.label"
+/// band = "urgent"
+///
+/// [[gm_role_preset.widget]]
+/// id = "levers"
+/// type = "actions"
+/// label = "world.fs.gm_widget.levers.label"
+/// actions = ["gm-session-pause", "gm-session-resume"]
+/// ```
+///
+/// Every facet key belongs to exactly one `type`, and [`parse_world`] refuses a
+/// key on the wrong one by name: an author who writes `text` on an `attention`
+/// widget has written a note they will never see, and accepting it silently is
+/// the "configured something that does nothing" failure a typed schema exists
+/// to prevent.
+///
+/// `label` and `text` are `strings.csv` ids (AGENTS.md rule 11), so a note is
+/// text the String Table owns rather than anything a page could execute.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmRolePresetWidget {
+    /// Stable within its preset; the id the browser keys the rendered card by.
+    pub id: String,
+    /// One of [`GM_WIDGET_TYPES`]. Named `type` in TOML.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The card's heading, as a String Table id.
+    #[serde(default)]
+    pub label: String,
+    /// `attention` only: the band the operator's queue filter starts on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub band: Option<String>,
+    /// `attention` only: the occurrence category the queue filter starts on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// `attention` and `workload`: the ship the surface starts narrowed to,
+    /// named the way [`GmRolePresetEntry::contacts`] names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ship: Option<String>,
+    /// `actions` only: ids from [`GM_WIDGET_ACTION_IDS`], in authored order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<String>,
+    /// `note` only: the String Table id of the sentence to show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+impl GmRolePresetWidget {
+    /// Semantic validation for one widget, with the caller's own source context
+    /// already spelled — `[[gm_role_preset]] #i 'id' [[gm_role_preset.widget]]
+    /// #j` — so an author reads WHERE before they read what.
+    fn validate(&self, at: &str) -> Result<(), String> {
+        if self.id.trim().is_empty() {
+            return Err(format!(
+                "{at} has an empty id; every widget needs a stable id for the \
+                 rendered card to be keyed by"
+            ));
+        }
+        if self.label.trim().is_empty() {
+            return Err(format!(
+                "{at} has an empty label; a widget's label is the only heading \
+                 an operator has for it, and is a strings.csv id"
+            ));
+        }
+        if !GM_WIDGET_TYPES.contains(&self.kind.as_str()) {
+            return Err(format!(
+                "{at} declares unknown widget type '{}'; this build draws {}",
+                self.kind,
+                GM_WIDGET_TYPES
+                    .iter()
+                    .map(|kind| format!("'{kind}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        // Which keys this type OWNS. Everything else is refused below by name,
+        // so a misplaced key is a load failure rather than a setting that
+        // quietly does nothing.
+        let (band_ok, ship_ok, actions_ok, text_ok) = match self.kind.as_str() {
+            GM_WIDGET_TYPE_ATTENTION => (true, true, false, false),
+            GM_WIDGET_TYPE_WORKLOAD => (false, true, false, false),
+            GM_WIDGET_TYPE_ACTIONS => (false, false, true, false),
+            _ => (false, false, false, true),
+        };
+        for (present, key, owns) in [
+            (
+                self.band.is_some() || self.category.is_some(),
+                "band/category",
+                band_ok,
+            ),
+            (self.ship.is_some(), "ship", ship_ok),
+            (!self.actions.is_empty(), "actions", actions_ok),
+            (self.text.is_some(), "text", text_ok),
+        ] {
+            if present && !owns {
+                return Err(format!(
+                    "{at} is a '{}' widget and may not declare {key}; that key \
+                     belongs to another widget type and would be ignored",
+                    self.kind
+                ));
+            }
+        }
+        if let Some(band) = self.band.as_deref() {
+            if crate::gm_attention::GmAttentionBand::from_authored(band).is_none() {
+                return Err(format!(
+                    "{at} declares unknown band '{band}'; the authored bands are {}",
+                    crate::gm_attention::GmAttentionBand::authored_vocabulary()
+                ));
+            }
+        }
+        if let Some(category) = self.category.as_deref() {
+            if crate::gm_attention::GmAttentionCategory::from_authored(category).is_none() {
+                return Err(format!(
+                    "{at} declares unknown category '{category}'; the queue's \
+                     categories are {}",
+                    crate::gm_attention::GmAttentionCategory::authored_vocabulary()
+                ));
+            }
+        }
+        if self
+            .ship
+            .as_deref()
+            .is_some_and(|ship| ship.trim().is_empty())
+        {
+            return Err(format!(
+                "{at} declares an empty ship; name the world entity the surface \
+                 should start narrowed to, or omit the key"
+            ));
+        }
+        if self.kind == GM_WIDGET_TYPE_ACTIONS {
+            if self.actions.is_empty() {
+                return Err(format!(
+                    "{at} is an 'actions' widget with no actions; an empty \
+                     button row is a card with nothing on it"
+                ));
+            }
+            for (k, action) in self.actions.iter().enumerate() {
+                if !GM_WIDGET_ACTION_IDS.contains(&action.as_str()) {
+                    return Err(format!(
+                        "{at} action #{k} names unknown GM action '{action}'; \
+                         this build's permitted GM action buttons are {}",
+                        GM_WIDGET_ACTION_IDS
+                            .iter()
+                            .map(|id| format!("'{id}'"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                if self.actions.iter().take(k).any(|other| other == action) {
+                    return Err(format!(
+                        "{at} names GM action '{action}' twice; one button is \
+                         one button"
+                    ));
+                }
+            }
+        }
+        if self.kind == GM_WIDGET_TYPE_NOTE {
+            let text = self.text.as_deref().unwrap_or_default();
+            if text.trim().is_empty() {
+                return Err(format!(
+                    "{at} is a 'note' widget with no text; the text is a \
+                     strings.csv id naming the sentence to show"
+                ));
+            }
+            // A note is TEXT the String Table owns, and the id is checked
+            // against the shape a `strings.csv` id actually has rather than
+            // against a blocklist of dangerous characters. The page renders a
+            // note through `textContent`, so markup could only ever appear as
+            // the literal characters an author typed — but a note carrying them
+            // is an author who believed they were writing a page, and letting
+            // the world load is how that belief survives to a live session.
+            if !text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            {
+                return Err(format!(
+                    "{at} declares note text '{text}' that is not a strings.csv \
+                     id; authored notes are String Table ids, never markup, \
+                     script or prose"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One authored variant of a `[[gm_palette]]` entry — the "allowed overrides"
@@ -2495,6 +2738,30 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
                  be unique within a world",
                 preset.id
             ));
+        }
+        // The preset's authored widget composition (issue #1439). Every error
+        // below names the preset AND the widget by index and id, because a
+        // world may carry several presets of several widgets each and "unknown
+        // widget type" with no address is a message an author cannot act on.
+        for (j, widget) in preset.widget.iter().enumerate() {
+            let at = format!(
+                "[[gm_role_preset]] #{i} '{}' [[gm_role_preset.widget]] #{j}",
+                preset.id
+            );
+            widget.validate(&at)?;
+            if let Some(k) = preset
+                .widget
+                .iter()
+                .take(j)
+                .position(|other| other.id == widget.id)
+            {
+                return Err(format!(
+                    "duplicate widget id '{}' in [[gm_role_preset]] #{i} '{}': \
+                     [[gm_role_preset.widget]] #{k} and #{j} both declare it; \
+                     a rendered card is keyed by this id",
+                    widget.id, preset.id
+                ));
+            }
         }
     }
 

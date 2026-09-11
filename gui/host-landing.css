@@ -1263,6 +1263,61 @@
   html:not([data-phx-force-landscape]) .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; }
 }
 
+/* ── Rotated phone (server/viewscreen held upright) ───────────────────── */
+/*
+ * `data-phx-force-landscape` (server.html) rotates a truly portrait phone
+ * into this file's landscape rules via a CSS transform, but that transform
+ * doesn't change what `@media` sees: `orientation` and `width` still read
+ * the true, unrotated viewport, so the rotated phone stays `orientation:
+ * portrait` here and never reaches the `min-width: 1000px` landscape
+ * breakpoint above. Its effective (post-rotation) width is the true
+ * viewport HEIGHT, so the same compact layout applies here, keyed on
+ * `max-height` instead of `max-width`, and scoped IN rather than excluded.
+ * A genuinely wide rotated screen (true height >= 1000px, e.g. a tablet)
+ * is left on the landscape column layout above. Kept as an exact duplicate
+ * of the block above (mirrored selector/condition only) so the two never
+ * drift apart silently.
+ */
+@media (orientation: portrait) and (max-height: 999px) {
+  html[data-phx-force-landscape] .landing-rail {
+    top: 0; left: 0; right: 0; bottom: auto;
+    width: auto; height: 64px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    padding: 0 72px 0 var(--settings-cog-keepout, 16px);
+    border-right: 0;
+    border-bottom: 1px solid var(--edge-faint);
+    background: linear-gradient(to bottom,
+      rgba(var(--rgb-panel), 0.92), rgba(var(--rgb-base), 0.4));
+  }
+  html[data-phx-force-landscape] .landing-rail-stamp { writing-mode: horizontal-tb; text-orientation: mixed; }
+  html[data-phx-force-landscape] #landing-fullscreen-btn { top: 9px; right: 16px; }
+
+  html[data-phx-force-landscape] .landing-stage { left: 0; top: 64px; bottom: 44px; }
+  html[data-phx-force-landscape] .landing-stage-inner { inset: 16px; }
+  html[data-phx-force-landscape] .landing-track {
+    width: 300%;
+    gap: 0;
+    transform: translateX(calc(var(--landing-depth, 0) * -33.3333%));
+  }
+  html[data-phx-force-landscape] .landing-col { flex: 0 0 33.3333%; width: auto; padding-right: 16px; overflow-y: auto; }
+  html[data-phx-force-landscape] .landing-col-menu { justify-content: flex-start; margin-left: 0; }
+  html[data-phx-force-landscape] .landing-col-mid, html[data-phx-force-landscape] .landing-col-ship { transform: none; }
+  html[data-phx-force-landscape] .is-deep .landing-col-menu { opacity: 1; }
+
+  html[data-phx-force-landscape] .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
+  html[data-phx-force-landscape] .landing-logo, html[data-phx-force-landscape] .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
+  html[data-phx-force-landscape] .landing-wordmark { font-size: clamp(var(--text-lg), 5.4vw, var(--text-2xl)); letter-spacing: var(--tracking-wide); }
+  html[data-phx-force-landscape] .landing-subline { justify-content: center; }
+  html[data-phx-force-landscape] .landing-menu { gap: 8px; }
+  html[data-phx-force-landscape] .landing-mi { height: 62px; }
+  html[data-phx-force-landscape] .landing-mi-label { font-size: var(--text-lg); }
+
+  html[data-phx-force-landscape] .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; }
+}
+
 /* ── Short landscape (a phone on its side) ────────────────────────────── */
 /*
  * The identity block would eat the whole pane, so it steps aside and the menu

@@ -139,7 +139,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Audio Presentation
-      summary: Local browser playback for UI interaction, engine ambience, background hum, and Red Alert siren assets, controlled by local settings rather than simulation authority.
+      summary: "Phone clients play a local UI interaction click controlled by their own master setting. The room's music, engine ambience, combat effects and Red Alert audio are owned by the browser Viewscreen through gui/host-audio.js, not by phone clients. Native game playback and richer private semantic feedback remain T4 work."
     architecture:
       kind: client-presentation
       authority: local
@@ -147,4 +147,4 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/settings-panel.js, assets/sounds]
+      paths: [client.html, gui/settings-panel.js, assets/sounds/ui_click.ogg]

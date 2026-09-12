@@ -1,0 +1,109 @@
+# T4 audio decisions: PRD #1454; implementation #1455-#1466; human acceptance #1467.
+# Ratified 2026-09-13 after the user interview and independent issue-split review.
+# These decisions specify future playback work, not implementation evidence.
+entities:
+  - decision: t4-game-audio-surface-scope
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Viewscreen Sound and Optional Private Feedback
+      summary: "T4 delivers game sounds and tones with their visual/text equivalents on applicable supported browser and native surfaces. Browser and native Viewscreens have full parity for the configured room soundtrack. Phones, native Station Consoles and the GM receive optional local own-action, refusal, timeout and important actionable-alert feedback; they do not duplicate shared music, engine or combat sound. No recorded dialogue playback, speech synthesis, TTS or voiced-scenario production is included. Live human voice/video remains separate roadmap work."
+      rationale:
+        - "The room soundtrack belongs to the Viewscreen; a private operator's feedback belongs to that operator's surface. A standalone GM does not acquire room sound merely because its simulation owns a ship."
+        - "The work preserves the existing sound assets and authored balance. Only missing distinct local-feedback and alert tones are added, with no broad sound-design replacement pass."
+        - "External show hardware and arbitrary remote media are outside this scope."
+
+  - decision: t4-audio-authored-mix-and-settings
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Master and Five Audio Categories
+      summary: "Master plus Music, Ambience/engines, Effects/weapons, Alerts and Interface feedback have independent volume and mute choices wherever the surface has a real consumer. Master zero or mute silences every active and future sound, including alarms, output tests and local audition. Each category scales its authored mix rather than replacing per-sound levels; unmuting retains the operator's selected level. Visual/text information remains when audio is muted or unavailable."
+      rationale:
+        - "Music contains the lobby and red-alert music; Ambience/engines contains ambient and engine beds; Effects/weapons contains phasers, blasters and forcefield sound; Alerts contains sirens, computer-message tones and actionable alerts; Interface feedback contains local action lifecycle sounds. Authored presentation cues declare their category."
+        - "Personal mixer, feedback and comfort preferences use the existing private operator profile. Viewscreen choices stay with the endpoint. Physical output assignments stay in bridge hardware configuration and cannot travel in a personal profile. These are preference records, not audio-event history."
+        - "Controls preview live, remain usable before and during a mission, preserve keyboard/pointer access and visible focus, and honor shared text scale, contrast and non-colour cues. Audio reset is scoped to audio preferences. Unavailable categories/capabilities are explained rather than offered as inert controls."
+        - "[ai] Migrate the existing client and browser-host master values without increasing them; preserve unrelated profile fields and retain unavailable choices for portability. Native preference persistence should use the existing host-owned adapters rather than ephemeral embedded-page storage."
+
+  - decision: t4-native-audio-output-assignment
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Explicit Private Outputs with No Room Fallback
+      summary: "The native Viewscreen uses its selected room output, initially the system default. Native private Station/GM playback requires explicit output assignment using the existing bridge media surface/device vocabulary and assignment rules. Missing, lost, refused or ambiguous private output means silence and visible surface-specific status, never system-default or room-output fallback. A deliberate output test uses the selected route and respects its mute and volume."
+      rationale:
+        - "A personal profile cannot assign physical outputs. Output assignment and personal playback preferences remain separate, just as hardware layout and private operator preferences already are."
+        - "A disconnected private output must not expose an operator's feedback to the room. Recovery resumes the explicitly assigned route without playing cues missed while it was unavailable."
+        - "[ai] When an explicitly selected room output disappears, show the unavailable selection and offer deliberate recovery/reselection rather than silently substituting a device. Label the initial system-default route as such."
+        - "[ai] Extend the existing native output-device owner for application playback; the existing CPAL setup tone alone does not satisfy game playback parity. Keep stream ownership in the native process and expose capabilities/status to embedded documents."
+        - "[ai] The first native room path must drive real shipped MP3/OGG assets through the production decoder/provider into a fake device sample sink, not merely assert intents or use a fake decoder. Browser/native room and private surfaces each expose a deliberate bounded output-test control obeying Master and assignment."
+
+  - decision: t4-informative-sound-live-equivalents
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Live Equivalents without Cue History or Replay
+      summary: "Every informative sound has a visual/text equivalent containing its useful meaning and source, urgency or direction where conveyed. Existing readouts, current state and Comms text are reused when sufficient; a missing equivalent arrives with the sound feature. Music, background hum and routine clicks require no caption. Equivalents accompany the live cue or existing current state. Missed cues are missed: there is no recent-cue list, audio playback history, catch-up backlog, cue record for review or replay, and no insertion into existing records solely to preserve a cue."
+      rationale:
+        - "Muting a sound, losing an output or choosing mono must not remove its live information. The equivalent is based on the receiving surface's allowed information before local playback preferences or device availability are applied."
+        - "A cue conveying a bearing from an unknown source must not disclose the hidden identity. Captions and sound metadata cannot bypass M7 information manipulation, Station audience limits or private GM data boundaries."
+        - "Native computer-message playback includes the text, severity and applicable Station indication that the browser Viewscreen presents; the equivalent is part of that feature's parity, not deferred cleanup."
+        - "Existing Comms and mission records retain their established behavior. The user's explicit no-history choice governs T4 even where broader foundation guidance discusses reviewability."
+        - "Normal command bookkeeping required by the existing typed Admission route remains intact, including its existing result, attribution or journal behavior. That bookkeeping is not a new audio playback record and must not drive old sound playback on restore, reconnect or review. No audio-event persistence is added."
+        - "[ai] Use only bounded transient delivery-deduplication/coalescing state, never a browsable, exported or saved cue history. Lifecycle changes discard stale one-shots; current loops may be rederived from current state without replaying prior sound events."
+
+  - decision: t4-quiet-private-audio-feedback
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Quiet Semantic Feedback for Stations and GM
+      summary: "Private Station/GM defaults include optional clicks, refusal, timeout and important actionable-alert feedback. Successful-action and pending tones are opt-in. Continuous-control updates never produce per-update sound, and repeated alerts/state publications coalesce rather than multiplying playback. Feedback identifies only the originating operator's action result or an alert actionable on that surface; it does not create a private copy of the room soundtrack."
+      rationale:
+        - "The existing semantic action lifecycle remains the source of own-action meaning. Sound follows the admitted result and does not paint a successful gameplay change optimistically."
+        - "Visible action status and live alert meaning remain available when private audio is disabled, blocked or unavailable. No history is added and missed tones do not play when an output later becomes available."
+        - "[ai] Connect a playback consumer to the existing semantic-cue seam, preserving correlation-based deduplication across repeated acknowledgements and recreated documents. Use shared policy across browser and native capability providers rather than a second action vocabulary."
+        - "[ai] Split semantic action feedback from the finite first alert set: current entitled human host of the actual Comms System receives latest live per-thread Urgent while unread and Critical irrespective of read; no literal Comms Station assumption. The GM receives only Urgent pending_comms/eligible_beat/idle_npc from attention and station_disconnected/ship_peer_lost/operator_disconnected/recovery_failed from health. Add the missing shared Urgent Comms text/accessibility chip with that cue."
+        - "[ai] Comms cues follow new eligible message identity or Urgent-to-Critical escalation; GM attention follows occurrence identity or lower-to-Urgent escalation; GM health follows its generation-bearing alert identity. Consume emitted facts, respect attention filter/snooze/reading hold and let technical health follow its existing unfilterable banner. Do not duplicate health through station_health attention."
+        - "[ai] Baseline current state silently on mount/new session/reconnect/restore/entitlement acquisition. Filter changes, snooze expiry, Return to live, tab changes and output return never manufacture a new sound from an old condition. Exclude raw StationImportance, room sound, routine/Background/Attention/quiet-time, progress/settled/paused/stale recovery rows and invented hull/power/security thresholds. Bounded transient comparison state supports deduplication, not history."
+        - "[ai] Native Station and GM reuse the same private projector through their separate real adapters. Integration must prove both an actual Station action and an actual GM action reaching production sample output; Rust playback does not re-derive private alert eligibility or broadcast to all panes."
+
+  - decision: t4-audio-comfort-processing
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Mono, Reduced Dynamic Range and Optional Alert Ducking
+      summary: "Applicable playback surfaces offer mono, reduced dynamic range and optional ducking of Music and Ambience/engines under important alerts. Mono carries all allowed content to both output channels; reduced range brings loud peaks and quiet sounds closer together; ducking restores the beds smoothly after the alert. No comfort operation defeats Master/category mute or changes authoritative information, and directional equivalents remain available."
+      rationale:
+        - "Ducking is only offered where music or ambience actually exists; private Station/GM surfaces do not acquire shared beds to make a setting applicable."
+        - "Room comfort choices belong to the Viewscreen endpoint; personal choices belong to the private operator profile. Changing comfort does not change hardware assignments or add cue history."
+        - "[ai] Initial defaults are stereo, full dynamics and ducking off, with category gains at identity and existing Master values migrated. These preserve the authored baseline until an operator chooses otherwise."
+        - "[ai] Sample-level checks should prove both-channel mono, bounded dynamic processing, allowed-category ducking/recovery and Master-zero output. Separate real-device listening checks assess comfort without treating automated metrics as human acceptance."
+        - "[ai] Deliver mono, reduced dynamics and room ducking as separate complete paths. Each tests authored-cue-shaped provider input independently; optional comfort work does not block authored definition/audition or live cue integration."
+
+  - decision: t4-m8-authored-sound-cues
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Validated M8 Sounds through Typed Presentation Dispatch
+      summary: "GM and scenario sound cues use the same typed presentation command route with validated allowed sound assets, category, audience and sufficient informative equivalent metadata. Each recipient's mixer, comfort and output policy applies without a GM bypass. A deliberate local audition previews sound and its equivalent without a live authoritative action or shared playback; native GM audition requires an explicitly assigned private output. Speech and arbitrary remote media are outside this contract."
+      rationale:
+        - "Informative cue metadata cannot disclose more than the target audience is permitted to know; a cue cannot hide an essential instruction by declaring itself decorative. Reuse the existing sound inventory and add only the required distinct feedback/alert tones."
+        - "Local audition has visible preview/availability status and cleanup. It respects Master mute and private-output failure rules and creates no cue history or narrative entry."
+        - "Live commands retain normal Admission/result/attribution bookkeeping. Restoring or reading existing command records must not replay their old sound, and an audio playback log or catch-up record is not introduced."
+        - "Only live M8 producer integration depends on the planned typed presentation dispatch. Independent validation/local audition, audio providers, settings and equivalents do not depend on completion of M6 Workshop or M7 information control."
+        - "[ai] The external prerequisite is gm-milestone-presentation, GM In-Sim Presentation Control, in pasm/spec/roadmap/gm-console-milestones.yaml. No concrete implementation issue or API is claimed. The live integration path stays blocked until that route exists; definition validation and safe local audition ship as their own complete earlier path."
+        - "[ai] Resolve authored assets through the existing content mechanism and reject missing files/metadata before live emission. Reuse one admitted command shape for GM and scenario producers; local audition invokes only the presentation provider."
+
+  - decision: t4-audio-endpoint-provider-architecture
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: One Playback Owner per Logical Endpoint
+      summary: "A small presentation-provider contract accepts authored configuration, current loop state, allowed one-shot intent and mix updates, and reports actual playback availability. Browser and native providers implement it; native streams/decoding live in one process owner. Lobby, HUD and Console documents present or control their logical endpoint rather than each owning another playback copy. Mix/cue policy and audience-safe equivalents are separately testable behind narrow interfaces."
+      rationale:
+        - "[ai] Playback consumes settled local presentation state; volume, device status, delivery deduplication and cue suppression never enter the authoritative digest or create another Admission path. Normal existing command bookkeeping is preserved."
+        - "[ai] Native endpoints sharing a physical output mix only under explicit existing assignment/consent rules; recreating a view cannot play an occurrence twice. Stop, dispose and stale-one-shot discard are explicit lifecycle operations. There is no playback backlog or review record."
+        - "[ai] Browser state follows actual autoplay/decode results and offers honest blocked/unavailable/retry UI. A rejected play call must not escape through command sending; category controls require evidence through the actual supported-device gain path rather than an assignable media volume property."
+        - "[ai] Reuse shared policy fixtures, existing settings/profile tests, native fake-output routing and targeted real-provider integration checks. Deliver each feature's controls, live equivalents and usability checks in its own vertical slice; reserve human listening/device acceptance for a separate issue."
+        - "[ai] No library/backend choice is locked by this decision. Native playback must decode the shipped MP3/OGG assets and support explicit output routing; existing Bevy defaults or the CPAL setup tone do not establish implementation parity."

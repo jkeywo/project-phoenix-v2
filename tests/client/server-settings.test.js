@@ -461,6 +461,60 @@ describe('the Gameplay tab', () => {
     expect(control('pause').textContent).toBe(t('settings.gameplay.pause'));
   });
 
+  // ── The borrowed manual-save panel ───────────────────────────────────────
+  //
+  // It used to float permanently over the viewscreen. The cog borrows the LIVE
+  // node (server.html mounted a save-slots controller on it at startup), so
+  // these assert the move and, more importantly, the hand-back: a panel still
+  // parented in the overlay when it is next rebuilt is destroyed, not moved.
+
+  /** The page markup the cog borrows from, minus the WASM that fills it. */
+  function installSavePanel() {
+    const shell = document.createElement('div');
+    shell.id = 'server-shell';
+    const panel = document.createElement('aside');
+    panel.id = 'manual-save-panel';
+    shell.appendChild(panel);
+    document.body.appendChild(shell);
+    return panel;
+  }
+
+  it('borrows the live manual-save panel onto the tab and hands it back', () => {
+    const panel = installSavePanel();
+    ({ menu: mounted } = mount());
+    mounted.open();
+    mounted.selectTab('gameplay');
+
+    expect(panel.closest('.server-settings-body')).not.toBeNull();
+    expect(document.getElementById('manual-save-panel')).toBe(panel);
+
+    // Another tab is a rebuild: the same node has to be back home first, or
+    // clearing the overlay would take it out of the document altogether.
+    mounted.selectTab('audio');
+    expect(document.getElementById('manual-save-panel')).toBe(panel);
+    expect(panel.parentElement.id).toBe('server-shell');
+
+    mounted.selectTab('gameplay');
+    expect(panel.closest('.server-settings-body')).not.toBeNull();
+    mounted.destroy();
+    mounted = null;
+    expect(panel.parentElement.id).toBe('server-shell');
+  });
+
+  it('leaves a GM desk to keep its own copy of the same panel', () => {
+    const panel = installSavePanel();
+    const roster = document.createElement('div');
+    roster.id = 'gm-roster';
+    document.body.appendChild(roster);
+    roster.appendChild(panel);
+
+    ({ menu: mounted } = mount());
+    mounted.open();
+    mounted.selectTab('gameplay');
+
+    expect(panel.parentElement.id).toBe('gm-roster');
+  });
+
   it('exit to lobby asks the host page to return, and closes the menu', () => {
     let bindings;
     ({ menu: mounted, bindings } = mount());

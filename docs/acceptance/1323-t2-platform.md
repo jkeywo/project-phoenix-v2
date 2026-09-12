@@ -251,6 +251,10 @@ the documented importer changes supported legacy fields.
 
 Use two simulation peers (ship/GM), not a phone console without simulation.
 Open each peer's save controls/catalogue; record baseline rows and storage origin.
+On a browser viewscreen the in-session save controls are in the settings cog's
+Gameplay tab rather than on the viewscreen itself; the pre-session catalogue is
+still the landing's **Load Game** route, and a GM desk still carries the same
+panel in its roster.
 Create a uniquely named manual save on A at the next deterministic capture tick;
 observe local completion and confirm B acquired no matching manual row. Rename,
 export and delete only that disposable A row with the ordinary confirmation.

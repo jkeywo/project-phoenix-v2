@@ -803,22 +803,38 @@
     .save-slots-empty { color: var(--ink-faint); font-size: var(--text-sm); }
     /* The named manual-save affordance belongs to running-session chrome, not
        to the pre-scenario picker. Rust's lobby phase drives `[hidden]` below;
-       PhoenixReady is intentionally not a proxy for a capturable World. */
+       PhoenixReady is intentionally not a proxy for a capturable World.
+       It is no longer permanent viewscreen furniture either: naming a save is
+       something an operator does deliberately, so the settings cog's Gameplay
+       tab BORROWS this live node (`gui/server-settings.js`) the way the landing
+       borrows `#scenario-panel`, and hands it back to `#server-shell` when the
+       panel rebuilds or closes. Hence no positioning, no z-index and no box of
+       its own here — a docked panel is laid out by whichever surface is
+       holding it (the GM desk holds the same node in its roster, see
+       `gui/gm-workspace-shell.js`). */
     #manual-save-panel {
-      position: fixed;
-      top: 56px; right: 12px;
-      z-index: 170;
-      width: min(22rem, calc(100vw - 24px));
       box-sizing: border-box;
-      padding: 0.7rem;
-      border: 1px solid var(--edge);
-      border-radius: 4px;
-      background: rgba(var(--rgb-deep), 0.92);
       color: var(--ink);
       font-family: monospace;
     }
+    /* Parked at home it must not paint: a borrowable panel with no borrower is
+       not a floating overlay, it is off screen. Keyed on the PARENT rather than
+       a class so every borrower (cog, GM roster) is visible by the fact of
+       holding it, and no future one has to be told to add a class. */
+    #server-shell > #manual-save-panel { display: none; }
     #manual-save-panel[hidden] { display: none; }
     #manual-save-panel .save-slots-heading { margin-bottom: 0.55rem; }
+    /* Docked in the cog it must read as one of that panel's sections rather
+       than as a transplanted overlay: same spacing below, and the same small
+       upper-case heading `.server-settings-heading` gives every other section.
+       Scoped to the cog's body so the GM desk's copy keeps its own h2. */
+    .server-settings-body #manual-save-panel { margin-bottom: 14px; }
+    .server-settings-body #manual-save-panel:last-child { margin-bottom: 0; }
+    .server-settings-body #manual-save-panel .save-slots-heading {
+      font-size: var(--text-xs); letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--ink-dim);
+      margin-bottom: 6px;
+    }
     /* No portrait stacking here: this document always reads as landscape
        (see the orientation-lock block below and the `data-phx-force-landscape`
        doc comment at the top of the file) — a genuinely portrait phone screen

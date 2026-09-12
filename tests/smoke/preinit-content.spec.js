@@ -1,7 +1,8 @@
 // #1248: real local-slot/import gates wait for static sibling content and
 // composed literal hulls before checking the existing save identity.
 import { test, expect, MINIMAL_DEFAULT_WORLD, waitForWasmReady,
-  readHostPeerId, createTestClient, openSaveCatalogue } from './fixtures';
+  readHostPeerId, createTestClient, openSaveCatalogue,
+  openManualSavePanel, closeSettingsCog } from './fixtures';
 
 const WORLD = 'assets/worlds/default.toml';
 const CHILD = 'assets/worlds/preinit-child.toml';
@@ -48,7 +49,7 @@ async function savedHost(context) {
   await client.send('SetReady', { ready: true });
   await client.waitForMessage('GameStarted', 20000);
   await page.bringToFront();
-  const panel = page.locator('#manual-save-panel');
+  const panel = await openManualSavePanel(page);
   await expect(panel.locator('[data-save-action="create"]')).toBeEnabled({ timeout: 20000 });
   await panel.locator('input').fill('Preinit content');
   await panel.locator('[data-save-action="create"]').click();
@@ -60,6 +61,7 @@ async function savedHost(context) {
     if (refusal) throw Error(refusal);
     return { slot: row.slot_id, text: window.wasm_take_exported_snapshot() };
   });
+  await closeSettingsCog(page);
   await client.close();
   return { page, ...save };
 }

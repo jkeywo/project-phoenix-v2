@@ -8,7 +8,8 @@
  *     entirely in the public demo build (see `isDemo` below).
  *   - **Audio** — master volume, which SCALES the per-sound volumes authored
  *     in the ship/world TOML rather than replacing them.
- *   - **Gameplay** — pause/resume, the viewscreen join QR, and exit-to-lobby.
+ *   - **Gameplay** — pause/resume, the viewscreen join QR, the borrowed
+ *     manual-save panel (see `dockManualSave`), and exit-to-lobby.
  *     Deliberately NOT build-gated, so nothing on this tab may reach for
  *     debug-only plumbing.
  *
@@ -647,6 +648,57 @@ export function mountServerSettings(opts = {}) {
     body.appendChild(el);
   }
 
+  /**
+   * The named manual-save surface, borrowed into the Gameplay tab.
+   *
+   * `#manual-save-panel` used to float permanently in the viewscreen's
+   * top-right corner. Naming and writing a save is a deliberate act an operator
+   * goes looking for, not information the room needs on screen for the whole
+   * mission, so it lives in the cog now — beside pause and exit-to-lobby, the
+   * other two session controls.
+   *
+   * The node is MOVED rather than rebuilt here, for the reason
+   * `gui/host-landing-render.js` moves `#scenario-panel` and `save-slots.js`
+   * moves the importer: `server.html` mounted a live `mountSaveSlots`
+   * controller on it at startup and `window.phManualSaveController` still holds
+   * that root, so re-rendering a copy here would give the cog a dead panel and
+   * leave the real one's phase updates going nowhere. Its `[hidden]` stays
+   * Rust's to drive (`__setSaveSlotsPhase`): docked in the lobby it shows
+   * nothing, which is the same refusal it used to express by not being there.
+   *
+   * A GM page is deliberately left alone — `gui/gm-workspace-shell.js` has
+   * already moved this same node into the desk's roster, where it is permanent
+   * chrome on purpose, and two borrowers fighting over one node would leave it
+   * wherever the last rebuild happened to put it.
+   */
+  function manualSavePanel() {
+    if (currentHostActionContext() === GM_ACTION_CONTEXT) return null;
+    const el = doc.getElementById('manual-save-panel');
+    if (!el || el.closest('#gm-roster')) return null;
+    return el;
+  }
+
+  function dockManualSave(body) {
+    const el = manualSavePanel();
+    if (el) body.appendChild(el);
+  }
+
+  /**
+   * Hand the panel back to `#server-shell`, where the stylesheet parks it out
+   * of sight.
+   *
+   * Called BEFORE every rebuild rather than after a close, because
+   * `renderSettingsOverlay` empties the overlay: a panel still parented there
+   * when the next `buildPanel` runs is not re-parented but destroyed, taking
+   * the live controller's root with it.
+   */
+  function undockManualSave() {
+    const el = doc.getElementById('manual-save-panel');
+    if (!el || !overlay.contains(el)) return;
+    const home = doc.getElementById('server-shell') || doc.body;
+    home?.appendChild(el);
+  }
+
   function buildGameplayTab(body) {
     const sim = section('settings.gameplay.simulation');
     const simRow = rowHost();
@@ -671,6 +723,11 @@ export function mountServerSettings(opts = {}) {
     body.appendChild(qrSection);
 
     buildJoinCodeSection(body);
+
+    // Above the Session section on purpose: exit-to-lobby ends the mission, and
+    // the control that lets an operator keep it should be the one they meet
+    // first.
+    dockManualSave(body);
 
     const sessionSection = section('settings.gameplay.session');
     const sessionRow = rowHost();
@@ -1037,6 +1094,8 @@ export function mountServerSettings(opts = {}) {
   // ── Panel ──────────────────────────────────────────────────────────────────
 
   function buildPanel() {
+    // Before anything clears the overlay — see `undockManualSave`.
+    undockManualSave();
     const demo = isDemo();
     // The shared operational tabs plus this endpoint's own Display tab (issue
     // #1427) — the viewscreen list, which the native viewscreen's cog also
@@ -1137,6 +1196,8 @@ export function mountServerSettings(opts = {}) {
     }
     if (typeof stopGamepad === 'function') stopGamepad();
     semanticControls.destroy();
+    // A torn-down cog must not take the borrowed save panel with it.
+    undockManualSave();
     shell.close();
   }
 

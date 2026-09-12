@@ -524,6 +524,25 @@ export async function openSaveCatalogue(page, timeout = 30_000) {
   return page;
 }
 
+/** Reveal the in-session manual-save panel, which the settings cog's Gameplay
+ *  tab borrows rather than the viewscreen carrying it permanently. Idempotent —
+ *  it opens the cog only if it is shut — so a spec that saves twice does not
+ *  have to track whether the panel is already on screen. */
+export async function openManualSavePanel(page, timeout = 30_000) {
+  const overlay = page.locator('#server-settings-overlay');
+  if (!await overlay.isVisible()) await page.locator('#server-settings-btn').click();
+  await page.locator('.server-settings-tab[data-tab="gameplay"]').click();
+  const panel = page.locator('#manual-save-panel');
+  await panel.waitFor({ state: 'visible', timeout });
+  return panel;
+}
+
+/** Shut the cog again, releasing the borrowed save panel. */
+export async function closeSettingsCog(page) {
+  const overlay = page.locator('#server-settings-overlay');
+  if (await overlay.isVisible()) await page.keyboard.press('Escape');
+}
+
 // ── Reading an expectation out of TOML instead of pinning it (issue #941) ────
 //
 // Deliberately tiny, deliberately not a TOML parser: these read the handful of

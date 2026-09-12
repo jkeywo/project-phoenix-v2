@@ -12,6 +12,8 @@ import {
   waitForWasmReady,
   MINIMAL_DEFAULT_WORLD,
   openSaveCatalogue,
+  openManualSavePanel,
+  closeSettingsCog,
 } from './fixtures';
 import { ts } from './strings';
 
@@ -82,9 +84,13 @@ async function startedHost(context, name = 'Save Tester', { denySaveLocks = fals
   );
   await captain.send('SetReady', { ready: true });
   await captain.waitForMessage('GameStarted', 20_000);
-  const createSave = page.locator('#manual-save-panel [data-save-action="create"]');
+  const createSave = (await openManualSavePanel(page))
+    .locator('[data-save-action="create"]');
   await expect(createSave).toBeVisible({ timeout: 20_000 });
   await expect(createSave).toBeEnabled();
+  // Leave the viewscreen as a session actually runs: cog shut, save panel with
+  // it. Every helper below reopens it for the moment it needs it.
+  await closeSettingsCog(page);
   return { page, captain };
 }
 
@@ -110,7 +116,7 @@ function snapshotIdentity(artifact) {
 
 async function createNamedSave(page, displayName) {
   await page.bringToFront();
-  const panel = page.locator('#manual-save-panel');
+  const panel = await openManualSavePanel(page);
   await panel.locator('input').fill(displayName);
   await panel.locator('[data-save-action="create"]').click();
   await page.waitForFunction(
@@ -119,10 +125,12 @@ async function createNamedSave(page, displayName) {
     displayName,
     { timeout: 20_000 },
   );
-  return page.evaluate(
+  const row = await page.evaluate(
     (name) => Array.from(window.wasm_list_save_slots()).find((row) => row.display_name === name),
     displayName,
   );
+  await closeSettingsCog(page);
+  return row;
 }
 
 async function cataloguePage(page) {
@@ -238,9 +246,10 @@ test('local save slots complete their browser lifecycle and restore only in a fr
   });
   await waitForRedAlert(captain);
 
-  // The manual affordance is persistent running-session chrome. It has a name
-  // field, is enabled from the authoritative phase, and offers no live restore.
-  const capture = running.locator('#manual-save-panel');
+  // The manual affordance lives in the settings cog rather than on the
+  // viewscreen. Borrowed onto the Gameplay tab it has a name field, is enabled
+  // from the authoritative phase, and offers no live restore.
+  const capture = await openManualSavePanel(running);
   await expect(capture.locator('[data-save-action="create"]')).toBeEnabled();
   await expect(capture.locator('[data-save-action="start"]')).toHaveCount(0);
   const restore = await createNamedSave(running, 'Restore point');
@@ -536,9 +545,9 @@ test('two same-origin browser peers keep autosave, manual, export, delete, and f
     window.wasm_create_save_slot('First peer refused'));
   expect(refusedSlot).toMatch(/^[0-9a-f-]{36}$/);
   const secondAfterFailure = await createNamedSave(second.page, 'Second peer after failure');
-  await expect(first.page.locator('#manual-save-panel .save-slots-status.failed')).toBeVisible({
-    timeout: 20_000,
-  });
+  await expect((await openManualSavePanel(first.page)).locator('.save-slots-status.failed'))
+    .toBeVisible({ timeout: 20_000 });
+  await closeSettingsCog(first.page);
   expect((await saveRows(first.page)).map((row) => row.display_name))
     .not.toContain('First peer refused');
   expect((await saveRows(second.page)).map((row) => row.slot_id))

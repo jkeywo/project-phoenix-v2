@@ -37,17 +37,41 @@
        range or a dock is held, so a hull with no dock system is unchanged. */
     .dock-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; }
     .dock-panel[hidden] { display: none; }
-    .dock-row { display: flex; align-items: center; gap: 10px; }
+    /* issue #1425: `flex-wrap: wrap` so a long docked_to_name that cannot
+       share this row with the button at all (the button's own content can
+       consume the row's entire width at 200% text on a narrow pane — the
+       min-width:0/overflow-wrap fix on .dock-status alone only helps once
+       SOME width remains) drops to its own line below the button instead of
+       being squeezed to zero width, which produced an unreadable vertical
+       stack of single characters. */
+    .dock-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     .dock-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
     .dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
-    .dock-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    /* issue #1425: a flex row's default min-width is `auto`, not `0` — a long
+       docked_to_name/available_target_name (a world entity name id, unbounded
+       length) pushed this span past the row's edge instead of wrapping, which
+       is how gui/cruiser/helm.html's OWN dock-status already reads (it was
+       fixed there when the cruiser Helm mounted a dock system). Matching that
+       fix here rather than leaving the two hulls' identical controls diverge. */
+    .dock-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .dock-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
     /* Under-tow-load indicator (issue #1157): shown only while this ship's
        tractor holds a target, so a hull with no tractor is unchanged. */
-    .tow-load-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+    /* issue #1425: `flex-wrap: wrap` for the same reason as .dock-row below —
+       the "Under tow load" label's own `white-space: nowrap` can consume the
+       row's width at 200% text on a narrow pane, and the target name needs
+       to drop to its own line rather than be squeezed to zero width. */
+    .tow-load-panel { flex-shrink: 0; flex-wrap: wrap; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
     .tow-load-panel[hidden] { display: none; }
-    .tow-load-label { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
-    .tow-load-target { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .tow-load-label { flex: 0 0 auto; white-space: nowrap; font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
+    /* issue #1425: same overflow as .dock-status above — the tow target is
+       also a world entity name id of unbounded length, and this row had no
+       flex-shrink budget for it at all. gui/cruiser/helm.html avoids the
+       whole class of bug with a column layout; kept as a row here (smaller
+       diff, matches this hull's existing composition) but given the same
+       shrink/wrap budget so a long name grows the panel's height instead of
+       running under the "Under tow load" label or off the console edge. */
+    .tow-load-target { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
 
     /* Portrait (issue #1376, John's 2026-09-06 decision): nothing scrolls.
        Stacking three full-width blocks — the scope, then this rail's own

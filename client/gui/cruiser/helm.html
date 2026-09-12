@@ -35,7 +35,14 @@
        flight that never docks. */
     .dock-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; }
     .dock-panel[hidden] { display: none; }
-    .dock-row { display: flex; align-items: center; gap: 10px; }
+    /* issue #1425: `flex-wrap: wrap` so a long docked_to_name that cannot
+       share this row with the button at all (the button's own content can
+       consume the row's entire width at 200% text on a narrow pane) drops to
+       its own line below the button instead of being squeezed to zero width
+       despite this row's status span already carrying min-width:0 +
+       overflow-wrap: anywhere — that pair only helps once SOME width remains
+       to wrap into. */
+    .dock-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     .dock-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
     .dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
     .dock-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }

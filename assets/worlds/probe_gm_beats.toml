@@ -1,0 +1,69 @@
+# Authored eligible-beat probe for #1434 (PRD #1419 M4, story 7).
+#
+# Six GM-operable beats, authored the ordinary way, covering every state the
+# attention queue has to read and every band an author may choose:
+#
+#   brief       manual, one-shot, no authored band  -> default Attention, and
+#                                                      spent for ever once fired
+#   recall      manual, repeatable, `urgent`        -> comes back as a FRESH
+#                                                      occurrence after firing
+#   storm       manual, gated by `flag(storm_ready)` -> the ready<->ineligible
+#                                                      transition, both ways
+#   open_gate   manual, repeatable                  -> opens that gate through
+#   close_gate  manual, repeatable                     the world's own handlers
+#   relief      AUTOMATIC (on_timer) + all three     -> `background`, and the
+#               levers, `background`                   only beat whose moment
+#                                                      would also arrive alone
+#
+# Nothing here needs the beats to actually fire for the queue to be right; the
+# handlers only move flags, so a test can prove the projection ran without
+# running any of them.
+[global]
+seed = 1434
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+command_delay_ticks = 2
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[script]
+setup = """
+// A moment only a Game Master can cause, and only once.
+gm_event("brief", "world.probe_gm_beats.beat.brief", "on_brief");
+
+// A reusable quick tool the author marks Urgent.
+gm_event("recall", "world.probe_gm_beats.beat.recall", "on_recall")
+    .repeatable()
+    .attention_band("urgent");
+
+// A beat behind an authored gate. Its `when` is the ordinary trigger-level
+// predicate, so it is ineligible until the gate opens and ineligible again
+// once it closes - without the beat ever being spent.
+gm_event("storm", "world.probe_gm_beats.beat.storm", "on_storm").when("flag(storm_ready)");
+
+// The two beats that work that gate, so a test moves the world through the
+// world's own handlers instead of writing flags behind its back.
+gm_event("open_gate", "world.probe_gm_beats.beat.open_gate", "on_open_gate").repeatable();
+gm_event("close_gate", "world.probe_gm_beats.beat.close_gate", "on_close_gate").repeatable();
+
+// An ordinary automatic moment that a Game Master may ALSO reach for. It has
+// all three levers, so its row can prove that opening it offers exactly the
+// controls the author declared - and it is the only beat here that would
+// arrive on its own, so it gets the "early" sentence rather than the manual one.
+on_timer(600, "on_relief")
+    .gm_controls("relief", "world.probe_gm_beats.beat.relief")
+    .pauseable()
+    .skip()
+    .attention_band("background");
+
+fn on_brief(ctx) { ctx.flags.increment("briefed", 1); }
+fn on_recall(ctx) { ctx.flags.increment("recalled", 1); }
+fn on_storm(ctx) { ctx.flags.increment("stormed", 1); }
+fn on_open_gate(ctx) { ctx.flags.increment("storm_ready", 1); }
+fn on_close_gate(ctx) { ctx.flags.increment("storm_ready", -1); }
+fn on_relief(ctx) { ctx.flags.increment("relieved", 1); }
+"""

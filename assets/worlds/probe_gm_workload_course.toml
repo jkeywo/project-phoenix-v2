@@ -1,0 +1,51 @@
+# The Navigation half of the #1438 Station-workload probe.
+#
+# The workload advisory counts a Navigation clearance only when the clearance is
+# actually DELIVERED to a person, which the router decides: an AI Navigation
+# asking a human Helm raises a popup, while two people at the same table are
+# suppressed on purpose. So the only case that is a demand at all is a course
+# the ship's OWN Navigation plotted — and a hull only plots one when it has
+# somewhere to be.
+#
+# This world gives it somewhere: one anchor and one mandatory Reach objective,
+# scored positive and Helm-relevant, which is what `operate_navigation_ai` ranks
+# to a destination and writes onto the shared waypoint. `[gm_attention]` is left
+# alone here; the thresholds this world runs on are the shipped ones.
+#
+# The anchor is deliberately far from the hull's spawn, so a test can watch the
+# demand stand while the hull is nowhere near it and then complete when the hull
+# arrives inside the authored `waypoint_arrival_radius`.
+[global]
+seed = 1438
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+sim_tick_hz = 30.0
+ai_tick_hz = 30.0
+ai_snapshot_hz = 10.0
+command_delay_ticks = 2
+
+[anchors]
+workload_course = [5000.0, 0.0, -5000.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[script]
+setup = """
+on_world_loaded("on_load");
+
+fn on_load(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-workload-course",
+        text: "world.patrol.trigger.action.obj_patrol_sector.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 60,
+        directive_kind: "Reach",
+        directive_anchor: "workload_course"
+    });
+}
+"""

@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t, wireText } from '../strings.js';
 import { phColor } from './ph-console-styles.js';
+import { textScaleOf } from './ph-scope-chrome.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { activateNavigationAction } from '../stations/navigation-action-control.js';
@@ -67,6 +68,15 @@ export class PhNavigationMap extends PhElement {
 
   #touchActive = false;
 
+  // The operator's text-scale multiplier as of the last frame the chart
+  // actually painted. Checked once per rAF tick (see `#rafLoop`) so a live
+  // change — dragging the settings slider while this console is open —
+  // repaints the same frame it reaches every rem-based string, rather than
+  // waiting for the next unrelated state push, pan or zoom to set
+  // `needsRender`. A CSS custom property changing is not itself a DOM
+  // mutation this element observes, so nothing else would notice.
+  #lastTextScale = NaN;
+
   template() {
     return [
       '<style>',
@@ -123,7 +133,14 @@ export class PhNavigationMap extends PhElement {
       '.wp-bar-spacer { flex: 0 0 var(--nav-chart-corner-clear, 0px); height: var(--nav-chart-corner-clear-h, 0px); display: var(--nav-chart-corner-clear-display, none); visibility: hidden; }',
       '.wp-btn { pointer-events: auto; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); background: rgba(var(--rgb-panel), 0.88); border: 1px solid rgba(var(--rgb-edge-control), 0.5); padding: 6px 12px; cursor: pointer; display: none; white-space: nowrap; min-height: var(--control-hit-min); }',
       '.wp-btn.show { display: block; }',
-      '.wp-btn.active { color: var(--gold); border-color: var(--gold); }',
+      // PENDING (armed, waiting for the placement tap): a dashed border AND
+      // an appended glyph, not colour alone (PRD #1418 story 6 — issue
+      // #1423). Colour-blind, grayscale and forced-colours viewers all still
+      // see the border style change and the "…" the button's own text grows,
+      // matching the border-style convention issue #1422 used for the Power
+      // panel's "held below commanded" rung.
+      '.wp-btn.active { color: var(--gold); border-color: var(--gold); border-style: dashed; }',
+      '.wp-btn.active::after { content: \'\\2026\'; }',
       '.wp-btn:active { opacity: 0.7; }',
       '.wp-btn:disabled { opacity: 0.42; cursor: not-allowed; }',
       '.toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.3em; color: var(--tactical); background: rgba(var(--rgb-deep), 0.92); border: 1px solid var(--tactical); box-shadow: 0 0 24px rgba(var(--rgb-tactical), 0.25); padding: 10px 24px; pointer-events: none; opacity: 0; transition: opacity 0.22s ease; z-index: 3; }',
@@ -528,6 +545,11 @@ export class PhNavigationMap extends PhElement {
   }
 
   #rafLoop() {
+    const scale = textScaleOf(this);
+    if (scale !== this.#lastTextScale) {
+      this.#lastTextScale = scale;
+      this.needsRender = true;
+    }
     if (this.needsRender) this.#render();
     this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
@@ -597,8 +619,14 @@ export class PhNavigationMap extends PhElement {
     const cssW = this.getBoundingClientRect ? this.getBoundingClientRect().width : 0;
     const px = (cssW > 0) ? W / cssW : 1;
     const zoomFont = Math.min(1.3, Math.max(0.85, this.#zoom));
-    const namePx = Math.round(12 * px * zoomFont);
-    const wpPx = Math.round(10 * px * zoomFont);
+    // The chart is genuinely spatial (PRD #1418 story 3) — its grid, blip
+    // positions and pan/zoom stay untouched by the operator's text-scale
+    // choice. The NAMES painted over it are not spatial, they are prose, and
+    // a `<canvas>` font string sits outside the CSS ramp entirely, so nothing
+    // reaches them without this multiplier (see `textScaleOf`).
+    const textScale = textScaleOf(this);
+    const namePx = Math.round(12 * px * zoomFont * textScale);
+    const wpPx = Math.round(10 * px * zoomFont * textScale);
 
     // Drop a selection whose blip left the chart (it may have despawned or
     // fallen outside the refresh). Emit only on a change.

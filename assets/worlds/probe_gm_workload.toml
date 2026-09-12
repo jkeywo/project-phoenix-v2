@@ -1,0 +1,92 @@
+# Station-workload probe for #1438, on every shipped default.
+#
+# Three speakers and three GM Comms routes, so three genuinely independent
+# conversations can be opened against one crew's Comms Station through ordinary
+# scripted delivery — which is what a workload count of three has to be built
+# from. Nothing in `[gm_attention]` is authored here: the thresholds this world
+# proves are the shipped ones (three demands, thirty simulation seconds).
+[global]
+seed = 1438
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+sim_tick_hz = 30.0
+ai_tick_hz = 30.0
+ai_snapshot_hz = 10.0
+command_delay_ticks = 2
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_workload.speaker_one"
+transform = { position = [0.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_workload.speaker_two"
+transform = { position = [80.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_workload.speaker_three"
+transform = { position = [-80.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+[[gm_comms_route]]
+id = "route-one"
+label = "world.probe_gm_workload.route.one"
+visibility = "selected_ships"
+senders = ["world.probe_gm_workload.speaker_one"]
+[[gm_comms_route.hail]]
+id = "hail-one"
+label = "world.probe_gm_workload.hail.one"
+script_path = "assets/worlds/probe_gm_workload.toml#script.setup"
+root_fn = "offer_one"
+
+[[gm_comms_route]]
+id = "route-two"
+label = "world.probe_gm_workload.route.two"
+visibility = "selected_ships"
+senders = ["world.probe_gm_workload.speaker_two"]
+[[gm_comms_route.hail]]
+id = "hail-two"
+label = "world.probe_gm_workload.hail.two"
+script_path = "assets/worlds/probe_gm_workload.toml#script.setup"
+root_fn = "offer_two"
+
+[[gm_comms_route]]
+id = "route-three"
+label = "world.probe_gm_workload.route.three"
+visibility = "selected_ships"
+senders = ["world.probe_gm_workload.speaker_three"]
+[[gm_comms_route.hail]]
+id = "hail-three"
+label = "world.probe_gm_workload.hail.three"
+script_path = "assets/worlds/probe_gm_workload.toml#script.setup"
+root_fn = "offer_three"
+
+[script]
+setup = """
+fn offer_one(ctx) {
+    #{ message: "world.probe_gm_workload.offer_one", responses: [
+        #{ text: "world.probe_gm_workload.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn offer_two(ctx) {
+    #{ message: "world.probe_gm_workload.offer_two", responses: [
+        #{ text: "world.probe_gm_workload.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn offer_three(ctx) {
+    #{ message: "world.probe_gm_workload.offer_three", responses: [
+        #{ text: "world.probe_gm_workload.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn close_offer(ctx) { ctx.flags.increment("gm_workload_closed", 1); }
+"""

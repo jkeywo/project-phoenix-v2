@@ -8,7 +8,7 @@
  * existing fresh-app resume path.
  */
 
-import { t } from './strings.js';
+import { t, wireText } from './strings.js';
 import { createFocusTrap } from './focus-trap.js';
 import {
   armBrowserSaveIdentityHandoff,
@@ -32,6 +32,29 @@ const KNOWN_REFUSALS = new Set([
 
 function text(value) {
   return value == null ? '' : String(value);
+}
+
+/**
+ * The operator-visible name of one catalogue row.
+ *
+ * A `display_name` is normally prose somebody typed into the bookmark field,
+ * and prose is rendered as it was typed. Some rows are named by the ENGINE
+ * instead — the recovery checkpoint `src/gm_restore.rs` takes before a live
+ * restore is bookmarked under `RECOVERY_CHECKPOINT_NAME`, a String Table id,
+ * because that crate has no locale to write a sentence in. Those rows are
+ * durable and ordinary: they show up in this landing catalogue every player
+ * sees, in the GM checkpoint picker and in the restore preview. Printing the
+ * stored field verbatim would put `server.gm.restore.recovery_name` on screen.
+ *
+ * `wireText` is the repo's render-site rule for exactly this shape — a field
+ * that MAY be an id and is just as often literal text — so the resolution is
+ * one shared seam rather than a per-surface list of engine-authored names.
+ *
+ * @param {string} displayName the durable `display_name` of a row
+ * @returns {string} the sentence when it is an authored id, else the prose
+ */
+export function slotName(displayName) {
+  return wireText(displayName);
 }
 
 /** Normalise one wasm-bindgen catalogue object without trusting its shape. */
@@ -62,6 +85,17 @@ export function normalizeSaveSlot(row) {
     metadataError: text(source.metadata_error),
     canStart: startable && scenario !== '' && text(source.selected_ship) !== '',
     canRename: kind === 'manual',
+    // Issue #1445's live-restore candidate preflight is deliberately NOT read
+    // here. Rust publishes it on these same rows, but only while a world is
+    // booted, and this catalogue is only ever on screen BEFORE one is chosen:
+    // the landing docks `#save-slots-panel` to pick a save, and the panel is
+    // `display: none` from then on (see the comment above `#snapshot-import`
+    // in server.html). A verdict this surface could never show is not
+    // presentation it should carry, and it answers a different question from
+    // the version gate above — whether a LIVE restore could keep the ship and
+    // Station assignments that exist right now. `gui/gm-checkpoint-panel.js`
+    // reads the field, from the in-session GM console where a live seating
+    // exists to be a candidate for.
   };
 }
 
@@ -360,7 +394,7 @@ export function mountSaveSlots(options) {
       for (const row of model.slots) {
         const displayName = row.kind === 'autosave'
           ? t('server.save_slots.autosave')
-          : row.displayName;
+          : slotName(row.displayName);
         const item = node(doc, 'li', 'save-slot-row');
         const button = node(doc, 'button', 'save-slot-select' + (row.selected ? ' selected' : ''));
         button.type = 'button';
@@ -404,7 +438,7 @@ export function mountSaveSlots(options) {
     if (selected) {
       renameInput.value = selected.kind === 'autosave'
         ? t('server.save_slots.autosave')
-        : selected.displayName;
+        : slotName(selected.displayName);
       renameInput.disabled = !selected.canRename;
       renameButton.disabled = !selected.canRename;
       exportButton.disabled = false;
@@ -416,7 +450,9 @@ export function mountSaveSlots(options) {
       const deleting = model.slots.find((row) => row.slotId === state.confirmingId);
       confirmText.textContent = t('server.save_slots.delete_confirm', {
         name: deleting
-          ? (deleting.kind === 'autosave' ? t('server.save_slots.autosave') : deleting.displayName)
+          ? (deleting.kind === 'autosave'
+            ? t('server.save_slots.autosave')
+            : slotName(deleting.displayName))
           : state.confirmingId,
       });
     }

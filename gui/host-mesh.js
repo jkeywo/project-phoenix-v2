@@ -124,8 +124,15 @@
  * a known departed GM reconnect can reuse that transfer without being mistaken
  * for a new public operator. `12` carries frozen Station/rating pairs: an
  * older host would silently boot a human-held Station on Backfill.
+ *
+ * `13` adds the `gm-restore` frame (issue #1447): the readiness, per-peer load
+ * report and terminal settle of a multi-peer live restore. A revision-12 host
+ * would hold its world on the canonical restore request, never answer the
+ * readiness ask, and be disconnected as a nonresponder while the revision-13
+ * hosts rewound without it — a fleet split with no symptom, which is exactly
+ * the class of change a whole-fleet revision refusal exists for.
  */
-export const HOST_MESH_PROTOCOL = 12;
+export const HOST_MESH_PROTOCOL = 13;
 
 import { canonicalStationRatings } from './fleet-crew.js';
 export { canonicalStationRatings } from './fleet-crew.js';
@@ -183,6 +190,15 @@ export const HOST_FRAME_GM_JOIN_STATUS = 'gm-join-status';
 export const HOST_FRAME_GM_JOIN_PENDING = 'gm-join-pending';
 /** Revision 9 (#1293): Rust-owned pause/restore/digest/commit protocol. */
 export const HOST_FRAME_GM_JOIN = 'gm-join';
+/**
+ * Revision 13 (#1447): one peer's word in a multi-peer live restore — ready,
+ * loaded, unable, or the initiating peer's terminal settle.
+ *
+ * Like every other running-mission frame its body is minted and read only by
+ * Rust; this module ferries it opaquely. The candidate world itself does NOT
+ * travel here: it goes as ordinary `snapshot` chunks over #1118's transport.
+ */
+export const HOST_FRAME_GM_RESTORE = 'gm-restore';
 
 /** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
@@ -207,6 +223,7 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_GM_JOIN_STATUS,
   HOST_FRAME_GM_JOIN_PENDING,
   HOST_FRAME_GM_JOIN,
+  HOST_FRAME_GM_RESTORE,
 ];
 
 /**
@@ -228,6 +245,7 @@ export const HOST_SIMULATION_FRAME_TYPES = [
   HOST_FRAME_SLOT_CLAIM,
   HOST_FRAME_GM_ACTION,
   HOST_FRAME_GM_JOIN,
+  HOST_FRAME_GM_RESTORE,
 ];
 
 /** True when this frame belongs to the running simulation rather than the lobby. */
@@ -1551,6 +1569,7 @@ if (typeof window !== 'undefined') {
     HOST_FRAME_GM_JOIN_DECISION,
     HOST_FRAME_GM_JOIN_STATUS,
     HOST_FRAME_GM_JOIN_PENDING,
+    HOST_FRAME_GM_RESTORE,
     isSimulationFrame,
     simulationFrame,
     hostSlotOrdinal,

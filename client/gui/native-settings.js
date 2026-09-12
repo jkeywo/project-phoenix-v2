@@ -22,15 +22,17 @@
  *
  * ## A tab with nothing on it is not offered
  *
- * The shared tab list is the four the host page shows, and three of them are
- * empty here TODAY — the native process has no master volume, no wasm debug
+ * The shared tab list is the VIEWSCREEN list — the four the host page shows plus
+ * the Display tab both viewscreens carry (issue #1427) — and three of them are
+ * empty here TODAY: the native process has no master volume, no wasm debug
  * bindings and no host-local action registry. Rendering them as blank bodies
  * would be the settings menu claiming settings this host does not have, which
  * is the same failure as a control with nothing behind it. So the tab strip is
  * the shared list FILTERED to the tabs the table puts something on: an empty
  * tab disappears, and the slice that gives the native host a volume brings its
- * tab back by adding a row. `visibleTabs` still decides the order and still
- * decides what a demo build hides, so this never becomes a second tab list.
+ * tab back by adding a row. `visibleViewscreenTabs` still decides the order and
+ * still decides what a demo build hides, so this never becomes a second tab
+ * list.
  *
  * ## Everything it cannot do itself arrives as a hook
  *
@@ -46,13 +48,14 @@
  */
 
 import { t as defaultT } from './strings.js';
-import { visibleTabs } from './settings-tabs.js';
+import { visibleViewscreenTabs } from './settings-tabs.js';
 import {
   mountOverlayShell,
   renderTabBar,
   makeSectionBuilders,
   makeRowBuilder,
 } from './settings-overlay-kit.js';
+import { renderViewscreenPresentationPanel } from './viewscreen-presentation-panel.js';
 
 /** The cog's element id. Exported so a test and the CSS agree on one name. */
 export const NATIVE_SETTINGS_BUTTON_ID = 'native-settings-btn';
@@ -71,10 +74,13 @@ export const NATIVE_SETTINGS_OVERLAY_ID = 'native-settings-overlay';
  * | `labelId` | the string id of the control's own name |
  * | `hintId` | the string id of the line under the section, or absent |
  * | `action` | the verb handed to the caller's `run` hook when it is pressed |
+ * | `kind` | `action` (the default) for a button, or a richer group a shared renderer builds |
  *
- * Both rows are on **Gameplay** because both are decisions about the session in
- * front of the operator rather than about this machine's audio or bindings,
- * which is where the host page puts the same QR control.
+ * The two verb rows are on **Gameplay** because both are decisions about the
+ * session in front of the operator rather than about this machine's audio or
+ * bindings, which is where the host page puts the same QR control. The third is
+ * on **Display**, which is this MACHINE's rather than the session's — see its
+ * own comment, and `kind` in the table above.
  */
 export const NATIVE_SETTINGS_CONTROLS = [
   {
@@ -104,6 +110,23 @@ export const NATIVE_SETTINGS_CONTROLS = [
     hintId: 'settings.display_hint',
     action: 'toggle_fullscreen',
   },
+  {
+    // This ENDPOINT's text size and contrast (issue #1427). The first row whose
+    // `kind` is not `action`: what it puts on the tab is a whole control group —
+    // a slider, a tri-state, two per-setting resets and a scoped Reset all —
+    // rather than one button with one verb, so the table names the group and
+    // `gui/viewscreen-presentation-panel.js` (shared with `server.html`'s cog)
+    // builds it. The row still decides which tab it lives on and still
+    // disappears when the surface cannot answer it: a caller that passes no
+    // `presentation` controller loses this row, and with it the Display tab,
+    // rather than rendering controls with nothing behind them.
+    id: 'presentation',
+    kind: 'presentation',
+    tab: 'presentation',
+    // No `sectionId`: the shared panel writes its own headings, hints and
+    // status lines, so a heading here would be the same words twice.
+    sectionId: null,
+  },
 ];
 
 /**
@@ -121,18 +144,22 @@ export const NATIVE_SETTINGS_CONTROLS = [
  * @returns {{
  *   tabs: Array<{id: string, labelId: string}>,
  *   activeTab: string|null,
- *   sections: Array<{id: string, headingId: string, hintId: string|null,
+ *   sections: Array<{id: string, kind: string, headingId: string|null,
+ *                    hintId: string|null,
  *                    controls: Array<{id: string, labelId: string, action: string}>}>,
  * }}
  *   `sections` is the ACTIVE tab's, in table order, and empty when nothing is
- *   offered at all.
+ *   offered at all. A section's `kind` is its first row's — `action` for the
+ *   ordinary button groups, and one of the richer kinds (`presentation`) where
+ *   the whole section is built by a shared renderer instead.
  */
 export function nativeSettingsView(input) {
   const opts = input || {};
   const rows = Array.isArray(opts.controls) ? opts.controls : NATIVE_SETTINGS_CONTROLS;
-  // The shared list decides the order and decides what a demo build hides; this
-  // only drops the ones nothing on this surface can answer.
-  const tabs = visibleTabs(!!opts.demo)
+  // The viewscreen list — the shared operational tabs plus the endpoint's own
+  // Display tab (issue #1427). It decides the order and decides what a demo
+  // build hides; this only drops the ones nothing on this surface can answer.
+  const tabs = visibleViewscreenTabs(!!opts.demo)
     .filter(function (tab) {
       return rows.some(function (row) { return row && row.tab === tab.id; });
     })
@@ -146,10 +173,17 @@ export function nativeSettingsView(input) {
   const sections = [];
   rows.forEach(function (row) {
     if (!row || !row.id || row.tab !== active) return;
-    let section = sections.find(function (s) { return s.id === row.sectionId; });
+    const kind = row.kind || 'action';
+    // A section is keyed by its heading AND its kind: a richer kind builds its
+    // own headings, so two of them with no `sectionId` must not silently merge
+    // into one section the way two button rows under one heading do.
+    let section = sections.find(function (s) {
+      return s.id === row.sectionId && s.kind === kind;
+    });
     if (!section) {
       section = {
         id: row.sectionId,
+        kind: kind,
         headingId: row.sectionId,
         hintId: null,
         controls: [],
@@ -161,7 +195,11 @@ export function nativeSettingsView(input) {
     // primitives put it, and a second row wanting different words wants a
     // second section.
     if (!section.hintId && row.hintId) section.hintId = row.hintId;
-    section.controls.push({ id: row.id, labelId: row.labelId, action: row.action });
+    // A richer kind's section is built whole by a shared renderer, so it has no
+    // buttons of its own to describe; only an `action` row contributes one.
+    if (kind === 'action') {
+      section.controls.push({ id: row.id, labelId: row.labelId, action: row.action });
+    }
   });
 
   return { tabs: tabs, activeTab: active, sections: sections };
@@ -172,10 +210,16 @@ export function nativeSettingsView(input) {
  *
  * @param {Document} doc the document to mount into. FIRST, as every renderer in
  *   this fleet takes it: one implementation, several documents.
- * @param {{run?: (action: string) => void}} [hooks] `run` is handed the pressed
- *   row's `action` verb. Absent, the controls render and do nothing — which is
- *   what a surface with nothing behind them would be, and is why the table says
- *   what a row sends rather than doing it.
+ * @param {{run?: (action: string) => void, presentation?: object}} [hooks]
+ *   `run` is handed the pressed row's `action` verb. Absent, the controls render
+ *   and do nothing — which is what a surface with nothing behind them would be,
+ *   and is why the table says what a row sends rather than doing it.
+ *   `presentation` is this endpoint's presentation controller
+ *   (`gui/viewscreen-presentation.js`, issue #1427). It is a hook rather than
+ *   something built here for the same reason `run` is: the browser viewscreen's
+ *   store is its own `localStorage` and the native one's is a file only the host
+ *   process can write, and this module knows neither. Absent, the Display row
+ *   is dropped and the tab with it, rather than offering a slider that forgets.
  * @param {{t?: (id: string, params?: object) => string, demo?: boolean}} [opts]
  *   `t` is injected so a surface that reaches the String Table its own way can
  *   say so. The kit's own chrome (the cog's accessible name, the tab labels)
@@ -209,11 +253,39 @@ export function mountNativeSettings(doc, hooks, opts) {
   });
   const row = makeRowBuilder(doc, 'native-settings-row');
 
+  /** One control button, the shape both viewscreen cogs build them in. */
+  function control(id, labelId, onClick) {
+    const el = doc.createElement('button');
+    el.type = 'button';
+    el.className = 'native-settings-control';
+    el.setAttribute('data-control', id);
+    el.textContent = t(labelId);
+    el.addEventListener('click', function (e) {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      onClick();
+    });
+    return el;
+  }
+
+  /**
+   * The rows this surface can actually answer.
+   *
+   * The table says what a row NEEDS; the hooks say what this mount HAS. A row
+   * whose need is unmet is dropped here rather than rendered inert, which is the
+   * same rule `nativeSettingsView` applies one level up to a tab with no rows —
+   * and it is what makes "a control exists exactly when something answers it"
+   * true of the Display tab as well as of the two verbs.
+   */
+  const rows = (Array.isArray(o.controls) ? o.controls : NATIVE_SETTINGS_CONTROLS)
+    .filter(function (entry) {
+      return !entry || entry.kind !== 'presentation' || !!h.presentation;
+    });
+
   /** This surface's memory of which tab is selected. See `nativeSettingsView`. */
   let activeTab = null;
 
   function buildPanel() {
-    const vm = nativeSettingsView({ demo: demo, activeTab: activeTab, controls: o.controls });
+    const vm = nativeSettingsView({ demo: demo, activeTab: activeTab, controls: rows });
     activeTab = vm.activeTab;
 
     // Rebuilt whole on every open, like both siblings: a panel holding the last
@@ -240,20 +312,33 @@ export function mountNativeSettings(doc, hooks, opts) {
     const body = doc.createElement('div');
     body.className = 'native-settings-body';
     vm.sections.forEach(function (spec) {
+      if (spec.kind === 'presentation') {
+        // The whole section is the shared panel's — the same controls, the same
+        // live preview and the same two reset scopes `server.html`'s cog shows,
+        // dressed in this sheet's class names.
+        renderViewscreenPresentationPanel(body, {
+          doc: doc,
+          t: t,
+          presentation: h.presentation,
+          section: section,
+          hint: hint,
+          row: row,
+          control: control,
+          classes: {
+            slider: 'native-settings-slider',
+            readout: 'native-settings-readout',
+            status: 'native-settings-hint',
+          },
+        });
+        return;
+      }
       const el = section(spec.headingId);
       if (spec.hintId) el.appendChild(hint(spec.hintId));
       const controls = row();
-      spec.controls.forEach(function (control) {
-        const btn = doc.createElement('button');
-        btn.type = 'button';
-        btn.className = 'native-settings-control';
-        btn.setAttribute('data-control', control.id);
-        btn.textContent = t(control.labelId);
-        btn.addEventListener('click', function (e) {
-          if (e && typeof e.preventDefault === 'function') e.preventDefault();
-          if (h.run) h.run(control.action);
-        });
-        controls.appendChild(btn);
+      spec.controls.forEach(function (entry) {
+        controls.appendChild(control(entry.id, entry.labelId, function () {
+          if (h.run) h.run(entry.action);
+        }));
       });
       el.appendChild(controls);
       body.appendChild(el);

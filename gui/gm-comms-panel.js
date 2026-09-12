@@ -175,6 +175,23 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
   sendButton?.addEventListener('click', () => requestSend());
   hailButton?.addEventListener('click', () => requestSend(true));
   refreshAdmission();
-  return { update, reset, refreshAdmission, requestSend,
+  /**
+   * Bring one authored route to the operator's hand (issue #1433).
+   *
+   * The GM attention queue opens a pending conversation by naming the route
+   * that already speaks as its sender — this is that navigation and nothing
+   * more: it selects an existing option, repaints the dependent selects, and
+   * puts focus where a reply would be composed. It submits nothing, and a
+   * route this projection does not hold is simply refused.
+   */
+  function focusRoute(routeId) {
+    if (!routeInput || !projection.routes.some(row => row.id === routeId)) return false;
+    routeInput.value = routeId;
+    refreshAdmission();
+    doc.getElementById('gm-comms-panel')?.scrollIntoView?.({ block: 'nearest' });
+    routeInput.focus({ preventScroll: true });
+    return true;
+  }
+  return { update, reset, refreshAdmission, requestSend, focusRoute,
     state: () => structuredClone({ ...projection, pending: [...pending.values()].map(({ timer, ...row }) => row) }) };
 }

@@ -27,10 +27,23 @@
        (`gui/destroyer/engineering.html`) — one look for one control. */
     .tractor-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 6px; margin-top: 8px; }
     .tractor-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; }
-    .tractor-row { display: flex; align-items: center; gap: 10px; }
+    /* issue #1425: `flex-wrap: wrap` — see the matching comment on
+       gui/destroyer/helm.html's .dock-row. This row's own button can consume
+       its full width at 200% text on a narrow pane, and the status span
+       (shared by Tractor and Umbilical, which reuse this class) needs to
+       drop to its own line rather than be squeezed to zero width. */
+    .tractor-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     .tractor-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
     .tractor-btn.engaged { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
-    .tractor-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    /* issue #1425: this row is `display: flex` and a flex item's default
+       min-width is `auto`, not `0` — a long coupled_target_name (a world
+       entity name id, unbounded length; shared by Tractor and Umbilical,
+       which both reuse this class) pushed the status text past the button
+       instead of wrapping. Matches the fix gui/cruiser/helm.html's own
+       dock-status already carries for the same class of value, and mirrors
+       the same fix applied to gui/destroyer/engineering.html's copy of this
+       class (issue #1425). */
+    .tractor-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .tractor-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
   </style>

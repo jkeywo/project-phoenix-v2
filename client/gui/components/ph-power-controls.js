@@ -82,6 +82,23 @@ export class PhPowerControls extends PhElement {
     .level-meta { display: flex; align-items: center; gap: 0.35rem; }
     .cold-tag { font-size: var(--text-xs); color: var(--fire); border: 1px solid var(--fire); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    /* Forced colours (issue #1422). A pip says which rung the group is running
+       at using its FILL, and a forced-colours mode collapses every fill to one
+       system ground — so lit, unlit and held pips all became the same empty
+       circle and the allocation readout lost its meaning entirely. Restate the
+       three states in system colours plus a border STYLE, which the UA keeps:
+       lit is the selection colour, held is dashed (commanded but refused by the
+       battery floor) and unavailable is dotted. The level text beside them
+       already carries the same fact in words, so this is the graphical half of
+       a redundancy, not the only channel. */
+    @media (forced-colors: active) {
+      .pip { border-color: CanvasText; background: Canvas; }
+      .pip.active { background: Highlight; border-color: Highlight; }
+      .pip.inactive { background: Canvas; }
+      .pip.held { background: Canvas; border-style: dashed; }
+      .pip.disabled { opacity: 1; border-style: dotted; }
+      .cold-tag, .auto-badge { border-color: CanvasText; }
+    }
   </style>
   <div class="header">
     <span>${t('component.power.title')}</span>

@@ -328,6 +328,38 @@
   --root-size-portrait:   clamp(11px, 3vw, 15px);
   --root-size-landscape:  clamp(13px, 1.65vw, 16px);
 
+  /* The SHELL's root (client.html: the lobby, the Station Bar, the settings
+     overlay, the disconnect banner). Named here in issue #1422 because the
+     shell had no root size of its own at all — it inherited the browser's
+     13px monospace default, so --a11y-text-scale reached every console iframe
+     and stopped at the page around them. That made settings, errors and
+     overlays the least readable parts of an enlarged interface, which is
+     precisely what PRD #1418 story 4 forbids.
+
+     13px is that inherited default written down, so the shell renders at
+     exactly the size it always has when no scaling is applied; client.html
+     multiplies it by --a11y-text-scale. It is a token rather than a literal so
+     a designer can retune the shell's baseline without touching the scaling
+     arithmetic. */
+  --root-size-shell:      13px;
+
+  /* The VIEWSCREEN's root (server.html and the native host's lobby document:
+     the settings menu, the join panel, the world picker, the landing and the
+     lobby chrome around the shared 3D view). Named here in issue #1427 for the
+     same reason --root-size-shell was named in #1422: neither viewscreen
+     document set a root size, so both rode the browser's 16px default and every
+     `--text-*` rung on them ignored a text-scale setting entirely.
+
+     16px is that inherited default written down, so an unscaled viewscreen
+     renders at exactly the size it always has; each document multiplies it by
+     --a11y-text-scale. What does NOT multiply is the scene: `#canvas` is sized
+     as a percentage of its shell and the simulation draws in world units, so
+     enlarging the menus cannot crop or shrink the picture the room is watching.
+     A token rather than a literal so a designer can retune the viewscreen
+     baseline — a television is read from across a room — without editing the
+     scaling arithmetic in two documents. */
+  --root-size-viewscreen: 16px;
+
   /* ── Accessibility (issue #1102) ────────────────────────────────
      The private per-player Accessibility profile (gui/accessibility-profile.js)
      drives these at runtime. `--a11y-text-scale` multiplies the console root
@@ -338,6 +370,20 @@
      `:root`; it is named here so the reference in console.css resolves to a
      defined token rather than only to its inline fallback. */
   --a11y-text-scale:   1;
+
+  /* The unscaled `--text-md` rung — deliberately IMMUNE to `--a11y-text-scale`
+     (issue #1429, PRD #1418 stories 19-21). Divides the scale factor back out
+     of the ramp rung it is named after, so a consumer that must render at the
+     SAME size no matter the operator's chosen text scale can still ride the
+     shared ramp instead of restating a raw literal `design-tokens.test.js`
+     would then have to allowlist. Today's one consumer is server.html's
+     `.chatter-bubble` on a phone-shaped Viewscreen: level-3 AI-to-AI
+     Coordination chatter stays compact there so it cannot fill a small
+     screen, while every OTHER string on the same page keeps multiplying by
+     `--a11y-text-scale` as normal. Not a general escape hatch — a new
+     consumer names its own reason, in its own comment, for being the one
+     other place that stays fixed. */
+  --text-md-fixed:     calc(var(--text-md) / var(--a11y-text-scale, 1));
 
   /* SVG user-space type. A radar overlay draws into `viewBox="0 0 100 100"`,
      where a font-size is in VIEWBOX UNITS and scales with the element — so it
@@ -493,6 +539,7 @@
      recessed rungs stay dark and are unchanged). */
   --tactical:          #ffa860;   /* 11.02:1 — weapons orange */
   --fire:              #ff6a4a;   /*  7.41:1 — danger red */
+  --fire-hot:          #ff6060;   /*  7.09:1 — red-alert bezel, weapons lock */
   --loaded:            #6ee890;   /* 13.61:1 — armed / ready */
   --reloading:         #ffcf66;   /* 14.37:1 — amber */
   --cyan:              #a0dcf0;   /* 13.99:1 */
@@ -571,11 +618,11 @@
    ph-battery-bar.js is the one loop that needs it. */
 :root { --a11y-anim-play: running; }
 
-:root[data-reduced-motion="reduce"] { --a11y-anim-play: paused; }
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) { --a11y-anim-play: paused; }
 
-:root[data-reduced-motion="reduce"] *,
-:root[data-reduced-motion="reduce"] *::before,
-:root[data-reduced-motion="reduce"] *::after {
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) *,
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) *::before,
+:root[data-reduced-motion="reduce"]:not([data-decorative-motion]) *::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   animation-delay: 0ms !important;
@@ -585,16 +632,180 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduced-motion="no-preference"]) { --a11y-anim-play: paused; }
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) {
+    --a11y-anim-play: paused;
+  }
 
-  :root:not([data-reduced-motion="no-preference"]) *,
-  :root:not([data-reduced-motion="no-preference"]) *::before,
-  :root:not([data-reduced-motion="no-preference"]) *::after {
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) *,
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) *::before,
+  :root:not([data-reduced-motion="no-preference"]):not([data-decorative-motion]) *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     animation-delay: 0ms !important;
     transition-duration: 0.001ms !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ── The three separate effects (issue #1428) ────────────────
+   PRD #1418 story 13: camera shake, flashes and decorative UI motion are three
+   preferences, not one. Until this block they were one — every rule above hangs
+   off `data-reduced-motion`, so an operator who could not take the viewscreen's
+   hull shake had to give up the loading spinner as well.
+
+   `gui/visual-effects.js` resolves each effect to an intensity in 0..=1 and
+   `applyEffectIntensitiesToRoot` stamps BOTH forms on every root the profile
+   reaches: a band attribute (`data-shake` / `data-flash` /
+   `data-decorative-motion`, one of `full` / `reduced` / `off`) and the raw
+   number as a custom property. Two forms because the consumers differ — CSS
+   cannot rescale an animation whose authored duration it does not know, so a
+   whole-interface rule switches on the band, while a NAMED loop that wants to
+   pulse more gently divides its own period by `--a11y-flash-scale`.
+
+   ## Why the blocks above are now gated on `:not([data-decorative-motion])`
+
+   Once JS has stamped a decorative band, that band is the authority and the
+   older attribute must step aside — otherwise an operator who asks for reduced
+   motion but explicitly keeps decorative animation would have it collapsed
+   anyway by the rule that used to be the only one. `data-reduced-motion` still
+   carries the OVERALL preference (an unset effect follows it, resolved in JS),
+   and it still drives everything that is not one of the three named effects,
+   including the whole pre-JS window and a JS-off client.
+
+   ## The three bands
+
+   `off` is exactly what `reduce` did: durations collapse, loops take one
+   iteration, and a loop that must hold a brighter frame keeps layering its own
+   override in the file that declares it. `reduced` is the genuinely gentler
+   middle the Reduce effects preset writes: loops SETTLE — one iteration, paused
+   — while one-shot transitions and entrances keep their travel, because an
+   interface that snaps between states with no transition reads as broken and
+   PRD #1418 forbids comfort that hides information.
+
+   Shake has no CSS rule of its own: the viewscreen's shake is a whole-page
+   `transform` written from `server.html`'s `__applyShake` with an offset Rust
+   already scaled by the same intensity (`ViewscreenMotion::shake_intensity`).
+   The attribute is stamped anyway so a surface, a test or a later rule can read
+   what is in force without asking JS. */
+:root {
+  --a11y-shake-scale: 1;
+  --a11y-flash-scale: 1;
+  --a11y-decorative-scale: 1;
+  /* A flash loop's RESOLVED period: its authored period divided by the flash
+     intensity, computed beside the loop it belongs to (`#phone-bezel` in
+     client.html, `#hud-vignette` in server.html) and read here and there. This
+     root value is only the fallback for a `[data-effect="flash"]` element that
+     names no period of its own. */
+  --a11y-flash-duration: 1.3s;
+}
+
+:root[data-decorative-motion="reduced"],
+:root[data-decorative-motion="off"] { --a11y-anim-play: paused; }
+
+/* Settle: a loop reaches its first frame and stays there; a transition still
+   travels. */
+:root[data-decorative-motion="reduced"] *,
+:root[data-decorative-motion="reduced"] *::before,
+:root[data-decorative-motion="reduced"] *::after {
+  animation-iteration-count: 1 !important;
+}
+
+:root[data-decorative-motion="off"] *,
+:root[data-decorative-motion="off"] *::before,
+:root[data-decorative-motion="off"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ## A flash is not decoration, so the decorative band must not claim it
+   (issue #1428)
+
+   The two blocks above are the whole-interface sweep, and `*` is exactly as
+   wide as it says: it catches EVERY element, including the two the FLASH
+   preference owns — `#phone-bezel.alert-on` (client.html) and
+   `#hud-overlay.alert-on #hud-vignette` (server.html). Neither of those pages
+   declares its loop `!important`, so before this rule the decorative band won
+   and the three effects were not in fact independent: an operator who kept
+   Flashes at Full and turned Interface animation Off silently lost the
+   red-alert pulse, and pressing Reduce effects (which writes the `reduced`
+   band) left the pulse running exactly one iteration however the flash control
+   was moved afterwards. That is the story-13 promise — reduce one effect
+   without losing the others — failing on the effect people reach for first.
+
+   So the flash loops carry a `data-effect="flash"` marker and re-assert
+   themselves here, after the sweep and at a higher specificity (0,4,0 against
+   the sweep's 0,2,0), which is what lets an `!important` beat an `!important`.
+
+   The gate is `:not([data-flash="off"])`, so this rule is only ever ADDING
+   motion the flash preference still wants: an explicit Flashes = Off leaves it
+   unmatched and each page's own `animation: none` held-frame rule stands, which
+   is how a zero-effect state keeps the red frame that says "red alert" while
+   removing the movement.
+
+   The duration is the element's OWN resolved period, `--a11y-flash-duration`,
+   computed beside the loop it belongs to (`--a11y-flash-period` divided by the
+   flash intensity: 2.8s on the bezel, 1.3s on the vignette) and read by both the
+   page's own declaration and this override — one number, in one place, rather
+   than the same division written twice and drifting. */
+:root[data-decorative-motion]:not([data-flash="off"]) [data-effect="flash"] {
+  animation-duration: var(--a11y-flash-duration) !important;
+  animation-iteration-count: infinite !important;
+}
+
+/* ── Forced colours (issue #1422) ────────────────────────────
+   Windows High Contrast — and any other forced-colours mode — is the BROWSER
+   repainting the page in the user's own palette. It is not a Phoenix setting
+   and Phoenix does not get a vote: PRD #1418 is explicit that "a Phoenix
+   contrast selection is not permission to defeat browser-enforced colours".
+   Until this block, `gui/`, `client.html` and `server.html` referenced
+   `forced-colors` nowhere at all, and two things broke silently in that mode:
+
+     1. FOCUS. The UA drops `box-shadow` outright in forced colours, and the
+        chamfered half of the control family (`.btn` / `.mini-btn`, which is
+        every power stepper) draws its focus ring as an INSET box-shadow after
+        setting `outline: none` — because a chamfer clip-path eats an outset
+        outline. So those controls kept the `outline: none` and lost the ring
+        entirely: a keyboard operator in high contrast could not see where they
+        were. The shadow-DOM half of that repair lives in
+        `gui/components/ph-console-styles.js`, which is the sheet adopted
+        inside each component; this block does the token half.
+
+     2. EDGES. Region separation that leans on the surface ramp disappears when
+        every background collapses to `Canvas`. The palette below re-points the
+        edge tokens at `CanvasText`, so a border authored as
+        `1px solid var(--edge-faint)` is drawn in the user's real ink instead of
+        a near-invisible graphite that the UA would then override anyway.
+
+   The selector deliberately lists `:root[data-contrast="more"]` alongside
+   `:root`: the high-contrast palette above is more specific, so matching it
+   here is what stops a Phoenix contrast choice from out-specifying the forced
+   palette. Custom properties are not themselves subject to the forced-colours
+   override, so naming system colours in them is what carries the user's palette
+   through to every `var()` consumer — including across shadow boundaries, which
+   a class rule in this file cannot reach.
+
+   `--a11y-text-scale` is untouched here: text size is an orthogonal preference
+   and a forced palette says nothing about it. */
+@media (forced-colors: active) {
+  :root,
+  :root[data-contrast="more"] {
+    /* The focus ring follows the system's own selection colour, and thickens:
+       in a forced palette the ring is the ONLY thing distinguishing the focused
+       control from its neighbours, since every fill is the same `Canvas`. */
+    --focus-ring:          Highlight;
+    --focus-ring-contrast: Highlight;
+    --focus-ring-width:    3px;
+
+    /* Edges — every divider and control boundary in the user's ink. */
+    --edge-faint:          CanvasText;
+    --edge:                CanvasText;
+    --edge-control:        CanvasText;
+    --edge-strong:         CanvasText;
+    --edge-bright:         CanvasText;
   }
 }

@@ -34,7 +34,8 @@
  * the scenario buttons were fixed (issue #949): two call sites found, and no
  * reason to think a third would not appear.
  *
- * `gm_entity`, `gm_activity`, `gm_mission`, `gm_spawn` and `gm_comms` are deliberate
+ * `gm_entity`, `gm_activity`, `gm_mission`, `gm_spawn`, `gm_comms`,
+ * `gm_attention`, `gm_health` and `gm_workload` are deliberate
  * exceptions. They are strict domain DTOs whose String Table display ids must
  * remain raw through parsing and state; only the map, inspector, mission panel
  * and spawn panel resolve their known display fields at presentation.
@@ -45,6 +46,16 @@
  * `id`s the typed spawn action puts on the wire, so a substitution here would
  * both double-resolve the label and rewrite an identity. `gm_comms` also
  * retains exact operator-authored text, even when it matches a String Table id.
+ * `gm_attention` carries String Table REASON ids beside their parameters, and
+ * the parameters are themselves authored entity-name ids: resolving here would
+ * substitute the id before the panel could interpolate the parameters into it,
+ * and would rewrite an occurrence's identity fields on the way. `gm_health`
+ * (issue #1437) carries exactly the same shape, plus StationIds and public
+ * operator ids that a substitution would rewrite into display text — and its
+ * banner region is the one surface a Game Master must never be shown a mangled
+ * sentence in. `gm_workload` is the same shape — String Table reason ids
+ * beside authored parameters, plus ship and Station identities — for the same
+ * reason.
  *
  * For every other channel, use the same rule as localiseTree: substitute only
  * what the table actually holds.
@@ -105,7 +116,9 @@ export function createHostChannel({ handlers, strings }) {
       // explicit presentation sites. Preserve UUIDs, weapon/System ids, and
       // raw String Table display ids exactly as Rust sent them.
       handler(
-        name === 'gm_entity' || name === 'gm_activity' || name === 'gm_mission' || name === 'gm_spawn' || name === 'gm_comms'
+        name === 'gm_entity' || name === 'gm_activity' || name === 'gm_mission' || name === 'gm_spawn'
+          || name === 'gm_comms' || name === 'gm_attention' || name === 'gm_health'
+          || name === 'gm_workload'
           ? payload : localiseHostPayload(payload, strings),
       );
     } else {

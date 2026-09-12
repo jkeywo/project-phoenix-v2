@@ -764,11 +764,44 @@ export function createGmMissionPanel({
     pending.clear();
   }
 
+  /**
+   * Bring one authored beat's existing controls to the operator's hand
+   * (issue #1434).
+   *
+   * The GM attention queue opens an eligible beat by naming the qualified event
+   * id this panel already lists — this is that navigation and nothing more: it
+   * finds the row, marks it as the one the operator was sent to, and puts focus
+   * on the first lever that is pressable right now. It presses nothing. A beat
+   * this projection does not hold, or one whose every lever is currently
+   * refused, is reported back as not opened rather than being invented a
+   * control to click.
+   */
+  function focusEvent(eventId) {
+    if (!list || typeof eventId !== 'string' || !eventId) return false;
+    const row = [...list.querySelectorAll('li[data-event-id]')]
+      .find((candidate) => candidate.dataset.eventId === eventId);
+    if (!row) return false;
+    for (const other of list.querySelectorAll('li[data-opened]')) delete other.dataset.opened;
+    row.dataset.opened = 'true';
+    if (typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+    // Fire first: it is the lever an eligible beat is in the queue FOR. The
+    // other two follow in the order the row draws them.
+    for (const lever of [FIRE, PAUSE, SKIP]) {
+      const entry = buttons.get(buttonKey(eventId, lever));
+      if (entry && !entry.button.disabled) {
+        entry.button.focus({ preventScroll: true });
+        return true;
+      }
+    }
+    return false;
+  }
+
   return {
     actionFeedback,
     fire,
     setPaused,
     armSkip,
+    focusEvent,
     update,
     reset,
     refreshAdmission,

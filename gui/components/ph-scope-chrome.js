@@ -253,6 +253,39 @@ export function phPx(el, name, fallback) {
 export const TEXT_MIN_FALLBACK_PX = 11;
 
 /**
+ * The operator's live text-scale multiplier (`--a11y-text-scale`), resolved
+ * against a real element the same way `phPx` resolves a length.
+ *
+ * A `<canvas>` font string sits outside the CSS ramp entirely — nothing in
+ * `gui/console.css` reaches a value baked into a draw call — which is how the
+ * radar's and the navigation chart's own contact-name labels came to render at
+ * a fixed size regardless of the operator's chosen text scale (PRD #1418
+ * story 3: "spatial content retains its meaning while its labels ... remain
+ * readable"). Multiplying a canvas font size by this value is the one seam
+ * that lets 200% text reach those labels: the MAP stays genuinely spatial
+ * (blip positions, chart pan/zoom, grid geometry are untouched), only the
+ * TEXT painted onto it grows.
+ *
+ * `--a11y-text-scale` is a bare number (not a length), so this deliberately
+ * does not reuse `phPx`'s px-only contract — it is the sibling read, not a
+ * caller of it.
+ *
+ * @param {Element} el
+ * @param {number} fallback   the multiplier to use where nothing can resolve
+ *   it (Node, jsdom, or a document with no accessibility profile applied)
+ * @returns {number}
+ */
+export function textScaleOf(el, fallback = 1) {
+  if (!el || typeof getComputedStyle !== 'function') return fallback;
+  let style;
+  try { style = getComputedStyle(el); } catch (_) { return fallback; }
+  if (!style || typeof style.getPropertyValue !== 'function') return fallback;
+  const raw = (style.getPropertyValue('--a11y-text-scale') || '').trim();
+  const scale = parseFloat(raw);
+  return Number.isFinite(scale) && scale > 0 ? scale : fallback;
+}
+
+/**
  * Pick a "nice" spacing for range rings: 1, 2 or 5 times a power of ten.
  *
  * The dormant gui/radar-widget.js drew three rings at a fixed 33 / 66 / 100 %
@@ -306,6 +339,40 @@ export function ringPlan(range) {
 export function scaleReadout(range) {
   if (!Number.isFinite(range) || range <= 0) return '';
   return t('console.radar.scale', { range: range.toFixed(0) });
+}
+
+/**
+ * Is the browser itself repainting the page in a forced-colours palette
+ * (Windows High Contrast and friends) right now? (issue #1424)
+ *
+ * `gui/tokens.css`'s `@media (forced-colors: active)` block (issue #1422)
+ * repaints every DOM-styled control automatically — a CSS declaration is
+ * exactly the thing the browser overrides. A scope's contact rings and its
+ * hostile marker are `<canvas>` pixels and SVG attribute strings, neither of
+ * which is a CSS declaration the browser can intercept: `phColor()` resolves
+ * `var(--fire-hot)` etc. against a COMPUTED custom-property value, and custom
+ * properties are explicitly exempt from the forced-colours override (see the
+ * tokens.css comment this mirrors). So without this check a scope keeps
+ * painting its authored red/cyan regardless of the user's forced palette —
+ * not wrong exactly (the picture stays legible), but not the user's chosen
+ * palette either, which is the same complaint #1422 fixed for the focus ring.
+ *
+ * A scope calls this once per frame/render rather than caching it: forced
+ * colours is a live browser state a user can toggle at the OS level while
+ * Phoenix is running, and the two DOM-side blocks above re-evaluate on every
+ * repaint for the same reason.
+ *
+ * @param {Window|object|null} [win]
+ * @returns {boolean}
+ */
+export function forcedColorsActive(win) {
+  const w = win || (typeof window !== 'undefined' ? window : null);
+  try {
+    return !!(w && typeof w.matchMedia === 'function'
+      && w.matchMedia('(forced-colors: active)').matches);
+  } catch (_) {
+    return false;
+  }
 }
 
 /** Re-exported so a scope needs one import for its token-resolving helpers. */

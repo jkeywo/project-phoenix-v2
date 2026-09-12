@@ -192,6 +192,35 @@
   border-color: var(--cyan);
   color: var(--signal);
 }
+/* The chosen option in a tri-state group (issue #1427's contrast row). Border
+   AND background, never colour alone, so the selection survives a contrast
+   change and a forced-colour palette — which is the point of the control the
+   operator is standing there pressing. `aria-pressed` carries the same fact for
+   a reader that is not looking at it. */
+.native-settings-control.active {
+  background: var(--cyan-deep);
+  border-color: var(--cyan);
+  color: var(--ink);
+}
+
+/* ── The Display tab's slider (issue #1427) ─────────────────────────────
+   Text size, in whole percent from 100% to 200%. `flex` so it takes the row's
+   width and the readout sits at its end; `min-width` keeps it grabbable rather
+   than letting the readout squeeze it away when the enlarged percentage beside
+   it grows. Both live in a `.native-settings-row`, which wraps — so at 200% the
+   readout drops under the slider instead of either one shrinking. */
+.native-settings-slider {
+  flex: 1 1 auto;
+  min-width: 140px;
+  min-height: var(--control-hit-min);
+}
+.native-settings-readout {
+  min-width: 5ch;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--control-font-md);
+  color: var(--ink-dim);
+}
 
 /* One focus treatment for every control in the panel, shown by SHAPE as well
    as colour — the rule `native_host::setup_accessibility` holds the bridge to,

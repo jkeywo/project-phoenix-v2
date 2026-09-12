@@ -35,6 +35,9 @@ export const GM_ALL_ROLE_PRESET = Object.freeze({
   panels: Object.freeze([]),
   quickActions: Object.freeze([]),
   contacts: Object.freeze([]),
+  // No authored widgets, which is what makes the widget region absent on the
+  // default desk and on the fallback a removed preset resolves to (#1439).
+  widgets: Object.freeze([]),
 });
 
 /** Panel DOM ids this build actually draws and safely owns the `hidden`
@@ -60,6 +63,73 @@ function normaliseIdList(value) {
   return out;
 }
 
+/** The four typed widgets a preset may compose (issue #1439). Closed, and the
+ * same four `GM_WIDGET_TYPES` in `src/world/config.rs` refuses a fifth of at
+ * world load: a card this build cannot draw is a card nobody authored. */
+export const GM_WIDGET_TYPES = Object.freeze(['attention', 'workload', 'actions', 'note']);
+
+/**
+ * The GM action buttons an `actions` widget may repeat — the SAME list the
+ * quick-action facet narrows, because they are the same buttons.
+ *
+ * A widget button never issues a `GmAction`: it activates the shipped control
+ * by this DOM id, so the confirmation category, the admission check and the
+ * feedback lifecycle are the ones that button already had. Rust validates an
+ * authored id against `GM_WIDGET_ACTION_IDS`, which
+ * `src/world/config_tests.rs` reads this file to keep in step.
+ */
+export const GM_WIDGET_ACTION_IDS = GM_ROLE_PRESET_QUICK_ACTION_IDS;
+
+/** A `strings.csv` id and nothing else — the shape Rust already refused at
+ * world load, re-checked here for a hand-poked payload's sake. An authored
+ * note is text the String Table owns; it is rendered through `textContent`,
+ * never parsed as markup. */
+const isStringTableId = (value) => typeof value === 'string' && value.length > 0
+  && /^[A-Za-z0-9._-]+$/.test(value);
+
+function normaliseWidget(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const kind = value.type ?? value.kind;
+  if (typeof value.id !== 'string' || value.id.length === 0) return undefined;
+  if (!GM_WIDGET_TYPES.includes(kind)) return undefined;
+  if (typeof value.label !== 'string' || value.label.length === 0) return undefined;
+  const widget = { id: value.id, type: kind, label: value.label };
+  if (kind === 'attention') {
+    if (typeof value.band === 'string' && value.band) widget.band = value.band;
+    if (typeof value.category === 'string' && value.category) widget.category = value.category;
+  }
+  if (kind === 'attention' || kind === 'workload') {
+    if (typeof value.ship === 'string' && value.ship) widget.ship = value.ship;
+  }
+  if (kind === 'actions') {
+    widget.actions = normaliseIdList(value.actions)
+      .filter((id) => GM_WIDGET_ACTION_IDS.includes(id));
+    if (widget.actions.length === 0) return undefined;
+  }
+  if (kind === 'note') {
+    if (!isStringTableId(value.text)) return undefined;
+    widget.text = value.text;
+  }
+  return widget;
+}
+
+/** Parse one preset's `[[gm_role_preset.widget]]` list. Same posture as the
+ * preset list itself: a malformed or unknown-type entry is dropped rather than
+ * drawn as an empty card, and a repeated id keeps the first — Rust refused
+ * both at world load, so reaching either here means the payload was poked. */
+function normaliseWidgets(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const candidate of value) {
+    const widget = normaliseWidget(candidate);
+    if (!widget || seen.has(widget.id)) continue;
+    seen.add(widget.id);
+    out.push(widget);
+  }
+  return out;
+}
+
 function normalisePreset(value) {
   if (!value || typeof value !== 'object'
       || typeof value.id !== 'string' || value.id.length === 0
@@ -70,6 +140,7 @@ function normalisePreset(value) {
     panels: normaliseIdList(value.panels),
     quickActions: normaliseIdList(value.quick_actions ?? value.quickActions),
     contacts: normaliseIdList(value.contacts),
+    widgets: normaliseWidgets(value.widget ?? value.widgets),
   };
 }
 
@@ -153,11 +224,15 @@ export function createGmRolePresets({
   doc = globalThis.document,
   t = (id) => id,
   onSelect = () => {},
+  onEffective = () => {},
 } = {}) {
   const selectEl = doc && doc.getElementById('gm-role-preset-select');
   let presets = [];
   let desiredId = null;
   let effective = GM_ALL_ROLE_PRESET;
+  /** Why the effective preset last changed, for `onEffective`. See its
+   * contract below: only `'select'` is the operator asking for this role. */
+  let source = 'init';
 
   function paintOptions() {
     if (!selectEl) return;
@@ -193,6 +268,20 @@ export function createGmRolePresets({
         : GM_ALL_ROLE_PRESET_ID;
     }
     applyVisibility();
+    // The EFFECTIVE preset, every time it is resolved, with why. Issue #1439's
+    // widget region is composed from this: the four typed cards follow the
+    // preset in effect, whether it changed because the operator switched
+    // (`'select'`), because a reconnect restored their last choice
+    // (`'restore'`), or because a world (re)load removed the preset they were
+    // on and it fell back to All (`'available'`).
+    //
+    // The distinction is load-bearing, not decorative. A widget's authored
+    // default filters are applied on `'select'` alone — a live switch is the
+    // operator asking for this role's view. On `'restore'` the private filters
+    // and snoozes the operator actually left behind win, which is what makes
+    // "same-session reconnect restores their state" true rather than "a
+    // reconnect silently re-imposes the author's defaults over it".
+    onEffective(effective, { source });
   }
 
   function normaliseDesired(id) {
@@ -206,6 +295,7 @@ export function createGmRolePresets({
   function setAvailablePresets(rawPayload) {
     presets = parseGmRolePresets(rawPayload);
     paintOptions();
+    source = 'available';
     reconcileEffective();
   }
 
@@ -216,6 +306,7 @@ export function createGmRolePresets({
    * its effect has not. */
   function select(id) {
     desiredId = normaliseDesired(id);
+    source = 'select';
     reconcileEffective();
     onSelect(desiredId);
   }
@@ -226,11 +317,19 @@ export function createGmRolePresets({
    * value it just restored" bug reconnect persistence has to avoid). */
   function restore(id) {
     desiredId = normaliseDesired(id);
+    source = 'restore';
     reconcileEffective();
   }
 
   function state() {
-    return { presets: [...presets], desiredId, effectivePresetId: effective.id };
+    return {
+      presets: [...presets],
+      desiredId,
+      effectivePresetId: effective.id,
+      // The resolved preset itself, so a consumer that composes from it (the
+      // #1439 widget region) can read what is in effect without re-resolving.
+      effective,
+    };
   }
 
   if (selectEl) {

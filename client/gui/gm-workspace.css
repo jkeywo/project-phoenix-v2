@@ -1,14 +1,27 @@
-/* Shared desktop GM desk. Dimensions describe the artboard; visual values use tokens. */
+/* Shared desktop GM desk. Dimensions describe the artboard; visual values use tokens.
+ *
+ * TEXT SCALE IS APPLIED EXACTLY ONCE, AND NOT HERE. This sheet is only ever
+ * loaded into server.html (gui/gm-workspace-shell.js links it) and into the
+ * native GM document, which is server.html with its scripts stripped
+ * (src/native_host/native_gm/document.rs). Both carry
+ *   html { font-size: calc(var(--root-size-viewscreen) * var(--a11y-text-scale, 1)) }
+ * since issue #1427, so every `rem` below — and so every `--text-*` rung, each
+ * of which is a `max(px, rem)` — already grows with the endpoint's chosen text
+ * size. Multiplying a rung by `--a11y-text-scale` again, as these rules did
+ * before that root rule existed, squares the setting: 200% rendered the desk at
+ * 56px instead of 28px. Ratcheted by
+ * tests/client/gm-workspace-shell.test.js › 'applies the endpoint text scale
+ * exactly once'. */
 #gm-console.gm-desk {
   padding: 0; gap: 0; background: var(--surface-void); color: var(--ink);
-  font-family: var(--font-display); font-size: calc(var(--text-md) * var(--a11y-text-scale));
+  font-family: var(--font-display); font-size: var(--text-md);
   scroll-padding: var(--space-5);
 }
 .gm-desk * { box-sizing: border-box; }
 #gm-console.gm-desk [hidden] { display: none !important; }
-#gm-console.gm-desk h1 { font-size: calc(var(--text-xl) * var(--a11y-text-scale)); color: var(--gold); }
-#gm-console.gm-desk h2 { font-size: calc(var(--text-lg) * var(--a11y-text-scale)); }
-#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: calc(var(--text-sm) * var(--a11y-text-scale)); color: var(--ink-dim); }
+#gm-console.gm-desk h1 { font-size: var(--text-xl); color: var(--gold); }
+#gm-console.gm-desk h2 { font-size: var(--text-lg); }
+#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: var(--text-sm); color: var(--ink-dim); }
 #gm-console.gm-desk p { margin: var(--space-2) 0; overflow-wrap: anywhere; }
 #gm-console.gm-desk p:empty, #gm-console.gm-desk ol:empty { display: none; }
 #gm-console .gm-station-bar {
@@ -22,22 +35,123 @@
 #gm-console.gm-desk #gm-session-heading, #gm-console.gm-desk #gm-session-log-heading,
 #gm-console.gm-desk #gm-session-log { display: none; }
 #gm-console.gm-desk #gm-session-actions { gap: var(--space-2); }
+/* The post-M5 desk (PRD #930, canvas artboard "After M5 - facilitation +
+   operations"): ONE bar and three columns over two rows, six REGIONS rather
+   than nine grid cells. A region is the panel frame; the sections inside it
+   are blocks that stack and scroll within it, which is how the artboard draws
+   Attention/Roster/authored widgets as one left-hand panel and
+   Comms/Activity/Action log as one tabbed centre panel. Nothing changed
+   column: every later milestone adds panels to the column that already held
+   its kind, which is the canvas note "each later screen adds panels rather
+   than moving them". Every one of them scrolls in place, which is what keeps
+   the desk usable at --a11y-text-scale: 2 (PRD #1418). */
 #gm-console.gm-desk #gm-workspace {
-  display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px;
-  grid-template-rows: minmax(0, 1fr) 236px; gap: var(--space-5); padding: var(--space-5);
-  height: calc(100vh - 88px); min-height: 580px; flex: 0 0 auto;
+  display: grid; grid-template-columns: 320px minmax(0, 1fr) 340px;
+  /* Every row keeps a FLOOR that scales with the operator’s text size (PRD
+     #1418, issue #1438): four 1fr rows of a fixed-height desk leave the left
+     column about one line each at --a11y-text-scale: 2 — a heading and a
+     clipped row, which is not a panel.
+     The height stays DEFINITE. `min-height` here would make the grid's block
+     size indefinite, at which point `1fr` resolves against max-content instead
+     of the viewport: every row grows to its whole content, the sections stop
+     scrolling inside their own `overflow: auto`, and at ordinary text size the
+     desk becomes four viewports tall with only the first row on screen.
+     With a definite height 1fr is larger than the floor at ordinary text, so
+     the desk is exactly as it was; at 200% the floors overflow the desk and
+     #gm-console scrolls VERTICALLY (server.html: overflow-y: auto). The desk
+     still never scrolls sideways, which is the contract the smoke spec asserts
+     — alongside the vertical fit at both default-text viewports, which is what
+     pins the definite height. */
+  /* The artboard's 250px second row, expressed so it can never eat the first.
+     `auto` as a maximum would let the lower row grow to its max-content during
+     grid's maximize step - which runs BEFORE flexible tracks are sized - and
+     leave the map/inspector row at its zero floor. A flexible maximum keeps
+     the lower row in proportion (about 31% of the desk) with the artboard
+     height as a hard base, and that base rises with the operator's text size
+     so a 200% mission panel is a panel rather than a heading and a clipped
+     row. */
+  grid-template-rows: minmax(0, 1fr) minmax(max(250px, 14em), 0.45fr);
+  gap: var(--space-5); padding: var(--space-5);
+  height: max(580px, calc(100vh - 88px)); flex: 0 0 auto;
 }
-#gm-console.gm-desk #gm-workspace > section {
+#gm-console.gm-desk #gm-workspace > .gm-desk-region {
   min-width: 0; min-height: 0; max-width: none; padding: var(--space-5);
   background: var(--surface-panel); border: 1px solid var(--edge);
   display: flex; flex-direction: column; gap: var(--space-4); overflow: auto;
 }
-#gm-console.gm-desk #gm-roster { grid-area: 1 / 1; }
+/* A stacked region (left column, right column). The REGION is the one scroll
+   box; the sections inside it are laid out at their own height and never open
+   a second one.
+   That is a correctness rule, not a taste one. A panel that scrolls inside a
+   region that scrolls inside #gm-console puts four nested scroll boxes between
+   a bounded list (#gm-checkpoint-list, #gm-journal-list) and the page, and a
+   row in the innermost one can then be scrolled into view at every level and
+   still not be at the point a click lands: tests/smoke/gm-checkpoint-200.spec.js
+   caught exactly that, as a checkpoint row whose own sibling summary line
+   intercepted every click at 200% text. One region scroller keeps the chain the
+   same depth the After-M3 desk had, where the column WAS the panel. */
+#gm-console.gm-desk .gm-desk-stack > section {
+  flex: 0 0 auto; min-width: 0; overflow: visible;
+  border: 0; background: none; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+#gm-console.gm-desk #gm-desk-brief { grid-area: 1 / 1; }
 #gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2; overflow: hidden; }
-#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3; }
+#gm-console.gm-desk #gm-desk-detail { grid-area: 1 / 3; }
 #gm-console.gm-desk #gm-mission-panel { grid-area: 2 / 1; }
-#gm-console.gm-desk #gm-comms-panel { grid-area: 2 / 2; }
-#gm-console.gm-desk #gm-activity { grid-area: 2 / 3; }
+#gm-console.gm-desk #gm-desk-log { grid-area: 2 / 2; }
+#gm-console.gm-desk #gm-health-panel { grid-area: 2 / 3; }
+/* Comms, Activity and the saved action journal share the centre region behind
+   one tab strip. The strip switches views with `data-log-view` and never with
+   `hidden`, because `hidden` on Comms and Activity belongs to the role preset
+   (gui/gm-role-presets.js, GM_ROLE_PRESET_PANEL_IDS) - two writers on one
+   attribute is exactly the race the widget region is kept out of. A preset
+   that hides a panel hides its TAB instead, which the shell owns. */
+/* Like the stacked regions above, the log region is the ONE scroll box: the
+   strip stays put while the view under it scrolls, and the view itself opens
+   no second scroller. */
+#gm-console.gm-desk #gm-desk-log-tabs {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  position: sticky; top: 0; z-index: 2; background: var(--surface-raised);
+}
+#gm-console.gm-desk #gm-desk-log-tabs button {
+  flex: 1 1 8ch; letter-spacing: var(--tracking-tight); text-transform: none; overflow-wrap: normal;
+}
+#gm-console.gm-desk #gm-desk-log > section {
+  display: none; flex: 0 0 auto; min-width: 0; overflow: visible;
+  border: 0; background: none; padding: 0;
+}
+#gm-console.gm-desk #gm-desk-log[data-log-view="comms"] > #gm-comms-panel { display: grid; }
+#gm-console.gm-desk #gm-desk-log[data-log-view="activity"] > #gm-activity,
+#gm-console.gm-desk #gm-desk-log[data-log-view="journal"] > #gm-journal {
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+/* The bar's health pills (artboard: Tick / Quiet / Checkpoint). Each is drawn
+   only when the live payload behind it exists, so a missing pill is a missing
+   fact rather than an invented one. Every pill states its condition as a WORD;
+   the colours are decoration on top of that (PRD #1418 story 6). */
+#gm-console.gm-desk #gm-health-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+#gm-console.gm-desk #gm-health-pills span {
+  border: 1px solid var(--edge); padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono); font-size: max(12px, var(--text-sm));
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-health-pills span[data-pill="tick"][data-state="live"] { color: var(--cyan); }
+#gm-console.gm-desk #gm-health-pills span[data-pill="tick"]:not([data-state="live"]) {
+  color: var(--gold); border-color: var(--gold);
+}
+#gm-console.gm-desk #gm-health-pills span[data-pill="checkpoint"] { color: var(--gold); }
+/* The workload word beside a crewed hull in the roster (issue #1438 data on
+   the artboard's Roster rows). A word, never a colour alone, and Overloaded
+   also thickens its edge so a forced palette keeps the distinction. */
+#gm-console.gm-desk .gm-roster-workload {
+  border-left: 3px solid var(--edge-bright); padding-left: var(--space-2);
+  letter-spacing: var(--tracking-wide); color: var(--gold);
+  font-size: max(12px, var(--text-sm));
+}
+#gm-console.gm-desk .gm-roster-workload[data-level="overloaded"] { border-left-width: var(--space-2); }
+#gm-console.gm-desk .gm-roster-workload[data-level="backfill"],
+#gm-console.gm-desk .gm-roster-workload[data-level="offline"] { color: var(--ink-dim); }
 #gm-console.gm-desk #gm-entity-map { flex: 1; min-height: 0; height: auto; width: 100%; background: var(--surface-abyss); }
 #gm-console.gm-desk #gm-map-legend { font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-selection-chip { color: var(--gold); font-family: var(--font-mono); }
@@ -54,7 +168,7 @@
 #gm-console.gm-desk button.btn {
   min-width: 0; max-width: 100%; padding: var(--space-3) var(--space-4); margin: 0;
   min-height: var(--control-hit-min); height: auto; border: 0;
-  font-size: calc(var(--text-xs) * var(--a11y-text-scale)); color: var(--ink);
+  font-size: var(--text-xs); color: var(--ink);
   background: var(--surface-panel-up); white-space: normal; overflow-wrap: anywhere;
 }
 #gm-console.gm-desk button[aria-pressed="true"], #gm-console.gm-desk button[aria-selected="true"] { color: var(--gold); background: var(--surface-lift); }
@@ -90,12 +204,11 @@
 }
 @media (max-width: 1000px) {
   #gm-console.gm-desk #gm-workspace { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
-  #gm-console.gm-desk #gm-workspace > section { grid-area: auto; max-height: 600px; }
+  #gm-console.gm-desk #gm-workspace > .gm-desk-region { grid-area: auto; max-height: 600px; }
   #gm-console.gm-desk #gm-map-panel { height: 480px; }
 }
 #gm-console.gm-desk .gm-station-bar { padding-left: var(--settings-cog-keepout, var(--space-5)); padding-right: var(--space-5); }
 #gm-console.gm-desk #gm-role-preset-label { flex: 0 1 auto; max-width: 200px; }
-#gm-console.gm-desk #gm-workspace > #gm-comms-panel { display: grid; }
 #gm-console.gm-desk #manual-save-panel { position: static; width: 100%; max-width: none; padding: var(--space-4) 0; background: transparent; border: 0; }
 #gm-console.gm-desk #gm-entity-identity { font-family: var(--font-mono); font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-comms-panel[data-empty="true"] > label,
@@ -106,6 +219,16 @@
 #gm-console.gm-desk #gm-spawn-panel[data-empty="true"] > #gm-spawn-exact-form { display: none; }
 #gm-console.gm-desk button.btn { background: var(--edge-bright); }
 #gm-console.gm-desk button[aria-pressed="true"], #gm-console.gm-desk button[aria-selected="true"] { background: var(--gold); }
+/* The selected roster entity survives forced colours as more than a control
+   background (issue #1430, PRD #1418 story 6): a browser in forced-colours
+   mode replaces an authored button fill with its own system colours, so the
+   ROW carries a second, non-colour edge — the same redundant-border pattern
+   the attention queue, journal and checkpoint rows already use. Styling the
+   row rather than the button itself deliberately leaves the button's own
+   focus-ring rules (`ph-console-styles.js`, `.btn:focus-visible`) untouched. */
+#gm-console.gm-desk .gm-roster-row:has(> button[aria-pressed="true"]) {
+  border-left: 3px solid var(--gold);
+}
 html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 #gm-console.gm-desk #gm-system-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -124,7 +247,7 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-session-state { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
 #gm-console.gm-desk #gm-inspector-tabs button { letter-spacing: var(--tracking-tight); text-transform: none; overflow-wrap: normal; }
 #gm-console.gm-desk #gm-operator-identity { max-width: 100px; font-size: var(--text-xs); color: var(--gold); }
-#gm-console.gm-desk #gm-workspace > section {
+#gm-console.gm-desk #gm-workspace > .gm-desk-region {
   background: linear-gradient(180deg, var(--surface-raised), var(--surface-base));
   clip-path: polygon(var(--cham-panel) 0, calc(100% - var(--cham-panel)) 0, 100% var(--cham-panel), 100% calc(100% - var(--cham-panel)), calc(100% - var(--cham-panel)) 100%, var(--cham-panel) 100%, 0 calc(100% - var(--cham-panel)), 0 var(--cham-panel));
 }
@@ -149,14 +272,14 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 /* ── Legibility (GM console feedback, 2026-09-10) ──────────────────────
    The desk's smallest rungs (--text-xs is 11px, dim headings, dim pills)
    read fine on a phone console at arm's length and badly on a wall pane
-   across a desk. Floor the desk's body at 14px, lift every dim/xs rung one
-   step, and let the shared ramp still scale it (--a11y-text-scale). */
-#gm-console.gm-desk { font-size: calc(max(14px, var(--text-md)) * var(--a11y-text-scale)); line-height: 1.4; }
-#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: calc(max(13px, var(--text-sm)) * var(--a11y-text-scale)); color: var(--ink); letter-spacing: var(--tracking-wide); }
-#gm-console.gm-desk button.btn { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); }
+   across a desk. Floor the desk's body at 14px and lift every dim/xs rung one
+   step; the rem half of each `max()` carries the text scale on its own. */
+#gm-console.gm-desk { font-size: max(14px, var(--text-md)); line-height: 1.4; }
+#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: max(13px, var(--text-sm)); color: var(--ink); letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk button.btn { font-size: max(12px, var(--text-sm)); }
 #gm-console.gm-desk #gm-map-legend, #gm-console.gm-desk #gm-entity-identity, #gm-console.gm-desk #gm-session-clock,
 #gm-console.gm-desk #gm-scenario-title, #gm-console.gm-desk .gm-station-pills span,
-#gm-console.gm-desk #gm-system-pills span, #gm-console.gm-desk #gm-operator-identity { font-size: calc(max(12px, var(--text-sm)) * var(--a11y-text-scale)); }
+#gm-console.gm-desk #gm-system-pills span, #gm-console.gm-desk #gm-operator-identity { font-size: max(12px, var(--text-sm)); }
 #gm-console.gm-desk .gm-station-pills span, #gm-console.gm-desk #gm-scenario-title { color: var(--ink); }
 #gm-console.gm-desk .gm-station-pills [data-rating="Backfill"] { color: var(--ink-dim); }
 #gm-console.gm-desk label, #gm-console.gm-desk dt, #gm-console.gm-desk .gm-activity-entry { color: var(--ink); }
@@ -167,7 +290,9 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
    Chrome (121+) takes the standard properties and ignores the -webkit-
    pseudo-elements; the native Ultralight pane (WebKit) is the reverse. Both
    end in the same thin, always-visible thumb. */
-#gm-console.gm-desk #gm-workspace > section,
+#gm-console.gm-desk #gm-workspace > .gm-desk-region,
+#gm-console.gm-desk .gm-desk-stack > section,
+#gm-console.gm-desk #gm-desk-log > section,
 #gm-console.gm-desk #gm-station-surface,
 #gm-console.gm-desk .gm-knowledge-category,
 #gm-console.gm-desk #gm-objective-results {
@@ -185,3 +310,293 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
    such a jump and hides again once the selection card is in view. */
 #gm-console.gm-desk #gm-inspector-back { position: sticky; top: 0; z-index: 2; width: 100%; flex-shrink: 0; }
 #gm-console.gm-desk #gm-objective-scope { color: var(--gold); font-family: var(--font-mono); margin: 0; }
+
+/* ── Saved GM action history (issue #1441) ──────────────────────────────
+   The journal is a READING surface, so it has to stay legible when the
+   operator turns text up: rows wrap instead of truncating, the list scrolls
+   inside its own bounded box rather than pushing the detail off the column,
+   and outcome is spelled out in words with the colour edge as a second,
+   redundant signal. */
+#gm-console.gm-desk #gm-journal-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+#gm-console.gm-desk #gm-journal-filters .gm-activity-filter { min-width: 0; flex: 1 1 8em; }
+#gm-console.gm-desk #gm-journal-filters select { min-width: 0; width: 100%; }
+#gm-console.gm-desk #gm-journal-list {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2);
+  max-height: 22em; overflow: auto;
+  scrollbar-width: thin; scrollbar-color: var(--edge-bright) var(--surface-deep); scrollbar-gutter: stable;
+}
+#gm-console.gm-desk .gm-journal-row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3);
+  width: 100%; min-width: 0; max-width: 100%; text-align: left;
+  min-height: var(--control-hit-min); height: auto; padding: var(--space-3);
+  border: 1px solid var(--edge); background: var(--surface-panel-up);
+  color: var(--ink); font: inherit; white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-journal-row[data-selected="true"] { border-color: var(--gold); background: var(--surface-lift); }
+#gm-console.gm-desk .gm-journal-row:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk .gm-journal-row[data-outcome="applied"] { border-left: 3px solid var(--cyan); }
+#gm-console.gm-desk .gm-journal-row[data-outcome="no-op"] { border-left: 3px solid var(--edge-bright); }
+#gm-console.gm-desk .gm-journal-row[data-outcome="refused"] { border-left: 3px solid var(--fire-bright); }
+#gm-console.gm-desk .gm-journal-order { font-family: var(--font-mono); color: var(--ink-dim); }
+#gm-console.gm-desk .gm-journal-outcome { margin-left: auto; letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk #gm-journal-detail {
+  display: grid; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--edge);
+}
+#gm-console.gm-desk .gm-inverse-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; }
+#gm-console.gm-desk .gm-inverse-rows dt { color: var(--ink-dim); }
+#gm-console.gm-desk .gm-inverse-rows dd { margin: 0 0 var(--space-2) 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk .gm-inverse-eligibility { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); }
+/* The two-second window on taking a placement back (issue #1443). The edge is
+   a SECOND signal beside the sentence, never the only one, and it thickens
+   rather than changing hue alone once the window has shut — so a forced-colour
+   or monochrome rendering still separates "still open" from "gone" (PRD #1418
+   story 6). The row inherits the wrapping `dd` rule above, so it reflows at
+   --a11y-text-scale: 2 instead of truncating. */
+#gm-console.gm-desk .gm-inverse-exposure { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); }
+#gm-console.gm-desk .gm-inverse-exposure[data-latched="true"] {
+  border-left-width: 6px; border-left-color: var(--fire-bright); font-weight: 600;
+}
+
+/* ── Attention queue (issue #1433) ──────────────────────────────────────
+   Every rung is a token multiple so the whole panel keeps working at
+   --a11y-text-scale: 2 (PRD #1418): rows wrap and the panel scrolls rather
+   than the text shrinking, filters stack instead of squeezing, and band /
+   held state read as WORDS so forced colours cannot erase them. */
+#gm-console.gm-desk #gm-attention-filters { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+#gm-console.gm-desk #gm-attention-filters label { display: grid; gap: var(--space-2); flex: 1 1 8ch; min-width: 0; }
+#gm-console.gm-desk #gm-attention-filters select { width: 100%; min-width: 0; }
+#gm-console.gm-desk #gm-attention-list { display: grid; gap: var(--space-4); min-width: 0; }
+#gm-console.gm-desk .gm-attention-band-group { display: grid; gap: var(--space-2); min-width: 0; }
+#gm-console.gm-desk .gm-attention-band-group ol { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+#gm-console.gm-desk .gm-attention-band-group li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2);
+  padding: var(--space-3); border: 1px solid var(--edge); background: var(--surface-panel-up);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-attention-band-group li[data-selected="true"] { border-color: var(--gold); }
+#gm-console.gm-desk .gm-attention-band-group li[data-band="urgent"] { border-left-width: var(--space-2); }
+/* A row the projection has dropped while the list is held for reading. The
+   dashed edge is the hint; the sentence in .gm-attention-resolved is the
+   status, because a border is the first thing forced colours take away. */
+#gm-console.gm-desk .gm-attention-band-group li[data-stale="true"] { border-style: dashed; }
+#gm-console.gm-desk .gm-attention-reason { grid-column: 1 / -1; margin: 0; }
+#gm-console.gm-desk .gm-attention-resolved {
+  grid-column: 1 / -1; margin: 0; font-style: italic;
+  font-size: max(12px, var(--text-sm));
+}
+#gm-console.gm-desk .gm-attention-band { font-size: max(12px, var(--text-sm)); letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-attention-age { font-family: var(--font-mono); text-align: right; }
+#gm-console.gm-desk #gm-attention-status[data-state="held"] { color: var(--gold); }
+/* Where focus lands when the row an operator was standing on leaves the queue
+   (snoozed, or resolved under a held list). Drawn for plain `:focus` as well as
+   `:focus-visible`, because the landing is programmatic and an invisible
+   landing is a lost operator. */
+#gm-console.gm-desk #gm-attention-status:focus,
+#gm-console.gm-desk .gm-attention-resolved:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk #gm-attention-banners { display: grid; gap: var(--space-2); }
+#gm-console.gm-desk #gm-attention-banners p { border: 1px solid var(--gold); padding: var(--space-3); margin: 0; }
+
+/* ── GM faction relations + Undo control (issue #1442) ──────────────────
+   Both are reading-and-deciding surfaces, so they follow the journal's rule:
+   wrap and stack rather than shrink, keep every control at the shared hit
+   floor, and never rely on colour alone — the readout says "hostile" or "not
+   hostile" in words and `data-hostile` is only a second, redundant signal. */
+#gm-console.gm-desk #gm-faction-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+#gm-console.gm-desk #gm-faction-controls .gm-activity-filter { min-width: 0; flex: 1 1 8em; }
+#gm-console.gm-desk #gm-faction-controls select { min-width: 0; width: 100%; }
+#gm-console.gm-desk #gm-faction-relation { margin: var(--space-2) 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk #gm-faction-relation[data-hostile="true"] { color: var(--fire-bright); }
+#gm-console.gm-desk #gm-faction-apply,
+#gm-console.gm-desk #gm-journal-undo {
+  min-height: var(--control-hit-min); height: auto; width: 100%;
+  padding: var(--space-2) var(--space-3); white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-journal-undo:focus-visible,
+#gm-console.gm-desk #gm-faction-apply:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk #gm-journal-undo-feedback,
+#gm-console.gm-desk #gm-faction-feedback { margin: var(--space-2) 0 0 0; overflow-wrap: anywhere; }
+
+/* ── Named GM checkpoints (issue #1445) ─────────────────────────────────
+   The same reading discipline as the journal above: rows wrap rather than
+   truncate, the candidate list scrolls inside its own bounded box instead of
+   pushing the detail off the column, the verdict is spelled out in words with
+   the border edge as a second redundant signal, and the name field and its
+   button stack rather than shrinking when text is turned up. */
+#gm-console.gm-desk #gm-checkpoint-create {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+}
+#gm-console.gm-desk #gm-checkpoint-create label { flex: 1 1 100%; }
+#gm-console.gm-desk #gm-checkpoint-name { flex: 1 1 12em; min-width: 0; }
+#gm-console.gm-desk #gm-checkpoint-bookmark { min-height: var(--control-hit-min); flex: 0 0 auto; }
+#gm-console.gm-desk #gm-checkpoint-hint,
+#gm-console.gm-desk #gm-checkpoint-intro,
+#gm-console.gm-desk #gm-checkpoint-restore-note { color: var(--ink-dim); margin: 0; }
+#gm-console.gm-desk #gm-checkpoint-status[data-tone="failed"] { color: var(--fire-bright); }
+#gm-console.gm-desk #gm-checkpoint-status[data-tone="pending"] { color: var(--gold); }
+#gm-console.gm-desk #gm-checkpoint-status[data-tone="ok"] { color: var(--cyan); }
+#gm-console.gm-desk #gm-checkpoint-list {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2);
+  max-height: 22em; overflow: auto;
+  scrollbar-width: thin; scrollbar-color: var(--edge-bright) var(--surface-deep); scrollbar-gutter: stable;
+}
+#gm-console.gm-desk .gm-checkpoint-row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3);
+  width: 100%; min-width: 0; max-width: 100%; text-align: left;
+  min-height: var(--control-hit-min); height: auto; padding: var(--space-3);
+  border: 1px solid var(--edge); background: var(--surface-panel-up);
+  color: var(--ink); font: inherit; white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-checkpoint-row[aria-pressed="true"] { border-color: var(--gold); background: var(--surface-lift); }
+#gm-console.gm-desk .gm-checkpoint-row:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk .gm-checkpoint-row[data-eligible="true"] { border-left: 3px solid var(--cyan); }
+#gm-console.gm-desk .gm-checkpoint-row[data-eligible="false"] { border-left: 3px solid var(--fire-bright); }
+/* Unchecked is its own state, and it keeps the same 3px gutter so an
+   unchecked row does not read as a shifted eligible one. */
+#gm-console.gm-desk .gm-checkpoint-row[data-eligible="unknown"] { border-left: 3px solid var(--ink-dim); }
+#gm-console.gm-desk .gm-checkpoint-record { font-family: var(--font-mono); color: var(--ink-dim); }
+#gm-console.gm-desk .gm-checkpoint-row .gm-checkpoint-verdict { margin-left: auto; letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk #gm-checkpoint-detail {
+  display: grid; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--edge);
+}
+#gm-console.gm-desk .gm-checkpoint-reasons {
+  margin: 0; padding-left: var(--space-4); display: grid; gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+/* Live restore (issue #1446). The phase is a SENTENCE in #gm-restore-status;
+   `data-phase` on the group and the tone colour are decoration on top of it,
+   so a forced-colour mode loses the emphasis and keeps the meaning. Both
+   buttons keep a --control-hit-min floor and wrap at 200% rather than
+   shrinking the operator's text. */
+#gm-console.gm-desk #gm-restore {
+  display: grid; gap: var(--space-2); padding-top: var(--space-3);
+  border-top: 1px solid var(--edge); min-width: 0;
+}
+#gm-console.gm-desk #gm-restore-note { color: var(--ink-dim); margin: 0; }
+#gm-console.gm-desk #gm-restore-summary { margin: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk #gm-restore-actions {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+}
+#gm-console.gm-desk #gm-restore-actions button {
+  min-height: var(--control-hit-min); flex: 0 1 auto; max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-restore-status { margin: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk #gm-restore-status[data-tone="failed"] { color: var(--fire-bright); }
+#gm-console.gm-desk #gm-restore-status[data-tone="pending"] { color: var(--gold); }
+#gm-console.gm-desk #gm-restore-status[data-tone="ok"] { color: var(--cyan); }
+/* ── Technical health and its banners (issue #1437) ─────────────────────
+   Everything here reads as WORDS. `data-state` and colour are decoration on
+   top of a translated noun, so forced colours and a monochrome display lose
+   the emphasis and keep the meaning (PRD #1418 story 27). Rows wrap and the
+   panel scrolls at 200% rather than reducing the operator's text. */
+#gm-console.gm-desk #gm-health-groups { display: grid; gap: var(--space-4); min-width: 0; }
+#gm-console.gm-desk .gm-health-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+#gm-console.gm-desk .gm-health-group li {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3); border: 1px solid var(--edge);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-health-name { flex: 1 1 8ch; min-width: 0; }
+#gm-console.gm-desk .gm-health-state { letter-spacing: var(--tracking-wide); }
+#gm-console.gm-desk .gm-health-detail { font-family: var(--font-mono); color: var(--ink-dim); }
+#gm-console.gm-desk .gm-health-group li[data-state="stale"] .gm-health-state,
+#gm-console.gm-desk .gm-health-group li[data-state="recovering"] .gm-health-state { color: var(--gold); }
+#gm-console.gm-desk .gm-health-group li[data-state="disconnected"] { border-left-width: var(--space-2); }
+#gm-console.gm-desk .gm-health-group li[data-state="disconnected"] .gm-health-state { color: var(--gold); }
+#gm-console.gm-desk #gm-health-summary[data-state="disconnected"],
+#gm-console.gm-desk #gm-health-summary[data-state="recovering"] { color: var(--gold); }
+/* The sample tick, beside the announced summary rather than in it. */
+#gm-console.gm-desk #gm-health-tick {
+  font-family: var(--font-mono); color: var(--ink-dim); margin: 0;
+}
+/* The programmatic landing for a banner with no hull of its own to open. */
+#gm-console.gm-desk #gm-health-summary:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk .gm-health-banner {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-health-banner-state { letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-health-banner-message { flex: 1 1 12ch; min-width: 0; }
+#gm-console.gm-desk .gm-health-banner[data-state="disconnected"] { border-width: 2px; }
+
+/* ── Station workload (issue #1438) ────────────────────────────────────
+   Every rung is a token multiple, so the panel keeps working at
+   --a11y-text-scale: 2 (PRD #1418): a Station row wraps onto as many lines as
+   its text needs and the panel scrolls, rather than the text shrinking or the
+   count being clipped off the end. The level reads as a WORD in its own
+   element, so forced colours cannot erase the one thing the row is for. */
+#gm-console.gm-desk #gm-workload-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); min-width: 0; }
+#gm-console.gm-desk #gm-workload-list > li {
+  border: 1px solid var(--edge); background: var(--surface-panel-up);
+  padding: var(--space-3); min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-workload-list > li[data-level="overloaded"] { border-left-width: var(--space-2); }
+/* An advisory nobody is sitting behind reads quieter, but it still reads: the
+   dimming is on top of the word, never instead of it. */
+#gm-console.gm-desk #gm-workload-list > li[data-level="backfill"] .gm-workload-state,
+#gm-console.gm-desk #gm-workload-list > li[data-level="offline"] .gm-workload-state { color: var(--ink-dim); }
+#gm-console.gm-desk #gm-workload-list summary {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3);
+  align-items: baseline; min-height: var(--control-hit-min); min-width: 0; cursor: pointer;
+}
+#gm-console.gm-desk #gm-workload-list summary:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk .gm-workload-name { flex: 1 1 12ch; min-width: 0; }
+#gm-console.gm-desk .gm-workload-state { letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-workload-count { font-family: var(--font-mono); }
+#gm-console.gm-desk .gm-workload-body { display: grid; gap: var(--space-2); padding-top: var(--space-2); min-width: 0; }
+#gm-console.gm-desk .gm-workload-demands { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+#gm-console.gm-desk .gm-workload-demands li { border-left: 3px solid var(--edge-bright); padding-left: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk .gm-workload-note, #gm-console.gm-desk .gm-workload-building { margin: 0; color: var(--ink-dim); }
+#gm-console.gm-desk #gm-workload-status:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+/* ── The typed world-authored widget region (issue #1439) ────────────────
+   The post-M5 screen puts it where the artboard does: the last block of the
+   LEFT region, under Attention and the Roster, which is where a world's own
+   mission panel belongs (the artboard's illustrative "Skyhook claimants").
+   `gui/gm-widgets-panel.js` still owns the `hidden` attribute, so a scenario
+   that authors no widget leaves the left column exactly as it was and the
+   vertical fit the smoke spec pins at both default-text viewports is
+   untouched. It never scrolls sideways: every card is a min-width: 0 auto-fit
+   track that wraps at 200% instead of squeezing. */
+#gm-console.gm-desk #gm-widgets-list {
+  list-style: none; margin: 0; padding: 0; min-width: 0;
+  display: grid; gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(22ch, 100%), 1fr));
+}
+#gm-console.gm-desk #gm-widgets-list > li {
+  display: grid; gap: var(--space-3); align-content: start;
+  border: 1px solid var(--edge); padding: var(--space-4);
+  min-width: 0; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk .gm-widget-heading { margin: 0; font-size: var(--text-sm); letter-spacing: var(--tracking-wide); color: var(--gold); }
+#gm-console.gm-desk .gm-widget-summary, #gm-console.gm-desk .gm-widget-narrowing,
+#gm-console.gm-desk .gm-widget-empty, #gm-console.gm-desk .gm-widget-unavailable,
+#gm-console.gm-desk .gm-widget-note { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk .gm-widget-narrowing, #gm-console.gm-desk .gm-widget-empty,
+#gm-console.gm-desk .gm-widget-unavailable { color: var(--ink-dim); }
+#gm-console.gm-desk .gm-widget-attention-rows,
+#gm-console.gm-desk .gm-widget-workload-rows {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); min-width: 0;
+}
+#gm-console.gm-desk .gm-widget-attention-rows li,
+#gm-console.gm-desk .gm-widget-workload-rows li {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: baseline;
+  border-left: 3px solid var(--edge-bright); padding-left: var(--space-2);
+  min-width: 0; overflow-wrap: anywhere;
+}
+/* Urgent and overloaded are marked by WEIGHT of edge as well as by the word
+   each row already carries, so forced colours lose nothing (PRD #1418). */
+#gm-console.gm-desk .gm-widget-attention-rows li[data-band="urgent"],
+#gm-console.gm-desk .gm-widget-workload-rows li[data-level="overloaded"] { border-left-width: var(--space-2); }
+#gm-console.gm-desk .gm-widget-band, #gm-console.gm-desk .gm-widget-level {
+  letter-spacing: var(--tracking-wide); color: var(--gold);
+}
+#gm-console.gm-desk .gm-widget-reason, #gm-console.gm-desk .gm-widget-station { flex: 1 1 12ch; min-width: 0; }
+/* The buttons wrap rather than squeezing, and keep the shared hit floor: a
+   widget button is a second press of a shipped control, not a smaller one. */
+#gm-console.gm-desk .gm-widget-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); min-width: 0; }
+#gm-console.gm-desk .gm-widget-actions button { flex: 1 1 12ch; min-height: var(--control-hit-min); min-width: 0; }
+#gm-console.gm-desk .gm-widget-actions button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+@media (max-width: 1000px) {
+  #gm-console.gm-desk #gm-widgets { grid-area: auto; }
+}

@@ -46,6 +46,15 @@
 // evaluated, wherever this module enters the graph — the same ordering
 // guarantee gui/tutorial-state.js relies on.
 import { simState } from './sim-state.js';
+import {
+  EFFECT_IDS,
+  FOLLOW_PREFERENCE,
+  applyEffectIntensitiesToRoot,
+  applicableEffects,
+  normalizeEffectLevel,
+  reduceEffectsChoices,
+  resolveEffectIntensities,
+} from './visual-effects.js';
 
 /** Pre-#1279 Accessibility-only localStorage key, retained for migration. */
 export const ACCESSIBILITY_PROFILE_KEY = 'phoenix-accessibility-v1';
@@ -55,11 +64,25 @@ export const TEXT_SCALE_VAR = '--a11y-text-scale';
 
 // ── Presentation effect vocabulary ──────────────────────────────────────────
 
-/** Text-scale slider bounds (whole-percent stops from 100% to 150%). The
- *  resolver clamps to a wider absolute range so a hand-edited record cannot
- *  push the root font-size somewhere unusable. */
+/** Text-scale slider bounds — whole-percent stops from 100% to **200%**
+ *  (issue #1422, PRD #1418: "provide usable in-app text enlargement through
+ *  200%"). The exposed ceiling was 150% until that PRD; raising it is a change
+ *  to a CONTRACT, not just a number, because the native bridge reasons over the
+ *  same range: `SUPPORTED_TEXT_SCALE_MIN`/`MAX` in
+ *  `src/native_host/setup_accessibility.rs` mirror these two, and the drift
+ *  guard `the_supported_extremes_match_the_client` pins the pair. A pane's
+ *  reflow demand is `MIN_CONSOLE_LOGICAL_WIDTH_PX x scale`, so 200% asks a
+ *  split pane for 640 logical px of width rather than 480.
+ *
+ *  `TEXT_SCALE_FLOOR`/`CEIL` remain the absolute clamp a hand-edited or
+ *  host-injected record is coerced into. The ceiling is now the SAME number as
+ *  the slider maximum — deliberately: 200% is the largest scale this client
+ *  claims its consoles reflow at, so a record asking for 300% is clamped to the
+ *  largest supported value rather than honoured into a layout nobody has
+ *  verified. The floor still guards the other direction, where there is no
+ *  exposed control at all. */
 export const TEXT_SCALE_MIN = 1.0;
-export const TEXT_SCALE_MAX = 1.5;
+export const TEXT_SCALE_MAX = 2.0;
 export const TEXT_SCALE_STEP = 0.05;
 export const TEXT_SCALE_DEFAULT = 1.0;
 const TEXT_SCALE_FLOOR = 0.5;
@@ -71,14 +94,30 @@ const TEXT_SCALE_CEIL = 2.0;
  * even when the OS asked for it. This is what lets an explicit choice override
  * an OS default in either direction.
  */
-export const FOLLOW_OS = 'default';
+export const FOLLOW_OS = FOLLOW_PREFERENCE;
 export const EXPLICIT_ON = 'on';
 export const EXPLICIT_OFF = 'off';
 const TRI_STATES = new Set([FOLLOW_OS, EXPLICIT_ON, EXPLICIT_OFF]);
 
-/** The presentation effects the profile carries. */
-export const PRESENTATION_EFFECTS = Object.freeze(['textScale', 'contrast', 'reducedMotion']);
+/**
+ * The presentation effects the profile carries.
+ *
+ * The first three are the T1 settings: a text-scale number, and two tri-states.
+ * The last three are issue #1428's separate visual effects — camera/page shake,
+ * flash/pulse and decorative motion — each an intensity in `0..=1` or
+ * follow-the-preference, with their vocabulary in `gui/visual-effects.js`.
+ *
+ * They live in ONE list because every consumer here iterates it: the
+ * normaliser, the writer, the scoped Reset all and the status projection. That
+ * is what made adding three effects a change to this array rather than to four
+ * places, and it is what keeps "Reset all is scoped to the presentation
+ * settings" true of the new three without anybody remembering to add them.
+ */
+export const PRESENTATION_EFFECTS = Object.freeze(
+  ['textScale', 'contrast', 'reducedMotion'].concat(EFFECT_IDS),
+);
 const TRI_EFFECTS = new Set(['contrast', 'reducedMotion']);
+const INTENSITY_EFFECTS = new Set(EFFECT_IDS);
 
 // ── Assistance schema (AC4 — declared, with no AI side effect) ──────────────
 
@@ -110,14 +149,9 @@ export const ASSISTANCE_FUNCTIONS = Object.freeze([
 
 /** A fresh profile: every effect unset (follows the OS), no assistance. */
 export function emptyAccessibilityProfile() {
-  return {
-    presentation: {
-      textScale: FOLLOW_OS,
-      contrast: FOLLOW_OS,
-      reducedMotion: FOLLOW_OS,
-    },
-    assistance: {},
-  };
+  const presentation = {};
+  for (const effect of PRESENTATION_EFFECTS) presentation[effect] = FOLLOW_OS;
+  return { presentation, assistance: {} };
 }
 
 /** Clamp a text-scale number to the safe absolute range. */
@@ -137,6 +171,14 @@ function normalizeTextScale(value) {
   return FOLLOW_OS;
 }
 
+/** One presentation value, coerced by the rule its effect is governed by: a
+ *  clamped text-scale multiplier, a `0..=1` effect intensity, or a tri-state. */
+function normalizePresentationValue(effect, value) {
+  if (effect === 'textScale') return normalizeTextScale(value);
+  if (INTENSITY_EFFECTS.has(effect)) return normalizeEffectLevel(value);
+  return normalizeTri(value);
+}
+
 /**
  * Coerce an untrusted value (parsed localStorage JSON, missing field, old
  * schema) into a valid profile. Never throws. Only assistance overrides that
@@ -150,6 +192,11 @@ export function normalizeAccessibilityProfile(raw) {
   p.presentation.textScale = normalizeTextScale(pres.textScale);
   p.presentation.contrast = normalizeTri(pres.contrast);
   p.presentation.reducedMotion = normalizeTri(pres.reducedMotion);
+  // A profile written before issue #1428 carries none of these; each reads as
+  // follow-the-preference, which is exactly the behaviour that record had.
+  for (const effect of EFFECT_IDS) {
+    p.presentation[effect] = normalizeEffectLevel(pres[effect]);
+  }
   if (raw.assistance && typeof raw.assistance === 'object') {
     for (const id of ASSISTANCE_FUNCTIONS) {
       const v = raw.assistance[id];
@@ -170,10 +217,38 @@ export function normalizeAccessibilityProfile(raw) {
  */
 export function profileWithPresentation(profile, effect, value) {
   if (!PRESENTATION_EFFECTS.includes(effect)) return profile;
-  const next = effect === 'textScale' ? normalizeTextScale(value) : normalizeTri(value);
+  const next = normalizePresentationValue(effect, value);
   const current = normalizeAccessibilityProfile(profile);
   if (current.presentation[effect] === next) return profile;
   current.presentation[effect] = next;
+  return current;
+}
+
+/**
+ * Profile with EVERY presentation effect returned to its documented default —
+ * follow-the-system for all three — and nothing else touched (issue #1422).
+ *
+ * This is the whole of "Reset all" on a presentation surface, and its SCOPE is
+ * the point (PRD #1418: "Reset all is scoped to the current presentation
+ * settings, not unrelated bindings, identity or save data"). It rebuilds the
+ * `presentation` block only; the `assistance` overrides ride through untouched,
+ * and everything outside this profile — semantic bindings, gamepad tuning,
+ * feedback preferences, GM confirmation policy, scenario saves, the operator's
+ * identity — is not reachable from here at all, by construction rather than by
+ * a careful list.
+ *
+ * Returns the SAME input reference when every effect is already at its default,
+ * so a caller can skip a persist / re-apply, exactly like
+ * `profileWithPresentation`.
+ *
+ * @param {object} profile
+ */
+export function profileWithPresentationDefaults(profile) {
+  const current = normalizeAccessibilityProfile(profile);
+  const alreadyDefault = PRESENTATION_EFFECTS
+    .every((effect) => current.presentation[effect] === FOLLOW_OS);
+  if (alreadyDefault) return profile;
+  for (const effect of PRESENTATION_EFFECTS) current.presentation[effect] = FOLLOW_OS;
   return current;
 }
 
@@ -381,11 +456,85 @@ export function resolveTextScale(value, osTextScale) {
 export function resolveEffects(profile, osDefaults) {
   const p = normalizeAccessibilityProfile(profile);
   const os = osDefaults || {};
+  const reducedMotion = resolveTriState(p.presentation.reducedMotion, os.reducedMotion);
   return {
     textScale: resolveTextScale(p.presentation.textScale, os.textScale),
     contrast: resolveTriState(p.presentation.contrast, os.contrast),
-    reducedMotion: resolveTriState(p.presentation.reducedMotion, os.reducedMotion),
+    reducedMotion,
+    // The three separate effects (issue #1428) fold over the SAME resolved
+    // motion preference, so an operator who has only ever used the Motion
+    // control keeps exactly the behaviour they had: unset effects are 0 under
+    // reduce and 1 otherwise. An explicit intensity overrides it in both
+    // directions, like every other explicit value in this resolver.
+    ...resolveEffectIntensities(p.presentation, reducedMotion),
   };
+}
+
+/**
+ * Where each presentation effect's live value actually CAME FROM, alongside the
+ * value itself — the honest answer to "is this my choice, my system's, or the
+ * built-in default?" (issue #1422; PRD #1418 stories 9 and 16).
+ *
+ * The stored profile alone cannot answer that. `default` in the record means
+ * *follow the system*, and the system may be saying something (Windows asked
+ * for 150% text, the browser reports `prefers-reduced-motion: reduce`) or
+ * saying nothing at all. Those are three different states behind one stored
+ * value, and a settings surface that prints only the resolved number tells the
+ * operator nothing about whether changing their OS would move it:
+ *
+ *   - `explicit`  — the operator chose this value here. It overrides the system
+ *                   in BOTH directions (see `resolveTriState`).
+ *   - `system`    — following the system, and the system supplied this value.
+ *   - `default`   — following the system, and the system asked for nothing, so
+ *                   the documented built-in default applies.
+ *
+ * `available` is `false` when the host tried to read this preference natively
+ * and failed (`unavailableOsPreferences`). That is deliberately distinct from a
+ * successful read of a neutral value: "we could not ask" is not "the answer was
+ * no", and only the first of those is worth telling the operator about.
+ *
+ * Pure and never throws — it composes the same resolver the application path
+ * uses, so a status line cannot disagree with what is actually on screen.
+ *
+ * @param {object} profile
+ * @param {{ reducedMotion?: boolean, contrast?: boolean, textScale?: number }} [osDefaults]
+ * @param {string[]} [unavailable] effect ids whose native read failed
+ * @returns {{ [effect: string]: { value: number|boolean, source: 'explicit'|'system'|'default', available: boolean } }}
+ */
+export function presentationStatus(profile, osDefaults, unavailable) {
+  const p = normalizeAccessibilityProfile(profile);
+  const os = osDefaults || {};
+  const effects = resolveEffects(p, os);
+  const missing = new Set(Array.isArray(unavailable) ? unavailable : []);
+  const sourceOf = (effect) => {
+    if (p.presentation[effect] !== FOLLOW_OS) return 'explicit';
+    // Following the system: `system` only when the system actually SAID
+    // something. A silent OS is the documented default, not a system value.
+    //
+    // The three separate effects (issue #1428) have no system query of their
+    // own — no OS reports a camera-shake preference — so the system signal they
+    // follow is the motion preference, exactly the value they resolve against.
+    // An explicit Motion choice is the operator's, not the system's, so it does
+    // NOT make a following effect read as `system`.
+    if (INTENSITY_EFFECTS.has(effect)) return os.reducedMotion === true ? 'system' : 'default';
+    const signal = effect === 'textScale' ? os.textScale != null : os[effect] === true;
+    return signal ? 'system' : 'default';
+  };
+  const out = {};
+  for (const effect of PRESENTATION_EFFECTS) {
+    const source = sourceOf(effect);
+    out[effect] = {
+      value: effects[effect],
+      source,
+      // An unreadable OS preference cannot invalidate an explicit choice — that
+      // value never depended on the read. A following EFFECT depends on the
+      // motion read rather than on one of its own, so it inherits that answer.
+      available: source === 'explicit'
+        ? true
+        : !missing.has(INTENSITY_EFFECTS.has(effect) ? 'reducedMotion' : effect),
+    };
+  }
+  return out;
 }
 
 // ── Application onto document roots ──────────────────────────────────────────
@@ -412,6 +561,11 @@ export function applyEffectsToRoot(root, effects) {
   } catch (_) {
     /* detached / cross-origin root — best-effort */
   }
+  // The per-effect bands and intensities (issue #1428). Written alongside
+  // `data-reduced-motion` rather than instead of it: the older attribute still
+  // carries the OVERALL preference that unset effects follow, and the rules in
+  // gui/tokens.css that are not one of the three named effects still read it.
+  applyEffectIntensitiesToRoot(root, effects);
 }
 
 /** Every same-origin console iframe currently mounted under `doc`. */
@@ -549,6 +703,73 @@ if (typeof window !== 'undefined') {
       saveAccessibilityProfile(storage, sim.accessibilityProfile);
     }
     return window.applyAccessibilityProfile();
+  };
+
+  /**
+   * Return EVERY presentation effect to its documented default, persist, and
+   * re-apply (issue #1422). The scoped "Reset all" the settings surface offers.
+   *
+   * It goes through the same `persistOperatorProfile()` hook a single-effect
+   * change does, which is what keeps the scope honest: that hook snapshots the
+   * live bindings, gamepad tuning, feedback preferences and GM confirmation
+   * policy from their own owners and writes them back unchanged. This function
+   * never reads or names them, so it cannot clear one by accident, and it has
+   * no path at all to scenario saves or to the operator's identity.
+   */
+  window.resetAccessibilityPresentation = function resetPresentation() {
+    const sim = window.simState;
+    if (!sim) return undefined;
+    sim.accessibilityProfile = normalizeAccessibilityProfile(
+      profileWithPresentationDefaults(sim.accessibilityProfile),
+    );
+    if (typeof window.persistOperatorProfile === 'function') {
+      window.persistOperatorProfile();
+    } else {
+      let storage = null;
+      try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
+      saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    }
+    return window.applyAccessibilityProfile();
+  };
+
+  /**
+   * The **Reduce effects** preset (issue #1428, PRD #1418 story 14): one press
+   * writing conservative values for every effect the CONSOLE surface can
+   * actually render, persisted and previewed through the same path a single
+   * control uses.
+   *
+   * It writes EXPLICIT intensities rather than turning the Motion tri-state on,
+   * which is the difference between a preset and a second master switch: after
+   * pressing it each control shows a chosen value, each can be moved on its own,
+   * and a per-setting reset returns just that one to following the preference.
+   *
+   * Scoped to `applicableEffects('console')`, so it cannot quietly store a
+   * camera-shake value on a surface that has no camera — see the inventory in
+   * `gui/visual-effects.js`.
+   */
+  window.reduceAccessibilityEffects = function reduceEffects() {
+    const sim = window.simState;
+    if (!sim) return undefined;
+    let profile = sim.accessibilityProfile;
+    const choices = reduceEffectsChoices('console');
+    for (const effect of Object.keys(choices)) {
+      profile = profileWithPresentation(profile, effect, choices[effect]);
+    }
+    sim.accessibilityProfile = normalizeAccessibilityProfile(profile);
+    if (typeof window.persistOperatorProfile === 'function') {
+      window.persistOperatorProfile();
+    } else {
+      let storage = null;
+      try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
+      saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    }
+    return window.applyAccessibilityProfile();
+  };
+
+  /** The effects the private console surface offers controls for, for the
+   *  inline shell (issue #1428). */
+  window.applicableAccessibilityEffects = function applicable() {
+    return applicableEffects('console');
   };
 
   /**

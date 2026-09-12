@@ -18,7 +18,17 @@ import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
+import { createGmAttentionPanel } from './gm-attention-panel.js';
+import { createGmAttentionFilters } from './gm-attention-filters.js';
+import { createGmHealthBanner } from './gm-health-banner.js';
+import { createGmHealthPanel } from './gm-health-panel.js';
+import { createGmWorkloadPanel } from './gm-workload-panel.js';
+import { createGmWidgetsPanel } from './gm-widgets-panel.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
+import { createGmJournalPanel } from './gm-journal-panel.js';
+import { createGmFactionPanel } from './gm-faction-panel.js';
+import { createGmCheckpointPanel } from './gm-checkpoint-panel.js';
+import { createGmRestoreControl } from './gm-restore-control.js';
 import {
   ActionFeedbackLifecycle,
   emitActionFeedbackTransition,
@@ -83,6 +93,55 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     getOperatorName: (id) => typeof win.__hostGmName === 'function'
       ? win.__hostGmName(id) : id,
   });
+  // Saved action history (issue #1441). A pure reader over the same canonical
+  // journal the Session controls settle their own results against — it rides
+  // the `gm_session` projection rather than opening a second channel, because
+  // it is not a second log.
+  //
+  // It also carries the Undo control (issue #1442): the inverse is an ordinary
+  // typed GM action, so it is submitted through the same late-bound host
+  // adapter every other panel uses and its answer arrives as a row of this same
+  // journal. The confirmation controller is bound below, once it exists.
+  let gmConfirmationsRef = null;
+  const gmJournalPanel = createGmJournalPanel({
+    doc: doc,
+    t,
+    getOperatorName: (id) => typeof win.__hostGmName === 'function'
+      ? win.__hostGmName(id) : id,
+    getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
+    submitUndo: (request) => typeof win.__hostUndoGmAction === 'function'
+      && win.__hostUndoGmAction(request),
+    confirmAction: (request) => (gmConfirmationsRef
+      ? gmConfirmationsRef.request(request)
+      : request.accept()),
+  });
+  win.__hostGmJournalState = gmJournalPanel.state;
+  // Named checkpoints (issue #1445). The save API is the page's own — the same
+  // one gui/save-slots.js is handed — so a bookmark is the ordinary manual
+  // capture with a name, not a second storage path. Late-bound through the
+  // window seam because the classic host script installs it after this module
+  // island; an absent API leaves the panel readable and its controls inert
+  // rather than throwing at mount.
+  // Declared before the checkpoint panel so its selection callback can reach
+  // it; assigned after the confirmation controller exists.
+  let gmRestoreControl = null;
+  const gmCheckpointPanel = createGmCheckpointPanel({
+    doc: doc,
+    t,
+    api: {
+      list: () => (typeof win.__hostGmCheckpointList === 'function'
+        ? win.__hostGmCheckpointList() : []),
+      create: (name) => (typeof win.__hostGmCheckpointCreate === 'function'
+        ? win.__hostGmCheckpointCreate(name) : ''),
+    },
+    canCapture: () => win.__saveSlotsCaptureAvailable === true,
+    // The restore control (issue #1446) sits under the SAME candidate list, so
+    // the row a GM previewed is the row they restore: a second picker could
+    // hold a different selection from the one whose reasons are on screen.
+    onSelect: () => gmRestoreControl?.refresh(),
+  });
+  win.__hostGmCheckpointPanel = gmCheckpointPanel;
+  win.__hostGmCheckpointState = gmCheckpointPanel.state;
   win.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
   win.__hostGmSessionReset = gmSessionControls.reset;
   win.__hostGmSessionState = gmSessionControls.state;
@@ -90,6 +149,19 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   try { operatorStorage = win.localStorage; } catch (_) { /* Settings reports unavailable storage. */ }
   const gmConfirmationProfile = createGmConfirmationProfile({ storage: operatorStorage, registry: hostSemanticActions });
   const gmConfirmations = createGmConfirmationController({ doc: doc, t, profile: gmConfirmationProfile });
+  gmConfirmationsRef = gmConfirmations;
+  // The faction-relation control (issue #1442): the only GM surface that can
+  // move a hostility, and the source of the actions the journal's Undo
+  // reverses. It reads the authored roster off this same `gm_session` payload.
+  const gmFactionPanel = createGmFactionPanel({
+    doc: doc,
+    t,
+    getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
+    submit: (request) => typeof win.__hostSetFactionHostility === 'function'
+      && win.__hostSetFactionHostility(request),
+    confirmAction: gmConfirmations.request,
+  });
+  win.__hostGmFactionState = gmFactionPanel.state;
   win.__hostGmConfirmationProfile = gmConfirmationProfile;
   win.__hostGmConfirmations = gmConfirmations;
   hostSemanticActions.setConfirmationHandler(({ definition, accept }) => gmConfirmations.request({
@@ -144,6 +216,116 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   win.__hostGmCommsRefresh = gmCommsPanel.refreshAdmission;
   win.__hostGmCommsReset = gmCommsPanel.reset;
   win.__hostGmCommsState = gmCommsPanel.state;
+  // The M4 attention queue (issue #1433). Its filters/snoozes are one private
+  // controller so #1442's authored widgets reuse this exact state rather than
+  // growing a second copy; the session id arrives later (the fleet join
+  // resolves it), so `restore` is called then, like the role presets.
+  // The panel is built FROM the controller, so it cannot be named here yet;
+  // the repaint is resolved lazily instead. Without it a same-session
+  // reconnect restores the operator's bands and snoozes into a queue that goes
+  // on showing the old rows until membership happens to change.
+  let repaintGmAttention = () => {};
+  // The authored widget region (issue #1439) mirrors the same private filter
+  // state, so it repaints on the same change. Late-bound for the same reason
+  // the queue's repaint is: the controller is built before either consumer.
+  let repaintGmWidgets = () => {};
+  const gmAttentionFilters = createGmAttentionFilters({
+    storage: operatorStorage,
+    getSessionId: () => (typeof win.__hostGmSessionId === 'function' ? win.__hostGmSessionId() : null),
+    getOperatorId: () => (typeof win.__hostLocalGm === 'function' ? (win.__hostLocalGm()?.id ?? null) : null),
+    onChange: () => { repaintGmAttention(); repaintGmWidgets(); },
+  });
+  // Public technical health (issue #1437). Three late-bound edges, because the
+  // two halves guard different things and neither may own both: the attention
+  // panel owns the banner REGION (nothing an operator does to the queue can
+  // reach it), the health component owns what a warning LOOKS like, and the
+  // health panel owns the readable table and feeds the region from the same
+  // parsed alerts it counts in its own summary.
+  let gmHealthPanelRef = null;
+  const gmHealthBanner = createGmHealthBanner({
+    doc: doc, t,
+    onAction: (alert) => {
+      if (alert.ship) { gmProjection.select(alert.ship.entity_id); return; }
+      gmHealthPanelRef?.focus();
+    },
+  });
+  const gmAttentionPanel = createGmAttentionPanel({
+    doc: doc, t, has,
+    filters: gmAttentionFilters,
+    renderBanners: (rows, container) => gmHealthBanner.render(rows, container),
+    // Opening a row is a NAVIGATION to something that already exists on this
+    // desk — the authored conversation route, (issue #1434) the authored beat's
+    // own mission-panel row carrying the Fire/Pause/Skip its author declared, or
+    // (issue #1435) simply the hull an idle-NPC row names. No GmAction, no
+    // dialog, no panel switch: the operator presses the lever, and that press
+    // takes the ordinary admission check and the ordinary apply-tick
+    // revalidation with it.
+    //
+    // Each row lights only the halves it actually names. An idle-NPC row names
+    // a ship and nothing else: selecting it is what draws that ship's inspector
+    // and the actions the ship allows, and the absent route and event are why
+    // nothing here chooses, offers or issues an order on the operator's behalf.
+    onOpen: (occurrence) => {
+      if (occurrence.target.ship) gmProjection.select(occurrence.target.ship.entity_id);
+      // Comms shares the desk's centre region with the activity feed and the
+      // action log (the post-M5 screen), so the route has to be ON SCREEN
+      // before it can be focused — a `display: none` panel has nothing to
+      // focus. The shell resolves the view; the panel still does the pointing.
+      if (occurrence.target.route) {
+        shell.showLog('gm-comms-panel');
+        gmCommsPanel.focusRoute(occurrence.target.route);
+      }
+      if (occurrence.target.event) gmMissionPanel.focusEvent(occurrence.target.event.id);
+    },
+    // The bar's Quiet pill is the same wait the queue's own lull row shows, so
+    // it has to advance on the queue's cadence. A lull publishes nothing — the
+    // advisory keeps one id and one `seconds` param for its whole duration —
+    // so without this the pill would be painted once and then sit frozen
+    // beside a row counting up. Presentation only: the tick repaints the bar
+    // from state the panel already holds.
+    onAge: () => shell.refresh(),
+  });
+  repaintGmAttention = gmAttentionPanel.repaint;
+  win.__hostGmAttentionState = gmAttentionPanel.state;
+  win.__hostGmAttentionRestore = gmAttentionFilters.restore;
+  win.__hostGmAttentionBanners = gmAttentionPanel.banners;
+  const gmHealthPanel = createGmHealthPanel({
+    doc: doc, t, has,
+    banners: (alerts) => gmAttentionPanel.banners(alerts),
+  });
+  gmRestoreControl = createGmRestoreControl({
+    doc: doc,
+    t,
+    getCandidate: () => gmCheckpointPanel.state().selected,
+    getOperator: () => (typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null),
+    submitRestore: (request) => typeof win.__hostRequestLiveRestore === 'function'
+      && win.__hostRequestLiveRestore(request),
+    submitResume: (correlation) => typeof win.__hostSetSessionPaused === 'function'
+      && win.__hostSetSessionPaused(false, correlation),
+    confirmAction: gmConfirmations.request,
+  });
+  win.__hostGmRestoreState = gmRestoreControl.state;
+  gmHealthPanelRef = gmHealthPanel;
+  win.__hostGmHealthState = gmHealthPanel.state;
+  // The M4 Station-workload advisory (issue #1438). Read-only by construction:
+  // it takes no callbacks because there is nothing on it to act with.
+  const gmWorkloadPanel = createGmWorkloadPanel({ doc: doc, t, has });
+  win.__hostGmWorkloadState = gmWorkloadPanel.state;
+  // The typed world-authored widget region (issue #1439). It composes from the
+  // surfaces above rather than from the Host Channel: the attention queue's own
+  // parsed occurrences, the workload advisory's own parsed rows, the ONE
+  // private filter controller and the shipped GM action buttons. Nothing it
+  // draws can disagree with the panel it mirrors, and nothing it draws is a
+  // new action — see gui/gm-widgets-panel.js.
+  const gmWidgetsPanel = createGmWidgetsPanel({
+    doc: doc, t, has,
+    filters: gmAttentionFilters,
+    readAttention: () => gmAttentionPanel.state(),
+    readWorkload: () => gmWorkloadPanel.state(),
+    repaintAttention: () => repaintGmAttention(),
+  });
+  repaintGmWidgets = gmWidgetsPanel.repaint;
+  win.__hostGmWidgetsState = gmWidgetsPanel.state;
   const gmSpawnPanel = createGmSpawnPanel({
     doc: doc,
     win: win,
@@ -192,6 +374,12 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
         win.__hostGmRolePresetChanged(presetId);
       }
     },
+    // The authored widget composition follows the EFFECTIVE preset (issue
+    // #1439), including the fallback to the built-in All a removed preset
+    // resolves to — All authors no widgets, so the region goes away on its own.
+    // Only the operator's own live switch carries the authored default filters
+    // with it; a reconnect restores what they actually left behind.
+    onEffective: (preset, context) => gmWidgetsPanel.setPreset(preset, context),
   });
   win.__hostGmRolePresetsSetAvailable = gmRolePresets.setAvailablePresets;
   win.__hostGmRolePresetsRestore = gmRolePresets.restore;
@@ -271,14 +459,32 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
         shell.refresh(null, gmStationPuppet.state().projection);
       }
     },
-    gm_session:   function(p) { gmSessionControls.update(p); },
+    gm_session:   function(p) {
+      gmSessionControls.update(p);
+      gmFactionPanel.update(p);
+      gmJournalPanel.update(p);
+      // A refused restore request never reaches the health projection — no
+      // restore started — so its answer is read off the ONE canonical journal.
+      let session = p;
+      if (typeof session === 'string') {
+        try { session = JSON.parse(session); } catch (_) { session = null; }
+      }
+      gmRestoreControl.settleJournal(session?.journal?.entries);
+    },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
+    // The desk's bar carries a pill per advisory (the post-M5 screen), and
+    // the roster carries the workload word, so each of these three also
+    // repaints the shell. Both paints are signature-guarded, so an unchanged
+    // bar or roster is never rebuilt under an operator's pointer.
+    gm_attention: function(p) { gmAttentionPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
+    gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); shell.refresh(); },
+    gm_workload:  function(p) { gmWorkloadPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
     handlers,
-    dispose() { shell.dispose(); },
+    dispose() { gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       shell.refresh();
       gmSessionControls.refreshAdmission();
@@ -286,10 +492,24 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       gmCommsPanel.refreshAdmission();
       gmSpawnPanel.refreshAdmission();
       gmStationPuppet.refresh();
+      gmFactionPanel.refreshAdmission();
+      gmJournalPanel.refreshAdmission();
+      // The catalogue read is asynchronous; the bar's Checkpoint pill is
+      // painted once it has actually come back rather than a refresh behind.
+      Promise.resolve(gmCheckpointPanel.refresh()).then(() => shell.refresh(), () => {});
+      gmRestoreControl.refresh();
       win.__hostGmEffectRefresh();
     },
     reset() {
+      gmAttentionPanel.reset();
+      gmHealthPanel.reset();
+      gmWorkloadPanel.reset();
+      gmWidgetsPanel.reset();
       gmSessionControls.reset();
+      gmFactionPanel.reset();
+      gmJournalPanel.reset();
+      gmCheckpointPanel.reset();
+      gmRestoreControl.reset();
       win.__hostGmMissionReset();
       gmCommsPanel.reset();
       gmSpawnPanel.reset();

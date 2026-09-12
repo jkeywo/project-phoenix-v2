@@ -267,6 +267,32 @@ const CSS = `
 .mini-btn:focus-visible > .mini-bg {
   box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
+
+/* ── Forced colours (issue #1422) ────────────────────────────────
+   A forced-colours mode (Windows High Contrast and friends) DROPS box-shadow.
+   The rule directly above is the only focus indicator the chamfered half of
+   this family has — the two rules before it hand back 'outline: none' because
+   a clip-path eats an outset outline — so in that mode .btn and .mini-btn,
+   which is every power stepper, every overlay toggle and every fire control,
+   showed no keyboard focus at all.
+
+   Redraw the ring as a BORDER on the recessed body. A border sits inside the
+   chamfer clip, so it survives where an outset outline does not, and unlike a
+   shadow it IS repainted in the user's palette rather than removed. .btn-bg
+   is absolutely positioned with 'inset: var(--control-inset)', so the border
+   grows inward from an already-inset box and moves no layout.
+
+   'Highlight' is the system's own selection colour, taken from the same place
+   the token half of this repair takes it (gui/tokens.css) — named literally
+   here because a shadow root reads that file's custom properties but nothing
+   guarantees a component was adopted into a document that links it. */
+@media (forced-colors: active) {
+  .btn:focus-visible > .btn-bg,
+  .mini-btn:focus-visible > .mini-bg {
+    box-sizing: border-box;
+    border: var(--focus-ring-width, 3px) solid Highlight;
+  }
+}
 `;
 
 let sheet;

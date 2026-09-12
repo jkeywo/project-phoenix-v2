@@ -39,6 +39,25 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'unavailable-comms-recipient': 'server.gm.comms.reason.recipient',
   'unavailable-comms-hail': 'server.gm.comms.reason.hail',
   'world-unavailable': 'server.gm.session.reason.world_unavailable',
+  // The typed inverse family (issue #1442). Each names exactly one thing that
+  // was wrong, because "undo failed" is not an answer a GM can act on.
+  'unknown-faction': 'server.gm.session.reason.unknown_faction',
+  'unknown-gm-action': 'server.gm.session.reason.unknown_gm_action',
+  'inverse-unsupported': 'server.gm.session.reason.inverse_unsupported',
+  'inverse-facts-mismatch': 'server.gm.session.reason.inverse_facts_mismatch',
+  'affected-state-changed': 'server.gm.session.reason.affected_state_changed',
+  'already-inverted': 'server.gm.session.reason.already_inverted',
+  // The one cutoff on taking a placement back (issue #1443).
+  'sensor-exposure-elapsed': 'server.gm.session.reason.sensor_exposure_elapsed',
+  // Restoring a removed entity (issue #1444). Two more things that can be
+  // wrong, and each names itself: the identity is taken, or a reference the
+  // restore would put back now holds someone else's newer decision.
+  'restore-identity-occupied': 'server.gm.session.reason.restore_identity_occupied',
+  'restore-reference-conflict': 'server.gm.session.reason.restore_reference_conflict',
+  // The bounded single-simulation-peer live restore (issue #1446). Both name
+  // exactly what the GM has to do next: wait, or stop trying until #1447.
+  'multiple-simulation-peers': 'server.gm.session.reason.multiple_simulation_peers',
+  'live-restore-in-progress': 'server.gm.session.reason.live_restore_in_progress',
 });
 
 /** The immediate browser-to-WASM ingress refusal, which has no wire reason. */

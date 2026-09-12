@@ -1,0 +1,56 @@
+# Fleet-wide pending-Comms probe for #1433. One hailable speaker opens an
+# ordinary WORLD-AUTHORED conversation through `ctx.effects.open_comms`, which
+# — unlike a GM's own `TransmitComms` — addresses no single hull. That is the
+# ordinary case for scripted scenario traffic, so the GM attention queue has to
+# explain such a row without interpolating an empty ship name into the
+# addressed sentence (`server.gm.attention.reason.pending_comms_fleet`).
+#
+# Kept apart from `probe_gm_attention.toml` deliberately: this world opens its
+# conversation at t=0, and folding it into the band/ordering probe would put a
+# fourth occurrence into every queue that probe's tests count.
+[global]
+seed = 1433
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+command_delay_ticks = 2
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_attention.speaker_fleet"
+transform = { position = [0.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station"] }
+
+# The speaker still owns an authored GM route, so the occurrence this world
+# produces is unaddressed WITHOUT being unroutable: opening the row still lands
+# on the conversation surface the scenario already authored.
+[[gm_comms_route]]
+id = "fleet-route"
+label = "world.probe_gm_attention.route.fleet"
+visibility = "selected_ships"
+senders = ["world.probe_gm_attention.speaker_fleet"]
+
+[script]
+setup = """
+on_timer(0, "on_start");
+
+fn on_start(ctx) {
+    ctx.effects.open_comms(#{
+        from: "world.probe_gm_attention.speaker_fleet",
+        node_fn: "fleet_offer"
+    });
+}
+
+fn fleet_offer(ctx) {
+    #{ message: "world.probe_gm_attention.offer_fleet", responses: [
+        #{ text: "world.probe_gm_attention.acknowledge", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+
+fn close_offer(ctx) { ctx.flags.increment("gm_attention_closed", 1); }
+"""

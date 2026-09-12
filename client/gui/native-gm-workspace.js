@@ -18,6 +18,9 @@ const ACTIONS = Object.freeze({
   __hostSetContactOverride: 'set_contact_override',
   __hostDespawnEntity: 'despawn_entity',
   __hostSetNpcDoctrine: 'set_npc_doctrine',
+  __hostSetFactionHostility: 'set_faction_hostility',
+  __hostUndoGmAction: 'undo_gm_action',
+  __hostRequestLiveRestore: 'request_live_restore',
   __hostSetStationPuppet: 'set_station_puppet',
   __hostIssueStationCommand: 'issue_station_command',
 });

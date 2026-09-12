@@ -1199,14 +1199,16 @@
  * status strip and corner control shrink to match. Two columns, so one step is
  * half the track.
  */
-/* `html:not([data-phx-force-landscape])` excludes server.html (the
-   server/viewscreen), which sets that attribute so it always reads as
-   landscape here and instead rotates a genuinely portrait phone screen into
-   this file's landscape rules (see server.html's own orientation-lock CSS).
-   The native host's lobby document carries no such attribute, so this guard
-   changes nothing for it. */
+/* Every surface that links this sheet takes these rules, server.html
+   included. It used to be excluded by a `data-phx-force-landscape` guard —
+   the viewscreen rotated a phone held upright into the landscape layout
+   rather than laying the landing out for the screen it was on — and the
+   result was a sideways menu with the hull column off the edge. The
+   rotation now covers the viewscreen shell alone (see server.html's
+   orientation-lock block); the landing, lobby, world picker and join panel
+   read this portrait layout on the phone as it is actually held. */
 @media (max-width: 999px), (orientation: portrait) {
-  html:not([data-phx-force-landscape]) .landing-rail {
+  .landing-rail {
     top: 0; left: 0; right: 0; bottom: auto;
     width: auto; height: 64px;
     flex-direction: row;
@@ -1226,96 +1228,77 @@
     background: linear-gradient(to bottom,
       rgba(var(--rgb-panel), 0.92), rgba(var(--rgb-base), 0.4));
   }
-  html:not([data-phx-force-landscape]) .landing-rail-stamp { writing-mode: horizontal-tb; text-orientation: mixed; }
-  html:not([data-phx-force-landscape]) #landing-fullscreen-btn { top: 9px; right: 16px; }
+  .landing-rail-stamp { writing-mode: horizontal-tb; text-orientation: mixed; }
+  #landing-fullscreen-btn { top: 9px; right: 16px; }
 
-  html:not([data-phx-force-landscape]) .landing-stage { left: 0; top: 64px; bottom: 44px; }
-  html:not([data-phx-force-landscape]) .landing-stage-inner { inset: 16px; }
+  .landing-stage { left: 0; top: 64px; bottom: 44px; }
+  .landing-stage-inner { inset: 16px; }
   /* Three columns, so one step is a third of the track (issue #1362 added the
      hull column; it was two and a half before). The step is written as the
      reciprocal of the column count in both places — a track N panes wide slid
      by 100/N per rung — so the two numbers cannot drift apart the way a
      hand-tuned pair would. */
-  html:not([data-phx-force-landscape]) .landing-track {
+  .landing-track {
     width: 300%;
     gap: 0;
     transform: translateX(calc(var(--landing-depth, 0) * -33.3333%));
   }
-  html:not([data-phx-force-landscape]) .landing-col { flex: 0 0 33.3333%; width: auto; padding-right: 16px; overflow-y: auto; }
-  html:not([data-phx-force-landscape]) .landing-col-menu { justify-content: flex-start; margin-left: 0; }
-  html:not([data-phx-force-landscape]) .landing-col-mid, html:not([data-phx-force-landscape]) .landing-col-ship { transform: none; }
+  /* `box-sizing: border-box` is what makes the step land on the column. A
+     third of the track is the column's WIDTH here and also the distance one
+     rung slides, so a content-box column was a third of the track PLUS its own
+     16px gutter — and the error accumulated: the World column sat 16px right of
+     the pane and the hull column 48px, which is how the hull picker ended up
+     with its right edge off the screen on a phone. */
+  .landing-col {
+    flex: 0 0 33.3333%;
+    width: auto;
+    box-sizing: border-box;
+    padding-right: 16px;
+    overflow-y: auto;
+  }
+  .landing-col-menu { justify-content: flex-start; margin-left: 0; }
+  .landing-col-mid, .landing-col-ship { transform: none; }
   /* One pane at a time is already the whole of the receding here, and dimming
      a column nobody can see would only follow the operator back to it. The
      INACTIVITY is not reset with it: the menu is off screen at this depth
      either way, and `inert` is written from the depth rather than from a
      breakpoint, so a pointer that could still reach it would be the one
      disagreement between the two. */
-  html:not([data-phx-force-landscape]) .is-deep .landing-col-menu { opacity: 1; }
+  .is-deep .landing-col-menu { opacity: 1; }
 
-  html:not([data-phx-force-landscape]) .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
-  html:not([data-phx-force-landscape]) .landing-logo, html:not([data-phx-force-landscape]) .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
-  html:not([data-phx-force-landscape]) .landing-wordmark { font-size: clamp(var(--text-lg), 5.4vw, var(--text-2xl)); letter-spacing: var(--tracking-wide); }
-  html:not([data-phx-force-landscape]) .landing-subline { justify-content: center; }
-  html:not([data-phx-force-landscape]) .landing-menu { gap: 8px; }
-  html:not([data-phx-force-landscape]) .landing-mi { height: 62px; }
-  html:not([data-phx-force-landscape]) .landing-mi-label { font-size: var(--text-lg); }
+  .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
+  .landing-logo, .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
+  .landing-wordmark { font-size: clamp(var(--text-lg), 5.4vw, var(--text-2xl)); letter-spacing: var(--tracking-wide); }
+  .landing-subline { justify-content: center; }
+  .landing-menu { gap: 8px; }
+  .landing-mi { height: 62px; }
+  .landing-mi-label { font-size: var(--text-lg); }
 
-  html:not([data-phx-force-landscape]) .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; }
-}
-
-/* ── Rotated phone (server/viewscreen held upright) ───────────────────── */
-/*
- * `data-phx-force-landscape` (server.html) rotates a truly portrait phone
- * into this file's landscape rules via a CSS transform, but that transform
- * doesn't change what `@media` sees: `orientation` and `width` still read
- * the true, unrotated viewport, so the rotated phone stays `orientation:
- * portrait` here and never reaches the `min-width: 1000px` landscape
- * breakpoint above. Its effective (post-rotation) width is the true
- * viewport HEIGHT, so the same compact layout applies here, keyed on
- * `max-height` instead of `max-width`, and scoped IN rather than excluded.
- * A genuinely wide rotated screen (true height >= 1000px, e.g. a tablet)
- * is left on the landscape column layout above. Kept as an exact duplicate
- * of the block above (mirrored selector/condition only) so the two never
- * drift apart silently.
- */
-@media (orientation: portrait) and (max-height: 999px) {
-  html[data-phx-force-landscape] .landing-rail {
-    top: 0; left: 0; right: 0; bottom: auto;
-    width: auto; height: 64px;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 14px;
-    padding: 0 72px 0 var(--settings-cog-keepout, 16px);
-    border-right: 0;
-    border-bottom: 1px solid var(--edge-faint);
-    background: linear-gradient(to bottom,
-      rgba(var(--rgb-panel), 0.92), rgba(var(--rgb-base), 0.4));
+  /* The two bottom corner ticks are drawn 16px in from the page's corners,
+     which on a wide screen is well clear of a status bar padded 56px. Padded
+     20px they land ON the first and last readout — the bracket and the rule
+     struck through "[WEB BUILD]" in a phone screenshot. There is no room to
+     pad past them at this width and they are pure decoration, so the bottom
+     pair stands down on a narrow screen. The top pair is untouched: nothing
+     is drawn in those corners here. */
+  .landing-ck.bl, .landing-ck.br { display: none; }
+  .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; justify-content: space-between; }
+  /* The three readouts are single lines of type, and on a phone they were
+     wrapping into two inside a 44px bar — "[WEB / BUILD]" stacked on itself,
+     overlapping its neighbour. The rules that let it happen are the rails'
+     `flex: 1` taking the slack and every span shrinking under it, so: the
+     rails stand down (`space-between` is the spacing they were drawing), and
+     the readouts hold their line. The session line is the one that can still
+     be long — it carries a room's hosting state — so it is the one allowed to
+     shrink, and it truncates rather than wraps. */
+  .landing-statusbar .landing-sep { display: none; }
+  .landing-statusbar > span { flex: 0 0 auto; white-space: nowrap; }
+  .landing-statusbar > #landing-status-session {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  html[data-phx-force-landscape] .landing-rail-stamp { writing-mode: horizontal-tb; text-orientation: mixed; }
-  html[data-phx-force-landscape] #landing-fullscreen-btn { top: 9px; right: 16px; }
-
-  html[data-phx-force-landscape] .landing-stage { left: 0; top: 64px; bottom: 44px; }
-  html[data-phx-force-landscape] .landing-stage-inner { inset: 16px; }
-  html[data-phx-force-landscape] .landing-track {
-    width: 300%;
-    gap: 0;
-    transform: translateX(calc(var(--landing-depth, 0) * -33.3333%));
-  }
-  html[data-phx-force-landscape] .landing-col { flex: 0 0 33.3333%; width: auto; padding-right: 16px; overflow-y: auto; }
-  html[data-phx-force-landscape] .landing-col-menu { justify-content: flex-start; margin-left: 0; }
-  html[data-phx-force-landscape] .landing-col-mid, html[data-phx-force-landscape] .landing-col-ship { transform: none; }
-  html[data-phx-force-landscape] .is-deep .landing-col-menu { opacity: 1; }
-
-  html[data-phx-force-landscape] .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
-  html[data-phx-force-landscape] .landing-logo, html[data-phx-force-landscape] .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
-  html[data-phx-force-landscape] .landing-wordmark { font-size: clamp(var(--text-lg), 5.4vw, var(--text-2xl)); letter-spacing: var(--tracking-wide); }
-  html[data-phx-force-landscape] .landing-subline { justify-content: center; }
-  html[data-phx-force-landscape] .landing-menu { gap: 8px; }
-  html[data-phx-force-landscape] .landing-mi { height: 62px; }
-  html[data-phx-force-landscape] .landing-mi-label { font-size: var(--text-lg); }
-
-  html[data-phx-force-landscape] .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; }
 }
 
 /* ── Short landscape (a phone on its side) ────────────────────────────── */

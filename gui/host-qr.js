@@ -95,10 +95,25 @@ export function isQrVisible(doc) {
   return shown !== '' && shown !== 'none';
 }
 
-/** Show or hide the join panel. Returns what it did, for the caller's log. */
+/**
+ * Show or hide the join panel. Returns what it did, for the caller's log.
+ *
+ * The class on the root element is for the surfaces that have to GET OUT OF
+ * THE WAY of this panel. It floats bottom-anchored over whatever is behind it,
+ * which on a screen wide enough to have a spare corner costs nothing — and on
+ * a phone held upright covers the bottom of the lobby, including its Launch
+ * control. gui/host-lobby.css's compact rules reserve room for it, and can
+ * only do that while it is actually on screen; an inline `display` is not
+ * something a stylesheet can ask about, so the one place that writes it says
+ * so here as well. Written on `documentElement` because the two are in
+ * different subtrees: the panel is viewscreen furniture and the lobby is a
+ * body-level panel beside it.
+ */
 export function setQrVisible(doc, visible) {
   const el = overlay(doc);
   if (el) el.style.display = visible ? 'block' : 'none';
+  const root = doc && doc.documentElement;
+  if (root && root.classList) root.classList.toggle('phx-join-panel-open', !!visible);
   return !!visible;
 }
 
@@ -122,6 +137,40 @@ export function applyQrPhase(doc, action) {
   if (action === 'show') return setQrVisible(doc, true);
   if (action === 'hide') return setQrVisible(doc, false);
   return null;
+}
+
+/**
+ * How many pixels wide to draw the code, for the screen it is being drawn on.
+ *
+ * 200 is the size this panel is designed at and the size it keeps on anything
+ * from a laptop up — a code read from the far side of a room. A phone host is
+ * the case that needed a number of its own: 200px of QR plus its quiet zone is
+ * two thirds of a 375px screen, and the panel it sits in floats over the lobby,
+ * so the code covered the crew list it is meant to sit beside.
+ *
+ * Drawn at the smaller size rather than SCALED to it, which is the whole reason
+ * this is a function and not a CSS rule. `QRCode.toCanvas` writes the width it
+ * is given onto the canvas as a bitmap AND as an inline style; a CSS width over
+ * that is a resample of a black-and-white grid, and a resampled QR is a QR that
+ * a camera has to work at. Asking for 168 modules-worth of canvas gives a crisp
+ * one at 168.
+ *
+ * Read off the document rather than `window`: this module draws into the native
+ * host's in-memory lobby document as well as the host page, and takes the
+ * document it is given everywhere else too. A document with no
+ * `documentElement.clientWidth` to offer (one built by a test) gets the design
+ * size, which is the same answer it got before this function existed.
+ *
+ * @param {Document} doc the document the panel is drawn in.
+ * @returns {number} the canvas width in CSS pixels.
+ */
+export function qrPixelWidth(doc) {
+  const DESIGN = 200;
+  const room = (doc && doc.documentElement && doc.documentElement.clientWidth) || 0;
+  if (!room || room >= 560) return DESIGN;
+  // A little under half the screen: enough that the card still reads as being
+  // ABOUT the code, small enough that the lobby behind it is still a lobby.
+  return Math.max(128, Math.min(DESIGN, Math.round(room * 0.45)));
 }
 
 /**
@@ -149,7 +198,7 @@ export function drawJoinQr(doc, invite, encoder, opts) {
   const canvas = doc.getElementById('qr');
   if (canvas && encoder && typeof encoder.toCanvas === 'function') {
     canvas.style.display = 'block';
-    encoder.toCanvas(canvas, url, { width: 200 });
+    encoder.toCanvas(canvas, url, { width: qrPixelWidth(doc) });
   }
 
   if (!(opts && opts.link === false)) {

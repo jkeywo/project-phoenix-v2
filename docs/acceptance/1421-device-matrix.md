@@ -113,15 +113,18 @@ PRD #1418, "Supported surfaces and enlargement":
   for. Do not check it off until that issue lands; this document only
   records the design commitment so its acceptance kit inherits the same
   matrix.
-- What **does** exist today is `server.html` (the shared Viewscreen/GM host
-  document) forcing landscape on a phone-shaped screen it is itself running
-  on (`data-phx-force-landscape`, added in `384ca3f7`): a phone used *as the
-  host machine* gets rotated into the same landscape layout as everyone
-  else, rather than falling into `host-landing.css`/`host-lobby.css`'s
-  compact portrait rules (which remain live, unguarded, for `client.html`
-  player consoles). That is a different thing from the PRD's phone-Viewscreen
-  *companion display* feature above — do not conflate the two when this
-  section is filled in for a later issue.
+- `server.html` (the shared Viewscreen/GM host document) used to force
+  landscape on a phone-shaped screen it was itself running on
+  (`data-phx-force-landscape`, added in `384ca3f7`): a phone used *as the
+  host machine* was rotated into the same landscape layout as everyone else
+  rather than taking `host-landing.css`/`host-lobby.css`'s compact portrait
+  rules. **That lock is gone.** The rotation put the landing's hull column
+  and the lobby's join card off the edge of the screen, and those sheets'
+  portrait rules — which were always live and unguarded for `client.html`
+  player consoles — now apply to the host document as well. A phone host in
+  portrait is a portrait page. That is still a different thing from the PRD's
+  phone-Viewscreen *companion display* feature above — do not conflate the
+  two when this section is filled in for a later issue.
 - **GM**: PC and tablet, **landscape only**, web today; native GM is T4 M6
   (PRD #930), out of this PRD's scope to bring forward. No phone GM, no
   portrait-tablet GM.
@@ -232,10 +235,11 @@ pass/fail/note per device in §4.
    **Return to live** appear rather than the list silently reordering under
    you, and any critical connection/recovery banner stays visible separately
    from the held list.
-4. Confirm the page stays landscape-locked on the phone-shaped case (if one
-   is available) — `data-phx-force-landscape` should rotate/relayout rather
-   than fall into `host-landing.css`'s portrait rules — and record that this
-   exercises the *host-forced-landscape* behavior in §1.4, not the (not yet
+4. Confirm the page lays out for the phone-shaped case in the orientation
+   it is held in (if one is available): held upright, the landing's menu,
+   World list and hull picker are each fully on screen one at a time, and the
+   lobby's join card and Launch control do not overlap. There is no longer a
+   landscape lock to exercise — record this against §1.4, not the (not yet
    built) phone-Viewscreen companion display.
 5. Native multi-monitor GM: do not duplicate here — run
    `docs/acceptance/1128-accessibility.md` and cite its dated result in §4.

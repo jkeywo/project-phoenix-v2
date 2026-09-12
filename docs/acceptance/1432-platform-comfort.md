@@ -134,8 +134,9 @@ On the physical phone(s) recorded in §4.1:
    (#1422).
 3. Reconnect (or force-close and reopen the browser tab) and confirm the
    chosen values survived (#1422's persistence contract).
-4. Now open the phone as a **Viewscreen** (`server.html` on the phone,
-   landscape-forced per `data-phx-force-landscape`). Open its Display tab and
+4. Now open the phone as a **Viewscreen** (`server.html` on the phone, in
+   whichever orientation it is held — there is no landscape lock). Open its
+   Display tab and
    confirm **only** text scale, contrast and Reduce effects are offered — no
    individual shake/flash/decorative-motion rows (#1429).
 5. Trigger (or load a scenario that produces) a level-3 AI-to-AI System

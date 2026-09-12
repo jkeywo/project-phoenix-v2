@@ -238,21 +238,10 @@
    this panel, and gui/host-landing.css sizes it for the middle column it docks
    into. Lives here with the rest of the picker's rules rather than in
    server.html (#1328). */
-/* html:not([data-phx-force-landscape]) excludes server.html (the
-   server/viewscreen), which sets that attribute so it always reads as
-   landscape and instead rotates a genuinely portrait phone screen into that
-   layout (see server.html's own orientation-lock CSS). */
+/* server.html takes this too: the viewscreen's landscape lock now rotates its
+   own shell only, so a phone held upright lays the picker out for the screen
+   it is on (see server.html's orientation-lock block). */
 @media (orientation: portrait), (max-width: 800px) {
-  html:not([data-phx-force-landscape]) #scenario-panel { flex-direction: column; overflow-y: auto; }
-  html:not([data-phx-force-landscape]) #world-list { width: 100%; max-width: none; min-width: 0; overflow: visible; }
-}
-/* Rotated phone (server/viewscreen held upright): `data-phx-force-landscape`
-   rotates a truly portrait phone into this file's wide rules via a CSS
-   transform, but `@media` still reads the true, unrotated viewport, so its
-   effective (post-rotation) width is the true viewport HEIGHT — same
-   layout, keyed on `max-height` instead of `max-width`, scoped IN rather
-   than excluded. */
-@media (orientation: portrait) and (max-height: 800px) {
-  html[data-phx-force-landscape] #scenario-panel { flex-direction: column; overflow-y: auto; }
-  html[data-phx-force-landscape] #world-list { width: 100%; max-width: none; min-width: 0; overflow: visible; }
+  #scenario-panel { flex-direction: column; overflow-y: auto; }
+  #world-list { width: 100%; max-width: none; min-width: 0; overflow: visible; }
 }

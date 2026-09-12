@@ -57,11 +57,13 @@ const EVERY_CONTROL = [
   RESET_ALL,
 ];
 
-// The viewscreen is a landscape surface by contract (`data-phx-force-landscape`
-// on server.html), so the rows carried here are the landscape ones PRD #1418
-// names as starting regression cases plus a landscape phone — a phone run as a
-// secondary viewscreen, which the PRD supports without claiming it is a good
-// room display.
+// The viewscreen is a landscape surface by DESIGN — a television in a room —
+// though no longer by contract: server.html's `data-phx-force-landscape` lock
+// is gone, and a phone held upright now gets a portrait page rather than a
+// rotated landscape one. The rows carried here are still the landscape ones PRD
+// #1418 names as starting regression cases plus a landscape phone — a phone run
+// as a secondary viewscreen, which the PRD supports without claiming it is a
+// good room display.
 const CARRIED_ON = ['tablet-1280x720-interim-landscape', 'phone-844x390-landscape'];
 
 const device = (id) => {

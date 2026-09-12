@@ -95,6 +95,9 @@ The first offline Workshop Authoring slice is at `/workshop.html` on the host.
 It imports one TOML/Rhai mod ZIP, edits source with pack-wide undo, and exports
 through the existing structural checks. `npm run build:workshop` also builds
 `dist/workshop.html` without compiling WASM; serve that directory over HTTP.
+On Windows, double-click `run-workshop.bat` to build it, start a local server
+and open the Workshop in your browser. Keep its window open while editing;
+Ctrl+C stops the server. It uses port 8083 and needs the installed npm dependencies.
 Runtime validation, disposable Test simulation and model tooling remain later
 M6 work. See [Editor and Workshop](wiki/entities/editor.md) for the current boundary.
 

@@ -55,7 +55,9 @@ project-root editing, model tooling, or Workshop redesign.
 
 `workshop.html` is M6's first offline browser Authoring slice. Build it with
 `npm run build:workshop` and serve `dist/workshop.html`; ordinary Trunk builds
-also ship it. Its JavaScript and TOML parser are local build artifacts. It opens
+also ship it. On Windows, `run-workshop.bat` builds the page and uses
+`scripts/serve-workshop.mjs` to serve it on loopback port 8083, opening the browser
+only after the server is listening. Its JavaScript and TOML parser are local build artifacts. It opens
 one user-selected text mod ZIP without a project-directory grant or GM session.
 `WorkshopDocument` owns immutable imported bytes, the editable source documents,
 and one chronological `UndoStack` across the whole pack. The source editor

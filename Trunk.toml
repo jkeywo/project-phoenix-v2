@@ -33,3 +33,9 @@ command_arguments = ["scripts/wasm-editor-alias.mjs", "dist/.stage"]
 stage = "post_build"
 command = "node"
 command_arguments = ["scripts/ship-cards.mjs", "dist/.stage"]
+
+# Offline Workshop Authoring is shipped beside the host and uses only local JS.
+[[hooks]]
+stage = "post_build"
+command = "node"
+command_arguments = ["scripts/build-workshop.mjs", "dist/.stage"]

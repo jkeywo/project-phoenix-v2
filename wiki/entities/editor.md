@@ -2,8 +2,8 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js]
-updated: 2026-08-31
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, gui/workshop-authoring.js, scripts/build-workshop.mjs]
+updated: 2026-09-12
 ---
 
 # Editor
@@ -50,6 +50,32 @@ authored defaults together. Feedback presentation is keyed per semantic action,
 so a busy Export or Import refusal remains alongside an outstanding Validate
 Pending state instead of erasing it. This tracer adds no unified inspector,
 project-root editing, model tooling, or Workshop redesign.
+
+## Standalone Workshop Authoring
+
+`workshop.html` is M6's first offline browser Authoring slice. Build it with
+`npm run build:workshop` and serve `dist/workshop.html`; ordinary Trunk builds
+also ship it. Its JavaScript and TOML parser are local build artifacts. It opens
+one user-selected text mod ZIP without a project-directory grant or GM session.
+`WorkshopDocument` owns immutable imported bytes, the editable source documents,
+and one chronological `UndoStack` across the whole pack. The source editor
+preserves unknown keys, comments, source BOMs and unchanged mixed line endings;
+it does not run the old editor's normalizing serializers. Undo selects the
+document it changed. Dirty state compares against the imported or last exported
+source, independently of history and validation.
+
+The thin `workshop-authoring.js` adapter uses shared private Accessibility,
+semantic Import/Validate/Export bindings, remapping and attributed local action
+feedback. Accepted action bindings take precedence over conventional history
+shortcuts outside editable fields. A failed replacement import or export keeps
+the prior draft and history. Export derives a temporary `ModPackWorkspace` and
+calls the existing `exportModPack` gate, preserving the exact edited manifest
+instead of regenerating it. The UI explicitly calls these **structural** checks:
+Rhai compilation and complete runtime admission remain the host's responsibility.
+The existing gate still refuses BOM-prefixed TOML, while the source remains
+available for repair. This slice has no Test simulation, project provider,
+structured inspector or model-asset editing; the existing editor/viewer remain
+until the M6 parity workflow is delivered.
 
 ## Validation boundary
 

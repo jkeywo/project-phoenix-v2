@@ -91,6 +91,13 @@ trunk serve --config client-trunk.toml --port 8081
 
 Then open `http://localhost:8080` as the view screen and `http://localhost:8081` on your phone (or a second tab).
 
+The first offline Workshop Authoring slice is at `/workshop.html` on the host.
+It imports one TOML/Rhai mod ZIP, edits source with pack-wide undo, and exports
+through the existing structural checks. `npm run build:workshop` also builds
+`dist/workshop.html` without compiling WASM; serve that directory over HTTP.
+Runtime validation, disposable Test simulation and model tooling remain later
+M6 work. See [Editor and Workshop](wiki/entities/editor.md) for the current boundary.
+
 ### Tests
 
 ```bash

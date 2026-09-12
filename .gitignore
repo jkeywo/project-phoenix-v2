@@ -21,6 +21,8 @@ raw
 .scratch
 .worktrees/
 .phoenix/
+.opencode
+
 
 node_modules
 

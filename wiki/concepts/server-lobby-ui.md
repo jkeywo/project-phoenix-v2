@@ -185,7 +185,10 @@ seeds the same resource from `PHOENIX_REDUCED_MOTION` at startup. Consumers
 therefore share one decision: reduced motion zeroes hull-damage camera/page
 shake and caps the shield flash, while the host CSS disables the Red Alert
 vignette pulse. The default keeps the normal effects, and
-`ViewscreenMotion.shake_intensity` is the future comfort-slider seam.
+`ViewscreenMotion.shake_intensity` now carries the separate camera-shake choice
+from `gui/viewscreen-presentation.js` (#1428). Flash/pulse and decorative motion
+have independent settings too; Viewscreen choices persist per endpoint through
+the browser/native presentation adapters, separately from private profiles.
 
 ## Tests
 

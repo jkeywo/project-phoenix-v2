@@ -2337,8 +2337,9 @@ Three things are **parked in the kit's §9** rather than dropped, following
   default layer, reports each unavailable read, and retains explicit profile
   precedence. New documents read once; crash recreation retains their defaults.
   Actual pane/reticle adoption still needs the rig pass in
-  `docs/acceptance/1127-windows-preferences.md`. The shared 200% tracer remains
-  blocked; the native setup contract still declares 100–150% support.
+  `docs/acceptance/1127-windows-preferences.md`. The shared 200% tracer and
+  Station-family workflows have landed (#1422–#1426); physical-device acceptance
+  remains in `docs/acceptance/1432-platform-comfort.md`.
 - **A crashed console's rebuild, observed.** Not constructible by hand — a view
   crash is an internal renderer fault and a borderless-fullscreen Station window
   has nothing to close. The rule is proved instead against a real running bridge

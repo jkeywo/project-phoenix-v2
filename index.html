@@ -1,17 +1,15 @@
 <!DOCTYPE html>
-<html lang="en" data-phx-force-landscape>
-<!-- data-phx-force-landscape (see the orientation-lock block in the <style>
-     below, and the matching guard in gui/host-landing.css, gui/host-lobby.css,
-     gui/host-qr.css and gui/host-scenarios.css): this document is the
-     server/viewscreen — a television in a room, never a phone console — so it
-     never falls back to those files' compact "portrait" layout. A phone run
-     as the server instead gets visually rotated into the same landscape
-     layout everyone else sees, rather than the cramped one-column mobile
-     layout those files carry for player consoles. The native host's own
-     lobby document (src/native_host/host_lobby/document.rs) carries none of
-     this — it's a desktop window and is never expected to be portrait — so it
-     doesn't set the attribute and the guarded rules behave exactly as before
-     for it. -->
+<html lang="en">
+<!-- The server/viewscreen. On a phone held upright this document lays itself
+     out for the screen it is on. It used to rotate itself a quarter turn
+     instead — `data-phx-force-landscape` on this tag held the portrait rules in
+     gui/host-landing.css, gui/host-scenarios.css, gui/host-lobby.css and
+     gui/host-qr.css off the whole document, and a CSS transform turned the body
+     sideways — which put the hull picker off the edge of the landing and the
+     join QR half off the lobby. The attribute and those sheets' guards are gone
+     together; the native host's own lobby document
+     (src/native_host/host_lobby/document.rs) never carried the attribute and
+     behaves exactly as it did. -->
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -1106,9 +1104,31 @@
       flex-direction: column-reverse;
       gap: 4px;
       max-height: 320px;
-      width: 480px;
+      /* A third of the screen, not 480 fixed pixels. Coordination chatter is
+         background reading beside the 3D view, and a third is the share that
+         reads as a column down one side rather than as a caption on a
+         television or a wall of text on a laptop. The 12px is this container's
+         own left inset, subtracted so the RIGHT edge lands on the third —
+         which is what "a third of the way across" means when you are looking
+         at it. */
+      width: calc(33.3333% - 12px);
       overflow: hidden;
       pointer-events: none;
+    }
+    /* Portrait (a phone or a tall panel held upright). A third of the WIDTH is
+       a two-word column there, so the third turns through ninety degrees: the
+       chatter takes the full width and is held to the bottom third of the
+       screen instead. Same share of the picture, spent on the dimension that
+       has room for it — and the 3D view above it stays clear. The height is a
+       cap, not a size: one bubble is one bubble tall, and the column grows
+       upward from the bottom (`column-reverse`) until it reaches the third. */
+    @media (orientation: portrait) {
+      #chatter-container {
+        left: 12px;
+        right: 12px;
+        width: auto;
+        max-height: calc(33.3333vh - 78px);
+      }
     }
     .chatter-bubble {
       font-family: "JetBrains Mono", monospace;
@@ -1538,33 +1558,24 @@
       font-size: var(--text-xs); color: var(--ink-dim);
     }
 
-    /* Orientation lock (issue: phone-as-server): the server/viewscreen is
-       designed landscape-only — `data-phx-force-landscape` on <html> (see the
-       doc comment by that attribute) keeps every OTHER surface here reading
-       its landscape rules even in a portrait viewport, so the one thing left
-       is to make a truly portrait screen (a phone held upright) actually
-       SHOW that landscape layout instead of a sideways-cropped one. The
-       classic CSS-only rotate: give the shell the viewport's dimensions
-       swapped, then rotate it a quarter turn into the real viewport. Pure
-       CSS rather than the Screen Orientation API because that API needs
-       fullscreen and Android — it would do nothing at all on an iPhone,
-       where this trick still works. */
-    @media (orientation: portrait) {
-      /* `body`, not `#server-shell`: the landing/lobby/scenario/join panels
-         are its own direct children, siblings of `#server-shell` rather than
-         nested inside it (they're shown/hidden by toggling `display` on each,
-         not composed inside the shell) — so the shell alone would rotate the
-         viewscreen and miss the very three surfaces this is for. */
-      body {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vh;
-        height: 100vw;
-        transform-origin: top left;
-        transform: rotate(90deg) translateY(-100%);
-      }
-    }
+    /* NO ORIENTATION LOCK (was: "phone-as-server"). This document used to
+       rotate itself a quarter turn on a portrait screen — `body` given the
+       viewport's dimensions swapped and turned 90deg — on the reading that the
+       server/viewscreen is landscape-only. It took the landing, the world
+       picker, the lobby and the join panel with it, because those are siblings
+       of #server-shell rather than children of it, and a quarter-turned page is
+       a sideways menu with its right-hand column off the edge: the hull picker
+       could not be reached and the join QR sat half off the screen.
+
+       So a phone held upright now gets a portrait page. Each surface here has a
+       portrait layout of its own — gui/host-landing.css, host-scenarios.css,
+       host-lobby.css, host-qr.css, which used to guard those rules with
+       `html:not([data-phx-force-landscape])` so this document never took them —
+       and the viewscreen itself already had one: gui/phone-viewscreen.js reads
+       a phone-shaped viewport directly (PRD #1418 stories 18-21), and always
+       read the TRUE one, since a CSS rotate never moved what `matchMedia`
+       reports. The attribute, the guards and the duplicated rotated-phone
+       blocks in those four sheets are all gone with the rotation. */
   </style>
 <link rel="modulepreload" href="./project-phoenix-e4b810a8d6666a1e.js" crossorigin="anonymous" integrity="sha384-Wi2tF7OrH1kd/jpwoEYSzLTRa07HCSGpYUXNXKnjP2rkD+36qvWxccQXH01KTTac"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-e4b810a8d6666a1e_bg.wasm" crossorigin="anonymous" integrity="sha384-5aDGCcwTAOQdi9FQnBrpTeerHIfngPmehJtNQolGMKlH6OgO/Pz39uRxbQN+rVuh" as="fetch" type="application/wasm"></head>
 <body>

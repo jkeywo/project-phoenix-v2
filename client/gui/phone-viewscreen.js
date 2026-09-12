@@ -28,11 +28,12 @@
  * phone" question. Reused here rather than inventing a third number for the
  * same shape of screen.
  *
- * `server.html` is landscape-LOCKED (`data-phx-force-landscape`, commit
- * 384ca3f7), but that is a pure CSS rotate of the RENDERED layout — the
- * viewport `matchMedia` reports against is the physical, pre-rotate screen,
- * so a phone held upright still matches the portrait branch below and one
- * held sideways still matches the landscape branch. That is exactly the pair
+ * `server.html` was once landscape-LOCKED (`data-phx-force-landscape`, commit
+ * 384ca3f7) — a pure CSS rotate of the RENDERED layout, which never moved the
+ * viewport `matchMedia` reports against — so this test read the physical
+ * screen then and reads it now that the lock is gone: a phone held upright
+ * matches the portrait branch below and one held sideways matches the
+ * landscape branch, either way. That is exactly the pair
  * `docs/acceptance/1421-device-matrix.md`'s phone rows exercise:
  * `phone-390x844-portrait` and `phone-844x390-landscape`.
  *

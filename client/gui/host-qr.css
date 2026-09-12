@@ -192,23 +192,91 @@
   box-sizing: border-box;
 }
 #overlay.pre-scenario #qr-panel { margin-left: auto; margin-right: auto; }
-/* html:not([data-phx-force-landscape]) excludes server.html (the
-   server/viewscreen), which sets that attribute so it always reads as
-   landscape and instead rotates a genuinely portrait phone screen into that
-   layout (see server.html's own orientation-lock CSS). */
+/* server.html takes this too: it no longer rotates a phone held upright into
+   a landscape layout, so the picker lays out for the screen it is actually on
+   (see server.html's doc comment). */
 @media (orientation: portrait), (max-width: 800px) {
-  html:not([data-phx-force-landscape]) #overlay.pre-scenario {
+  #overlay.pre-scenario {
     width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
   }
 }
-/* Rotated phone (server/viewscreen held upright): `data-phx-force-landscape`
-   rotates a truly portrait phone into this file's wide rules via a CSS
-   transform, but `@media` still reads the true, unrotated viewport, so its
-   effective (post-rotation) width is the true viewport HEIGHT — same
-   layout, keyed on `max-height` instead of `max-width`, scoped IN rather
-   than excluded. */
-@media (orientation: portrait) and (max-height: 800px) {
-  html[data-phx-force-landscape] #overlay.pre-scenario {
-    width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
+/* ── The anchored panel on a narrow screen ───────────────────────────── */
+/*
+ * Everything above draws this card at the size it is READ AT ACROSS A ROOM: a
+ * 200px code, a display-sized join code, a URL column 232px wide. On a host
+ * run from a phone that card is most of the screen — it covered the lobby it
+ * is supposed to sit beside, and the code and the URL ran off the right edge.
+ * (It used to be hidden by the landscape rotation, which turned the whole
+ * document sideways; with that gone this is what is actually on screen.)
+ *
+ * So the card is sized for the phone that is holding it rather than the room:
+ * bounded by the viewport on both sides, the code scaled to the width it has,
+ * the join code stepped down a rung or two. Nothing is dropped — every part of
+ * this panel is something a guest needs — and a phone screen is read from a
+ * foot away, which is where the room-scale sizes were earning their keep.
+ *
+ * `max-width` and not a fixed width: the panel still shrink-wraps its content,
+ * and this only stops it growing past the screen.
+ */
+/* The breakpoint is gui/host-lobby.css's own compact one, to the character.
+   The lobby reserves `--join-card-keepout` for this card, and a width where
+   one sheet had reflowed and the other had not is a reservation of the wrong
+   size — the two conditions have to open and close together. */
+@media (orientation: portrait), (max-width: 720px) {
+  /* What this card occupies, declared by the sheet that draws it, for the
+     surfaces underneath to clear — the same shape as `--settings-cog-keepout`,
+     which each host declares for the corner its cog takes. gui/host-lobby.css
+     reads it (with a fallback, so an absent value cannot invalidate the rule
+     that uses it) to scroll its body and lift its Launch control clear, and
+     only while `html.phx-join-panel-open` says there is a card on screen.
+     One rung generous: it is the card's full height plus its inset plus a
+     line of air, and being a line SHORT of it is the failure this prevents —
+     the card is measured at 315px on a 375px screen, and a join URL a few
+     characters longer than the local one makes it taller. */
+  :root { --join-card-keepout: 24rem; }
+  #overlay:not(.pre-scenario) { left: 0.75rem; right: 0.75rem; bottom: 0.75rem; }
+  /* A row instead of a column, which is what turns this from a card covering
+     the lobby into a bar sitting under it: the code on the left, and the two
+     things you read INSTEAD of scanning it — the URL and the typed code —
+     stacked in the space beside it. Same four parts, same order down the
+     card, about half the height.
+
+     Opaque, too. --scrim-panel is 60% and is chosen for a panel over the 3D
+     view, where what shows through is a starfield; over the LOBBY what shows
+     through is text, and two columns of type at 60% over each other is the
+     "misty" this panel was reported as. A phone is the one screen where this
+     panel always has a page behind it rather than a scene. */
+  #qr-panel {
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px 10px;
+    background: var(--surface-void);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 4px;
   }
+  #qr-caption { grid-column: 1 / -1; justify-self: center; }
+  #qr-link { grid-column: 1; grid-row: 2; }
+  #qr-url-row { grid-column: 2; grid-row: 2; align-items: flex-start; }
+  /* The typed code keeps the full width and stays the biggest thing here. It
+     is the part that gets READ ALOUD across the room a phone host is standing
+     in, and squeezed into the column beside the QR it was the one element that
+     still ran off the screen — eight tracked characters do not fit in 150px at
+     any size worth having. */
+  #join-code-row { grid-column: 1 / -1; grid-row: 3; margin-top: 2px; }
+  /* `joining-off` still reads correctly through the grid: it hides the code,
+     the URL row and the join row, which leaves one caption spanning both
+     columns and centred — the empty frame it is meant to be instead of. */
+  /* The quiet zone shrinks with the code it surrounds — it is a margin
+     measured in modules, not a fixed 8px, and a scanner reads it as part of
+     the code either way. The CODE's own size is not set here: gui/host-qr.js's
+     `qrPixelWidth` draws the canvas at the size that fits, because scaling a
+     QR in CSS resamples the grid a camera has to read. */
+  #qr-link { padding: 6px; }
+  #qr-url-row { max-width: 100%; }
+  /* Two rungs down from --text-display. The join code is still the largest
+     thing on the card, which is the whole of its job. */
+  #join-code { font-size: var(--text-2xl); padding: 4px 6px 4px 12px; }
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountWorkshopAuthoring } from '../../gui/workshop-authoring.js';
-import { readStoreZip } from '../../editor/mod-pack-export.js';
+import { readStoreZip, createStoreZip } from '../../editor/mod-pack-export.js';
 import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { OPERATOR_PROFILE_KEY, createOperatorProfileSnapshot } from '../../gui/operator-profile.js';
 import { t } from '../../gui/strings.js';
@@ -83,6 +83,14 @@ describe('Workshop Authoring browser surface', () => {
     byId('export').click();
     expect(byId('dirty').textContent).toBe(t('workshop.dirty'));
     expect(document.querySelector('[data-action-id="editor.mod.export"]').dataset.state).toBe('Refused');
+  });
+
+  it('localises a missing-manifest refusal and preserves the previously imported pack', async () => {
+    await importBytes();
+    await importBytes(createStoreZip([{ path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT }]));
+    expect(document.querySelector('.workshop-findings').textContent).toContain(t('workshop.missing_manifest'));
+    expect(byId('files').querySelectorAll('option')).toHaveLength(2);
+    expect(document.querySelector('[data-action-id="editor.mod.import"]').dataset.state).toBe('Refused');
   });
 
   it('uses the shared profile text scale and remapped structural-check action', async () => {

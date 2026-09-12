@@ -21,6 +21,7 @@ workshop.exported,Successful export with runtime validation boundary,[ZIP export
 workshop.imported,Successful import does not claim content is valid,[Pack imported. Select a document to edit or check its structure.]
 workshop.changed,Editing invalidates previous structural validation,[Source changed. Check structure again before exporting.]
 workshop.start,Empty Workshop instruction,[Import a mod ZIP to begin. Only this pack is editable.]
+workshop.missing_manifest,Import refusal for an archive without its required manifest,[The pack is missing scenarios.toml.]
 server.gm.return_to_host_lobby,Native prelaunch recovery button when only the saved GM monitor remains. Disables the GM role through host layout and restores the host lobby on the freed monitor,[Return to host lobby]
 settings.gm.confirmation.station,GM takeover or release; {action} {ship} {station},[{action}: {ship} / {station}]
 settings.gm.confirmation.station_command,GM authentic Station command confirmation; {ship} {station},[Send the latest control intent to {ship} / {station}.]

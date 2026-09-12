@@ -194,7 +194,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       show('workshop.imported');
       pending.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
     } catch (error) {
-      show('editor.mod.import.previous_workspace_preserved', [String(error.message)], true);
+      show('editor.mod.import.previous_workspace_preserved', [
+        error.code === 'workshop-missing-manifest' ? t('workshop.missing_manifest') : String(error.message),
+      ], true);
       pending.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
     } finally {
       pendingImport = null;

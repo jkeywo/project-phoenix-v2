@@ -39,7 +39,9 @@ export class WorkshopDocument {
   constructor(bytes) {
     const archive = readStoreZipArchive(Uint8Array.from(bytes));
     if (!Object.hasOwn(archive.files, MANIFEST_PATH)) {
-      throw new Error('scenarios.toml is missing');
+      const error = new Error(MANIFEST_PATH);
+      error.code = 'workshop-missing-manifest';
+      throw error;
     }
     this._source = archive.source;
     this._files = new Map(Object.entries(archive.files));

@@ -33,6 +33,10 @@ pub struct PreparedBlaster {
     gain: f32,
     matrix: super::spatial::StereoMatrix,
 }
+pub struct PreparedComputer {
+    pcm: Arc<Pcm>,
+    gain: f32,
+}
 impl Default for RoomPlayer {
     fn default() -> Self {
         Self {
@@ -46,7 +50,7 @@ impl Default for RoomPlayer {
 }
 impl RoomPlayer {
     pub fn prepare(&mut self, input: &RoomInput) {
-        let paths: Vec<_> = [
+        let mut paths: Vec<_> = [
             Some(MENU),
             input.config.ambient.as_ref().map(|s| s.file.as_str()),
             input.config.engine.as_ref().map(|s| s.file.as_str()),
@@ -67,29 +71,18 @@ impl RoomPlayer {
         .into_iter()
         .flatten()
         .collect();
+        if let Some(config) = &input.config.computer_message {
+            paths.extend(
+                ["info", "advisory", "warning", "critical"]
+                    .into_iter()
+                    .filter_map(|severity| {
+                        config.for_severity(severity).map(|cue| cue.file.as_str())
+                    }),
+            );
+        }
         self.cache.retain(|path, _| paths.contains(&path.as_str()));
         self.failures.clear();
-        self.asset(MENU);
-        for path in [
-            input.config.ambient.as_ref().map(|s| s.file.as_str()),
-            input.config.engine.as_ref().map(|s| s.file.as_str()),
-            input.config.phaser_loop.as_ref().map(|s| s.file.as_str()),
-            input.config.forcefield.as_ref().map(|s| s.file.as_str()),
-            input.config.blaster.as_ref().map(|s| s.file.as_str()),
-            input
-                .config
-                .red_alert
-                .as_ref()
-                .map(|s| s.music_file.as_str()),
-            input
-                .config
-                .red_alert
-                .as_ref()
-                .map(|s| s.siren_file.as_str()),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        for path in &paths {
             self.asset(path);
         }
     }
@@ -254,6 +247,29 @@ impl RoomPlayer {
                 prepared.gain,
                 prepared.matrix,
             );
+        }
+    }
+    pub fn prepare_computer(
+        &mut self,
+        input: &RoomInput,
+        severity: &str,
+    ) -> Option<PreparedComputer> {
+        let spec = input
+            .config
+            .computer_message
+            .as_ref()?
+            .for_severity(severity)?;
+        Some(PreparedComputer {
+            pcm: self.asset(&spec.file)?,
+            gain: spec.volume,
+        })
+    }
+    pub fn play_computer(&mut self, input: &RoomInput, ready: bool, prepared: PreparedComputer) {
+        if ready && input.lifecycle.running && !input.lifecycle.suspended {
+            self.mixer
+                .lock()
+                .unwrap()
+                .cue("computer", prepared.pcm, "alerts", prepared.gain, None);
         }
     }
 }

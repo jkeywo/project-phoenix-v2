@@ -124,6 +124,11 @@ pub(super) fn run(
                 })
                 .flatten()
         });
+        let prepared_computer = request.computer.as_ref().and_then(|(at, severity)| {
+            (stream.is_some() && at.elapsed() <= Duration::from_millis(250))
+                .then(|| player.prepare_computer(&request.input, severity))
+                .flatten()
+        });
         let mut fresh = control.lock().unwrap();
         if fresh.quit {
             break;
@@ -131,6 +136,7 @@ pub(super) fn run(
         if fresh.input != request.input
             || fresh.retry != request.retry
             || fresh.blaster != request.blaster
+            || fresh.computer != request.computer
         {
             continue;
         }
@@ -147,6 +153,11 @@ pub(super) fn run(
                 if let Some(prepared) = prepared_blaster {
                     player.play_blaster(&fresh.input, ready, prepared);
                 }
+            }
+        }
+        if fresh.take_computer(Instant::now()).is_some() {
+            if let Some(prepared) = prepared_computer {
+                player.play_computer(&fresh.input, ready, prepared);
             }
         }
         if fresh.test != last_test {

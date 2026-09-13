@@ -43,6 +43,7 @@ import { gameOverView } from '../../gui/game-over-view.js';
 import { createPresentationCard } from '../../gui/presentation-card.js';
 import { mountSensorReport } from '../../gui/sensor-report.js';
 import { createAudioLiveEquivalents } from '../../gui/audio-live-equivalents.js';
+import { createComputerMessageBanner } from '../../gui/computer-message.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HTML = readFileSync(path.join(root, 'gui/viewscreen-hud.html'), 'utf8');
@@ -90,7 +91,7 @@ const IMPORTED = [...MODULE.matchAll(/^\s*import\s*\{([^}]*)\}/gm)]
   .sort();
 
 /** What `runIsland` binds those names to, in declaration order. */
-const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView, createPresentationCard, mountSensorReport, createAudioLiveEquivalents };
+const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView, createPresentationCard, mountSensorReport, createAudioLiveEquivalents, createComputerMessageBanner };
 
 /**
  * Run the island's body with its imports bound to the real gui/ modules.
@@ -126,6 +127,43 @@ function push(state) {
 
 const text = (id) => document.getElementById(id)?.textContent;
 const slotLabel = (id) => document.querySelector(`[data-i18n="${id}"]`)?.textContent;
+
+describe('current native computer message', () => {
+  it('renders permitted text, severity and known Station from a pre-module HUD then replaces and clears it', () => {
+    mountPage();
+    push({computer_message:{text:'Maintain course.',severity:'advisory',station:'helm'}});
+    runIsland();
+    expect(text('hud-computer-message-text')).toBe('Maintain course.');
+    expect(text('hud-computer-message-severity')).toContain(t('server.computer_message.severity.advisory'));
+    expect(text('hud-computer-message-station')).toContain(t('station.helm.name'));
+    expect(document.querySelector('#hud-computer-message').hidden).toBe(false);
+    push({computer_message:{text:'<script>literal authored text</script>',severity:'critical',station:'not-a-station'}});
+    expect(text('hud-computer-message-text')).toBe('<script>literal authored text</script>');
+    expect(document.querySelector('#hud-computer-message script')).toBeNull();
+    expect(text('hud-computer-message-severity')).toContain(t('server.computer_message.severity.critical'));
+    expect(text('hud-computer-message-station')).toBe('');
+    push({computer_message:null});
+    expect(document.querySelector('#hud-computer-message').hidden).toBe(true);
+    expect(text('hud-computer-message-text')).toBe('');
+    expect(document.querySelectorAll('.vs-computer-message')).toHaveLength(1);
+  });
+
+  it('uses explicit severity words while muted and never depends on a browser audio API', () => {
+    mountPage(); runIsland();
+    for (const severity of ['info','advisory','warning','critical']) {
+      push({computer_message:{text:'Current information.',severity,station:null}});
+      expect(text('hud-computer-message-severity')).toContain(t('server.computer_message.severity.' + severity));
+      expect(text('hud-computer-message-station')).toBe('');
+      expect(document.querySelector('#hud-computer-message').getAttribute('role')).toBe('status');
+    }
+    // A document recreate paints current state, without an audio trigger or a
+    // list of previous messages anywhere in its DOM.
+    mountPage(); runIsland();
+    push({computer_message:{text:'Current information.',severity:'warning',station:null}});
+    expect(document.querySelectorAll('.vs-computer-message-text')).toHaveLength(1);
+    expect(text('hud-computer-message-text')).toBe('Current information.');
+  });
+});
 
 /** The real table, restored after any test that takes it away. */
 const REAL_TABLE = getTable();
@@ -233,7 +271,7 @@ describe('the page localises itself from the String Table', () => {
     // header — the island never evaluates and the prelude's fallback carries
     // the Viewscreen — and a name added to an import list would otherwise be
     // an undefined binding here rather than a failing expectation.
-    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js', 'game-over-view.js', 'presentation-card.js', 'sensor-report.js', 'audio-live-equivalents.js']);
+    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js', 'game-over-view.js', 'presentation-card.js', 'sensor-report.js', 'audio-live-equivalents.js', 'computer-message.js']);
     for (const file of SPECIFIERS) {
       expect(existsSync(path.join(root, 'gui', file)), `gui/${file}`).toBe(true);
     }

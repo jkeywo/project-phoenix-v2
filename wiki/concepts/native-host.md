@@ -1248,7 +1248,13 @@ audio rows and presentation cards inherit them live and after recreation. An
 active card does not cover a simultaneous audio equivalent.
 Loading, hidden, recreated and restored documents do not catch up missed shots;
 only current lifecycle/beam state retries a failed document push.
-Computer-message playback is a subsequent audio slice.
+The current ship's-computer message is rendered by `gui/computer-message.js` on
+both Viewscreens: permitted text, an explicit severity word and a recognised
+Station cue, cleared by the existing HUD's absence/expiry. A fresh
+`ComputerMessagePosted` occurrence reaches the native Alerts bus through its
+optional authored severity asset, including a replacement at unchanged severity.
+There is one expiring tone slot; mute, output recovery or restore drops it. The
+current text remains readable independently of playback, with no new history.
 
 ## Input routing (issue #1124)
 

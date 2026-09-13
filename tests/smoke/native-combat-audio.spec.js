@@ -123,3 +123,44 @@ test('native Display controls scale and contrast both live audio and presentatio
   expect(await page.evaluate(() => window.requests.length)).toBe(3);
   expect(errors).toEqual([]);
 });
+
+test('native computer text remains current, scaled and explicit while room sound is unavailable @core', async ({ page }) => {
+  await page.route('**/native-hud-display-probe', route => route.fulfill({contentType:'text/html',body:DISPLAY_PAGE}));
+  await page.goto('/native-hud-display-probe');
+  const hud = page.frameLocator('#hud');
+  await expect(hud.locator('#hud-computer-message')).toBeAttached();
+  await page.evaluate(script => {
+    const child = document.querySelector('#hud').contentWindow;
+    child.eval(script);
+    child.__updateHud(JSON.stringify({computer_message:{text:'Maintain course.',severity:'advisory',station:'helm'},
+      presentation_card:{kind:'title',title:'Incoming',body:'Current presentation.'}}));
+    window.shell.open(); window.shell.selectTab('presentation');
+  }, reading[0].script);
+  const banner = hud.locator('#hud-computer-message');
+  const text = hud.locator('#hud-computer-message-text');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('Advisory');
+  await expect(banner).toContainText('Helm');
+  const base = await text.evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+  await page.locator('[data-control="viewscreen-text-scale"]').focus();
+  await page.keyboard.press('End');
+  expect(await text.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(base * 1.6, 4);
+  await page.locator('[data-control="viewscreen-contrast-on"]').click();
+  expect(await banner.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(0, 0, 0)');
+  expect(await text.evaluate(el => getComputedStyle(el).color)).toBe('rgb(255, 255, 255)');
+  expect(await banner.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
+  expect(await banner.evaluate(el => {
+    const r=el.getBoundingClientRect(); el.style.pointerEvents='auto';
+    const top=el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));
+    el.style.pointerEvents=''; return top;
+  })).toBe(true);
+  await page.evaluate(() => document.querySelector('#hud').contentWindow.__updateHud(JSON.stringify({
+    computer_message:{text:'Replacement message.',severity:'critical',station:'unknown-station'}
+  })));
+  await expect(text).toHaveText('Replacement message.');
+  await expect(banner).toContainText('Critical');
+  await expect(hud.locator('#hud-computer-message-station')).toBeEmpty();
+  await page.evaluate(() => document.querySelector('#hud').contentWindow.__updateHud(JSON.stringify({computer_message:null})));
+  await expect(banner).toBeHidden(); await expect(text).toBeEmpty();
+  await expect(hud.locator('.vs-computer-message')).toHaveCount(1);
+});

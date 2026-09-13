@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="server.hud_doc_title">Phoenix Viewscreen HUD</title>
   <link rel="stylesheet" href="audio-settings.css">
+  <link rel="stylesheet" href="computer-message.css">
   <!--
     The native host's viewscreen HUD overlay (issue #422's HTML overlay, ported
     to the native path). server.html renders this same #hud-overlay above its
@@ -47,11 +48,9 @@
     boundary, which resolves the ids among them and passes a scenario's
     authored prose through untouched.
 
-    One thing server.html's viewscreen draws is simply absent here, and this
-    page carries neither the markup nor the ids for it: the ship's-computer
-    banner it renders from `computer_message` (server.html:1946-1951, 2710-2745,
-    issue #1342). Adding it changes what the shared Viewscreen SHOWS, which is
-    a different change from wiring the table in.
+    The ship's-computer banner uses gui/computer-message.js on both surfaces.
+    It consumes only the current permitted computer_message HUD field, not a
+    history or a playback trigger; the native process owns optional tones.
   -->
   <!--
     No external font stylesheet: the native host is offline/LAN, and a
@@ -600,6 +599,7 @@
     import { createPresentationCard } from './presentation-card.js';
     import { mountSensorReport } from './sensor-report.js';
     import { createAudioLiveEquivalents } from './audio-live-equivalents.js';
+    import { createComputerMessageBanner } from './computer-message.js';
 
     // ONE guard for the whole page: with a table, this island localises the
     // markup and installs the localising renderer; without one it does neither
@@ -691,12 +691,14 @@
 
     if (hasTable) hud.render = renderLocalised;
     const presentationCard = createPresentationCard();
+    const computerMessage = createComputerMessageBanner();
     const renderReport = mountSensorReport(document);
     const renderBase = hud.render || hud.renderRaw;
     hud.render = function(json) {
       renderBase(json);
       let state; try { state = typeof json === "string" ? JSON.parse(json) : json; } catch { state = null; }
       presentationCard.update(state?.presentation_card || null);
+      computerMessage.update(state?.computer_message || null);
       renderReport(state?.sensor_report || null);
     };
 

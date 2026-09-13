@@ -84,7 +84,16 @@ struct Control {
     test_at: Option<Instant>,
     alert_at: Option<Instant>,
     blaster: Option<(Instant, [f32; 3])>,
+    computer: Option<(Instant, String)>,
     quit: bool,
+}
+impl Control {
+    fn take_computer(&mut self, now: Instant) -> Option<String> {
+        self.computer.take().and_then(|(at, severity)| {
+            (now.saturating_duration_since(at) <= std::time::Duration::from_millis(250))
+                .then_some(severity)
+        })
+    }
 }
 /// Requests contain only current settings/state and one expiring deliberate test.
 /// They are overwritten, never an audio event queue.
@@ -170,6 +179,7 @@ impl NativeRoomAudio {
             test_at: None,
             alert_at: None,
             blaster: None,
+            computer: None,
             quit: false,
         }));
         let player = RoomPlayer::default();
@@ -222,6 +232,7 @@ impl NativeRoomAudio {
             control.test_at = None;
             control.alert_at = None;
             control.blaster = None;
+            control.computer = None;
         } else if control.input.red_alert != input.red_alert {
             control.alert_at = input.red_alert.then(Instant::now);
         }
@@ -234,6 +245,24 @@ impl NativeRoomAudio {
             // decoder/device never accumulates a playback queue.
             control.blaster = Some((Instant::now(), position));
             self.visuals.blaster(position);
+        }
+    }
+    pub fn computer_message(&self, severity: &str) {
+        let mut control = self.control.lock().unwrap();
+        if control.input.lifecycle.running && !control.input.lifecycle.suspended {
+            if let Some(spec) = control
+                .input
+                .config
+                .computer_message
+                .as_ref()
+                .and_then(|config| config.for_severity(severity))
+            {
+                if self.mixer.lock().unwrap().mix.gain("alerts", spec.volume) > 0.0 {
+                    // One expiring occurrence, even for repeated equal severity.
+                    // Current text travels independently in the normal HUD.
+                    control.computer = Some((Instant::now(), severity.to_owned()));
+                }
+            }
         }
     }
     pub fn command(&mut self, record: &HostLobbyRecord) {
@@ -257,6 +286,9 @@ impl NativeRoomAudio {
                     return;
                 }
                 self.mixer.lock().unwrap().set_mix(state.mix);
+                if state.mix.gain("alerts", 1.0) == 0.0 {
+                    self.control.lock().unwrap().computer = None;
+                }
                 state.persistence = if self
                     .preferences
                     .as_ref()
@@ -305,6 +337,7 @@ impl NativeRoomAudio {
                         control.test_at = None;
                         control.alert_at = None;
                         control.blaster = None;
+                        control.computer = None;
                         self.mixer.lock().unwrap().stop_all();
                     }
                     Err(error) => {
@@ -319,6 +352,7 @@ impl NativeRoomAudio {
                 control.test_at = None;
                 control.alert_at = None;
                 control.blaster = None;
+                control.computer = None;
                 self.mixer.lock().unwrap().stop_all();
             }
             HostLobbyRecord::TestAudioOutput => {
@@ -406,6 +440,10 @@ fn update_room(
         if let Ok(cue) = codec::decode_native_audio_cue(&event.json) {
             if cue.kind == "blaster" {
                 audio.blaster([cue.x, cue.y, cue.z]);
+            } else if cue.kind == "computer_message" {
+                if let Some(severity) = cue.severity {
+                    audio.computer_message(&severity);
+                }
             }
         }
     }
@@ -418,6 +456,8 @@ fn update_room(
 
 #[cfg(test)]
 mod combat_tests;
+#[cfg(test)]
+mod computer_tests;
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // Random UUIDs isolate temporary test directories.
 mod tests;

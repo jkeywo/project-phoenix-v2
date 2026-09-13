@@ -40,7 +40,99 @@ beforeEach(() => {
 afterEach(() => { mounted.dispose(); vi.restoreAllMocks(); });
 
 describe('Workshop Authoring browser surface', () => {
-  it('creates one pack and imports a binary asset through chronological undo without editing dependency source', async () => {
+  it('tests unsaved mod source with a read-only base hull and keeps Authoring and Test exclusive', async () => {
+    mounted.dispose();
+    const files = readStoreZip(workshopPack());
+    const baseHull = 'assets/entities/base-hull.toml';
+    let run = null;
+    const request = vi.fn(async value => {
+      if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'initial', files };
+      if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
+      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: { worlds: [WORKSHOP_WORLD], ships: [baseHull] } };
+      if (value.op === 'test-start') {
+        run = { running: true, paused: false, tick: 0, multiplier: 1, selection: value.selection };
+        return { status: 'test', run };
+      }
+      if (value.op === 'test-control') {
+        if (value.control.command === 'pause') run = { ...run, paused: true };
+        if (value.control.command === 'step') run = { ...run, tick: run.tick + 1 };
+        return { status: 'test', run };
+      }
+      if (value.op === 'test-status') return { status: 'test', run };
+      if (value.op === 'test-stop') { run = null; return { status: 'test', run }; }
+      return { status: 'done' };
+    });
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), provider: createNativeWorkshopProvider({ request }) });
+    await mounted.ready;
+    await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
+    expect([...byId('files').options].some(option => option.value === baseHull)).toBe(false);
+    expect(byId('test-ship').value).toBe(baseHull);
+    select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# unsaved first\n`);
+    await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
+    byId('test-start').click();
+    await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(true));
+    expect(document.querySelector('.workshop-toolbar').hidden).toBe(true);
+    expect(byId('test-world').disabled).toBe(true);
+    const first = request.mock.calls.find(([value]) => value.op === 'test-start')[0];
+    expect(first.files[WORKSHOP_WORLD]).toContain('# unsaved first');
+    expect(first.selection).toMatchObject({ ship: baseHull, seed: 1 });
+    edit('must not enter the running draft'); // Even synthetic input is held.
+    byId('test-authoring').click();
+    await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(false));
+    expect(byId('source').value).toContain('# unsaved first');
+    expect(request.mock.calls.filter(([value]) => value.op === 'test-control').map(([value]) => value.control)).toEqual([
+      { command: 'pause' }, { command: 'visibility', visible: false },
+    ]);
+    edit(`${WORKSHOP_WORLD_TEXT}# unsaved second\n`);
+    expect(byId('test-status').textContent).toContain(t('workshop.test_stale'));
+    await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
+    byId('test-start').click();
+    await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(true));
+    const starts = request.mock.calls.filter(([value]) => value.op === 'test-start');
+    expect(starts).toHaveLength(2);
+    expect(starts[1][0].files[WORKSHOP_WORLD]).toContain('# unsaved second');
+    expect(byId('test-status').textContent).not.toContain(t('workshop.test_stale'));
+    byId('test-pause').click();
+    await vi.waitFor(() => expect(byId('test-step').disabled).toBe(false));
+    byId('test-step').click();
+    await vi.waitFor(() => expect(run.tick).toBe(1));
+    run = { ...run, running: false, error: 'Model load failed' };
+    await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(false));
+    expect(byId('test-status').textContent).toContain('Model load failed');
+    expect(byId('source').value).toContain('# unsaved second');
+    expect(request.mock.calls.some(([value]) => value.op === 'save-sources')).toBe(false);
+  });
+
+  it('retains an unavailable Test hull after source edits until an explicit replacement is selected', async () => {
+    mounted.dispose();
+    const files = readStoreZip(workshopPack());
+    const oldHull = 'assets/entities/old.toml', newHull = 'assets/entities/new.toml';
+    let ships = [oldHull];
+    const request = vi.fn(async value => {
+      if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'initial', files };
+      if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
+      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: { worlds: [WORKSHOP_WORLD], ships } };
+      if (value.op === 'test-stop') return { status: 'test', run: null };
+      return { status: 'done' };
+    });
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), provider: createNativeWorkshopProvider({ request }) });
+    await mounted.ready;
+    await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
+    ships = [newHull];
+    select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# hull removed\n`);
+    await vi.waitFor(() => expect([...byId('test-ship').options].map(option => option.value)).toContain(newHull));
+    expect(byId('test-ship').value).toBe(oldHull);
+    expect(byId('test-ship').selectedOptions[0].disabled).toBe(true);
+    expect(byId('test-start').disabled).toBe(true);
+    byId('test-start').click();
+    expect(request.mock.calls.some(([value]) => value.op === 'test-start')).toBe(false);
+    byId('test-ship').value = newHull; byId('test-ship').dispatchEvent(new Event('change'));
+    expect(byId('test-start').disabled).toBe(false);
+    byId('test-seed').value = ''; byId('test-seed').dispatchEvent(new Event('change'));
+    expect(byId('test-start').disabled).toBe(true);
+  });
+
+  it.each(['assets/models/test.glb', 'assets/models/nested/buffer.bin'])('creates one pack and imports %s through chronological undo without editing dependency source', async path => {
     mounted.dispose();
     const dependencies = { base_files: { 'assets/scenarios.toml': '[content]\nid="phoenix-base"\nepoch=1\n' }, packs: [] };
     runtime.dependencies = async () => dependencies;
@@ -48,17 +140,17 @@ describe('Workshop Authoring browser surface', () => {
     await mounted.ready;
     byId('new').click();
     await vi.waitFor(() => expect(byId('files').options.length).toBe(2));
-    byId('add-path').value = 'assets/models/test.glb';
+    byId('add-path').value = path;
     const assetInput = document.querySelectorAll('input[type=file]')[1];
     Object.defineProperty(assetInput, 'files', { configurable: true, value: [{ arrayBuffer: async () => new Uint8Array([0, 255, 13, 10]) }] });
     assetInput.dispatchEvent(new Event('change'));
-    await vi.waitFor(() => expect(byId('files').value).toBe('assets/models/test.glb'));
+    await vi.waitFor(() => expect(byId('files').value).toBe(path));
     expect(byId('source').disabled).toBe(true);
     expect(byId('source').value).toContain('4');
     byId('undo').click();
-    expect([...byId('files').options].map(option => option.value)).not.toContain('assets/models/test.glb');
+    expect([...byId('files').options].map(option => option.value)).not.toContain(path);
     byId('redo').click();
-    expect(byId('files').value).toBe('assets/models/test.glb');
+    expect(byId('files').value).toBe(path);
     byId('dependencies-load').click();
     await vi.waitFor(() => expect(byId('dependency-source').value).toContain('phoenix-base'));
     expect(byId('dependency-source').readOnly).toBe(true);

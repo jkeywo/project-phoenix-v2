@@ -1,5 +1,42 @@
 use crate::core::messages::{ClientMessage, ServerMessage};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn encode_workshop_test_launch(
+    value: &crate::workshop::test_protocol::Launch,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| e.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn decode_workshop_test_launch(
+    value: &[u8],
+) -> Result<crate::workshop::test_protocol::Launch, String> {
+    serde_json::from_slice(value).map_err(|e| e.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn encode_workshop_test_status(
+    value: &crate::workshop::test_protocol::TestStatus,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| e.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn decode_workshop_test_status(
+    value: &str,
+) -> Result<crate::workshop::test_protocol::TestStatus, String> {
+    serde_json::from_str(value).map_err(|e| e.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn encode_workshop_test_control(
+    value: &crate::workshop::test_protocol::ControlRecord,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| e.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn decode_workshop_test_control(
+    value: &str,
+) -> Result<crate::workshop::test_protocol::ControlRecord, String> {
+    serde_json::from_str(value).map_err(|e| e.to_string())
+}
+
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn encode_workshop_key(key: &crate::native_host::workshop::keyboard::WorkshopKey) -> String {
     serde_json::to_string(key).expect("local Authoring keys serialize")
@@ -1876,6 +1913,8 @@ pub fn decode_workshop_request(
             | Operation::LoadSources
             | Operation::RecoveryLoad
             | Operation::RecoveryClear
+            | Operation::TestStatus
+            | Operation::TestStop
     ) && field_count != 1
     {
         return Err("Unexpected Workshop operation field".into());

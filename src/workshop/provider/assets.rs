@@ -48,6 +48,7 @@ pub fn binary_path(path: &str) -> bool {
     ]
     .iter()
     .any(|suffix| path.ends_with(suffix))
+        || (path.starts_with("assets/models/") && path.ends_with(".bin"))
 }
 
 struct Upload {

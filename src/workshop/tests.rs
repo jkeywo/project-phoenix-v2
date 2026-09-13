@@ -7,6 +7,7 @@ fn dependencies() -> WorkshopDependencies {
             "[content]\nid = \"phoenix-base\"\nepoch = 1\n".into(),
         )]),
         packs: Vec::new(),
+        base_assets: BTreeMap::new(),
     }
 }
 

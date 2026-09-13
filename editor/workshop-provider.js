@@ -100,6 +100,34 @@ export function createNativeWorkshopProvider({ request }) {
       }
       return bytes;
     },
+    test: {
+      async catalog(files) {
+        const response = await call({ op: 'test-catalog', files });
+        const value = response?.catalog;
+        if (response?.status !== 'test-catalog' || !value || !['worlds', 'ships'].every(key =>
+          Array.isArray(value[key]) && value[key].every(path => typeof path === 'string'))) throw new Error('Invalid native Test catalogue');
+        return value;
+      },
+      async start(files, selection) {
+        const response = await call({ op: 'test-start', files, selection });
+        if (response?.status !== 'test' || !response.run) throw new Error('Invalid native Test start');
+        return response.run;
+      },
+      async control(control) {
+        const response = await call({ op: 'test-control', control });
+        if (response?.status !== 'test') throw new Error('Invalid native Test control');
+        return response.run || { running: false };
+      },
+      async status() {
+        const response = await call({ op: 'test-status' });
+        if (response?.status !== 'test') throw new Error('Invalid native Test status');
+        return response.run || { running: false };
+      },
+      async stop() {
+        const response = await call({ op: 'test-stop' });
+        if (response?.status !== 'test' || response.run) throw new Error('Invalid native Test stop');
+      },
+    },
     recovery: {
       async load() {
         const value = (await call({ op: 'recovery-load' })).recovery;

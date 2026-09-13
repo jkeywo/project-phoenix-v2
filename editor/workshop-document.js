@@ -8,7 +8,8 @@ import { createStoreZip, exportModPack, MANIFEST_PATH, readStoreZipArchive } fro
 import { UndoStack } from './undo-stack.js';
 
 const encode = text => new TextEncoder().encode(text);
-export const isWorkshopBinary = path => /\.(glb|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(path);
+export const isWorkshopBinary = path => /\.(glb|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(path)
+  || (path.startsWith('assets/models/') && path.endsWith('.bin'));
 export const isNativeAssetReference = value => value && typeof value === 'object'
   && Object.keys(value).length === 2 && typeof value.asset === 'string'
   && /^[0-9a-f]{16}-[0-9]+$/.test(value.asset) && Number.isSafeInteger(value.length)
@@ -119,6 +120,7 @@ export class WorkshopDocument {
     if (equal(before, after)) return false;
     this._history.push({ path, before: copy(before), after });
     this._files.set(path, after);
+    this._sourceRevision = this.sourceRevision + 1;
     return true;
   }
   sourceBytes() {
@@ -126,6 +128,7 @@ export class WorkshopDocument {
     return Uint8Array.from(this._source.bytes);
   }
   canUndo() { return this._history.canUndo(); }
+  get sourceRevision() { return this._sourceRevision || 0; }
   canRedo() { return this._history.canRedo(); }
   isDirty() {
     return !mapsEqual(this._files, this._exported);
@@ -138,6 +141,7 @@ export class WorkshopDocument {
     if (before === after) return false;
     this._history.push({ path, before, after });
     this._files.set(path, after);
+    this._sourceRevision = this.sourceRevision + 1;
     return true;
   }
 
@@ -146,6 +150,7 @@ export class WorkshopDocument {
     if (!entry) return null;
     if (entry.before === null) this._files.delete(entry.path);
     else this._files.set(entry.path, copy(entry.before));
+    this._sourceRevision = this.sourceRevision + 1;
     return entry.path;
   }
 
@@ -153,6 +158,7 @@ export class WorkshopDocument {
     const entry = this._history.redo();
     if (!entry) return null;
     this._files.set(entry.path, copy(entry.after));
+    this._sourceRevision = this.sourceRevision + 1;
     return entry.path;
   }
 

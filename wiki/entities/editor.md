@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
 updated: 2026-09-13
 ---
 
@@ -145,9 +145,37 @@ and recovery draft, and retires an unfinished import after older accepted work
 finishes. A pane becomes live only after its modules and source startup settle;
 failed initialisation follows the bounded pane rebuild path.
 
-Disposable Test simulation, specialised entity/definition/model panels and runtime
-model asset overlays remain later M6 work. The existing editor/viewer remain
-until the parity workflow is delivered.
+Native Authoring forwards physical key identity, modifiers, repeat and release
+through the shared semantic dispatcher. Unclaimed input reaches the embedded
+engine for ordinary text and caret editing; Ctrl+Tab remains host-owned.
+
+Native Test uses `provider/test_snapshot.rs` to materialize and validate one
+immutable unsaved document plus its read-only dependencies. Its source-based
+catalogue resolves complete composed hulls, including base hulls outside the
+editable mod. `native_host/workshop/test_process.rs` stages exact bytes in a
+private directory and launches the same host executable with explicit world,
+hull and seed selection. The child has no delivery listener or crew transport.
+The child pins both filesystem and Bevy asset roots to that stage. Runtime
+shader support is captured read-only alongside the authored snapshot; there is
+no fallback to current project files. The native Live layout store is disabled.
+Inherited pipes carry only typed clock/visibility controls and current status.
+The native host's ordinary solo launch assigns every Station Backfill.
+
+`test_clock.rs` feeds the ordinary fixed schedules: Pause holds the virtual clock,
+Step supplies exactly one fixed timestep after discarding a partial frame, and
+1×/2×/4×/8× acceleration changes the virtual rate. The shared
+`editor/workshop-test.js` controller and `gui/workshop-test-panel.js` keep Test
+and source controls exclusive. Returning to Authoring pauses and hides the
+retained run. Editing marks it stale; Restart captures new source and starts a
+fresh process rather than patching the old simulation. Validation failures keep
+the draft and previous run. Stop, child/output failure and view-epoch retirement
+kill/wait the child and release staged files. Worker startup reclaims abandoned
+UUID staging directories with valid typed markers under its existing root claim.
+
+The browser Test adapter, GM/other-player-ship views, traces, breakpoints, role
+preview, specialised entity/definition/model panels and runtime model asset
+overlays remain M6 continuation work. The existing editor/viewer remain until
+the parity workflow is delivered.
 
 ## Validation boundary
 

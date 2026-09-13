@@ -44,6 +44,26 @@ fn main() {
     use project_phoenix::entities::template_preload::TemplatePreload;
     use project_phoenix::native_host;
 
+    // Private process adapter used only by the offline Workshop. It accepts
+    // exactly its host-created descriptor and never starts delivery/crew IO.
+    let child_args: Vec<_> = std::env::args_os().skip(1).collect();
+    if child_args
+        .first()
+        .is_some_and(|arg| arg == native_host::workshop::test_process::CHILD_FLAG)
+    {
+        if child_args.len() != 2 {
+            eprintln!("phoenix-host: invalid disposable Test invocation");
+            std::process::exit(2);
+        }
+        if let Err(error) =
+            native_host::workshop::test_process::run_child(std::path::Path::new(&child_args[1]))
+        {
+            eprintln!("phoenix-host: disposable Test failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let mut args = match parse_args(std::env::args().skip(1)) {
         Ok(ParseOutcome::Help) => {
             print!("{HELP}");

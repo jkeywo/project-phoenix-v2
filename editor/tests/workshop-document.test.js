@@ -4,23 +4,23 @@ import { readStoreZip, readStoreZipArchive, createStoreZip } from '../mod-pack-e
 import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT, WORKSHOP_MANIFEST } from '../../tests/fixtures/workshop-pack.js';
 
 describe('offline Workshop source documents', () => {
-  it('imports arbitrary asset bytes without text decoding and undoes additions in chronological order', () => {
+  it.each(['assets/models/test.glb', 'assets/models/nested/buffer.bin'])('imports %s bytes without text decoding and undoes additions in chronological order', path => {
     const draft = new WorkshopDocument(workshopPack());
     const asset = new Uint8Array([0, 255, 13, 10, 128, 10]);
-    draft.put('assets/models/test.glb', asset);
+    draft.put(path, asset);
     asset.fill(0);
-    expect(draft.isBinary('assets/models/test.glb')).toBe(true);
-    expect(draft.read('assets/models/test.glb')).toBeUndefined();
-    expect(draft.bytes('assets/models/test.glb')).toEqual(new Uint8Array([0, 255, 13, 10, 128, 10]));
+    expect(draft.isBinary(path)).toBe(true);
+    expect(draft.read(path)).toBeUndefined();
+    expect(draft.bytes(path)).toEqual(new Uint8Array([0, 255, 13, 10, 128, 10]));
     const cloned = new WorkshopDocument(draft.archive());
-    expect(cloned.bytes('assets/models/test.glb')).toEqual(draft.bytes('assets/models/test.glb'));
+    expect(cloned.bytes(path)).toEqual(draft.bytes(path));
     draft.edit(WORKSHOP_WORLD, '# changed\n[global]\n');
     draft.undo();
-    expect(draft.undo()).toBe('assets/models/test.glb');
+    expect(draft.undo()).toBe(path);
     expect(draft.archive()).toEqual(workshopPack());
     const recovered = WorkshopDocument.restore(draft.snapshot());
     recovered.redo();
-    expect(recovered.bytes('assets/models/test.glb')).toEqual(cloned.bytes('assets/models/test.glb'));
+    expect(recovered.bytes(path)).toEqual(cloned.bytes(path));
     expect(recovered.check().ok).toBe(false); // ordinary pack admission is still text-only
   });
 

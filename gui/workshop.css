@@ -5,6 +5,7 @@
   color: #e9eef4;
 }
 * { box-sizing: border-box; }
+#workshop [hidden] { display: none !important; }
 body { margin: 0; }
 #workshop { max-width: 90rem; margin: auto; padding: 1.5rem; }
 h1 { margin: 0; font-size: 1.75rem; }
@@ -28,6 +29,10 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-source label, .workshop-files label { overflow-wrap: anywhere; }
 .workshop-findings { white-space: pre-wrap; overflow-wrap: anywhere; border-left: .2rem solid currentColor; padding: .75rem; margin-top: 1rem; }
 .workshop-feedback { display: flex; flex-wrap: wrap; gap: .75rem; }
+.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: 1.5rem; }
+.workshop-test h2, .workshop-test p { flex-basis: 100%; margin: .25rem 0; overflow-wrap: anywhere; }
+.workshop-test select, .workshop-test input { max-width: 100%; }
+.workshop-test label { overflow-wrap: anywhere; }
 details { margin-top: 1.5rem; }
 :root[data-contrast="more"] { background: #000; color: #fff; }
 :root[data-contrast="more"] :is(button, select, textarea) { background: #000; border-color: #fff; }

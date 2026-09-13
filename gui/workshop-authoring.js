@@ -5,6 +5,7 @@ import { WorkshopDocument, isWorkshopBinary } from '../editor/workshop-document.
 import { newWorkshopPack } from '../editor/workshop-provider.js';
 import { createWorkshopRuntime } from '../editor/workshop-runtime.js';
 import { createWorkshopRecovery } from '../editor/workshop-recovery.js';
+import { mountWorkshopTestPanel } from './workshop-test-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -47,8 +48,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     return node;
   }
   root.replaceChildren();
-  root.append(el('h1', 'workshop.title'), el('p', 'workshop.authoring', { class: 'workshop-mode' }),
-    el('p', provider?.save ? 'workshop.native_scope' : 'workshop.scope'));
+  const sourceScope = el('p', provider?.save ? 'workshop.native_scope' : 'workshop.scope');
+  root.append(el('h1', 'workshop.title'), el('p', 'workshop.authoring', { class: 'workshop-mode' }), sourceScope);
   const toolbar = el('div', null, { class: 'workshop-toolbar' });
   const fileInput = el('input', null, { type: 'file', accept: '.zip,application/zip', hidden: '' });
   const activate = id => actions.activate(id, { context: MOD_ACTION_CONTEXT, source: 'control' });
@@ -122,6 +123,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let pendingRecovery = true;
   let recoveredDraft = null;
   let persistenceGeneration = 0;
+  let testPanel = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -139,7 +141,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const actions = createModActionRegistry({
     actionFeedback: lifecycle,
     openImport(activation) {
-      if (provider?.canImport === false || pendingImport || pendingValidation || pendingRecovery) return false;
+      if (provider?.canImport === false || pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return false;
       if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return false;
       pendingImport = activation;
       fileInput.value = '';
@@ -208,7 +210,12 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       source.value = draft?.isBinary(selected) ? translate('workshop.binary_source', { bytes: draft.byteLength(selected) }) : draft?.read(selected) || '';
       sourceLabel.textContent = selected ? translate('workshop.source_path', { path: selected }) : translate('workshop.source');
     }
-    const busy = Boolean(pendingImport || pendingValidation || pendingRecovery);
+    const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
+    const testing = testPanel?.testing() || false;
+    toolbar.hidden = recoveryPanel.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
+    sourceScope.hidden = testing;
+    dependencies.hidden = testing || !runtime.dependencies;
+    root.querySelector('.workshop-mode').textContent = translate(testing ? 'workshop.test_mode' : 'workshop.authoring');
     files.disabled = !draft || busy;
     source.disabled = !draft || busy || draft.isBinary(selected);
     checkButton.disabled = !draft || busy;
@@ -231,9 +238,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       fieldInfo.textContent = translate('workshop.inspector_stale');
     }
     dirty.textContent = translate(!draft ? 'workshop.empty' : draft.isDirty() ? 'workshop.dirty' : 'workshop.saved');
+    testPanel?.refresh();
   }
   function travel(redo) {
-    if (pendingImport || pendingValidation || pendingRecovery) return;
+    if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
     const path = redo ? draft?.redo() : draft?.undo();
     if (!path) return;
     selected = draft.paths().includes(path) ? path : draft.paths()[0];
@@ -242,7 +250,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     persistDraft();
   }
   async function inspect() {
-    if (!draft || pendingImport || pendingValidation || pendingRecovery) return;
+    if (!draft || pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
     const candidate = draft;
     const path = selected;
     const text = candidate.read(path);
@@ -273,7 +281,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   }
   fieldSelect.addEventListener('change', renderField);
   async function patchField() {
-    if (!inspected || pendingValidation || pendingImport) return;
+    if (!inspected || pendingValidation || pendingImport || testPanel?.held()) return;
     const snapshot = inspected;
     const field = snapshot.fields[Number(fieldSelect.value)];
     if (!field) return;
@@ -297,7 +305,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   }
   function evaluate(exporting, activation) {
     if (exporting && provider?.save) return false;
-    if (!draft || pendingImport || pendingValidation || pendingRecovery) return false;
+    if (!draft || pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return false;
     pendingValidation = true;
     const candidate = draft;
     show('workshop.runtime_checking');
@@ -360,7 +368,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     }
   }
   async function createPack() {
-    if (pendingImport || pendingValidation || pendingRecovery || provider?.canCreate === false) return;
+    if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held() || provider?.canCreate === false) return;
     if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return;
     pendingValidation = true; refresh();
     try {
@@ -372,7 +380,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     finally { pendingValidation = false; if (!disposed) refresh({ selection: true }); }
   }
   async function saveNative() {
-    if (!provider?.save || !draft || pendingValidation || pendingRecovery || pendingImport) return;
+    if (!provider?.save || !draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
     pendingValidation = true; refresh();
     try {
       await provider.save(draft);
@@ -385,9 +393,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     } finally { pendingValidation = false; if (!disposed) refresh(); }
   }
   function addDocument(value = '') {
-    if (!draft || pendingValidation || pendingRecovery || pendingImport) return;
+    if (!draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
     const path = addPath.value.trim();
-    if ((!path.startsWith('assets/') || !/\.(toml|rhai|glb|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(path))) {
+    if (!path.startsWith('assets/') || (!/\.(toml|rhai)$/.test(path) && !isWorkshopBinary(path))) {
       show('workshop.add_refused', [], true); return;
     }
     if (draft.paths().includes(path) && !win.confirm(translate('workshop.replace_file_confirm', { path }))) return;
@@ -397,7 +405,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   }
   assetInput.addEventListener('change', async () => {
     const file = assetInput.files?.[0];
-    if (!file || !draft || pendingValidation || pendingRecovery || pendingImport) return;
+    if (!file || !draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
     const target = draft;
     const path = addPath.value.trim();
     pendingValidation = true; refresh();
@@ -459,9 +467,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     importButton.focus();
   }
   fileInput.addEventListener('cancel', cancelImport);
-  files.addEventListener('change', () => { selected = files.value; refresh({ selection: true }); });
+  files.addEventListener('change', () => {
+    if (testPanel?.held()) { refresh({ selection: true }); return; }
+    selected = files.value; refresh({ selection: true });
+  });
   source.addEventListener('input', () => {
-    if (pendingImport || pendingValidation || pendingRecovery) return;
+    if (testPanel?.held()) { refresh({ selection: true }); return; }
+    if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
     if (draft?.edit(selected, source.value)) {
       findings.textContent = translate('workshop.changed');
       findings.setAttribute('role', 'status');
@@ -527,6 +539,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   }
   doc.addEventListener('keydown', keydown);
   win.addEventListener('beforeunload', beforeUnload);
+  testPanel = mountWorkshopTestPanel({ root, provider, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed: () => refresh(), win });
   refresh({ selection: true });
   show('workshop.start');
   nativeStorageStatus();
@@ -569,6 +583,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   })();
   return { ready, dispose() {
     disposed = true;
+    testPanel.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);
     win.removeEventListener('beforeunload', beforeUnload);

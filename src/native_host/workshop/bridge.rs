@@ -18,6 +18,12 @@ enum Job {
         record: String,
     },
     Stop,
+    #[cfg(test)]
+    InstallTest {
+        epoch: u64,
+        process: Box<super::test_process::TestProcess>,
+        ready: mpsc::SyncSender<()>,
+    },
 }
 #[derive(Default)]
 struct Inner {
@@ -48,6 +54,7 @@ impl WorkshopBridge {
     }
     pub fn fault(&self) {
         let mut state = self.lock();
+        state.epoch += 1;
         state.failed = true;
         state.live = false;
     }
@@ -120,6 +127,7 @@ impl WorkshopWorker {
         mut provider: NativeWorkshopProvider,
         mut operators: crate::native_host::panes::operator::NativeOperators,
     ) -> Result<Self, String> {
+        super::test_process::retire_abandoned_stages(&provider.test_directory());
         let (requests, input) = mpsc::sync_channel(8);
         let state = Arc::new(Mutex::new(Inner::default()));
         let bridge = WorkshopBridge {
@@ -130,7 +138,36 @@ impl WorkshopWorker {
             .name("phoenix-workshop-source".into())
             .spawn(move || {
                 let mut active_epoch = 0;
-                while let Ok(job) = input.recv() {
+                let mut test: Option<super::test_process::TestProcess> = None;
+                loop {
+                    let job = match input.recv_timeout(std::time::Duration::from_millis(50)) {
+                        Ok(job) => job,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            // A failed/replaced page may never send another
+                            // request. Retire after the accepted FIFO drains,
+                            // independently of a replacement document mounting.
+                            let epoch = state.lock().unwrap_or_else(|e| e.into_inner()).epoch;
+                            if epoch != active_epoch {
+                                provider.retire_view();
+                                test = None;
+                                active_epoch = epoch;
+                            }
+                            continue;
+                        }
+                    };
+                    #[cfg(test)]
+                    if let Job::InstallTest {
+                        epoch,
+                        process,
+                        ready,
+                    } = job
+                    {
+                        test = Some(*process);
+                        active_epoch = epoch;
+                        let _ = ready.send(());
+                        continue;
+                    }
                     let Job::Request {
                         epoch,
                         pane,
@@ -141,14 +178,96 @@ impl WorkshopWorker {
                     };
                     if epoch != active_epoch {
                         provider.retire_view();
+                        // A view crash/replacement retains source recovery, but
+                        // cannot leave a detached disposable simulation alive.
+                        test = None;
                         active_epoch = epoch;
                     }
                     let scripts = if operators.handle(pane, "operator", &record) {
                         operators.replies.remove(&pane).unwrap_or_default()
                     } else {
+                        let response = match crate::core::codec::decode_workshop_request(&record) {
+                            Ok(request) => {
+                                use crate::workshop::provider::{
+                                    Operation, Response, WorkshopResponse,
+                                };
+                                let id = request.id;
+                                let result = match request.operation {
+                                    Operation::TestStart { files, selection } => {
+                                        match provider.prepare_test(files, selection) {
+                                            Ok(snapshot) => {
+                                                let started = std::env::current_exe()
+                                                    .map_err(|e| e.to_string())
+                                                    .and_then(|executable| {
+                                                        super::test_process::TestProcess::start(
+                                                            &executable,
+                                                            &provider.test_directory(),
+                                                            snapshot,
+                                                        )
+                                                    });
+                                                match started {
+                                                    Ok(mut started) => {
+                                                        let run = started.status();
+                                                        test = run.running.then_some(started);
+                                                        Response::Test { run: Some(run) }
+                                                    }
+                                                    Err(message) => Response::Refused {
+                                                        message,
+                                                        report: None,
+                                                    },
+                                                }
+                                            }
+                                            Err(refusal) => refusal,
+                                        }
+                                    }
+                                    Operation::TestControl { control } => match test.as_mut() {
+                                        Some(process) => match process.control(control) {
+                                            Ok(run) => Response::Test { run: Some(run) },
+                                            Err(message) => Response::Refused {
+                                                message,
+                                                report: None,
+                                            },
+                                        },
+                                        None => Response::Refused {
+                                            message: "No disposable Test is running".into(),
+                                            report: None,
+                                        },
+                                    },
+                                    Operation::TestStatus => {
+                                        let run = test.as_mut().map(|process| process.status());
+                                        // A closed output pipe is a failed Test
+                                        // even if the process has not exited.
+                                        // Release both it and its stage now;
+                                        // the UI cannot control a dead channel.
+                                        if run.as_ref().is_some_and(|run| !run.running) {
+                                            test = None;
+                                        }
+                                        Response::Test { run }
+                                    }
+                                    Operation::TestStop => {
+                                        test = None;
+                                        Response::Test { run: None }
+                                    }
+                                    operation => {
+                                        provider
+                                            .handle(crate::workshop::provider::WorkshopRequest {
+                                                id,
+                                                operation,
+                                            })
+                                            .result
+                                    }
+                                };
+                                crate::core::codec::encode_workshop_response(&WorkshopResponse {
+                                    id,
+                                    result,
+                                })
+                                .expect("finite private Workshop responses serialize")
+                            }
+                            Err(_) => provider.handle_json(&record),
+                        };
                         vec![vellum_ultralight::bridge::push_call(
                             "window.__phoenixNativeWorkshopReply",
-                            &provider.handle_json(&record),
+                            &response,
                         )]
                     };
                     let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -157,6 +276,7 @@ impl WorkshopWorker {
                     }
                     let bytes: usize = scripts.iter().map(String::len).sum();
                     if state.reply_bytes.saturating_add(bytes) > 2 * MAX_RECORD_BYTES {
+                        state.epoch += 1;
                         state.failed = true;
                         state.live = false;
                         continue;
@@ -355,5 +475,49 @@ mod tests {
             replacement.pushed[0]
         );
         assert!(!replacement.pushed[0].contains("refused"));
+    }
+
+    #[test]
+    fn fault_or_replacement_without_another_document_request_retires_the_child() {
+        for fault in [false, true] {
+            let fixture = Fixture::new();
+            let worker = fixture.worker();
+            let bridge = worker.bridge();
+            bridge.activate(PaneId(1));
+            let (mut process, path) =
+                super::super::test_process::pipe_probe(&fixture.0.join("test-probes"));
+            assert!(
+                process
+                    .control(super::super::test_clock::TestControl::Pause {})
+                    .unwrap()
+                    .running
+            );
+            let (ready, installed) = mpsc::sync_channel(1);
+            bridge
+                .requests
+                .send(Job::InstallTest {
+                    epoch: bridge.lock().epoch,
+                    process: Box::new(process),
+                    ready,
+                })
+                .unwrap();
+            installed.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(path.exists());
+            if fault {
+                bridge.fault();
+            } else {
+                bridge.activate(PaneId(2));
+            }
+            // No subsequent request is submitted. This exercises the actual
+            // worker's idle retirement and a real inherited-pipe child.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while path.exists() {
+                assert!(
+                    Instant::now() < deadline,
+                    "orphaned Test stage after document retirement"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
     }
 }

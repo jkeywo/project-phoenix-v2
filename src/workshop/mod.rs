@@ -21,6 +21,7 @@ pub mod archive;
 pub mod document;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
+pub mod test_protocol;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -31,6 +32,8 @@ mod wasm;
 pub struct WorkshopDependencies {
     pub base_files: BTreeMap<String, String>,
     #[serde(default)]
+    pub base_assets: BTreeMap<String, Vec<u8>>,
+    #[serde(default)]
     pub packs: Vec<WorkshopDependencyPack>,
 }
 
@@ -39,6 +42,8 @@ pub struct WorkshopDependencyPack {
     pub id: String,
     pub manifest_toml: String,
     pub files: BTreeMap<String, String>,
+    #[serde(default)]
+    pub assets: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

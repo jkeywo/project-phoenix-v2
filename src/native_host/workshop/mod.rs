@@ -3,6 +3,8 @@
 pub mod bridge;
 pub mod document;
 pub mod keyboard;
+pub mod test_clock;
+pub mod test_process;
 
 use bevy::prelude::*;
 
@@ -142,6 +144,7 @@ fn read_dependencies(
         root: &std::path::Path,
         directory: &std::path::Path,
         files: &mut std::collections::BTreeMap<String, String>,
+        binary: &mut std::collections::BTreeMap<String, Vec<u8>>,
         total: &mut usize,
     ) -> Result<(), String> {
         for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())? {
@@ -152,31 +155,37 @@ fn read_dependencies(
             }
             let path = entry.path();
             if kind.is_dir() {
-                walk(root, &path, files, total)?;
-            } else if kind.is_file()
-                && path
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|s| s == "toml" || s == "rhai")
-            {
+                walk(root, &path, files, binary, total)?;
+            } else if kind.is_file() {
                 let name = path
                     .strip_prefix(root)
                     .map_err(|e| e.to_string())?
                     .to_string_lossy()
                     .replace('\\', "/");
+                let text_source = name.ends_with(".toml") || name.ends_with(".rhai");
+                if !text_source
+                    && !crate::workshop::provider::assets::binary_path(&name)
+                    && !crate::workshop::provider::test_snapshot::runtime_support_path(&name)
+                {
+                    continue;
+                }
                 use std::io::Read;
-                let remaining = (64 * 1024 * 1024usize).saturating_sub(*total);
-                let mut text = String::new();
+                let remaining = (512 * 1024 * 1024usize).saturating_sub(*total);
+                let mut bytes = Vec::new();
                 std::fs::File::open(&path)
                     .map_err(|e| e.to_string())?
                     .take(remaining as u64 + 1)
-                    .read_to_string(&mut text)
+                    .read_to_end(&mut bytes)
                     .map_err(|e| e.to_string())?;
-                *total = total.saturating_add(text.len());
-                if *total > 64 * 1024 * 1024 || files.len() >= 16384 {
+                *total = total.saturating_add(bytes.len());
+                if *total > 512 * 1024 * 1024 || files.len() + binary.len() >= 16384 {
                     return Err("Workshop dependencies are too large".into());
                 }
-                files.insert(name, text);
+                if text_source {
+                    files.insert(name, String::from_utf8(bytes).map_err(|e| e.to_string())?);
+                } else {
+                    binary.insert(name, bytes);
+                }
             }
         }
         Ok(())
@@ -191,6 +200,12 @@ fn read_dependencies(
         return Err("Read-only Workshop dependencies cannot contain linked paths".into());
     }
     let mut total = 0;
-    walk(root, &assets, &mut dependencies.base_files, &mut total)?;
+    walk(
+        root,
+        &assets,
+        &mut dependencies.base_files,
+        &mut dependencies.base_assets,
+        &mut total,
+    )?;
     Ok(dependencies)
 }

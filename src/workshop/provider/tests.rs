@@ -277,31 +277,52 @@ fn crash_between_replacements_finishes_the_exact_validated_transaction_on_reopen
 
 #[test]
 fn project_binary_members_are_exact() {
-    let fixture = Fixture::new();
-    fs::create_dir_all(fixture.root.join("assets/models")).unwrap();
-    let bytes = vec![0, 255, 13, 10, 128, 10];
-    fs::write(fixture.root.join("assets/models/test.glb"), &bytes).unwrap();
-    let mut provider = fixture.open();
-    assert_eq!(provider.baseline["assets/models/test.glb"], bytes);
-    let mut files = provider.baseline.clone();
-    files.insert("assets/models/new.glb".into(), bytes.clone());
-    assert!(matches!(
-        provider
-            .apply(Operation::Save {
-                files,
-                expected_revision: provider.revision.clone()
-            })
-            .unwrap(),
-        Response::Saved { .. }
-    ));
-    assert_eq!(
-        fs::read(fixture.root.join("assets/models/new.glb")).unwrap(),
-        bytes
-    );
-    assert!(allowed_path(WorkspaceKind::Mod, "assets/models/test.glb"));
-    assert!(allowed_path(
+    for suffix in ["glb", "bin"] {
+        let fixture = Fixture::new();
+        fs::create_dir_all(fixture.root.join("assets/models")).unwrap();
+        let bytes = vec![0, 255, 13, 10, 128, 10];
+        fs::write(
+            fixture.root.join(format!("assets/models/test.{suffix}")),
+            &bytes,
+        )
+        .unwrap();
+        let mut provider = fixture.open();
+        assert_eq!(
+            provider.baseline[&format!("assets/models/test.{suffix}")],
+            bytes
+        );
+        let mut files = provider.baseline.clone();
+        files.insert(format!("assets/models/new.{suffix}").into(), bytes.clone());
+        assert!(matches!(
+            provider
+                .apply(Operation::Save {
+                    files,
+                    expected_revision: provider.revision.clone()
+                })
+                .unwrap(),
+            Response::Saved { .. }
+        ));
+        assert_eq!(
+            fs::read(fixture.root.join(format!("assets/models/new.{suffix}"))).unwrap(),
+            bytes
+        );
+        drop(provider);
+        assert_eq!(
+            fixture.open().baseline[&format!("assets/models/new.{suffix}")],
+            bytes
+        );
+        assert!(allowed_path(
+            WorkspaceKind::Mod,
+            &format!("assets/models/test.{suffix}")
+        ));
+        assert!(allowed_path(
+            WorkspaceKind::Project,
+            "assets/sounds/exploration.mp3"
+        ));
+    }
+    assert!(!allowed_path(
         WorkspaceKind::Project,
-        "assets/sounds/exploration.mp3"
+        "assets/worlds/data.bin"
     ));
 }
 
@@ -495,6 +516,7 @@ fn mod_workspace_saves_exact_sources_and_retains_binary_members_while_runtime_re
             "[content]\nid='phoenix-base'\nepoch=1\n".into(),
         )]),
         packs: Vec::new(),
+        base_assets: BTreeMap::new(),
     };
     let open = || {
         NativeWorkshopProvider::open(
@@ -617,4 +639,132 @@ fn deletion_recovery_is_idempotent_and_preserves_an_external_replacement() {
             assert!(!reopened.unwrap().baseline.contains_key(path));
         }
     }
+}
+
+#[test]
+fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_selected_root() {
+    let fixture = Fixture::new();
+    fs::create_dir_all(fixture.root.join("assets/entities")).unwrap();
+    fs::create_dir_all(fixture.root.join("assets/models")).unwrap();
+    fs::create_dir_all(fixture.root.join("assets/shaders")).unwrap();
+    fs::write(
+        fixture.root.join("assets/shaders/test.wgsl"),
+        b"// captured shader\r\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("assets/entities/test.toml"),
+        b"class='lancer'\nname='Test hull'\n",
+    )
+    .unwrap();
+    let model = include_bytes!("../../../assets/gui/dpad-button-idle.png").to_vec();
+    fs::write(fixture.root.join("assets/models/test.png"), &model).unwrap();
+    let provider = fixture.open();
+    let mut sources = provider.assets.compact(&provider.baseline).unwrap();
+    assert!(!sources.contains_key("assets/shaders/test.wgsl"));
+    fs::write(
+        fixture.root.join("assets/shaders/test.wgsl"),
+        b"// later external edit",
+    )
+    .unwrap();
+    let authored = "# unsaved exact comment\r\n[global]\r\ntitle='Unsaved Test'\r\n";
+    sources.insert(
+        "assets/worlds/test.toml".into(),
+        assets::Source::Text(authored.into()),
+    );
+    // Later disk edits are irrelevant to the immutable draft supplied to Test.
+    fs::write(
+        fixture.root.join("assets/models/test.png"),
+        b"external replacement",
+    )
+    .unwrap();
+    let selection = test_snapshot::TestSelection {
+        world: "assets/worlds/test.toml".into(),
+        ship: "assets/entities/test.toml".into(),
+        seed: 42,
+    };
+    let snapshot = provider
+        .prepare_test(sources.clone(), selection.clone())
+        .unwrap();
+    assert_eq!(snapshot.files[&selection.world], authored.as_bytes());
+    assert_eq!(snapshot.files["assets/models/test.png"], model);
+    assert_eq!(
+        snapshot.files["assets/shaders/test.wgsl"],
+        b"// captured shader\r\n"
+    );
+    assert_eq!(snapshot.selection.seed, 42);
+    assert_eq!(
+        fs::read(fixture.root.join(&selection.world)).unwrap(),
+        provider.baseline[&selection.world]
+    );
+    assert_eq!(
+        fs::read(fixture.root.join("assets/models/test.png")).unwrap(),
+        b"external replacement"
+    );
+    let repeated = provider
+        .prepare_test(sources.clone(), selection.clone())
+        .unwrap();
+    assert_eq!(snapshot.revision, repeated.revision);
+    sources.insert(
+        selection.world.clone(),
+        assets::Source::Text("[global\n".into()),
+    );
+    assert!(matches!(
+        provider.prepare_test(sources, selection),
+        Err(Response::Refused {
+            report: Some(_),
+            ..
+        })
+    ));
+    assert!(!fixture.recovery.join("test").exists());
+}
+
+#[test]
+fn test_catalog_resolves_read_only_hulls_and_unsaved_include_edits_without_binary_materialization()
+{
+    let fixture = Fixture::new();
+    let dependencies = WorkshopDependencies {
+        base_files: BTreeMap::from([
+            (
+                "assets/entities/base.toml".into(),
+                "class='lancer'\n".into(),
+            ),
+            (
+                "assets/entities/fragment.toml".into(),
+                "name='Partial'\n".into(),
+            ),
+            ("assets/worlds/base.toml".into(), "[global]\n".into()),
+        ]),
+        ..Default::default()
+    };
+    let provider = NativeWorkshopProvider::open(
+        WorkspaceKind::Mod,
+        &fixture.root,
+        &fixture.recovery,
+        dependencies,
+    )
+    .unwrap();
+    let mut draft = BTreeMap::from([
+        (
+            "assets/entities/authored.toml".into(),
+            "includes=['base.toml']\nname='Unsaved'\n".into(),
+        ),
+        ("assets/worlds/authored.toml".into(), "[global]\n".into()),
+    ]);
+    let catalog = provider.test_catalog(draft.clone()).unwrap();
+    assert_eq!(
+        catalog.worlds,
+        ["assets/worlds/authored.toml", "assets/worlds/base.toml"]
+    );
+    assert_eq!(
+        catalog.ships,
+        ["assets/entities/authored.toml", "assets/entities/base.toml"]
+    );
+    // An invalid replacement shadows the base; it must not silently offer the
+    // old cached hull or an includer which cannot compose from this draft.
+    draft.insert("assets/entities/base.toml".into(), "[invalid".into());
+    assert!(provider.test_catalog(draft).unwrap().ships.is_empty());
+    assert!(provider
+        .test_catalog(BTreeMap::from([("../elsewhere.toml".into(), "".into())]))
+        .is_err());
 }

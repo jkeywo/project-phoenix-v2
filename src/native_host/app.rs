@@ -215,6 +215,10 @@ pub struct NativeHostConfig {
     /// which opens one borderless-fullscreen surface per configured monitor:
     /// the viewscreen on the primary window, each Station on its own window.
     pub bridge_profile: Option<crate::native_host::bridge_profile::ValidatedProfile>,
+    /// Ordinary native hosts adopt and remember their bridge arrangement.
+    /// A disposable Workshop Test must keep its own window and never open the
+    /// operator's saved Live layout or recreate its assigned Station surfaces.
+    pub remember_layout: bool,
     /// The host's own lobby surface (issue #1325), already opened and published.
     ///
     /// Opened by the caller for the same reason panes are: the document is
@@ -265,6 +269,7 @@ impl NativeHostConfig {
             experiments: Default::default(),
             panes: None,
             bridge_profile: None,
+            remember_layout: true,
             host_lobby: None,
             mod_pack_shelf: None,
         }
@@ -906,7 +911,7 @@ pub fn build_native_host_app(
     // seats and only seats) and the next boot would move the viewscreen onto a
     // live console. See `layout_store_systems`' module note.
     app.add_plugins(crate::native_host::layout_store_systems::BridgeLayoutStorePlugin);
-    if cfg.bridge_profile.is_none() {
+    if cfg.bridge_profile.is_none() && cfg.remember_layout {
         match crate::native_host::layout_store::LayoutStore::user() {
             Some(store) => {
                 // Opening the operator's real store is the one moment to clear

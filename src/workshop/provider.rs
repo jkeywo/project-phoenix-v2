@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{document, WorkshopDependencies, WorkshopValidation};
 pub mod assets;
+pub mod test_snapshot;
 
 pub type Files = BTreeMap<String, Vec<u8>>;
 const MAX_BYTES: usize = 512 * 1024 * 1024;
@@ -78,6 +79,18 @@ pub enum Operation {
         expected_revision: String,
     },
     RecoveryClear,
+    TestStart {
+        files: assets::Sources,
+        selection: test_snapshot::TestSelection,
+    },
+    TestCatalog {
+        files: BTreeMap<String, String>,
+    },
+    TestControl {
+        control: crate::workshop::test_protocol::TestControl,
+    },
+    TestStatus,
+    TestStop,
 }
 
 #[derive(Debug, Serialize)]
@@ -125,6 +138,12 @@ pub enum Response {
         recovery: Option<RecoveryRecord>,
     },
     Done,
+    Test {
+        run: Option<crate::workshop::test_protocol::TestStatus>,
+    },
+    TestCatalog {
+        catalog: test_snapshot::TestCatalog,
+    },
     Refused {
         message: String,
         report: Option<WorkshopValidation>,
@@ -156,6 +175,7 @@ pub struct NativeWorkshopProvider {
     baseline: Files,
     revision: String,
     assets: assets::AssetStore,
+    test_support: Files,
     _claim: File,
 }
 
@@ -164,6 +184,10 @@ impl NativeWorkshopProvider {
     /// accepted writes survive; an abandoned upload cannot block the next view.
     pub(crate) fn retire_view(&mut self) {
         self.assets.retire_view();
+    }
+    #[cfg(feature = "server")]
+    pub(crate) fn test_directory(&self) -> PathBuf {
+        self.private.join("test-runs")
     }
     pub fn open(
         kind: WorkspaceKind,
@@ -193,6 +217,7 @@ impl NativeWorkshopProvider {
             .map_err(|_| "This Workshop root is already open".to_string())?;
         let mut provider = Self {
             assets: assets::AssetStore::new(private.join("assets")),
+            test_support: Files::new(),
             root,
             private,
             kind,
@@ -203,6 +228,7 @@ impl NativeWorkshopProvider {
         };
         provider.finish_transaction()?;
         provider.baseline = provider.read_files()?;
+        provider.test_support = provider.capture_test_support()?;
         provider.revision = revision(&provider.baseline);
         Ok(provider)
     }
@@ -367,6 +393,15 @@ impl NativeWorkshopProvider {
             Operation::RecoveryClear => {
                 remove_optional(&self.private.join("draft.json"))?;
                 Response::Done
+            }
+            Operation::TestCatalog { files } => Response::TestCatalog {
+                catalog: self.test_catalog(files)?,
+            },
+            Operation::TestStart { .. }
+            | Operation::TestControl { .. }
+            | Operation::TestStatus
+            | Operation::TestStop => {
+                return Err("Disposable Test requires its explicit offline native shell".into());
             }
         })
     }
@@ -559,11 +594,7 @@ pub fn allowed_path(kind: WorkspaceKind, path: &str) -> bool {
                     && [".toml", ".rhai"]
                         .iter()
                         .any(|suffix| path.ends_with(suffix)))
-                    || [
-                        ".glb", ".png", ".jpg", ".jpeg", ".ktx2", ".ptex", ".wav", ".ogg", ".mp3",
-                    ]
-                    .iter()
-                    .any(|suffix| path.ends_with(suffix)))))
+                    || assets::binary_path(path))))
 }
 
 fn revision(files: &Files) -> String {

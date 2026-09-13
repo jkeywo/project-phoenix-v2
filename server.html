@@ -2237,6 +2237,9 @@
           <p id="gm-npc-target" role="status"></p>
           <dl><dt data-i18n="server.gm.npc.current"></dt><dd id="gm-npc-current"></dd>
             <dt data-i18n="server.gm.npc.intent"></dt><dd id="gm-npc-intent"></dd></dl>
+          <p id="gm-npc-field-info"></p>
+          <label data-i18n="inspector.authored_definition"></label>
+          <div id="gm-npc-definition"></div>
           <label for="gm-npc-choice" data-i18n="server.gm.npc.choice"></label>
           <select id="gm-npc-choice"></select>
           <p id="gm-npc-empty" data-i18n="server.gm.npc.empty"></p>
@@ -4540,6 +4543,15 @@
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine', operator_id: operator.id,
         correlation: request.correlation, target: request.target, doctrine: request.doctrine })) !== false;
+    };
+    window.__hostSetNpcDoctrineChecked = function(request) {
+      const operator = window.__hostLocalGm();
+      if (!operator || !request || request.operator_id !== operator.id
+          || !/^[0-9a-f]{16}$/.test(request.expected_revision)
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine_checked', operator_id: operator.id,
+        correlation: request.correlation, target: request.target, doctrine: request.doctrine,
+        expected_revision: request.expected_revision })) !== false;
     };
     window.__hostSetFactionHostility = function(request) {
       const operator = window.__hostLocalGm();

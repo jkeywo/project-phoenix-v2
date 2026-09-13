@@ -2,8 +2,8 @@
 title: NPC Doctrine Controls
 type: concept
 tags: [ai, npc, gm, doctrine, scenario, replay]
-sources: [src/gm_npc.rs, src/gm_action.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/server.rs, src/ai/server.rs, src/snapshot.rs, src/sim_digest.rs, src/gm_projection.rs, gui/gm-npc-panel.js, pasm/spec/design/gm-console-t2.yaml]
-updated: 2026-09-07
+sources: [src/gm_npc.rs, src/gm_npc/inspector.rs, src/inspector.rs, src/gm_action.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/server.rs, src/ai/server.rs, src/snapshot.rs, src/sim_digest.rs, src/gm_projection.rs, gui/gm-npc-panel.js, gui/inspector-field.js, pasm/spec/design/gm-console-t2.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
+updated: 2026-09-13
 ---
 
 # NPC Doctrine Controls
@@ -12,6 +12,21 @@ Issue #1308 adds `[[gm_npc_doctrine_palette]]` entries with a stable `id`, displ
 `label`, explicit NPC `targets`, and a `doctrine` list using the ordinary strict
 `DoctrineObjective` schema. The map's NPC panel receives only compatible choice
 identities and labels, the selected profile, and current scored AI intent.
+
+The shared browser/native Live panel submits `SetNpcDoctrineChecked` with a
+fingerprint from `gm_npc/inspector.rs`. Canonical application compares the actual
+doctrine, applied state and selected authored entry before calling the ordinary
+applier. An intervening doctrine or same-ID definition change refuses with
+`AffectedStateChanged`; unrelated motion and AI scores do not stale the reading.
+The request and result use normal GM bookkeeping and the existing M5 inverse.
+Confirmation retains the original fingerprint and the panel never optimistically
+changes the displayed current doctrine.
+
+`src/inspector.rs` supplies the same field metadata Authoring uses. The Live
+panel marks doctrine selection as a named action, scored intent as derived and
+the authored definition as recreate-required. The latter two are disabled
+controls. Runtime source locations are explicitly unavailable when no exact
+source span was retained; available authored origin layers remain visible.
 
 `SetNpcDoctrine` carries the target UUID and palette ID through normal GM
 admission, canonical ordering, duplicate handling and attributed terminal results.

@@ -4,10 +4,10 @@ import { createGmNpcPanel, parseNpcDoctrinePayload } from '../../gui/gm-npc-pane
 import { createGmConfirmationController, createGmConfirmationProfile } from '../../gui/gm-confirmation.js';
 
 const actor = { entity_id: 'courier', name: 'Courier' };
-const profile = { current: null, intent: null, choices: [{ id: 'north', label: 'North route' }, { id: 'east', label: 'East route' }] };
+import { npcProfile as profile } from '../fixtures/npc-live-inspector.js';
 const payload = (changes = {}) => ({ entities: [actor], npc_doctrines: { courier: structuredClone(profile) }, npc_doctrine_results: [], ...changes });
 beforeEach(() => { document.body.innerHTML = `<p id="gm-npc-target"></p><p id="gm-npc-current"></p><p id="gm-npc-intent"></p>
-  <select id="gm-npc-choice"></select><p id="gm-npc-empty"></p><button id="gm-npc-apply"></button><p id="gm-npc-feedback"></p><ol id="gm-npc-results"></ol>`; });
+  <p id="gm-npc-field-info"></p><div id="gm-npc-definition"></div><select id="gm-npc-choice"></select><p id="gm-npc-empty"></p><button id="gm-npc-apply"></button><p id="gm-npc-feedback"></p><ol id="gm-npc-results"></ol>`; });
 function mount(options = {}) {
   let operator = { id: 'gm-one' }, index = 0;
   const submit = vi.fn(() => true), correlation = vi.fn(() => `npc-${++index}`), schedule = vi.fn(() => 7), cancelSchedule = vi.fn();
@@ -32,7 +32,7 @@ it('shows only authored compatible choices and sends captured intent without opt
   const { panel, submit } = mount();
   expect([...document.querySelectorAll('option')].map(row => row.value)).toEqual(['north', 'east']);
   document.getElementById('gm-npc-apply').click();
-  expect(submit).toHaveBeenCalledWith({ action: 'set_npc_doctrine', operator_id: 'gm-one', correlation: 'npc-1', target: 'courier', doctrine: 'north' });
+  expect(submit).toHaveBeenCalledWith({ action: 'set_npc_doctrine_checked', operator_id: 'gm-one', correlation: 'npc-1', target: 'courier', doctrine: 'north', expected_revision: '0123456789abcdef' });
   expect(panel.state().profiles.courier.current).toBeNull();
   expect(panel.choose()).toBe(false); expect(submit).toHaveBeenCalledOnce();
   panel.update(payload({ npc_doctrines: {} }));
@@ -44,7 +44,7 @@ it('captures confirmation intent before acceptance and allocates correlation onl
   const { panel, correlation, submit } = mount({ t: (id, values) => values ? JSON.stringify(values) : id,
     confirmAction: request => { confirmation = request; return true; } });
   panel.choose(); expect(correlation).not.toHaveBeenCalled(); expect(panel.state().pending).toBeNull();
-  expect(confirmation).toMatchObject({ category: 'npc.directive', defaultMode: 'immediate', intent: { target: 'courier', doctrine: 'north' } });
+  expect(confirmation).toMatchObject({ category: 'npc.directive', defaultMode: 'immediate', intent: { target: 'courier', doctrine: 'north', expected_revision: '0123456789abcdef' } });
   expect(confirmation.description).toContain('Courier'); expect(confirmation.description).toContain('North route');
   document.getElementById('gm-npc-choice').value = 'east'; document.getElementById('gm-npc-choice').dispatchEvent(new Event('change'));
   expect(confirmation.accept()).toBe(true); expect(confirmation.accept()).toBe(false);
@@ -86,7 +86,7 @@ it.each(['removed', 'withdrawn'])('submits the captured %s intent for canonical 
   expect(document.getElementById('gm-npc-apply').disabled).toBe(true);
   expect(panel.state().pending).toBeNull(); expect(correlation).not.toHaveBeenCalled();
   expect(confirmation.accept()).toBe(true); expect(confirmation.accept()).toBe(false);
-  expect(submit).toHaveBeenCalledExactlyOnceWith({ action: 'set_npc_doctrine', operator_id: 'gm-one', correlation: 'npc-1', target: 'courier', doctrine: 'north' });
+  expect(submit).toHaveBeenCalledExactlyOnceWith({ action: 'set_npc_doctrine_checked', operator_id: 'gm-one', correlation: 'npc-1', target: 'courier', doctrine: 'north', expected_revision: '0123456789abcdef' });
   expect(feedback()).toBe('pending'); expect(correlation).toHaveBeenCalledOnce();
   panel.update(payload({ ...stale, npc_doctrine_results: [terminal({ outcome: 'refused', reason: 'unknown-npc-doctrine' })] }));
   expect(feedback()).toBe('refused'); expect(panel.state().pending).toBeNull(); expect(cancelSchedule).toHaveBeenCalledWith(7);
@@ -126,7 +126,7 @@ it.each(['removed', 'withdrawn'])('the shared confirmation dialog preserves a ca
   document.querySelector('[data-confirmation-accept]').click();
   document.querySelector('[data-confirmation-accept]').click();
   expect(controller.isOpen()).toBe(false);
-  const request = { action: 'set_npc_doctrine', operator_id: 'gm-one', correlation: 'npc-1', target: 'courier', doctrine: 'north' };
+  const request = { action: 'set_npc_doctrine_checked', operator_id: 'gm-one', correlation: 'npc-1', target: 'courier', doctrine: 'north', expected_revision: '0123456789abcdef' };
   expect(submit).toHaveBeenCalledExactlyOnceWith(request); expect(correlation).toHaveBeenCalledOnce();
   expect(schedule).toHaveBeenCalledOnce(); expect(panel.state().pending).toEqual(request); expect(feedback()).toBe('pending');
 
@@ -184,7 +184,7 @@ it.each(['applied', 'no-op', 'refused'])('matches the complete result identity a
   expect(feedback()).toBe('pending'); expect(panel.state().pending).not.toBeNull();
   panel.update(payload({ npc_doctrine_results: [terminal({ outcome })], npc_doctrines: { courier: { ...profile, current: 'north', intent: 'Fly north' } } }));
   expect(panel.state().pending).toBeNull(); expect(feedback()).toBe(outcome === 'no-op' ? 'no_op' : outcome);
-  expect(cancelSchedule).toHaveBeenCalledWith(7); expect(document.getElementById('gm-npc-intent').textContent).toBe('Fly north');
+  expect(cancelSchedule).toHaveBeenCalledWith(7); expect(document.querySelector('#gm-npc-intent input').value).toBe('Fly north');
 });
 
 it('timeout permits a new attempt and absolute reconnect/reset clears stale state', () => {
@@ -199,4 +199,44 @@ it('rejects malformed rows atomically and supports old empty projection payloads
     expect(parseNpcDoctrinePayload(bad)).toBeNull(); expect(panel.update(bad)).toBe(false); expect(panel.state().profiles.courier.choices).toHaveLength(2);
   }
   expect(panel.update({ entities: [] })).toBe(true); expect(panel.state().profiles).toEqual({});
+});
+
+it('keeps focused choice nodes during unrelated live updates and captures the displayed field revision', () => {
+  let confirmation;
+  const { panel, submit } = mount({ confirmAction: request => { confirmation = request; return true; } });
+  const select = document.getElementById('gm-npc-choice');
+  select.focus(); const options = [...select.options];
+  panel.update(payload({ entities: [{ ...actor, name: 'Courier at a new position' }] }));
+  expect(document.activeElement).toBe(select); expect([...select.options]).toEqual(options);
+  panel.choose();
+  const changed = structuredClone(profile); changed.current = 'east'; changed.choices[0].revision = '1111111111111111';
+  panel.update(payload({ npc_doctrines: { courier: changed } }));
+  confirmation.accept();
+  expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    action: 'set_npc_doctrine_checked', target: 'courier', doctrine: 'north', expected_revision: '0123456789abcdef',
+  }));
+  expect(panel.state().profiles.courier.current).toBe('east');
+  panel.update(payload({ npc_doctrines: { courier: changed },
+    npc_doctrine_results: [terminal({ outcome: 'refused', reason: 'affected-state-changed' })] }));
+  expect(feedback()).toBe('refused');
+  expect(document.getElementById('gm-npc-feedback').textContent).toContain('affected_state_changed');
+  expect(submit).toHaveBeenCalledOnce();
+});
+
+it('shows current field metadata and disabled derived/definition values without a raw setter', () => {
+  const { panel, submit } = mount();
+  const intent = document.querySelector('#gm-npc-intent input');
+  const definition = document.querySelector('#gm-npc-definition input');
+  expect(intent.disabled && intent.readOnly).toBe(true);
+  expect(definition.disabled && definition.readOnly).toBe(true);
+  expect(document.getElementById('gm-npc-intent').dataset.mutability).toBe('derived');
+  expect(document.getElementById('gm-npc-definition').dataset.mutability).toBe('recreate-required');
+  expect(document.getElementById('gm-npc-field-info').dataset.mutability).toBe('named-action');
+  definition.value = 'arbitrary replacement'; definition.dispatchEvent(new Event('input'));
+  expect(submit).not.toHaveBeenCalled();
+  const malformed = structuredClone(profile); delete malformed.choices[0].revision;
+  expect(panel.update(payload({ npc_doctrines: { courier: malformed } }))).toBe(false);
+  malformed.choices[0].revision = 1234567890123456;
+  expect(panel.update(payload({ npc_doctrines: { courier: malformed } }))).toBe(false);
+  expect(panel.state().profiles.courier.choices[0].revision).toBe('0123456789abcdef');
 });

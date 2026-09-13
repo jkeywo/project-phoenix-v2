@@ -33,10 +33,13 @@ fn model_float_edit_preserves_every_other_byte_and_uses_the_actual_runtime_type(
     let source = "# 船のリグ\r\n[base] # preserve\noffset = [1, 2, 3] # integer spelling\r\nscale=[2, 2, 2]\n[markers.\"forward emitter\"]\r\nposition = [0, 0, -2]\ndirection=[0, 0, -1] # keep\r\n";
     let path = [key("base"), key("offset"), Segment::Index(0)];
     let current = field(source, &path);
-    assert_eq!(current.kind, "float");
+    assert_eq!(current.descriptor.kind, "float");
     assert_eq!(current.source, "1");
     assert!(current.runtime_owned);
-    assert_eq!(current.live_mutability, "recreate-required");
+    assert_eq!(
+        current.descriptor.live_mutability,
+        crate::inspector::LiveMutability::RecreateRequired
+    );
     let edited = edit(source, &path, "1.5").unwrap();
     assert_eq!(edited, source.replacen("[1, 2, 3]", "[1.5, 2, 3]", 1));
     let actual = ModelRig::from_toml(&edited).unwrap();
@@ -128,7 +131,11 @@ fn only_real_runtime_defaults_are_present_and_entity_fallbacks_remain_unspecifie
             }
             _ => None,
         };
-        assert_eq!(field.default_source, expected, "{:?}", field.path);
+        assert_eq!(
+            field.descriptor.default_source, expected,
+            "{:?}",
+            field.path
+        );
     }
     assert!(toml::from_str::<Marker>("").is_err());
     assert!(toml::from_str::<TargetPoint>("").is_err());
@@ -168,7 +175,7 @@ fn model_enums_and_unsigned_integers_use_runtime_deserialization_for_refusals() 
             key("yaw_views"),
         ],
     ] {
-        assert_eq!(field(source, &path).kind, "integer");
+        assert_eq!(field(source, &path).descriptor.kind, "integer");
         for value in ["1.5", "-1", "4294967296", "'512'"] {
             assert!(edit(source, &path, value).is_err(), "{path:?} {value}");
         }
@@ -196,7 +203,7 @@ fn model_metadata_is_scoped_to_portable_sidecar_paths_and_known_scalar_fields() 
     ] {
         let field = fields(source, document_path).unwrap().remove(0);
         assert!(!field.runtime_owned, "{document_path}");
-        assert_eq!(field.kind, "integer");
+        assert_eq!(field.descriptor.kind, "integer");
         assert!(patch(
             source,
             &Patch {
@@ -210,8 +217,8 @@ fn model_metadata_is_scoped_to_portable_sidecar_paths_and_known_scalar_fields() 
     }
     let unknown = field(source, &[key("base"), key("extension")]);
     assert!(!unknown.runtime_owned);
-    assert_eq!(unknown.kind, "integer");
-    assert_eq!(unknown.default_source, None);
+    assert_eq!(unknown.descriptor.kind, "integer");
+    assert_eq!(unknown.descriptor.default_source, None);
     assert_eq!(
         edit(source, &unknown.path, "5").unwrap(),
         source.replace("extension=4", "extension=5")

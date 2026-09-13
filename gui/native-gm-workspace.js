@@ -21,6 +21,7 @@ const ACTIONS = Object.freeze({
   __hostSetContactInformation: 'set_contact_information',
   __hostDespawnEntity: 'despawn_entity',
   __hostSetNpcDoctrine: 'set_npc_doctrine',
+  __hostSetNpcDoctrineChecked: 'set_npc_doctrine_checked',
   __hostSetFactionHostility: 'set_faction_hostility',
   __hostUndoGmAction: 'undo_gm_action',
   __hostRequestLiveRestore: 'request_live_restore',

@@ -9,6 +9,8 @@ use crate::gm_action::{GmActionOutcome, GmActionRefusalReason};
 use crate::ship::components::ShipConfigComponent;
 use crate::world::server::WorldContentRuntime;
 
+pub mod inspector;
+
 pub fn bounded_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
 }
@@ -259,6 +261,43 @@ pub struct NpcDoctrineControl<'w, 's> {
 }
 
 impl NpcDoctrineControl<'_, '_> {
+    /// A Live Inspector edit must still describe the exact field and authored
+    /// choice at the canonical apply tick. The ordinary adapter owns every
+    /// compatibility check and reconciliation after this read check succeeds.
+    pub fn apply_checked(
+        &mut self,
+        runtime: &WorldContentRuntime,
+        target: &str,
+        id: &str,
+        expected_revision: &str,
+    ) -> (GmActionOutcome, Option<GmActionRefusalReason>) {
+        let Some(profile) = runtime.gm_npc_doctrine_palette.iter().find(|p| p.id == id) else {
+            return (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::UnknownNpcDoctrine),
+            );
+        };
+        let Some((_, _, _, behaviour, state, ..)) =
+            self.ships.iter().find(|(uuid, ..)| uuid.0 == target)
+        else {
+            return (
+                GmActionOutcome::Refused,
+                Some(if self.identities.iter().any(|uuid| uuid.0 == target) {
+                    GmActionRefusalReason::NpcDoctrineIncompatible
+                } else {
+                    GmActionRefusalReason::UnknownEntity
+                }),
+            );
+        };
+        if inspector::revision(target, &behaviour.0.doctrine, state, profile) != expected_revision {
+            return (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::AffectedStateChanged),
+            );
+        }
+        self.apply(runtime, target, id)
+    }
+
     pub fn apply(
         &mut self,
         runtime: &WorldContentRuntime,
@@ -464,7 +503,7 @@ impl NpcDoctrineControl<'_, '_> {
         self.ships
             .iter()
             .filter_map(
-                |(uuid, tags, config, _, state, fleet, civilian, _, blackboards)| {
+                |(uuid, tags, config, behaviour, state, fleet, civilian, _, blackboards)| {
                     if fleet
                         || civilian
                         || tags.is_some_and(|tags| tags.0.iter().any(|tag| tag == "player"))
@@ -489,6 +528,13 @@ impl NpcDoctrineControl<'_, '_> {
                         .map(|profile| NpcDoctrineChoice {
                             id: profile.id.clone(),
                             label: profile.label.clone(),
+                            revision: inspector::revision(
+                                &uuid.0,
+                                &behaviour.0.doctrine,
+                                state,
+                                profile,
+                            ),
+                            origin_layer: profile.origin_layer.clone(),
                         })
                         .collect();
                     if choices.is_empty() && state.0.is_none() {
@@ -519,6 +565,7 @@ impl NpcDoctrineControl<'_, '_> {
                             current: state.0.as_ref().map(|state| state.id.clone()),
                             intent,
                             choices,
+                            inspector: inspector::NpcInspector::default(),
                         },
                     ))
                 },
@@ -531,12 +578,15 @@ impl NpcDoctrineControl<'_, '_> {
 pub struct NpcDoctrineChoice {
     pub id: String,
     pub label: String,
+    pub revision: String,
+    pub origin_layer: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NpcDoctrineStatus {
     pub current: Option<String>,
     pub intent: Option<String>,
     pub choices: Vec<NpcDoctrineChoice>,
+    pub inspector: inspector::NpcInspector,
 }
 
 /// The scenario action's adapter uses the very same apply-boundary operation as

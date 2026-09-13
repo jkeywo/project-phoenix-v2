@@ -294,6 +294,14 @@ pub enum GmAction {
         ship: crate::command_admission::log::ShipKey,
         change: crate::gm_information::ContactInformationChange,
     },
+    /// Constrained Live Inspector transaction. Appended to preserve every
+    /// existing postcard variant index. The runtime-issued reading is checked
+    /// at apply time before the ordinary doctrine owner reconciles the choice.
+    SetNpcDoctrineChecked {
+        target: String,
+        doctrine: String,
+        expected_revision: String,
+    },
 }
 
 /// The exact affected field one GM action changed, with its before and after
@@ -618,6 +626,7 @@ impl GmAction {
             | Self::SpawnPaletteEntity { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
+            | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
             | Self::SetSystemDisabled { .. }
             | Self::TransmitComms { .. }
@@ -654,7 +663,7 @@ impl GmAction {
             | Self::DespawnEntity { target }
             | Self::SetContactOverride { target, .. }
             | Self::SetContactClassification { target, .. }
-            | Self::SetNpcDoctrine { target, .. } => Some(target.as_str()),
+            | Self::SetNpcDoctrine { target, .. } | Self::SetNpcDoctrineChecked { target, .. } => Some(target.as_str()),
             // The palette id, not the derived instance name: the durable fact
             // has to say WHAT the operator placed, and the instance name is
             // minted by the reducer a boundary later.
@@ -689,6 +698,16 @@ impl GmAction {
                 Ok(())
             }
             Self::SetNpcDoctrine { target, doctrine } if bounded(target) && bounded(doctrine) => {
+                Ok(())
+            }
+            Self::SetNpcDoctrineChecked {
+                target,
+                doctrine,
+                expected_revision,
+            } if bounded(target)
+                && bounded(doctrine)
+                && crate::gm_npc::inspector::valid_revision(expected_revision) =>
+            {
                 Ok(())
             }
             // A faction may not be made hostile to itself: the registry would
@@ -862,7 +881,9 @@ impl GmAction {
                 crate::gm_contact::ContactMode::Normal => GmActionKind::ContactNormal,
             },
             Self::TransmitComms { .. } => GmActionKind::Comms,
-            Self::SetNpcDoctrine { .. } => GmActionKind::NpcDoctrine,
+            Self::SetNpcDoctrine { .. } | Self::SetNpcDoctrineChecked { .. } => {
+                GmActionKind::NpcDoctrine
+            }
             Self::SetFactionHostility { .. } => GmActionKind::FactionRelation,
             Self::UndoGmAction { .. } => GmActionKind::ActionUndo,
             Self::RequestLiveRestore { .. } => GmActionKind::LiveRestore,
@@ -887,6 +908,7 @@ impl GmAction {
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
+            | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
             | Self::SetFactionHostility { .. }
@@ -905,7 +927,8 @@ impl GmAction {
     }
     pub fn npc_doctrine(&self) -> Option<String> {
         match self {
-            Self::SetNpcDoctrine { doctrine, .. } => Some(doctrine.clone()),
+            Self::SetNpcDoctrine { doctrine, .. }
+            | Self::SetNpcDoctrineChecked { doctrine, .. } => Some(doctrine.clone()),
             _ => None,
         }
     }
@@ -979,7 +1002,7 @@ impl GmAction {
             | Self::SetContactInformation { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
-            | Self::SetNpcDoctrine { .. }
+            | Self::SetNpcDoctrine { .. } | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
             | Self::SetFactionHostility { .. }
@@ -1019,6 +1042,7 @@ impl GmAction {
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::SetNpcDoctrine { .. }
+            | Self::SetNpcDoctrineChecked { .. }
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
             | Self::RequestLiveRestore { .. }
@@ -1049,7 +1073,7 @@ impl GmAction {
             | Self::Presentation { .. }
             | Self::SetContactInformation { .. }
             | Self::DespawnEntity { .. }
-            | Self::SetNpcDoctrine { .. }
+            | Self::SetNpcDoctrine { .. } | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
             // An undo is always a request to make something happen; WHAT it
@@ -2430,7 +2454,7 @@ impl GmActionJournal {
                         | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. }
-                        | GmAction::SetNpcDoctrine { .. }
+                        | GmAction::SetNpcDoctrine { .. } | GmAction::SetNpcDoctrineChecked { .. }
                         // A faction relation and an inverse have no latch to
                         // fold forward here either: both are recorded by the
                         // state they left, which this reducer does not hold.
@@ -2520,6 +2544,7 @@ impl GmActionJournal {
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
                 | GmAction::SetNpcDoctrine { .. }
+                | GmAction::SetNpcDoctrineChecked { .. }
                 | GmAction::SetFactionHostility { .. }
                 | GmAction::UndoGmAction { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
@@ -2646,6 +2671,7 @@ impl GmActionJournal {
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
                 | GmAction::SetNpcDoctrine { .. }
+                | GmAction::SetNpcDoctrineChecked { .. }
                 | GmAction::SetFactionHostility { .. }
                 | GmAction::UndoGmAction { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
@@ -3293,14 +3319,26 @@ pub fn apply_due_actions(
                     ),
                 }
             }
-            GmAction::SetNpcDoctrine { target, doctrine } => match content.as_deref() {
+            GmAction::SetNpcDoctrine { target, doctrine }
+            | GmAction::SetNpcDoctrineChecked {
+                target, doctrine, ..
+            } => match content.as_deref() {
                 Some(runtime) => {
                     // Read the live doctrine BEFORE the mutation: the applied
                     // palette id it replaces is the one fact an inverse needs,
                     // and `None` is the entity's own authored doctrine rather
                     // than an unknown one.
                     let before = ship_access.p3().applied_doctrine(target);
-                    let result = ship_access.p3().apply(runtime, target, doctrine);
+                    let result = if let GmAction::SetNpcDoctrineChecked {
+                        expected_revision, ..
+                    } = &grant.action
+                    {
+                        ship_access
+                            .p3()
+                            .apply_checked(runtime, target, doctrine, expected_revision)
+                    } else {
+                        ship_access.p3().apply(runtime, target, doctrine)
+                    };
                     if result.0 == GmActionOutcome::Applied {
                         affected = Some(GmAffectedField::NpcDoctrine {
                             entity: target.clone(),

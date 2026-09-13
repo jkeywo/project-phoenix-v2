@@ -1,6 +1,7 @@
 import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { wireText } from './strings.js';
 import { GM_ACTION_REFUSAL_REASON_LABELS } from './gm-action-reasons.js';
+import { validInspectorDescriptor, renderInspectorMetadata, renderInspectorReadOnly } from './inspector-field.js';
 
 export const GM_NPC_CONFIRMATION = Object.freeze({ category: 'npc.directive', defaultMode: 'immediate' });
 const bounded = value => typeof value === 'string' && value.length > 0 && new TextEncoder().encode(value).length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
@@ -13,7 +14,12 @@ export function parseNpcDoctrinePayload(payload) {
   if (typeof profiles !== 'object' || Array.isArray(profiles) || !Array.isArray(results)
     || Object.entries(profiles).some(([id, row]) => !bounded(id) || !row
       || !(row.current === null || bounded(row.current)) || !(row.intent === null || typeof row.intent === 'string')
-      || !Array.isArray(row.choices) || row.choices.some(choice => !choice || !bounded(choice.id) || typeof choice.label !== 'string')
+      || !row.inspector || !['current', 'intent', 'definition'].every(key => validInspectorDescriptor(row.inspector[key]))
+      || row.inspector.current.live_mutability !== 'named-action' || row.inspector.intent.live_mutability !== 'derived'
+      || row.inspector.definition.live_mutability !== 'recreate-required'
+      || !Array.isArray(row.choices) || row.choices.some(choice => !choice || !bounded(choice.id) || typeof choice.label !== 'string'
+        || typeof choice.revision !== 'string' || !/^[0-9a-f]{16}$/.test(choice.revision)
+        || !(choice.origin_layer == null || typeof choice.origin_layer === 'string'))
       || new Set(row.choices.map(choice => choice.id)).size !== row.choices.length)
     || results.some(row => !row || row.action_kind !== 'npc-doctrine' || !bounded(row.target) || !bounded(row.npc_doctrine)
       || !bounded(row.operator_id) || !bounded(row.correlation) || !Number.isSafeInteger(row.tick) || row.tick < 0
@@ -26,17 +32,29 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
   submit = () => false, confirmAction = request => request.accept(), correlation = createActionCorrelation,
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = suffix => doc?.getElementById(`gm-npc-${suffix}`);
-  let selected = null, choice = '', profiles = {}, entities = [], results = [], pending = null, timer = null, generation = 0;
+  let selected = null, choice = '', profiles = {}, entities = [], results = [], pending = null, timer = null, generation = 0, optionsSignature = null;
   const current = () => profiles[selected?.entity_id];
   const valid = () => !!getOperator() && !pending && entities.some(row => row.entity_id === selected?.entity_id)
     && !!current()?.choices.some(row => row.id === choice);
-  function feedback(state) {
-    if (el('feedback')) { el('feedback').dataset.state = state; el('feedback').textContent = t(`server.gm.npc.${state}`); }
+  function feedback(state, reason) {
+    if (el('feedback')) {
+      el('feedback').dataset.state = state;
+      el('feedback').textContent = t(`server.gm.npc.${state}`) + (reason
+        ? ` ${t(GM_ACTION_REFUSAL_REASON_LABELS[reason] || 'server.gm.effect.reason_unknown', { reason })}` : '');
+    }
   }
   function render() {
     if (el('target')) el('target').textContent = selected ? wireText(selected.name) : t('server.gm.npc.select');
     if (el('current')) el('current').textContent = current()?.current || t('server.gm.npc.original');
-    if (el('intent')) el('intent').textContent = current()?.intent ? wireText(current().intent) : t('server.gm.npc.no_intent');
+    const descriptor = current()?.inspector;
+    const selectedChoice = current()?.choices.find(row => row.id === choice);
+    renderInspectorMetadata(el('field-info'), descriptor?.current, { t });
+    renderInspectorReadOnly(el('intent'), current()?.intent ? wireText(current().intent) : t('server.gm.npc.no_intent'), descriptor?.intent,
+      { t, label: 'server.gm.npc.intent' });
+    const definition = descriptor?.definition && { ...descriptor.definition,
+      origin: { ...descriptor.definition.origin, layer: selectedChoice?.origin_layer || null } };
+    renderInspectorReadOnly(el('definition'), selectedChoice ? wireText(selectedChoice.label) : '', definition,
+      { t, label: 'inspector.authored_definition' });
     if (el('apply')) el('apply').disabled = !valid();
     if (el('empty')) el('empty').hidden = !!current()?.choices.length;
   }
@@ -44,19 +62,24 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
     const choices = current()?.choices || [];
     if (!choice) choice = choices.find(row => row.id === current()?.current)?.id || choices[0]?.id || '';
     if (el('choice')) {
-      el('choice').replaceChildren();
-      if (choice && !choices.some(row => row.id === choice)) {
-        const stale = doc.createElement('option'); stale.value = choice; stale.disabled = true;
-        stale.textContent = t('server.gm.npc.withdrawn', { doctrine: choice }); el('choice').appendChild(stale);
+      const signature = JSON.stringify([choice, choices.map(row => [row.id, row.label])]);
+      if (signature !== optionsSignature) {
+        optionsSignature = signature;
+        el('choice').replaceChildren();
+        if (choice && !choices.some(row => row.id === choice)) {
+          const stale = doc.createElement('option'); stale.value = choice; stale.disabled = true;
+          stale.textContent = t('server.gm.npc.withdrawn', { doctrine: choice }); el('choice').appendChild(stale);
+        }
+        for (const item of choices) { const option = doc.createElement('option'); option.value = item.id; option.textContent = wireText(item.label); el('choice').appendChild(option); }
       }
-      for (const item of choices) { const option = doc.createElement('option'); option.value = item.id; option.textContent = wireText(item.label); el('choice').appendChild(option); }
       el('choice').value = choice;
       el('choice').disabled = !choices.length || !!pending;
     }
   }
   function choose() {
     if (!valid()) return false;
-    const captured = Object.freeze({ action: 'set_npc_doctrine', operator_id: getOperator().id, target: selected.entity_id, doctrine: choice });
+    const captured = Object.freeze({ action: 'set_npc_doctrine_checked', operator_id: getOperator().id,
+      target: selected.entity_id, doctrine: choice, expected_revision: current().choices.find(row => row.id === choice).revision });
     const description = t('server.gm.npc.confirm', { target: wireText(selected.name),
       doctrine: wireText(current().choices.find(row => row.id === choice).label) });
     const epoch = generation;
@@ -85,7 +108,7 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
       && row.target === pending.target && row.npc_doctrine === pending.doctrine);
     if (terminal) {
       if (timer !== null) cancelSchedule(timer);
-      timer = null; pending = null; feedback(terminal.outcome === 'no-op' ? 'no_op' : terminal.outcome);
+      timer = null; pending = null; feedback(terminal.outcome === 'no-op' ? 'no_op' : terminal.outcome, terminal.reason);
     }
     if (el('results')) {
       el('results').replaceChildren();

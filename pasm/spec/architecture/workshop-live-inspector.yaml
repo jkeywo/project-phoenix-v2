@@ -1,0 +1,45 @@
+entities:
+  - component: workshop-inspector-descriptors
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Shared Authoring and Live Field Descriptors
+      summary: Authoring and Live share runtime field metadata and its accessible presentation. Descriptors declare type, available default, schema path, known source location or layer, validation and explicit Live mutability. They confer no write authority. Authoring retains its exact-source patch owner; Live exposes only a named admitted action. Derived and recreate-required values remain visible as disabled controls. Runtime readings without retained source spans explicitly report the location unavailable.
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      depends_on: [gm-t2-authored-npc-doctrine]
+    implementation:
+      status: declared
+      paths: [src/inspector.rs, src/workshop/document.rs, gui/inspector-field.js, gui/workshop-authoring.js, gui/gm-npc-panel.js]
+      symbols: [FieldDescriptor, FieldOrigin, LiveMutability, renderInspectorMetadata, renderInspectorReadOnly]
+      tests:
+        - cargo test --lib workshop::document
+        - npx vitest run tests/client/inspector-field.test.js tests/client/workshop-authoring.test.js
+
+  - component: workshop-live-npc-inspector
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Checked Live NPC Doctrine Inspector
+      summary: The first constrained M6 Live transaction selects a compatible authored NPC doctrine through the shared browser and native GM panel. Confirmation captures the target, choice and current field fingerprint. Canonical application refuses an intervening field or selected-definition change before reaching the existing doctrine compatibility and reconciliation owner. Admission, attribution, terminal results and the existing M5 inverse remain shared. The panel never optimistically changes the runtime value or edits raw ECS, Rhai or source data.
+      rationale:
+        - "[ai] The fingerprint includes actual BehaviourSection doctrine, applied profile and original baseline, plus the selected authored entry's identity, contents, eligibility and origin. A same-ID source replacement must stale a reading. Unrelated physics, derived AI scores and other authored choices do not stale it. The bounded opaque token is a comparison value, never an authorization credential or a new authoritative state resource."
+        - "[ai] The checked action is appended to the typed action enum to preserve existing variant identities. It reuses the ordinary NPC affected field and inverse; replay records the normal checked request and attributed result. Existing absolute scenario actions retain their established behavior."
+        - "[ai] The current doctrine offers only the runtime owner's compatible choices. Current scored intent is derived and disabled; the selected authored definition is recreate-required and disabled. A withdrawn choice remains visibly unavailable until deliberate reselection. This slice does not imply arbitrary Live fields or completion of all M6 Inspector work."
+    architecture:
+      kind: scenario-action-vocabulary
+      authority: authoritative
+      depends_on: [gm-t2-authored-npc-doctrine, workshop-inspector-descriptors]
+      coordinates: [gm-t2-directed-world-actions]
+    implementation:
+      status: declared
+      paths: [src/gm_npc.rs, src/gm_npc/inspector.rs, src/gm_action.rs, src/core/codec.rs, gui/gm-npc-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, server.html, tests/gm_npc.rs]
+      symbols: [SetNpcDoctrineChecked, apply_checked, NpcInspector, valid_revision]
+      tests:
+        - cargo test --features headless --test gm_npc live_inspector_
+        - cargo test --features host,headless --lib gm_npc::inspector
+        - npx vitest run tests/client/gm-npc-panel.test.js tests/client/native-gm-workspace.test.js
+        - tests/smoke/gm-page.spec.js

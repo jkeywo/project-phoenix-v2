@@ -15,6 +15,7 @@ import { applyAccessibilityProfile } from './accessibility-profile.js';
 import { loadOperatorProfile, applyOperatorProfile, saveOperatorProfile } from './operator-profile.js';
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import { t } from './strings.js';
+import { renderInspectorMetadata, validInspectorDescriptor } from './inspector-field.js';
 
 // wasm-bindgen may reject with a string JsValue rather than an Error object.
 const errorText = error => String(error?.message ?? error);
@@ -284,6 +285,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       type: field.kind, line: String(field.line),
     }) : translate('workshop.inspector_empty');
     if (field?.default_source != null) fieldInfo.textContent += ` ${translate('workshop.field_default', { value: field.default_source })}`;
+    if (validInspectorDescriptor(field)) renderInspectorMetadata(fieldInfo, field, { t: translate });
   }
   fieldSelect.addEventListener('change', renderField);
   async function patchField() {

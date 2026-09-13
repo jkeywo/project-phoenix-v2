@@ -118,27 +118,29 @@ test('equal GMs apply authored NPC doctrine through real AI and reject stale or 
     expect(await page.locator('#gm-npc-choice option').evaluateAll(rows => rows.map(row => row.value))).toEqual(['north', 'east']);
     await page.evaluate(() => {
       window.__npcRequests = [];
-      const submit = window.__hostSetNpcDoctrine;
-      window.__hostSetNpcDoctrine = request => { window.__npcRequests.push(structuredClone(request)); return submit(request); };
+      const submit = window.__hostSetNpcDoctrineChecked;
+      window.__hostSetNpcDoctrineChecked = request => { window.__npcRequests.push(structuredClone(request)); return submit(request); };
     });
   }
   const target = await first.evaluate(() => window.__hostGmNpcState().selected.entity_id);
   const start = await first.evaluate(() => window.__hostGmNpcState().selected.position);
   await first.locator('#gm-npc-apply').click();
   await expect(first.locator('#gm-npc-feedback')).toHaveAttribute('data-state', 'applied');
-  await expect(first.locator('#gm-npc-intent')).toContainText('Fly north');
+  await expect(first.locator('#gm-npc-intent input')).toHaveValue('Fly north');
+  await expect(first.locator('#gm-npc-intent input')).toBeDisabled();
+  await expect(first.locator('#gm-npc-definition input')).toBeDisabled();
   await first.waitForFunction(start => {
     const position = window.__hostGmNpcState().selected?.position;
     return position && Math.hypot(position[0] - start[0], position[2] - start[2]) > 1;
   }, start);
-  await first.evaluate(() => window.__hostSetNpcDoctrine(window.__npcRequests[0]));
+  await first.evaluate(() => window.__hostSetNpcDoctrineChecked(window.__npcRequests[0]));
   await expect(first.locator('#gm-npc-results li[data-doctrine="north"]')).toHaveCount(1);
   // Both GMs submit at the same held logical tick. The canonical order decides
-  // the final absolute choice, and both peers must observe the same facts.
+  // the first checked change; the other reading becomes stale on both peers.
   await first.locator('#gm-session-pause').click();
   await Promise.all([first, second].map(page => page.waitForFunction(() => window.__hostGmSessionState().paused)));
   await first.locator('#gm-npc-choice').selectOption('east');
-  await second.locator('#gm-npc-choice').selectOption('north');
+  await second.locator('#gm-npc-choice').selectOption('east');
   await Promise.all([first.locator('#gm-npc-apply').click(), second.locator('#gm-npc-apply').click()]);
   // gm_entity is an ordinary FixedLast projection. Resume before waiting for
   // its terminal facts; the two captured requests still share the paused tick.
@@ -152,7 +154,9 @@ test('equal GMs apply authored NPC doctrine through real AI and reject stale or 
   expect(left.results).toEqual(right.results);
   expect(left.results[1].tick).toBe(left.results[2].tick);
   expect(new Set(left.results.slice(1).map(row => row.operator_id)).size).toBe(2);
-  expect(left.profiles[target].current).toBe(left.results[2].npc_doctrine);
+  expect(left.results[1].outcome).toBe('applied');
+  expect(left.results[2]).toMatchObject({ outcome: 'refused', reason: 'affected-state-changed' });
+  expect(left.profiles[target].current).toBe('east');
   expect(right.profiles[target].current).toBe(left.profiles[target].current);
   const localOperator = await first.evaluate(() => window.__npcRequests[0].operator_id);
   const forbiddenDoctrine = left.profiles[target].current === 'north' ? 'east' : 'north';
@@ -186,13 +190,13 @@ test('equal GMs apply authored NPC doctrine through real AI and reject stale or 
   for (const page of [first, second]) {
     expect(await page.evaluate(target => window.__hostGmNpcState().profiles[target].current, target)).toBe(left.profiles[target].current);
   }
-  await first.evaluate(() => window.__hostSetNpcDoctrine({ ...window.__npcRequests[0], doctrine: 'withdrawn-choice', correlation: 'unknown-npc-doctrine' }));
+  await first.evaluate(() => window.__hostSetNpcDoctrineChecked({ ...window.__npcRequests[0], doctrine: 'withdrawn-choice', correlation: 'unknown-npc-doctrine' }));
   await expect(first.locator('#gm-npc-results [data-correlation="unknown-npc-doctrine"]')).toHaveAttribute('data-outcome', 'refused');
   await first.locator('#gm-despawn-preview').click();
   await expect(first.locator('#gm-action-confirmation')).toBeVisible();
   await first.locator('[data-confirmation-accept]').click();
   await first.waitForFunction(target => !window.__hostGmNpcState().profiles[target], target);
-  await first.evaluate(target => window.__hostSetNpcDoctrine({ ...window.__npcRequests[0], target, correlation: 'stale-npc' }), target);
+  await first.evaluate(target => window.__hostSetNpcDoctrineChecked({ ...window.__npcRequests[0], target, correlation: 'stale-npc' }), target);
   await expect(first.locator('#gm-npc-results [data-correlation="stale-npc"]')).toHaveAttribute('data-outcome', 'refused');
   expect(await first.locator('#gm-activity-list [data-category="gm_action"]').filter({ hasText: target }).count()).toBeGreaterThan(0);
   for (const captured of errors) expect(captured).toEqual([]);

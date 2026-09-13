@@ -162,6 +162,9 @@ pub mod gm_workload;
 /// Infrastructure condition + capacity on authored world furniture (issue
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;
+/// Runtime-owned field metadata (M6): the descriptors source Authoring and
+/// constrained Live inspectors share. Describes a field; grants no write.
+pub mod inspector;
 pub mod lobby;
 /// Host-to-host lockstep (issue #1116): the frozen fleet as the simulation sees
 /// it, the peer-independent command order, the barrier that withholds a tick

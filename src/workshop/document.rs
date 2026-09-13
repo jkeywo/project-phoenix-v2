@@ -1,6 +1,7 @@
 //! Source-preserving authoring fields. Runtime-owned schemas supply types and
 //! defaults; the TOML syntax tree supplies exact source spans for every authored
 //! scalar, including extension fields. No serializer rewrites the document.
+use crate::inspector::{FieldDescriptor, FieldOrigin, LiveMutability};
 use serde::{Deserialize, Serialize};
 use toml_edit::{Document, Item, Value};
 
@@ -14,14 +15,12 @@ pub enum Segment {
 #[derive(Clone, Debug, Serialize)]
 pub struct Field {
     pub path: Vec<Segment>,
-    pub kind: String,
+    #[serde(flatten)]
+    pub descriptor: FieldDescriptor,
     /// Exact TOML value text, which preserves large integers without JS loss.
     pub source: String,
     pub line: usize,
     pub runtime_owned: bool,
-    pub default_source: Option<String>,
-    /// Authoring owns documents; no arbitrary live writes are admitted here.
-    pub live_mutability: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -100,20 +99,23 @@ pub fn fields(source: &str, document_path: &str) -> Result<Vec<Field>, String> {
     let document = Document::parse(source).map_err(|e| e.to_string())?;
     let mut fields = Vec::new();
     walk_item(document.as_item(), &mut Vec::new(), source, &mut fields);
+    for field in &mut fields {
+        field.descriptor.origin.document = Some(document_path.into());
+    }
     if document_path.starts_with("assets/worlds/") && document_path.ends_with(".toml") {
         for field in &mut fields {
             if let Some((kind, default)) = global_field(&field.path) {
-                field.kind = kind.into();
+                field.descriptor.kind = kind.into();
                 field.runtime_owned = true;
-                field.default_source = default;
+                field.descriptor.default_source = default;
             }
         }
     }
     for field in &mut fields {
         if let Some((kind, default)) = super::model_fields::descriptor(document_path, &field.path) {
-            field.kind = kind.into();
+            field.descriptor.kind = kind.into();
             field.runtime_owned = true;
-            field.default_source = default;
+            field.descriptor.default_source = default;
         }
     }
     Ok(fields)
@@ -164,7 +166,27 @@ fn walk_value(value: &Value, path: &mut Vec<Segment>, source: &str, fields: &mut
             if let Some(span) = value.span() {
                 fields.push(Field {
                     path: path.clone(),
-                    kind: value.type_name().into(),
+                    descriptor: FieldDescriptor {
+                        kind: value.type_name().into(),
+                        default_source: None,
+                        live_mutability: LiveMutability::RecreateRequired,
+                        origin: FieldOrigin {
+                            schema_path: path
+                                .iter()
+                                .map(|part| match part {
+                                    Segment::Key(key) => key.clone(),
+                                    Segment::Index(index) => format!("[{index}]"),
+                                })
+                                .collect::<Vec<_>>()
+                                .join("."),
+                            document: None,
+                            line: Some(
+                                source[..span.start].bytes().filter(|b| *b == b'\n').count() + 1,
+                            ),
+                            layer: None,
+                        },
+                        validation: vec!["inspector.validation.source_document".into()],
+                    },
                     source: source[span.clone()].into(),
                     line: source[..span.start]
                         .bytes()
@@ -172,8 +194,6 @@ fn walk_value(value: &Value, path: &mut Vec<Segment>, source: &str, fields: &mut
                         .count()
                         + 1,
                     runtime_owned: false,
-                    default_source: None,
-                    live_mutability: "recreate-required",
                 });
             }
         }
@@ -200,8 +220,8 @@ pub fn patch(source: &str, patch: &Patch) -> Result<String, String> {
         .get("value")
         .and_then(Item::as_value)
         .ok_or("Expected a scalar value.")?;
-    let numeric = field.kind == "float" && value.is_integer();
-    if value.type_name() != field.kind && !numeric {
+    let numeric = field.descriptor.kind == "float" && value.is_integer();
+    if value.type_name() != field.descriptor.kind && !numeric {
         return Err("The value has a different type from this field.".into());
     }
     super::model_fields::validate(&patch.document_path, &patch.path, &patch.value_source)?;
@@ -278,7 +298,7 @@ mod tests {
         assert_eq!(result, source.replace("[1, 2, 3]", "[1, 8, 3]"));
         assert!(fields
             .iter()
-            .any(|field| field.runtime_owned && field.default_source.is_none()));
+            .any(|field| field.runtime_owned && field.descriptor.default_source.is_none()));
         assert!(fields
             .iter()
             .any(|field| !field.runtime_owned && field.source == "'unknown'"));
@@ -303,10 +323,10 @@ mod tests {
     fn runtime_field_type_and_default_do_not_come_from_malformed_source() {
         let source = "[global]\ntitle = 4\nsim_tick_hz = 'invalid'\n";
         let descriptors = fields(source, WORLD).unwrap();
-        assert_eq!(descriptors[0].kind, "string");
-        assert_eq!(descriptors[1].kind, "float");
+        assert_eq!(descriptors[0].descriptor.kind, "string");
+        assert_eq!(descriptors[1].descriptor.kind, "float");
         assert_eq!(
-            descriptors[1].default_source,
+            descriptors[1].descriptor.default_source,
             Some(
                 crate::entities::config::GlobalConfig::default()
                     .sim_tick_hz
@@ -331,7 +351,7 @@ mod tests {
         let source = "[global]\ntitle = 4\n";
         let field = fields(source, "scenarios.toml").unwrap().remove(0);
         assert!(!field.runtime_owned);
-        assert_eq!(field.kind, "integer");
+        assert_eq!(field.descriptor.kind, "integer");
         assert_eq!(
             patch(
                 source,

@@ -1631,6 +1631,15 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
             doctrine: bounded_gm_target_id(object.get("doctrine")?.as_str()?)?,
         },
+        "set_npc_doctrine_checked" if object.len() == 6 => {
+            let action = crate::gm_action::GmAction::SetNpcDoctrineChecked {
+                target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
+                doctrine: bounded_gm_target_id(object.get("doctrine")?.as_str()?)?,
+                expected_revision: object.get("expected_revision")?.as_str()?.to_owned(),
+            };
+            action.validate().ok()?;
+            action
+        }
         // Exactly `{operator_id, correlation, action, faction, enemy,
         // hostile}` (issue #1442). The two identities are authored faction
         // reference NAMES, bounded exactly as every other GM target id is, and

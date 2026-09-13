@@ -254,6 +254,7 @@ pub fn validate_station_action(
         | GmAction::SpawnPaletteEntity { .. }
         | GmAction::DespawnEntity { .. }
         | GmAction::SetNpcDoctrine { .. }
+        | GmAction::SetNpcDoctrineChecked { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetContactClassification { .. }
@@ -311,6 +312,7 @@ pub fn validate_station_action(
         | GmAction::SpawnPaletteEntity { .. }
         | GmAction::DespawnEntity { .. }
         | GmAction::SetNpcDoctrine { .. }
+        | GmAction::SetNpcDoctrineChecked { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetContactClassification { .. }

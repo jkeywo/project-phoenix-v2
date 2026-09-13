@@ -479,7 +479,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   });
   win.__hostGmDespawnState = gmDespawn.state;
   gmNpc = createGmNpcPanel({ doc: doc, t, getOperator: () => win.__hostLocalGm?.() || null,
-    submit: request => privateSubmit('gm.npc', request, () => win.__hostSetNpcDoctrine(request)),
+    submit: request => privateSubmit('gm.npc', request, () => win.__hostSetNpcDoctrineChecked(request)),
     confirmAction: gmConfirmations.request,
   });
   win.__hostGmNpcState = gmNpc.state;

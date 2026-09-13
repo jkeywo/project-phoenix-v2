@@ -19,8 +19,8 @@ fn signal() -> Arc<decoder::Pcm> {
                 } else {
                     0.025
                 };
-                let sample =
-                    amplitude * (i as f32 * std::f32::consts::TAU * 440.0 / RATE as f32).sin();
+                let sample = amplitude
+                    * crate::simmath::sin(i as f32 * std::f32::consts::TAU * 440.0 / RATE as f32);
                 [sample, sample * 0.4]
             })
             .collect(),

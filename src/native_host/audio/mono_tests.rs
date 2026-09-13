@@ -44,8 +44,10 @@ fn input() -> RoomInput {
     }
 }
 fn player(audio: &NativeRoomAudio) -> RoomPlayer {
-    let mut player = RoomPlayer::default();
-    player.mixer = audio.mixer.clone();
+    let mut player = RoomPlayer {
+        mixer: audio.mixer.clone(),
+        ..Default::default()
+    };
     player.cache.insert("mono-fixture.wav".into(), Ok(pcm()));
     player
 }

@@ -115,9 +115,9 @@ pub(super) fn prepare_with_revision(hub: &PrivateAudio, source: Option<fn() -> u
                 .to_radians();
             let angle = bearing.to_radians();
             let position = [
-                angle.sin() * pitch.cos(),
-                pitch.sin(),
-                -angle.cos() * pitch.cos(),
+                crate::simmath::sin(angle) * crate::simmath::cos(pitch),
+                crate::simmath::sin(pitch),
+                -crate::simmath::cos(angle) * crate::simmath::cos(pitch),
             ];
             let bounded = Pcm {
                 rate: pcm.rate,

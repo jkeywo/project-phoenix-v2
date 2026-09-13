@@ -122,6 +122,12 @@ pub fn ln(x: f32) -> f32 {
     libm::logf(x)
 }
 
+/// `x.log10()`, routed through the shared pure-Rust libm.
+#[inline]
+pub fn log10(x: f32) -> f32 {
+    libm::log10f(x)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,7 +144,7 @@ mod tests {
     /// tripwire.
     #[test]
     fn wrapper_outputs_are_bit_exact() {
-        let cases: [(f32, u32); 12] = [
+        let cases: [(f32, u32); 14] = [
             (sin(1.0), 0x3f576aa4),
             (sin(-2.5), 0xbf193578),
             (cos(1.0), 0x3f0a5140),
@@ -151,6 +157,8 @@ mod tests {
             (powf(2.5, 1.3), 0x40529f03),
             (exp(1.0), 0x402df854),
             (ln(2.0), 0x3f317218),
+            (log10(10.0), 0x3f800000),
+            (log10(100.0), 0x40000000),
         ];
         for (i, (got, want)) in cases.iter().enumerate() {
             assert_eq!(

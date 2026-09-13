@@ -24,9 +24,11 @@ pub fn impulse(position: [f32; 3], rate: u32) -> Vec<[f32; 2]> {
         0.0
     } else {
         // IRCAM's database azimuth is reversed from the listener/panner angle.
-        (-x.atan2(-z).to_degrees() + 360.0) % 360.0 / 15.0
+        (-crate::simmath::atan2(x, -z).to_degrees() + 360.0) % 360.0 / 15.0
     };
-    let elevation = y.atan2(x.hypot(z)).to_degrees().clamp(-45.0, 90.0);
+    let elevation = crate::simmath::atan2(y, crate::simmath::hypot(x, z))
+        .to_degrees()
+        .clamp(-45.0, 90.0);
     let lower = (elevation / 15.0).floor() as i32 * 15;
     let upper = (lower + 15).min(90);
     let blend_elevation = (elevation - lower as f32) / 15.0;

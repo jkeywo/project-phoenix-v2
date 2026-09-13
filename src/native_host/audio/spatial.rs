@@ -33,7 +33,7 @@ pub fn distance_gain(spec: &BlasterAudio, position: [f32; 3]) -> f32 {
     let distance = distance.max(reference);
     let gain = match spec.distance_model {
         DistanceModel::Inverse => reference / (reference + rolloff * (distance - reference)),
-        DistanceModel::Exponential => (distance / reference).powf(-rolloff),
+        DistanceModel::Exponential => crate::simmath::powf(distance / reference, -rolloff),
         DistanceModel::Linear => {
             let maximum = spec.max_distance.max(reference);
             if maximum == reference {
@@ -54,7 +54,9 @@ pub fn distance_gain(spec: &BlasterAudio, position: [f32; 3]) -> f32 {
 /// A stereo source keeps its centre image rather than being collapsed to mono.
 pub fn equal_power(position: [f32; 3], source_channels: usize) -> StereoMatrix {
     let [x, _, z] = position;
-    let mut azimuth = x.atan2(-z).to_degrees().clamp(-180.0, 180.0);
+    let mut azimuth = crate::simmath::atan2(x, -z)
+        .to_degrees()
+        .clamp(-180.0, 180.0);
     if azimuth < -90.0 {
         azimuth = -180.0 - azimuth;
     } else if azimuth > 90.0 {
@@ -67,7 +69,7 @@ pub fn equal_power(position: [f32; 3], source_channels: usize) -> StereoMatrix {
     } else {
         azimuth / 90.0
     };
-    let (right, left) = (normalised * std::f32::consts::FRAC_PI_2).sin_cos();
+    let (right, left) = crate::simmath::sin_cos(normalised * std::f32::consts::FRAC_PI_2);
     if source_channels == 1 {
         StereoMatrix([[left, 0.0], [right, 0.0]])
     } else if azimuth <= 0.0 {

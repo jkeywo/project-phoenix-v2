@@ -62,9 +62,9 @@ impl ReducedRange {
         let peak = frame
             .iter()
             .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
-        let release = (-1.0 / (rate as f32 * self.spec.release_seconds)).exp();
+        let release = crate::simmath::exp(-1.0 / (rate as f32 * self.spec.release_seconds));
         self.peak = peak.max(self.peak * release);
-        let level = 20.0 * self.peak.max(f32::MIN_POSITIVE).log10();
+        let level = 20.0 * crate::simmath::log10(self.peak.max(f32::MIN_POSITIVE));
         let over = level - self.spec.threshold_db;
         let half_knee = self.spec.knee_db * 0.5;
         let reduction = if over <= -half_knee {
@@ -74,9 +74,9 @@ impl ReducedRange {
         } else {
             (1.0 / self.spec.ratio - 1.0) * (over + half_knee).powi(2) / (2.0 * self.spec.knee_db)
         };
-        let target = 10.0_f32.powf(reduction / 20.0);
+        let target = crate::simmath::powf(10.0, reduction / 20.0);
         let coefficient = if target < self.gain {
-            (-1.0 / (rate as f32 * self.spec.attack_seconds)).exp()
+            crate::simmath::exp(-1.0 / (rate as f32 * self.spec.attack_seconds))
         } else {
             release
         };

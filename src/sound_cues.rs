@@ -40,9 +40,9 @@ impl SoundDefinition {
         let angle = equivalent.bearing?.to_radians();
         let pitch = equivalent.elevation.unwrap_or(0.0).to_radians();
         Some([
-            angle.sin() * pitch.cos(),
-            pitch.sin(),
-            -angle.cos() * pitch.cos(),
+            crate::simmath::sin(angle) * crate::simmath::cos(pitch),
+            crate::simmath::sin(pitch),
+            -crate::simmath::cos(angle) * crate::simmath::cos(pitch),
         ])
     }
 }

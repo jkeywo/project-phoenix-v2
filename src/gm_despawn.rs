@@ -115,6 +115,7 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
                 observer: uuid.clone(),
                 target,
                 mode,
+                classification: None,
             });
         }
         for (observer, rows) in content.contact_overrides.iter_mut() {
@@ -123,10 +124,42 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
                     observer: observer.clone(),
                     target: uuid.clone(),
                     mode,
+                    classification: None,
                 });
             }
         }
         content.contact_overrides.retain(|_, rows| !rows.is_empty());
+        let mut classified = Vec::new();
+        for (target, value) in content
+            .contact_classifications
+            .remove(&uuid)
+            .unwrap_or_default()
+        {
+            classified.push((uuid.clone(), target, value));
+        }
+        for (observer, rows) in content.contact_classifications.iter_mut() {
+            if let Some(value) = rows.remove(&uuid) {
+                classified.push((observer.clone(), uuid.clone(), value));
+            }
+        }
+        content
+            .contact_classifications
+            .retain(|_, rows| !rows.is_empty());
+        for (observer, target, value) in classified {
+            if let Some(row) = cleared
+                .iter_mut()
+                .find(|row| row.observer == observer && row.target == target)
+            {
+                row.classification = Some(value);
+            } else {
+                cleared.push(GmRemovalReference {
+                    observer,
+                    target,
+                    mode: crate::gm_contact::ContactMode::Normal,
+                    classification: Some(value),
+                });
+            }
+        }
     }
     // Close presentation activations in stable slot order, including starts
     // still queued this tick. Independent component clears below commute.

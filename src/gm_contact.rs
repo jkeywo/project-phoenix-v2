@@ -14,6 +14,75 @@ pub enum ContactMode {
 
 pub type ContactOverrides = BTreeMap<String, BTreeMap<String, ContactMode>>;
 
+/// One deliberately reported identity, resolved from authored content at the
+/// admitted apply tick. It never changes the real entity or its capabilities.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ReportedClassification {
+    pub palette: String,
+    pub label: String,
+}
+
+pub type ContactClassifications = BTreeMap<String, BTreeMap<String, ReportedClassification>>;
+
+/// An absolute classification edit, independent of the detection override.
+pub fn set_classification(
+    classifications: &mut ContactClassifications,
+    observer: &str,
+    target: &str,
+    requested: Option<ReportedClassification>,
+) -> bool {
+    if classifications
+        .get(observer)
+        .and_then(|rows| rows.get(target))
+        == requested.as_ref()
+    {
+        return false;
+    }
+    if let Some(value) = requested {
+        classifications
+            .entry(observer.into())
+            .or_default()
+            .insert(target.into(), value);
+    } else if let Some(rows) = classifications.get_mut(observer) {
+        rows.remove(target);
+        if rows.is_empty() {
+            classifications.remove(observer);
+        }
+    }
+    true
+}
+
+/// The observing Sensors surface gets only its reported labels, never the GM's
+/// palette selection or another observer's interpretation.
+pub fn classification_labels(
+    classifications: &ContactClassifications,
+    observer: &str,
+) -> BTreeMap<String, String> {
+    classifications
+        .get(observer)
+        .into_iter()
+        .flat_map(|rows| rows.iter())
+        .map(|(target, value)| (target.clone(), value.label.clone()))
+        .collect()
+}
+
+/// Apply only to contacts already admitted by detection. Misclassification is
+/// not Reveal: changing interpretation must not create a previously absent blip.
+pub fn classify_viewscreen_contacts(
+    entities: &mut [crate::core::messages::EntitySnapshot],
+    classifications: &ContactClassifications,
+    observer: &str,
+) {
+    let Some(rows) = classifications.get(observer) else {
+        return;
+    };
+    for entity in entities {
+        if let Some(value) = rows.get(&entity.uuid) {
+            entity.name = Some(value.label.clone());
+        }
+    }
+}
+
 /// Presentation-only sentinel, never an authored entity class or protected fact.
 pub const BASIC_RADAR_TAG: &str = "__gm_basic_contact";
 pub const BASIC_RADAR_ICON: &str = "__gm_basic_contact";
@@ -115,6 +184,13 @@ pub fn prune(
         .map(|(id, fleet)| (id.0.as_str(), fleet))
         .collect();
     content.contact_overrides.retain(|observer, rows| {
+        if live.get(observer.as_str()) != Some(&true) {
+            return false;
+        }
+        rows.retain(|target, _| live.contains_key(target.as_str()));
+        !rows.is_empty()
+    });
+    content.contact_classifications.retain(|observer, rows| {
         if live.get(observer.as_str()) != Some(&true) {
             return false;
         }

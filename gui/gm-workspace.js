@@ -417,6 +417,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
     submit: request => win.__hostSetContactOverride(request),
+    submitClassification: request => win.__hostSetContactClassification(request),
   });
   win.__hostGmContactState = gmContact.state;
   gmDespawn = createGmDespawnPanel({ doc: doc, t,

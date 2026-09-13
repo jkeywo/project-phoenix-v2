@@ -371,3 +371,279 @@ fn sensors_picture(app: &mut App, observer: &str) -> phoenix::core::messages::Se
         })
         .unwrap()
 }
+
+fn classification_palette(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .gm_palette
+        .push(phoenix::world::config::GmPaletteEntry {
+            id: "freighter".into(),
+            label: "test.reported.freighter".into(),
+            template_path: "assets/entities/alliance_cruiser.toml".into(),
+            ..Default::default()
+        });
+}
+
+fn classification_grant(
+    sequence: u64,
+    tick: u64,
+    observer: &str,
+    target: &str,
+    palette: Option<&str>,
+) -> GmActionGrant {
+    let mut result = grant(sequence, tick, observer, target, ContactMode::Normal);
+    result.action = GmAction::SetContactClassification {
+        ship: ShipKey(observer.into()),
+        target: target.into(),
+        palette: palette.map(str::to_owned),
+    };
+    result
+}
+
+#[test]
+fn classification_is_absolute_attributed_observer_scoped_and_independent_of_detection() {
+    let mut app = bare();
+    classification_palette(&mut app);
+    apply(
+        &mut app,
+        grant(1, 42, "observer", "target", ContactMode::Conceal),
+    );
+    let request = classification_grant(2, 42, "observer", "target", Some("freighter"));
+    apply(&mut app, request.clone());
+    apply(&mut app, request);
+    apply(
+        &mut app,
+        classification_grant(3, 42, "observer", "target", Some("freighter")),
+    );
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert_eq!(
+        runtime.contact_classifications["observer"]["target"].label,
+        "test.reported.freighter"
+    );
+    assert!(!runtime.contact_classifications.contains_key("other"));
+    assert_eq!(
+        mode(&runtime.contact_overrides, "observer", "target"),
+        ContactMode::Conceal
+    );
+    let results = app.world().resource::<GmActionLog>().entries();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[1].action_kind, GmActionKind::ContactMisclassify);
+    assert_eq!(results[1].observer.as_deref(), Some("observer"));
+    assert_eq!(results[1].target.as_deref(), Some("target"));
+    assert_eq!(results[2].outcome, GmActionOutcome::NoOp);
+    apply(
+        &mut app,
+        classification_grant(4, 42, "observer", "target", None),
+    );
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert!(runtime.contact_classifications.is_empty());
+    assert_eq!(
+        mode(&runtime.contact_overrides, "observer", "target"),
+        ContactMode::Conceal
+    );
+    assert_eq!(
+        app.world().resource::<GmActionLog>().entries()[3].action_kind,
+        GmActionKind::ContactClassificationNormal
+    );
+}
+
+#[test]
+fn classification_refuses_unknown_palette_stale_entities_and_unadmitted_operators() {
+    for (observer, target, palette) in [
+        ("observer", "target", "missing"),
+        ("missing", "target", "freighter"),
+        ("observer", "missing", "freighter"),
+    ] {
+        let mut app = bare();
+        classification_palette(&mut app);
+        apply(
+            &mut app,
+            classification_grant(1, 42, observer, target, Some(palette)),
+        );
+        assert!(app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .contact_classifications
+            .is_empty());
+        assert_eq!(
+            app.world().resource::<GmActionLog>().entries()[0].outcome,
+            GmActionOutcome::Refused
+        );
+    }
+    let request = phoenix::core::codec::decode_gm_action_request(
+        r#"{"operator_id":"gm","correlation":"classify","action":"set_contact_classification","ship":"observer","target":"target","palette":"freighter"}"#).unwrap();
+    let mut app = bare();
+    classification_palette(&mut app);
+    assert!(submit_local(app.world_mut(), request).is_err());
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_classifications
+        .is_empty());
+    for invalid in ["", "line\nbreak", &"x".repeat(129)] {
+        assert!(
+            classification_grant(1, 42, "observer", "target", Some(invalid))
+                .validate()
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn classification_replays_snapshots_and_publishes_only_the_observers_reported_label() {
+    let (mut live, observer, target) = seeded();
+    classification_palette(&mut live);
+    let tick = live.world().resource::<SimTick>().0 + 2;
+    let action = classification_grant(1, tick, &observer, &target, Some("freighter"));
+    let frame = phoenix::lockstep::MeshFrame::GmAction(GmActionFrame::Granted(action.clone()));
+    let encoded = phoenix::core::codec::encode_mesh_frame(&frame).unwrap();
+    assert_eq!(
+        phoenix::core::codec::decode_mesh_frame(&encoded),
+        Some(frame)
+    );
+    live.world_mut()
+        .resource_mut::<GmActionJournal>()
+        .insert(action.clone())
+        .unwrap();
+    let (mut replay, _, _) = seeded();
+    classification_palette(&mut replay);
+    replay
+        .world_mut()
+        .resource_mut::<GmActionJournal>()
+        .insert(action)
+        .unwrap();
+    for _ in 0..5 {
+        live.update();
+        replay.update();
+    }
+    assert_eq!(
+        phoenix::sim_digest::world_digest(live.world()),
+        phoenix::sim_digest::world_digest(replay.world())
+    );
+    let picture = sensors_picture(&mut live, &observer);
+    assert_eq!(
+        picture.contact_classifications[&target],
+        "test.reported.freighter"
+    );
+    assert!(picture.contact_overrides.is_empty());
+    let saved = phoenix::snapshot::capture(live.world());
+    let (mut restored, _, _) = seeded();
+    classification_palette(&mut restored);
+    let report = phoenix::snapshot::restore(restored.world_mut(), &saved);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    restored
+        .world_mut()
+        .run_system_once(phoenix::ship::sensors::publish_sensors_blackboard)
+        .unwrap();
+    assert_eq!(sensors_picture(&mut restored, &observer), picture);
+    assert_eq!(
+        restored.world().resource::<GmActionLog>().entries(),
+        live.world().resource::<GmActionLog>().entries()
+    );
+    let with_classification = phoenix::sim_digest::world_digest(restored.world());
+    restored
+        .world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .contact_classifications
+        .clear();
+    assert_ne!(
+        with_classification,
+        phoenix::sim_digest::world_digest(restored.world())
+    );
+}
+
+#[test]
+fn classification_prunes_with_either_identity_and_despawn_captures_its_inverse() {
+    for removed in ["observer", "target"] {
+        let mut app = bare();
+        classification_palette(&mut app);
+        apply(
+            &mut app,
+            classification_grant(1, 42, "observer", "target", Some("freighter")),
+        );
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &EntityUuid)>()
+            .iter(app.world())
+            .find(|(_, id)| id.0 == removed)
+            .unwrap()
+            .0;
+        app.world_mut().despawn(entity);
+        app.world_mut()
+            .run_system_once(phoenix::gm_contact::prune)
+            .unwrap();
+        assert!(app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .contact_classifications
+            .is_empty());
+    }
+    let mut app = bare();
+    classification_palette(&mut app);
+    apply(
+        &mut app,
+        grant(1, 42, "observer", "target", ContactMode::Reveal),
+    );
+    apply(
+        &mut app,
+        classification_grant(2, 42, "observer", "target", Some("freighter")),
+    );
+    let target = app
+        .world_mut()
+        .query::<(Entity, &EntityUuid)>()
+        .iter(app.world())
+        .find(|(_, id)| id.0 == "target")
+        .unwrap()
+        .0;
+    let cleared = phoenix::gm_despawn::remove_entity(app.world_mut(), target);
+    assert_eq!(cleared.len(), 1);
+    assert_eq!(cleared[0].mode, ContactMode::Reveal);
+    assert_eq!(
+        cleared[0].classification.as_ref().unwrap().label,
+        "test.reported.freighter"
+    );
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_classifications
+        .is_empty());
+}
+
+#[test]
+fn viewscreen_classification_keeps_detection_geometry_and_truth_intact() {
+    let mut app = bare();
+    classification_palette(&mut app);
+    apply(
+        &mut app,
+        classification_grant(1, 42, "observer", "target", Some("freighter")),
+    );
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    let truth = vec![phoenix::core::messages::EntitySnapshot {
+        uuid: "target".into(),
+        name: Some("true-raider".into()),
+        position: Some([20., 0., 0.]),
+        radar_icon: Some("ship".into()),
+        tags: vec!["ship".into()],
+        ..Default::default()
+    }];
+    let mut projected = truth.clone();
+    phoenix::gm_contact::classify_viewscreen_contacts(
+        &mut projected,
+        &runtime.contact_classifications,
+        "observer",
+    );
+    assert_eq!(
+        projected[0].name.as_deref(),
+        Some("test.reported.freighter")
+    );
+    assert_eq!(projected[0].position, truth[0].position);
+    assert_eq!(projected[0].radar_icon, truth[0].radar_icon);
+    assert_eq!(truth[0].name.as_deref(), Some("true-raider"));
+    let mut other = truth.clone();
+    phoenix::gm_contact::classify_viewscreen_contacts(
+        &mut other,
+        &runtime.contact_classifications,
+        "other",
+    );
+    assert_eq!(other, truth);
+}

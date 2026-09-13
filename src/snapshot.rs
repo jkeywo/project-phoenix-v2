@@ -2193,6 +2193,9 @@ pub struct ScenarioState {
     // while the save catalogue still retains their scenario/seed/tick metadata.
     #[serde(default)]
     pub contact_overrides: crate::gm_contact::ContactOverrides,
+    /// M7 interpreted contact identity, scoped to the observing player ship.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub contact_classifications: crate::gm_contact::ContactClassifications,
     /// `WorldContentRuntime::paused_gm_events` (issue #1303): the
     /// layer-qualified ids of GM-operable events a Game Master has paused.
     ///
@@ -3105,6 +3108,7 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         pending_gm_despawns: runtime.pending_gm_despawns.clone(),
         gm_despawn_captures: runtime.gm_despawn_captures.clone(),
         contact_overrides: runtime.contact_overrides.clone(),
+        contact_classifications: runtime.contact_classifications.clone(),
         // The GM's paused events (issue #1303). Empty — and so absent from the
         // payload — for every world that authors no pausable event, which is
         // every shipped world today.
@@ -5929,6 +5933,7 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // journal that is the only thing entitled to name them.
         runtime.gm_despawn_captures = stored.gm_despawn_captures.clone();
         runtime.contact_overrides = stored.contact_overrides.clone();
+        runtime.contact_classifications = stored.contact_classifications.clone();
         // The GM's paused events (issue #1303). Wholesale replacement on the
         // same rule and for the sharper reason on `ScenarioState`: a
         // freshly-loaded world pauses nothing, so anything short of replacement

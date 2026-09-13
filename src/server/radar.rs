@@ -350,7 +350,7 @@ pub(crate) fn sync_server_radar_bridge(
         })
         .unwrap_or_default();
     let entities = crate::objectives::project_entity_targets(&world.0.entities, &scoped_objectives);
-    let projected = if active == ConsoleRadar::ViewscreenScience {
+    let mut projected = if active == ConsoleRadar::ViewscreenScience {
         observer_q
             .single()
             .ok()
@@ -368,6 +368,17 @@ pub(crate) fn sync_server_radar_bridge(
     } else {
         None
     };
+    if active == ConsoleRadar::ViewscreenScience {
+        if let (Some(runtime), Ok(observer)) = (contact_runtime.as_ref(), observer_q.single()) {
+            if runtime.contact_classifications.contains_key(&observer.0) {
+                crate::gm_contact::classify_viewscreen_contacts(
+                    projected.get_or_insert_with(|| entities.clone()),
+                    &runtime.contact_classifications,
+                    &observer.0,
+                );
+            }
+        }
+    }
     bridge_sim_to_radar(
         &mut commands,
         widget,

@@ -256,6 +256,7 @@ pub fn validate_station_action(
         | GmAction::SetNpcDoctrine { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
+        | GmAction::SetContactClassification { .. }
         | GmAction::SetSystemDisabled { .. }
         | GmAction::TransmitComms { .. }
         | GmAction::SetEventPaused { .. }
@@ -310,6 +311,7 @@ pub fn validate_station_action(
         | GmAction::SetNpcDoctrine { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
+        | GmAction::SetContactClassification { .. }
         | GmAction::SetSystemDisabled { .. }
         | GmAction::TransmitComms { .. }
         | GmAction::SetEventPaused { .. }

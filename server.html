@@ -2240,6 +2240,12 @@
           <button id="gm-contact-reveal" type="button" disabled data-i18n="server.gm.contact.reveal"></button>
           <button id="gm-contact-conceal" type="button" disabled data-i18n="server.gm.contact.conceal"></button>
           <button id="gm-contact-normal" type="button" disabled data-i18n="server.gm.contact.normal"></button>
+          <label for="gm-contact-classification" data-i18n="server.gm.contact.classification"></label>
+          <select id="gm-contact-classification"></select>
+          <p id="gm-contact-classification-current" role="status"></p>
+          <button id="gm-contact-misclassify" type="button" disabled data-i18n="server.gm.contact.misclassify"></button>
+          <button id="gm-contact-classification-normal" type="button" disabled data-i18n="server.gm.contact.classification-normal"></button>
+          <p data-i18n="server.gm.contact.classification-explanation"></p>
           <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
           <ol id="gm-contact-results"></ol>
         </section>
@@ -4488,6 +4494,14 @@
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_system_disabled', target: request.target, system: request.system, disabled: request.disabled }));
+    };
+    window.__hostSetContactClassification = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
+          || typeof request.target !== 'string' || !(request.palette === null || typeof request.palette === 'string')
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
+        action: 'set_contact_classification', ship: request.ship, target: request.target, palette: request.palette }));
     };
     window.__hostSetContactOverride = function(request) {
       const operator = localGm();

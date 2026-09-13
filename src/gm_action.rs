@@ -278,6 +278,13 @@ pub enum GmAction {
     RequestLiveRestore {
         candidate: String,
     },
+    /// Observer-specific reported identity from authored content. None clears it.
+    /// Appended to preserve durable postcard enum indices.
+    SetContactClassification {
+        ship: crate::command_admission::log::ShipKey,
+        target: String,
+        palette: Option<String>,
+    },
 }
 
 /// The exact affected field one GM action changed, with its before and after
@@ -503,6 +510,8 @@ pub enum GmActionKind {
     /// (issue #1446). Appended, for the postcard variant-index reason every
     /// kind after the first shares.
     LiveRestore,
+    ContactMisclassify,
+    ContactClassificationNormal,
 }
 
 impl GmActionKind {
@@ -526,6 +535,8 @@ impl GmActionKind {
             | Self::SystemRestore
             | Self::ContactConceal
             | Self::ContactNormal
+            | Self::ContactMisclassify
+            | Self::ContactClassificationNormal
             | Self::Comms
             // The faction whose OWN enemies list moves. The other half of the
             // pair rides `LoggedGmAction::affected` rather than being folded
@@ -580,7 +591,9 @@ impl GmActionProposal {
 impl GmAction {
     pub fn observer_id(&self) -> Option<String> {
         match self {
-            Self::SetContactOverride { ship, .. } => Some(ship.0.clone()),
+            Self::SetContactOverride { ship, .. } | Self::SetContactClassification { ship, .. } => {
+                Some(ship.0.clone())
+            }
             _ => None,
         }
     }
@@ -602,7 +615,8 @@ impl GmAction {
             | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. }
             | Self::IssueStationCommand { ship, .. }
-            | Self::SetContactOverride { ship, .. } => Some(ship),
+            | Self::SetContactOverride { ship, .. }
+            | Self::SetContactClassification { ship, .. } => Some(ship),
         }
     }
 
@@ -623,6 +637,7 @@ impl GmAction {
             | Self::SetSystemDisabled { target, .. }
             | Self::DespawnEntity { target }
             | Self::SetContactOverride { target, .. }
+            | Self::SetContactClassification { target, .. }
             | Self::SetNpcDoctrine { target, .. } => Some(target.as_str()),
             // The palette id, not the derived instance name: the durable fact
             // has to say WHAT the operator placed, and the instance name is
@@ -690,6 +705,17 @@ impl GmAction {
                 && recipients.len() <= crate::gm_objective::MAX_OBJECTIVE_RECIPIENTS
                 && recipients.iter().all(|id| bounded(id))
                 && recipients.windows(2).all(|pair| pair[0] < pair[1]) =>
+            {
+                Ok(())
+            }
+            Self::SetContactClassification {
+                ship,
+                target,
+                palette,
+            } if bounded(&ship.0)
+                && bounded(target)
+                && ship.0 != *target
+                && palette.as_deref().is_none_or(bounded) =>
             {
                 Ok(())
             }
@@ -792,6 +818,13 @@ impl GmAction {
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
             Self::DespawnEntity { .. } => GmActionKind::WorldDespawn,
             Self::ObjectiveAction { .. } => GmActionKind::ObjectiveControl,
+            Self::SetContactClassification { palette, .. } => {
+                if palette.is_some() {
+                    GmActionKind::ContactMisclassify
+                } else {
+                    GmActionKind::ContactClassificationNormal
+                }
+            }
             Self::SetContactOverride { mode, .. } => match mode {
                 crate::gm_contact::ContactMode::Reveal => GmActionKind::ContactReveal,
                 crate::gm_contact::ContactMode::Conceal => GmActionKind::ContactConceal,
@@ -817,6 +850,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
+            | Self::SetContactClassification { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
@@ -907,6 +941,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
+            | Self::SetContactClassification { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
@@ -942,6 +977,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
+            | Self::SetContactClassification { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
@@ -972,6 +1008,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
+            | Self::SetContactClassification { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
@@ -1231,6 +1268,8 @@ pub fn validate_fleet_frame(
                 GmActionKind::ContactReveal
                     | GmActionKind::ContactConceal
                     | GmActionKind::ContactNormal
+                    | GmActionKind::ContactMisclassify
+                    | GmActionKind::ContactClassificationNormal
             ) != refusal.observer.is_some()
             {
                 return Err(GmActionRefusalReason::InvalidAction);
@@ -2345,6 +2384,7 @@ impl GmActionJournal {
                         | GmAction::ApplyDirectEffect { .. }
                         | GmAction::SpawnPaletteEntity { .. }
                         | GmAction::SetContactOverride { .. }
+                        | GmAction::SetContactClassification { .. }
                         | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. }
@@ -2431,6 +2471,7 @@ impl GmActionJournal {
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
                 | GmAction::SetContactOverride { .. }
+                | GmAction::SetContactClassification { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
@@ -2554,6 +2595,7 @@ impl GmActionJournal {
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
                 | GmAction::SetContactOverride { .. }
+                | GmAction::SetContactClassification { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
@@ -3319,6 +3361,7 @@ pub fn apply_due_actions(
                                         &live,
                                         &runtime.name_to_uuid,
                                         &runtime.contact_overrides,
+                                        &runtime.contact_classifications,
                                         |origin| {
                                             origin
                                                 .resolve(
@@ -3663,6 +3706,51 @@ pub fn apply_due_actions(
             // from a scripted one. Everything that decides the RESULT (the
             // palette entry, the variant, the placement) is answered here, at
             // the agreed apply tick, so every peer commits the same outcome.
+            GmAction::SetContactClassification {
+                ship,
+                target,
+                palette,
+            } => {
+                let observer = removal_targets.iter().find(|(uuid, ..)| uuid.0 == ship.0);
+                let target_live = removal_targets.iter().any(|(uuid, ..)| uuid.0 == *target);
+                match (content.as_deref_mut(), observer, target_live) {
+                    (Some(runtime), Some((_, _, true, true, ..)), true) if ship.0 != *target => {
+                        let reported = palette.as_ref().map(|id| {
+                            crate::gm_spawn::palette_entry(&runtime.gm_palette, id).map(|entry| {
+                                crate::gm_contact::ReportedClassification {
+                                    palette: id.clone(),
+                                    label: entry.label.clone(),
+                                }
+                            })
+                        });
+                        if matches!(reported, Some(None)) {
+                            (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::InvalidAction),
+                            )
+                        } else {
+                            let changed = crate::gm_contact::set_classification(
+                                &mut runtime.contact_classifications,
+                                &ship.0,
+                                target,
+                                reported.flatten(),
+                            );
+                            (
+                                if changed {
+                                    GmActionOutcome::Applied
+                                } else {
+                                    GmActionOutcome::NoOp
+                                },
+                                None,
+                            )
+                        }
+                    }
+                    _ => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownEntity),
+                    ),
+                }
+            }
             GmAction::SetContactOverride { ship, target, mode } => {
                 let observer = removal_targets.iter().find(|(uuid, ..)| uuid.0 == ship.0);
                 let target_live = removal_targets.iter().any(|(uuid, ..)| uuid.0 == *target);
@@ -4256,6 +4344,7 @@ pub fn reset(world: &mut World) {
     if let Some(mut content) = world.get_resource_mut::<crate::world::server::WorldContentRuntime>()
     {
         content.contact_overrides.clear();
+        content.contact_classifications.clear();
     }
     // The armed direct effects go with the journal that authorised them: an
     // arm that outlived its run would land damage in the NEXT one, attributed

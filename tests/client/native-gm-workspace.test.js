@@ -36,6 +36,16 @@ describe('native GM workspace over the shared GM presenters', () => {
         <h3 id="gm-session-log-heading"></h3><ol id="gm-session-log"></ol></section>`;
   });
 
+  it('sends classification through the real native GM adapter without changing operator scope', () => {
+    const app = mount();
+    const request = { ship: 'observer', target: 'target', palette: 'freighter', correlation: 'classify-1' };
+    expect(window.__hostSetContactClassification(request)).toBe(true);
+    expect(app.bridge.submitAction).toHaveBeenCalledExactlyOnceWith({ ...request,
+      action: 'set_contact_classification', operator_id: 'native-gm' });
+    expect(window.__hostSetContactClassification({ ...request, operator_id: 'other' })).toBe(false);
+    app.view.dispose(); expect(window.__hostSetContactClassification(request)).toBe(false);
+  });
+
   it('uses the ordinary GM session projection and submits attributed absolute pause state', () => {
     const app = mount();
     app.receive('gm_session', { paused: false, results: [] });

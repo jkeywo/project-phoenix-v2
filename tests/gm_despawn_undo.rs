@@ -173,6 +173,43 @@ fn contact_override(app: &App, observer: &str, target: &str) -> Option<ContactMo
         .copied()
 }
 
+#[test]
+fn despawn_undo_restores_reported_classification_without_inventing_a_visibility_override() {
+    let mut app = seeded();
+    let npc = place_removable_npc(&mut app, 1);
+    let observer = fleet_observer(&mut app);
+    let reported = phoenix::gm_contact::ReportedClassification {
+        palette: "reported-freighter".into(),
+        label: "test.reported.freighter".into(),
+    };
+    phoenix::gm_contact::set_classification(
+        &mut app
+            .world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .contact_classifications,
+        &observer,
+        &npc,
+        Some(reported.clone()),
+    );
+    let removal = despawn(&mut app, 1, 2, &npc);
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_classifications
+        .is_empty());
+    let request = undo_of(&mut app, 2, 3, &removal);
+    submit(&mut app, request);
+    settle(&mut app);
+    assert!(entity_for(&mut app, &npc).is_some());
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .contact_classifications[&observer][&npc],
+        reported
+    );
+    assert_eq!(contact_override(&app, &observer, &npc), None);
+}
+
 fn despawn(app: &mut App, operator: u32, sequence: u64, target: &str) -> GmActionGrant {
     let request = grant(
         operator,

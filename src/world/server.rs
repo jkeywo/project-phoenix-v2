@@ -210,6 +210,7 @@ pub struct WorldContentRuntime {
     /// pipeline's command queue. Captured and folded with its siblings.
     pub gm_despawn_captures: crate::gm_despawn_undo::GmDespawnCaptures,
     pub contact_overrides: crate::gm_contact::ContactOverrides,
+    pub contact_classifications: crate::gm_contact::ContactClassifications,
     /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
     /// (issue #1303).
     ///

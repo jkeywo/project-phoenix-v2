@@ -1876,8 +1876,12 @@ function scanPayload(state) {
 export function buildSensorsConsoleState(state, systemIds = []) {
   const bb = blackboardOfKind(state, 'Sensors', systemIds)?.data;
   const overrides = bb?.contact_overrides || {};
+  const classifications = bb?.contact_classifications || {};
   const originalEntities = state.asteroids || [];
-  const ordinary = originalEntities.filter(entity => overrides[entity.uuid] !== 'conceal');
+  const ordinary = originalEntities.filter(entity => overrides[entity.uuid] !== 'conceal').map(entity => {
+    const label = classifications[entity.uuid];
+    return typeof label === 'string' && label ? { ...entity, name: label, shipClass: label } : entity;
+  });
   const selectedMode = overrides[state.sensorsTarget] || 'normal';
   state = { ...state, asteroids: ordinary,
     sensorsTarget: selectedMode === 'conceal' ? null : state.sensorsTarget };
@@ -1915,6 +1919,13 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     if (blip) { blip.icon = null; blip.basic_contact = true; blip.selectable = true; blips.push(blip); }
   }
 
+  // Classification is applied after detection, including a deliberately revealed
+  // basic point. It supplies only the GM-authored label, never hidden raw facts.
+  for (const blip of blips) {
+    const label = classifications[blip.uuid];
+    if (typeof label === 'string' && label) blip.name = label;
+  }
+
   // Target identity/tactical facts (issue #1378): shared with the Weapons
   // builder's own target lock card through the one helper, so the two never
   // derive these fields two different ways. `range` is passed for symmetry
@@ -1924,7 +1935,8 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   if (selectedBasic) {
     const target = originalEntities.find(entity => entity.uuid === state.sensorsTarget);
     if (target) {
-      facts.target_name = t('console.sensors.basic_contact');
+      facts.target_name = classifications[target.uuid] || t('console.sensors.basic_contact');
+      facts.target_class = classifications[target.uuid] || null;
       const dx = entityX(target) - (state.shipX || 0), dz = entityZ(target) - (state.shipZ || 0);
       facts.target_bearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
       facts.target_range = Math.hypot(dx, dz);

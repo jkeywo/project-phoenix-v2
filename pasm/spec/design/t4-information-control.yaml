@@ -1,0 +1,25 @@
+entities:
+  - component: gm-t4-contact-classification
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Observer-Specific Reported Contact Classification
+      summary: "The first M7 path sets or clears a reported sensor identity for one observing player ship and one real target. SetContactClassification selects an existing scenario/mod GM palette label; its resolved label is retained as interpreted information independently of Reveal/Conceal. It changes the Sensors contact name and selected classification plus the matching Sensors Viewscreen label, never the real entity, faction, physical properties or independently earned scan readings. The same ordinary Sensors builder supplies GM Crew Knowledge, so Truth and Crew Knowledge show the discrepancy without another knowledge evaluator."
+      rationale:
+        - "[ai] The running world's authored palette supplies the allowed labels. The command accepts a palette key or null to clear; it accepts no arbitrary asset path, ECS field, free-text identity or gameplay tuning. This first path reuses that existing authored vocabulary rather than depending on future per-ship epistemics APIs."
+        - "[ai] Misclassification alone creates no contact. Conceal suppresses it; a Reveal-only basic point may carry the intentionally supplied label but still receives no raw protected hull, faction or scan facts. Independently earned scan readings, Comms and Objective knowledge remain separate evidence."
+        - "[ai] Browser and native GM controls share the contact panel, confirmation category and typed Admission route. Absolute apply/clear requests wait for their exact attributed correlated result. Classification results appear in the ordinary journal and activity feed; there is no second command or history lane."
+        - "[ai] The observing-ship/target map is canonical run state: ordered maps, agreed apply ticks, idempotent requests, snapshot capture/restore and conditional deterministic digest folding. The Sensors blackboard publishes only its observer's resolved labels, not the GM palette selection or another observer's interpretation."
+        - "[ai] Entity disappearance prunes the pair; an attributed despawn captures its classification beside the existing visibility override and a despawn undo restores both without overwriting a newer pair. A new run clears the map. Clear classification leaves Reveal/Conceal untouched."
+        - "[ai] Ghost contacts and delayed/degraded intel remain subsequent M7 paths. This delivery does not claim a complete per-ship evidence store or alter crew authority, Backfill targeting, live truth or deterministic physics."
+    architecture:
+      kind: gm-information-control
+      authority: authoritative
+      coordinates: [gm-milestone-information-control, gm-t2-directed-world-actions]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_contact.rs, src/gm_action.rs, src/core/codec.rs, src/core/messages.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/gm_despawn.rs, src/gm_despawn_undo.rs, src/ship/sensors.rs, src/server/radar.rs, src/world/server.rs, src/snapshot.rs, src/sim_digest.rs, gui/console-state.js, gui/gm-contact-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, gui/gm-journal-panel.js, gui/gm-activity-feed.js, server.html]
+      symbols: [ReportedClassification, ContactClassifications, set_classification, classification_labels, classify_viewscreen_contacts, SetContactClassification, ContactMisclassify, ContactClassificationNormal, createGmContactPanel]
+      tests: ["cargo test --features headless --test gm_contact --test gm_despawn_undo", "npx vitest run tests/client/gm-contact.test.js tests/client/gm-knowledge-compare.test.js tests/client/gm-activity-feed.test.js tests/client/native-gm-workspace.test.js"]

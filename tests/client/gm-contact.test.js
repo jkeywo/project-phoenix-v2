@@ -52,6 +52,7 @@ it('Normal restores the ordinary projection; observer B and independent Comms re
 function mount(options = {}) {
   document.body.innerHTML = '<select id="gm-contact-observer"></select><p id="gm-contact-target"></p><p id="gm-contact-mode"></p>'
     + ['reveal', 'conceal', 'normal'].map(mode => `<button id="gm-contact-${mode}"></button>`).join('')
+    + '<select id="gm-contact-classification"></select><p id="gm-contact-classification-current"></p><button id="gm-contact-misclassify"></button><button id="gm-contact-classification-normal"></button>'
     + '<p id="gm-contact-feedback"></p><ol id="gm-contact-results"></ol>';
   const submit = vi.fn(() => true), getOperator = vi.fn(() => ({ id: 'gm' }));
   const panel = createGmContactPanel({ submit, getOperator, schedule: vi.fn(), correlation: () => 'request', ...options });
@@ -111,4 +112,80 @@ it('all result outcomes come from the String Table', () => {
   panel.update({ entities, contact_results: ['applied', 'no-op', 'refused'].map((outcome, i) => ({
     action_kind: 'contact-normal', observer: 'observer', target: 'target', operator_id: 'gm', correlation: String(i), tick: i, outcome })) });
   expect([...document.getElementById('gm-contact-results').children].map(row => row.textContent)).toEqual(['translated:server.gm.contact.outcome_applied', 'translated:server.gm.contact.outcome_no_op', 'translated:server.gm.contact.outcome_refused']);
+});
+
+it('misclassification changes the selected observer sensor identity without mutating truth or other surfaces', () => {
+  const input = state(null, 1000);
+  const before = JSON.stringify(input);
+  input.blackboards.sensors.contact_classifications = { target: 'Reported freighter' };
+  const crew = JSON.parse(buildSensorsConsoleState(input));
+  expect(crew.blips[0].name).toBe('Reported freighter');
+  expect(crew.target_name).toBe('Reported freighter');
+  expect(crew.target_class).toBe('Reported freighter');
+  expect(crew.scan.reading.subject_name).toBe('SECRET-SCAN'); // independent earned reading
+  expect(crewContactRows(crew.blips, input.asteroids)[0].name).toBe('Reported freighter');
+  expect(input.asteroids[0]).toEqual(secret);
+  expect(buildCommsConsoleState(input)).toBe(buildCommsConsoleState(JSON.parse(before)));
+  expect(JSON.parse(buildSensorsConsoleState(JSON.parse(before))).target_name).toBe('SECRET-NAME');
+});
+it('classification never reveals a contact; Conceal wins and a revealed basic point gets only its false label', () => {
+  for (const mode of [null, 'conceal', 'reveal']) {
+    const input = state(mode); input.blackboards.scan.reading = null;
+    input.blackboards.sensors.contact_classifications = { target: 'Reported freighter' };
+    const crew = JSON.parse(buildSensorsConsoleState(input));
+    if (mode !== 'reveal') expect(crew.blips).toEqual([]);
+    else {
+      expect(crew.blips[0]).toMatchObject({ name: 'Reported freighter', basic_contact: true });
+      expect(crew.target_class).toBe('Reported freighter');
+      expect(crew.target_hull_pct).toBeNull(); expect(crew.target_faction).toBeNull();
+      expect(JSON.stringify(crew)).not.toContain('SECRET');
+    }
+  }
+});
+it('classification apply and clear use typed captured requests and exact correlated results', () => {
+  const submitClassification = vi.fn(() => true);
+  const { panel, entities } = mount({ submitClassification });
+  const palette = [{ palette: 'freighter', label: 'Reported freighter' }];
+  panel.update({ entities, contact_classification_palette: palette });
+  const select = document.getElementById('gm-contact-classification');
+  select.value = 'freighter'; select.dispatchEvent(new Event('change'));
+  document.getElementById('gm-contact-misclassify').click();
+  expect(submitClassification).toHaveBeenCalledExactlyOnceWith({ operator_id: 'gm', correlation: 'request', ship: 'observer', target: 'target', palette: 'freighter' });
+  expect(panel.chooseClassification('freighter')).toBe(false);
+  const result = { action_kind: 'contact-misclassify', observer: 'observer', target: 'target', operator_id: 'gm', correlation: 'request', tick: 42, outcome: 'applied' };
+  panel.update({ entities, contact_classification_palette: palette, contact_results: [{ ...result, observer: 'other' }] });
+  expect(panel.state().pending).not.toBeNull();
+  panel.update({ entities, contact_classification_palette: palette, contact_classifications: { observer: { target: palette[0] } }, contact_results: [result] });
+  expect(panel.state().pending).toBeNull();
+  expect(document.getElementById('gm-contact-classification-current').textContent).toBe('Reported freighter');
+  document.getElementById('gm-contact-classification-normal').click();
+  expect(submitClassification).toHaveBeenLastCalledWith({ operator_id: 'gm', correlation: 'request', ship: 'observer', target: 'target', palette: null });
+});
+it('classification refuses unlisted choices, malformed projections and unavailable admission', () => {
+  const submitClassification = vi.fn(() => true), { panel, entities, getOperator } = mount({ submitClassification });
+  expect(panel.chooseClassification('unknown')).toBe(false);
+  expect(panel.update({ entities, contact_classifications: { observer: { target: { label: 'bad' } } } })).toBe(false);
+  panel.update({ entities, contact_classification_palette: [{ palette: 'freighter', label: 'Reported freighter' }] });
+  getOperator.mockReturnValue(null); expect(panel.chooseClassification('freighter')).toBe(false);
+  expect(submitClassification).not.toHaveBeenCalled(); panel.reset(); expect(panel.state().classifications).toEqual({});
+});
+it('live entity updates preserve the focused classification choice and its native option nodes', () => {
+  const { panel, entities } = mount();
+  const palette = [{ palette: 'freighter', label: 'Reported freighter' }, { palette: 'cruiser', label: 'Reported cruiser' }];
+  panel.update({ entities, contact_classification_palette: palette });
+  const select = document.getElementById('gm-contact-classification');
+  select.focus(); select.value = 'cruiser';
+  const options = [...select.options];
+  for (let tick = 0; tick < 3; tick++) panel.update({
+    entities: entities.map(row => ({ ...row, position: [tick, 0, 0] })),
+    contact_classification_palette: palette.map(row => ({ ...row })),
+  });
+  expect(document.activeElement).toBe(select);
+  expect(select.value).toBe('cruiser');
+  options.forEach((option, i) => expect(select.options[i]).toBe(option));
+  panel.update({ entities, contact_classification_palette: [palette[1]] });
+  expect(select.value).toBe('cruiser');
+  expect([...select.options].map(option => option.value)).toEqual(['', 'cruiser']);
+  panel.update({ entities, contact_classification_palette: [palette[0]] });
+  expect(select.value).toBe('');
 });

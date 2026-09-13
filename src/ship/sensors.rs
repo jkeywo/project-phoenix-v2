@@ -821,6 +821,16 @@ pub fn publish_sensors_blackboard(
             .unwrap_or_default();
         let bb = SensorsBlackboard {
             contact_overrides: overrides.clone(),
+            contact_classifications: uuid
+                .and_then(|id| {
+                    content.as_ref().map(|runtime| {
+                        crate::gm_contact::classification_labels(
+                            &runtime.contact_classifications,
+                            &id.0,
+                        )
+                    })
+                })
+                .unwrap_or_default(),
             radar_range: base_range * radar_mult,
             radar_shows,
             radar_selects,

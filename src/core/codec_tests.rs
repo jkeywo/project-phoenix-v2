@@ -997,6 +997,8 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
         despawn_results: Vec::new(),
         contact_results: Vec::new(),
         contact_overrides: Default::default(),
+        contact_classifications: Default::default(),
+        contact_classification_palette: Default::default(),
         entities: vec![
             crate::gm_projection::GmEntityProjection {
                 removable: false,

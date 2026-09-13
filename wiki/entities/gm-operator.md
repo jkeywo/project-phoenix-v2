@@ -2,8 +2,8 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [src/gm_solo.rs, src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
-updated: 2026-09-08
+sources: [src/gm_contact.rs, gui/gm-contact-panel.js, pasm/spec/design/t4-information-control.yaml, src/gm_solo.rs, src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+updated: 2026-09-13
 ---
 
 # GM Operator
@@ -440,12 +440,27 @@ For intended design, see
 `gui/gm-knowledge-compare.js` compares a separately selected ship's knowledge
 with the GM view. Truth uses `gm_entity`; the selected ship's `gm_station`
 replica passes through the same fold and Sensors/Comms builders used by
-authentic Station consoles. Contacts can differ because of sensor range and
-tag filtering. Both Objective comparison columns use the selected ship's
+authentic Station consoles. Contacts can differ because of sensor range,
+tag filtering, Reveal/Conceal and reported classification. Both Objective comparison columns use the selected ship's
 recipient-filtered list and therefore show equality. Comms likewise compares
 the selected ship's recipient-filtered blackboard with the ordinary console
 builder's view of that same blackboard. The comparison excludes Station-private hull and
 blackboard detail, which remains accessible through Station puppeting.
+
+`src/gm_contact.rs` also owns M7's per-observer reported classifications.
+`SetContactClassification` selects a scenario/mod GM palette label for one
+real target, or clears that label. The contact panel uses the existing
+confirmation and canonical result lifecycle in browser and native GM workspaces.
+The observing Sensors blackboard carries only resolved labels for that ship;
+the ordinary Sensors builder substitutes the reported name/classification, and
+the Sensors Viewscreen substitutes its contact label. Detection, entity truth,
+physical properties, faction, independently earned scans, Comms and Objectives
+remain unchanged. A classification does not reveal an absent contact, and
+Conceal still wins. The canonical map survives snapshot/reconnect, contributes
+to the digest, and is cleared with either identity or a new run. Despawn undo
+restores a captured classification alongside visibility without inventing a
+visibility override. Ghosts and delayed/degraded intel remain later M7 work;
+see [`t4-information-control.yaml`](../../pasm/spec/design/t4-information-control.yaml).
 
 ## Authentic Station puppeting
 

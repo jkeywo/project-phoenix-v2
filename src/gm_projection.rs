@@ -211,6 +211,10 @@ pub struct GmEntityProjectionPayload {
     pub despawn_results: Vec<crate::gm_action::LoggedGmAction>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub contact_overrides: crate::gm_contact::ContactOverrides,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub contact_classifications: crate::gm_contact::ContactClassifications,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contact_classification_palette: Vec<crate::gm_contact::ReportedClassification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contact_results: Vec<crate::gm_action::LoggedGmAction>,
 }
@@ -684,6 +688,8 @@ fn publish_local_projection(
         crate::gm_action::GmActionKind::ContactReveal,
         crate::gm_action::GmActionKind::ContactConceal,
         crate::gm_action::GmActionKind::ContactNormal,
+        crate::gm_action::GmActionKind::ContactMisclassify,
+        crate::gm_action::GmActionKind::ContactClassificationNormal,
     ]
     .into_iter()
     .flat_map(|kind| crate::gm_action::projected_results(kind, &action_log, &local_refusals))
@@ -736,6 +742,23 @@ fn publish_local_projection(
         contact_overrides: world_content
             .as_ref()
             .map(|runtime| runtime.contact_overrides.clone())
+            .unwrap_or_default(),
+        contact_classifications: world_content
+            .as_ref()
+            .map(|runtime| runtime.contact_classifications.clone())
+            .unwrap_or_default(),
+        contact_classification_palette: world_content
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .gm_palette
+                    .iter()
+                    .map(|entry| crate::gm_contact::ReportedClassification {
+                        palette: entry.id.clone(),
+                        label: entry.label.clone(),
+                    })
+                    .collect()
+            })
             .unwrap_or_default(),
         contact_results,
         npc_doctrines: world_content

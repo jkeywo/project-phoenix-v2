@@ -2793,7 +2793,7 @@ server.gm.contact.reveal,GM contact override control and shared Sensors projecti
 server.gm.contact.conceal,GM contact override control and shared Sensors projection,[Conceal]
 server.gm.contact.normal,GM contact override control and shared Sensors projection,[Normal]
 server.gm.contact.pending,GM contact override control and shared Sensors projection,[Waiting for the authoritative result.]
-server.gm.contact.applied,GM contact override control and shared Sensors projection,[Contact visibility updated.]
+server.gm.contact.applied,GM contact override control and shared Sensors projection,[Contact information updated.]
 server.gm.contact.refused,GM contact override control and shared Sensors projection,[The request was refused.]
 server.gm.contact.timed_out,GM contact override control and shared Sensors projection,[No result yet. Check the result list before retrying.]
 server.gm.contact.result,GM contact override attributed result,[{operator}: {mode} for {observer} → {target} at tick {tick} ({outcome})]
@@ -3324,3 +3324,7 @@ world.probe_gm_widgets.widget.brief,Label of the authored note widget in the GM 
 world.probe_gm_widgets.widget.quiet_watch,Label of the authored background-watch attention widget in the GM widget probe world,[Quiet watch]
 world.probe_gm_widgets.note.brief,Authored facilitator note shown on the tactical desk in the GM widget probe world,[Hold the escort back until the relay answers.]
 world.probe_gm_widgets.note.narrative,Authored facilitator note shown on the narrative desk in the GM widget probe world,[Let the quiet run; the crew have not finished talking.]
+server.gm.contact.classification,GM authored false-classification selector,[Reported classification]
+server.gm.contact.misclassify,GM false-classification action,[Set classification]
+server.gm.contact.classification-normal,GM clear false-classification action,[Use ordinary classification]
+server.gm.contact.classification-explanation,GM classification scope explanation,"[Report an authored identity to this ship’s Sensors. Detection and independently earned scan readings remain unchanged.]"

@@ -246,6 +246,11 @@ pub enum GmActivityAction {
     /// [`Self::SetFactionHostility`]'s reason: a restore is not a session
     /// pause, even though it holds the session.
     RequestLiveRestore,
+    SetContactClassification {
+        observer: String,
+        target: String,
+        active: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -520,6 +525,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // requests at one tick and order are already separated by the
         // operator and correlation the entry itself carries.
         GmActivityAction::RequestLiveRestore => (17, false, ""),
+        GmActivityAction::SetContactClassification { active, target, .. } => (18, *active, target),
     }
 }
 
@@ -1358,6 +1364,8 @@ fn terminal_action_entries(
                 crate::gm_action::GmActionKind::ContactReveal
                     | crate::gm_action::GmActionKind::ContactConceal
                     | crate::gm_action::GmActionKind::ContactNormal
+                    | crate::gm_action::GmActionKind::ContactMisclassify
+                    | crate::gm_action::GmActionKind::ContactClassificationNormal
             ) {
                 // Contact history retains its recorded observer even after that
                 // ship disappears; reference supplies the cached name or UUID.
@@ -1477,6 +1485,15 @@ fn terminal_action_entries(
                                 }
                                 _ => crate::gm_contact::ContactMode::Normal,
                             },
+                        },
+                        (
+                            kind @ (crate::gm_action::GmActionKind::ContactMisclassify
+                            | crate::gm_action::GmActionKind::ContactClassificationNormal),
+                            _,
+                        ) => GmActivityAction::SetContactClassification {
+                            observer: fact.observer.clone()?,
+                            target: fact.target.clone()?,
+                            active: kind == crate::gm_action::GmActionKind::ContactMisclassify,
                         },
                         (crate::gm_action::GmActionKind::Comms, _) => {
                             GmActivityAction::TransmitComms {

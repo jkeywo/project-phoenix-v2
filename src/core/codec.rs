@@ -956,6 +956,8 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         crate::gm_action::GmActionKind::ContactReveal
                             | crate::gm_action::GmActionKind::ContactConceal
                             | crate::gm_action::GmActionKind::ContactNormal
+                            | crate::gm_action::GmActionKind::ContactMisclassify
+                            | crate::gm_action::GmActionKind::ContactClassificationNormal
                     ) != observer.is_some()
                     {
                         return None;
@@ -1372,6 +1374,20 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
             // recipients are invalid vocabulary before they reach admission.
             action.validate().ok()?;
             action
+        }
+        "set_contact_classification" if object.len() == 6 => {
+            let palette = object.get("palette")?;
+            crate::gm_action::GmAction::SetContactClassification {
+                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
+                    object.get("ship")?.as_str()?,
+                )?),
+                target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
+                palette: if palette.is_null() {
+                    None
+                } else {
+                    Some(bounded_gm_target_id(palette.as_str()?)?)
+                },
+            }
         }
         "set_contact_override" if object.len() == 6 => {
             crate::gm_action::GmAction::SetContactOverride {

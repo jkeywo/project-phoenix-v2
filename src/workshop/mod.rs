@@ -24,6 +24,7 @@ use crate::world::validate::{
 
 pub mod archive;
 pub mod document;
+mod model_fields;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
 #[cfg(all(target_arch = "wasm32", feature = "server"))]

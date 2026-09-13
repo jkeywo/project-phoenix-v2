@@ -1,4 +1,4 @@
-//! Source-preserving authoring fields. Runtime-owned GlobalConfig supplies
+//! Source-preserving authoring fields. Runtime-owned schemas supply types and
 //! defaults; the TOML syntax tree supplies exact source spans for every authored
 //! scalar, including extension fields. No serializer rewrites the document.
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ pub struct Patch {
     pub value_source: String,
 }
 
-trait ScalarField {
+pub(super) trait ScalarField {
     const KIND: &'static str;
     fn default_source(&self) -> Option<String>;
     fn descriptor(&self) -> (&'static str, Option<String>) {
@@ -107,6 +107,13 @@ pub fn fields(source: &str, document_path: &str) -> Result<Vec<Field>, String> {
                 field.runtime_owned = true;
                 field.default_source = default;
             }
+        }
+    }
+    for field in &mut fields {
+        if let Some((kind, default)) = super::model_fields::descriptor(document_path, &field.path) {
+            field.kind = kind.into();
+            field.runtime_owned = true;
+            field.default_source = default;
         }
     }
     Ok(fields)
@@ -197,6 +204,7 @@ pub fn patch(source: &str, patch: &Patch) -> Result<String, String> {
     if value.type_name() != field.kind && !numeric {
         return Err("The value has a different type from this field.".into());
     }
+    super::model_fields::validate(&patch.document_path, &patch.path, &patch.value_source)?;
     let span =
         find_span(document.as_item(), &patch.path).ok_or("The source location is unavailable.")?;
     let replacement_span = value

@@ -9,7 +9,7 @@ use super::registry::PaneId;
 const PROFILE_LIMIT: usize = 1024 * 1024;
 
 #[derive(Default)]
-pub(super) struct NativeOperators {
+pub(crate) struct NativeOperators {
     pub scope: Option<String>,
     pub root: Option<PathBuf>,
     pub replies: BTreeMap<PaneId, Vec<String>>,

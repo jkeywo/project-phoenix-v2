@@ -7,6 +7,7 @@ pub mod engine;
 pub mod hrtf;
 pub mod mix;
 pub mod player;
+pub mod private;
 pub mod spatial;
 pub mod store;
 pub mod visual;
@@ -100,6 +101,8 @@ impl Control {
 #[derive(Resource)]
 pub struct NativeRoomAudio {
     pub visuals: visual::NativeAudioVisual,
+    pub private: private::PrivateAudio,
+    private_worker: Option<std::thread::JoinHandle<()>>,
     control: Arc<Mutex<Control>>,
     state: Arc<Mutex<NativeAudioState>>,
     mixer: Arc<Mutex<engine::Mixer>>,
@@ -183,15 +186,17 @@ impl NativeRoomAudio {
             quit: false,
         }));
         let player = RoomPlayer::default();
+        let private = private::PrivateAudio::new(profile.clone());
         let mixer = player.mixer.clone();
         mixer.lock().unwrap().mix = mix;
         #[cfg(feature = "host")]
         let worker = if start_device {
             let control = control.clone();
             let state = state.clone();
+            let private = private.clone();
             std::thread::Builder::new()
                 .name("phoenix-room-audio".into())
-                .spawn(move || device::run(control, state, player))
+                .spawn(move || device::run(control, state, player, private))
                 .ok()
         } else {
             None
@@ -204,8 +209,19 @@ impl NativeRoomAudio {
         if worker.is_none() {
             state.lock().unwrap().status = "unavailable";
         }
+        #[cfg(feature = "host")]
+        let private_worker = start_device
+            .then(|| private::spawn(private.clone()))
+            .flatten();
+        #[cfg(not(feature = "host"))]
+        let private_worker = None;
+        if private_worker.is_none() {
+            private.unavailable();
+        }
         Self {
             visuals: visual::NativeAudioVisual::default(),
+            private,
+            private_worker,
             control,
             state,
             mixer,
@@ -219,6 +235,7 @@ impl NativeRoomAudio {
         self.state.lock().unwrap().clone()
     }
     pub fn apply_input(&self, input: RoomInput) {
+        self.private.continuation(input.lifecycle.generation);
         let mut control = self.control.lock().unwrap();
         if control.input == input {
             return;
@@ -317,7 +334,22 @@ impl NativeRoomAudio {
                 let selected = store::select_room(&self.profile, output.clone());
                 match selected {
                     Ok(profile) => {
+                        // Retire the old room output before a new assignment can
+                        // make a formerly colliding private route eligible. The
+                        // current-control guard also rejects an old worker commit.
+                        let mut control = self.control.lock().unwrap();
+                        control.output = output.clone();
+                        control.routing_error = None;
+                        control.retry = control.retry.wrapping_add(1);
+                        control.test_at = None;
+                        control.alert_at = None;
+                        control.blaster = None;
+                        control.computer = None;
+                        self.mixer.lock().unwrap().stop_all();
+                        self.private.room_output(None);
                         self.profile = profile;
+                        self.private.profile(self.profile.clone());
+                        drop(control);
                         let mut state = self.state.lock().unwrap();
                         state.output = output.clone();
                         state.status = "loading";
@@ -330,15 +362,6 @@ impl NativeRoomAudio {
                         } else {
                             "unavailable"
                         };
-                        let mut control = self.control.lock().unwrap();
-                        control.output = output.clone();
-                        control.routing_error = None;
-                        control.retry = control.retry.wrapping_add(1);
-                        control.test_at = None;
-                        control.alert_at = None;
-                        control.blaster = None;
-                        control.computer = None;
-                        self.mixer.lock().unwrap().stop_all();
                     }
                     Err(error) => {
                         self.state.lock().unwrap().detail = error;
@@ -367,6 +390,10 @@ impl NativeRoomAudio {
 }
 impl Drop for NativeRoomAudio {
     fn drop(&mut self) {
+        self.private.shutdown();
+        if let Some(worker) = self.private_worker.take() {
+            let _ = worker.join();
+        }
         self.control.lock().unwrap().quit = true;
         self.mixer.lock().unwrap().stop_all();
         if let Some(worker) = self.worker.take() {
@@ -385,7 +412,23 @@ impl Plugin for NativeRoomAudioPlugin {
             PostUpdate,
             update_room.after(crate::server::audio_lifecycle::publish_audio_lifecycle),
         );
+        app.add_systems(PostUpdate, attach_private_endpoints);
         app.declare_state::<NativeRoomAudio>(StateClass::Presentation, "native-room-audio");
+    }
+}
+fn attach_private_endpoints(
+    audio: Option<Res<NativeRoomAudio>>,
+    panes: Option<Res<super::panes::PaneBusResource>>,
+    gm: Option<Res<super::native_gm::NativeGmSurface>>,
+) {
+    let Some(audio) = audio else {
+        return;
+    };
+    if let Some(panes) = panes {
+        panes.0.attach_audio(audio.private.clone());
+    }
+    if let Some(gm) = gm {
+        gm.bridge.attach_audio(audio.private.clone());
     }
 }
 fn update_room(

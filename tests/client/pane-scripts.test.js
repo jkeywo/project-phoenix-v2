@@ -42,6 +42,7 @@ import { NAMESPACE_CLIENT, parseJoinCode } from '../../gui/join-code.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PANES = path.join(root, 'src/native_host/panes');
 const BOOT = readFileSync(path.join(PANES, 'pane_boot.js'), 'utf8');
+const OPERATOR_STORAGE = readFileSync(path.join(PANES, 'operator_storage.js'), 'utf8');
 const LINK = readFileSync(path.join(PANES, 'pane_link.js'), 'utf8');
 const DOCUMENT_RS = readFileSync(path.join(PANES, 'document.rs'), 'utf8');
 const DATA = JSON.parse(readFileSync(path.join(root, 'assets/join/join-codes.json'), 'utf8'));
@@ -73,6 +74,7 @@ const fragment = (token, name) => `#${PANE_JOIN_CODE}&token=${token}&name=${name
 function runBoot(hash, loadProfile = true) {
   window.location.hash = hash;
   installOutQueue(); // document.rs installs queue_shim before PANE_BOOT_JS.
+  new Function(OPERATOR_STORAGE)();
   // eslint-disable-next-line no-new-func
   new Function(BOOT)();
   if (loadProfile) window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });

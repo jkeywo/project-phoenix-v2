@@ -134,7 +134,12 @@ export function createGmConfirmationProfile({ storage, registry = createSemantic
     profile = { ...snapshot(), audio: normalizePrivateAudio(value) };
     return saveOperatorProfile(storage, profile);
   }
-  return { mode, setMode, importProfile, setAudio, audio: () => profile.audio, feedback: () => profile.feedback,
+  function reload() {
+    profile = loadOperatorProfile(storage, {registry:catalogue}).profile;
+    registry.replaceProfile({bindings:profile.bindings,tuning:profile.gamepad.tuning});
+    for (const listener of listeners) listener();
+  }
+  return { mode, setMode, importProfile, setAudio, reload, audio: () => profile.audio, feedback: () => profile.feedback,
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     exportProfile: () => serializeOperatorProfile(snapshot()),
     initialStatus: loaded.status,

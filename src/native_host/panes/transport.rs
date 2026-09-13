@@ -87,6 +87,8 @@ impl std::error::Error for PaneInputRefusal {}
 
 #[derive(Default)]
 struct BusState {
+    audio: Option<crate::native_host::audio::private::PrivateAudio>,
+    audio_sent: BTreeMap<PaneId, String>,
     operators: super::operator::NativeOperators,
     registry: PaneRegistry,
     connections: ConnectionLeg,
@@ -134,9 +136,19 @@ struct BusState {
 
 impl BusState {
     fn open(&mut self, identity: PaneIdentity) -> PaneId {
+        let surface = identity
+            .assigned_station()
+            .unwrap_or(identity.name())
+            .to_owned();
         let connection = self.connections.shared.lock().open(self.connections.id);
         let id = self.registry.open(identity);
         self.connection_ids.insert(id, connection);
+        if let Some(audio) = &self.audio {
+            audio.bind(
+                crate::native_host::audio::private::Endpoint::Console(id),
+                &surface,
+            );
+        }
         id
     }
 
@@ -145,6 +157,10 @@ impl BusState {
         for (&id, &connection) in &self.connection_ids {
             if registry.is_superseded(connection) && self.superseded.insert(id) {
                 self.operators.close(id);
+                if let Some(audio) = &self.audio {
+                    audio.close(crate::native_host::audio::private::Endpoint::Console(id));
+                }
+                self.audio_sent.remove(&id);
                 if let Some(pane) = self.registry.get_mut(id) {
                     pane.supersede();
                 }
@@ -230,6 +246,10 @@ impl PaneBus {
     }
 
     fn close_in_state(state: &mut BusState, id: PaneId) {
+        if let Some(audio) = &state.audio {
+            audio.close(crate::native_host::audio::private::Endpoint::Console(id));
+        }
+        state.audio_sent.remove(&id);
         if let Some((_token, pending)) = state.registry.close(id) {
             let connection = state.connection_ids[&id];
             for msg in pending {
@@ -318,6 +338,40 @@ impl PaneBus {
             .replies
             .remove(&id)
             .unwrap_or_default()
+    }
+
+    pub fn attach_audio(&self, audio: crate::native_host::audio::private::PrivateAudio) {
+        let mut state = self.lock();
+        if state.audio.is_some() {
+            return;
+        }
+        for pane in state.registry.open_panes() {
+            let identity = pane.identity();
+            audio.bind(
+                crate::native_host::audio::private::Endpoint::Console(pane.id()),
+                identity.assigned_station().unwrap_or(identity.name()),
+            );
+        }
+        state.audio = Some(audio);
+    }
+    pub fn private_audio_script(&self, id: PaneId) -> Option<String> {
+        let state = self.lock();
+        let script = state
+            .audio
+            .as_ref()?
+            .script(crate::native_host::audio::private::Endpoint::Console(id))?;
+        (state.audio_sent.get(&id) != Some(&script)).then_some(script)
+    }
+    pub fn mark_private_audio_sent(&self, id: PaneId, script: String) {
+        self.lock().audio_sent.insert(id, script);
+    }
+    pub fn submit_private_audio(&self, id: PaneId, record: &str) -> bool {
+        self.lock().audio.as_ref().is_some_and(|audio| {
+            audio.submit(
+                crate::native_host::audio::private::Endpoint::Console(id),
+                record,
+            )
+        })
     }
 
     pub fn requeue_operator_replies(&self, id: PaneId, mut replies: Vec<String>) {
@@ -418,6 +472,10 @@ impl PaneBus {
             .get_mut(id)
             .is_some_and(|pane| pane.requeue_front(batch));
         if overflowed && !state.faulted.iter().any(|(existing, _)| *existing == id) {
+            if let Some(audio) = &state.audio {
+                audio.close(crate::native_host::audio::private::Endpoint::Console(id));
+            }
+            state.audio_sent.remove(&id);
             state.faulted.push((id, PaneFault::ReliableOverflow));
         }
     }
@@ -469,6 +527,10 @@ impl PaneBus {
         if state.registry.get_mut(id).is_none() {
             return;
         }
+        if let Some(audio) = &state.audio {
+            audio.close(crate::native_host::audio::private::Endpoint::Console(id));
+        }
+        state.audio_sent.remove(&id);
         if !state.faulted.iter().any(|(existing, _)| *existing == id) {
             state.faulted.push((id, reason));
         }
@@ -821,6 +883,10 @@ impl NativeTransport for PaneTransport {
         // overflows on every dispatch, and the caller's answer is to close it
         // once.
         for id in faulted {
+            if let Some(audio) = &state.audio {
+                audio.close(crate::native_host::audio::private::Endpoint::Console(id));
+            }
+            state.audio_sent.remove(&id);
             if !state.faulted.iter().any(|(existing, _)| *existing == id) {
                 state.faulted.push((id, PaneFault::ReliableOverflow));
             }

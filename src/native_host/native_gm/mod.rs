@@ -77,7 +77,12 @@ impl Plugin for NativeGmPlugin {
                 // Ready/Unready and a surface failure must reach the roster and
                 // pause authority before this frame's fixed tick can launch or
                 // advance the simulation. PostUpdate still catches display work.
-                (sync_lobby_role_intent, drain_records, sync_presence)
+                (
+                    sync_lobby_role_intent,
+                    sync_operator_scope,
+                    drain_records,
+                    sync_presence,
+                )
                     .chain()
                     .after(super::host_lobby::drain_surface_records)
                     .before(crate::gm_action::apply_due_actions)
@@ -152,6 +157,15 @@ fn sync_lobby_role_intent(
             },
         });
         *roster = replacement;
+    }
+}
+
+fn sync_operator_scope(
+    surface: Res<NativeGmSurface>,
+    hull: Option<Res<crate::lobby::SelectedShipResource>>,
+) {
+    if let Some(hull) = hull {
+        surface.bridge.set_operator_scope(&hull.0);
     }
 }
 

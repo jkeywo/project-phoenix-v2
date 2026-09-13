@@ -175,6 +175,8 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let operatorStorage = null;
   try { operatorStorage = win.PhoenixOperatorStorage || win.localStorage; } catch (_) { /* Settings reports unavailable storage. */ }
   const gmConfirmationProfile = createGmConfirmationProfile({ storage: operatorStorage, registry: hostSemanticActions });
+  const reloadNativeProfile = () => gmConfirmationProfile.reload();
+  win.addEventListener('phoenix-operator-profile-loaded', reloadNativeProfile);
   let disposePrivateAudio = null, unsubscribePrivateProfile = null;
   if (win.__phoenixGmPage === true) {
     privateAudio = createPrivateAudio({ root: win,
@@ -544,7 +546,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
-    dispose() { disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       if (!alertScope()) privateAlerts.reset();
       shell.refresh();

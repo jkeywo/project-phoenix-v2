@@ -22,8 +22,10 @@ pub fn build_document(host_html: &str) -> String {
     }
     page.push_str(remaining);
     let boot = format!(
-        "<script>{}</script><script type=\"module\">{}</script>",
+        "<script>{}\n{}\n{}</script><script type=\"module\">{}</script>",
         include_str!("queue.js"),
+        crate::native_host::panes::document::OPERATOR_STORAGE_JS,
+        include_str!("../audio/private_boot.js"),
         include_str!("boot.js")
     );
     page.replace("</body>", &format!("{boot}</body>"))

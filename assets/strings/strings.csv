@@ -1,4 +1,12 @@
 id,context,en
+settings.audio.private_assignment,Native private endpoint assigned outputs,[{surface}: {outputs}]
+settings.audio.private_no_output,Native private endpoint with no assigned output,[No assigned output]
+settings.audio.private_backend_unavailable,Native private backend did not start,[The native private audio provider is unavailable. Controls and portable choices remain usable.]
+settings.audio.private_room_unresolved,Private output cannot rule out shared room device,[The room output identity is unavailable. Select an explicit Viewscreen output before enabling private audio.]
+settings.audio.private_unassigned,Native private output needs explicit bridge media entry,[Assign an output to this surface in the bridge media profile then relaunch. No room or system output is used.]
+settings.audio.private_invalid_assignment,Native private bridge media validation failure,[The bridge media assignments conflict. Correct the assignments and sharing consent before playing private audio.]
+settings.audio.private_surface_collision,Native private surface name collision,[This surface name is reserved or used by another active console. Give each private surface a unique assignment.]
+settings.audio.asset_failed,Native audio asset decode failure,[The configured sound could not be decoded.]
 settings.audio.private_scope,Private Station or GM endpoint audio scope,[Only this console's local feedback and actionable alerts. Room music and combat belong to the Viewscreen.]
 settings.audio.private_cues,Private cue selection legend,[Local feedback]
 settings.audio.cue_clicks,Private accepted action click toggle,[Quiet clicks]

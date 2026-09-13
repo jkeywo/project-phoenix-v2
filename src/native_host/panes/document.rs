@@ -161,6 +161,7 @@ use super::registry::PaneId;
 
 /// The first script in a pane document. See `pane_boot.js`.
 pub const PANE_BOOT_JS: &str = include_str!("pane_boot.js");
+pub const OPERATOR_STORAGE_JS: &str = include_str!("operator_storage.js");
 
 /// The last script in a pane document. See `pane_link.js`.
 pub const PANE_LINK_JS: &str = include_str!("pane_link.js");
@@ -397,9 +398,11 @@ pub fn build_pane_document_with(
         None => String::new(),
     };
     let boot = format!(
-        "\n<script>\n{}{}\n{}</script>\n",
+        "\n<script>\n{}{}\n{}\n{}\n{}</script>\n",
         frame_ms,
         queue_shim(PANE_OUT_NAMESPACE),
+        OPERATOR_STORAGE_JS,
+        include_str!("../audio/private_boot.js"),
         PANE_BOOT_JS,
     );
     let mut html = String::with_capacity(client_index_html.len() + boot.len() + PANE_LINK_JS.len());

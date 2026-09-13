@@ -23,6 +23,13 @@ export function createPrivateAudio({
   let spec = null;
   const listeners = new Set(), records = new Map(), lastCue = new Map();
   const notify = () => { for (const listener of listeners) listener(); };
+  const nativeStorageStatus = () => {
+    if (!root.PhoenixOperatorStorage) return;
+    persistence = root.PhoenixOperatorStorageStatus?.status === 'error' ? 'unavailable' : 'saved';
+    notify();
+  };
+  root.addEventListener?.('phoenix-operator-storage-status', nativeStorageStatus);
+  if (root.PhoenixOperatorStorage?.isReady?.()) nativeStorageStatus();
   // Embedded browser-shaped APIs are not a native output assignment. A7 must
   // inject its explicit private adapter before mounting this document owner.
   const native = requireNativeProvider || root.PhoenixOperatorCapabilities?.surface === 'native-pane';
@@ -108,7 +115,8 @@ export function createPrivateAudio({
     enable: async () => { try { return active && await provider.enable(); } catch (_) { return false; } },
     testOutput: async () => { try { return active && !!spec && await provider.testOutput('test'); } catch (_) { return false; } },
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
-    dispose() { disposed = true; records.clear(); lastCue.clear(); provider.dispose(); listeners.clear(); },
+    dispose() { disposed = true; records.clear(); lastCue.clear(); provider.dispose(); listeners.clear();
+      root.removeEventListener?.('phoenix-operator-storage-status', nativeStorageStatus); },
   };
 }
 

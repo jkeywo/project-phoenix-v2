@@ -37,6 +37,9 @@ entities:
         - "[ai] When an explicitly selected room output disappears, show the unavailable selection and offer deliberate recovery/reselection rather than silently substituting a device. Label the initial system-default route as such."
         - "[ai] Extend the existing native output-device owner for application playback; the existing CPAL setup tone alone does not satisfy game playback parity. Keep stream ownership in the native process and expose capabilities/status to embedded documents."
         - "[ai] The first native room path must drive real shipped MP3/OGG assets through the production decoder/provider into a fake device sample sink, not merely assert intents or use a fake decoder. Browser/native room and private surfaces each expose a deliberate bounded output-test control obeying Master and assignment."
+        - "[ai] Private endpoints bind to the host's typed Console or GM incarnation. Existing Station/participant media surface labels are retained; native-gm names the private GM. Duplicate active labels and Console use of reserved viewscreen/native-gm labels are refused visibly. The page cannot supply a surface, file or device identity."
+        - "[ai] When the room uses its default route, its actually opened device identity participates only in the existing sharing-consent check. A known collision needs consent from both surfaces; unresolved room identity keeps private playback unavailable until the operator assigns an explicit room output. This never selects a default device for private sound."
+        - "[ai] One private process worker prepares the shared fixed feedback manifest and gives each explicitly assigned output an independent mixer cursor. Scope changes, pane/GM retirement, output loss and mute discard active or pending one-shots. Status is current control acknowledgement, not an audio record."
 
   - decision: t4-informative-sound-live-equivalents
     core:

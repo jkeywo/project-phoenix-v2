@@ -92,6 +92,12 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
     }
     const output = state?.status || 'unavailable';
     const lines = [t(`settings.audio.output_${output}`)];
+    if (state?.native && state?.private) {
+      lines.push(t('settings.audio.private_assignment', {
+        surface: state.surface || '', outputs: (state.outputs || []).join(', ') || t('settings.audio.private_no_output'),
+      }));
+      if (state.detail) lines.push(state.detail.startsWith('settings.audio.') ? t(state.detail) : state.detail);
+    }
     if (state?.mix.master.muted || state?.mix.master.level === 0) lines.push(t('settings.audio.master_silent'));
     if (state?.test === 'playing') lines.push(t('settings.audio.test_playing'));
     const testBus = state?.mix[state?.testBus || 'music'];

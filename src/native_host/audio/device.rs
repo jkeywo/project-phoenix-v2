@@ -15,6 +15,7 @@ pub(super) fn run(
     control: Arc<Mutex<Control>>,
     state: Arc<Mutex<NativeAudioState>>,
     mut player: RoomPlayer,
+    private: super::private::PrivateAudio,
 ) {
     let mut stream = None;
     let mut last_retry = u64::MAX;
@@ -22,6 +23,7 @@ pub(super) fn run(
     let mut scan_at = Instant::now() - Duration::from_secs(2);
     let failed = Arc::new(AtomicBool::new(false));
     let mut route = None;
+    let mut actual_output = None;
     loop {
         let request = control.lock().unwrap().clone();
         if request.quit {
@@ -29,6 +31,8 @@ pub(super) fn run(
         }
         let changed = request.retry != last_retry;
         if changed {
+            private.room_output(None);
+            actual_output = None;
             stream = None;
             player.reset_output();
             player.retry();
@@ -67,6 +71,7 @@ pub(super) fn run(
                         _ => None,
                     };
                     if let Some(error) = bad {
+                        private.room_output(None);
                         stream = None;
                         player.reset_output();
                         let mut status = state.lock().unwrap();
@@ -78,16 +83,33 @@ pub(super) fn run(
                             None => cpal::default_host().default_output_device(),
                         };
                         let opened = device
+                            .as_ref()
                             .ok_or_else(|| "settings.audio.system_missing".to_string())
-                            .and_then(|device| open(&device, player.mixer.clone(), failed.clone()));
+                            .and_then(|device| open(device, player.mixer.clone(), failed.clone()));
+                        let actual = device
+                            .as_ref()
+                            .and_then(|device| device.name().ok())
+                            .and_then(|name| {
+                                devices
+                                    .discovered
+                                    .iter()
+                                    .enumerate()
+                                    .find(|(index, candidate)| {
+                                        candidate.name.as_deref() == Some(&name)
+                                            && !devices.ambiguous[*index]
+                                    })
+                                    .map(|(_, candidate)| candidate.identity.to_string())
+                            });
                         let mut status = state.lock().unwrap();
                         match opened {
                             Ok(opened) => {
+                                actual_output = actual;
                                 stream = Some(opened);
                                 status.status = "playing";
                                 status.detail.clear();
                             }
                             Err(error) => {
+                                private.room_output(None);
                                 status.status = "failed";
                                 status.detail = error;
                             }
@@ -95,6 +117,7 @@ pub(super) fn run(
                     }
                 }
                 Err(error) => {
+                    private.room_output(None);
                     stream = None;
                     player.reset_output();
                     let mut status = state.lock().unwrap();
@@ -104,6 +127,7 @@ pub(super) fn run(
             }
         }
         if failed.swap(false, Ordering::AcqRel) {
+            private.room_output(None);
             stream = None;
             player.reset_output();
             let mut status = state.lock().unwrap();
@@ -141,6 +165,7 @@ pub(super) fn run(
             continue;
         }
         let ready = stream.is_some();
+        private.room_output(if ready { actual_output.clone() } else { None });
         if fresh
             .alert_at
             .is_none_or(|time| time.elapsed() > Duration::from_millis(250))
@@ -190,7 +215,7 @@ pub(super) fn run(
     drop(stream);
 }
 
-fn open(
+pub(super) fn open(
     device: &cpal::Device,
     mixer: Arc<Mutex<Mixer>>,
     failed: Arc<AtomicBool>,

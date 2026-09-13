@@ -8,6 +8,7 @@ let operator = null;
 let phase = 'Lobby';
 let hostLobbyUnavailable = false;
 const send = value => window.phoenixNativeGmOut.send(JSON.stringify(value));
+window.PhoenixInstallNativeOperatorStorage(record => window.phoenixNativeGmOperatorOut.send(record));
 window.__phoenixNativeGmChannels = Object.fromEntries(channels.map(channel => [channel, json => {
   const payload = JSON.parse(json);
   latest.set(channel, payload);

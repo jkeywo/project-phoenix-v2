@@ -139,6 +139,12 @@ pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> Pa
         return report;
     }
     bus.mark_live(id);
+    if let Some(script) = bus.private_audio_script(id) {
+        if surface.push(&script).is_ok() {
+            bus.mark_private_audio_sent(id, script);
+            report.pushed += 1;
+        }
+    }
 
     let replies = bus.take_operator_replies(id);
     for (index, reply) in replies.iter().enumerate() {
@@ -173,6 +179,9 @@ pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> Pa
     }
 
     for record in surface.drain() {
+        if bus.submit_private_audio(id, &record) {
+            continue;
+        }
         if bus.submit_operator_record(id, &record) {
             continue;
         }

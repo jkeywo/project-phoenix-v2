@@ -176,6 +176,31 @@ pub fn encode_native_audio_state(
 }
 
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn encode_native_private_audio_state(
+    state: &crate::native_host::audio::private::Status,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(state)
+}
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub(crate) fn decode_native_private_audio_request(
+    json: &str,
+) -> Result<crate::native_host::audio::private::Request, serde_json::Error> {
+    serde_json::from_str(json)
+}
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub(crate) fn decode_native_private_audio_manifest(
+    json: &str,
+) -> Result<crate::native_host::audio::private::Manifest, serde_json::Error> {
+    serde_json::from_str(json)
+}
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub(crate) fn is_native_gm_profile_record(json: &str) -> Option<bool> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    (value["type"] == "NativeOperator")
+        .then(|| matches!(value["operation"].as_str(), Some("load" | "save")))
+}
+
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn decode_native_audio_hud(
     json: &str,
 ) -> Result<crate::core::messages::ViewscreenHudState, serde_json::Error> {

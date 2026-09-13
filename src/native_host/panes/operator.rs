@@ -284,7 +284,14 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
     if raw["audio"].is_object() {
         safe["audio"] = json!({"version": 1, "mono": raw["audio"]["mono"].as_bool().unwrap_or(false),
             "reducedRange": raw["audio"]["reducedRange"].as_bool().unwrap_or(false), "mix": {}, "cues": {}});
-        for bus in ["master", "alerts", "interface"] {
+        for bus in [
+            "master",
+            "music",
+            "ambience",
+            "effects",
+            "alerts",
+            "interface",
+        ] {
             let value = &raw["audio"]["mix"][bus];
             safe["audio"]["mix"][bus] = json!({
                 "level": value["level"].as_f64().filter(|v| v.is_finite()).unwrap_or(1.0).clamp(0.0, 1.0),
@@ -407,7 +414,10 @@ mod tests {
             saved["audio"]["mix"]["master"],
             json!({"level":0.12,"muted":true})
         );
-        assert!(saved["audio"]["mix"].get("music").is_none());
+        assert_eq!(
+            saved["audio"]["mix"]["music"],
+            json!({"level":0.5,"muted":false})
+        );
         assert_eq!(saved["audio"]["cues"]["applied"], true);
         assert_eq!(saved["audio"]["mono"], true);
         assert_eq!(saved["audio"]["reducedRange"], true);

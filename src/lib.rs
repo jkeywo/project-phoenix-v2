@@ -46,6 +46,7 @@ pub use phoenix_math::audio_config;
 /// the mechanism — no plugin declares yet, and nothing in the digest/snapshot
 /// reads the census, so the registry is inert to `sim_digest::world_digest`.
 pub mod authoritative;
+pub mod sound_cues;
 /// Fixed-capacity history window (issue #788). Pure, Bevy-free, domain-neutral.
 /// Re-exported from the `phoenix-math` workspace crate (issue #1184).
 pub use phoenix_math::bounded_history;

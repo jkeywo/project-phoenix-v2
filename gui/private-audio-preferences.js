@@ -1,6 +1,8 @@
 /** Portable private feedback choices. Hardware routes and occurrences never
- * enter this schema; private surfaces own only Master, Alerts and Interface. */
+ * enter this schema. Audition adds the existing Music/Ambience/Effects buses;
+ * ordinary private feedback controls remain Master, Alerts and Interface. */
 export const PRIVATE_AUDIO_BUSES = Object.freeze(['master', 'alerts', 'interface']);
+export const AUDITION_AUDIO_BUSES = Object.freeze(['master','music','ambience','effects','alerts','interface']);
 export const PRIVATE_AUDIO_CUES = Object.freeze({
   clicks: true, refused: true, timedOut: true, applied: false, pending: false, actionable: true,
 });
@@ -11,7 +13,7 @@ export function normalizePrivateAudio(value) {
     version: 1,
     mono: value?.mono === true,
     reducedRange: value?.reducedRange === true,
-    mix: Object.fromEntries(PRIVATE_AUDIO_BUSES.map(id => {
+    mix: Object.fromEntries(AUDITION_AUDIO_BUSES.map(id => {
       const bus = value?.mix?.[id];
       return [id, {
         level: typeof bus?.level === 'number' && Number.isFinite(bus.level)

@@ -41,6 +41,7 @@
  */
 
 import { stringify as tomlStringify, parse as tomlParse } from 'smol-toml';
+import { SOUND_CUES_PATH, validateSoundCatalog } from '../gui/sound-cues.js';
 import { validateFile, partitionFindings } from './validation.js';
 import { resolveTemplate, canonicalTemplatePath, INCLUDES_KEY } from './entity-includes.js';
 
@@ -91,6 +92,7 @@ export function isWorldContentPath(path) {
  * `is_allowed_content_path` in `src/world/mod_pack.rs`.
  */
 export function isAllowedContentPath(path) {
+  if (path === SOUND_CUES_PATH) return true;
   if (typeof path !== 'string' || path.length === 0) return false;
   if (path.includes('..') || path.includes('\\')) return false;
   if (path === MANIFEST_PATH) return true;
@@ -937,6 +939,11 @@ export function exportModPack(input) {
 
     seenPaths.add(path);
     contentByPath[path] = text;
+    if (path === SOUND_CUES_PATH) {
+      try {
+        for (const finding of validateSoundCatalog(tomlParse(text)).findings) errors.push(`"${path}": ${finding.code} ${finding.id}`);
+      } catch (_) { errors.push(`"${path}": catalog`); }
+    }
     parsedByPath[path] = file.parsed;
     zipEntries.push({
       path,

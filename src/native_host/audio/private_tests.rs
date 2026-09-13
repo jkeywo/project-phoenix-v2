@@ -148,6 +148,114 @@ fn record(hub: &PrivateAudio, key: Endpoint, fixture: &str) -> String {
         )
 }
 const REFUSED: &str = include_str!("../../../tests/fixtures/native-private-refused.json");
+const AUDITION: &str = include_str!("../../../tests/fixtures/native-private-audition.json");
+
+#[test]
+fn audition_actual_gm_bridge_reaches_decoded_spatial_pcm_only_on_explicit_private_output() {
+    let hub = PrivateAudio::new(profile());
+    let fake = Fake::with(&["output:Helm", "output:GM", "output:Room"]);
+    let mut worker = Worker::new(fake.clone());
+    let gm = NativeGmBridge::default();
+    let id = PaneId(91);
+    let key = Endpoint::Gm(id);
+    gm.activate(id);
+    gm.attach_audio(hub.clone());
+    worker.step(&hub);
+    let mut surface = RecordingSurface::ready();
+    surface.queue_record(record(&hub, key, AUDITION));
+    gm.pump(id, &mut surface);
+    assert!(gm.take_records().is_empty());
+    worker.step(&hub);
+    assert_eq!(hub.status(key).unwrap().preview, "playing");
+    let samples = fake.sink("output:GM");
+    assert!(audible(&samples));
+    let energy = |channel: usize| {
+        samples
+            .chunks_exact(2)
+            .map(|p| p[channel] * p[channel])
+            .sum::<f32>()
+    };
+    assert!(energy(1) > energy(0));
+    assert!(!audible(&fake.sink("output:Room")));
+    assert!(!audible(&fake.sink("output:Helm")));
+    let _ = fake.sink("output:GM");
+    assert!(!audible(&fake.sink("output:GM")));
+    worker.step(&hub);
+    assert_eq!(hub.status(key).unwrap().preview, "idle");
+    assert!(gm.take_records().is_empty());
+}
+
+#[test]
+fn audition_replacement_mute_stop_and_generation_retire_prepared_preview_without_replay() {
+    let hub = PrivateAudio::new(profile());
+    let key = Endpoint::Gm(PaneId(92));
+    hub.bind(key, "native-gm");
+    let fake = Fake::with(&["output:GM"]);
+    let mut worker = Worker::new(fake.clone());
+    worker.step(&hub);
+    hub.submit(key, &record(&hub, key, AUDITION));
+    // Prepare with the production decoder, then invalidate before commit.
+    audition::prepare(&hub);
+    let generation = hub.status(key).unwrap().generation;
+    let request = |fields: serde_json::Value| {
+        let mut value = fields;
+        value["type"] = "NativePrivateAudio".into();
+        value["generation"] = generation.into();
+        value.to_string()
+    };
+    hub.submit(key, &request(serde_json::json!({"stop_preview":true})));
+    worker.step(&hub);
+    assert!(!audible(&fake.sink("output:GM")));
+    hub.submit(key, &record(&hub, key, AUDITION));
+    audition::prepare(&hub);
+    for muted in [true, false] {
+        hub.submit(key,&request(serde_json::json!({"mix":{"master":{"level":1,"muted":false},"effects":{"level":1,"muted":muted},
+            "alerts":{"level":1,"muted":false},"interface":{"level":1,"muted":false}}})));
+    }
+    worker.step(&hub);
+    assert!(!audible(&fake.sink("output:GM")));
+    hub.submit(key, &record(&hub, key, AUDITION));
+    audition::prepare(&hub);
+    hub.close(key);
+    worker.step(&hub);
+    assert!(!audible(&fake.sink("output:GM")));
+    hub.bind(key, "native-gm");
+    worker.step(&hub);
+    assert!(!audible(&fake.sink("output:GM")));
+}
+
+#[test]
+fn audition_rejects_console_forgery_invalid_information_and_missing_output_without_fallback() {
+    let hub = PrivateAudio::new(BridgeProfile::empty());
+    let key = Endpoint::Gm(PaneId(93));
+    hub.bind(key, "native-gm");
+    let fake = Fake::with(&["output:GM", "output:Room"]);
+    let mut worker = Worker::new(fake.clone());
+    worker.step(&hub);
+    hub.submit(key, &record(&hub, key, AUDITION));
+    worker.step(&hub);
+    assert!(!audible(&fake.sink("output:Room")));
+    assert!(fake.0.lock().unwrap().opened.is_empty());
+    hub.profile(profile());
+    worker.step(&hub);
+    let mut invalid: serde_json::Value =
+        serde_json::from_str(&record(&hub, key, AUDITION)).unwrap();
+    invalid["preview"]["definition"]
+        .as_object_mut()
+        .unwrap()
+        .remove("equivalent");
+    hub.submit(key, &invalid.to_string());
+    worker.step(&hub);
+    assert_eq!(hub.status(key).unwrap().preview, "failed");
+    assert!(!audible(&fake.sink("output:GM")));
+    let station = Endpoint::Console(PaneId(94));
+    hub.bind(station, "helm");
+    worker.step(&hub);
+    hub.submit(station, &record(&hub, station, AUDITION));
+    worker.step(&hub);
+    assert!(!hub.status(station).unwrap().audition);
+    assert!(!audible(&fake.sink("output:GM")));
+}
 const TEST: &str = include_str!("../../../tests/fixtures/native-private-test.json");
 
 #[test]

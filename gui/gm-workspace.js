@@ -38,6 +38,7 @@ import { createHostActionRegistry } from './host-actions.js';
 import { t, has } from './strings.js';
 import { mountGmWorkspaceShell } from './gm-workspace-shell.js';
 import { createPrivateAudio, attachPrivateAudioLifecycle, privateFeedbackReceiver } from './private-audio.js';
+import { mountSoundAudition } from './sound-audition-panel.js';
 import { createPrivateRequestFeedback } from './private-request-feedback.js';
 import { createPrivateAlerts, attachPrivateAlertLifecycle } from './private-alerts.js';
 
@@ -178,11 +179,12 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   const reloadNativeProfile = () => gmConfirmationProfile.reload();
   win.addEventListener('phoenix-operator-profile-loaded', reloadNativeProfile);
   let disposePrivateAudio = null, unsubscribePrivateProfile = null;
-  if (win.__phoenixGmPage === true) {
+  {
     privateAudio = createPrivateAudio({ root: win,
       requireNativeProvider,
+      allowAudition: true,
       read: gmConfirmationProfile.audio, save: gmConfirmationProfile.setAudio,
-      isEnabled: () => gmConfirmationProfile.feedback().semanticCues !== false });
+      isEnabled: () => win.__phoenixGmPage === true && gmConfirmationProfile.feedback().semanticCues !== false });
     win.__privateAudio = privateAudio;
     disposePrivateAudio = attachPrivateAudioLifecycle(privateAudio, win);
     unsubscribePrivateProfile = gmConfirmationProfile.subscribe(privateAudio.reload);
@@ -466,6 +468,8 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submit: request => privateSubmit('gm.presentation', request, () => win.__hostPresentation(request)),
   });
   win.__hostGmPresentationState = gmPresentation.state;
+  const soundAudition = doc.getElementById('gm-mission-panel')
+    ? mountSoundAudition({root:doc.getElementById('gm-mission-panel'),audio:privateAudio,win}) : null;
   gmDespawn = createGmDespawnPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
@@ -546,7 +550,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
-    dispose() { win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       if (!alertScope()) privateAlerts.reset();
       shell.refresh();

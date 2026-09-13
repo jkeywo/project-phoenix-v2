@@ -32,16 +32,19 @@ window.render=async(reduced,master=1,muted=false)=>{
  finite:samples.every(Number.isFinite)&&right.every(Number.isFinite),rightEnergy:right.reduce((v,x)=>v+x*x,0),available:provider.snapshot().reducedRangeAvailable};
  provider.dispose();return result;
 };
-window.pulse=async(bus=null,zero=false)=>{
+window.pulse=async(bus=null,zero=false,auditionStop=null)=>{
  const context=new OfflineAudioContext(2,2400,24000);
  Object.defineProperty(context,'state',{get:()=> 'running'});context.close=async()=>{};
  const provider=createBrowserAudioProvider({contextFactory:()=>context,fetchAudio:()=>fetch('/pulse.wav')});
- provider.setReducedRange(true);provider.register('pulse',{file:'pulse.wav',volume:1,category:'effects'});
- while(!provider.snapshot().ready.includes('pulse')) await new Promise(resolve=>setTimeout(resolve,0));
- provider.cue('pulse');
+ provider.setReducedRange(true);
+ if(auditionStop!==null)await provider.audition({file:'pulse.wav',volume:1,category:'effects'});
+ else {provider.register('pulse',{file:'pulse.wav',volume:1,category:'effects'});
+   while(!provider.snapshot().ready.includes('pulse')) await new Promise(resolve=>setTimeout(resolve,0));
+   provider.cue('pulse');}
  const paused=context.suspend(128/24000),rendering=context.startRendering();await paused;
  if(bus){const mix=defaultAudioMix();if(zero)mix[bus].level=0;else mix[bus].muted=true;
    provider.setMix(mix);provider.setMix(defaultAudioMix());}
+ if(auditionStop===true)provider.stopAudition();
  await context.resume();const output=await rendering;
  const peak=output.getChannelData(0).slice(128).reduce((v,x)=>Math.max(v,Math.abs(x)),0);
  provider.dispose();return peak;
@@ -70,6 +73,14 @@ test('a quick Master/category mute or zero discards real compressor lookahead in
   expect(await page.evaluate(()=>pulse())).toBeGreaterThan(.0001);
   for(const bus of ['master','effects'])for(const zero of [false,true])
     expect(await page.evaluate(({bus,zero})=>pulse(bus,zero),{bus,zero})).toBe(0);
+});
+
+test('explicit audition Stop discards real compressor lookahead immediately', {tag:'@core'}, async({page})=>{
+  await page.route('**/range-offline',route=>route.fulfill({contentType:'text/html',body:OFFLINE}));
+  await page.route('**/pulse.wav',route=>route.fulfill({contentType:'audio/wav',body:PULSE}));
+  await page.goto('/range-offline');await page.waitForFunction(()=>typeof pulse==='function');
+  expect(await page.evaluate(()=>pulse(null,false,false))).toBeGreaterThan(.0001);
+  expect(await page.evaluate(()=>pulse(null,false,true))).toBe(0);
 });
 
 const PAGE=mode=>`<!doctype html><html><head><base href='/client/'><meta name='viewport' content='width=device-width'>

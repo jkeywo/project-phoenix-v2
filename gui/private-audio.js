@@ -1,5 +1,6 @@
 import { createBrowserAudioProvider } from './browser-audio-provider.js';
-import { normalizePrivateAudio, PRIVATE_AUDIO_BUSES, PRIVATE_AUDIO_CUES } from './private-audio-preferences.js';
+import { normalizePrivateAudio, PRIVATE_AUDIO_BUSES, PRIVATE_AUDIO_CUES, AUDITION_AUDIO_BUSES } from './private-audio-preferences.js';
+import { validateSoundDefinition } from './sound-cues.js';
 
 export const PRIVATE_AUDIO_MANIFEST = 'assets/audio/private-feedback.json';
 const STATES = { Pending: 'pending', Applied: 'applied', Refused: 'refused', TimedOut: 'timedOut' };
@@ -17,6 +18,7 @@ export function createPrivateAudio({
   manifest, now = () => Date.now(), contextFactory, fetchAudio,
   isEnabled = () => true,
   requireNativeProvider = false,
+  allowAudition = false,
 } = {}) {
   let preferences = normalizePrivateAudio(read());
   let persistence = 'unavailable', active = true, disposed = false;
@@ -105,6 +107,9 @@ export function createPrivateAudio({
     if (!active) { records.clear(); provider.stopAll(); }
     notify();
   }
+  const auditionAvailable = () => allowAudition && typeof provider.audition === 'function'
+    && (!native || provider.snapshot().audition === true);
+  const buses = () => allowAudition ? AUDITION_AUDIO_BUSES : PRIVATE_AUDIO_BUSES;
   return {
     ready, action, click: () => cue('clicks'), actionable: () => cue('actionable'), reload, setActive,
     reset() { records.clear(); provider.stopAll(); },
@@ -112,13 +117,17 @@ export function createPrivateAudio({
     state: () => ({ ...provider.snapshot(), mix: preferences.mix, cues: preferences.cues,
       mono: preferences.mono, monoAvailable: typeof provider.setMono === 'function',
       reducedRange: preferences.reducedRange,
-      persistence, private: true, room: false, buses: PRIVATE_AUDIO_BUSES, testBus: 'interface' }),
-    setBus: (id, value) => PRIVATE_AUDIO_BUSES.includes(id) && change({ ...preferences,
+      persistence, private: true, room: false, buses: buses(), testBus: 'interface',
+      auditionAvailable: auditionAvailable(), categories: auditionAvailable() ? AUDITION_AUDIO_BUSES.slice(1) : provider.snapshot().categories }),
+    setBus: (id, value) => buses().includes(id) && change({ ...preferences,
       mix: { ...preferences.mix, [id]: { ...preferences.mix[id], ...value } } }),
     setCue: (id, value) => Object.hasOwn(PRIVATE_AUDIO_CUES, id) && change({ ...preferences,
       cues: { ...preferences.cues, [id]: value === true } }),
     setMono: value => change({ ...preferences, mono: value === true }),
     setReducedRange: value => change({ ...preferences, reducedRange: value === true }),
+    audition: async (definition, assets) => !validateSoundDefinition(definition, assets)
+      && active && auditionAvailable() && await provider.audition(definition, assets.find(asset=>asset.file===definition.file)),
+    stopAudition: () => provider.stopAudition?.(),
     resetMix: () => change({ ...preferences, mono: false, reducedRange: false, mix: normalizePrivateAudio().mix }),
     enable: async () => { try { return active && await provider.enable(); } catch (_) { return false; } },
     testOutput: async () => { try { return active && !!spec && await provider.testOutput('test'); } catch (_) { return false; } },

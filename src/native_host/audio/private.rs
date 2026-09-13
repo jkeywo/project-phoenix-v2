@@ -15,6 +15,8 @@ use std::{
 };
 
 const FRESH: Duration = Duration::from_millis(250);
+#[path = "private_audition.rs"]
+mod audition;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Endpoint {
     Console(PaneId),
@@ -22,6 +24,9 @@ pub enum Endpoint {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
+    pub audition: bool,
+    pub preview: &'static str,
+    pub preview_id: u64,
     pub generation: u64,
     pub revision: u64,
     pub status: &'static str,
@@ -32,6 +37,7 @@ pub struct Status {
     pub categories: [&'static str; 2],
 }
 struct Entry {
+    preview: Option<audition::Pending>,
     status: Status,
     routing_error: String,
     retry: u64,
@@ -43,6 +49,7 @@ struct Entry {
 }
 impl Entry {
     fn stop(&mut self) {
+        audition::stop(self);
         self.pending = None;
         self.status.test = "idle";
         for mixer in &self.mixers {
@@ -89,6 +96,9 @@ pub(crate) struct Request {
     #[serde(default)]
     retry: bool,
     cue: Option<Cue>,
+    preview: Option<audition::Request>,
+    #[serde(default)]
+    stop_preview: bool,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +106,12 @@ struct PrivateMix {
     master: Bus,
     alerts: Bus,
     interface: Bus,
+    #[serde(default)]
+    music: Bus,
+    #[serde(default)]
+    ambience: Bus,
+    #[serde(default)]
+    effects: Bus,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -134,7 +150,11 @@ impl PrivateAudio {
         state.entries.insert(
             key,
             Entry {
+                preview: None,
                 status: Status {
+                    audition: matches!(key, Endpoint::Gm(_)),
+                    preview: "idle",
+                    preview_id: 0,
                     generation,
                     revision: 0,
                     status: "loading",
@@ -214,7 +234,8 @@ impl PrivateAudio {
         if !json.contains("\"NativePrivateAudio\"") {
             return false;
         }
-        if json.len() > 4096 {
+        // Includes bounded authored equivalent text for one current audition.
+        if json.len() > 16_384 {
             return true;
         }
         let Ok(request) = crate::core::codec::decode_native_private_audio_request(json) else {
@@ -248,12 +269,15 @@ impl PrivateAudio {
                 master: mix.master,
                 alerts: mix.alerts,
                 interface: mix.interface,
-                ..Default::default()
+                music: mix.music,
+                ambience: mix.ambience,
+                effects: mix.effects,
             }
             .sanitised();
             for mixer in &entry.mixers {
                 mixer.lock().unwrap().set_mix(entry.mix);
             }
+            audition::mute(entry);
             if entry.pending.as_ref().is_some_and(|(_, id, _)| {
                 private_category(id).is_none_or(|category| entry.mix.gain(category, 1.0) == 0.0)
             }) {
@@ -265,6 +289,12 @@ impl PrivateAudio {
         }
         if request.retry {
             entry.retry += 1;
+        }
+        if request.stop_preview {
+            audition::stop(entry);
+        }
+        if let Some(preview) = request.preview {
+            audition::request(entry, preview);
         }
         if let Some(cue) = request.cue {
             let now = SystemTime::now()
@@ -428,6 +458,7 @@ impl<B: Backend> Worker<B> {
     }
     pub fn step(&mut self, hub: &PrivateAudio) -> bool {
         self.prepare();
+        audition::prepare(hub);
         let devices = self.backend.scan();
         let mut state = hub.0.lock().unwrap();
         if state.quit {
@@ -546,6 +577,7 @@ impl<B: Backend> Worker<B> {
             {
                 entry.status.test = "idle";
             }
+            audition::commit(entry);
         }
         true
     }

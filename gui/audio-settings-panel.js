@@ -104,6 +104,7 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
   function paint() {
     const state = audio?.state();
     for (const [id, controls] of rows) {
+      controls.row.hidden = privateSurface && ['music','ambience','effects'].includes(id) && !state?.auditionAvailable;
       const bus = state?.mix[id] || { level: 1, muted: false };
       const available = !!(state?.room || state?.private) && (id === 'master' || state.categories.includes(id));
       controls.slider.value = String(bus.level);

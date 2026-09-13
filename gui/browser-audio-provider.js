@@ -22,6 +22,7 @@ export function createBrowserAudioProvider({
   let failed = false;
   let disposed = false;
   let testGeneration = 0;
+  let auditionGeneration = 0;
   let testState = 'idle';
   let mix = normalizeAudioMix();
   let mono = false;
@@ -96,6 +97,7 @@ export function createBrowserAudioProvider({
           // A suspended context freezes sample time. Keeping a one-shot here
           // would replay its missed remainder after an unlock/device return.
           testGeneration++;
+          auditionGeneration++;
           testState = 'idle';
           for (const voice of [...voices]) stopVoice(voice);
           range?.reset();
@@ -118,6 +120,8 @@ export function createBrowserAudioProvider({
     const quieted = ['master', ...AUDIO_CATEGORIES].filter(id =>
       audioBusGain(mix, id) > 0 && audioBusGain(next, id) === 0);
     mix = next;
+    const preview=sounds.get('__audition');
+    if (preview && audioSoundGain(mix,preview.category,preview.level)===0) stopAudition();
     if (master) master.gain.value = audioBusGain(mix, 'master');
     for (const [id, gain] of buses) gain.gain.value = audioBusGain(mix, id);
     if (quieted.length) {
@@ -282,6 +286,7 @@ export function createBrowserAudioProvider({
 
   function stopAll() {
     range?.reset();
+    auditionGeneration++;
     testGeneration++;
     testState = 'idle';
     for (const sound of sounds.values()) sound.wanted = false;
@@ -324,6 +329,24 @@ export function createBrowserAudioProvider({
     if (audioSoundGain(mix, sound.category, sound.level) === 0) { changed(); return false; }
     return play(sound, { duration: 2, test: true });
   }
+  function stopAudition() { auditionGeneration++; range?.reset(); remove('__audition'); }
+  async function audition(definition) {
+    stopAudition();
+    const generation = auditionGeneration;
+    cache.delete(definition.file);
+    const bearing=definition.equivalent?.bearing,elevation=definition.equivalent?.elevation||0;
+    const angle=bearing*Math.PI/180,pitch=elevation*Math.PI/180;
+    const position=bearing==null?null:{x:Math.sin(angle)*Math.cos(pitch),y:Math.sin(pitch),z:-Math.cos(angle)*Math.cos(pitch)};
+    register('__audition', { ...definition, loop: false, spatial:position?{
+      panning_model:'HRTF',distance_model:'inverse',ref_distance:1,max_distance:1,rolloff_factor:0,
+    }:null });
+    const sound = sounds.get('__audition');
+    if (!sound || !await enable()) return false;
+    if (!sound.buffer) await sound.pending;
+    if (disposed || generation !== auditionGeneration || sounds.get('__audition') !== sound) return false;
+    if (audioSoundGain(mix, sound.category, sound.level) === 0) return false;
+    return play(sound, { duration: 2, position });
+  }
 
   function snapshot() {
     const entries = [...sounds.values()];
@@ -359,5 +382,5 @@ export function createBrowserAudioProvider({
       Promise.resolve(context.close()).catch(() => {});
     }
   }
-  return { register, remove, loop, cue, setMix, setMono, setDucking, setReducedRange, enable, testOutput, stopAll, snapshot, outputPeak, dispose };
+  return { register, remove, loop, cue, setMix, setMono, setDucking, setReducedRange, enable, testOutput, audition, stopAudition, stopAll, snapshot, outputPeak, dispose };
 }

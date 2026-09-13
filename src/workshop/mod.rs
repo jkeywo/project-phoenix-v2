@@ -287,6 +287,13 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
         }
     }
     let sources = Sources(text_files);
+    if let Some(source) = sources.0.get(crate::sound_cues::PATH) {
+        if let Err(error) =
+            crate::sound_cues::validate_source(source, |path| files.contains_key(path))
+        {
+            report.error("invalid-sound-cues", crate::sound_cues::PATH, error);
+        }
+    }
     report.extend(crate::world::mod_pack::validate_pack_scripts(&sources.0));
     for (path, text) in &sources.0 {
         let result = if path.starts_with("assets/worlds/") && path.ends_with(".toml") {

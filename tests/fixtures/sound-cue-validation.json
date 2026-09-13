@@ -1,0 +1,12 @@
+[
+  {"name":"decorative click","cue":{"id":"click","label":"Click","file":"assets/sounds/ui_click.ogg","category":"interface","audience":"station","volume":0.12},"expected":null},
+  {"name":"informative weapon","cue":{"id":"shot","label":"Shot","file":"assets/sounds/Blaster.mp3","category":"effects","audience":"viewscreen","volume":0.9,"equivalent":{"meaning":"Weapon fired","source":"Training contact","urgency":"warning","bearing":45}},"expected":null},
+  {"name":"information cannot be decorative","cue":{"id":"shot","label":"Shot","file":"assets/sounds/Blaster.mp3","category":"effects","audience":"viewscreen","volume":0.9},"expected":"equivalent"},
+  {"name":"room sound cannot become station feedback","cue":{"id":"music","label":"Music","file":"assets/sounds/exploration.mp3","category":"music","audience":"station","volume":1},"expected":"audience"},
+  {"name":"category cannot disguise informative source","cue":{"id":"shot","label":"Shot","file":"assets/sounds/Blaster.mp3","category":"interface","audience":"station","volume":0.1},"expected":"category"},
+  {"name":"remote media refused","cue":{"id":"remote","label":"Remote","file":"https://example.test/voice.mp3","category":"interface","audience":"gm","volume":0.1},"expected":"asset"},
+  {"name":"unlisted packaged speech refused","cue":{"id":"speech","label":"Speech","file":"assets/sounds/dialogue.ogg","category":"interface","audience":"gm","volume":0.1},"expected":"asset"},
+  {"name":"elevation needs bearing","cue":{"id":"shot","label":"Shot","file":"assets/sounds/Blaster.mp3","category":"effects","audience":"viewscreen","volume":0.9,"equivalent":{"meaning":"Shot","source":"Contact","urgency":"warning","elevation":5}},"expected":"direction"},
+  {"name":"missing source refused","cue":{"id":"shot","label":"Shot","file":"assets/sounds/Blaster.mp3","category":"effects","audience":"viewscreen","volume":0.9,"equivalent":{"meaning":"Shot","source":" ","urgency":"warning"}},"expected":"equivalent"},
+  {"name":"out of range level refused","cue":{"id":"click","label":"Click","file":"assets/sounds/ui_click.ogg","category":"interface","audience":"gm","volume":2},"expected":"volume"}
+]

@@ -23,6 +23,7 @@ import { clientStampField } from './client-stamp.mjs';
 import { joinCodesJson, JOIN_CODES_JSON } from './join-codes.mjs';
 import { roomDuckingJson } from './room-ducking.mjs';
 import { audioRangeModule } from './audio-range.mjs';
+import { soundCuesJson, SOUND_CUES_JSON, soundCueInventoryJs, SOUND_CUE_INVENTORY } from './sound-cues.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'dist', 'client');
@@ -51,6 +52,8 @@ async function main() {
   // from a committed JS module generated from the Rust catalogue. Refuse a
   // stale module before deleting the previous build output.
   await assertDebugSurfaceModuleCurrent(root);
+  await writeFile(path.join(root, SOUND_CUES_JSON), await soundCuesJson(root), 'utf8');
+  await writeFile(path.join(root, SOUND_CUE_INVENTORY), await soundCueInventoryJs(root), 'utf8');
 
   await rm(out, { recursive: true, force: true });
   await mkdir(path.join(out, 'assets'), { recursive: true });

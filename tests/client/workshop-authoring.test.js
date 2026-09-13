@@ -42,6 +42,7 @@ afterEach(() => { mounted.dispose(); vi.restoreAllMocks(); });
 describe('Workshop Authoring browser surface', () => {
   it('tests unsaved mod source with a read-only base hull and keeps Authoring and Test exclusive', async () => {
     mounted.dispose();
+    vi.spyOn(window, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ version: 1, assets: [], cues: [] }) });
     const files = readStoreZip(workshopPack());
     const baseHull = 'assets/entities/base-hull.toml';
     let run = null;
@@ -72,6 +73,7 @@ describe('Workshop Authoring browser surface', () => {
     byId('test-start').click();
     await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(true));
     expect(document.querySelector('.workshop-toolbar').hidden).toBe(true);
+    expect(document.querySelector('.sound-audition').hidden).toBe(true);
     expect(byId('test-world').disabled).toBe(true);
     const first = request.mock.calls.find(([value]) => value.op === 'test-start')[0];
     expect(first.files[WORKSHOP_WORLD]).toContain('# unsaved first');
@@ -79,6 +81,7 @@ describe('Workshop Authoring browser surface', () => {
     edit('must not enter the running draft'); // Even synthetic input is held.
     byId('test-authoring').click();
     await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(false));
+    expect(document.querySelector('.sound-audition').hidden).toBe(false);
     expect(byId('source').value).toContain('# unsaved first');
     expect(request.mock.calls.filter(([value]) => value.op === 'test-control').map(([value]) => value.control)).toEqual([
       { command: 'pause' }, { command: 'visibility', visible: false },

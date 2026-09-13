@@ -9,6 +9,11 @@
 .audio-settings-bus { min-width: 0; padding: 0.5em; border: 1px solid currentColor; }
 .audio-settings-controls, .audio-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75em; }
 .audio-settings-controls input { min-width: 6em; width: 9em; flex: 1; }
+.sound-audition { min-width:0; overflow-wrap:anywhere; }
+.sound-audition select { max-width:100%; }
+.sound-audition button { min-height:44px; margin:.25rem; }
+.sound-audition :focus-visible { outline:3px solid currentColor; outline-offset:3px; }
+.sound-audition [data-sound-equivalent] { border-inline-start:.25rem solid currentColor; padding:.5rem; }
 .audio-settings button { min-height: 44px; padding: 0.5em 0.75em; font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; }
 .audio-settings button[aria-pressed="true"] { border-width: 3px; font-weight: bold; }
 .audio-settings :focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }

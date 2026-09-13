@@ -1,5 +1,52 @@
 use super::*;
 
+#[test]
+fn sound_catalog_requires_captured_asset_and_cannot_hide_informative_metadata() {
+    let catalog = r#"version=1
+[[assets]]
+file="assets/sounds/ui_click.ogg"
+category="interface"
+informative=false
+[[cues]]
+id="click"
+label="Click"
+file="assets/sounds/ui_click.ogg"
+category="interface"
+audience="gm"
+volume=0.12
+"#;
+    let mut files = BTreeMap::from([
+        (
+            "assets/scenarios.toml".into(),
+            b"[content]\nid=\"base\"\nepoch=1\n".to_vec(),
+        ),
+        (crate::sound_cues::PATH.into(), catalog.as_bytes().to_vec()),
+    ]);
+    let missing = validate_project(&files);
+    assert!(missing
+        .findings
+        .iter()
+        .any(|finding| finding.category == "invalid-sound-cues"));
+    files.insert(
+        "assets/sounds/ui_click.ogg".into(),
+        include_bytes!("../../assets/sounds/ui_click.ogg").to_vec(),
+    );
+    assert!(!validate_project(&files)
+        .findings
+        .iter()
+        .any(|finding| finding.category == "invalid-sound-cues"));
+    files.insert(
+        crate::sound_cues::PATH.into(),
+        catalog
+            .replace("audience=\"gm\"", "audience=\"hidden\"")
+            .into_bytes(),
+    );
+    assert!(validate_project(&files)
+        .findings
+        .iter()
+        .any(|finding| finding.category == "invalid-sound-cues"));
+}
+
 fn dependencies() -> WorkshopDependencies {
     WorkshopDependencies {
         base_files: BTreeMap::from([(

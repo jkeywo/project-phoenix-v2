@@ -90,7 +90,7 @@ pub fn is_allowed_content_path(path: &str) -> bool {
     if path.contains("..") || path.contains('\\') {
         return false;
     }
-    if path == MANIFEST_PATH {
+    if path == MANIFEST_PATH || path == crate::sound_cues::PATH {
         return true;
     }
     // Rhai scripts sit beside the world that loads them: a sibling
@@ -573,6 +573,21 @@ pub fn validate_mod_pack(
     //     atomically. Reconciles #856's "packs contain no executable code" — the
     //     sandbox profile, not the extension, is the trust boundary.
     findings.extend(validate_pack_scripts(&files));
+    if let Some(source) = files.get(crate::sound_cues::PATH) {
+        // The text-only adapter carries no new binary assets; its base is the
+        // packaged non-speech inventory. The asset-aware adapter supplies the
+        // same validator with its candidate/active/base byte resolver.
+        let inventory = crate::sound_cues::bundled().assets;
+        if let Err(error) = crate::sound_cues::validate_source(source, |path| {
+            inventory.iter().any(|asset| asset.file == path)
+        }) {
+            findings.push(archive_error(
+                "invalid-sound-cues",
+                crate::sound_cues::PATH,
+                error,
+            ));
+        }
+    }
 
     // 6. Validate the manifest, resolving worlds against pack THEN the active
     //    stack THEN base (issue #987 precedence: candidate → active → base).

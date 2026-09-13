@@ -4,17 +4,22 @@ import { cp, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promi
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { soundCuesJson, SOUND_CUES_JSON, soundCueInventoryJs, SOUND_CUE_INVENTORY } from './sound-cues.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const out = path.resolve(root, process.argv[2] || 'dist');
 const editorModules = [
-  'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-test', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
+  'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'undo-stack', 'validation', 'entity-includes', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
 ];
 await mkdir(path.join(out, 'editor'), { recursive: true });
 await mkdir(path.join(out, 'assets', 'strings'), { recursive: true });
+await writeFile(path.join(root,SOUND_CUES_JSON),await soundCuesJson(root),'utf8');
+await writeFile(path.join(root,SOUND_CUE_INVENTORY),await soundCueInventoryJs(root),'utf8');
+await cp(path.join(root,'assets/audio'),path.join(out,'assets/audio'),{recursive:true});
+await cp(path.join(root,'assets/sounds'),path.join(out,'assets/sounds'),{recursive:true});
 await copyFile(path.join(root, 'workshop.html'), path.join(out, 'workshop.html'));
 await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
 await copyFile(path.join(root, 'assets/strings/strings.csv'), path.join(out, 'assets/strings/strings.csv'));

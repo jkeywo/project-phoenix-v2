@@ -6,6 +6,7 @@ import { newWorkshopPack } from '../editor/workshop-provider.js';
 import { createWorkshopRuntime } from '../editor/workshop-runtime.js';
 import { createWorkshopRecovery } from '../editor/workshop-recovery.js';
 import { mountWorkshopTestPanel } from './workshop-test-panel.js';
+import { mountWorkshopSoundCues } from '../editor/workshop-sound-cues.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -124,6 +125,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let recoveredDraft = null;
   let persistenceGeneration = 0;
   let testPanel = null;
+  let soundAudition = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -202,6 +204,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (refused) findings.focus();
   }
   function refresh({ selection = false } = {}) {
+    soundAudition?.refresh({held:!!(pendingImport || pendingValidation || pendingRecovery || testPanel?.held())});
     if (selection) {
       files.replaceChildren(...(draft?.paths() || []).map(path => {
         const option = el('option', null, { value: path }); option.textContent = path; return option;
@@ -538,6 +541,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (draft?.isDirty()) { event.preventDefault(); event.returnValue = ''; }
   }
   doc.addEventListener('keydown', keydown);
+  soundAudition = mountWorkshopSoundCues({root,win,draft:()=>draft,native:!!provider?.save,
+    resolveAsset:path=>runtime.readAsset?.(path)??null,
+    readAudio:()=>profile.audio,saveAudio:audio=>{profile={...profile,audio};return saveOperatorProfile(win.PhoenixOperatorStorage||win.localStorage,profile);}});
   win.addEventListener('beforeunload', beforeUnload);
   testPanel = mountWorkshopTestPanel({ root, provider, draft: () => draft,
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed: () => refresh(), win });
@@ -584,6 +590,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   return { ready, dispose() {
     disposed = true;
     testPanel.dispose();
+    soundAudition?.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);
     win.removeEventListener('beforeunload', beforeUnload);

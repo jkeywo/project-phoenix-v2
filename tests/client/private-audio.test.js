@@ -145,9 +145,10 @@ describe('portable private preferences and migration', () => {
     audio.hardware_output = 'private-headphones'; audio.occurrences = ['secret']; audio.mix.music = { level: 1 };
     owner.setAudio(audio); owner.setMode('event.fire', 'immediate');
     const exported = owner.exportProfile();
-    expect(exported).not.toContain('headphones'); expect(exported).not.toContain('secret'); expect(exported).not.toContain('music');
+    expect(exported).not.toContain('headphones'); expect(exported).not.toContain('secret');
     const prepared = prepareOperatorProfileImport(exported, { registry: createClientSemanticActionRegistry() });
     expect(prepared.profile.audio.mix.master).toEqual({ level: 0.3, muted: true });
+    expect(prepared.profile.audio.mix.music).toEqual({ level: 1, muted: false });
     expect(prepared.profile.audio.cues.applied).toBe(true);
     expect(owner.importProfile('{broken').status).toBe('rejected');
     expect(owner.audio().mix.master.level).toBe(0.3);

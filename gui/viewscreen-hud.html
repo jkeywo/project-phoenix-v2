@@ -566,6 +566,7 @@
     import { localiseHostPayload } from './host-channel.js';
     import { gameOverView } from './game-over-view.js';
     import { createPresentationCard } from './presentation-card.js';
+    import { mountSensorReport } from './sensor-report.js';
 
     // ONE guard for the whole page: with a table, this island localises the
     // markup and installs the localising renderer; without one it does neither
@@ -652,11 +653,13 @@
 
     if (hasTable) hud.render = renderLocalised;
     const presentationCard = createPresentationCard();
+    const renderReport = mountSensorReport(document);
     const renderBase = hud.render || hud.renderRaw;
     hud.render = function(json) {
       renderBase(json);
-      let state; try { state = typeof json === 'string' ? JSON.parse(json) : json; } catch { state = null; }
+      let state; try { state = typeof json === "string" ? JSON.parse(json) : json; } catch { state = null; }
       presentationCard.update(state?.presentation_card || null);
+      renderReport(state?.sensor_report || null);
     };
 
     // Paint whatever landed while this module was still being fetched — with

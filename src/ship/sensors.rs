@@ -140,6 +140,10 @@ impl Plugin for ShipSensorsPlugin {
                     tick_sensors_threat_warning
                         .in_set(crate::sim_sets::FixedStep::TickSensorsThreatWarning)
                         .in_set(crate::sim_sets::SimSet::Input),
+                    crate::gm_information::reports::advance
+                        .in_set(crate::sim_sets::SimSet::Publish)
+                        .before(publish_sensors_blackboard)
+                        .before(publish_sensor_radar_blackboard),
                     publish_sensors_blackboard
                         .in_set(crate::sim_sets::FixedStep::PublishSensorsBlackboard)
                         .in_set(crate::sim_sets::SimSet::Publish),
@@ -761,7 +765,7 @@ pub fn tick_sensors_threat_warning(
 /// Publish every ship's own Sensors blackboard into that ship's
 /// `ShipSystemBlackboards` (issue #828 — was LocalShip-only; per-Ship
 /// following the #824 helm / #826 shields precedent), split on
-/// `Has<LocalShip>`:
+/// presentation ownership and fleet membership:
 ///
 /// - `science_target_uuid` — each ship's own [`SensorRadarSelection`], player and
 ///   NPC alike.
@@ -769,15 +773,15 @@ pub fn tick_sensors_threat_warning(
 ///   scaled by its own `SensorRadarRange` modifier, which
 ///   `apply_radar_damage_modifiers` keeps in sync with the `sensor-radar`
 ///   system's damage tier each tick. The local ship's base is the console
-///   config (`cfg.sensors_radar_range`, as before); an NPC's base follows
+///   config mirror attached at spawn (the local config is a fixture fallback); an NPC's base follows
 ///   [`effective_sensor_range`]'s preference order — its own
 ///   `AiProfile.sensor_range`, falling back to the console config only for
 ///   hulls with no AI profile at all.
 /// - `radar_shows` / `radar_selects` — authored presentation filters from
-///   `ShipClientConfigResource`, which describes the **local player's** hull
-///   only, so they are gated on `is_local`; NPCs don't render a radar and
-///   get empty filters.
+///   each fleet hull's own Sensors config mirror; NPCs do not render a radar
+///   and get empty filters. This does not depend on which hull is LocalShip.
 pub fn publish_sensors_blackboard(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     content: Option<Res<crate::world::server::WorldContentRuntime>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     mut ships_q: Query<
@@ -788,38 +792,75 @@ pub fn publish_sensors_blackboard(
             Option<&crate::ai::server::AiProfile>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
+            Option<&crate::gm_information::reports::SensorsObservationConfig>,
+            Has<crate::lockstep::FleetSlotOf>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let cfg = &ship_config.0;
-    for (uuid, sensors_target, modifiers, ai_profile, mut bbs, is_local) in ships_q.iter_mut() {
+    for (uuid, sensors_target, modifiers, ai_profile, mut bbs, is_local, own_radar, fleet) in
+        ships_q.iter_mut()
+    {
         let radar_mult = modifiers
             .map(|m| m.get(&ModifierSlot::SensorRadarRange))
             .unwrap_or(1.0);
-        // The local ship keeps the console-config base; NPCs use the same
+        // Each fleet hull keeps its own console-config base; NPCs use the same
         // per-entity preference order as `effective_sensor_range`.
-        let base_range = if is_local {
-            cfg.sensors_radar_range
+        let base_range = if is_local || fleet {
+            own_radar.map_or(
+                if is_local {
+                    cfg.sensors_radar_range
+                } else {
+                    0.0
+                },
+                |radar| radar.0.range,
+            )
         } else {
             ai_profile
                 .map(|p| p.sensor_range)
                 .filter(|r| r.is_finite() && *r > 0.0)
                 .unwrap_or(cfg.sensors_radar_range)
         };
-        let (radar_shows, radar_selects) = if is_local {
-            (
-                cfg.sensors_radar_shows.clone(),
-                cfg.sensors_radar_selects.clone(),
-            )
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (radar_shows, radar_selects) =
+            if let Some(radar) = own_radar.filter(|_| is_local || fleet) {
+                let radar = &radar.0;
+                (
+                    radar
+                        .shows
+                        .iter()
+                        .map(|tag| tag.as_str().to_owned())
+                        .collect(),
+                    radar
+                        .selects
+                        .iter()
+                        .map(|tag| tag.as_str().to_owned())
+                        .collect(),
+                )
+            } else if is_local {
+                (
+                    cfg.sensors_radar_shows.clone(),
+                    cfg.sensors_radar_selects.clone(),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
         let overrides = uuid
             .and_then(|uuid| content.as_ref()?.contact_overrides.get(&uuid.0))
             .cloned()
             .unwrap_or_default();
         let bb = SensorsBlackboard {
+            contact_reports: uuid
+                .and_then(|id| {
+                    content.as_ref().map(|runtime| {
+                        crate::gm_information::reports::projection(
+                            &runtime.contact_information.reports,
+                            &id.0,
+                            tick.as_ref().map_or(0, |tick| tick.0),
+                        )
+                    })
+                })
+                .unwrap_or_default(),
             contact_ghosts: uuid
                 .and_then(|id| {
                     content.as_ref().map(|runtime| {
@@ -915,6 +956,17 @@ pub fn publish_sensor_radar_blackboard(
             })
             .unwrap_or_default()
                 != crate::gm_contact::ContactMode::Conceal
+                && !uuid
+                    .and_then(|uuid| {
+                        content.as_ref().map(|content| {
+                            crate::gm_information::reports::contains(
+                                &content.contact_information.reports,
+                                &uuid.0,
+                                target,
+                            )
+                        })
+                    })
+                    .unwrap_or(false)
         });
         // Resolve the selected target's authoritative Red Alert state. `Some(..)`
         // only when the selection names a Red-Alert-capable ship; `None` for no

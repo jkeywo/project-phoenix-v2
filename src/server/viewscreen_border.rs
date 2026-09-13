@@ -748,6 +748,7 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         game_over_message: None,
         computer_message: None,
         presentation_card: None,
+        sensor_report: None,
         game_over_report: Vec::new(),
         game_over_outcome: None,
         scenario_title: None,
@@ -853,6 +854,7 @@ fn compute_hud_state(
         game_over_message,
         computer_message,
         presentation_card: None,
+        sensor_report: None,
         game_over_report,
         game_over_outcome,
         scenario_title,
@@ -888,6 +890,16 @@ fn recompute_hud_state(
     beam_q: Query<&crate::console::weapons::ActiveBeam, With<crate::server_app::LocalShip>>,
     computer_message: Option<Res<ActiveComputerMessage>>,
     presentation: crate::gm_presentation::PresentationHud,
+    report_selection: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::state::ShipViewMode,
+            Option<&crate::ship::sensors::SensorRadarSelection>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     world_resource: Option<Res<WorldResource>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
@@ -928,6 +940,29 @@ fn recompute_hud_state(
     );
     if *phase.get() == GamePhase::InProgress {
         next.presentation_card = presentation.card();
+        if let (Ok((observer, mode, selection)), Some(content)) =
+            (report_selection.single(), content.as_deref())
+        {
+            if matches!(
+                mode.view_mode,
+                crate::core::messages::ViewMode::ScienceRadar
+                    | crate::core::messages::ViewMode::SensorsRadar
+            ) {
+                if let Some(target) = selection.and_then(|selection| selection.0.as_deref()) {
+                    if crate::gm_contact::mode(&content.contact_overrides, &observer.0, target)
+                        != crate::gm_contact::ContactMode::Conceal
+                    {
+                        next.sensor_report = crate::gm_information::reports::projection(
+                            &content.contact_information.reports,
+                            &observer.0,
+                            tick.as_deref().map_or(0, |tick| tick.0),
+                        )
+                        .remove(target)
+                        .flatten();
+                    }
+                }
+            }
+        }
     }
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
@@ -1823,5 +1858,88 @@ mod tests {
         // -0.5° (tiny left turn) → 359.5°, rounds to 360 then wraps to 0.
         let yaw = (-0.5_f32).to_radians();
         assert_eq!(yaw_to_compass_bearing(yaw), 0);
+    }
+    #[test]
+    fn selected_sensor_report_hud_follows_view_selection_and_conceal() {
+        use crate::gm_information::reports::{ReportPolicy, ReportSample, ReportState};
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.insert_resource(State::new(GamePhase::InProgress));
+        app.insert_resource(crate::sim_tick::SimTick(12));
+        let mut content = crate::world::server::WorldContentRuntime::default();
+        content
+            .contact_information
+            .reports
+            .entry("observer".into())
+            .or_default()
+            .insert(
+                "target".into(),
+                ReportState {
+                    policy: ReportPolicy {
+                        delay_ticks: 2,
+                        position_step_mm: 0,
+                        hide_identity: true,
+                    },
+                    next_tick: Some(14),
+                    pending: None,
+                    presented: Some(ReportSample {
+                        observed_tick: 10,
+                        name: "console.sensors.basic_contact".into(),
+                        position_mm: [0, 0, 0],
+                    }),
+                },
+            );
+        app.insert_resource(content);
+        let mut view = crate::ship::state::ShipViewMode::default();
+        view.view_mode = crate::core::messages::ViewMode::SensorsRadar;
+        let observer = app
+            .world_mut()
+            .spawn((
+                crate::server_app::LocalShip,
+                crate::entities::spawner::EntityUuid("observer".into()),
+                view,
+                crate::ship::sensors::SensorRadarSelection(Some("target".into())),
+            ))
+            .id();
+        app.world_mut()
+            .run_system_once(spawn_hud_state_entity)
+            .unwrap();
+        let read = |app: &mut App| {
+            app.world_mut()
+                .run_system_once(recompute_hud_state)
+                .unwrap();
+            app.world_mut()
+                .query::<&ViewscreenHud>()
+                .single(app.world())
+                .unwrap()
+                .0
+                .sensor_report
+                .clone()
+        };
+        let report = read(&mut app).unwrap();
+        assert_eq!(report.age_ticks, 2);
+        assert_eq!(report.observed_tick, 10);
+        app.world_mut()
+            .entity_mut(observer)
+            .get_mut::<crate::ship::state::ShipViewMode>()
+            .unwrap()
+            .view_mode = crate::core::messages::ViewMode::Camera(Default::default());
+        assert!(read(&mut app).is_none());
+        app.world_mut()
+            .entity_mut(observer)
+            .get_mut::<crate::ship::state::ShipViewMode>()
+            .unwrap()
+            .view_mode = crate::core::messages::ViewMode::ScienceRadar;
+        assert!(read(&mut app).is_some());
+        crate::gm_contact::set(
+            &mut app
+                .world_mut()
+                .resource_mut::<crate::world::server::WorldContentRuntime>()
+                .contact_overrides,
+            "observer",
+            "target",
+            crate::gm_contact::ContactMode::Conceal,
+        );
+        assert!(read(&mut app).is_none());
     }
 }

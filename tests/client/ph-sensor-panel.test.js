@@ -283,3 +283,14 @@ describe('PhSensorPanel', () => {
     expect(hostStyle.display).toBe('inline');
   });
 });
+
+it('keeps reported contact source and age readable and clears them on ordinary selection', () => {
+  const { el } = setup();
+  const target_report = { name: 'Reported freighter', source: 'console.sensors.report_source', observed_tick: 11, age_ticks: 4 };
+  el.state = { target_uuid: 'reported', target_name: target_report.name, target_report };
+  const label = el.shadowRoot.querySelector('#sensor-report');
+  expect(label.hidden).toBe(false); expect(label.textContent).toContain('11'); expect(label.textContent).toContain('4');
+  expect(label.textContent).toContain(t('console.sensors.report_source'));
+  el.state = { target_uuid: 'ordinary', target_name: 'Ordinary contact' };
+  expect(label.hidden).toBe(true); expect(label.textContent).toBe('');
+});

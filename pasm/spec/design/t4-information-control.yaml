@@ -12,7 +12,7 @@ entities:
         - "[ai] Browser and native GM controls share the contact panel, confirmation category and typed Admission route. Absolute apply/clear requests wait for their exact attributed correlated result. Classification results appear in the ordinary journal and activity feed; there is no second command or history lane."
         - "[ai] The observing-ship/target map is canonical run state: ordered maps, agreed apply ticks, idempotent requests, snapshot capture/restore and conditional deterministic digest folding. The Sensors blackboard publishes only its observer's resolved labels, not the GM palette selection or another observer's interpretation."
         - "[ai] Entity disappearance prunes the pair; an attributed despawn captures its classification beside the existing visibility override and a despawn undo restores both without overwriting a newer pair. A new run clears the map. Clear classification leaves Reveal/Conceal untouched."
-        - "[ai] Delayed/degraded intel remains a subsequent M7 path; ghost contacts have their own implemented owner below. This delivery does not claim a complete per-ship evidence store or alter crew authority, Backfill targeting, live truth or deterministic physics."
+        - "[ai] Ghost and delayed/degraded reports have their own implemented owners below. This delivery does not claim a complete per-ship evidence store or alter crew authority, Backfill targeting, live truth or deterministic physics."
     architecture:
       kind: gm-information-control
       authority: authoritative
@@ -47,3 +47,29 @@ entities:
       paths: [src/gm_information.rs, src/gm_action.rs, src/core/codec.rs, src/core/messages.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_contact.rs, src/ship/sensors.rs, src/server/radar.rs, src/world/config.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/world/script/authoring.rs, src/snapshot.rs, src/sim_digest.rs, gui/console-state.js, gui/gm-contact-panel.js, gui/gm-knowledge-compare.js, gui/gm-workspace.js, gui/native-gm-workspace.js, server.html]
       symbols: [ContactInformation, ContactInformationChange, GhostContact, SetContactInformation, ghost_snapshots, viewscreen_ghosts, apply_scenario_command]
       tests: ["cargo test --features headless --test gm_contact ghost_", "cargo test --lib gm_information::", "npx vitest run tests/client/gm-contact.test.js tests/client/gm-knowledge-compare.test.js tests/client/native-gm-workspace.test.js tests/client/gm-confirmation.test.js"]
+
+  - component: gm-t4-sensor-report-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Observer-Specific Degraded and Delayed Sensors Reports
+      summary: "The typed contact-information owner sets or clears a basic Sensors report policy for one observing fleet ship and one real target. Explicit u32 delay ticks, world-millimetre position grid and identity suppression control a bounded sample-and-hold pipeline over allowed observations. The ordinary Sensors builder, Crew Knowledge comparison and Sensors Viewscreen use the same reported name and position, with visible source, observation tick and age. No current-truth enrichment or pre-enable history is created."
+      rationale:
+        - "[ai] The accepted M7 scope is implemented without a future C2 evidence-store API. Each fleet hull retains its immutable authored Sensors radar config; capture uses canonical ship physics, current modifiers and allowed tag/range/point detection with recipient-filtered objective markers, or the explicit Reveal floor. Presentation ownership cannot substitute another hull's config."
+        - "[ai] Nonzero delay is also the sampling cadence: withhold the initial sample, then release the previous allowed sample and capture the next at each interval. At most one pending and one presented sample exist per observer/target. Missing observation releases absence on the same cadence. Zero delay publishes current allowed samples; grid and identity masking may still degrade them."
+        - "[ai] A policy supplies only a basic identity and position. Live hull, faction, motion, target state, regions, anchored waypoints and displayed Scan readings cannot enrich the manipulated Sensors lane. Independently earned scan state remains canonical and reappears when policy clears; Comms, Objectives, combat mechanics and other observers retain their established behavior. Classification is captured with the observation, never looked up from current truth when an old sample is displayed."
+        - "[ai] Conceal wins and flushes the pipeline. Identical policy requests are no-ops retaining pending work; changed policies reset samples. A new run clears all records, disappearance prunes pairs, and attributed despawn undo restores the exact captured report pipeline without rewinding global time or overwriting a newer pair. Ordered state participates in the existing snapshot and deterministic digest owner."
+        - "[ai] Browser and native GM controls share explicit fields, confirmation and exact correlated canonical results. Mission TOML and Rhai set_contact_report/clear_contact_report resolve observer and target names through the same typed TriggerAction dispatch. There is no direct ECS mutation or filesystem/asset authority."
+        - "[ai] The shared live source-and-age renderer shows only the public report and does not announce every tick. It appears on the selected Sensors contact and the effective Sensors Viewscreen, clears when absent or another view is selected, and creates no cue history or audio playback."
+        - "[ai] The shared suppresses_spatial_cue predicate suppresses current positional audio from a concealed or report-policy source while the effective Viewscreen is Sensors. Producers consume such events without delayed replay. The ordinary camera retains its existing unnamed public combat geometry; the predicate does not alter physics or create an audio queue."
+    architecture:
+      kind: gm-information-control
+      authority: authoritative
+      coordinates: [gm-milestone-information-control, gm-t4-contact-classification, gm-t4-ghost-contacts]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_information.rs, src/gm_information/reports.rs, src/gm_action.rs, src/gm_contact.rs, src/gm_despawn.rs, src/gm_despawn_undo.rs, src/entities/spawner.rs, src/core/messages.rs, src/ship/sensors.rs, src/server/radar.rs, src/server/viewscreen_border.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/script/authoring.rs, src/snapshot.rs, src/sim_digest.rs, gui/console-state.js, gui/gm-contact-panel.js, gui/gm-knowledge-compare.js, gui/sensor-report.js, gui/components/ph-sensor-panel.js, gui/viewscreen-hud.html, server.html]
+      symbols: [ReportPolicy, ReportState, ReportSample, SensorReport, SensorsObservationConfig, SetReportPolicy, ClearReportPolicy, suppresses_spatial_cue, sensorReportText, renderSensorReport, mountSensorReport]
+      tests: ["cargo test --features headless --test gm_contact report_policy", "cargo test --features headless --test gm_despawn_undo despawn_undo_restores_the_captured_report_pipeline", "cargo test --lib gm_information::", "cargo test --lib contact_report", "cargo test --lib selected_sensor_report_hud", "npx vitest run tests/client/gm-contact.test.js tests/client/gm-knowledge-compare.test.js tests/client/viewscreen-hud.test.js"]

@@ -116,6 +116,7 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
                 target,
                 mode,
                 classification: None,
+                report: None,
             });
         }
         for (observer, rows) in content.contact_overrides.iter_mut() {
@@ -125,6 +126,7 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
                     target: uuid.clone(),
                     mode,
                     classification: None,
+                    report: None,
                 });
             }
         }
@@ -157,6 +159,42 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
                     target,
                     mode: crate::gm_contact::ContactMode::Normal,
                     classification: Some(value),
+                    report: None,
+                });
+            }
+        }
+        let mut reports = Vec::new();
+        for (target, report) in content
+            .contact_information
+            .reports
+            .remove(&uuid)
+            .unwrap_or_default()
+        {
+            reports.push((uuid.clone(), target, report));
+        }
+        for (observer, rows) in &mut content.contact_information.reports {
+            if let Some(report) = rows.remove(&uuid) {
+                reports.push((observer.clone(), uuid.clone(), report));
+            }
+        }
+        content
+            .contact_information
+            .reports
+            .retain(|_, rows| !rows.is_empty());
+        content.contact_information.ghosts.remove(&uuid);
+        for (observer, target, report) in reports {
+            if let Some(row) = cleared
+                .iter_mut()
+                .find(|row| row.observer == observer && row.target == target)
+            {
+                row.report = Some(report);
+            } else {
+                cleared.push(GmRemovalReference {
+                    observer,
+                    target,
+                    mode: crate::gm_contact::ContactMode::Normal,
+                    classification: None,
+                    report: Some(report),
                 });
             }
         }

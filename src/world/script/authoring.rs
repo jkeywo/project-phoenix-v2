@@ -282,6 +282,18 @@ mod tests {
             &["observer", "id", "palette", "position_mm"],
         ),
         ("effects", "remove_ghost_contact", &["observer", "id"]),
+        (
+            "effects",
+            "set_contact_report",
+            &[
+                "observer",
+                "target",
+                "delay_ticks",
+                "position_step_mm",
+                "hide_identity",
+            ],
+        ),
+        ("effects", "clear_contact_report", &["observer", "target"]),
         ("effects", "load_world", &["path"]),
         ("effects", "unload_world", &["path"]),
         ("effects", "game_over", &["reason"]),

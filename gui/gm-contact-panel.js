@@ -3,7 +3,7 @@ import { wireText } from './strings.js';
 
 const MODES = ['reveal', 'conceal', 'normal'];
 const RESULT_MODES = [...MODES, 'misclassify', 'classification-normal', 'information'];
-const informationTarget = change => Object.values(change || {})[0]?.id;
+const informationTarget = change => { const row = Object.values(change || {})[0]; return row?.id || row?.target; };
 const requestedKind = request => request.change ? 'contact-information' : Object.hasOwn(request, 'palette') ? (request.palette === null ? 'contact-classification-normal' : 'contact-misclassify') : `contact-${request.mode}`;
 
 /** One observing player ship and one real world target; absolute state survives reconnect. */
@@ -21,6 +21,8 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   const valid = () => getOperator() && !pending && selected && selected.entity_id !== observer
     && entities.some(row => row.entity_id === observer && row.kind === 'player_ship')
     && entities.some(row => row.entity_id === selected.entity_id);
+  const validPolicy = policy => policy && [policy.delay_ticks, policy.position_step_mm].every(value => Number.isInteger(value) && value >= 0 && value <= 4294967295) && typeof policy.hide_identity === 'boolean' && (policy.delay_ticks > 0 || policy.position_step_mm > 0 || policy.hide_identity);
+  const chosenPolicy = () => ({ delay_ticks: Number(el('report-delay')?.value), position_step_mm: Number(el('report-step')?.value), hide_identity: !!el('report-identity')?.checked });
   function render() {
     if (el('target')) el('target').textContent = selected ? wireText(selected.name) : t('server.gm.contact.select');
     if (el('mode')) el('mode').textContent = t(`server.gm.contact.${overrides[observer]?.[selected?.entity_id] || 'normal'}`);
@@ -30,6 +32,11 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     if (el('classification')) el('classification').disabled = !valid() || !palette.length;
     if (el('misclassify')) el('misclassify').disabled = !valid() || !palette.some(row => row.palette === el('classification')?.value);
     if (el('classification-normal')) el('classification-normal').disabled = !valid() || !current;
+    const report = information.reports?.[observer]?.[selected?.entity_id];
+    for (const id of ['report-delay', 'report-step', 'report-identity']) if (el(id)) el(id).disabled = !valid();
+    if (el('report-set')) el('report-set').disabled = !valid() || !validPolicy(chosenPolicy());
+    if (el('report-clear')) el('report-clear').disabled = !valid() || !report;
+    if (el('report-current')) el('report-current').textContent = report ? t('server.gm.contact.report_current', { delay: report.policy.delay_ticks, step: report.policy.position_step_mm, identity: t(report.policy.hide_identity ? 'server.gm.contact.report_hidden' : 'server.gm.contact.report_visible') }) : t('server.gm.contact.report_normal');
     const ghostId = el('ghost-id')?.value;
     for (const id of ['ghost-id', 'ghost-palette', 'ghost-x', 'ghost-y', 'ghost-z']) if (el(id)) el(id).disabled = !validObserver();
     if (el('ghost-set')) el('ghost-set').disabled = !validObserver() || !boundedId(ghostId) || !validPosition(ghostPosition()) || !palette.some(row => row.palette === el('ghost-palette')?.value);
@@ -77,9 +84,12 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     if (!validObserver() || !boundedId(target)) return false;
     const ghost = change.set_ghost;
     if (ghost && (!validPosition(ghost.position_mm) || !palette.some(row => row.palette === ghost.palette))) return false;
-    if (!ghost && !change.remove_ghost) return false;
+    const policy = change.set_report_policy;
+    if (policy && (!valid() || policy.target !== selected.entity_id || !validPolicy(policy.policy))) return false;
+    if (change.clear_report_policy && (!valid() || change.clear_report_policy.target !== selected.entity_id)) return false;
+    if (!ghost && !change.remove_ghost && !policy && !change.clear_report_policy) return false;
     const chosen = { operator_id: getOperator().id, ship: observer, change: structuredClone(change) };
-    const description = t('settings.gm.confirmation.contact', { mode: t(ghost ? 'server.gm.contact.ghost-set' : 'server.gm.contact.ghost-remove'), target,
+    const description = t('settings.gm.confirmation.contact', { mode: t(policy ? 'server.gm.contact.report_set' : change.clear_report_policy ? 'server.gm.contact.report_normal' : ghost ? 'server.gm.contact.ghost-set' : 'server.gm.contact.ghost-remove'), target,
       ship: wireText(entities.find(row => row.entity_id === observer)?.name || observer) });
     return confirmAction({ category: 'contact.override', description, preview: () => description, accept: () => submitChosen(chosen) });
   }
@@ -117,6 +127,8 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     const nextInformation = value.contact_information || { ghosts: {} };
     if (!nextInformation || typeof nextInformation !== 'object' || !nextInformation.ghosts || typeof nextInformation.ghosts !== 'object'
       || Object.values(nextInformation.ghosts).some(rows => !rows || typeof rows !== 'object' || Object.entries(rows).some(([id, ghost]) => !ghost || ghost.id !== id || !boundedId(id) || !reported(ghost) || !Array.isArray(ghost.position_mm) || ghost.position_mm.length !== 3 || !validPosition(ghost.position_mm)))) return false;
+    if (nextInformation.reports && (typeof nextInformation.reports !== "object" || Array.isArray(nextInformation.reports)
+      || Object.values(nextInformation.reports).some(rows => !rows || typeof rows !== "object" || Array.isArray(rows) || Object.values(rows).some(row => !row || !validPolicy(row.policy))))) return false;
     information = nextInformation;
     entities = value.entities; overrides = nextOverrides; classifications = nextClassifications; palette = nextPalette;
     // Moving entities publish continuously. Keep the native dropdown's option
@@ -175,6 +187,9 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   el('misclassify')?.addEventListener('click', () => chooseClassification(el('classification').value));
   el('classification-normal')?.addEventListener('click', () => chooseClassification(null));
   for (const id of ['ghost-id', 'ghost-palette', 'ghost-x', 'ghost-y', 'ghost-z']) el(id)?.addEventListener('input', render);
+  for (const id of ['report-delay', 'report-step', 'report-identity']) el(id)?.addEventListener('input', render);
+  el('report-set')?.addEventListener('click', () => chooseInformation({ set_report_policy: { target: selected?.entity_id, policy: chosenPolicy() } }));
+  el('report-clear')?.addEventListener('click', () => chooseInformation({ clear_report_policy: { target: selected?.entity_id } }));
   el('ghost-set')?.addEventListener('click', () => chooseInformation({ set_ghost: { id: el('ghost-id').value, palette: el('ghost-palette').value, position_mm: ghostPosition() } }));
   el('ghost-remove')?.addEventListener('click', () => chooseInformation({ remove_ghost: { id: el('ghost-id').value } }));
   render();

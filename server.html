@@ -2249,6 +2249,15 @@
           <p id="gm-contact-classification-current" role="status"></p>
           <button id="gm-contact-misclassify" type="button" disabled data-i18n="server.gm.contact.misclassify"></button>
           <button id="gm-contact-classification-normal" type="button" disabled data-i18n="server.gm.contact.classification-normal"></button>
+          <fieldset><legend data-i18n="server.gm.contact.report_heading"></legend>
+            <p data-i18n="server.gm.contact.report_explanation"></p>
+            <p id="gm-contact-report-current" role="status"></p>
+            <label for="gm-contact-report-delay" data-i18n="server.gm.contact.report_delay"></label><input id="gm-contact-report-delay" type="number" min="0" max="4294967295" step="1" value="0">
+            <label for="gm-contact-report-step" data-i18n="server.gm.contact.report_step"></label><input id="gm-contact-report-step" type="number" min="0" max="4294967295" step="1" value="0">
+            <label><input id="gm-contact-report-identity" type="checkbox"><span data-i18n="server.gm.contact.report_identity"></span></label>
+            <button id="gm-contact-report-set" type="button" disabled data-i18n="server.gm.contact.report_set"></button>
+            <button id="gm-contact-report-clear" type="button" disabled data-i18n="server.gm.contact.report_normal"></button>
+          </fieldset>
           <fieldset><legend data-i18n="server.gm.contact.ghosts"></legend>
             <p data-i18n="server.gm.contact.ghost-explanation"></p>
             <label for="gm-contact-ghost-id" data-i18n="server.gm.contact.ghost-id"></label><input id="gm-contact-ghost-id" type="text" maxlength="128">
@@ -3196,6 +3205,9 @@
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
     import { mountGmWorkspace } from './gui/gm-workspace.js';
+    import { mountSensorReport } from './gui/sensor-report.js';
+    window.__renderSensorReport = mountSensorReport(document);
+    window.__renderSensorReport(window.__sensorReport);
     import { t, has, localiseTree } from './gui/strings.js';
     const gmWorkspace = mountGmWorkspace({ win: window, doc: document });
     const hostChannelDispatch = createHostChannel({
@@ -3457,6 +3469,8 @@
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
     window.__latestPresentationCard = s.presentation_card || null;
     window.__updatePresentationCard?.(window.__latestPresentationCard);
+    window.__sensorReport = s.sensor_report || null;
+    window.__renderSensorReport?.(window.__sensorReport);
     const overlay   = document.getElementById('hud-overlay');
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
     // Red-alert siren/music, engine volume from thrust, and the phaser loop's

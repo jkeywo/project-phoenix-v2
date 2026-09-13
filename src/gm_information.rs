@@ -1,6 +1,7 @@
 //! Per-observer reported information. Ghosts never become simulation entities.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub mod reports;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -13,11 +14,19 @@ pub enum ContactInformationChange {
     RemoveGhost {
         id: String,
     },
+    SetReportPolicy {
+        target: String,
+        policy: reports::ReportPolicy,
+    },
+    ClearReportPolicy {
+        target: String,
+    },
 }
 impl ContactInformationChange {
     pub fn target(&self) -> &str {
         match self {
             Self::SetGhost { id, .. } | Self::RemoveGhost { id } => id,
+            Self::SetReportPolicy { target, .. } | Self::ClearReportPolicy { target } => target,
         }
     }
     pub fn bounded(&self) -> bool {
@@ -25,6 +34,7 @@ impl ContactInformationChange {
         id(self.target())
             && match self {
                 Self::SetGhost { palette, .. } => id(palette),
+                Self::SetReportPolicy { policy, .. } => policy.changes_report(),
                 _ => true,
             }
     }
@@ -40,10 +50,12 @@ pub struct GhostContact {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContactInformation {
     pub ghosts: BTreeMap<String, BTreeMap<String, GhostContact>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reports: reports::Reports,
 }
 impl ContactInformation {
     pub fn is_empty(&self) -> bool {
-        self.ghosts.is_empty()
+        self.ghosts.is_empty() && self.reports.is_empty()
     }
 }
 
@@ -51,7 +63,27 @@ pub fn ghost_uuid(observer: &str, id: &str) -> String {
     format!("__gm_ghost:{observer}:{id}")
 }
 
-/// Caller verifies the observing FleetSlot. Palette resolution and absolute
+/// Shared live positional-cue audience gate. Sensors presentation cannot expose
+/// current geometry from a concealed or manipulated report. Consumed cues are
+/// never held for later playback; the ordinary camera's public geometry remains
+/// independent of the Sensors picture. Caller supplies the effective M8 view.
+pub fn suppresses_spatial_cue(
+    state: &ContactInformation,
+    overrides: &crate::gm_contact::ContactOverrides,
+    observer: &str,
+    source: &str,
+    view: &crate::core::messages::ViewMode,
+) -> bool {
+    matches!(
+        view,
+        crate::core::messages::ViewMode::ScienceRadar
+            | crate::core::messages::ViewMode::SensorsRadar
+    ) && (crate::gm_contact::mode(overrides, observer, source)
+        == crate::gm_contact::ContactMode::Conceal
+        || reports::contains(&state.reports, observer, source))
+}
+
+/// Caller verifies the observing FleetSlot and any real policy target. Palette resolution and absolute
 /// no-op semantics are shared by admitted GM actions and mission dispatch.
 pub fn apply_change(
     runtime: &mut crate::world::server::WorldContentRuntime,
@@ -62,6 +94,18 @@ pub fn apply_change(
         return Err("invalid-contact-information");
     }
     match change {
+        ContactInformationChange::SetReportPolicy { target, policy } => Ok(reports::set(
+            &mut runtime.contact_information.reports,
+            observer,
+            target,
+            Some(policy.clone()),
+        )),
+        ContactInformationChange::ClearReportPolicy { target } => Ok(reports::set(
+            &mut runtime.contact_information.reports,
+            observer,
+            target,
+            None,
+        )),
         ContactInformationChange::SetGhost {
             id,
             palette,
@@ -138,6 +182,18 @@ pub fn apply_scenario_command(
     if !live {
         return Err("unknown-contact-observer");
     }
+    if matches!(
+        change,
+        ContactInformationChange::SetReportPolicy { .. }
+            | ContactInformationChange::ClearReportPolicy { .. }
+    ) && (change.target() == observer
+        || !world
+            .query::<&crate::entities::spawner::EntityUuid>()
+            .iter(world)
+            .any(|id| id.0 == change.target()))
+    {
+        return Err("unknown-contact-target");
+    }
     let mut runtime = world
         .get_resource_mut::<crate::world::server::WorldContentRuntime>()
         .ok_or("world-unavailable")?;
@@ -168,6 +224,56 @@ pub fn viewscreen_ghosts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn spatial_cues_follow_the_effective_sensors_picture_without_inventing_delayed_audio() {
+        use crate::core::messages::ViewMode;
+        let mut state = ContactInformation::default();
+        reports::set(
+            &mut state.reports,
+            "a",
+            "b",
+            Some(reports::ReportPolicy {
+                delay_ticks: 4,
+                position_step_mm: 0,
+                hide_identity: false,
+            }),
+        );
+        let mut overrides = Default::default();
+        for view in [ViewMode::SensorsRadar, ViewMode::ScienceRadar] {
+            assert!(suppresses_spatial_cue(&state, &overrides, "a", "b", &view));
+            assert!(!suppresses_spatial_cue(
+                &state, &overrides, "other", "b", &view
+            ));
+        }
+        assert!(!suppresses_spatial_cue(
+            &state,
+            &overrides,
+            "a",
+            "b",
+            &ViewMode::Camera(Default::default())
+        ));
+        state.reports.clear();
+        assert!(!suppresses_spatial_cue(
+            &state,
+            &overrides,
+            "a",
+            "b",
+            &ViewMode::SensorsRadar
+        ));
+        crate::gm_contact::set(
+            &mut overrides,
+            "a",
+            "b",
+            crate::gm_contact::ContactMode::Conceal,
+        );
+        assert!(suppresses_spatial_cue(
+            &state,
+            &overrides,
+            "a",
+            "b",
+            &ViewMode::SensorsRadar
+        ));
+    }
     #[test]
     fn ghost_changes_have_a_binary_roundtrip_and_strict_authored_shape() {
         let change = ContactInformationChange::SetGhost {

@@ -219,6 +219,7 @@ export function crewContactRows(sensorsBlips, rawEntities) {
       return {
         id: blip.uuid,
         name: blip.name,
+        ...(blip.report ? { report: blip.report } : {}),
         // Mirror Rust's arithmetic exactly (src/gm_projection.rs `percent`):
         // `((current / maximum) * 100.0).clamp(...).round()` is computed
         // entirely in f32, while `hullFraction` here is an f32 value carried
@@ -334,6 +335,7 @@ export function buildKnowledgeCompare(truthEntities, projection, ship, { display
 
 function describeContact(entry, t) {
   if (!entry) return t('server.gm.knowledge.none');
+  if (entry.report) return t('console.sensors.report_label', { name: wireText(entry.name || entry.id), source: wireText(entry.report.source), age: entry.report.age_ticks, tick: entry.report.observed_tick });
   if (entry.destroyed) return `${entry.name || entry.id} — ${t('server.gm.entity.destroyed')}`;
   if (entry.hull_percent !== null && entry.hull_percent !== undefined) {
     return `${entry.name || entry.id} — ${t('server.gm.entity.hull', { percent: entry.hull_percent })}`;

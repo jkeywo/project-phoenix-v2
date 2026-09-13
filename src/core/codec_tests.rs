@@ -4939,6 +4939,7 @@ fn encode_hud_state_round_trips() {
         game_over_report: Vec::new(),
         game_over_outcome: None,
         scenario_title: None,
+        sensor_report: None,
     };
     let json = encode_hud_state(&state).expect("encode hud");
     let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
@@ -4960,6 +4961,7 @@ fn encode_hud_state_emits_snake_case_fields() {
         game_over_report: Vec::new(),
         game_over_outcome: None,
         scenario_title: None,
+        sensor_report: None,
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(json.contains("\"heading\":0"), "got: {json}");
@@ -4989,6 +4991,7 @@ fn encode_hud_state_carries_the_computer_message_when_present() {
         game_over_report: Vec::new(),
         game_over_outcome: None,
         scenario_title: None,
+        sensor_report: None,
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(json.contains("\"computer_message\":{"), "got: {json}");
@@ -5011,6 +5014,7 @@ fn encode_hud_state_omits_absent_computer_message() {
         game_over_report: Vec::new(),
         game_over_outcome: None,
         scenario_title: None,
+        sensor_report: None,
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(

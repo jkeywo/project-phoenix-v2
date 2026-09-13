@@ -116,6 +116,8 @@ pub struct GmRemovalReference {
     pub mode: ContactMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::gm_contact::ReportedClassification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<crate::gm_information::reports::ReportState>,
 }
 
 /// The complete inverse data for one allowed GM removal.
@@ -357,6 +359,7 @@ pub fn restore_precheck(
     name_to_uuid: &std::collections::HashMap<String, String>,
     contact_overrides: &crate::gm_contact::ContactOverrides,
     contact_classifications: &crate::gm_contact::ContactClassifications,
+    contact_reports: &crate::gm_information::reports::Reports,
     template_resolves: impl FnOnce(&crate::world::spawn_origin::SpawnOrigin) -> bool,
 ) -> Result<(), GmActionRefusalReason> {
     // Nothing to rebuild from: an authored `[[entity]]` block, or a capture the
@@ -407,6 +410,11 @@ pub fn restore_precheck(
                 .get(&reference.observer)
                 .and_then(|rows| rows.get(&reference.target))
                 .is_some()
+            || crate::gm_information::reports::contains(
+                contact_reports,
+                &reference.observer,
+                &reference.target,
+            )
         {
             return Err(GmActionRefusalReason::RestoreReferenceConflict);
         }
@@ -568,6 +576,14 @@ pub fn apply_armed_restores(world: &mut World) {
                     &reference.target,
                     reference.classification.clone(),
                 );
+                if let Some(report) = &reference.report {
+                    runtime
+                        .contact_information
+                        .reports
+                        .entry(reference.observer.clone())
+                        .or_default()
+                        .insert(reference.target.clone(), report.clone());
+                }
             }
         }
     }
@@ -652,6 +668,7 @@ mod tests {
                 &Default::default(),
                 &Default::default(),
                 &Default::default(),
+                &Default::default(),
                 |_| true
             ),
             Err(GmActionRefusalReason::RestoreIdentityOccupied)
@@ -670,6 +687,7 @@ mod tests {
                 &capture,
                 &live,
                 &names,
+                &Default::default(),
                 &Default::default(),
                 &Default::default(),
                 |_| true
@@ -691,6 +709,7 @@ mod tests {
                 &names,
                 &Default::default(),
                 &Default::default(),
+                &Default::default(),
                 |_| true
             ),
             Ok(())
@@ -705,6 +724,7 @@ mod tests {
             target: "raider-1".into(),
             mode: ContactMode::Reveal,
             classification: None,
+            report: None,
         }];
         let mut overrides = crate::gm_contact::ContactOverrides::new();
         overrides
@@ -717,6 +737,7 @@ mod tests {
                 &Default::default(),
                 &Default::default(),
                 &overrides,
+                &Default::default(),
                 &Default::default(),
                 |_| true
             ),
@@ -732,6 +753,7 @@ mod tests {
             target: "raider-1".into(),
             mode: ContactMode::Reveal,
             classification: None,
+            report: None,
         }];
         let mut overrides = crate::gm_contact::ContactOverrides::new();
         overrides
@@ -745,6 +767,7 @@ mod tests {
                 &Default::default(),
                 &overrides,
                 &Default::default(),
+                &Default::default(),
                 |_| true
             ),
             Ok(())
@@ -757,6 +780,7 @@ mod tests {
         assert_eq!(
             restore_precheck(
                 &capture,
+                &Default::default(),
                 &Default::default(),
                 &Default::default(),
                 &Default::default(),

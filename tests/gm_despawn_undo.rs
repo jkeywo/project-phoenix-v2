@@ -847,3 +847,50 @@ fn a_runtime_spawned_structure_is_reversed_by_the_same_machinery_as_a_hull() {
         Some(ContactMode::Reveal)
     );
 }
+
+#[test]
+fn despawn_undo_restores_the_captured_report_pipeline_without_replaying_absent_time() {
+    let mut app = seeded();
+    let npc = place_removable_npc(&mut app, 1);
+    let observer = fleet_observer(&mut app);
+    let report = phoenix::gm_information::reports::ReportState {
+        policy: phoenix::gm_information::reports::ReportPolicy {
+            delay_ticks: 1000,
+            position_step_mm: 100,
+            hide_identity: false,
+        },
+        next_tick: Some(u64::MAX),
+        pending: None,
+        presented: Some(phoenix::gm_information::reports::ReportSample {
+            observed_tick: 1,
+            position_mm: [100, 0, 200],
+            name: "captured-observation".into(),
+        }),
+    };
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .contact_information
+        .reports
+        .entry(observer.clone())
+        .or_default()
+        .insert(npc.clone(), report.clone());
+    let removal = despawn(&mut app, 1, 2, &npc);
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_information
+        .reports
+        .is_empty());
+    let request = undo_of(&mut app, 2, 3, &removal);
+    submit(&mut app, request);
+    settle(&mut app);
+    assert!(entity_for(&mut app, &npc).is_some());
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .contact_information
+            .reports[&observer][&npc],
+        report
+    );
+    assert_eq!(contact_override(&app, &observer, &npc), None);
+}

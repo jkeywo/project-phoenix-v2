@@ -40,6 +40,7 @@ import {
 } from '../../gui/visual-effects.js';
 import { localiseHostPayload } from '../../gui/host-channel.js';
 import { gameOverView } from '../../gui/game-over-view.js';
+import { mountSensorReport } from '../../gui/sensor-report.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HTML = readFileSync(path.join(root, 'gui/viewscreen-hud.html'), 'utf8');
@@ -87,7 +88,7 @@ const IMPORTED = [...MODULE.matchAll(/^\s*import\s*\{([^}]*)\}/gm)]
   .sort();
 
 /** What `runIsland` binds those names to, in declaration order. */
-const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView };
+const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView, mountSensorReport };
 
 /**
  * Run the island's body with its imports bound to the real gui/ modules.
@@ -163,7 +164,7 @@ describe('the page localises itself from the String Table', () => {
     // header — the island never evaluates and the prelude's fallback carries
     // the Viewscreen — and a name added to an import list would otherwise be
     // an undefined binding here rather than a failing expectation.
-    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js', 'game-over-view.js']);
+    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js', 'game-over-view.js', 'sensor-report.js']);
     for (const file of SPECIFIERS) {
       expect(existsSync(path.join(root, 'gui', file)), `gui/${file}`).toBe(true);
     }
@@ -487,4 +488,13 @@ describe('the host tells this document how much it may move (issue #1428)', () =
     expect(() => window.__phoenixSetHudEffects(null)).not.toThrow();
     expect(document.documentElement.getAttribute('data-flash')).toBeNull();
   });
+});
+
+it('renders the same live report label on the native Viewscreen and clears it with the next ordinary HUD', () => {
+  mountPage(); runIsland();
+  push({ sensor_report: { name: '<script>untrusted report</script>', source: 'console.sensors.report_source', observed_tick: 12, age_ticks: 3 } });
+  const label = document.getElementById('viewscreen-sensor-report');
+  expect(label.hidden).toBe(false); expect(label.textContent).toContain('untrusted report');
+  expect(label.querySelector('script')).toBeNull(); expect(label.textContent).toContain('12'); expect(label.textContent).toContain('3');
+  push({}); expect(label.hidden).toBe(true); expect(label.textContent).toBe('');
 });

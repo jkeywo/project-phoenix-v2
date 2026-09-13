@@ -727,7 +727,13 @@ impl GmAction {
                 Ok(())
             }
             Self::SetContactInformation { ship, change }
-                if bounded(&ship.0) && change.bounded() =>
+                if bounded(&ship.0)
+                    && change.bounded()
+                    && (!matches!(
+                        change,
+                        crate::gm_information::ContactInformationChange::SetReportPolicy { .. }
+                            | crate::gm_information::ContactInformationChange::ClearReportPolicy { .. }
+                    ) || change.target() != ship.0) =>
             {
                 Ok(())
             }
@@ -3432,6 +3438,7 @@ pub fn apply_due_actions(
                                         &runtime.name_to_uuid,
                                         &runtime.contact_overrides,
                                         &runtime.contact_classifications,
+                                        &runtime.contact_information.reports,
                                         |origin| {
                                             origin
                                                 .resolve(
@@ -3779,7 +3786,7 @@ pub fn apply_due_actions(
             GmAction::SetContactInformation { ship, change } => {
                 let observer = removal_targets.iter().find(|(uuid, ..)| uuid.0 == ship.0);
                 match (content.as_deref_mut(), observer) {
-                    (Some(runtime), Some((_, _, true, true, ..))) => {
+                    (Some(runtime), Some((_, _, true, true, ..))) if !matches!(change, crate::gm_information::ContactInformationChange::SetReportPolicy { .. } | crate::gm_information::ContactInformationChange::ClearReportPolicy { .. }) || removal_targets.iter().any(|(uuid, ..)| uuid.0 == change.target() && uuid.0 != ship.0) => {
                         match crate::gm_information::apply_change(runtime, &ship.0, change) {
                             Ok(changed) => (
                                 if changed {
@@ -3861,6 +3868,19 @@ pub fn apply_due_actions(
                             target,
                             *mode,
                         );
+                        // Paused GM actions may conceal and return to Normal
+                        // before another Fixed Publish. Clear at the canonical
+                        // action boundary so that cannot resurrect old samples.
+                        if *mode == crate::gm_contact::ContactMode::Conceal {
+                            if let Some(report) = runtime
+                                .contact_information
+                                .reports
+                                .get_mut(&ship.0)
+                                .and_then(|rows| rows.get_mut(target))
+                            {
+                                report.clear_samples();
+                            }
+                        }
                         (
                             if changed {
                                 GmActionOutcome::Applied

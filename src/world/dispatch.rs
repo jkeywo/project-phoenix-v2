@@ -619,7 +619,43 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
             {
                 out.commands.push(ActionCmd::SetContactInformation {
                     observer: observer.clone(),
-                    change: change.clone(),
+                    change: match change {
+                        crate::gm_information::ContactInformationChange::SetReportPolicy {
+                            target,
+                            policy,
+                        } => {
+                            let Some(target) = context
+                                .name_to_uuid
+                                .get(target)
+                                .or_else(|| context.name_to_uuid.values().find(|id| *id == target))
+                            else {
+                                out.warnings
+                                    .push(format!("Contact target '{target}' is not live"));
+                                return out;
+                            };
+                            crate::gm_information::ContactInformationChange::SetReportPolicy {
+                                target: target.clone(),
+                                policy: policy.clone(),
+                            }
+                        }
+                        crate::gm_information::ContactInformationChange::ClearReportPolicy {
+                            target,
+                        } => {
+                            let Some(target) = context
+                                .name_to_uuid
+                                .get(target)
+                                .or_else(|| context.name_to_uuid.values().find(|id| *id == target))
+                            else {
+                                out.warnings
+                                    .push(format!("Contact target '{target}' is not live"));
+                                return out;
+                            };
+                            crate::gm_information::ContactInformationChange::ClearReportPolicy {
+                                target: target.clone(),
+                            }
+                        }
+                        _ => change.clone(),
+                    },
                 });
             } else {
                 out.warnings

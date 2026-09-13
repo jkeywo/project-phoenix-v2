@@ -3876,6 +3876,9 @@ pub struct ViewscreenHudState {
     pub computer_message: Option<ComputerMessageWire>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation_card: Option<crate::gm_presentation::PresentationCardWire>,
+    /// Selected Sensors report from this observer’s allowed observation pipeline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensor_report: Option<crate::gm_information::reports::SensorReport>,
     /// The structured post-mission report (issue #1344), in authored row order,
     /// set only while the game has ended and only when the scenario authored
     /// one. The SAME [`GameOverReportRow`] the phone receives on
@@ -5688,6 +5691,9 @@ pub struct SensorsBlackboard {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contact_ghosts: Vec<EntitySnapshot>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub contact_reports:
+        std::collections::BTreeMap<String, Option<crate::gm_information::reports::SensorReport>>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub contact_overrides: std::collections::BTreeMap<String, crate::gm_contact::ContactMode>,
     /// Already resolved reported labels for this observer only.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -5714,6 +5720,7 @@ impl Default for SensorsBlackboard {
             contact_overrides: Default::default(),
             contact_classifications: Default::default(),
             contact_ghosts: Default::default(),
+            contact_reports: Default::default(),
             radar_shows: Vec::new(),
             radar_selects: Vec::new(),
             science_target_uuid: None,

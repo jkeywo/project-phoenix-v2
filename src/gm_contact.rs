@@ -187,6 +187,16 @@ pub fn prune(
         .contact_information
         .ghosts
         .retain(|observer, _| live.get(observer.as_str()) == Some(&true));
+    content
+        .contact_information
+        .reports
+        .retain(|observer, rows| {
+            if live.get(observer.as_str()) != Some(&true) {
+                return false;
+            }
+            rows.retain(|target, _| live.contains_key(target.as_str()));
+            !rows.is_empty()
+        });
     content.contact_overrides.retain(|observer, rows| {
         if live.get(observer.as_str()) != Some(&true) {
             return false;

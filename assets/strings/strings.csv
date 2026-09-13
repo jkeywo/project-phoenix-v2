@@ -3453,3 +3453,16 @@ server.gm.contact.ghost-y,GM ghost world Y coordinate,[World Y (mm)]
 server.gm.contact.ghost-z,GM ghost world Z coordinate,[World Z (mm)]
 server.gm.contact.ghost-set,GM absolute ghost action,[Set ghost]
 server.gm.contact.ghost-remove,GM clear ghost action,[Remove ghost]
+
+"console.sensors.report_source","Allowed Sensors observation source","[Sensors report]"
+"console.sensors.report_label","Live reported contact and observation age","[{name} · {source} · observed tick {tick} · age {age} ticks]"
+"server.gm.contact.report_heading","GM contact reporting policy heading","[Reported information]"
+"server.gm.contact.report_explanation","GM explicit report policy boundary","[Publish a basic name and position sample from this ship’s allowed Sensors picture. Delay releases the previous sample at each interval; no earlier history is created. Position grid rounds down in world millimetres. Live hull, faction and motion details are withheld while this policy is active.]"
+"server.gm.contact.report_delay","GM report cadence explicit ticks","[Delay and sampling interval (ticks; 0 for live)]"
+"server.gm.contact.report_step","GM report grid explicit millimetres","[Position grid (world mm; 0 for exact)]"
+"server.gm.contact.report_identity","GM report hides observed identity","[Hide reported identity]"
+"server.gm.contact.report_set","GM set report policy action","[Apply report policy]"
+"server.gm.contact.report_normal","GM no report policy state and clear action","[Use current allowed picture]"
+"server.gm.contact.report_current","GM active report policy values","[Delay {delay} ticks · grid {step} mm · identity {identity}]"
+"server.gm.contact.report_hidden","GM report identity state","[hidden]"
+"server.gm.contact.report_visible","GM report identity state","[observed]"

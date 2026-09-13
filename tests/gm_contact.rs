@@ -841,3 +841,200 @@ fn ghost_mission_and_gm_controls_share_the_same_resolved_state() {
     )
     .is_err());
 }
+
+fn report_policy(target: &str, delay: u32) -> phoenix::gm_information::ContactInformationChange {
+    phoenix::gm_information::ContactInformationChange::SetReportPolicy {
+        target: target.into(),
+        policy: phoenix::gm_information::reports::ReportPolicy {
+            delay_ticks: delay,
+            position_step_mm: 1000,
+            hide_identity: true,
+        },
+    }
+}
+#[test]
+fn report_policy_admission_is_typed_attributed_idempotent_and_rejects_missing_targets() {
+    let mut app = bare();
+    apply(
+        &mut app,
+        ghost_grant(1, 42, "observer", report_policy("target", 4)),
+    );
+    apply(
+        &mut app,
+        ghost_grant(2, 42, "observer", report_policy("target", 4)),
+    );
+    assert_eq!(
+        app.world().resource::<GmActionLog>().entries()[1].outcome,
+        GmActionOutcome::NoOp
+    );
+    assert_eq!(
+        app.world().resource::<GmActionLog>().entries()[0]
+            .target
+            .as_deref(),
+        Some("target")
+    );
+    apply(
+        &mut app,
+        ghost_grant(3, 42, "observer", report_policy("missing", 4)),
+    );
+    assert_eq!(
+        app.world().resource::<GmActionLog>().entries()[2].outcome,
+        GmActionOutcome::Refused
+    );
+    // Self-observation is invalid typed action shape, so it is rejected before
+    // any grant enters the canonical journal rather than producing an apply row.
+    assert!(app
+        .world_mut()
+        .resource_mut::<GmActionJournal>()
+        .insert(ghost_grant(4, 42, "observer", report_policy("observer", 4)))
+        .is_err());
+    let text = r#"{"operator_id":"gm","correlation":"report","action":"set_contact_information","ship":"observer","change":{"set_report_policy":{"target":"target","policy":{"delay_ticks":4,"position_step_mm":1000,"hide_identity":true}}}}"#;
+    assert!(phoenix::core::codec::decode_gm_action_request(text).is_some());
+    for bad in [
+        text.replace(r#""delay_ticks":4"#, r#""delay_ticks":-1"#),
+        text.replace(
+            r#""hide_identity":true"#,
+            r#""hide_identity":true,"truth":true"#,
+        ),
+    ] {
+        assert!(phoenix::core::codec::decode_gm_action_request(&bad).is_none());
+    }
+    assert!(phoenix::gm_information::apply_scenario_command(
+        app.world_mut(),
+        "observer",
+        &report_policy("missing", 4)
+    )
+    .is_err());
+    assert_eq!(
+        phoenix::gm_information::apply_scenario_command(
+            app.world_mut(),
+            "observer",
+            &report_policy("target", 4)
+        ),
+        Ok(false)
+    );
+    apply(
+        &mut app,
+        ghost_grant(
+            4,
+            42,
+            "observer",
+            phoenix::gm_information::ContactInformationChange::ClearReportPolicy {
+                target: "target".into(),
+            },
+        ),
+    );
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_information
+        .is_empty());
+}
+#[test]
+fn report_policy_replays_pending_samples_and_snapshot_resumes_the_same_public_picture() {
+    let (mut live, observer, target) = seeded();
+    let (mut replay, _, _) = seeded();
+    let at = live.world().resource::<SimTick>().0 + 2;
+    let request = ghost_grant(1, at, &observer, report_policy(&target, 4));
+    let frame = phoenix::lockstep::MeshFrame::GmAction(GmActionFrame::Granted(request.clone()));
+    assert_eq!(
+        phoenix::core::codec::decode_mesh_frame(
+            &phoenix::core::codec::encode_mesh_frame(&frame).unwrap()
+        ),
+        Some(frame)
+    );
+    for app in [&mut live, &mut replay] {
+        app.world_mut()
+            .resource_mut::<GmActionJournal>()
+            .insert(request.clone())
+            .unwrap();
+        // Explicit Reveal ensures this fixture's remote raider is an allowed basic observation.
+        phoenix::gm_contact::set(
+            &mut app
+                .world_mut()
+                .resource_mut::<WorldContentRuntime>()
+                .contact_overrides,
+            &observer,
+            &target,
+            ContactMode::Reveal,
+        );
+    }
+    for _ in 0..3 {
+        live.update();
+        replay.update();
+    }
+    assert_eq!(
+        phoenix::sim_digest::world_digest(live.world()),
+        phoenix::sim_digest::world_digest(replay.world())
+    );
+    assert!(live
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_information
+        .reports[&observer][&target]
+        .pending
+        .is_some());
+    let saved = phoenix::snapshot::capture(live.world());
+    let resumed = phoenix::snapshot::restore(replay.world_mut(), &saved);
+    assert!(resumed.is_complete(), "{:?}", resumed.gaps);
+    for _ in 0..8 {
+        live.update();
+        replay.update();
+    }
+    assert_eq!(
+        phoenix::sim_digest::world_digest(live.world()),
+        phoenix::sim_digest::world_digest(replay.world())
+    );
+    let picture = sensors_picture(&mut live, &observer);
+    assert_eq!(sensors_picture(&mut replay, &observer), picture);
+    let report = picture.contact_reports[&target].as_ref().unwrap();
+    assert_eq!(report.name, "console.sensors.basic_contact");
+    assert!(report.age_ticks >= 4);
+    let before = phoenix::sim_digest::world_digest(replay.world());
+    replay
+        .world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .contact_information
+        .reports
+        .clear();
+    assert_ne!(before, phoenix::sim_digest::world_digest(replay.world()));
+}
+
+#[test]
+fn report_policy_conceal_then_normal_at_one_stopped_boundary_cannot_resurrect_samples() {
+    let mut app = bare();
+    apply(
+        &mut app,
+        ghost_grant(1, 42, "observer", report_policy("target", 4)),
+    );
+    let sample = phoenix::gm_information::reports::ReportSample {
+        observed_tick: 1,
+        name: "old-observation".into(),
+        position_mm: [100, 0, 0],
+    };
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .contact_information
+        .reports
+        .get_mut("observer")
+        .unwrap()
+        .get_mut("target")
+        .unwrap()
+        .presented = Some(sample);
+    apply(
+        &mut app,
+        grant(2, 42, "observer", "target", ContactMode::Conceal),
+    );
+    apply(
+        &mut app,
+        grant(3, 42, "observer", "target", ContactMode::Normal),
+    );
+    let report = &app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_information
+        .reports["observer"]["target"];
+    assert!(report.presented.is_none());
+    assert!(report.pending.is_none());
+    assert!(report.next_tick.is_none());
+}

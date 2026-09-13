@@ -2662,3 +2662,33 @@ fn spawn_entity_on_non_spawn_variant_panics() {
     };
     let _ = dispatch_spawn_entity(&action, &fx.ctx());
 }
+
+#[test]
+fn contact_report_resolves_both_observer_and_target_names_before_dispatch() {
+    let fixture = Fixture::new()
+        .with_entity("observer-name", "observer-uuid")
+        .with_entity("target-name", "target-uuid");
+    let policy = crate::gm_information::reports::ReportPolicy {
+        delay_ticks: 12,
+        position_step_mm: 500,
+        hide_identity: true,
+    };
+    let action = TriggerAction::SetContactInformation {
+        ship: "observer-name".into(),
+        change: crate::gm_information::ContactInformationChange::SetReportPolicy {
+            target: "target-name".into(),
+            policy: policy.clone(),
+        },
+    };
+    let out = dispatch_action(&action, &fixture.ctx());
+    assert_eq!(
+        out.commands,
+        vec![ActionCmd::SetContactInformation {
+            observer: "observer-uuid".into(),
+            change: crate::gm_information::ContactInformationChange::SetReportPolicy {
+                target: "target-uuid".into(),
+                policy
+            }
+        }]
+    );
+}

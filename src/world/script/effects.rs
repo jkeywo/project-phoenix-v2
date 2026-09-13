@@ -567,6 +567,27 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         },
     );
     host_fn!(
+        engine, "set_contact_report", receiver = "effects", category = "effect",
+        params = ["observer", "target", "delay_ticks", "position_step_mm", "hide_identity"],
+        summary = "Apply one observing ship's basic Sensors report policy. Delay and position grid are explicit non-negative integers; samples contain only allowed observations and expose their age.",
+        |sink: &mut EffectSink, observer: ImmutableString, target: ImmutableString, delay: rhai::INT, step: rhai::INT, hide_identity: bool| -> Result<(), Box<EvalAltResult>> {
+            let delay_ticks = u32::try_from(delay).map_err(|_| raise("report delay requires u32 ticks".into()))?;
+            let position_step_mm = u32::try_from(step).map_err(|_| raise("report position step requires u32 millimetres".into()))?;
+            let change = crate::gm_information::ContactInformationChange::SetReportPolicy { target: target.to_string(), policy: crate::gm_information::reports::ReportPolicy { delay_ticks, position_step_mm, hide_identity } };
+            if !crate::gm_npc::bounded_id(&observer) || observer == target || !change.bounded() { return Err(raise("invalid contact report policy".into())); }
+            sink.push_action(TriggerAction::SetContactInformation { ship: observer.to_string(), change }); Ok(())
+        },
+    );
+    host_fn!(
+        engine, "clear_contact_report", receiver = "effects", category = "effect", params = ["observer", "target"],
+        summary = "Remove one observing ship's Sensors report policy and its samples, returning to the current allowed picture.",
+        |sink: &mut EffectSink, observer: ImmutableString, target: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+            let change = crate::gm_information::ContactInformationChange::ClearReportPolicy { target: target.to_string() };
+            if !crate::gm_npc::bounded_id(&observer) || observer == target || !change.bounded() { return Err(raise("invalid contact report identity".into())); }
+            sink.push_action(TriggerAction::SetContactInformation { ship: observer.to_string(), change }); Ok(())
+        },
+    );
+    host_fn!(
         engine,
         "set_npc_doctrine",
         receiver = "effects",
@@ -3089,5 +3110,27 @@ mod tests {
             template_loader: &crate::entities::loader::WasmTemplateLoader,
         };
         dispatch_action(action, &ctx).commands
+    }
+    #[test]
+    fn contact_report_rhai_matches_typed_toml_and_rejects_negative_cadence() {
+        let actions = run_buffered(
+            r#"fn run(ctx) { ctx.effects.set_contact_report("observer", "target", 12, 500, true); ctx.effects.clear_contact_report("observer", "target"); }"#,
+            "run",
+        );
+        let expected = toml_action(
+            r#"type = "set_contact_information"
+entity = "observer"
+contact_information = { set_report_policy = { target = "target", policy = { delay_ticks = 12, position_step_mm = 500, hide_identity = true } } }"#,
+        );
+        assert!(matches!(&actions[0], BufferedEffect::Action(action) if action == &expected));
+        assert!(
+            matches!(&actions[1], BufferedEffect::Action(TriggerAction::SetContactInformation { change: crate::gm_information::ContactInformationChange::ClearReportPolicy { target }, .. }) if target == "target")
+        );
+        assert!(run_result(r#"fn run(ctx) { ctx.effects.set_contact_report("observer", "target", -1, 500, true); }"#, "run").is_err());
+        assert!(run_result(
+            r#"fn run(ctx) { ctx.effects.set_contact_report("observer", "target", 0, 0, false); }"#,
+            "run"
+        )
+        .is_err());
     }
 }

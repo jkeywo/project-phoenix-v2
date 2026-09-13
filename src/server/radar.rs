@@ -311,6 +311,7 @@ pub(crate) fn spawn_viewscreen_radar_widgets(
 /// other viewscreen widgets retain their stale blip sets while hidden, which
 /// keeps the work bounded.
 pub(crate) fn sync_server_radar_bridge(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
     contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
@@ -388,6 +389,18 @@ pub(crate) fn sync_server_radar_bridge(
                     &runtime.contact_classifications,
                     &observer.0,
                 );
+            }
+            if !runtime.contact_information.reports.is_empty() {
+                projected = Some(crate::gm_information::reports::viewscreen(
+                    projected.as_ref().unwrap_or(&entities),
+                    &runtime.contact_information.reports,
+                    &runtime.contact_overrides,
+                    &observer.0,
+                    tick.as_ref().map_or(0, |tick| tick.0),
+                    physics.x,
+                    physics.z,
+                    settings.range,
+                ));
             }
         }
     }

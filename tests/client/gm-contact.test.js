@@ -222,3 +222,51 @@ it('controls ghosts without a real target and correlates exactly while retaining
   expect(panel.chooseInformation({ remove_ghost: { id: 'echo' } })).toBe(true);
   expect(submitInformation.mock.calls[1][0].change).toEqual({ remove_ghost: { id: 'echo' } });
 });
+
+const report = { observed_tick: 10, age_ticks: 5, source: 'console.sensors.report_source', name: 'Observed freighter', position_mm: [10000, 0, -20000] };
+it('uses only the reported position and captured identity across every live Sensors detail lane', () => {
+  const input = state('reveal', 1000); input.blackboards.scan.reading = null;
+  input.blackboards.sensors.contact_reports = { target: report };
+  input.blackboards.sensors.contact_classifications = { target: 'NEW-CLASSIFICATION' };
+  input.regions = [{ uuid: 'target', name: 'SECRET-REGION' }];
+  input.navigationWaypoint = { source_uuid: 'target', x: 200, z: 0, label: 'SECRET-WAYPOINT' };
+  input.blackboardKinds.weapons = 'Weapons'; input.blackboards.weapons = { target_uuid: 'target' };
+  const raw = buildSensorsConsoleState(input), payload = JSON.parse(raw);
+  expect(payload.target_name).toBe(report.name); expect(payload.target_report).toEqual(report);
+  expect(payload.target_range).toBeCloseTo(Math.hypot(10, -20));
+  expect(payload.blips.find(blip => blip.uuid === 'target')).toMatchObject({ basic_contact: true, report });
+  expect(crewContactRows(payload.blips, input.asteroids)[0].report).toEqual(report);
+  expect(raw).not.toMatch(/SECRET|NEW-CLASSIFICATION/); expect(payload.regions).toEqual([]);
+  for (const key of ['target_kind', 'target_class', 'target_hull_pct', 'target_shield_freq', 'target_faction', 'target_alert', 'target_weapons', 'target_projection', 'target_threat']) expect(payload[key]).toBeNull();
+});
+it('withholds a pending observation despite Reveal and discards stale selection facts; Conceal wins over a released sample', () => {
+  for (const [mode, sample] of [['reveal', null], ['conceal', report]]) {
+    const input = state(mode, 1000); input.blackboards.scan.reading = null;
+    input.blackboards.sensors.contact_reports = { target: sample };
+    const payload = JSON.parse(buildSensorsConsoleState(input));
+    expect(payload.blips).toEqual([]); expect(payload.target_uuid).toBeNull(); expect(payload.target_report).toBeNull();
+    expect(payload.target_alert).toBeNull(); expect(payload.target_weapons).toBeNull();
+  }
+});
+it('captures an explicit report policy before confirmation and correlates its terminal result', () => {
+  let request; const submitInformation = vi.fn(() => true);
+  const { panel, entities } = mount({ submitInformation, confirmAction: value => { request = value; return true; } });
+  const change = { set_report_policy: { target: 'target', policy: { delay_ticks: 12, position_step_mm: 1000, hide_identity: true } } };
+  expect(panel.chooseInformation(change)).toBe(true); change.set_report_policy.policy.delay_ticks = 99;
+  request.accept(); expect(submitInformation.mock.calls[0][0].change.set_report_policy.policy.delay_ticks).toBe(12);
+  panel.update({ entities, contact_results: [{ action_kind: 'contact-information', observer: 'other', target: 'target', operator_id: 'gm', correlation: 'request', tick: 42, outcome: 'applied' }] });
+  expect(panel.state().pending).not.toBeNull();
+  panel.update({ entities, contact_results: [{ action_kind: 'contact-information', observer: 'observer', target: 'target', operator_id: 'gm', correlation: 'request', tick: 42, outcome: 'applied' }] });
+  expect(panel.state().pending).toBeNull();
+  expect(panel.chooseInformation({ set_report_policy: { target: 'target', policy: { delay_ticks: -1, position_step_mm: 0, hide_identity: false } } })).toBe(false);
+  expect(panel.update({ entities, contact_information: { ghosts: {}, reports: { observer: { target: {} } } } })).toBe(false);
+});
+
+it('holds independently earned scans off the manipulated Sensors lane and restores them when policy clears', () => {
+  const input = state(null, 1000), reading = input.blackboards.scan.reading;
+  input.blackboards.sensors.contact_reports = { target: report };
+  expect(JSON.parse(buildSensorsConsoleState(input)).scan.reading).toBeNull();
+  expect(input.blackboards.scan.reading).toBe(reading);
+  input.blackboards.sensors.contact_reports = {};
+  expect(JSON.parse(buildSensorsConsoleState(input)).scan.reading).toEqual(reading);
+});

@@ -254,6 +254,7 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &RadarAppearanceSpawn,
     &TargetSpawn,
     &AudioSpawn,
+    &SensorsObservationSpawn,
     &FactionSpawn,
     &WeaponsConsoleSpawn,
     &TorpedoesSpawn,
@@ -1101,6 +1102,16 @@ impl SpawnSection for TargetSpawn {
     }
 }
 
+struct SensorsObservationSpawn;
+impl SpawnSection for SensorsObservationSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        if let Some(sensors) = &config.sensors_console {
+            cmds.insert(crate::gm_information::reports::SensorsObservationConfig(
+                sensors.long_range_radar.clone(),
+            ));
+        }
+    }
+}
 struct AudioSpawn;
 impl SpawnSection for AudioSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {

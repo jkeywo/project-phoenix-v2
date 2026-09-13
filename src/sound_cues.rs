@@ -169,15 +169,20 @@ impl Catalog {
     }
 }
 
-/// Validate declared packaged sound assets and informative definitions. The
-/// caller supplies candidate/active/base availability after its asset gate;
+/// Parse authored definitions and their metadata before resolving any bytes.
+pub fn parse_source(source: &str) -> Result<Catalog, String> {
+    let catalog: Catalog = toml::from_str(source).map_err(|error| error.to_string())?;
+    catalog.validate_all().map_err(str::to_string)?;
+    Ok(catalog)
+}
+
+/// The caller supplies candidate/active/base availability after its asset gate;
 /// selected projects supply only their captured source set.
 pub fn validate_source(
     source: &str,
     asset_available: impl Fn(&str) -> bool,
 ) -> Result<Catalog, String> {
-    let catalog: Catalog = toml::from_str(source).map_err(|error| error.to_string())?;
-    catalog.validate_all().map_err(str::to_string)?;
+    let catalog = parse_source(source)?;
     for cue in &catalog.cues {
         if !asset_available(&cue.file) {
             return Err(format!("asset: {}", cue.file));

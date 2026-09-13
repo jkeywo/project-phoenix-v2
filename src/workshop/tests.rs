@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn project_and_pack_sound_catalogs_require_their_captured_decodable_bytes() {
+    const SOUND: &str = "assets/sounds/custom/sonar ping.ogg";
+    let catalog = include_str!("../../tests/fixtures/sound-cue-pack.toml");
+    let sound = include_bytes!("../../assets/sounds/ui_click.ogg").to_vec();
+    let mut files = BTreeMap::from([
+        ("assets/scenarios.toml".into(), b"[content]\nid=\"phoenix-base\"\nepoch=1\n[[scenario]]\nid=\"sound\"\nworld=\"assets/worlds/sound.toml\"\n".to_vec()),
+        ("assets/worlds/sound.toml".into(), b"[global]\ntitle=\"Sound\"\n".to_vec()),
+        (crate::sound_cues::PATH.into(), catalog.as_bytes().to_vec()),
+    ]);
+    for bytes in [None, Some(b"corrupt".to_vec()), Some(sound.clone())] {
+        files.remove(SOUND);
+        if let Some(bytes) = bytes.as_ref() {
+            files.insert(SOUND.into(), bytes.clone());
+        }
+        let report = validate_project(&files);
+        assert_eq!(
+            report.accepted,
+            bytes.as_ref() == Some(&sound),
+            "{:?}",
+            report.findings
+        );
+        if !report.accepted {
+            assert!(report
+                .findings
+                .iter()
+                .any(|finding| finding.category == "invalid-sound-cues"
+                    && finding.file == crate::sound_cues::PATH
+                    && finding.message.contains(SOUND)));
+        }
+    }
+    let mut members = crate::world::mod_pack::read_store_zip_bytes(include_bytes!(
+        "../../tests/fixtures/mod-packs/valid-v1.zip"
+    ))
+    .unwrap();
+    members.insert(crate::sound_cues::PATH.into(), catalog.as_bytes().to_vec());
+    let zip = crate::workshop::archive::store_zip(&members).unwrap();
+    let mut dependencies = dependencies();
+    assert!(!validate_pack(&zip, &dependencies).accepted);
+    dependencies.base_assets.insert(SOUND.into(), sound);
+    assert!(validate_pack(&zip, &dependencies).accepted);
+    dependencies
+        .base_assets
+        .insert(SOUND.into(), b"corrupt".to_vec());
+    assert!(!validate_pack(&zip, &dependencies).accepted);
+}
+
+#[test]
 fn sound_catalog_requires_captured_asset_and_cannot_hide_informative_metadata() {
     let catalog = r#"version=1
 [[assets]]

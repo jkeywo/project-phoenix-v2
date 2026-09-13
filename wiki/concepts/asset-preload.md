@@ -2,7 +2,7 @@
 title: Asset Preload
 type: concept
 tags: [assets, gltf, sidecar, preload, lobby, loading-phase]
-sources: [src/server/asset_preload.rs, src/server/pfx.rs, src/server_app/registration.rs, src/server_app_render.rs, src/entities/config_cache.rs, src/entities/world_preload.rs, gui/host-content-fetch.js, src/entities/model_rig.rs, src/entities/model_markers.rs, src/lobby/server.rs, src/core/messages.rs, server.html, client.html, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs]
+sources: [src/server/asset_preload.rs, src/server/pfx.rs, src/server_app/registration.rs, src/server_app_render.rs, src/entities/config_cache.rs, src/entities/world_preload.rs, gui/host-content-fetch.js, src/entities/model_rig.rs, src/entities/model_markers.rs, src/lobby/server.rs, src/core/messages.rs, server.html, client.html, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, src/world/pack_asset_validation.rs, src/world/mod_pack.rs, src/workshop/mod.rs, src/sound_cues.rs, tests/client/workshop-sound-capture.test.js]
 updated: 2026-09-13
 ---
 
@@ -48,6 +48,14 @@ retires preload, scene, LOD, viewer and authored dust texture state in `Last`,
 after queued frame work and before extraction. Failed or late old loads cannot
 keep a removed pack visual on screen. The original planet image wins over its
 shipped compressed sibling when a pack explicitly replaces that original.
+
+`assets/audio/sound-cues.toml` participates in the same dependency discovery.
+Its validated cue paths enter immutable capture before admission. Each sound
+must decode from candidate, newest active pack, or captured base bytes; naming
+a bundled file does not prove availability, and corrupt higher-priority bytes
+do not fall through to another file. Selected Workshop projects use only their
+captured files. Catalog errors identify the catalog and offending sound path.
+The live catalog itself remains captured once at world ingest.
 
 ## Failure semantics
 

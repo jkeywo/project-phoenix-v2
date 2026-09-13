@@ -2,6 +2,122 @@ use super::*;
 use crate::world::load::MemoryTemplateLoader;
 
 #[test]
+fn sound_catalog_pack_uses_decoded_candidate_active_and_captured_base_bytes() {
+    use std::{cell::Cell, sync::Arc};
+    const PATH: &str = "assets/sounds/custom/sonar ping.ogg";
+    let sound = include_bytes!("../../assets/sounds/ui_click.ogg");
+    let catalog = include_str!("../../tests/fixtures/sound-cue-pack.toml");
+    let base_files: BTreeMap<String, Vec<u8>> = [
+        (
+            MANIFEST_PATH.into(),
+            manifest_for("sound", "assets/worlds/sound.toml").into_bytes(),
+        ),
+        (
+            "assets/worlds/sound.toml".into(),
+            simple_world("Sound").into_bytes(),
+        ),
+        (crate::sound_cues::PATH.into(), catalog.as_bytes().to_vec()),
+    ]
+    .into();
+    let pack = |id: &str, bytes: &[u8]| ActivePack {
+        id: id.into(),
+        assets: [(PATH.into(), Arc::from(bytes))].into(),
+        ..Default::default()
+    };
+    // A damaged higher-precedence source must not fall through to valid bytes
+    // below it. Every accepted route reads the same actual decoder input.
+    for (candidate, active, base, accepted, reads_base) in [
+        (
+            Some(sound.as_slice()),
+            vec![pack("older", b"broken")],
+            Some(b"broken".as_slice()),
+            true,
+            false,
+        ),
+        (
+            None,
+            vec![pack("older", b"broken"), pack("newer", sound)],
+            Some(b"broken".as_slice()),
+            true,
+            false,
+        ),
+        (
+            None,
+            vec![pack("older", sound), pack("newer", b"broken")],
+            Some(sound.as_slice()),
+            false,
+            false,
+        ),
+        (
+            Some(b"broken".as_slice()),
+            vec![pack("older", sound)],
+            Some(sound.as_slice()),
+            false,
+            false,
+        ),
+        (None, vec![], Some(sound.as_slice()), true, true),
+        (None, vec![], Some(b"broken".as_slice()), false, true),
+        (None, vec![], None, false, true),
+    ] {
+        let mut files = base_files.clone();
+        if let Some(bytes) = candidate {
+            files.insert(PATH.into(), bytes.to_vec());
+        }
+        let zip = crate::workshop::archive::store_zip(&files).unwrap();
+        let reads = Cell::new(0);
+        let result = validate_mod_pack_with_assets(
+            &zip,
+            &base_identity(),
+            no_base,
+            &no_templates(),
+            &active,
+            &|path| {
+                assert_eq!(path, PATH);
+                reads.set(reads.get() + 1);
+                base.map(Arc::from)
+            },
+            &[],
+        );
+        assert_eq!(result.is_accepted(), accepted, "{:?}", result.findings);
+        assert_eq!(reads.get() > 0, reads_base);
+        if !accepted {
+            let finding = result
+                .findings
+                .iter()
+                .find(|finding| finding.category == "invalid-sound-cues")
+                .unwrap();
+            assert_eq!(finding.source.file, crate::sound_cues::PATH);
+            assert!(finding.message.contains(PATH));
+        }
+    }
+    // Naming a shipped file alone no longer grants availability in a source-only
+    // adapter. Supplying those exact bytes through the asset seam does.
+    let shipped = "assets/sounds/ui_click.ogg";
+    let mut files = base_files;
+    files.insert(
+        crate::sound_cues::PATH.into(),
+        catalog
+            .replace(PATH, shipped)
+            .replace("category = \"alerts\"", "category = \"interface\"")
+            .into_bytes(),
+    );
+    let zip = crate::workshop::archive::store_zip(&files).unwrap();
+    assert!(
+        !validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]).is_accepted()
+    );
+    let result = validate_mod_pack_with_assets(
+        &zip,
+        &base_identity(),
+        no_base,
+        &no_templates(),
+        &[],
+        &|path| (path == shipped).then(|| Arc::from(sound.as_slice())),
+        &[],
+    );
+    assert!(result.is_accepted(), "{:?}", result.findings);
+}
+
+#[test]
 fn buffer_only_replacement_revalidates_unchanged_base_and_active_models() {
     let mut json = br#"{"asset":{"version":"2.0"},"buffers":[{"uri":"vertices.bin","byteLength":36}],"bufferViews":[{"buffer":0,"byteLength":36}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}],"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}]}"#.to_vec();
     while !json.len().is_multiple_of(4) {

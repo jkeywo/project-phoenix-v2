@@ -814,14 +814,10 @@ pub fn validate_mod_pack_with_assets(
     //     sandbox profile, not the extension, is the trust boundary.
     findings.extend(validate_pack_scripts(&files));
     if let Some(source) = files.get(crate::sound_cues::PATH) {
-        // The text-only adapter carries no new binary assets; its base is the
-        // packaged non-speech inventory. The asset-aware adapter supplies the
-        // same validator with its candidate/active/base byte resolver.
-        let inventory = crate::sound_cues::bundled().assets;
-        if let Err(error) = crate::sound_cues::validate_source(source, |path| {
-            inventory.iter().any(|asset| asset.file == path)
-        }) {
-            findings.push(archive_error(
+        if let Err(error) =
+            crate::world::pack_asset_validation::validate_sound_catalog(source, &resolve_asset)
+        {
+            findings.push(member_error(
                 "invalid-sound-cues",
                 crate::sound_cues::PATH,
                 error,

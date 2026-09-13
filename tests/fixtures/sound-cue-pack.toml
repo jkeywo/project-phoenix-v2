@@ -1,0 +1,30 @@
+version = 1
+
+[[assets]]
+file = "assets/sounds/custom/sonar ping.ogg"
+category = "alerts"
+informative = true
+
+[[cues]]
+id = "nested-sonar"
+label = "Sonar report"
+file = "assets/sounds/custom/sonar ping.ogg"
+category = "alerts"
+audience = "viewscreen"
+volume = 0.35
+[cues.equivalent]
+meaning = "Sonar report ready"
+source = "Sensors"
+urgency = "advisory"
+
+[[cues]]
+id = "private-sonar"
+label = "Private sonar report"
+file = "assets/sounds/custom/sonar ping.ogg"
+category = "alerts"
+audience = "gm"
+volume = 0.2
+[cues.equivalent]
+meaning = "Sonar report ready"
+source = "Sensors"
+urgency = "advisory"

@@ -5,6 +5,8 @@ entities:
       confidence: confirmed
       title: Workshop Runtime Asset Validation
       summary: Exact ZIP members and explicit immutable dependency bytes pass the current glTF, image and audio decoders before a Workshop export or host pack installation is accepted. Unsupported pack formats stop before binary decoding. External buffer replacements also validate unchanged base and active model consumers; missing consumer bytes refuse acceptance. Model nodes must form a forest with distinct parentless roots in each scene and no more than 128 levels, checked iteratively before recursive renderer loading. Expanded accessor values and generated primitive/morph data share a conservative 256 MiB per-model admission budget, including sparse zero-filled entries and repeated uses. Raw references and portable counts are checked before upstream hooks and typed readers; mesh, skin, morph and animation metadata must meet the installed renderer's contracts. Asset findings identify the affected member or dependency rather than the archive manifest.
+      rationale:
+        - "[ai] Authored sound catalogs discover their validated local cue paths through required_assets before immutable snapshot capture. Admission decodes each referenced sound from candidate bytes, newest active pack, then captured base; corrupt winning bytes never fall through to an older file, and a bundled filename alone grants no availability. Selected projects resolve only their captured files. Catalog findings name the catalog and offending dependency. LiveSoundCatalog remains the immutable boot-owned content input."
     architecture:
       kind: authoring-validator
       authority: local
@@ -17,6 +19,9 @@ entities:
         - src/world/pack_asset_validation/metadata.rs
         - src/world/pack_asset_validation/semantics.rs
         - src/audio_decode.rs
+        - src/sound_cues.rs
+        - src/world/mod_pack.rs
+        - src/workshop/mod.rs
         - editor/asset-dependencies.js
         - editor/workshop-assets.js
         - tests/smoke/workshop-assets.spec.js
@@ -24,6 +29,7 @@ entities:
         - cargo test --lib world::pack_asset_validation
         - cargo test --lib world::mod_pack
         - npx vitest run tests/client/workshop-assets.test.js
+        - npx vitest run tests/client/workshop-sound-capture.test.js
         - npx playwright test workshop-assets.spec.js --project chromium
 
   - component: workshop-runtime-asset-reader

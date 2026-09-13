@@ -210,7 +210,11 @@ fn validate_accessor(accessor: &gltf::Accessor<'_>, buffers: &[Arc<[u8]>]) -> Re
 /// native snapshot provider and browser preflight; it never reads a live cache.
 pub fn required_assets(path: &str, bytes: &[u8]) -> Result<BTreeSet<String>, String> {
     let mut required = BTreeSet::new();
-    if path.ends_with(".glb") {
+    if path == crate::sound_cues::PATH {
+        let source = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
+        let catalog = crate::sound_cues::parse_source(source)?;
+        required.extend(catalog.cues.into_iter().map(|cue| cue.file));
+    } else if path.ends_with(".glb") {
         let model = parse_model(bytes)?;
         for buffer in model.buffers() {
             if let gltf::buffer::Source::Uri(uri) = buffer.source() {
@@ -233,6 +237,65 @@ pub fn required_assets(path: &str, bytes: &[u8]) -> Result<BTreeSet<String>, Str
         required.insert(local_reference(&source.fallback, "assets/descriptor")?);
     }
     Ok(required)
+}
+
+/// Catalog acceptance resolves the same immutable bytes as playback. A known
+/// shipped filename is not proof that this selected content has those bytes.
+pub fn validate_sound_catalog(
+    source: &str,
+    resolve: &AssetResolver<'_>,
+) -> Result<crate::sound_cues::Catalog, String> {
+    let catalog = crate::sound_cues::parse_source(source)?;
+    let files: BTreeSet<_> = catalog.cues.iter().map(|cue| cue.file.as_str()).collect();
+    for path in files {
+        let bytes =
+            resolve(path).ok_or_else(|| format!("Missing immutable sound dependency {path:?}"))?;
+        validate(path, &bytes, resolve)
+            .map_err(|error| format!("Invalid sound dependency {path:?}: {error}"))?;
+    }
+    Ok(catalog)
+}
+
+#[cfg(test)]
+mod sound_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn sound_catalog_dependencies_are_validated_local_paths_and_decoded_once() {
+        const SOURCE: &str = include_str!("../../tests/fixtures/sound-cue-pack.toml");
+        const SOUND: &str = "assets/sounds/custom/sonar ping.ogg";
+        assert_eq!(
+            required_assets(crate::sound_cues::PATH, SOURCE.as_bytes()).unwrap(),
+            [SOUND.to_owned()].into()
+        );
+        let reads = std::cell::Cell::new(0);
+        let catalog = validate_sound_catalog(SOURCE, &|path| {
+            assert_eq!(path, SOUND);
+            reads.set(reads.get() + 1);
+            Some(Arc::from(
+                include_bytes!("../../assets/sounds/ui_click.ogg").as_slice(),
+            ))
+        })
+        .unwrap();
+        assert_eq!(catalog.cues.len(), 2);
+        assert_eq!(
+            reads.get(),
+            1,
+            "two definitions sharing one file decode once"
+        );
+        for path in [
+            "https://example.invalid/tone.ogg",
+            "assets/sounds/../secret.ogg",
+        ] {
+            assert!(required_assets(
+                crate::sound_cues::PATH,
+                SOURCE.replace(SOUND, path).as_bytes()
+            )
+            .is_err());
+        }
+        assert!(required_assets(crate::sound_cues::PATH, b"not [valid").is_err());
+        assert!(required_assets(crate::sound_cues::PATH, &[255]).is_err());
+    }
 }
 
 pub fn validate(path: &str, bytes: &[u8], resolve: &AssetResolver<'_>) -> Result<(), String> {

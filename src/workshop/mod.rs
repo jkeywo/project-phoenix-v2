@@ -321,7 +321,11 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
     let sources = Sources(text_files);
     if let Some(source) = sources.0.get(crate::sound_cues::PATH) {
         if let Err(error) =
-            crate::sound_cues::validate_source(source, |path| files.contains_key(path))
+            crate::world::pack_asset_validation::validate_sound_catalog(source, &|path| {
+                files
+                    .get(path)
+                    .map(|bytes| std::sync::Arc::from(bytes.as_slice()))
+            })
         {
             report.error("invalid-sound-cues", crate::sound_cues::PATH, error);
         }

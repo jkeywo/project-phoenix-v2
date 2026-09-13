@@ -1,6 +1,13 @@
 import { mountNativeWorkshop } from './gui/native-workshop.js';
 import './gui/strings-boot.js';
 import { applyToDom } from './gui/strings.js';
+window.__phoenixNativeWorkshopKey = record => {
+  const event = new KeyboardEvent(record.pressed ? 'keydown' : 'keyup', {
+    code: record.code, key: record.key, ctrlKey: record.ctrlKey, shiftKey: record.shiftKey,
+    altKey: record.altKey, metaKey: record.metaKey, repeat: record.repeat, bubbles: true, cancelable: true,
+  });
+  return !(document.activeElement || document.body).dispatchEvent(event);
+};
 const profileKey = 'phoenix-operator-profile-v1';
 let profile = null;
 const loaded = new Promise(resolve => {

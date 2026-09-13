@@ -2,6 +2,7 @@
 //! but owns no live world, crew transport, join code or Game Master identity.
 pub mod bridge;
 pub mod document;
+pub mod keyboard;
 
 use bevy::prelude::*;
 

@@ -9,7 +9,7 @@ use project_phoenix::{
     },
     native_host::{
         panes::{
-            pane_thread::{PaneKind, PaneRuntime, PaneSpecOwned},
+            pane_thread::{PaneInput, PaneKind, PaneRuntime, PaneSpecOwned, PaneView},
             ultralight::{stage_sdk, UltralightHost, UltralightPaneSurface},
             PaneId,
         },
@@ -212,8 +212,21 @@ fn native_workshop_shared_page_saves_exact_source_and_restores_after_view_recrea
     );
     surface
         .view_mut()
-        .evaluate("document.getElementById('workshop-undo').click()")
+        .evaluate("document.getElementById('workshop-source').focus()")
         .unwrap();
+    surface.input(&PaneInput::WorkshopKey(
+        project_phoenix::native_host::workshop::keyboard::WorkshopKey {
+            code: "KeyZ".into(),
+            key: "z".into(),
+            pressed: true,
+            repeat: false,
+            ctrl_key: true,
+            shift_key: false,
+            alt_key: false,
+            meta_key: false,
+            text: None,
+        },
+    ));
     assert_eq!(surface.view_mut().evaluate("String(!document.getElementById('workshop-source').value.includes('# recovered edit'))").unwrap(), "true");
     let mut pixels = vec![0; 1440 * 1000 * 4];
     runtime.render();

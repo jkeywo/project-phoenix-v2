@@ -424,6 +424,38 @@ impl PaneView for UltralightPaneSurface {
                 Modifiers::default(),
             ),
             PaneInput::KeyChar(text) => self.view.key_char(text),
+            PaneInput::WorkshopKey(key) => {
+                let json = crate::core::codec::encode_workshop_key(key);
+                let handled = self
+                    .view
+                    .evaluate(&format!("window.__phoenixNativeWorkshopKey({json})"))
+                    .ok()
+                    .as_deref()
+                    == Some("true");
+                if !handled {
+                    if let Some(text) = &key.text {
+                        self.view.key_char(text);
+                    } else if let Some(code) =
+                        crate::native_host::workshop::keyboard::virtual_key(&key.code)
+                    {
+                        self.view.key(
+                            if key.pressed {
+                                KeyEventType::RawKeyDown
+                            } else {
+                                KeyEventType::KeyUp
+                            },
+                            code,
+                            0,
+                            Modifiers {
+                                ctrl: key.ctrl_key,
+                                shift: key.shift_key,
+                                alt: key.alt_key,
+                                meta: key.meta_key,
+                            },
+                        );
+                    }
+                }
+            }
             PaneInput::Focus => self.view.focus(),
             PaneInput::Unfocus => self.view.unfocus(),
         }
@@ -2169,6 +2201,19 @@ fn forward_keyboard_text(
     let ctrl = keycodes.pressed(KeyCode::ControlLeft) || keycodes.pressed(KeyCode::ControlRight);
     let focused = host.focus.focused();
     for key in keys.read() {
+        if let Some(id) = focused.filter(|id| {
+            host.mirror
+                .get(*id)
+                .is_some_and(|pane| pane.kind == PaneKind::Workshop)
+        }) {
+            if let Some(key) = crate::native_host::workshop::keyboard::from_input(key, &keycodes) {
+                host.send(PaneCommand::Input {
+                    id,
+                    input: PaneInput::WorkshopKey(key),
+                });
+            }
+            continue;
+        }
         if let Some(command) = super::keyboard::pane_keyboard_command(key, ctrl, focused) {
             host.send(command);
         }

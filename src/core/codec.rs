@@ -1,5 +1,10 @@
 use crate::core::messages::{ClientMessage, ServerMessage};
 
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn encode_workshop_key(key: &crate::native_host::workshop::keyboard::WorkshopKey) -> String {
+    serde_json::to_string(key).expect("local Authoring keys serialize")
+}
+
 /// Browser-host local FFI reply. This does not change the game wire protocol.
 pub fn encode_connection_binding(
     result: Result<

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountWorkshopAuthoring } from '../../gui/workshop-authoring.js';
 import { t } from '../../gui/strings.js';
+import { WorkshopDocument } from '../../editor/workshop-document.js';
 
 const queue = readFileSync('src/native_host/workshop/queue.js', 'utf8');
 const boot = readFileSync('src/native_host/workshop/boot.js', 'utf8');
@@ -12,7 +13,7 @@ let dispose;
 const drain = () => window.__phoenixNativeWorkshopDrain().split('\n').filter(Boolean);
 afterEach(() => {
   window.dispatchEvent(new Event('pagehide'));
-  for (const key of ['__phoenixNativeWorkshopSend', '__phoenixNativeWorkshopDrain', '__phoenixNativeWorkshopReply',
+  for (const key of ['__phoenixNativeWorkshopSend', '__phoenixNativeWorkshopDrain', '__phoenixNativeWorkshopReply', '__phoenixNativeWorkshopKey',
     '__phoenixOperatorReply', 'PhoenixOperatorStorage', 'PhoenixOperatorStorageStatus']) delete window[key];
   vi.restoreAllMocks();
 });
@@ -76,5 +77,33 @@ describe('native Workshop shared boot', () => {
       expect(getItem).toHaveBeenCalledWith('phoenix-operator-profile-v1');
       expect(document.querySelector('.workshop-findings').textContent).toBe(t('editor.mod.settings.storage_refused'));
     } finally { workspace.dispose(); }
+  });
+
+  it('native modifier keys execute the shared chronological undo without inserting shortcut text', async () => {
+    document.body.innerHTML = '<main id="workshop"></main>';
+    window.eval(queue);
+    const source = '# retained\n[global]\ntitle="Native"\n';
+    const draft = WorkshopDocument.fromNativeFiles({ 'assets/worlds/test.toml': source }, { kind: 'project' });
+    const provider = { save: vi.fn(), load: async () => draft, runtime: {},
+      recovery: { load: async () => null, save: async () => {} } };
+    const pending = runBoot(window, document, ({ root }) => {
+      const authoring = mountWorkshopAuthoring({ root, provider });
+      return { ...authoring, receive: vi.fn() };
+    }, vi.fn());
+    drain();
+    window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });
+    await pending;
+    const input = document.getElementById('workshop-source');
+    input.focus(); input.value = `${source}# edit\n`; input.dispatchEvent(new Event('input'));
+    const key = { code: 'KeyZ', key: 'z', pressed: true, ctrlKey: true, repeat: false };
+    expect(window.__phoenixNativeWorkshopKey(key)).toBe(true);
+    expect(input.value).toBe(source);
+    expect(window.__phoenixNativeWorkshopKey({ ...key, shiftKey: true })).toBe(true);
+    expect(input.value).toBe(`${source}# edit\n`);
+    const released = vi.fn();
+    input.addEventListener('keyup', released, { once: true });
+    expect(window.__phoenixNativeWorkshopKey({ ...key, pressed: false })).toBe(false);
+    expect(released.mock.calls[0][0].code).toBe('KeyZ');
+    expect(released.mock.calls[0][0].ctrlKey).toBe(true);
   });
 });

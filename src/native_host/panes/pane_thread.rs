@@ -249,6 +249,7 @@ pub enum PaneInput {
     Scroll { dx: i32, dy: i32 },
     Key(PaneKeyCode),
     KeyChar(String),
+    WorkshopKey(crate::native_host::workshop::keyboard::WorkshopKey),
     Focus,
     Unfocus,
 }
@@ -2160,6 +2161,7 @@ pub(crate) mod doubles {
             PaneInput::Scroll { .. } => "scroll",
             PaneInput::Key(_) => "key",
             PaneInput::KeyChar(_) => "keychar",
+            PaneInput::WorkshopKey(_) => "workshop-key",
             PaneInput::Focus => "focus",
             PaneInput::Unfocus => "unfocus",
         }

@@ -28,21 +28,25 @@ pub struct RoomInput {
 pub struct RoomPlayer {
     pub mixer: Arc<Mutex<Mixer>>,
     cache: BTreeMap<String, Result<Arc<Pcm>, String>>,
+    asset_revision: u64,
     previous: Option<RoomInput>,
     was_ready: bool,
     pub failures: Vec<String>,
 }
 pub struct PreparedBlaster {
+    asset_revision: u64,
     pcm: Arc<Pcm>,
     gain: f32,
     matrix: super::spatial::StereoMatrix,
 }
 pub struct PreparedComputer {
+    asset_revision: u64,
     pcm: Arc<Pcm>,
     gain: f32,
     important: bool,
 }
 pub struct PreparedAuthored {
+    asset_revision: u64,
     pcm: Arc<Pcm>,
     category: &'static str,
     gain: f32,
@@ -53,6 +57,7 @@ impl Default for RoomPlayer {
         Self {
             mixer: Arc::new(Mutex::new(Mixer::default())),
             cache: BTreeMap::new(),
+            asset_revision: 0,
             previous: None,
             was_ready: false,
             failures: Vec::new(),
@@ -60,6 +65,19 @@ impl Default for RoomPlayer {
     }
 }
 impl RoomPlayer {
+    /// The endpoint samples accepted content revisions; the pure Mixer knows
+    /// nothing about the global pack stack. Only current loops may be rebuilt.
+    pub fn refresh_assets(&mut self, revision: u64) {
+        if self.asset_revision == revision {
+            return;
+        }
+        self.asset_revision = revision;
+        self.mixer.lock().unwrap().stop_all();
+        self.cache.clear();
+        self.failures.clear();
+        self.previous = None;
+        self.was_ready = false;
+    }
     pub fn prepare(&mut self, input: &RoomInput) {
         let mut paths: Vec<_> = [
             Some(MENU),
@@ -250,10 +268,19 @@ impl RoomPlayer {
                 super::spatial::StereoMatrix([[1.0, 0.0], [0.0, 1.0]]),
             ),
         };
-        Some(PreparedBlaster { pcm, gain, matrix })
+        Some(PreparedBlaster {
+            asset_revision: self.asset_revision,
+            pcm,
+            gain,
+            matrix,
+        })
     }
     pub fn play_blaster(&mut self, input: &RoomInput, ready: bool, prepared: PreparedBlaster) {
-        if ready && input.lifecycle.running && !input.lifecycle.suspended {
+        if prepared.asset_revision == self.asset_revision
+            && ready
+            && input.lifecycle.running
+            && !input.lifecycle.suspended
+        {
             self.mixer.lock().unwrap().cue_spatial(
                 "blaster",
                 prepared.pcm,
@@ -273,13 +300,18 @@ impl RoomPlayer {
             .as_ref()?
             .for_severity(severity)?;
         Some(PreparedComputer {
+            asset_revision: self.asset_revision,
             pcm: self.asset(&spec.file)?,
             gain: spec.volume,
             important: matches!(severity, "warning" | "critical"),
         })
     }
     pub fn play_computer(&mut self, input: &RoomInput, ready: bool, prepared: PreparedComputer) {
-        if ready && input.lifecycle.running && !input.lifecycle.suspended {
+        if prepared.asset_revision == self.asset_revision
+            && ready
+            && input.lifecycle.running
+            && !input.lifecycle.suspended
+        {
             let mut mixer = self.mixer.lock().unwrap();
             if prepared.important {
                 mixer.important_cue("computer", prepared.pcm, prepared.gain);
@@ -313,6 +345,7 @@ impl RoomPlayer {
             pcm = super::hrtf::render(&pcm, position, Some(deadline))?;
         }
         Some(PreparedAuthored {
+            asset_revision: self.asset_revision,
             pcm,
             category,
             gain: definition.volume,
@@ -324,7 +357,11 @@ impl RoomPlayer {
         })
     }
     pub fn play_authored(&mut self, input: &RoomInput, ready: bool, prepared: PreparedAuthored) {
-        if ready && input.lifecycle.running && !input.lifecycle.suspended {
+        if prepared.asset_revision == self.asset_revision
+            && ready
+            && input.lifecycle.running
+            && !input.lifecycle.suspended
+        {
             let mut mixer = self.mixer.lock().unwrap();
             // One current authored occurrence; replacement never creates a queue.
             if prepared.important {

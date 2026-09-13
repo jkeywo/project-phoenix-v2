@@ -23,6 +23,8 @@ pub const SHORT_MAX_AGE: u32 = 3_600;
 
 /// The endpoint publishing the host's own [`crate::delivery::stamp`].
 pub const STAMP_PATH: &str = "/host/stamp.json";
+/// Read-only current native asset revision; no gameplay or content mutation.
+pub const ASSET_REVISION_PATH: &str = "/host/asset-revision.json";
 /// The endpoint publishing the version-pinned content manifest + catalogue.
 pub const MANIFEST_PATH: &str = "/host/manifest.json";
 /// Header a client may carry its stamp in, as `protocol/content_id/epoch`.

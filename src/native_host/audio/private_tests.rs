@@ -18,10 +18,15 @@ struct FakeState {
     mixers: BTreeMap<String, Vec<Arc<Mutex<Mixer>>>>,
     failed: Arc<AtomicBool>,
     denied: Option<String>,
+    after_prepare: Option<Box<dyn FnOnce() + Send>>,
 }
 impl Backend for Fake {
     type Stream = Arc<AtomicBool>;
     fn scan(&mut self) -> Result<Vec<(String, bool)>, String> {
+        let callback = self.0.lock().unwrap().after_prepare.take();
+        if let Some(callback) = callback {
+            callback();
+        }
         Ok(self.0.lock().unwrap().devices.clone())
     }
     fn open(&mut self, id: &str, mixer: Arc<Mutex<Mixer>>) -> Result<Self::Stream, String> {
@@ -686,4 +691,106 @@ fn named_room_selection_retires_old_sound_before_unblocking_a_private_default_co
     let _audio = task.join().unwrap();
     assert!(opened);
     assert!(!old_active);
+}
+
+#[test]
+fn accepted_asset_revision_reloads_private_pcm_and_discards_old_slots_on_both_assigned_outputs() {
+    use super::super::asset_tests::{install, Cleanup, FILE};
+    use crate::entities::config_cache::mod_pack_revision;
+    let _lock = crate::entities::config_cache::overlay_test_guard();
+    let _cleanup = Cleanup(&["private-epoch"]);
+    install("private-epoch", 8192);
+    let hub = PrivateAudio::new(profile());
+    let station = Endpoint::Console(PaneId(801));
+    let gm = Endpoint::Gm(PaneId(802));
+    hub.bind(station, "helm");
+    hub.bind(gm, "native-gm");
+    let fake = Fake::with(&["output:Helm", "output:GM", "output:Room"]);
+    let mut worker = Worker::new(fake.clone());
+    worker.manifest.get_mut("refused").unwrap().file = FILE.into();
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    for key in [station, gm] {
+        hub.submit(key, &record(&hub, key, REFUSED));
+    }
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    for output in ["output:Helm", "output:GM"] {
+        let samples = fake.sink(output);
+        assert!(samples[..32]
+            .iter()
+            .all(|value| (*value - 0.03).abs() < 0.00001));
+    }
+    // Prepare a real preview and queue a deliberate test before replacement.
+    hub.submit(gm, &record(&hub, gm, AUDITION));
+    audition::prepare(&hub);
+    let old_station = record(&hub, station, REFUSED);
+    hub.submit(
+        station,
+        &old_station.replace("\"test\":false", "\"test\":true"),
+    );
+    let previous_generation = hub.status(gm).unwrap().generation;
+    hub.0
+        .lock()
+        .unwrap()
+        .entries
+        .get_mut(&gm)
+        .unwrap()
+        .status
+        .detail = "settings.audio.asset_failed".into();
+    install("private-epoch", 16384);
+    hub.refresh_assets(mod_pack_revision());
+    assert!(hub.status(gm).unwrap().generation > previous_generation);
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    assert_eq!(hub.status(gm).unwrap().preview, "idle");
+    assert!(hub.status(gm).unwrap().detail.is_empty());
+    assert_eq!(hub.status(station).unwrap().test, "idle");
+    for output in ["output:Helm", "output:GM", "output:Room"] {
+        assert!(!audible(&fake.sink(output)));
+    }
+    // Old pane bytes cannot become a fresh cue after the owner epoch changes.
+    hub.submit(station, &old_station);
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    assert!(!audible(&fake.sink("output:Helm")));
+    assert_eq!(worker.pcm[FILE].as_ref().unwrap().samples[0], 0.5);
+    for key in [station, gm] {
+        hub.submit(key, &record(&hub, key, REFUSED));
+    }
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    for output in ["output:Helm", "output:GM"] {
+        let samples = fake.sink(output);
+        assert!(samples[..32]
+            .iter()
+            .all(|value| (*value - 0.06).abs() < 0.00001));
+    }
+    assert!(!audible(&fake.sink("output:Room")));
+    assert_eq!(fake.0.lock().unwrap().opened, ["output:Helm", "output:GM"]);
+}
+
+#[test]
+fn private_worker_rejects_pcm_when_pack_changes_between_decode_and_device_commit() {
+    use super::super::asset_tests::{install, Cleanup, FILE};
+    use crate::entities::config_cache::mod_pack_revision;
+    let _lock = crate::entities::config_cache::overlay_test_guard();
+    let _cleanup = Cleanup(&["private-prepare-race"]);
+    install("private-prepare-race", 8192);
+    let hub = PrivateAudio::new(profile());
+    let key = Endpoint::Console(PaneId(803));
+    hub.bind(key, "helm");
+    let fake = Fake::with(&["output:Helm"]);
+    let mut worker = Worker::new(fake.clone());
+    worker.manifest.get_mut("refused").unwrap().file = FILE.into();
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    hub.submit(key, &record(&hub, key, REFUSED));
+    fake.0.lock().unwrap().after_prepare =
+        Some(Box::new(|| install("private-prepare-race", 16384)));
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    assert!(!audible(&fake.sink("output:Helm")));
+    assert!(hub.0.lock().unwrap().entries[&key].pending.is_none());
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    assert!(!audible(&fake.sink("output:Helm")));
+    assert_eq!(worker.pcm[FILE].as_ref().unwrap().samples[0], 0.5);
+    hub.submit(key, &record(&hub, key, REFUSED));
+    worker.step_with_revision(&hub, Some(mod_pack_revision));
+    assert!(fake.sink("output:Helm")[..32]
+        .iter()
+        .all(|value| (*value - 0.06).abs() < 0.00001));
 }

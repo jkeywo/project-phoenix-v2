@@ -396,6 +396,14 @@ pub fn route(
         return Route::MethodNotAllowed;
     }
     match req.path.as_str() {
+        http::ASSET_REVISION_PATH => Route::Json {
+            status: 200,
+            reason: "OK",
+            body: codec::encode_native_asset_revision(
+                crate::entities::config_cache::mod_pack_revision(),
+            ),
+            refusal: None,
+        },
         STAMP_PATH => Route::Json {
             status: 200,
             reason: "OK",
@@ -1466,6 +1474,55 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             }
             other => panic!("expected JSON, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn native_asset_revision_capability_tracks_the_current_accepted_stack_without_mutating_it() {
+        use crate::entities::config_cache::{
+            mod_pack_revision, push_mod_pack, remove_mod_pack, ActivePack,
+        };
+        let _guard = crate::entities::config_cache::overlay_test_guard();
+        let fx = Fixture::new("audio-revision", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let get = |method: &str| {
+            route(
+                &request(&format!("{method} /host/asset-revision.json HTTP/1.1\r\n")),
+                &content,
+                &ClientSource::Hosted,
+                &HostedDocuments::default(),
+                PeerOrigin::Remote,
+            )
+        };
+        let before = mod_pack_revision();
+        for method in ["GET", "HEAD"] {
+            let Route::Json {
+                status,
+                body,
+                refusal,
+                ..
+            } = get(method)
+            else {
+                panic!("revision capability");
+            };
+            assert_eq!(status, 200);
+            assert_eq!(refusal, None);
+            assert_eq!(body, codec::encode_native_asset_revision(before));
+            assert!(body.contains("phoenix-native-asset-revision"));
+        }
+        assert_eq!(mod_pack_revision(), before);
+        assert!(matches!(get("POST"), Route::MethodNotAllowed));
+        push_mod_pack(ActivePack {
+            id: "audio-revision-capability".into(),
+            ..Default::default()
+        });
+        let after = mod_pack_revision();
+        let response = get("GET");
+        remove_mod_pack("audio-revision-capability");
+        assert_ne!(before, after);
+        let Route::Json { body, .. } = response else {
+            panic!("revision capability");
+        };
+        assert_eq!(body, codec::encode_native_asset_revision(after));
     }
 
     #[test]

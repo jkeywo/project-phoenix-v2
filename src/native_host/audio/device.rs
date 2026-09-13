@@ -25,7 +25,14 @@ pub(super) fn run(
     let mut route = None;
     let mut actual_output = None;
     loop {
-        let request = control.lock().unwrap().clone();
+        let request = {
+            let mut current = control.lock().unwrap();
+            current.refresh_assets(
+                crate::entities::config_cache::mod_pack_revision(),
+                &player.mixer,
+            );
+            current.clone()
+        };
         if request.quit {
             break;
         }
@@ -136,6 +143,7 @@ pub(super) fn run(
         }
         // File IO and decoding never hold the callback's mixer lock. A newer
         // continuation/output request invalidates the prepared old state.
+        player.refresh_assets(request.asset_revision);
         player.prepare(&request.input);
         let prepared_blaster = request.blaster.and_then(|(at, position)| {
             (stream.is_some() && at.elapsed() <= Duration::from_millis(250))
@@ -165,10 +173,15 @@ pub(super) fn run(
                 .flatten()
         });
         let mut fresh = control.lock().unwrap();
+        fresh.refresh_assets(
+            crate::entities::config_cache::mod_pack_revision(),
+            &player.mixer,
+        );
         if fresh.quit {
             break;
         }
-        if fresh.input != request.input
+        if fresh.asset_revision != request.asset_revision
+            || fresh.input != request.input
             || fresh.retry != request.retry
             || fresh.blaster != request.blaster
             || fresh.computer != request.computer

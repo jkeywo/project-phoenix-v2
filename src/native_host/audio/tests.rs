@@ -189,6 +189,7 @@ fn assert_sound(samples: &[f32]) {
 
 #[test]
 fn native_application_adapter_decodes_authored_mp3_and_ogg_into_device_samples() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     let mut app = App::new();
     app.insert_resource(State::new(GamePhase::InProgress))
         .insert_resource(RoomAudioLifecycle::default())

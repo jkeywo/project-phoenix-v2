@@ -644,6 +644,17 @@ pub fn encode_delivery_stamp(stamp: &crate::delivery::stamp::DeliveryStamp) -> S
     stamp_json(stamp).to_string()
 }
 
+/// Advertise the native delivery owner's asset revision without losing u64
+/// precision in a pure-JS consumer. This is local delivery metadata, not a
+/// simulation message or a cue record.
+pub fn encode_native_asset_revision(revision: u64) -> String {
+    serde_json::json!({
+        "capability": "phoenix-native-asset-revision", "version": 1,
+        "revision": revision.to_string(),
+    })
+    .to_string()
+}
+
 /// Encode the browser host's join-handshake verdict (issue #1111).
 ///
 /// The same `StampMismatch::code()` the native host answers

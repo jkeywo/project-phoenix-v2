@@ -117,6 +117,7 @@ fn sounded(samples: &[f32]) -> bool {
 
 #[test]
 fn gm_and_scenario_authored_cues_reach_real_native_pcm_once_without_canonical_presentation_state() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     let (mut app, mut player) = app();
     let audio = app.world().resource::<NativeRoomAudio>();
     let mut reader = visual::VisualReader::default();
@@ -195,6 +196,7 @@ fn gm_and_scenario_authored_cues_reach_real_native_pcm_once_without_canonical_pr
 
 #[test]
 fn authored_refusals_recipient_and_information_gate_do_not_disclose_or_queue_sound() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     let (mut app, _) = app();
     for (sequence, id) in [(1, "missing"), (2, "private-alert")] {
         gm(&mut app, sequence, "alpha", command("alpha", id, None));
@@ -288,6 +290,7 @@ fn authored_refusals_recipient_and_information_gate_do_not_disclose_or_queue_sou
 
 #[test]
 fn authored_mute_loss_expiry_and_restore_consume_current_native_request() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     let (mut app, mut player) = app();
     gm(&mut app, 1, "alpha", command("alpha", "weapons", None));
     let audio = app.world().resource::<NativeRoomAudio>();

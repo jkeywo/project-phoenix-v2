@@ -58,6 +58,7 @@ impl Entry {
     }
 }
 struct State {
+    asset_revision: u64,
     entries: BTreeMap<Endpoint, Entry>,
     profile: BridgeProfile,
     generation: u64,
@@ -69,6 +70,7 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            asset_revision: 0,
             entries: BTreeMap::new(),
             profile: BridgeProfile::empty(),
             generation: 0,
@@ -193,15 +195,10 @@ impl PrivateAudio {
             return;
         }
         state.continuation = Some(generation);
-        let count = state.entries.len() as u64;
-        let mut next = state.generation;
-        state.generation += count;
-        for entry in state.entries.values_mut() {
-            next += 1;
-            entry.stop();
-            entry.status.generation = next;
-            entry.status.revision += 1;
-        }
+        retire_entries(&mut state);
+    }
+    pub fn refresh_assets(&self, revision: u64) {
+        refresh_assets(&mut self.0.lock().unwrap(), revision);
     }
     /// The room worker reports its actually opened output. This is only a
     /// collision check, never a private routing choice or fallback.
@@ -331,6 +328,29 @@ impl PrivateAudio {
     }
 }
 
+fn retire_entries(state: &mut State) {
+    let mut next = state.generation;
+    state.generation += state.entries.len() as u64;
+    for entry in state.entries.values_mut() {
+        next += 1;
+        entry.stop();
+        entry.status.generation = next;
+        entry.status.revision += 1;
+    }
+}
+
+fn refresh_assets(state: &mut State, revision: u64) {
+    if state.asset_revision != revision {
+        state.asset_revision = revision;
+        retire_entries(state);
+        for entry in state.entries.values_mut() {
+            if entry.status.detail == "settings.audio.asset_failed" {
+                entry.status.detail.clear();
+            }
+        }
+    }
+}
+
 fn refresh_routes(state: &mut State) {
     let mut effective = state.profile.clone();
     let room_named = effective
@@ -430,6 +450,7 @@ struct Live<S> {
     outputs: Vec<Output<S>>,
 }
 pub struct Worker<B: Backend> {
+    asset_revision: u64,
     backend: B,
     live: BTreeMap<Endpoint, Live<B::Stream>>,
     manifest: BTreeMap<String, Sound>,
@@ -442,6 +463,7 @@ impl<B: Backend> Worker<B> {
         ))
         .expect("private sound manifest");
         Self {
+            asset_revision: 0,
             backend,
             live: BTreeMap::new(),
             manifest: manifest.sounds,
@@ -457,13 +479,36 @@ impl<B: Backend> Worker<B> {
         }
     }
     pub fn step(&mut self, hub: &PrivateAudio) -> bool {
+        // Deterministic fake-device entry point: the caller owns the epoch.
+        self.step_with_revision(hub, None)
+    }
+    fn step_with_revision(&mut self, hub: &PrivateAudio, source: Option<fn() -> u64>) -> bool {
+        let revision = {
+            let mut state = hub.0.lock().unwrap();
+            if let Some(read) = source {
+                refresh_assets(&mut state, read());
+            }
+            state.asset_revision
+        };
+        if self.asset_revision != revision {
+            self.asset_revision = revision;
+            self.pcm.clear();
+        }
         self.prepare();
-        audition::prepare(hub);
+        audition::prepare_with_revision(hub, source);
         let devices = self.backend.scan();
         let mut state = hub.0.lock().unwrap();
+        if let Some(read) = source {
+            refresh_assets(&mut state, read());
+        }
         if state.quit {
             self.live.clear();
             return false;
+        }
+        // A revision accepted while decoding invalidates all prepared PCM.
+        // Current owner retirement already stopped outputs and consumed slots.
+        if state.asset_revision != self.asset_revision {
+            return true;
         }
         self.live.retain(|key, _| state.entries.contains_key(key));
         for (key, entry) in &mut state.entries {
@@ -589,7 +634,9 @@ pub fn spawn(hub: PrivateAudio) -> Option<std::thread::JoinHandle<()>> {
         .name("phoenix-private-audio".into())
         .spawn(move || {
             let mut worker = Worker::new(cpal_backend::Cpal::default());
-            while worker.step(&hub) {
+            while worker
+                .step_with_revision(&hub, Some(crate::entities::config_cache::mod_pack_revision))
+            {
                 std::thread::sleep(Duration::from_millis(10));
             }
         })

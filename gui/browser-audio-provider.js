@@ -2,6 +2,7 @@ import { AUDIO_CATEGORIES, normalizeAudioMix, audioBusGain, audioSoundGain, clam
 import { validDuckingSpec, nextDuck, duckGain, releaseDuck } from './audio-ducking.js';
 import { createAudioRange } from './audio-range.js';
 import { fetchContentAsset } from './content-assets.js';
+import { createAudioAssetRevision } from './audio-asset-revision.js';
 
 /** Production browser playback adapter. [ai] Every sample takes the same route:
  * decoded buffer -> authored gain (optional listener-relative panner) -> category
@@ -13,9 +14,20 @@ export function createBrowserAudioProvider({
     const Ctor = globalThis.AudioContext || globalThis.webkitAudioContext;
     return Ctor ? new Ctor() : null;
   },
-  fetchAudio = fetchContentAsset,
+  fetchAudio = file => fetchContentAsset(file, {
+    fetch: path => globalThis.fetch(path, { cache: 'no-store' }),
+  }),
+  readAssetRevision,
+  watchAssetRevision,
   onChange = () => {},
 } = {}) {
+  const assetSource = readAssetRevision ? null : createAudioAssetRevision();
+  readAssetRevision ||= assetSource.read;
+  watchAssetRevision ||= assetSource?.watch || (callback => {
+    const timer = globalThis.setInterval(callback, 100);
+    timer?.unref?.();
+    return () => globalThis.clearInterval(timer);
+  });
   let context = null;
   let master = null;
   let meter = null;
@@ -24,6 +36,13 @@ export function createBrowserAudioProvider({
   let disposed = false;
   let testGeneration = 0;
   let auditionGeneration = 0;
+  let assetRevision = readAssetRevision();
+  let stopAssetWatch = null;
+  const cancelPreparations = new Set();
+  function retirePreparations() {
+    for (const cancel of cancelPreparations) cancel();
+    cancelPreparations.clear();
+  }
   let testState = 'idle';
   let mix = normalizeAudioMix();
   let mono = false;
@@ -36,6 +55,34 @@ export function createBrowserAudioProvider({
   const beds = new Map();
   let ducking = false, duckSpec = null, duckWindow = null;
   function changed() { onChange(); }
+
+  function refreshAssets() {
+    if (disposed) return false;
+    const next = readAssetRevision();
+    if (next === assetRevision) return false;
+    assetRevision = next;
+    retirePreparations();
+    testGeneration++;
+    auditionGeneration++;
+    testState = 'idle';
+    for (const voice of [...voices]) stopVoice(voice);
+    range?.reset();
+    scheduleDuck(null);
+    sounds.delete('__audition');
+    cache.clear();
+    failed = false;
+    for (const sound of sounds.values()) {
+      sound.buffer = null;
+      sound.pending = null;
+      sound.loading = false;
+      sound.failed = false;
+    }
+    // Only ordinary loop wanted/level state survives. A pending test, preview
+    // or informative one-shot is consumed, never rebuilt from replacement PCM.
+    for (const sound of sounds.values()) prepare(sound);
+    changed();
+    return true;
+  }
 
   function scheduleDuck(window) {
     duckWindow = window;
@@ -107,6 +154,7 @@ export function createBrowserAudioProvider({
         }
         changed();
       };
+      stopAssetWatch = watchAssetRevision(refreshAssets);
       setMix(mix);
       return context;
     } catch (_) {
@@ -117,6 +165,7 @@ export function createBrowserAudioProvider({
   }
 
   function setMix(value) {
+    refreshAssets();
     const next = normalizeAudioMix(value);
     const quieted = ['master', ...AUDIO_CATEGORIES].filter(id =>
       audioBusGain(mix, id) > 0 && audioBusGain(next, id) === 0);
@@ -156,14 +205,19 @@ export function createBrowserAudioProvider({
     changed();
   }
 
-  function bufferFor(file) {
+  function bufferFor(file, revision) {
     if (cache.has(file)) return cache.get(file);
     const pending = Promise.resolve().then(async () => {
+      if (disposed || refreshAssets() || revision !== assetRevision) return null;
       const response = await fetchAudio(file);
+      if (disposed || refreshAssets() || revision !== assetRevision) return null;
       if (response.ok === false) throw new Error('Audio asset unavailable');
-      return context.decodeAudioData(await response.arrayBuffer());
+      const bytes = await response.arrayBuffer();
+      if (disposed || refreshAssets() || revision !== assetRevision) return null;
+      return context.decodeAudioData(bytes);
     }).catch(() => {
-      cache.delete(file);
+      // A superseded request must not evict a newer decode of the same path.
+      if (cache.get(file) === pending) cache.delete(file);
       return null;
     });
     cache.set(file, pending);
@@ -172,22 +226,30 @@ export function createBrowserAudioProvider({
 
   function prepare(sound) {
     if (!graph()) return Promise.resolve(null);
+    const revision = assetRevision;
     sound.loading = true;
     sound.failed = false;
-    const pending = bufferFor(sound.file).then(buffer => {
-      if (disposed || sounds.get(sound.id) !== sound) return null;
+    // Decoding itself may be unabortable. Retire the waiter immediately so an
+    // old preview/test cannot leave its controls pending until that work ends.
+    let cancel;
+    const cancelled = new Promise(resolve => { cancel = () => resolve(null); });
+    cancelPreparations.add(cancel);
+    const pending = Promise.race([bufferFor(sound.file, revision), cancelled]).then(buffer => {
+      if (disposed || refreshAssets() || revision !== assetRevision
+          || sounds.get(sound.id) !== sound || sound.pending !== pending) return null;
       sound.loading = false;
       sound.buffer = buffer;
       sound.failed = !buffer;
       if (buffer) reconcileLoop(sound);
       changed();
       return buffer;
-    });
+    }).finally(() => cancelPreparations.delete(cancel));
     sound.pending = pending;
     return pending;
   }
 
   function register(id, spec) {
+    refreshAssets();
     remove(id);
     if (!spec?.file || !AUDIO_CATEGORIES.includes(spec.category)) return;
     const sound = { ...spec, id, level: clampAudioLevel(spec.volume), wanted: false, buffer: null };
@@ -210,6 +272,7 @@ export function createBrowserAudioProvider({
   }
 
   function play(sound, { position = null, duration = null, test = false } = {}) {
+    if (refreshAssets()) return false;
     if (!sound.buffer || context?.state !== 'running' || disposed) return false;
     let voice = null;
     try {
@@ -256,9 +319,10 @@ export function createBrowserAudioProvider({
   function reconcileLoop(sound) {
     if (sound.loop && sound.wanted && !sound.voice) play(sound);
   }
-  function reconcileLoops() { for (const sound of sounds.values()) reconcileLoop(sound); }
+  function reconcileLoops() { refreshAssets(); for (const sound of sounds.values()) reconcileLoop(sound); }
 
   function loop(id, wanted, volume) {
+    refreshAssets();
     const sound = sounds.get(id);
     if (!sound) return;
     sound.wanted = !!wanted;
@@ -271,6 +335,7 @@ export function createBrowserAudioProvider({
   }
 
   function cue(id, position) {
+    refreshAssets();
     const sound = sounds.get(id);
     // Muted, blocked and not-yet-decoded cues are missed, never queued.
     if (!sound || audioSoundGain(mix, sound.category, sound.level) === 0) return false;
@@ -302,6 +367,7 @@ export function createBrowserAudioProvider({
   }
 
   async function enable() {
+    refreshAssets();
     if (!graph()) return false;
     failed = false;
     try {
@@ -319,6 +385,7 @@ export function createBrowserAudioProvider({
   }
 
   async function testOutput(id) {
+    refreshAssets();
     const generation = ++testGeneration;
     for (const voice of [...voices]) if (voice.test) stopVoice(voice);
     const sound = sounds.get(id);
@@ -337,6 +404,7 @@ export function createBrowserAudioProvider({
   }
   function stopAudition() { auditionGeneration++; range?.reset(); remove('__audition'); }
   async function audition(definition) {
+    refreshAssets();
     stopAudition();
     const generation = auditionGeneration;
     cache.delete(definition.file);
@@ -355,6 +423,7 @@ export function createBrowserAudioProvider({
   }
 
   function snapshot() {
+    refreshAssets();
     const entries = [...sounds.values()];
     const status = unavailable || context?.state === 'closed' ? 'unavailable'
       : failed || entries.some(sound => sound.failed) ? 'failed'
@@ -380,6 +449,8 @@ export function createBrowserAudioProvider({
   function dispose() {
     stopAll();
     disposed = true;
+    retirePreparations();
+    stopAssetWatch?.();
     sounds.clear();
     cache.clear();
     range?.dispose();

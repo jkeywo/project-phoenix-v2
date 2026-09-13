@@ -74,6 +74,7 @@ fn sounded(samples: &[f32]) -> bool {
 
 #[test]
 fn posted_computer_message_reaches_actual_native_samples_each_time_and_omissions_stay_silent() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     let mut app = app();
     let mut player = player(&app);
     for _ in 0..2 {
@@ -105,6 +106,7 @@ fn posted_computer_message_reaches_actual_native_samples_each_time_and_omissions
 
 #[test]
 fn computer_tones_obey_live_mute_loss_deadline_and_restore_without_replay() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     let mut app = app();
     let mut player = player(&app);
     for bus in ["alerts", "master"] {
@@ -172,6 +174,7 @@ fn computer_tones_obey_live_mute_loss_deadline_and_restore_without_replay() {
 
 #[test]
 fn only_a_played_warning_or_critical_computer_tone_ducks_current_music() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     for severity in ["info", "advisory", "warning", "critical"] {
         let mut app = app();
         let cue = ComputerMessageCue {

@@ -68,7 +68,11 @@ pub(super) fn request(entry: &mut Entry, request: Request) {
         pcm: None,
     });
 }
+#[cfg(test)]
 pub(super) fn prepare(hub: &PrivateAudio) {
+    prepare_with_revision(hub, None);
+}
+pub(super) fn prepare_with_revision(hub: &PrivateAudio, source: Option<fn() -> u64>) {
     let requests: Vec<_> = {
         let state = hub.0.lock().unwrap();
         state
@@ -79,13 +83,20 @@ pub(super) fn prepare(hub: &PrivateAudio) {
                     .preview
                     .as_ref()
                     .filter(|preview| preview.pcm.is_none())
-                    .map(|preview| (*key, entry.status.generation, preview.clone()))
+                    .map(|preview| {
+                        (
+                            *key,
+                            entry.status.generation,
+                            state.asset_revision,
+                            preview.clone(),
+                        )
+                    })
             })
             .collect()
     };
     // Disk/decode work is never under endpoint or callback locks. The current
     // request remains with its endpoint and is checked again at commit.
-    for (key, generation, preview) in requests {
+    for (key, generation, revision, preview) in requests {
         let result = decoder::read(&preview.definition.file).and_then(|pcm| {
             let Some(bearing) = preview
                 .definition
@@ -126,6 +137,12 @@ pub(super) fn prepare(hub: &PrivateAudio) {
             .ok_or_else(|| "audition-preparation-expired".into())
         });
         let mut state = hub.0.lock().unwrap();
+        if let Some(read) = source {
+            refresh_assets(&mut state, read());
+        }
+        if state.asset_revision != revision {
+            continue;
+        }
         if let Some(entry) = state
             .entries
             .get_mut(&key)

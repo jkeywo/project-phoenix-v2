@@ -1253,6 +1253,21 @@ selected room output. `RoomAudioLifecycle` supplies restore holds and continuati
 boundaries. Missing outputs and missed cues stay silent; no playback history is
 saved. The existing Red Alert state/frame remains the live visual equivalent.
 
+Accepted pack revisions are observed by the endpoint adapters in `audio/mod.rs`,
+`device.rs` and `private.rs`. They stop old voices and retire tests, previews and
+transient deliveries before `RoomPlayer` or the private worker can use newly
+decoded path data. Preparation rechecks the revision at commit; only current room
+loops are rederived. `gui/browser-audio-provider.js` follows the same boundary
+with `gui/content-assets.js` and guards late fetch/decode completions. Native-served
+phones discover `/host/asset-revision.json` through `gui/audio-asset-revision.js`;
+only the advertised capability enables polling, and fresh HTTP audio reads use
+the existing overlay byte route. Other delivery sites receive one probe. The
+host-local WASM revision takes precedence and disposal cancels discovery/polling. The pure
+mixer retains no content-store dependency. `audio/asset_tests.rs`, the private
+fake-device tests and `tests/smoke/audio-assets.spec.js` pin replacement samples
+and no replay.
+
+
 `gui/native-audio.js` adapts the shared Audio panel to typed host-local controls
 and current status. Master and supported categories affect live playback; the
 bounded output test uses the same Music/Master path. The mix shares

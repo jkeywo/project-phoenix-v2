@@ -101,6 +101,7 @@ fn advance(app: &mut App, seconds: f32) {
 
 #[test]
 fn real_combat_producers_reach_native_samples_and_muted_live_equivalents() {
+    let _assets = crate::entities::config_cache::overlay_test_guard();
     let mut app = App::new();
     app.add_plugins(bevy::state::app::StatesPlugin)
         .insert_state(GamePhase::InProgress)

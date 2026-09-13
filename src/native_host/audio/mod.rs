@@ -86,6 +86,7 @@ impl Default for NativeAudioState {
 }
 #[derive(Clone)]
 struct Control {
+    asset_revision: u64,
     input: RoomInput,
     output: Option<String>,
     routing_error: Option<String>,
@@ -108,6 +109,19 @@ impl Control {
             (now.saturating_duration_since(at) <= std::time::Duration::from_millis(250))
                 .then_some(cue)
         })
+    }
+    fn refresh_assets(&mut self, revision: u64, mixer: &Arc<Mutex<engine::Mixer>>) {
+        if self.asset_revision == revision {
+            return;
+        }
+        self.asset_revision = revision;
+        mixer.lock().unwrap().stop_all();
+        self.alert_at = None;
+        self.test_at = None;
+        self.blaster = None;
+        self.computer = None;
+        self.authored = None;
+        // Retain authored_serial: a repeated delivery is still consumed.
     }
     fn take_computer(&mut self, now: Instant) -> Option<String> {
         self.computer.take().and_then(|(at, severity)| {
@@ -199,6 +213,7 @@ impl NativeRoomAudio {
             ..Default::default()
         }));
         let control = Arc::new(Mutex::new(Control {
+            asset_revision: 0,
             input: RoomInput {
                 lifecycle: crate::console_bridge::AudioLifecycleState {
                     suspended: true,
@@ -272,6 +287,13 @@ impl NativeRoomAudio {
     }
     pub fn snapshot(&self) -> NativeAudioState {
         self.state.lock().unwrap().clone()
+    }
+    pub fn refresh_assets(&self, revision: u64) {
+        self.private.refresh_assets(revision);
+        self.control
+            .lock()
+            .unwrap()
+            .refresh_assets(revision, &self.mixer);
     }
     pub fn apply_input(&self, input: RoomInput) {
         self.private.continuation(input.lifecycle.generation);
@@ -588,6 +610,7 @@ fn attach_private_endpoints(
     let Some(audio) = audio else {
         return;
     };
+    audio.refresh_assets(crate::entities::config_cache::mod_pack_revision());
     if let Some(panes) = panes {
         panes.0.attach_audio(audio.private.clone());
     }
@@ -673,6 +696,8 @@ fn update_room(
     }
 }
 
+#[cfg(test)]
+mod asset_tests;
 #[cfg(test)]
 mod combat_tests;
 #[cfg(test)]

@@ -41,8 +41,8 @@ test('offline Workshop imports, edits, undoes and exports one source-preserving 
   await page.locator('#workshop-redo').click();
   await page.locator('#workshop-source').fill('[global\n');
   await page.locator('#workshop-export').click();
-  await expect(page.getByRole('alert')).toContainText(ts('workshop.check_refused'));
-  await expect(page.getByRole('alert')).toBeFocused();
+  await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(ts('workshop.check_refused'));
+  await expect(page.locator('.workshop-findings[role="alert"]')).toBeFocused();
   await page.locator('#workshop-undo').click();
   const downloaded = page.waitForEvent('download');
   await page.locator('#workshop-export').click();
@@ -89,8 +89,8 @@ test('Workshop uses the real runtime for Rhai, source-span fields and browser re
   await page.locator('#workshop-files').selectOption(script);
   await page.locator('#workshop-source').fill('import "network" as unsafe;');
   await page.locator('#workshop-check').click();
-  await expect(page.getByRole('alert')).toContainText(ts('workshop.check_refused'), { timeout: 90_000 });
-  await expect(page.getByRole('alert')).toContainText(script);
+  await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(ts('workshop.check_refused'), { timeout: 90_000 });
+  await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(script);
   await page.locator('#workshop-undo').click();
   await page.locator('#workshop-files').selectOption(world);
   const original = await page.locator('#workshop-source').inputValue();
@@ -138,7 +138,7 @@ test('Workshop creates a pack, previews read-only dependencies and preserves MP3
   await page.locator('#workshop-restore').click();
   await expect(page.locator('#workshop-files')).toHaveValue('assets/sounds/music.mp3');
   await page.locator('#workshop-check').click();
-  await expect(page.getByRole('alert')).toContainText(ts('workshop.check_refused'));
+  await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(ts('workshop.check_refused'));
   await page.locator('#workshop-undo').click();
   await expect(page.locator('#workshop-files option')).toHaveCount(2);
   const downloaded = page.waitForEvent('download');

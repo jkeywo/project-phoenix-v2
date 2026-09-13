@@ -210,7 +210,7 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
   // completion is asynchronous: a registered future loop is not yet a voice.
   await serverPage.locator('#server-settings-btn').click();
   await serverPage.locator('#server-settings-overlay [data-tab="audio"]').click();
-  await serverPage.locator('[data-audio-enable]').click();
+  await serverPage.locator('#server-settings-overlay [data-audio-enable]').click();
   await serverPage.waitForFunction(() => ['ambient', 'engine', 'phaser', 'music', 'siren']
     .every(id => window.__audioDebug().output.ready.includes(id)));
   await serverPage.keyboard.press('Escape');

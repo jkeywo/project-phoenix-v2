@@ -58,6 +58,39 @@ test('real GM presentation admission reaches the host card and crew view while r
   expect(await gm.evaluate(() => window.wasm_sim_tick())).toBe(heldTick);
   await gm.locator('#gm-session-resume').click();
   await gm.waitForFunction(() => !window.__hostGmSessionState().paused);
+  // A12: keep the actual remote GM admission and host channel in this proof.
+  // Silence unrelated background buses through the recipient's real mixer;
+  // the fixture has no world alert to produce its own Alerts output.
+  await host.locator('#server-settings-btn').click();
+  await host.locator('.server-settings-tab[data-tab="audio"]').click();
+  for (const bus of ['music', 'ambience', 'effects']) {
+    const mute = host.locator(`#server-settings-overlay [data-audio-bus="${bus}"] button`);
+    if (await mute.isEnabled() && await mute.getAttribute('aria-pressed') !== 'true') await mute.click();
+  }
+  await host.locator('#server-settings-overlay [data-audio-enable]').click();
+  await host.waitForFunction(() => window.__audioDebug().output.ready.includes('authored_red-alert'));
+  await expect.poll(() => host.evaluate(() => window.__audioDebug().outputPeak)).toBeLessThan(0.00001);
+  await host.evaluate(() => {
+    // Observe and forward the real event; never synthesize acceptance or PCM.
+    const forward = window.__audioCue;
+    window.__authoredSoundProof = { count: 0, peak: 0 };
+    window.__audioCue = payload => {
+      if (JSON.parse(payload).kind === 'authored') window.__authoredSoundProof.count++;
+      forward(payload);
+    };
+    window.__authoredSoundSampler = setInterval(() => {
+      window.__authoredSoundProof.peak = Math.max(window.__authoredSoundProof.peak, window.__audioDebug().outputPeak);
+    }, 10);
+  });
+  await panel.locator('#gm-presentation-sound').selectOption('red-alert');
+  await button('play_sound').click();
+  await expect(panel.locator('[role=status]')).toHaveAttribute('data-state', 'applied');
+  await expect.poll(() => host.evaluate(() => window.__authoredSoundProof.peak)).toBeGreaterThan(0.00001);
+  expect(await host.evaluate(() => window.__authoredSoundProof.count)).toBe(1);
+  await expect(host.locator('[data-audio-equivalent="authored"]')).toContainText('Ship computer');
+  expect(await gm.evaluate(() => window.__audioDebug().output.active.some(voice => voice.id === 'authored_red-alert'))).toBe(false);
+  await host.evaluate(() => clearInterval(window.__authoredSoundSampler));
+  await host.locator('#server-settings-btn').click();
   const ship = await panel.locator('#gm-presentation-ship').inputValue();
   const operator = await gm.evaluate(() => window.__hostGmStartState().operatorId);
   const ingress = await host.evaluate(request => ({ tick: window.wasm_sim_tick(),

@@ -664,7 +664,7 @@ pub fn begin_asset_preload(
     for icon_path in manifest.radar_icons.iter().chain(&manifest.pfx_textures) {
         let handle: Handle<Image> = asset_server.load(crate::entities::pack_assets::asset_path(
             &asset_server,
-            &icon_path,
+            icon_path,
         ));
         icon_handles.push((icon_path.clone(), handle));
     }
@@ -721,7 +721,7 @@ pub fn begin_asset_preload(
                     .chain(&manifest_mut.pfx_textures)
                 {
                     let handle: Handle<Image> = asset_server.load(
-                        crate::entities::pack_assets::asset_path(&asset_server, &icon_path),
+                        crate::entities::pack_assets::asset_path(&asset_server, icon_path),
                     );
                     icon_handles.push((icon_path.clone(), handle));
                 }
@@ -1064,7 +1064,11 @@ pub fn poll_asset_preload(
         preload.ready_count = preload.total_count;
         bevy::log::info!(
             "asset_preload: all assets ready — icons={}, sidecars={}, sub_worlds={}, GLBs={}+{} failed",
-            icons_ready, sidecars_done, sub_worlds_done, glbs_loaded, glbs_failed,
+            icons_ready,
+            sidecars_done,
+            sub_worlds_done,
+            glbs_loaded,
+            glbs_failed,
         );
     } else {
         bevy::log::debug!(

@@ -318,6 +318,7 @@ mod tests {
             &["ship", "message", "duration_ticks"],
         ),
         ("effects", "clear_presentation", &["ship", "part"]),
+        ("effects", "sound", &["ship", "id", "source"]),
         // The Viewscreen computer-message vocabulary (issue #1342): a scenario
         // author schedules a timed, severity-graded message the same way they
         // author any other effect.

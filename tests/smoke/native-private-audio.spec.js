@@ -81,8 +81,8 @@ test('actual native GM M8 action uses its own correlated refusal and the same na
   expect(await page.evaluate(()=>takeAudio())).toBe(refusedFixture);
   await page.evaluate(()=>receive('gm_session',{journal:{entries:[{operator_id:'native-gm',correlation:sent[0].correlation,outcome:'refused'}]}}));
   expect(await page.evaluate(()=>takeAudio())).toBe('');
-  await page.locator('[data-audio-bus=master] button').click();
-  await page.evaluate(()=>takeAudio());await page.locator('[data-audio-test]').click();
+  await page.locator('main [data-audio-bus=master] button').click();
+  await page.evaluate(()=>takeAudio());await page.locator('main [data-audio-test]').click();
   expect(await page.evaluate(()=>takeAudio())).toBe('');
   expect(errors).toEqual([]);
 });

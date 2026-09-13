@@ -172,7 +172,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   });
   win.__hostGmCheckpointPanel = gmCheckpointPanel;
   win.__hostGmCheckpointState = gmCheckpointPanel.state;
-  win.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
+  win.__hostGmSessionRefresh = () => { gmSessionControls.refreshAdmission(); workshopSource.refresh(); };
   win.__hostGmSessionReset = gmSessionControls.reset;
   win.__hostGmSessionState = gmSessionControls.state;
   let operatorStorage = null;

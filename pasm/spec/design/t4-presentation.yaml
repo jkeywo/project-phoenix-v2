@@ -16,6 +16,7 @@ entities:
     architecture:
       kind: gm-presentation-control
       authority: authoritative
+      owns: [t4-audio-live-catalog]
       coordinates: [gm-milestone-presentation]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:

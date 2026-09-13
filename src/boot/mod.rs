@@ -460,6 +460,13 @@ fn build_inner(
             StateClass::DeferredFold,
             "t4-audio-live-catalog",
         );
+        // Shared GM/Station projection systems register this optional resource
+        // on headless peers too, where the playback plugin is absent. Its
+        // continuation comparison remains local presentation on every profile.
+        app.declare_state::<crate::server::audio_lifecycle::RoomAudioLifecycle>(
+            StateClass::Presentation,
+            "room-audio-lifecycle",
+        );
     }
     if let Some(assets) = snapshot {
         crate::entities::pack_assets::register_snapshot(&mut app, assets);

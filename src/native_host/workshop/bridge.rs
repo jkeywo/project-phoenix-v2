@@ -134,65 +134,68 @@ impl WorkshopWorker {
             state: state.clone(),
             requests,
         };
-        let thread = thread::Builder::new()
-            .name("phoenix-workshop-source".into())
-            .spawn(move || {
-                let mut active_epoch = 0;
-                let mut test: Option<super::test_process::TestProcess> = None;
-                loop {
-                    let job = match input.recv_timeout(std::time::Duration::from_millis(50)) {
-                        Ok(job) => job,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            // A failed/replaced page may never send another
-                            // request. Retire after the accepted FIFO drains,
-                            // independently of a replacement document mounting.
-                            let epoch = state.lock().unwrap_or_else(|e| e.into_inner()).epoch;
-                            if epoch != active_epoch {
-                                provider.retire_view();
-                                test = None;
-                                active_epoch = epoch;
+        let thread =
+            thread::Builder::new()
+                .name("phoenix-workshop-source".into())
+                .spawn(move || {
+                    let mut active_epoch = 0;
+                    let mut test: Option<super::test_process::TestProcess> = None;
+                    loop {
+                        let job = match input.recv_timeout(std::time::Duration::from_millis(50)) {
+                            Ok(job) => job,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            Err(mpsc::RecvTimeoutError::Timeout) => {
+                                // A failed/replaced page may never send another
+                                // request. Retire after the accepted FIFO drains,
+                                // independently of a replacement document mounting.
+                                let epoch = state.lock().unwrap_or_else(|e| e.into_inner()).epoch;
+                                if epoch != active_epoch {
+                                    provider.retire_view();
+                                    test = None;
+                                    active_epoch = epoch;
+                                }
+                                continue;
                             }
+                        };
+                        #[cfg(test)]
+                        if let Job::InstallTest {
+                            epoch,
+                            process,
+                            ready,
+                        } = job
+                        {
+                            test = Some(*process);
+                            active_epoch = epoch;
+                            let _ = ready.send(());
                             continue;
                         }
-                    };
-                    #[cfg(test)]
-                    if let Job::InstallTest {
-                        epoch,
-                        process,
-                        ready,
-                    } = job
-                    {
-                        test = Some(*process);
-                        active_epoch = epoch;
-                        let _ = ready.send(());
-                        continue;
-                    }
-                    let Job::Request {
-                        epoch,
-                        pane,
-                        record,
-                    } = job
-                    else {
-                        break;
-                    };
-                    if epoch != active_epoch {
-                        provider.retire_view();
-                        // A view crash/replacement retains source recovery, but
-                        // cannot leave a detached disposable simulation alive.
-                        test = None;
-                        active_epoch = epoch;
-                    }
-                    let scripts = if operators.handle(pane, "operator", &record) {
-                        operators.replies.remove(&pane).unwrap_or_default()
-                    } else {
-                        let response = match crate::core::codec::decode_workshop_request(&record) {
-                            Ok(request) => {
-                                use crate::workshop::provider::{
-                                    Operation, Response, WorkshopResponse,
-                                };
-                                let id = request.id;
-                                let result = match request.operation {
+                        let Job::Request {
+                            epoch,
+                            pane,
+                            record,
+                        } = job
+                        else {
+                            break;
+                        };
+                        if epoch != active_epoch {
+                            provider.retire_view();
+                            // A view crash/replacement retains source recovery, but
+                            // cannot leave a detached disposable simulation alive.
+                            test = None;
+                            active_epoch = epoch;
+                        }
+                        let scripts =
+                            if operators.handle(pane, "operator", &record) {
+                                operators.replies.remove(&pane).unwrap_or_default()
+                            } else {
+                                let response =
+                                    match crate::core::codec::decode_workshop_request(&record) {
+                                        Ok(request) => {
+                                            use crate::workshop::provider::{
+                                                Operation, Response, WorkshopResponse,
+                                            };
+                                            let id = request.id;
+                                            let result = match request.operation {
                                     Operation::TestStart { files, selection } => {
                                         match provider.prepare_test(files, selection) {
                                             Ok(snapshot) => {
@@ -209,7 +212,7 @@ impl WorkshopWorker {
                                                     Ok(mut started) => {
                                                         let run = started.status();
                                                         test = run.running.then_some(started);
-                                                        Response::Test { run: Some(run) }
+                                                        Response::Test { run: Some(run.into()) }
                                                     }
                                                     Err(message) => Response::Refused {
                                                         message,
@@ -222,7 +225,7 @@ impl WorkshopWorker {
                                     }
                                     Operation::TestControl { control } => match test.as_mut() {
                                         Some(process) => match process.control(control) {
-                                            Ok(run) => Response::Test { run: Some(run) },
+                                            Ok(run) => Response::Test { run: Some(run.into()) },
                                             Err(message) => Response::Refused {
                                                 message,
                                                 report: None,
@@ -242,7 +245,7 @@ impl WorkshopWorker {
                                         if run.as_ref().is_some_and(|run| !run.running) {
                                             test = None;
                                         }
-                                        Response::Test { run }
+                                        Response::Test { run: run.map(Box::new) }
                                     }
                                     Operation::TestStop => {
                                         test = None;
@@ -257,35 +260,34 @@ impl WorkshopWorker {
                                             .result
                                     }
                                 };
-                                crate::core::codec::encode_workshop_response(&WorkshopResponse {
-                                    id,
-                                    result,
-                                })
-                                .expect("finite private Workshop responses serialize")
-                            }
-                            Err(_) => provider.handle_json(&record),
-                        };
-                        vec![vellum_ultralight::bridge::push_call(
-                            "window.__phoenixNativeWorkshopReply",
-                            &response,
-                        )]
-                    };
-                    let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if state.epoch != epoch || state.active != Some(pane) || state.failed {
-                        continue;
+                                            crate::core::codec::encode_workshop_response(
+                                                &WorkshopResponse { id, result },
+                                            )
+                                            .expect("finite private Workshop responses serialize")
+                                        }
+                                        Err(_) => provider.handle_json(&record),
+                                    };
+                                vec![vellum_ultralight::bridge::push_call(
+                                    "window.__phoenixNativeWorkshopReply",
+                                    &response,
+                                )]
+                            };
+                        let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                        if state.epoch != epoch || state.active != Some(pane) || state.failed {
+                            continue;
+                        }
+                        let bytes: usize = scripts.iter().map(String::len).sum();
+                        if state.reply_bytes.saturating_add(bytes) > 2 * MAX_RECORD_BYTES {
+                            state.epoch += 1;
+                            state.failed = true;
+                            state.live = false;
+                            continue;
+                        }
+                        state.reply_bytes += bytes;
+                        state.replies.extend(scripts);
                     }
-                    let bytes: usize = scripts.iter().map(String::len).sum();
-                    if state.reply_bytes.saturating_add(bytes) > 2 * MAX_RECORD_BYTES {
-                        state.epoch += 1;
-                        state.failed = true;
-                        state.live = false;
-                        continue;
-                    }
-                    state.reply_bytes += bytes;
-                    state.replies.extend(scripts);
-                }
-            })
-            .map_err(|e| e.to_string())?;
+                })
+                .map_err(|e| e.to_string())?;
         Ok(Self {
             bridge,
             thread: Some(thread),

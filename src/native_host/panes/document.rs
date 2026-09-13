@@ -74,28 +74,19 @@
 //! once already: the previous arrangement published `window.connectionManager`,
 //! a global #1112 retired with PeerJS, and the page never called it.
 //!
-//! # Why the `<audio>` element has to go
+//! # Private audio and legacy media elements
 //!
 //! Ultralight ships no media backend: `HTMLMediaElement.play` is simply
 //! **undefined**, and calling it throws `TypeError: el.play is not a function`.
 //!
-//! That would be cosmetic if the page played its UI click *after* sending. It
-//! plays it *before* — `client.html`'s `send()` calls `playClick()` and then
-//! `link.send(...)` — so the exception propagates out of the `console_action`
-//! message listener and the command never reaches the transport at all. The
-//! page's `NO_CLICK` set exempts the high-rate ones (`SetThrust`, `SetSteering`,
-//! `Identify`, `SetName`), which is exactly why this is so easy to miss: a pane
-//! joins, renames itself, flies with the joystick, and every deliberate console
-//! command — every `ControlSystem` — is silently dropped, with a clean log on
-//! both sides.
+//! Older bundles played a click before sending each console command. Removing
+//! their media elements keeps that legacy path from throwing before transport.
+//! The synthetic legacy-bundle test preserves this compatibility guard.
 //!
-//! Removing the element makes `playClick`'s own first line
-//! (`const el = document.getElementById('ui-click'); if (!el) return;`) the path
-//! it takes, which is the behaviour of a page whose audio has been trimmed —
-//! something `gui/settings-panel.js` already tolerates (`audioEls` is
-//! `.filter(Boolean)`ed). Fixing it in `client.html` instead would mean changing
-//! the page a phone loads to suit a pane, which is the thing this module exists
-//! not to do.
+//! Current bundles use `gui/private-audio.js` for semantic feedback. The native
+//! private provider and `native-pane` capability are injected before that module
+//! runs, so playback uses the pane's explicitly assigned native output. An
+//! unavailable provider remains silent; it never falls back to browser media.
 //!
 //! # Where the identity is, and where it is emphatically not
 //!
@@ -411,10 +402,8 @@ pub fn build_pane_document_with(
     html.push_str(&client_index_html[head_end..]);
 
     let html = strip_elements_matching(&html, "script", Some(PEERJS_SCRIPT_MARKER));
-    // Every `<audio>` element, unconditionally: Ultralight has no media
-    // backend, and the page calls `play()` BEFORE it sends. See the module note
-    // — this is the difference between a pane that works and a pane that joins
-    // and then silently drops every console command.
+    // Legacy bundles may call media.play() before sending a command. Keep the
+    // media strip while current bundles use the injected private audio owner.
     let html = strip_elements_matching(&html, "audio", None);
 
     let body_close = html.rfind("</body>").ok_or(DocumentError::NoBody)?;
@@ -942,18 +931,22 @@ mod tests {
     }
 
     #[test]
-    fn the_repositorys_own_client_page_has_the_audio_element_this_strips() {
-        // The strip above is only worth anything if it is aimed at something
-        // real. If `client.html` ever loses its `<audio>` element this fails
-        // loudly rather than leaving a no-op behind — and if it gains another
-        // one, the pane document must lose that too.
+    fn the_repositorys_client_uses_the_explicit_native_private_audio_provider() {
         let client = std::fs::read_to_string("client.html").unwrap();
-        assert!(
-            client.contains("<audio"),
-            "the page a phone loads has a UI click sound; if that changed, so did the \
-             reason for this strip"
-        );
-        assert!(!build_pane_document(&client).unwrap().contains("<audio"));
+        let html = build_pane_document(&client).unwrap();
+        let provider = "root.PhoenixPrivateAudioProvider = function";
+        let module = "src=\"gui/private-audio.js\"";
+        let mount = "window.PrivateAudio.createPrivateAudio(";
+        assert!(!client.contains(provider));
+        assert_eq!(html.matches(provider).count(), 1);
+        assert_eq!(client.matches(module).count(), 1);
+        assert_eq!(html.matches(module).count(), 1);
+        assert_eq!(client.matches(mount).count(), 1);
+        assert_eq!(html.matches(mount).count(), 1);
+        assert!(html.find(provider).unwrap() < html.find(module).unwrap());
+        assert!(html.find("surface: 'native-pane'").unwrap() < html.find(module).unwrap());
+        assert!(!html.contains("<audio"));
+        assert!(!html.contains("gui/host-audio.js"));
     }
 
     #[test]

@@ -69,7 +69,7 @@ test('private GM M8 action settles only its own journal result and owned ship ne
   const errors = []; page.on('pageerror', error => errors.push(String(error)));
   await page.goto('/client/private-gm-probe');
   await expect.poll(() => page.evaluate(() => window.audio?.state().ready.length)).toBe(7);
-  await page.locator('[data-audio-enable]').click();
+  await page.locator('#audio [data-audio-enable]').click();
   await page.locator('#gm-presentation-panel > button').nth(1).click();
   expect(await page.evaluate(() => sent[0].cue)).toBe('release_view');
   await expect.poll(() => page.evaluate(() => audio.state().active.length)).toBe(0);
@@ -80,6 +80,10 @@ test('private GM M8 action settles only its own journal result and owned ship ne
     await new Promise(resolve => setTimeout(resolve,30)); return audio.debug().outputPeak;
   })).toBeGreaterThan(0.00001);
   expect(await page.evaluate(() => room.state().active)).toEqual([]);
-  expect(await page.evaluate(() => audio.state().categories)).toEqual(['alerts','interface']);
+  // GM exposes the authored audition categories locally; owning a ship still
+  // never activates the room soundtrack (the production room owner above).
+  expect(await page.evaluate(() => ({ categories: audio.state().categories,
+    audition: audio.state().auditionAvailable, room: audio.state().room })))
+    .toEqual({ categories: ['music','ambience','effects','alerts','interface'], audition: true, room: false });
   expect(errors).toEqual([]);
 });

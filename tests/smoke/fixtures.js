@@ -340,7 +340,11 @@ export function captureFetchFailures(page) {
   const failures = [];
   page.on('response', (res) => {
     if (res.status() < 400) return;
-    failures.push(`HTTP ${res.status()} ${new URL(res.url()).pathname}`);
+    const pathname = new URL(res.url()).pathname;
+    // Static delivery has no native revision endpoint. Audio deliberately
+    // probes once and treats its 404 as an absent capability, not an asset.
+    if (res.status() === 404 && pathname === '/host/asset-revision.json') return;
+    failures.push(`HTTP ${res.status()} ${pathname}`);
   });
   page.on('console', (msg) => {
     if (msg.type() !== 'error') return;

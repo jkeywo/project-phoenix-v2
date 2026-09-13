@@ -1,5 +1,3 @@
-import { createWorkshopHandoffStore } from '../editor/workshop-handoff.js';
-
 export function createWorkshopSourceTransfer({ store, read, operator, disconnect, navigate }) {
   let busy = false, disposed = false;
   return {
@@ -46,9 +44,12 @@ export function mountWorkshopSourceLink({ root, win, t }) {
   let handoffStore;
   // Storage can be denied (including a throwing indexedDB getter). Acquire it
   // only inside the guarded click operation, never while mounting GM controls.
-  const storage = () => handoffStore ||= createWorkshopHandoffStore({ indexedDB: win.indexedDB });
+  // Client/native GM bundles carry this shared presenter without the offline
+  // editor modules. Load source transfer only for a deliberate supported open.
+  const storage = async () => handoffStore ||= (await import('../editor/workshop-handoff.js'))
+    .createWorkshopHandoffStore({ indexedDB: win.indexedDB });
   const transfer = createWorkshopSourceTransfer({
-    store: { save: source => storage().save(source), clear: token => storage().clear(token) },
+    store: { save: async source => (await storage()).save(source), clear: async token => (await storage()).clear(token) },
     read: id => win.__hostWorkshopSource(id), operator: () => win.__hostLocalGm?.(),
     disconnect: () => win.__hostWorkshopDisconnect(), navigate: url => win.location.assign(url),
   });

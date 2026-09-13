@@ -59,8 +59,8 @@ test('Workshop validates real model, image and audio bytes, recovers a refused b
   await page.locator('#workshop-add-asset').click();
   await (await replacing).setFiles({ name: 'workshop-vertices.bin', mimeType: 'application/octet-stream', buffer: Buffer.from([255]) });
   await page.locator('#workshop-check').click();
-  await expect(page.getByRole('alert')).toContainText(ts('workshop.check_refused'), { timeout: 90_000 });
-  await expect(page.getByRole('alert')).toContainText(MODEL);
+  await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(ts('workshop.check_refused'), { timeout: 90_000 });
+  await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(MODEL);
   await expect(page.locator('#workshop-recovery-status')).toHaveText(ts('workshop.recovery_saved'));
   await page.reload();
   await page.locator('#workshop-restore').click();

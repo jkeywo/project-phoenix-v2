@@ -13,7 +13,7 @@ test('a running GM opens retained authored source through the Workshop control',
   await expect(worlds.first()).toBeVisible({ timeout: 60_000 });
   await page.locator('#mod-pack-file').setInputFiles({ name: 'retained-source.zip', mimeType: 'application/zip', buffer: Buffer.from(workshopPack()) });
   await expect(page.locator('#mod-pack-status')).toContainText(ts('server.mod_pack_applied'));
-  await worlds.filter({ hasNotText: 'Workshop test' }).first().click();
+  await page.locator('#world-list .world-btn[data-scenario-id]:not([data-scenario-id="workshop-test"])').first().click();
   const ship = page.locator('ph-ship-picker .ship-card').first();
   await Promise.race([ship.waitFor({ state: 'visible', timeout: 60_000 }),
     page.locator('#landing-panel').waitFor({ state: 'hidden', timeout: 60_000 })]);

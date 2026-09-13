@@ -139,7 +139,7 @@ pub enum Response {
     },
     Done,
     Test {
-        run: Option<crate::workshop::test_protocol::TestStatus>,
+        run: Option<Box<crate::workshop::test_protocol::TestStatus>>,
     },
     TestCatalog {
         catalog: test_snapshot::TestCatalog,

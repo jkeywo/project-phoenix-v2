@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 const host = readFileSync(resolve('server.html'), 'utf8');
 const boot = readFileSync(resolve('src/native_host/native_gm/boot.js'), 'utf8')
@@ -9,6 +9,11 @@ const boot = readFileSync(resolve('src/native_host/native_gm/boot.js'), 'utf8')
 const queue = readFileSync(resolve('src/native_host/native_gm/queue.js'), 'utf8');
 
 describe('native GM private bridge boot', () => {
+  beforeEach(() => {
+    // The real embedded document installs this profile bridge before boot.js.
+    window.PhoenixInstallNativeOperatorStorage = vi.fn();
+    window.phoenixNativeGmOperatorOut = { send: vi.fn() };
+  });
   it('delivers the advertised attention, health and workload projections to the shared workspace', () => {
     document.body.innerHTML = '<main id="gm-console"></main>';
     window.phoenixNativeGmOut = { send: vi.fn() };

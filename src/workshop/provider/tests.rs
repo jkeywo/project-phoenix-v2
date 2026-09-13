@@ -296,7 +296,7 @@ fn project_binary_members_are_exact() {
             bytes
         );
         let mut files = provider.baseline.clone();
-        files.insert(format!("assets/models/new.{suffix}").into(), bytes.clone());
+        files.insert(format!("assets/models/new.{suffix}"), bytes.clone());
         assert!(matches!(
             provider
                 .apply(Operation::Save {

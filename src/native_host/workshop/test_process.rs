@@ -311,11 +311,11 @@ struct ChildPipe {
 /// The internal command accepts exactly one host-created descriptor. It is a
 /// new process, so cache, seed, ledger and entity IDs cannot inherit a Test run.
 pub fn run_child(descriptor: &Path) -> Result<(), String> {
-    let bytes = fs::File::open(descriptor)
+    let mut bytes = Vec::new();
+    fs::File::open(descriptor)
         .map_err(|e| e.to_string())?
         .take(MAX_RECORD_BYTES + 1)
-        .bytes()
-        .collect::<Result<Vec<_>, _>>()
+        .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
     if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err("Test launch descriptor is too large".into());

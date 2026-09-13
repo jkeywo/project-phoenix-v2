@@ -291,7 +291,7 @@ describe('migration and reconnect preserve the operator choice', () => {
     // The privacy boundary: no transport identity, no station ownership, no
     // save catalogue can reach the record a reconnect reloads.
     expect(Object.keys(snapshot).sort()).toEqual([
-      'accessibility', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
+      'accessibility', 'audio', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
       'kind', 'version',
     ]);
   });

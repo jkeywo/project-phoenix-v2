@@ -35,6 +35,7 @@ use project_phoenix::save_slots::ContentCheck;
 use project_phoenix::save_slots_store::{
     install_local_save_store, request_named_manual_save, SaveSlotService,
 };
+use project_phoenix::server::audio_lifecycle::{publish_audio_lifecycle, RoomAudioLifecycle};
 use project_phoenix::sim_tick::SimTick;
 
 const WORLD: &str = "assets/worlds/duel.toml";
@@ -168,6 +169,8 @@ fn build(store: PeerStore) -> App {
         1.0 / 60.0,
     )));
     install_local_save_store(&mut app, store);
+    app.init_resource::<RoomAudioLifecycle>()
+        .add_systems(PostUpdate, publish_audio_lifecycle);
     app.finish();
     app.cleanup();
     app
@@ -821,6 +824,21 @@ fn a_refused_recovery_capture_refuses_the_restore_without_loading_anything() {
     assert_eq!(tick(&app), requested_tick(&app));
     assert!(tick(&app) >= saved_tick, "the world did not rewind");
     assert!(paused(&app));
+    assert!(
+        app.world().resource::<RoomAudioLifecycle>().state.suspended,
+        "a reported rollback keeps room playback held"
+    );
+    propose(
+        &mut app,
+        "resume-rollback",
+        "gm-1",
+        GmAction::SetSessionPaused { active: false },
+    );
+    let facts = settle_facts(&mut app, &["resume-rollback"]);
+    assert_eq!(fact(&facts, "resume-rollback").0, GmActionOutcome::Applied);
+    app.update();
+    assert_eq!(phase(&app), GmRestorePhase::Idle);
+    assert!(!app.world().resource::<RoomAudioLifecycle>().state.suspended);
 }
 
 /// The candidate is revalidated AT EXECUTION, against live state, in the same
@@ -1207,6 +1225,7 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
     let (result, _) = restore(&mut app, "restore-1", &slot_id);
     assert_eq!(result, GmActionOutcome::Applied);
     assert_eq!(phase(&app), GmRestorePhase::Restored, "{:?}", failure(&app));
+    assert!(app.world().resource::<RoomAudioLifecycle>().state.suspended);
 
     // Nothing resumes on its own, however long the desk is left alone.
     for _ in 0..60 {
@@ -1214,6 +1233,7 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
     }
     assert!(paused(&app));
     assert_eq!(phase(&app), GmRestorePhase::Restored);
+    assert!(app.world().resource::<RoomAudioLifecycle>().state.suspended);
 
     // The GM presses Resume, through the OWNER'S OWN rule. This is the whole
     // claim: a held world spends no ticks, so the one tick this grant may be
@@ -1262,6 +1282,7 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
         GmRestorePhase::Idle,
         "the reported restore clears once the GM resumes"
     );
+    assert!(!app.world().resource::<RoomAudioLifecycle>().state.suspended);
 
     // The world is not merely marked running: it spends ticks again.
     let resumed_at = tick(&app);

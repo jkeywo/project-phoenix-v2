@@ -162,6 +162,17 @@ function makeBindings(overrides = {}) {
     __getMasterVolume: () => state.master,
     __setMasterVolume: (v) => { calls.push(['__setMasterVolume', v]); state.master = v; },
   };
+  const audioListeners = new Set();
+  bindings.__roomAudio = {
+    state: () => ({ room: true, categories: ['music'], status: 'idle', persistence: 'saved',
+      mix: Object.fromEntries(['master', 'music', 'ambience', 'effects', 'alerts', 'interface']
+        .map(id => [id, { level: id === 'master' ? state.master : 1, muted: false }])) }),
+    setBus: (id, change) => {
+      if (id === 'master') bindings.__setMasterVolume(change.level);
+      for (const listener of audioListeners) listener();
+    },
+    subscribe: listener => { audioListeners.add(listener); return () => audioListeners.delete(listener); },
+  };
   return Object.assign(bindings, overrides);
 }
 

@@ -5,7 +5,7 @@
 //!
 //! - **Config push** — [`push_audio_config`] merges the local ship's `[audio]`
 //!   block with the world's `[audio.red_alert]` and sends it once on game
-//!   start, so JS can build its `<audio>` elements from TOML rather than
+//!   start, so JS can build its decoded audio graph from TOML rather than
 //!   hardcoded markup.
 //! - **Forcefield envelope** — [`process_forcefield_damage`] spikes an
 //!   intensity on damage and [`drive_forcefield_level`] decays it, pushing the
@@ -28,6 +28,7 @@
 //!
 //! Server-only — gated by the `server` feature in `lib.rs`.
 
+use crate::authoritative::{DeclareState, StateClass};
 use bevy::prelude::*;
 
 use crate::audio_config::{
@@ -67,6 +68,12 @@ impl Plugin for ServerAudioPlugin {
             .add_message::<AudioCueEvent>()
             .init_resource::<ForcefieldAudioState>()
             .init_resource::<AudioConfigSent>()
+            .init_resource::<super::audio_lifecycle::RoomAudioLifecycle>()
+            .declare_state::<super::audio_lifecycle::RoomAudioLifecycle>(
+                StateClass::Presentation,
+                "room-audio-lifecycle",
+            )
+            .add_systems(PostUpdate, super::audio_lifecycle::publish_audio_lifecycle)
             .add_systems(OnEnter(GamePhase::InProgress), reset_audio_config_sent)
             .add_systems(
                 Update,
@@ -103,6 +110,45 @@ impl Plugin for ServerAudioPlugin {
 
 fn reset_audio_config_sent(mut sent: ResMut<AudioConfigSent>) {
     sent.0 = false;
+}
+
+/// Restore/recovery continuation: discard the old damage envelope and publish
+/// the freshly restored authored config through the existing configuration lane.
+pub(super) fn rebase_audio_presentation(world: &mut World) {
+    if let Some(mut state) = world.get_resource_mut::<ForcefieldAudioState>() {
+        state.intensity = 0.0;
+    }
+    let ship = world
+        .query_filtered::<&ShipAudioSection, With<LocalShip>>()
+        .single(world)
+        .ok()
+        .map(|section| section.0.clone());
+    push_forcefield_level(
+        ship.as_ref()
+            .and_then(|ship| ship.forcefield.as_ref())
+            .map_or(0.0, |spec| spec.base_volume),
+    );
+    if !world
+        .get_resource::<State<GamePhase>>()
+        .is_some_and(|phase| *phase.get() == GamePhase::InProgress)
+    {
+        return;
+    }
+    let authored_world = world
+        .get_resource::<WorldConfig>()
+        .and_then(|config| config.audio.clone());
+    let payload = build_audio_payload(ship.as_ref(), authored_world.as_ref());
+    if let Ok(json) = codec::encode_audio_config(&payload) {
+        if let Some(mut configs) = world.get_resource_mut::<Messages<AudioConfigChanged>>() {
+            configs.clear();
+            configs.write(AudioConfigChanged { json });
+        }
+        if let Some(mut sent) = world.get_resource_mut::<AudioConfigSent>() {
+            // A continuation boundary can precede the configured ship. Clear
+            // the old mix now, retaining the ordinary late-spawn retry.
+            sent.0 = ship.is_some() || authored_world.is_some();
+        }
+    }
 }
 
 /// Sends the merged ship + world audio config to JS, once, on game start.
@@ -274,6 +320,41 @@ mod tests {
     use crate::audio_config::{ForcefieldAudio, ShipAudioConfig};
     use crate::core::messages::DeliveryClass;
     use crate::lobby::Target;
+
+    #[test]
+    fn an_empty_boundary_clears_old_config_without_latching_out_a_late_ship() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<AudioConfigChanged>>();
+        world.init_resource::<AudioConfigSent>();
+        world.insert_resource(State::new(GamePhase::InProgress));
+        rebase_audio_presentation(&mut world);
+        assert!(!world.resource::<AudioConfigSent>().0);
+        let clear: Vec<_> = world
+            .resource_mut::<Messages<AudioConfigChanged>>()
+            .drain()
+            .collect();
+        assert_eq!(clear.len(), 1);
+        assert_eq!(
+            clear[0].json,
+            codec::encode_audio_config(&build_audio_payload(None, None)).unwrap()
+        );
+        let configured = ShipAudioConfig {
+            forcefield: Some(forcefield_cfg()),
+            ..Default::default()
+        };
+        let expected =
+            codec::encode_audio_config(&build_audio_payload(Some(&configured), None)).unwrap();
+        world.spawn((LocalShip, ShipAudioSection(configured)));
+        world.run_system_once(push_audio_config).unwrap();
+        let published: Vec<_> = world
+            .resource_mut::<Messages<AudioConfigChanged>>()
+            .drain()
+            .collect();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].json, expected);
+        assert!(world.resource::<AudioConfigSent>().0);
+    }
 
     fn forcefield_cfg() -> ForcefieldAudio {
         ForcefieldAudio {

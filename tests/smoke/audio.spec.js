@@ -1,15 +1,14 @@
 // Smoke test: data-driven server audio.
 //
 // Audio playback lives in the host page's JS (Bevy audio was reverted
-// in-browser), but every filename and tuning value comes from TOML that only
+// in-browser), but mission filenames and tuning values come from TOML that only
 // Rust parses. This test verifies the whole chain end-to-end: ship/world TOML
 // → EntityConfig/WorldConfig → ShipAudioSection on the LocalShip →
 // AudioConfigChanged → "audio_config" host channel → window.__audioConfig →
-// constructed <audio> elements.
+// decoded Web Audio graph.
 //
-// It asserts on the audio module's *state*, not on sound — headless Chromium
-// can't be asked whether something is audible. The `__audioDebug()` hook in
-// server.html exposes what's needed.
+// It asserts on the audio module's state and real decoded sample readiness.
+// audio-mixer.spec.js also measures the real graph's output signal and silence.
 //
 // Panning correctness (the yaw sign) is covered by unit tests in
 // crates/phoenix-math/src/audio_config.rs; it can't be verified from here.
@@ -71,9 +70,8 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
 
   const serverPage = await context.newPage();
 
-  // An unclamped volume would surface here as an IndexSizeError, and a
-  // bubbling decodeAudioData rejection would surface as an unhandled
-  // rejection. Both must stay empty.
+  // Decoder/device errors must be reported in the Audio tab, not escape as
+  // unhandled rejections.
   const pageErrors = [];
   serverPage.on('pageerror', (e) => pageErrors.push(String(e)));
 
@@ -107,13 +105,20 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
       config: typeof window.__audioConfig,
       cue: typeof window.__audioCue,
       level: typeof window.__audioLevel,
+      lifecycle: typeof window.__audioLifecycle,
     })),
-  ).toEqual({ config: 'function', cue: 'function', level: 'function' });
+  ).toEqual({ config: 'function', cue: 'function', level: 'function', lifecycle: 'function' });
+  // Observe the actual runtime channel, without synthesizing a boundary from a
+  // lobby button or HUD. Only the latest state is needed by this probe.
+  await serverPage.evaluate(() => {
+    const forward = window.__audioLifecycle;
+    window.__audioLifecycle = payload => {
+      window.__audioLifecycleSeen = JSON.parse(payload);
+      forward(payload);
+    };
+  });
 
-  // No hardcoded <audio> tags may remain in the markup — every element is
-  // constructed from the pushed config. (The constructed ones are detached
-  // `new Audio()` objects and never appear in the DOM, so a non-zero count
-  // here means literal markup survived.)
+  // All sounds use the provider's real gain path.
   expect(await serverPage.locator('audio').count()).toBe(0);
 
   // Nothing is configured until the game starts.
@@ -139,6 +144,8 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
   });
 
   const dbg = await serverPage.evaluate(() => window.__audioDebug());
+  await expect.poll(() => serverPage.evaluate(() => window.__audioLifecycleSeen?.running)).toBe(true);
+  expect(await serverPage.evaluate(() => window.__audioLifecycleSeen.suspended)).toBe(false);
 
   // Ship-level sounds come from the selected ship's entity TOML...
   expect(dbg.cfg.ambient.file).toBe(EXPECTED.ambient);
@@ -166,7 +173,7 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
   expect(typeof dbg.cfg.blaster.ref_distance).toBe('number');
   expect(typeof dbg.cfg.blaster.max_distance).toBe('number');
 
-  // Elements were constructed and playback started.
+  // Sounds were registered and mission playback requested.
   expect(dbg.els).toEqual(
     expect.arrayContaining(['ambient', 'engine', 'phaser', 'forcefield', 'music', 'siren']),
   );
@@ -183,10 +190,7 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
   );
   expect(audioRequests).toEqual(expect.arrayContaining([ambientFile]));
 
-  // Volumes must be inside the range HTMLMediaElement.volume accepts;
-  // out-of-range throws IndexSizeError. Read them from the module, not from
-  // document.querySelectorAll — the elements are detached and a DOM sweep
-  // would return nothing and pass vacuously.
+  // Effective gains remain bounded; inspect the provider, not a DOM audio tag.
   expect(Object.keys(dbg.volumes).length).toBeGreaterThan(0);
   for (const [name, v] of Object.entries(dbg.volumes)) {
     expect(v, `${name} volume out of range`).toBeGreaterThanOrEqual(0);
@@ -194,13 +198,22 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
   }
 
   // The authored ambient volume must survive the trip from TOML to the
-  // element — this is the value the JS used to hardcode.
+  // gain node — this is the value the JS used to hardcode.
   expect(dbg.volumes.ambient).toBeCloseTo(EXPECTED.ambientVolume, 5);
   // Engine starts at its authored idle volume until thrust rides it up.
   expect(dbg.volumes.engine).toBeCloseTo(EXPECTED.engineIdle, 5);
 
   // Music only plays under red alert, which hasn't fired.
   expect(dbg.musicPlaying).toBe(false);
+
+  // Deliberate output enable travels through the actual Viewscreen cog. Decode
+  // completion is asynchronous: a registered future loop is not yet a voice.
+  await serverPage.locator('#server-settings-btn').click();
+  await serverPage.locator('#server-settings-overlay [data-tab="audio"]').click();
+  await serverPage.locator('[data-audio-enable]').click();
+  await serverPage.waitForFunction(() => ['ambient', 'engine', 'phaser', 'music', 'siren']
+    .every(id => window.__audioDebug().output.ready.includes(id)));
+  await serverPage.keyboard.press('Escape');
 
   // The forcefield level callback clamps rather than throwing.
   const clamped = await serverPage.evaluate(() => {

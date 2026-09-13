@@ -1,5 +1,6 @@
 pub mod asset_preload;
 pub mod audio;
+pub mod audio_lifecycle;
 pub mod bridge;
 pub mod native_visuals;
 pub mod pfx;

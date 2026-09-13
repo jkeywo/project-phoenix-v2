@@ -147,6 +147,12 @@ pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, ser
     serde_json::to_string(c)
 }
 
+pub fn encode_audio_lifecycle(
+    state: &crate::console_bridge::AudioLifecycleState,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(state)
+}
+
 /// Encode the rendererless GM peer's absolute local map Host Channel projection.
 pub fn encode_gm_entity_projection(
     payload: &crate::gm_projection::GmEntityProjectionPayload,

@@ -2,8 +2,8 @@
 title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
-sources: [server.html, client.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
-updated: 2026-09-07
+sources: [server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
+updated: 2026-09-13
 ---
 
 # Server HTML Lobby UI
@@ -13,6 +13,25 @@ The lobby UI on the **server** (viewscreen) page is rendered as HTML/CSS/JS. The
 Since issue #1325 the render itself is **not** in `server.html`: the decisions are `gui/host-lobby-view.js` (#1229), the DOM writes are `gui/host-lobby-render.js`, and the panel's rules are `gui/host-lobby.css`. Issue #1329 did the same for the join panel that floats over the lobby — `gui/host-qr.js` and `gui/host-qr.css`. `server.html` links all five and keeps only what is its own: the audio graph, the fleet freeze and mesh pump, the asset-loading and game-over overlays, and what a click on the QR does in a desktop browser (it opens a client in its own window).
 
 There is no `qrVisible` flag any more. The join panel's visibility **is** `#overlay`, read and written only through `gui/host-qr.js`: two documents in two engines cannot share a module-level boolean, and four handlers keeping one in step is how it came to disagree with the screen.
+
+The browser Viewscreen's Audio tab uses `gui/audio-settings-panel.js` over
+`gui/host-audio.js` and `gui/browser-audio-provider.js`. Every authored room
+sound, including overlapping shots and all four computer-message severities,
+passes through category and Master gain nodes. Music, Ambience/engines,
+Effects/weapons and Alerts are available when configured; Interface feedback
+is explained as unavailable here. Deliberate enable/retry and a bounded Music
+output test report blocked, failed and unavailable output separately from mute.
+`gui/audio-preferences.js` migrates the old Master key into the audio section of
+this endpoint's existing Viewscreen preference record. Audio and visual writes
+merge their own sections, and each reset preserves the other section.
+
+`src/server/audio_lifecycle.rs` derives a local audio continuation boundary from
+actual mission and restore/recovery state. The browser flush sends that boundary
+before current config/HUD and discards old one-shots; `gui/audio-live-equivalents.js`
+shows only live weapons bearing, ship impact and current beam firing. Existing
+Red Alert and computer-message readouts retain their meaning when muted.
+There is no audio history, catch-up or replay. Private GM pages remain silent
+for this shared soundtrack; native room playback is separate T4 work.
 
 The split exists because there are now **two** surfaces rendering this lobby from the same payload: the host page, and the native host's viewscreen surface (see [Native Host](./native-host.md#the-host-lobby-on-the-viewscreen-issue-1325)), whose document is built from this page's own `#lobby-panel` markup. Both call the same `renderHostLobby`. A second implementation of these element ids would drift the first time either was touched, so there is not one.
 

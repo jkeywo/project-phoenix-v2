@@ -108,6 +108,7 @@
      save-import rules stayed inline below — they style host tooling the native
      surface strips rather than renders. -->
 <link rel="stylesheet" href="gui/host-scenarios.css" />
+<link rel="stylesheet" href="gui/audio-settings.css" />
 <!-- The landing screen's stylesheet (issue #1360, PRD #1355). Linked AFTER the
      picker's, because it holds the `#scenario-panel.landing-docked` block that
      unwinds the picker from a full-screen layer into the landing's middle
@@ -3140,6 +3141,7 @@
        classic-script-can't-`import`-a-module bridge #1225/#1227 use. -->
   <script type="module">
     import { createHostAudio } from './gui/host-audio.js';
+    import { createAudioLiveEquivalents } from './gui/audio-live-equivalents.js';
     // window.localStorage access itself can throw in some private-mode /
     // sandboxed-iframe configurations — guarded here exactly like the old
     // inline code guarded window.localStorage.getItem, so a denial degrades
@@ -3147,14 +3149,21 @@
     let masterVolumeStorage = null;
     try { masterVolumeStorage = window.localStorage; }
     catch (_) { /* private mode / storage disabled — stay at the default */ }
+    const equivalents = createAudioLiveEquivalents(document);
     const hostAudio = createHostAudio({
       doc: document,
       storage: masterVolumeStorage,
-      AudioCtor: window.Audio,
+      isRoom: () => !window.__phoenixGmPage,
+      onEquivalent: equivalents.update,
     });
+    window.__roomAudio = hostAudio;
+    window.__resetHostAudio = hostAudio.resetSession;
+    window.addEventListener('pagehide', () => hostAudio.setPageActive(false));
+    window.addEventListener('pageshow', () => hostAudio.setPageActive(true));
     window.__audioConfig = hostAudio.audioConfig;
     window.__audioCue = hostAudio.audioCue;
     window.__audioLevel = hostAudio.audioLevel;
+    window.__audioLifecycle = hostAudio.audioLifecycle;
     window.__audioDebug = hostAudio.debug;
     window.__setMasterVolume = hostAudio.setMasterVolume;
     window.__getMasterVolume = hostAudio.getMasterVolume;
@@ -3181,6 +3190,7 @@
         lobby:        function(p) { window.__updateLobby(p); },
         chatter:      function(p) { window.__updateChatter(p); },
         audio_config: function(p) { window.__audioConfig(p); },
+        audio_lifecycle: function(p) { window.__audioLifecycle(p); },
         audio_cue:    function(p) { window.__audioCue(p); },
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
@@ -3576,6 +3586,7 @@
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+    if (s.phase === 'Lobby' && _lobbyPrevPhase !== 'Lobby') window.__resetHostAudio?.();
     // Entering authoritative Lobby is the GM activity run boundary. It is the
     // only place local Pending rows are reset; a bounded absolute result window
     // becoming empty is not enough evidence to invent a new run.

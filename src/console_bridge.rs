@@ -70,6 +70,15 @@ pub struct AudioConfigChanged {
     pub json: String,
 }
 
+/// Current room-audio continuation boundary. Peer-local presentation only:
+/// neither an Admission result nor a cue record, and never snapshotted/replayed.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct AudioLifecycleState {
+    pub generation: u64,
+    pub running: bool,
+    pub suspended: bool,
+}
+
 /// Emitted by `server::audio::push_blaster_cues` for each one-shot positional
 /// sound. `json` is the output of `codec::encode_audio_cue` and carries
 /// listener-relative coordinates. Drained by `bridge::flush_host_channels`

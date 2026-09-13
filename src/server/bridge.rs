@@ -512,6 +512,8 @@ pub mod host_channels {
     /// One-shot positional audio cues — JSON string
     /// (`codec::encode_audio_cue`).
     pub const AUDIO_CUE: &str = "audio_cue";
+    /// Runtime-owned continuation boundary; no sound/event history.
+    pub const AUDIO_LIFECYCLE: &str = "audio_lifecycle";
     /// Screen-shake offset — two-element `[x, y]` array of CSS pixels,
     /// emitted every frame (`[0, 0]` when idle so JS resets its transform).
     pub const SHAKE: &str = "shake";
@@ -547,12 +549,13 @@ pub mod host_channels {
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 17] = [
+    pub const ALL: [&str; 18] = [
         HUD,
         LOBBY,
         CHATTER,
         AUDIO_CONFIG,
         AUDIO_CUE,
+        AUDIO_LIFECYCLE,
         SHAKE,
         AUDIO_LEVEL,
         GM_ENTITY,
@@ -1036,6 +1039,7 @@ pub fn wasm_init() {
         (
             flush_outbound,
             flush_host_channels
+                .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
                 .after(crate::gm_action::publish_session_projection)
                 .after(crate::gm_event::publish_mission_projection)
                 .after(crate::gm_spawn::publish_spawn_projection)
@@ -1058,7 +1062,7 @@ pub fn wasm_init() {
             // performs only peer-local storage/export and fresh-app restore,
             // after all of this frame's fixed steps have completed.
             drain_lifecycle_saves,
-            drain_snapshot_restore,
+            drain_snapshot_restore.before(crate::server::audio_lifecycle::publish_audio_lifecycle),
             // The fleet's egress (issue #1116). `PostUpdate` for the same
             // reason as its neighbours: it runs after the frame's fixed steps,
             // so everything those ticks sealed goes out in one batch.
@@ -4555,10 +4559,28 @@ fn flush_host_channels(
     mut gm_attention: MessageReader<GmAttentionChanged>,
     mut gm_health: MessageReader<GmHealthChanged>,
     mut gm_workload: MessageReader<GmWorkloadChanged>,
+    audio_lifecycle: Res<crate::server::audio_lifecycle::RoomAudioLifecycle>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 15] = [
+    // Lifecycle precedes config/HUD/cues as one local presentation transaction:
+    // a restored HUD can never become an old-timeline siren edge. Other channels
+    // retain their own independent semantics.
+    let boundary_changed = audio_lifecycle.is_changed();
+    let lifecycle_payloads = if boundary_changed {
+        codec::encode_audio_lifecycle(&audio_lifecycle.state)
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let cues: Vec<String> = audio_cue.read().map(|m| m.json.clone()).collect();
+    let message_batches: [(&str, Vec<String>); 16] = [
+        (host_channels::AUDIO_LIFECYCLE, lifecycle_payloads),
+        (
+            host_channels::AUDIO_CONFIG,
+            audio_config.read().map(|m| m.json.clone()).collect(),
+        ),
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4575,12 +4597,12 @@ fn flush_host_channels(
                 .collect(),
         ),
         (
-            host_channels::AUDIO_CONFIG,
-            audio_config.read().map(|m| m.json.clone()).collect(),
-        ),
-        (
             host_channels::AUDIO_CUE,
-            audio_cue.read().map(|m| m.json.clone()).collect(),
+            if boundary_changed || audio_lifecycle.state.suspended {
+                Vec::new()
+            } else {
+                cues
+            },
         ),
         (
             host_channels::GM_ENTITY,
@@ -4679,6 +4701,9 @@ fn flush_host_channels(
         );
 
         // Per-frame tap: forcefield level, epsilon-deduped.
+        if boundary_changed {
+            edge::publish_last_sent_forcefield(-1.0);
+        }
         let current = edge::read_forcefield_level();
         let last = edge::read_last_sent_forcefield();
         if (current - last).abs() >= 0.001 {
@@ -5611,6 +5636,7 @@ spawn_on = "game_start"
                 host_channels::CHATTER,
                 host_channels::AUDIO_CONFIG,
                 host_channels::AUDIO_CUE,
+                host_channels::AUDIO_LIFECYCLE,
                 host_channels::SHAKE,
                 host_channels::AUDIO_LEVEL,
                 host_channels::GM_ENTITY,

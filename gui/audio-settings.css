@@ -1,0 +1,13 @@
+.audio-settings { display: grid; gap: 0.75em; min-width: 0; }
+.audio-settings p { margin: 0; }
+.audio-settings-bus { min-width: 0; padding: 0.5em; border: 1px solid currentColor; }
+.audio-settings-controls, .audio-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75em; }
+.audio-settings-controls input { min-width: 6em; width: 9em; flex: 1; }
+.audio-settings button { min-height: 44px; padding: 0.5em 0.75em; font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; }
+.audio-settings button[aria-pressed="true"] { border-width: 3px; font-weight: bold; }
+.audio-settings :focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.audio-live-equivalents { position: fixed; z-index: 20; bottom: 5em; left: 1em; max-width: min(34em, 85vw); font: inherit; pointer-events: none; }
+.audio-live-equivalents > div { background: #08111f; color: #fff; padding: 0.35em 0.6em; border: 1px solid currentColor; }
+@media (forced-colors: active) {
+  .audio-live-equivalents > div { background: Canvas; color: CanvasText; }
+}

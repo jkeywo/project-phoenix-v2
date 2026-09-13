@@ -990,6 +990,39 @@ fn push_hud_state(
     }
 }
 
+/// A restore may finish after Update and leave the same HUD values as before.
+/// Recompute from the current world, discard the pre-boundary frame, and publish
+/// a fresh baseline even when change detection would otherwise send nothing.
+pub(super) fn rebase_hud_state(world: &mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let Some(mut messages) = world.get_resource_mut::<Messages<HudStateChanged>>() else {
+        return;
+    };
+    messages.clear();
+    if world
+        .get_resource::<State<GamePhase>>()
+        .is_some_and(|phase| *phase.get() == GamePhase::GameOver)
+    {
+        world
+            .run_system_once(push_game_over_hud_state)
+            .expect("hud-projection-system-valid");
+        return;
+    }
+    world
+        .run_system_once(recompute_hud_state)
+        .expect("hud-projection-system-valid");
+    let states: Vec<_> = world
+        .query::<&ViewscreenHud>()
+        .iter(world)
+        .filter_map(|hud| codec::encode_hud_state(&hud.0).ok())
+        .map(|json| HudStateChanged { json })
+        .collect();
+    world
+        .resource_mut::<Messages<HudStateChanged>>()
+        .write_batch(states);
+}
+
 // ── Lobby screen systems ──────────────────────────────────────────────
 // Removed in issue #436 — `spawn_lobby_screen`, `toggle_lobby_screen_visibility`,
 // `rebuild_lobby_station_grid`, `update_lobby_header_values`, `spawn_station_card`,
@@ -999,6 +1032,50 @@ fn push_hud_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_rebase_replaces_old_hud_and_republishes_unchanged_current_values() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<HudStateChanged>>();
+        world.insert_resource(State::new(GamePhase::InProgress));
+        world.run_system_once(spawn_hud_state_entity).unwrap();
+        world.spawn((
+            crate::server_app::LocalShip,
+            crate::ship::state::ShipRedAlert(true),
+            crate::ship_plugin::LastHelmInput {
+                thrust: 0.6,
+                ..Default::default()
+            },
+        ));
+        world
+            .resource_mut::<Messages<HudStateChanged>>()
+            .write(HudStateChanged {
+                json: "pre-restore HUD".into(),
+            });
+        rebase_hud_state(&mut world);
+        let hud = &world.query::<&ViewscreenHud>().single(&world).unwrap().0;
+        assert!(hud.red_alert);
+        assert_eq!(hud.engine_thrust, 0.6);
+        let expected = codec::encode_hud_state(hud).unwrap();
+        let first: Vec<_> = world
+            .resource_mut::<Messages<HudStateChanged>>()
+            .drain()
+            .collect();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].json, expected);
+        rebase_hud_state(&mut world);
+        let second: Vec<_> = world
+            .resource_mut::<Messages<HudStateChanged>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            second.len(),
+            1,
+            "an unchanged restored HUD still seeds current loops"
+        );
+        assert_eq!(second[0].json, expected);
+    }
 
     #[test]
     fn presentation_readiness_requires_terminal_preload_but_not_a_renderer() {

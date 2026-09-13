@@ -6,8 +6,8 @@
  *   - **Debug / Cheat** — the toggles that used to be loose buttons in the
  *     debug dock's toolbar, plus the four debug OUTPUT selectors. Absent
  *     entirely in the public demo build (see `isDemo` below).
- *   - **Audio** — master volume, which SCALES the per-sound volumes authored
- *     in the ship/world TOML rather than replacing them.
+ *   - **Audio** — Master and category levels/mutes scale the authored mix;
+ *     output enable/retry and a deliberate Music test expose device state.
  *   - **Gameplay** — pause/resume, the viewscreen join QR, the borrowed
  *     manual-save panel (see `dockManualSave`), and exit-to-lobby.
  *     Deliberately NOT build-gated, so nothing on this tab may reach for
@@ -17,8 +17,8 @@
  *     tracer; its button and remapped keyboard path share one adapter.
  *   - **Display** — this ENDPOINT's text size and contrast (issue #1427),
  *     saved in this browser for every later session and applied to the menus,
- *     overlays and lobby chrome around the shared view. The only tab here whose
- *     store is neither the simulation nor a page binding; the controls are
+ *     overlays and lobby chrome around the shared view. It shares the endpoint
+ *     preference record with Audio, preserving each section; the controls are
  *     shared with the native viewscreen's cog
  *     (`gui/viewscreen-presentation-panel.js`).
  *
@@ -60,6 +60,7 @@ import {
 } from './settings-tabs.js';
 import { createViewscreenPresentation } from './viewscreen-presentation.js';
 import { renderViewscreenPresentationPanel } from './viewscreen-presentation-panel.js';
+import { renderAudioSettingsPanel } from './audio-settings-panel.js';
 import { isPhoneViewscreen } from './phone-viewscreen.js';
 import {
   ActionFeedbackLifecycle,
@@ -79,9 +80,6 @@ import {
   renderSettingsOverlay,
   makeSectionBuilders,
   makeRowBuilder,
-  VOLUME_MIN,
-  VOLUME_MAX,
-  VOLUME_STEP,
 } from './settings-overlay-kit.js';
 
 // ── Wiring tables ────────────────────────────────────────────────────────────
@@ -283,6 +281,7 @@ export function mountServerSettings(opts = {}) {
   let outputs = { enabled: [], viewing: null };
   let activeTab = null;
   let rafHandle = null;
+  let disposeAudioPanel = null;
   const controls = {
     toggles: {}, commands: {}, outputs: {}, pause: null, qr: null,
     volumeReadout: null, joinCode: {}, fleet: {},
@@ -610,42 +609,7 @@ export function mountServerSettings(opts = {}) {
   }
 
   function buildAudioTab(body) {
-    const el = section('settings.master_volume');
-    const row = rowHost();
-
-    const slider = doc.createElement('input');
-    slider.type = 'range';
-    slider.className = 'server-settings-slider';
-    slider.min = String(VOLUME_MIN);
-    slider.max = String(VOLUME_MAX);
-    slider.step = String(VOLUME_STEP);
-    const current = invoke('__getMasterVolume');
-    slider.value = String(typeof current === 'number' ? current : VOLUME_MAX);
-
-    const readout = doc.createElement('span');
-    readout.className = 'server-settings-readout';
-    controls.volumeReadout = readout;
-
-    const paintReadout = () => {
-      readout.textContent = t('settings.master_volume_value', {
-        value: String(Math.round(Number(slider.value) * 100)),
-      });
-    };
-    // `input` applies live while dragging — the acceptance criterion is that
-    // you hear the change as you move the slider, not on release.
-    const apply = () => {
-      invoke('__setMasterVolume', Number(slider.value));
-      paintReadout();
-    };
-    slider.addEventListener('input', apply);
-    slider.addEventListener('change', apply);
-    paintReadout();
-
-    row.appendChild(slider);
-    row.appendChild(readout);
-    el.appendChild(row);
-    el.appendChild(hint('settings.master_volume_hint'));
-    body.appendChild(el);
+    disposeAudioPanel = renderAudioSettingsPanel(doc, body, opts.audio || bindings.__roomAudio);
   }
 
   /**
@@ -1094,6 +1058,8 @@ export function mountServerSettings(opts = {}) {
   // ── Panel ──────────────────────────────────────────────────────────────────
 
   function buildPanel() {
+    disposeAudioPanel?.();
+    disposeAudioPanel = null;
     // Before anything clears the overlay — see `undockManualSave`.
     undockManualSave();
     const demo = isDemo();
@@ -1186,6 +1152,7 @@ export function mountServerSettings(opts = {}) {
   }
 
   function destroy() {
+    disposeAudioPanel?.();
     if (rafHandle !== null && win && typeof win.cancelAnimationFrame === 'function') {
       win.cancelAnimationFrame(rafHandle);
     }

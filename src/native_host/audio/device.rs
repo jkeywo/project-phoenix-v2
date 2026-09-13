@@ -153,6 +153,17 @@ pub(super) fn run(
                 .then(|| player.prepare_computer(&request.input, severity))
                 .flatten()
         });
+        let prepared_authored = request.authored.as_ref().and_then(|(at, cue)| {
+            (stream.is_some() && at.elapsed() <= Duration::from_millis(250))
+                .then(|| {
+                    player.prepare_authored(
+                        &request.input,
+                        &cue.definition,
+                        *at + Duration::from_millis(250),
+                    )
+                })
+                .flatten()
+        });
         let mut fresh = control.lock().unwrap();
         if fresh.quit {
             break;
@@ -161,6 +172,7 @@ pub(super) fn run(
             || fresh.retry != request.retry
             || fresh.blaster != request.blaster
             || fresh.computer != request.computer
+            || fresh.authored != request.authored
         {
             continue;
         }
@@ -183,6 +195,11 @@ pub(super) fn run(
         if fresh.take_computer(Instant::now()).is_some() {
             if let Some(prepared) = prepared_computer {
                 player.play_computer(&fresh.input, ready, prepared);
+            }
+        }
+        if fresh.take_authored(Instant::now()).is_some() {
+            if let Some(prepared) = prepared_authored {
+                player.play_authored(&fresh.input, ready, prepared);
             }
         }
         if fresh.test != last_test {

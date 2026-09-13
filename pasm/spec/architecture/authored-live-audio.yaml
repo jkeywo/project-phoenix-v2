@@ -1,0 +1,45 @@
+entities:
+  - state: t4-audio-live-catalog
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Captured Live Sound Catalog
+      summary: "Immutable validated assets/audio/sound-cues.toml captured through world ingest. Its Viewscreen definitions control acceptance of the existing typed GM and scenario Sound presentation action."
+      rationale:
+        - "[ai] DeferredFold with zero independent world_digest fields: content_digest records the exact catalog source before freeze and restore compares that content identity. Ordinary boot and disposable Test reconstruct this immutable input; no command reads a filesystem or starts a fetch. Shared boot declares it for headless as well as browser/native hosts."
+        - "[ai] Browser preload completes exact source delivery before world initialization and early resume version checks. HostPreloaded consumes only the completed cache; a missing required catalog refuses boot instead of substituting stock while a fetch is pending."
+    architecture:
+      classification: authoritative
+      owner: gm-t4-presentation-cues
+      writers: [gm-t4-presentation-cues]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_presentation/sound.rs, src/boot/mod.rs, src/server/bridge.rs, gui/host-content-fetch.js, server.html]
+      symbols: [LiveSoundCatalog, preloadSoundCatalog, wasm_prepare_sound_catalog]
+      tests: [src/boot/tests.rs, src/gm_presentation/sound_tests.rs, tests/client/host-content-fetch.test.js]
+
+  - component: authored-live-room-sound
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Live Authored Room Sound
+      summary: "An accepted PresentationCue::Sound resolves a captured Viewscreen definition and creates only a frame-local request. The shared producer applies receiving LocalShip and M7 source suppression before the existing room audio channel; browser/native providers render one current occurrence through their normal category, Master, comfort and output owners."
+      rationale:
+        - "[ai] GM and declarative/Rhai scenario callers reuse the existing presentation action, apply validation and normal Admission/result/attribution bookkeeping. Unknown definitions, private audiences and absent named source entities refuse at apply. Playback availability does not change canonical success."
+        - "[ai] A source entity is an optional policy link, never an adapter truth lookup. Effective forced Sensors mode applies the same conceal or delayed/degraded-source predicate as combat audio. Static authored signals carry no entity link. Definition equivalents carry only authored meaning, source, urgency and optional listener-relative direction."
+        - "[ai] Current config prewarms assets without scheduling playback. Occurrences carry the existing room lifecycle generation and a process-local serial, consumed before mute/visibility/readiness checks. Native requests expire after the existing short delivery window; decoding commits only the current request under its owner lock. New, hidden, restored or late receivers never replay missed occurrences."
+        - "[ai] Catalogs and canonical action records remain normal content/bookkeeping. No cue list, audio journal, saved playback frontier, catch-up store, remote media or speech mechanism is introduced. Informative equivalents replace one current live row independently of audio success; decorative cues have no caption."
+    architecture:
+      kind: client-presentation
+      authority: local
+      reads: [t4-audio-live-catalog, room-audio-lifecycle]
+      coordinates: [gm-t4-presentation-cues, browser-room-audio, native-room-audio-player]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_presentation.rs, src/gm_presentation/sound.rs, src/gm_projection.rs, src/server/audio.rs, src/server/audio_lifecycle.rs, src/native_host/audio/mod.rs, src/native_host/audio/device.rs, src/native_host/audio/player.rs, src/native_host/audio/visual.rs, src/world/dispatch.rs, src/world/script/effects.rs, gui/gm-presentation-panel.js, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-live-equivalents.js]
+      symbols: [LiveSoundRequest, LiveSoundCue, PreparedAuthored, createHostAudio]
+      tests: [src/native_host/audio/authored_tests.rs, src/server/audio_lifecycle.rs, src/world/script/effects.rs, tests/client/live-authored-audio.test.js, tests/client/gm-presentation-panel.test.js, tests/smoke/live-authored-audio.spec.js]

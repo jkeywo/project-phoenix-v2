@@ -66,6 +66,13 @@ impl Plugin for ServerAudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AudioConfigChanged>()
             .add_message::<AudioCueEvent>()
+            .add_message::<crate::gm_presentation::sound::LiveSoundRequest>()
+            .init_resource::<crate::gm_presentation::sound::LiveSoundCatalog>()
+            .add_systems(
+                PostUpdate,
+                crate::gm_presentation::sound::publish
+                    .after(super::audio_lifecycle::publish_audio_lifecycle),
+            )
             .init_resource::<ForcefieldAudioState>()
             .init_resource::<AudioConfigSent>()
             .init_resource::<super::audio_lifecycle::RoomAudioLifecycle>()
@@ -138,7 +145,10 @@ pub(super) fn rebase_audio_presentation(world: &mut World) {
         .get_resource::<WorldConfig>()
         .and_then(|config| config.audio.clone());
     let payload = build_audio_payload(ship.as_ref(), authored_world.as_ref());
-    if let Ok(json) = codec::encode_audio_config(&payload) {
+    if let Ok(json) = codec::encode_room_audio_config(
+        &payload,
+        world.get_resource::<crate::gm_presentation::sound::LiveSoundCatalog>(),
+    ) {
         if let Some(mut configs) = world.get_resource_mut::<Messages<AudioConfigChanged>>() {
             configs.clear();
             configs.write(AudioConfigChanged { json });
@@ -162,6 +172,7 @@ fn push_audio_config(
     world_config: Option<Res<WorldConfig>>,
     mut writer: MessageWriter<AudioConfigChanged>,
     mut sent: ResMut<AudioConfigSent>,
+    catalog: Option<Res<crate::gm_presentation::sound::LiveSoundCatalog>>,
 ) {
     if sent.0 {
         return;
@@ -174,7 +185,7 @@ fn push_audio_config(
         return;
     }
     let payload = build_audio_payload(ship, world);
-    match codec::encode_audio_config(&payload) {
+    match codec::encode_room_audio_config(&payload, catalog.as_deref()) {
         Ok(json) => {
             writer.write(AudioConfigChanged { json });
             sent.0 = true;

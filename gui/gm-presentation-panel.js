@@ -21,9 +21,11 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
   const title = input('heading'); title.maxLength = 4096;
   const subtitle = input('body', 'textarea'); subtitle.maxLength = 4096;
   const message = input('message', 'select');
+  const sound = input('sound', 'select'), soundSource = input('sound_source', 'select');
   const current = doc.createElement('p'); current.className = 'gm-presentation-current'; root.append(current);
   const status = doc.createElement('p'); status.setAttribute('role', 'status');
   let ships = [], pending = null, timer = null, state = {}, listKey = '', messages = [], messageKey = '', cameras = {}, cameraKey = '';
+  let sounds = [], soundKey = '', sources = [], sourceKey = '';
   const buttons = [];
   function feedback(value) { status.textContent = t(`server.gm.presentation.${value}`); status.dataset.state = value; }
   function replaceChoices(field, choices) {
@@ -48,6 +50,9 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
       cameraKey = cameraListKey;
     }
     const choices = messages.filter(row => row.ship === null || row.ship === ship.value);
+    const nextSounds = JSON.stringify(sounds), nextSources = JSON.stringify(sources);
+    if (nextSounds !== soundKey) { replaceChoices(sound, sounds.map(id => [id, id])); soundKey = nextSounds; }
+    if (nextSources !== sourceKey) { replaceChoices(soundSource, [['', t('server.gm.presentation.sound_static')], ...sources]); sourceKey = nextSources; }
     const key = JSON.stringify(choices);
     if (key !== messageKey) {
       replaceChoices(message, choices.map(row => [row.message, `${wireText(row.sender)} (${row.message})`]));
@@ -80,6 +85,8 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
   button('show_title', () => ticks() && title.value.trim() && send({ title_card: { title: title.value, subtitle: subtitle.value, duration_ticks: ticks() } }));
   button('incoming', () => ticks() && messages.some(row => row.message === message.value && (row.ship === null || row.ship === ship.value)) && send({ incoming_comms: { message: message.value, duration_ticks: ticks() } }));
   button('clear', () => send('clear_card'));
+  button('play_sound', () => sounds.includes(sound.value) && (!soundSource.value || sources.some(([id]) => id === soundSource.value))
+    && send({ sound: { id: sound.value, source: soundSource.value || null } }));
   root.append(status); doc.getElementById('gm-mission-panel')?.append(root);
   ship.addEventListener('change', () => {
     camera.value = ''; message.value = ''; cameraKey = ''; messageKey = ''; refreshAdmission();
@@ -89,6 +96,7 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
     if (typeof p === 'string') { try { p = JSON.parse(p); } catch { return false; } }
     if (!p || !Array.isArray(p.entities)) return false;
     ships = p.entities.filter(row => row.kind === 'player_ship'); state = p.presentation || {}; messages = p.presentation_messages || []; cameras = p.presentation_cameras || {};
+    sounds = p.presentation_sounds || []; sources = p.entities.map(row => [row.entity_id, wireText(row.name)]);
     const key = JSON.stringify(ships.map(row => [row.entity_id, row.name]));
     if (key !== listKey) {
       replaceChoices(ship, ships.map(row => [row.entity_id, wireText(row.name)]));
@@ -100,7 +108,7 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
     }
     refreshAdmission(); return true;
   }
-  function reset() { if (timer !== null) cancelSchedule(timer); timer = null; pending = null; ships = []; state = {}; messages = []; cameras = {}; listKey = ''; cameraKey = ''; messageKey = ''; ship.replaceChildren(); camera.replaceChildren(); message.replaceChildren(); feedback('ready'); refreshAdmission(); }
+  function reset() { if (timer !== null) cancelSchedule(timer); timer = null; pending = null; ships = []; state = {}; messages = []; cameras = {}; sounds = []; sources = []; soundKey = ''; sourceKey = ''; listKey = ''; cameraKey = ''; messageKey = ''; ship.replaceChildren(); camera.replaceChildren(); message.replaceChildren(); sound.replaceChildren(); soundSource.replaceChildren(); feedback('ready'); refreshAdmission(); }
   refreshAdmission();
   return { update, reset, refreshAdmission, state: () => ({ pending, presentation: state }), destroy() { reset(); root.remove(); } };
 }

@@ -285,6 +285,11 @@ export function createBrowserAudioProvider({
     if (![...sounds.values()].some(other => other.file === sound.file)) cache.delete(sound.file);
   }
 
+  function stop(id) {
+    const sound = sounds.get(id);
+    for (const voice of [...voices]) if (voice.sound === sound) stopVoice(voice);
+  }
+
   function stopAll() {
     range?.reset();
     auditionGeneration++;
@@ -383,5 +388,5 @@ export function createBrowserAudioProvider({
       Promise.resolve(context.close()).catch(() => {});
     }
   }
-  return { register, remove, loop, cue, setMix, setMono, setDucking, setReducedRange, enable, testOutput, audition, stopAudition, stopAll, snapshot, outputPeak, dispose };
+  return { register, remove, stop, loop, cue, setMix, setMono, setDucking, setReducedRange, enable, testOutput, audition, stopAudition, stopAll, snapshot, outputPeak, dispose };
 }

@@ -23,6 +23,9 @@ export function createHostAudio({
   let suspended = false;
   let pageActive = true;
   let generation = null;
+  let authoredSerial = 0;
+  let authoredPlaying = null;
+  const authored = new Map();
   let menu = false;
   let menuRegistered = false;
   let previousHud = null;
@@ -102,6 +105,8 @@ export function createHostAudio({
     if (!next || typeof next !== 'object' || Array.isArray(next) || json === cfgText) return;
     for (const id of roomIds) provider.remove(id);
     roomIds.clear();
+    authored.clear();
+    authoredPlaying = null;
     cfg = next;
     cfgText = json;
     previousHud = null;
@@ -125,6 +130,19 @@ export function createHostAudio({
     for (const severity of ['info', 'advisory', 'warning', 'critical']) {
       const spec = next.computer_message?.[severity];
       add(`computer_${severity}`, spec, 'alerts', spec?.volume, false);
+    }
+    // These are the host's already validated, world-captured Viewscreen cues.
+    // Preparation is current configuration, never a pending playback request.
+    for (const definition of (Array.isArray(next.authored_sounds) ? next.authored_sounds : [])) {
+      if (definition?.audience !== 'viewscreen' || typeof definition.id !== 'string') continue;
+      const id = `authored_${definition.id}`;
+      const spatial = definition.equivalent?.bearing == null ? null : {
+        panning_model: 'HRTF', distance_model: 'inverse', ref_distance: 1, max_distance: 1, rolloff_factor: 0,
+      };
+      provider.register(id, { ...definition, loop: false, spatial,
+        important: ['warning', 'critical'].includes(definition.equivalent?.urgency) });
+      roomIds.add(id);
+      authored.set(definition.id, definition);
     }
     reconcile();
     notify();
@@ -163,6 +181,7 @@ export function createHostAudio({
    * preferences survive; the next HUD seeds red-alert state without a siren. */
   function resetSession() {
     provider.stopAll();
+    authoredPlaying = null;
     previousHud = null;
     previousLevel = null;
     hud = null;
@@ -175,8 +194,9 @@ export function createHostAudio({
     let value;
     try { value = JSON.parse(json); } catch (_) { return; }
     if (!value || !Number.isSafeInteger(value.generation) || typeof value.running !== 'boolean'
-      || typeof value.suspended !== 'boolean' || value.generation === generation) return;
+      || typeof value.suspended !== 'boolean' || (generation != null && value.generation <= generation)) return;
     generation = value.generation;
+    authoredSerial = 0;
     const currentMenu = menu;
     resetSession();
     running = value.running;
@@ -206,7 +226,25 @@ export function createHostAudio({
   function audioCue(json) {
     let cue;
     try { cue = JSON.parse(json); } catch (_) { return; }
-    if (!running || suspended || !pageActive || !isRoom() || !cue) return;
+    if (!cue) return;
+    if (cue.kind === 'authored') {
+      if (generation == null || cue.generation !== generation || !Number.isSafeInteger(cue.occurrence)
+        || cue.occurrence <= authoredSerial) return;
+      authoredSerial = cue.occurrence;
+      if (!running || suspended || !pageActive || !isRoom()) return;
+      const definition = authored.get(cue.definition?.id);
+      if (!definition || JSON.stringify(definition) !== JSON.stringify(cue.definition)) return;
+      provider.stop?.(authoredPlaying);
+      authoredPlaying = `authored_${definition.id}`;
+      emit({ kind: 'authored', equivalent: definition.equivalent || null });
+      const eq = definition.equivalent;
+      const angle = (eq?.bearing || 0) * Math.PI / 180, pitch = (eq?.elevation || 0) * Math.PI / 180;
+      provider.cue(authoredPlaying, eq?.bearing == null ? null : {
+        x: Math.sin(angle) * Math.cos(pitch), y: Math.sin(pitch), z: -Math.cos(angle) * Math.cos(pitch),
+      });
+      return;
+    }
+    if (!running || suspended || !pageActive || !isRoom()) return;
     if (cue.kind === 'computer_message') {
       // The existing computer banner is the equivalent: text, severity, Station.
       provider.cue(`computer_${cue.severity}`);

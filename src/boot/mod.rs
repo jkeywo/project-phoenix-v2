@@ -261,10 +261,9 @@ pub enum WorldIngest {
     /// and a pending content-ledger freeze, completed at Startup after the root
     /// scripts have been compiled and recorded, before anything spawns.
     ///
-    /// The [`BootPlan`]'s `world_path`, `reader`, `script_resolver` and
-    /// `raw_transform` are unused in this mode — a `HostPreloaded` plan still
-    /// carries the target-correct values (the browser's `WasmReader` and script
-    /// resolver) for shape and future use, but [`build`] consults none of them.
+    /// The world reader, script resolver and transform are unused for world
+    /// loading here. The authored sound catalog is captured from completed
+    /// browser preload without starting another fetch, before the same freeze.
     HostPreloaded,
     /// There is **no world yet** (issue #1326): compose the `App` and leave the
     /// whole ingestion — reset, read, validate, compile, apply, freeze, insert —
@@ -439,6 +438,15 @@ fn build_inner(plan: BootPlan, external_logging: bool) -> Result<App, BootError>
         ));
     }
     let mut app = App::new();
+    // All fields are immutable authored input, reconstructed at world ingest.
+    // Zero independent world-digest fields: content_digest pins the exact TOML.
+    use crate::authoritative::{DeclareState, StateClass};
+    if plan.profile != BootProfile::NativeWorkshop {
+        app.declare_state::<crate::gm_presentation::sound::LiveSoundCatalog>(
+            StateClass::DeferredFold,
+            "t4-audio-live-catalog",
+        );
+    }
 
     // Command/system errors WARN rather than abort the process (Bevy 0.18's
     // `DefaultErrorHandler`, set once here so every target — browser via
@@ -968,6 +976,16 @@ pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), Boo
         // streamed its records in at world-selection time, so a reset here would
         // wipe them.
         WorldIngest::HostPreloaded => {
+            #[cfg(target_arch = "wasm32")]
+            let (catalog, source) = crate::gm_presentation::sound::LiveSoundCatalog::preloaded()
+                .map_err(BootError::WorldInvalid)?;
+            #[cfg(not(target_arch = "wasm32"))]
+            let (catalog, source) = crate::gm_presentation::sound::LiveSoundCatalog::capture(
+                plan.reader.read(crate::gm_presentation::sound::PATH),
+            )
+            .map_err(BootError::WorldInvalid)?;
+            crate::content_ledger::record(crate::gm_presentation::sound::PATH, &source);
+            world.insert_resource(catalog);
             world.insert_resource(PendingHostContentFreeze);
             return Ok(());
         }
@@ -1052,7 +1070,12 @@ pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), Boo
         )?;
     }
 
+    let (catalog, sound_source) = crate::gm_presentation::sound::LiveSoundCatalog::capture(
+        plan.reader.read(crate::gm_presentation::sound::PATH),
+    )
+    .map_err(BootError::WorldInvalid)?;
     loaded.ledger.apply();
+    crate::content_ledger::record(crate::gm_presentation::sound::PATH, &sound_source);
     #[cfg(not(target_arch = "wasm32"))]
     {
         crate::content_ledger::eager_record_world_entities_with_scripts(
@@ -1069,6 +1092,7 @@ pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), Boo
     crate::content_ledger::freeze();
 
     world.insert_resource(loaded.config);
+    world.insert_resource(catalog);
     world.insert_resource(crate::world::server::PreCompiledScripts(loaded.scripts));
     Ok(())
 }

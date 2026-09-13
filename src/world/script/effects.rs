@@ -422,6 +422,14 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
             Ok(())
         },
     );
+    host_fn!(engine, "sound", receiver = "effects", category = "effect",
+        params = ["ship", "id", "source"], summary = "Play one validated authored Viewscreen sound; source is an entity name or empty for a static authored signal.",
+        |sink: &mut EffectSink, ship: ImmutableString, id: ImmutableString, source: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(presentation_action(&ship, crate::gm_presentation::PresentationCue::Sound {
+                id: id.to_string(), source: (!source.is_empty()).then(|| source.to_string()),
+            }).map_err(raise)?); Ok(())
+        },
+    );
     host_fn!(
         engine,
         "clear_presentation",
@@ -2224,6 +2232,13 @@ mod tests {
 
     #[test]
     fn presentation_hosts_use_the_declarative_parser_and_buffer_one_shared_action() {
+        let sound: RawActionEntry = toml::from_str("type = 'presentation'\nentity = 'player'\n[presentation.sound]\nid = 'weapons'\nsource = 'raider'\n").unwrap();
+        let parsed = parse_action_entry(&sound).unwrap();
+        let from_script = run_buffered(
+            r#"fn on_x(ctx) { ctx.effects.sound("player", "weapons", "raider"); }"#,
+            "on_x",
+        );
+        assert!(matches!(&from_script[0], BufferedEffect::Action(action) if action == &parsed));
         let raw: RawActionEntry = toml::from_str("type = 'presentation'\nentity = 'player'\n[presentation.title_card]\ntitle = 'Arrival'\nsubtitle = 'Stand by'\nduration_ticks = 10\n").unwrap();
         assert!(matches!(
             parse_action_entry(&raw).unwrap(),

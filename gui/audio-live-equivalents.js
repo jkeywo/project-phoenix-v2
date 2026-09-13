@@ -1,4 +1,4 @@
-import { t } from './strings.js';
+import { t, wireText } from './strings.js';
 
 /** Live presentation only: one current label for each informative sound family,
  * overwritten/coalesced in place and removed after its live indication. No list,
@@ -39,6 +39,13 @@ export function createAudioLiveEquivalents(doc) {
       else clear('beam');
     }
     if (cue.kind === 'impact') show('impact', t('audio.cue.impact'), true);
+    if (cue.kind === 'authored') {
+      const value = cue.equivalent;
+      if (!value) clear('authored');
+      else show('authored', [wireText(value.meaning), t('sound_cues.source', { source: wireText(value.source) }),
+        t(`sound_cues.urgency_${value.urgency}`), value.bearing == null ? '' : t('sound_cues.bearing', { value: value.bearing }),
+        value.elevation == null ? '' : t('sound_cues.elevation', { value: value.elevation })].filter(Boolean).join(' · '), true);
+    }
     if (cue.kind === 'blaster') {
       const bearing = Math.round((Math.atan2(cue.x, -cue.z) * 180 / Math.PI + 360) % 360) % 360;
       const elevation = Math.round(Math.atan2(cue.y, Math.hypot(cue.x, cue.z)) * 180 / Math.PI);

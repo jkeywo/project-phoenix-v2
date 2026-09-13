@@ -221,6 +221,8 @@ pub struct GmEntityProjectionPayload {
     pub presentation_messages: Vec<crate::gm_presentation::PresentationMessageChoice>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub presentation_cameras: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presentation_sounds: Vec<String>,
     #[serde(
         default,
         skip_serializing_if = "crate::gm_information::ContactInformation::is_empty"
@@ -784,6 +786,7 @@ fn publish_local_projection(
             .unwrap_or_default(),
         presentation_messages: presentation_control.message_choices(),
         presentation_cameras: presentation_control.cameras(),
+        presentation_sounds: presentation_control.sound_choices(),
         presentation_results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::Presentation,
             &action_log,

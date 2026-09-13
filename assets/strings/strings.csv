@@ -3562,3 +3562,8 @@ workshop.test_selection_invalid,Test requires a valid world hull and integer see
 "sound_cues.invalid_direction","Invalid sound equivalent direction refusal","[Definition {id} has invalid bearing or elevation metadata.]"
 "sound_cues.invalid_duplicate","Repeated sound definition identifier refusal","[Definition {id} repeats an existing identifier.]"
 "settings.audio.audition_invalid","Native authored audition refusal","[The local sound definition is invalid or its request is no longer current.]"
+
+server.gm.presentation.sound,GM live sound selector,[Authored sound]
+server.gm.presentation.sound_source,GM live sound optional information source,[Source contact]
+server.gm.presentation.sound_static,GM authored sound without physical source,[Static authored signal]
+server.gm.presentation.play_sound,GM live sound dispatch,[Play sound]

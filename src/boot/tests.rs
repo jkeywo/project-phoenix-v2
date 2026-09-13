@@ -45,6 +45,43 @@ const WORLD_PATH: &str = "boot_test_world.toml";
 /// A minimal, entity-free world that validates clean and carries no scripts.
 const CLEAN_WORLD: &str = "[global]\nseed = 1\n";
 
+#[test]
+fn authored_sound_catalog_is_captured_at_boot_for_headless_and_preloaded_hosts() {
+    use crate::gm_presentation::sound::{LiveSoundCatalog, BUNDLED, PATH};
+    let source = BUNDLED.replace("id = \"weapons\"", "id = \"authored-weapons\"");
+    for ingest in [WorldIngest::FromReader, WorldIngest::HostPreloaded] {
+        crate::content_ledger::reset();
+        let mut plan = plan_for(BootProfile::Headless);
+        plan.world_ingest = ingest;
+        plan.reader = Box::new(MemoryReader::new([
+            (WORLD_PATH, CLEAN_WORLD),
+            (PATH, source.as_str()),
+        ]));
+        let app = build(plan).unwrap();
+        let catalog = app.world().resource::<LiveSoundCatalog>();
+        assert!(catalog.choices().contains(&"authored-weapons".into()));
+        assert!(!catalog.choices().contains(&"weapons".into()));
+        let config =
+            crate::core::codec::encode_room_audio_config(&Default::default(), Some(catalog))
+                .unwrap();
+        assert!(config.contains("authored-weapons"));
+        let captured = crate::content_ledger::snapshot().get(PATH).unwrap();
+        crate::content_ledger::record(PATH, BUNDLED);
+        assert_ne!(crate::content_ledger::snapshot().get(PATH), Some(captured));
+        assert!(catalog.resolve("authored-weapons").is_some());
+        assert_eq!(
+            app.world()
+                .resource::<crate::authoritative::StateCensus>()
+                .get(std::any::type_name::<LiveSoundCatalog>()),
+            Some((
+                crate::authoritative::StateClass::DeferredFold,
+                "t4-audio-live-catalog"
+            ))
+        );
+    }
+    crate::content_ledger::reset();
+}
+
 /// A world whose inline `[script]` block is valid TOML but invalid Rhai, so the
 /// compile produces an erroring finding (the activation gate's trigger) rather than
 /// a `LoadError`.
@@ -425,14 +462,14 @@ fn an_unreadable_world_is_a_load_error_for_every_profile() {
 }
 
 #[test]
-fn host_preloaded_ingest_neither_reads_the_reader_nor_inserts_the_world() {
+fn host_preloaded_ingest_does_not_load_or_insert_the_world() {
     use crate::world::config::WorldConfig;
     crate::content_ledger::reset();
     crate::content_ledger::record("preloaded.toml", "preloaded");
 
-    // A reader carrying nothing: under `FromReader` this is the unreadable-world
-    // load error above. `HostPreloaded` must not consult it at all — the host
-    // (the browser's JS preload) already ingested the world — so the build
+    // A reader carrying no world: under `FromReader` this is an unreadable-world
+    // error. Only the catalog is captured here; browser production reads its
+    // completed cache. The host already ingested the world, so the build
     // succeeds, and boot inserts NEITHER the `WorldConfig` nor the
     // `PreCompiledScripts` (the browser's `WorldPlugin` Startup systems own both).
     let plan = BootPlan {

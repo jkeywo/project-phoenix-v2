@@ -9,10 +9,21 @@ use std::{
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VisualCue {
-    Lifecycle { active: bool },
-    Beam { active: bool },
-    Blaster { x: f32, y: f32, z: f32 },
+    Lifecycle {
+        active: bool,
+    },
+    Beam {
+        active: bool,
+    },
+    Blaster {
+        x: f32,
+        y: f32,
+        z: f32,
+    },
     Impact,
+    Authored {
+        equivalent: Option<crate::sound_cues::Equivalent>,
+    },
 }
 #[derive(Clone)]
 struct CurrentCue {
@@ -30,6 +41,7 @@ struct Current {
     forcefield: Option<crate::audio_config::ForcefieldWire>,
     shot: Option<CurrentCue>,
     impact: Option<CurrentCue>,
+    authored: Option<CurrentCue>,
 }
 #[derive(Clone, Default)]
 pub struct NativeAudioVisual(Arc<Mutex<Current>>);
@@ -42,6 +54,7 @@ impl NativeAudioVisual {
             current.active = active;
             current.shot = None;
             current.impact = None;
+            current.authored = None;
             current.level = None;
         }
         if current.forcefield != input.config.forcefield {
@@ -80,6 +93,19 @@ impl NativeAudioVisual {
             serial: current.serial,
             at: Instant::now(),
             cue: VisualCue::Blaster { x, y, z },
+        });
+    }
+    pub fn authored(&self, equivalent: Option<crate::sound_cues::Equivalent>) {
+        let mut current = self.0.lock().unwrap();
+        current.authored = None;
+        if !current.active {
+            return;
+        }
+        current.serial = current.serial.wrapping_add(1);
+        current.authored = Some(CurrentCue {
+            serial: current.serial,
+            at: Instant::now(),
+            cue: VisualCue::Authored { equivalent },
         });
     }
 }
@@ -123,6 +149,13 @@ impl VisualReader {
             current.impact = None;
         }
         let visible = ready && visible;
+        if current
+            .authored
+            .as_ref()
+            .is_some_and(|cue| now.saturating_duration_since(cue.at) > Duration::from_millis(250))
+        {
+            current.authored = None;
+        }
         let boundary = (current.generation, current.active);
         let reset = self.boundary != Some(boundary) || self.visible != visible;
         self.boundary = Some(boundary);
@@ -139,7 +172,10 @@ impl VisualReader {
         }
         self.beam = Some(beam);
         if visible && current.active && !reset {
-            for cue in [&current.impact, &current.shot].into_iter().flatten() {
+            for cue in [&current.impact, &current.shot, &current.authored]
+                .into_iter()
+                .flatten()
+            {
                 if cue.serial > self.serial {
                     cues.push(cue.cue.clone());
                 }

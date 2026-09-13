@@ -33,6 +33,19 @@ pub struct SoundDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equivalent: Option<Equivalent>,
 }
+impl SoundDefinition {
+    /// Authored listener-relative direction. This never consults hidden truth.
+    pub fn position(&self) -> Option<[f32; 3]> {
+        let equivalent = self.equivalent.as_ref()?;
+        let angle = equivalent.bearing?.to_radians();
+        let pitch = equivalent.elevation.unwrap_or(0.0).to_radians();
+        Some([
+            angle.sin() * pitch.cos(),
+            pitch.sin(),
+            -angle.cos() * pitch.cos(),
+        ])
+    }
+}
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Catalog {

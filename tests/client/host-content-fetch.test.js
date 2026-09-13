@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { registerContentFetch } from '../../gui/host-content-fetch.js';
+import { registerContentFetch, preloadSoundCatalog } from '../../gui/host-content-fetch.js';
 
 function rig(fetcher) {
   let callback;
@@ -15,6 +15,22 @@ function rig(fetcher) {
 }
 
 describe('pre-init and runtime content delivery', () => {
+  it('awaits exact authored catalog bytes and keeps resident overlays', async () => {
+    let release; const pending = new Promise(resolve => { release = resolve; });
+    const bindings = { wasm_preload_world_source: vi.fn(() => null), wasm_push_world_toml: vi.fn() };
+    const fetcher = vi.fn(async () => ({ ok: true, text: () => pending }));
+    const load = preloadSoundCatalog(bindings, fetcher); await Promise.resolve();
+    expect(bindings.wasm_push_world_toml).not.toHaveBeenCalled();
+    const source = '# authored comments\r\nversion = 1\r\n'; release(source); await load;
+    expect(bindings.wasm_push_world_toml).toHaveBeenCalledWith('assets/audio/sound-cues.toml', source);
+    bindings.wasm_preload_world_source.mockReturnValue(source); fetcher.mockClear();
+    await preloadSoundCatalog(bindings, fetcher); expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('refuses missing catalog instead of quietly freezing stock content', async () => {
+    const bindings = { wasm_preload_world_source: () => null, wasm_push_world_toml: vi.fn() };
+    await expect(preloadSoundCatalog(bindings, async () => ({ ok: false, status: 404 }))).rejects.toThrow('HTTP 404');
+    expect(bindings.wasm_push_world_toml).not.toHaveBeenCalled();
+  });
   it('waits for the body, delivers empty scripts as content, then checks completion', async () => {
     let release;
     const body = new Promise(resolve => { release = resolve; });

@@ -7931,6 +7931,7 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {
     window.set_config_request_callback = wasmBindings.set_config_request_callback;
     set_config_request_callback(handleConfigRequest);
     window.registerContentFetch(wasmBindings, settleContentPreload);
+    await window.preloadSoundCatalog(wasmBindings);
 
     // Step 2: Fetch and load the unified world TOML (map + scenario in one file)
     let worldToml = wasmBindings.wasm_preload_world_source(scenarioPath);
@@ -8005,6 +8006,8 @@ function settleContentPreload() {
   let _finishInitCalled = false;
 function finishInit() {
   if (_finishInitCalled || !wasmBindings.wasm_is_preload_complete()) return;
+  try { wasmBindings.wasm_prepare_sound_catalog(); }
+  catch (error) { showFatalError(String(error)); return; }
   _finishInitCalled = true;
   // The world is now being loaded into the (one-shot) WASM/Bevy instance.
   // A later Game Over → return re-enters driveWorldLoad, which checks this to

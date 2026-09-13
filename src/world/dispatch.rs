@@ -601,9 +601,27 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
     match action {
         TriggerAction::Presentation { ship, cue } => {
             if let Some(uuid) = context.name_to_uuid.get(ship) {
+                let mut cue = cue.clone();
+                if let crate::gm_presentation::PresentationCue::Sound {
+                    source: Some(source),
+                    ..
+                } = &mut cue
+                {
+                    let Some(uuid) = context
+                        .name_to_uuid
+                        .get(source)
+                        .or_else(|| context.name_to_uuid.values().find(|uuid| *uuid == source))
+                    else {
+                        out.warnings.push(format!(
+                            "presentation names unknown sound source '{source}'"
+                        ));
+                        return out;
+                    };
+                    *source = uuid.clone();
+                }
                 out.commands.push(ActionCmd::Presentation {
                     ship: uuid.clone(),
-                    cue: cue.clone(),
+                    cue,
                 });
             } else {
                 out.warnings.push(format!(

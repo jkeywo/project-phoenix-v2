@@ -994,6 +994,7 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
         presentation: Default::default(),
         presentation_results: Vec::new(),
         presentation_messages: Vec::new(),
+        presentation_sounds: Vec::new(),
         presentation_cameras: Default::default(),
         system_controls: Default::default(),
         system_results: Default::default(),

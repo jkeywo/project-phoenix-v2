@@ -18,6 +18,7 @@ mod mono_tests;
 pub struct RoomInput {
     pub lifecycle: AudioLifecycleState,
     pub config: AudioConfigPayload,
+    pub authored: Vec<crate::sound_cues::SoundDefinition>,
     pub red_alert: bool,
     pub thrust: f32,
     pub menu: bool,
@@ -38,6 +39,12 @@ pub struct PreparedBlaster {
 }
 pub struct PreparedComputer {
     pcm: Arc<Pcm>,
+    gain: f32,
+    important: bool,
+}
+pub struct PreparedAuthored {
+    pcm: Arc<Pcm>,
+    category: &'static str,
     gain: f32,
     important: bool,
 }
@@ -84,6 +91,7 @@ impl RoomPlayer {
                     }),
             );
         }
+        paths.extend(input.authored.iter().map(|cue| cue.file.as_str()));
         self.cache.retain(|path, _| paths.contains(&path.as_str()));
         self.failures.clear();
         for path in &paths {
@@ -121,6 +129,7 @@ impl RoomPlayer {
         let boundary = self.previous.as_ref().is_none_or(|previous| {
             previous.lifecycle.generation != input.lifecycle.generation
                 || previous.config != input.config
+                || previous.authored != input.authored
         });
         if boundary || !ready {
             self.mixer.lock().unwrap().stop_all();
@@ -276,6 +285,58 @@ impl RoomPlayer {
                 mixer.important_cue("computer", prepared.pcm, prepared.gain);
             } else {
                 mixer.cue("computer", prepared.pcm, "alerts", prepared.gain, None);
+            }
+        }
+    }
+    pub fn prepare_authored(
+        &mut self,
+        input: &RoomInput,
+        definition: &crate::sound_cues::SoundDefinition,
+        deadline: Instant,
+    ) -> Option<PreparedAuthored> {
+        if !input.authored.contains(definition)
+            || !input.lifecycle.running
+            || input.lifecycle.suspended
+        {
+            return None;
+        }
+        let category = match definition.category.as_str() {
+            "music" => "music",
+            "ambience" => "ambience",
+            "effects" => "effects",
+            "alerts" => "alerts",
+            "interface" => "interface",
+            _ => return None,
+        };
+        let mut pcm = self.asset(&definition.file)?;
+        if let Some(position) = definition.position() {
+            pcm = super::hrtf::render(&pcm, position, Some(deadline))?;
+        }
+        Some(PreparedAuthored {
+            pcm,
+            category,
+            gain: definition.volume,
+            important: category == "alerts"
+                && definition
+                    .equivalent
+                    .as_ref()
+                    .is_some_and(|value| matches!(value.urgency.as_str(), "warning" | "critical")),
+        })
+    }
+    pub fn play_authored(&mut self, input: &RoomInput, ready: bool, prepared: PreparedAuthored) {
+        if ready && input.lifecycle.running && !input.lifecycle.suspended {
+            let mut mixer = self.mixer.lock().unwrap();
+            // One current authored occurrence; replacement never creates a queue.
+            if prepared.important {
+                mixer.important_cue("authored", prepared.pcm, prepared.gain);
+            } else {
+                mixer.cue(
+                    "authored",
+                    prepared.pcm,
+                    prepared.category,
+                    prepared.gain,
+                    None,
+                );
             }
         }
     }

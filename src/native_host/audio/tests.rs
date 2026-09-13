@@ -140,6 +140,7 @@ fn input() -> RoomInput {
             suspended: false,
         },
         config: build_audio_payload(Some(&ship()), Some(&world())),
+        authored: Vec::new(),
         red_alert: false,
         thrust: 0.0,
         menu: false,

@@ -71,7 +71,7 @@ impl Default for NativeAudioState {
             mix: AudioMix::default(),
             mono: false,
             reduced_range: false,
-            categories: vec!["music", "ambience", "effects", "alerts"],
+            categories: vec!["music", "ambience", "effects", "alerts", "interface"],
             status: "loading",
             test: "idle",
             persistence: "unavailable",
@@ -95,9 +95,20 @@ struct Control {
     alert_at: Option<Instant>,
     blaster: Option<(Instant, [f32; 3])>,
     computer: Option<(Instant, String)>,
+    authored: Option<(Instant, crate::gm_presentation::sound::LiveSoundCue)>,
+    authored_serial: u64,
     quit: bool,
 }
 impl Control {
+    fn take_authored(
+        &mut self,
+        now: Instant,
+    ) -> Option<crate::gm_presentation::sound::LiveSoundCue> {
+        self.authored.take().and_then(|(at, cue)| {
+            (now.saturating_duration_since(at) <= std::time::Duration::from_millis(250))
+                .then_some(cue)
+        })
+    }
     fn take_computer(&mut self, now: Instant) -> Option<String> {
         self.computer.take().and_then(|(at, severity)| {
             (now.saturating_duration_since(at) <= std::time::Duration::from_millis(250))
@@ -203,6 +214,8 @@ impl NativeRoomAudio {
             alert_at: None,
             blaster: None,
             computer: None,
+            authored: None,
+            authored_serial: 0,
             quit: false,
         }));
         let player = RoomPlayer::default();
@@ -269,6 +282,7 @@ impl NativeRoomAudio {
         self.visuals.update(&input);
         if control.input.lifecycle.generation != input.lifecycle.generation
             || control.input.config != input.config
+            || control.input.authored != input.authored
             || input.lifecycle.suspended
         {
             self.mixer.lock().unwrap().stop_all();
@@ -276,6 +290,10 @@ impl NativeRoomAudio {
             control.alert_at = None;
             control.blaster = None;
             control.computer = None;
+            control.authored = None;
+            if control.input.lifecycle.generation != input.lifecycle.generation {
+                control.authored_serial = 0;
+            }
         } else if control.input.red_alert != input.red_alert {
             control.alert_at = input.red_alert.then(Instant::now);
         }
@@ -306,6 +324,37 @@ impl NativeRoomAudio {
                     control.computer = Some((Instant::now(), severity.to_owned()));
                 }
             }
+        }
+    }
+    pub fn authored_sound(&self, cue: crate::gm_presentation::sound::LiveSoundCue) {
+        let mut control = self.control.lock().unwrap();
+        if cue.kind != "authored"
+            || cue.generation != control.input.lifecycle.generation
+            || cue.occurrence <= control.authored_serial
+        {
+            return;
+        }
+        // Consume before readiness/mute checks: restoring an output or unmuting
+        // must never turn a repeated delivery into catch-up.
+        control.authored_serial = cue.occurrence;
+        if !control.input.lifecycle.running
+            || control.input.lifecycle.suspended
+            || !control.input.authored.contains(&cue.definition)
+        {
+            return;
+        }
+        self.visuals.authored(cue.definition.equivalent.clone());
+        self.mixer.lock().unwrap().stop("authored");
+        control.authored = None;
+        if self
+            .mixer
+            .lock()
+            .unwrap()
+            .mix
+            .gain(&cue.definition.category, cue.definition.volume)
+            > 0.0
+        {
+            control.authored = Some((Instant::now(), cue));
         }
     }
     pub fn command(&mut self, record: &HostLobbyRecord) {
@@ -370,6 +419,16 @@ impl NativeRoomAudio {
                 if state.mix.gain("alerts", 1.0) == 0.0 {
                     self.control.lock().unwrap().computer = None;
                 }
+                let mut control = self.control.lock().unwrap();
+                if control.authored.as_ref().is_some_and(|(_, cue)| {
+                    state
+                        .mix
+                        .gain(&cue.definition.category, cue.definition.volume)
+                        == 0.0
+                }) {
+                    control.authored = None;
+                }
+                drop(control);
                 state.persistence = if self.preferences.as_ref().is_some_and(|store| {
                     store
                         .save_audio_comfort(
@@ -444,6 +503,7 @@ impl NativeRoomAudio {
                         control.alert_at = None;
                         control.blaster = None;
                         control.computer = None;
+                        control.authored = None;
                         self.mixer.lock().unwrap().stop_all();
                         self.private.room_output(None);
                         self.profile = profile;
@@ -475,6 +535,7 @@ impl NativeRoomAudio {
                 control.alert_at = None;
                 control.blaster = None;
                 control.computer = None;
+                control.authored = None;
                 self.mixer.lock().unwrap().stop_all();
             }
             HostLobbyRecord::TestAudioOutput => {
@@ -502,6 +563,8 @@ impl Drop for NativeRoomAudio {
 }
 
 pub struct NativeRoomAudioPlugin;
+#[cfg(test)]
+mod authored_tests;
 impl Plugin for NativeRoomAudioPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<crate::server::audio::ServerAudioPlugin>() {
@@ -509,7 +572,9 @@ impl Plugin for NativeRoomAudioPlugin {
         }
         app.add_systems(
             PostUpdate,
-            update_room.after(crate::server::audio_lifecycle::publish_audio_lifecycle),
+            update_room
+                .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
+                .after(crate::gm_presentation::sound::publish),
         );
         app.add_systems(PostUpdate, attach_private_endpoints);
         app.declare_state::<NativeRoomAudio>(StateClass::Presentation, "native-room-audio");
@@ -541,6 +606,7 @@ fn update_room(
     forcefield: Option<Res<crate::server::audio::ForcefieldAudioState>>,
     mut current: Local<Option<crate::core::messages::ViewscreenHudState>>,
     bridge: Option<Res<HostLobbyBridgeResource>>,
+    catalog: Option<Res<crate::gm_presentation::sound::LiveSoundCatalog>>,
 ) {
     let Some(audio) = audio else {
         return;
@@ -562,6 +628,13 @@ fn update_room(
     audio.apply_input(RoomInput {
         lifecycle: lifecycle.state.clone(),
         config,
+        authored: if running {
+            catalog
+                .as_deref()
+                .map_or_else(Vec::new, |catalog| catalog.room())
+        } else {
+            Vec::new()
+        },
         menu: matches!(phase.get(), GamePhase::Lobby | GamePhase::Loading),
         red_alert: current.as_ref().is_some_and(|hud| hud.red_alert),
         thrust: current.as_ref().map_or(0.0, |hud| hud.engine_thrust),
@@ -579,6 +652,10 @@ fn update_room(
             }),
     });
     for event in cues.read() {
+        if let Ok(cue) = codec::decode_live_sound_cue(&event.json) {
+            audio.authored_sound(cue);
+            continue;
+        }
         if let Ok(cue) = codec::decode_native_audio_cue(&event.json) {
             if cue.kind == "blaster" {
                 audio.blaster([cue.x, cue.y, cue.z]);

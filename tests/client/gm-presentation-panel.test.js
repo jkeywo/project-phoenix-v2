@@ -15,6 +15,22 @@ function setup() {
   return { panel, submit, click, scheduled };
 }
 describe('shared presentation GM controls', () => {
+  it('sends one authored cue through the same typed action and retains source selection during refresh', () => {
+    const { panel, submit, click } = setup();
+    const projection = { entities: [{ kind: 'player_ship', entity_id: 'ship-a', name: 'Horizon' },
+      { kind: 'npc', entity_id: 'contact', name: 'Freighter' }], presentation_sounds: ['weapons'] };
+    panel.update(projection);
+    const source = document.getElementById('gm-presentation-sound_source'); source.value = 'contact'; source.focus();
+    const option = source.selectedOptions[0]; panel.update(projection);
+    expect(source.selectedOptions[0]).toBe(option); expect(document.activeElement).toBe(source);
+    click('play_sound'); click('play_sound');
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledWith({ operator_id: 'Ada', correlation: 'cue-1', ship: 'ship-a', cue: { sound: { id: 'weapons', source: 'contact' } } });
+    panel.update({ ...projection, presentation_results: [{ operator_id: 'Ada', correlation: 'cue-1', outcome: 'refused' }] });
+    expect(document.querySelector('[role=status]').textContent).toBe('refused');
+    panel.update({ ...projection, presentation_sounds: [] }); click('play_sound');
+    expect(submit).toHaveBeenCalledOnce();
+  });
   it('submits typed absolute cues once and settles only the matching canonical result', () => {
     const { panel, submit, click } = setup();
     document.getElementById('gm-presentation-view').value = 'sensors_radar';

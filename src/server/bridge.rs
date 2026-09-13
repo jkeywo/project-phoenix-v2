@@ -863,9 +863,8 @@ pub fn wasm_init() {
         // target and the test target and so has to decide at runtime.
         native_surface: crate::boot::NativeRenderSurface::Contract,
     };
-    // `HostPreloaded` neither reads nor validates a world, so `ingest_world` cannot
-    // return `Err` for it — this `expect` documents an unreachable, not a runtime
-    // failure mode the browser could actually hit.
+    // Completed catalog preload was validated before this call. Ingest captures
+    // the same immutable bytes without starting a late fetch.
     let mut app =
         crate::boot::build(plan).expect("browser boot composes a HostPreloaded plan infallibly");
 
@@ -1041,6 +1040,7 @@ pub fn wasm_init() {
             flush_host_channels
                 .after(crate::gm_projection::HeldGmProjection)
                 .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
+                .after(crate::gm_presentation::sound::publish)
                 .after(crate::gm_action::publish_session_projection)
                 .after(crate::gm_event::publish_mission_projection)
                 .after(crate::gm_spawn::publish_spawn_projection)
@@ -2604,6 +2604,11 @@ fn browser_resume_versions(
     resolver: &dyn crate::world::script::load::ScriptResolver,
 ) -> Result<vellum_save::Versions, String> {
     if !crate::content_ledger::is_frozen() {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let (_, source) = crate::gm_presentation::sound::LiveSoundCatalog::preloaded()?;
+            crate::content_ledger::record(crate::gm_presentation::sound::PATH, &source);
+        }
         let raw: toml::Value =
             toml::from_str(world_toml).map_err(|error: toml::de::Error| error.to_string())?;
         let (sources, findings) =
@@ -3403,6 +3408,17 @@ pub fn wasm_preload_world_source(path: String) -> Option<String> {
         crate::entities::config_cache::WorldFetchState::Ready(source) => Some(source),
         _ => None,
     }
+}
+
+/// Seal the same preloaded sound source before a pre-init save version check.
+/// World ingest captures it again into its immutable Resource without I/O.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_prepare_sound_catalog() -> Result<(), JsValue> {
+    let (_, source) = crate::gm_presentation::sound::LiveSoundCatalog::preloaded()
+        .map_err(|error| JsValue::from_str(&error))?;
+    crate::content_ledger::record(crate::gm_presentation::sound::PATH, &source);
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]

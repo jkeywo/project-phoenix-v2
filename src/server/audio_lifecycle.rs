@@ -87,6 +87,11 @@ pub fn publish_audio_lifecycle(world: &mut World) {
     {
         cues.clear();
     }
+    if let Some(mut requests) =
+        world.get_resource_mut::<Messages<crate::gm_presentation::sound::LiveSoundRequest>>()
+    {
+        requests.clear();
+    }
     crate::server::audio::rebase_audio_presentation(world);
     crate::server::viewscreen_border::rebase_hud_state(world);
 }
@@ -104,6 +109,7 @@ mod tests {
             .init_resource::<GmLiveRestore>()
             .init_resource::<MeshRestoreArm>()
             .add_message::<AudioCueEvent>()
+            .add_message::<crate::gm_presentation::sound::LiveSoundRequest>()
             .insert_resource(State::new(GamePhase::InProgress))
             .add_systems(Update, publish_audio_lifecycle);
         app.update();
@@ -121,6 +127,14 @@ mod tests {
             generation
         );
         let digest = crate::sim_digest::world_digest(app.world());
+        app.world_mut()
+            .write_message(crate::gm_presentation::sound::LiveSoundRequest {
+                ship: "alpha".into(),
+                source: None,
+                definition: crate::gm_presentation::sound::LiveSoundCatalog::default()
+                    .resolve("weapons")
+                    .unwrap(),
+            });
         app.world_mut()
             .resource_mut::<Messages<AudioCueEvent>>()
             .write(AudioCueEvent {
@@ -141,6 +155,10 @@ mod tests {
         assert!(state.running && state.suspended);
         assert_eq!(state.generation, generation + 1);
         assert!(app.world().resource::<Messages<AudioCueEvent>>().is_empty());
+        assert!(app
+            .world()
+            .resource::<Messages<crate::gm_presentation::sound::LiveSoundRequest>>()
+            .is_empty());
         assert_eq!(crate::sim_digest::world_digest(app.world()), digest);
         // Returning to Idle ends the hold; the real driver's Restored/RolledBack
         // -> explicit Resume path is exercised by tests/gm_restore.rs.

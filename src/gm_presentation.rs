@@ -6,6 +6,9 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::core::messages::{CameraView, ViewMode};
+pub mod sound;
+#[cfg(test)]
+mod sound_tests;
 
 /// Externally tagged: unlike the client ViewMode DTO, this survives postcard
 /// journal/snapshot encoding without a deserialize_any requirement.
@@ -46,7 +49,7 @@ impl PresentationView {
     }
 }
 
-/// Every duration is authored explicitly in simulation ticks. Pausing the
+/// View and card durations are authored explicitly in simulation ticks. Pausing the
 /// mission holds the cue; reconnect/restore shows only its still-live state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -66,6 +69,10 @@ pub enum PresentationCue {
         duration_ticks: u32,
     },
     ClearCard,
+    Sound {
+        id: String,
+        source: Option<String>,
+    },
 }
 
 impl PresentationCue {
@@ -93,6 +100,15 @@ impl PresentationCue {
                 duration_ticks,
             } => *duration_ticks > 0 && id(message),
             Self::ReleaseView | Self::ClearCard => true,
+            Self::Sound { id: cue, source } => {
+                !cue.is_empty()
+                    && cue.len() <= 512
+                    && cue.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    })
+                    && !cue.starts_with('-')
+                    && source.as_deref().is_none_or(id)
+            }
         }
     }
 }
@@ -211,6 +227,8 @@ fn apply(
             })
         }
         PresentationCue::ClearCard => next.card = None,
+        // Sound is an occurrence. No persistent view/card state is invented.
+        PresentationCue::Sound { .. } => return Ok(true),
     }
     let changed = next != before;
     if next == ShipPresentation::default() {
@@ -223,6 +241,9 @@ fn apply(
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct PresentationControl<'w, 's> {
+    catalog: Option<Res<'w, sound::LiveSoundCatalog>>,
+    entities: Query<'w, 's, &'static crate::entities::spawner::EntityUuid>,
+    commands: Commands<'w, 's>,
     pub inbox: Option<Res<'w, crate::comms::server::CommsInboxRes>>,
     markers: Query<
         'w,
@@ -257,12 +278,41 @@ impl PresentationControl<'_, '_> {
             .collect()
     }
     pub fn apply(
-        &self,
+        &mut self,
         state: &mut PresentationState,
         ship: &str,
         cue: &PresentationCue,
         tick: u64,
     ) -> Result<bool, crate::gm_action::GmActionRefusalReason> {
+        if !cue.valid() {
+            return Err(crate::gm_action::GmActionRefusalReason::InvalidAction);
+        }
+        if let PresentationCue::Sound { id, source } = cue {
+            let definition = self
+                .catalog
+                .as_deref()
+                .and_then(|catalog| catalog.resolve(id))
+                .ok_or(crate::gm_action::GmActionRefusalReason::InvalidAction)?;
+            if source
+                .as_ref()
+                .is_some_and(|source| !self.entities.iter().any(|entity| entity.0 == *source))
+            {
+                return Err(crate::gm_action::GmActionRefusalReason::UnknownEntity);
+            }
+            let request = sound::LiveSoundRequest {
+                ship: ship.into(),
+                source: source.clone(),
+                definition,
+            };
+            self.commands.queue(move |world: &mut World| {
+                if let Some(mut requests) =
+                    world.get_resource_mut::<Messages<sound::LiveSoundRequest>>()
+                {
+                    requests.write(request);
+                }
+            });
+            return Ok(true);
+        }
         let cameras = self.cameras();
         apply(
             state,
@@ -290,6 +340,11 @@ impl PresentationControl<'_, '_> {
                     .collect()
             })
             .unwrap_or_default()
+    }
+    pub fn sound_choices(&self) -> Vec<String> {
+        self.catalog
+            .as_deref()
+            .map_or_else(Vec::new, sound::LiveSoundCatalog::choices)
     }
 }
 
@@ -331,7 +386,7 @@ pub fn apply_scenario_command(
         ),
     >,
     tick: Option<Res<crate::sim_tick::SimTick>>,
-    control: PresentationControl,
+    mut control: PresentationControl,
 ) {
     let Some(content) = content.as_deref_mut() else {
         return;

@@ -158,6 +158,25 @@ pub fn encode_audio_config(
     serde_json::to_string(p)
 }
 
+/// The room's immutable authored cue definitions travel with its normal config,
+/// so providers can prepare assets before a live occurrence without queuing it.
+pub fn encode_room_audio_config(
+    p: &crate::audio_config::AudioConfigPayload,
+    catalog: Option<&crate::gm_presentation::sound::LiveSoundCatalog>,
+) -> Result<String, serde_json::Error> {
+    #[derive(serde::Serialize)]
+    struct Payload<'a> {
+        #[serde(flatten)]
+        audio: &'a crate::audio_config::AudioConfigPayload,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        authored_sounds: Vec<crate::sound_cues::SoundDefinition>,
+    }
+    serde_json::to_string(&Payload {
+        audio: p,
+        authored_sounds: catalog.map_or_else(Vec::new, |catalog| catalog.room()),
+    })
+}
+
 /// Decode the offline Workshop's explicit, data-only dependency snapshot.
 pub fn decode_workshop_dependencies(
     s: &str,
@@ -205,6 +224,16 @@ pub fn decode_workshop_patch(
 /// listener-relative — see `audio_config::listener_relative`.
 pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {
     serde_json::to_string(c)
+}
+pub fn encode_live_sound_cue(
+    cue: &crate::gm_presentation::sound::LiveSoundCue,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(cue)
+}
+pub fn decode_live_sound_cue(
+    json: &str,
+) -> Result<crate::gm_presentation::sound::LiveSoundCue, serde_json::Error> {
+    serde_json::from_str(json)
 }
 
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]

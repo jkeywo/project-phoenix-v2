@@ -25,6 +25,7 @@ export function createWorkshopRuntime({
     return pending;
   }
   return {
+    async dependencies() { return JSON.parse((await ready()).dependencies); },
     async inspect(source, documentPath) {
       const { runtime } = await ready();
       return JSON.parse(runtime.wasm_workshop_fields(source, documentPath));

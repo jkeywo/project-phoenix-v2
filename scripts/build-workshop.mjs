@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const out = path.resolve(root, process.argv[2] || 'dist');
 const editorModules = [
-  'workshop-document', 'workshop-runtime', 'workshop-recovery', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
+  'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'undo-stack', 'validation', 'entity-includes', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
 ];

@@ -739,7 +739,7 @@ fn map_script_finding(f: WorldFinding) -> WorldFinding {
 /// import/module resolve, the wall clock) is `denied-script-capability`. Either
 /// is a definite error, so acceptance (gated on [`has_error`]) rejects the whole
 /// pack.
-fn validate_pack_scripts(files: &BTreeMap<String, String>) -> Vec<WorldFinding> {
+pub(crate) fn validate_pack_scripts(files: &BTreeMap<String, String>) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
     // One source set, keyed by path (a sibling `.rhai` is both a pack file AND
     // the target of a world's `script = "..."`).

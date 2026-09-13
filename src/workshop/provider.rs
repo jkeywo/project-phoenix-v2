@@ -1,0 +1,527 @@
+//! Selected native Authoring roots. The private host creates this capability;
+//! no request can select, expand or replace its filesystem authority.
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use super::{document, WorkshopDependencies, WorkshopValidation};
+
+pub type Files = BTreeMap<String, Vec<u8>>;
+const MAX_BYTES: usize = 512 * 1024 * 1024;
+const MAX_FILES: usize = 16_384;
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceKind {
+    Project,
+    Mod,
+}
+
+#[derive(Debug)]
+pub struct WorkshopRequest {
+    pub id: u64,
+    pub operation: Operation,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Operation {
+    Load,
+    Validate {
+        files: Files,
+    },
+    Save {
+        files: Files,
+        expected_revision: String,
+    },
+    Inspect {
+        source: String,
+        document_path: String,
+    },
+    Patch {
+        source: String,
+        patch: document::Patch,
+    },
+    RecoveryLoad,
+    RecoverySave {
+        record: String,
+        expected_revision: String,
+    },
+    RecoveryClear,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorkshopResponse {
+    pub id: u64,
+    #[serde(flatten)]
+    pub result: Response,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum Response {
+    Loaded {
+        kind: WorkspaceKind,
+        revision: String,
+        files: Files,
+    },
+    Validated {
+        report: WorkshopValidation,
+    },
+    Saved {
+        revision: String,
+    },
+    Fields {
+        fields: Vec<document::Field>,
+    },
+    Patched {
+        source: String,
+    },
+    Recovery {
+        recovery: Option<RecoveryRecord>,
+    },
+    Done,
+    Refused {
+        message: String,
+        report: Option<WorkshopValidation>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveryRecord {
+    pub revision: String,
+    pub record: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Transaction {
+    root: String,
+    before: BTreeMap<String, Option<Vec<u8>>>,
+    after: BTreeMap<String, Option<Vec<u8>>>,
+}
+
+/// Every operation is synchronous and serialized by the private surface owner.
+/// Holds the OS claim for this selected root until the capability is dropped.
+pub struct NativeWorkshopProvider {
+    root: PathBuf,
+    private: PathBuf,
+    kind: WorkspaceKind,
+    dependencies: WorkshopDependencies,
+    baseline: Files,
+    revision: String,
+    _claim: File,
+}
+
+impl NativeWorkshopProvider {
+    pub fn open(
+        kind: WorkspaceKind,
+        root: impl AsRef<Path>,
+        recovery_dir: impl AsRef<Path>,
+        dependencies: WorkshopDependencies,
+    ) -> Result<Self, String> {
+        let root = fs::canonicalize(root).map_err(io_error)?;
+        if !root.is_dir() {
+            return Err("Selected Workshop root is not a directory".into());
+        }
+        let key = format!(
+            "{:016x}",
+            vellum_digest::fnv1a(root.to_string_lossy().as_bytes())
+        );
+        let private = recovery_dir.as_ref().join(key);
+        fs::create_dir_all(&private).map_err(io_error)?;
+        let claim = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(private.join("workspace.lock"))
+            .map_err(io_error)?;
+        claim
+            .try_lock()
+            .map_err(|_| "This Workshop root is already open".to_string())?;
+        let mut provider = Self {
+            root,
+            private,
+            kind,
+            dependencies,
+            baseline: Files::new(),
+            revision: String::new(),
+            _claim: claim,
+        };
+        provider.finish_transaction()?;
+        provider.baseline = provider.read_files()?;
+        provider.revision = revision(&provider.baseline);
+        Ok(provider)
+    }
+
+    /// The host's embedded bridge is the only caller. A delivered browser page
+    /// has no endpoint for this function and can never create the capability.
+    pub fn handle_json(&mut self, json: &str) -> String {
+        let response = if json.len() > MAX_BYTES.saturating_mul(4) {
+            WorkshopResponse {
+                id: 0,
+                result: refused("Workshop request is too large"),
+            }
+        } else {
+            match crate::core::codec::decode_workshop_request(json) {
+                Ok(request) => self.handle(request),
+                Err(message) => WorkshopResponse {
+                    id: 0,
+                    result: refused(message),
+                },
+            }
+        };
+        crate::core::codec::encode_workshop_response(&response)
+            .expect("Workshop responses contain only finite source data")
+    }
+
+    pub fn handle(&mut self, request: WorkshopRequest) -> WorkshopResponse {
+        let result = self.apply(request.operation).unwrap_or_else(refused);
+        WorkshopResponse {
+            id: request.id,
+            result,
+        }
+    }
+
+    fn apply(&mut self, operation: Operation) -> Result<Response, String> {
+        Ok(match operation {
+            Operation::Load => Response::Loaded {
+                kind: self.kind,
+                revision: self.revision.clone(),
+                files: self.baseline.clone(),
+            },
+            Operation::Validate { files } => {
+                self.check_files(&files)?;
+                Response::Validated {
+                    report: self.validate(&files),
+                }
+            }
+            Operation::Save {
+                files,
+                expected_revision,
+            } => {
+                self.check_files(&files)?;
+                if expected_revision != self.revision || self.read_files()? != self.baseline {
+                    return Err("Workshop source changed on disk. Reopen it before saving; the draft is retained.".into());
+                }
+                let report = self.validate(&files);
+                if !report.accepted {
+                    return Ok(Response::Refused {
+                        message: "Runtime validation refused the save".into(),
+                        report: Some(report),
+                    });
+                }
+                let after: BTreeMap<_, _> = files
+                    .keys()
+                    .chain(self.baseline.keys())
+                    .filter(|path| self.baseline.get(*path) != files.get(*path))
+                    .map(|path| (path.clone(), files.get(path).cloned()))
+                    .collect();
+                if !after.is_empty() {
+                    let before = after
+                        .keys()
+                        .map(|path| (path.clone(), self.baseline.get(path).cloned()))
+                        .collect();
+                    let transaction = Transaction {
+                        root: self.root.to_string_lossy().into_owned(),
+                        before,
+                        after,
+                    };
+                    let text = crate::core::codec::encode_workshop_transaction(&transaction)?;
+                    atomic_write(&self.private.join("transaction.json"), text.as_bytes())?;
+                    // The durable intent precedes every replacement. A crash or
+                    // IO failure resumes this exact validated save at next open.
+                    self.finish_transaction()?;
+                }
+                self.baseline = files;
+                self.revision = revision(&self.baseline);
+                Response::Saved {
+                    revision: self.revision.clone(),
+                }
+            }
+            Operation::Inspect {
+                source,
+                document_path,
+            } => Response::Fields {
+                fields: document::fields(&source, &document_path)?,
+            },
+            Operation::Patch { source, patch } => Response::Patched {
+                source: document::patch(&source, &patch)?,
+            },
+            Operation::RecoveryLoad => {
+                let recovery = read_optional(&self.private.join("draft.json"))?
+                    .map(|bytes| crate::core::codec::decode_workshop_recovery(&bytes))
+                    .transpose()?;
+                Response::Recovery { recovery }
+            }
+            Operation::RecoverySave {
+                record,
+                expected_revision,
+            } => {
+                if record.len() > MAX_BYTES {
+                    return Err("Workshop recovery record is too large".into());
+                }
+                let recovery = RecoveryRecord {
+                    record,
+                    revision: expected_revision,
+                };
+                atomic_write(
+                    &self.private.join("draft.json"),
+                    crate::core::codec::encode_workshop_recovery(&recovery)?.as_bytes(),
+                )?;
+                Response::Done
+            }
+            Operation::RecoveryClear => {
+                remove_optional(&self.private.join("draft.json"))?;
+                Response::Done
+            }
+        })
+    }
+
+    fn validate(&self, files: &Files) -> WorkshopValidation {
+        match self.kind {
+            WorkspaceKind::Project => super::validate_project(files),
+            WorkspaceKind::Mod => match super::archive::store_zip(files) {
+                Ok(bytes) => super::validate_pack(&bytes, &self.dependencies),
+                Err(message) => {
+                    let mut report = WorkshopValidation::default();
+                    report.error("archive-invalid", "scenarios.toml", message);
+                    report
+                }
+            },
+        }
+    }
+
+    fn check_files(&self, files: &Files) -> Result<(), String> {
+        if files.len() > MAX_FILES || files.values().map(Vec::len).sum::<usize>() > MAX_BYTES {
+            return Err("Workshop source bundle is too large".into());
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for path in files.keys() {
+            if !allowed_path(self.kind, path) {
+                return Err(format!("Unsupported Workshop source path: {path}"));
+            }
+            if !names.insert(path.to_ascii_lowercase()) {
+                return Err(format!("Duplicate Workshop source path: {path}"));
+            }
+            if self.resolve(path)?.is_dir() {
+                return Err(format!("Workshop source path names a directory: {path}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn read_files(&self) -> Result<Files, String> {
+        let mut files = Files::new();
+        self.walk(&self.root, &mut files)?;
+        self.check_files(&files)?;
+        Ok(files)
+    }
+
+    fn walk(&self, directory: &Path, files: &mut Files) -> Result<(), String> {
+        for entry in fs::read_dir(directory).map_err(io_error)? {
+            let entry = entry.map_err(io_error)?;
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(&self.root)
+                .map_err(io_error)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            // The project root is explicit authority over authored content,
+            // never over code, git metadata or endpoint-private files.
+            if entry.file_type().map_err(io_error)?.is_dir() {
+                if relative == "assets" || relative.starts_with("assets/") {
+                    self.resolve(&relative)?;
+                    self.walk(&path, files)?;
+                }
+            } else if allowed_path(self.kind, &relative) {
+                self.resolve(&relative)?;
+                let size = entry.metadata().map_err(io_error)?.len();
+                if size > MAX_BYTES as u64 {
+                    return Err("Workshop source member is too large".into());
+                }
+                files.insert(relative, fs::read(path).map_err(io_error)?);
+                if files.len() > MAX_FILES
+                    || files.values().map(Vec::len).sum::<usize>() > MAX_BYTES
+                {
+                    return Err("Workshop source bundle is too large".into());
+                }
+            } else if entry.file_type().map_err(io_error)?.is_symlink()
+                && relative.starts_with("assets")
+            {
+                return Err(format!(
+                    "Linked Workshop paths are not supported: {relative}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn resolve(&self, relative: &str) -> Result<PathBuf, String> {
+        if !safe_path(relative) {
+            return Err(format!("Invalid Workshop path: {relative}"));
+        }
+        let mut path = self.root.clone();
+        for component in relative.split('/') {
+            path.push(component);
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink()
+                        || !fs::canonicalize(&path)
+                            .map_err(io_error)?
+                            .starts_with(&self.root)
+                    {
+                        return Err(format!(
+                            "Linked Workshop paths are not supported: {relative}"
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error(error)),
+            }
+        }
+        Ok(path)
+    }
+
+    fn finish_transaction(&mut self) -> Result<(), String> {
+        let path = self.private.join("transaction.json");
+        let Some(bytes) = read_optional(&path)? else {
+            return Ok(());
+        };
+        let transaction = crate::core::codec::decode_workshop_transaction(&bytes)?;
+        if transaction.root != self.root.to_string_lossy()
+            || transaction.before.len() != transaction.after.len()
+        {
+            return Err("Invalid Workshop save recovery record".into());
+        }
+        self.check_files(
+            &transaction
+                .after
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone().unwrap_or_default()))
+                .collect(),
+        )?;
+        // Check the whole transaction before touching any file, including when
+        // resuming a save which replaced only a prefix before a hard shutdown.
+        for (name, after) in &transaction.after {
+            let before = transaction
+                .before
+                .get(name)
+                .ok_or("Invalid Workshop save recovery record")?;
+            let current = read_optional(&self.resolve(name)?)?;
+            if &current != after && &current != before {
+                return Err(format!(
+                    "Workshop save recovery conflicts with an external edit: {name}"
+                ));
+            }
+        }
+        for (name, after) in &transaction.after {
+            let target = self.resolve(name)?;
+            if &read_optional(&target)? != after {
+                match after {
+                    Some(bytes) => atomic_write(&target, bytes)?,
+                    None => remove_optional(&target)?,
+                }
+            }
+        }
+        remove_optional(&path)
+    }
+}
+
+fn refused(message: impl Into<String>) -> Response {
+    Response::Refused {
+        message: message.into(),
+        report: None,
+    }
+}
+fn io_error(error: impl std::fmt::Display) -> String {
+    error.to_string()
+}
+
+pub fn safe_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains(['\\', ':', '\0'])
+        && path.split('/').all(|part| {
+            let stem = part
+                .split('.')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && !part.ends_with(['.', ' '])
+                && !matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+                && !(stem.len() == 4
+                    && (stem.starts_with("com") || stem.starts_with("lpt"))
+                    && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+        })
+}
+
+pub fn allowed_path(kind: WorkspaceKind, path: &str) -> bool {
+    safe_path(path)
+        && (crate::world::mod_pack::is_allowed_content_path(path)
+            || (path.starts_with("assets/")
+                && ((kind == WorkspaceKind::Project
+                    && [".toml", ".rhai"]
+                        .iter()
+                        .any(|suffix| path.ends_with(suffix)))
+                    || [
+                        ".glb", ".png", ".jpg", ".jpeg", ".ktx2", ".ptex", ".wav", ".ogg", ".mp3",
+                    ]
+                    .iter()
+                    .any(|suffix| path.ends_with(suffix)))))
+}
+
+fn revision(files: &Files) -> String {
+    let mut bytes = Vec::new();
+    for (path, value) in files {
+        bytes.extend((path.len() as u64).to_le_bytes());
+        bytes.extend(path.as_bytes());
+        bytes.extend((value.len() as u64).to_le_bytes());
+        bytes.extend(value);
+    }
+    format!("{:016x}", vellum_digest::fnv1a(&bytes))
+}
+
+fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(io_error(error)),
+    }
+}
+fn remove_optional(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_error(error)),
+    }
+}
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path.parent().ok_or("Missing Workshop parent directory")?;
+    fs::create_dir_all(parent).map_err(io_error)?;
+    let temporary = parent.join(format!(".phoenix-workshop-{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(io_error)?;
+        file.write_all(bytes).map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        fs::rename(&temporary, path).map_err(io_error)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests;

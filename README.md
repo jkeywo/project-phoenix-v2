@@ -91,11 +91,15 @@ trunk serve --config client-trunk.toml --port 8081
 
 Then open `http://localhost:8080` as the view screen and `http://localhost:8081` on your phone (or a second tab).
 
-Offline Workshop Authoring is at `/workshop.html` on the host. It imports one
-TOML/Rhai mod ZIP, edits source and structured scalar fields with pack-wide undo,
+Offline Workshop Authoring is at `/workshop.html` on the host. It creates or imports one
+mod ZIP, edits source and structured scalar fields with pack-wide undo,
 and validates the exact unsaved archive through the runtime before export.
 Comments and untouched formatting survive field edits. A browser-local recovery
 copy retains source, dirty state and history; reopening offers Restore or Discard.
+Source files and binary assets can be added or replaced in that same history.
+The dependency browser shows immutable base/other-pack source. Binary members
+retain their exact bytes, but pack runtime admission still refuses them until
+the runtime asset overlay is available.
 Run `trunk build` to build the page and its WASM validator. `npm run build:workshop`
 updates the HTML/JS and read-only dependency bundle alongside that artifact.
 On Windows, double-click `run-workshop.bat` to build it, start a local server on

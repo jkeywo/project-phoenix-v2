@@ -117,3 +117,34 @@ test('Workshop uses the real runtime for Rhai, source-span fields and browser re
   expect(files[world]).toBe(original.replace('"Script Valid"', '"Edited with runtime fields"'));
   expect(files[script]).toContain('fn on_alarm(ctx)');
 });
+
+test('Workshop creates a pack, previews read-only dependencies and preserves MP3 import through recovery and undo', { tag: '@core' }, async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/workshop.html');
+  await page.locator('#workshop-new').click();
+  await expect(page.locator('#workshop-files option')).toHaveCount(2, { timeout: 90_000 });
+  await page.getByText(ts('workshop.dependencies'), { exact: true }).click();
+  await page.locator('#workshop-dependencies-load').click();
+  await expect(page.locator('#workshop-dependency-source')).toHaveAttribute('readonly', '');
+  await expect(page.locator('#workshop-dependency option')).not.toHaveCount(0);
+  await page.locator('#workshop-add-path').fill('assets/sounds/music.mp3');
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('#workshop-add-asset').click();
+  await (await chooser).setFiles({ name: 'music.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from([73, 68, 51, 255, 128, 0]) });
+  await expect(page.locator('#workshop-source')).toBeDisabled();
+  await expect(page.locator('#workshop-files')).toHaveValue('assets/sounds/music.mp3');
+  await expect(page.locator('#workshop-recovery-status')).toHaveText(ts('workshop.recovery_saved'));
+  await page.reload();
+  await page.locator('#workshop-restore').click();
+  await expect(page.locator('#workshop-files')).toHaveValue('assets/sounds/music.mp3');
+  await page.locator('#workshop-check').click();
+  await expect(page.getByRole('alert')).toContainText(ts('workshop.check_refused'));
+  await page.locator('#workshop-undo').click();
+  await expect(page.locator('#workshop-files option')).toHaveCount(2);
+  const downloaded = page.waitForEvent('download');
+  await page.locator('#workshop-export').click();
+  const artifact = await downloaded;
+  const files = readStoreZip(new Uint8Array(readFileSync(await artifact.path())));
+  expect(Object.keys(files)).toEqual(['scenarios.toml', 'assets/worlds/workshop.toml']);
+  expect(files['scenarios.toml']).toContain('workshop-pack');
+});

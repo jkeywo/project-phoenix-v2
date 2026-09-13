@@ -17,7 +17,10 @@ use crate::world::validate::{
     validate_composition_with_fragments, Severity, WorldFinding, WorldSource,
 };
 
+pub mod archive;
 pub mod document;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod provider;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -253,6 +256,82 @@ fn validate_world(path: &str, sources: &Sources, report: &mut WorkshopValidation
         sources,
         &sources.0,
     ));
+}
+
+/// A selected project's source set uses the ordinary project manifest and the
+/// same offline world/include/script validators. No pack header is invented,
+/// and no process-global template cache can fill a missing source member.
+pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation {
+    crate::world::script::init_hashing_seed();
+    let mut report = WorkshopValidation::default();
+    let mut text_files = BTreeMap::new();
+    for (path, bytes) in files {
+        if !path.ends_with(".toml") && !path.ends_with(".rhai") {
+            continue;
+        }
+        match std::str::from_utf8(bytes) {
+            Ok(text) => {
+                if path.ends_with(".toml") {
+                    if let Err(error) = toml::from_str::<toml::Value>(text) {
+                        report.error("runtime-source-invalid", path, error.to_string());
+                    }
+                }
+                text_files.insert(path.clone(), text.to_string());
+            }
+            Err(error) => report.error("runtime-source-invalid", path, error.to_string()),
+        }
+    }
+    let sources = Sources(text_files);
+    report.extend(crate::world::mod_pack::validate_pack_scripts(&sources.0));
+    for (path, text) in &sources.0 {
+        let result = if path.starts_with("assets/worlds/") && path.ends_with(".toml") {
+            crate::world::config::parse_world(text).map(|_| ())
+        } else if path.starts_with("assets/factions/") && path.ends_with(".toml") {
+            crate::ai::faction::parse_faction_config(text)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        } else if path.starts_with("assets/models/") && path.ends_with(".toml") {
+            crate::entities::model_rig::ModelRig::from_toml(text)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        } else {
+            Ok(())
+        };
+        if let Err(error) = result {
+            report.error("runtime-source-invalid", path, error);
+        }
+    }
+    let path = "assets/scenarios.toml";
+    match sources.0.get(path).map(|source| parse_manifest(source)) {
+        Some(Ok(manifest)) => {
+            report.extend(
+                crate::world::manifest::validate_manifest(&manifest, &sources.0[path], |path| {
+                    sources.0.get(path).cloned()
+                })
+                .into_iter()
+                .map(|mut finding| {
+                    if finding.source.file == "scenarios.toml" {
+                        finding.source.file = path.into();
+                    }
+                    finding
+                }),
+            );
+            for scenario in manifest.scenarios {
+                validate_world(&scenario.world, &sources, &mut report);
+            }
+        }
+        Some(Err(error)) => report.error("runtime-manifest-invalid", path, error.to_string()),
+        None => report.error(
+            "runtime-manifest-invalid",
+            path,
+            "Missing project manifest".into(),
+        ),
+    }
+    report.accepted = !report
+        .findings
+        .iter()
+        .any(|finding| finding.severity == "error");
+    report
 }
 
 #[cfg(test)]

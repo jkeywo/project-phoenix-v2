@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
 updated: 2026-09-13
 ---
 
@@ -59,7 +59,7 @@ HTML/JS and dependency snapshot alongside an existing runtime. On Windows,
 `run-workshop.bat` runs Trunk and uses
 `scripts/serve-workshop.mjs` to serve it on loopback port 8083, opening the browser
 only after the server is listening. Its JavaScript and runtime are local build artifacts. It opens
-one user-selected text mod ZIP without a project-directory grant or GM session.
+one new or user-selected mod ZIP without a project-directory grant or GM session.
 `WorkshopDocument` owns immutable imported bytes, the editable source documents,
 and one chronological `UndoStack` across the whole pack. The source editor
 preserves unknown keys, comments, source BOMs and unchanged mixed line endings;
@@ -95,8 +95,34 @@ explicit Restore or Discard before another import. Corrupt records and storage
 failure never silently replace the open source. This storage grants no filesystem
 authority and carries no private operator profile or live runtime state.
 
-Disposable Test simulation, project providers, specialised entity/definition/model
-panels and model assets remain later M6 work. The existing editor/viewer remain
+Source and binary file additions/replacements use the same chronological history.
+Binary members, including GLB and MP3, never pass through a text decoder. Undo of
+an addition removes that member; undo back to the original source set restores
+the complete original ZIP container. Pack validation still refuses binary members
+until the runtime asset overlay is implemented. A loaded pack can enter through
+`createBrowserWorkshopProvider` as an immutable source archive with separately
+snapshotted dependencies; the selected pack is removed from the other-pack list.
+The dependency viewer is read-only and never adds those files to the editable pack.
+
+`NativeWorkshopProvider` is an offline selected-project or selected-mod-directory
+capability constructed by native code. Its JSON request vocabulary cannot select
+another root. It reads authored paths under `assets/` (plus a mod's `scenarios.toml`),
+refuses traversal, path aliases and symlinks, and compares the complete loaded disk
+source plus its revision before saving. Project saves use the real project manifest,
+runtime source parsers, include/composition checks and the ordinary budgeted script
+compiler. Mod saves use the same pack validator as browser export.
+
+Native writes journal exact before/after bytes before replacing or deleting any
+member. Reopening finishes an interrupted accepted save, but refuses an external
+edit instead of overwriting it. A separate private per-root directory holds the
+OS workspace claim, save journal and crash-draft record. Recovery retains the old
+revision, so restoring a draft cannot silently overwrite newer files on disk.
+`mountNativeWorkshop` mounts the same shared Authoring UI over a private request
+callback and reply receiver; no browser HTTP/file provider is introduced. The
+native shell/CLI wiring is the next integration step.
+
+Disposable Test simulation, specialised entity/definition/model panels and runtime
+model asset overlays remain later M6 work. The existing editor/viewer remain
 until the parity workflow is delivered.
 
 ## Validation boundary

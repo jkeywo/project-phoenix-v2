@@ -270,7 +270,7 @@ export function createStoreZip(entries) {
  * Verifies structure, stored CRCs and fatal UTF-8 for both local and central
  * names and every member body. Throws on a malformed archive.
  */
-export function readStoreZipArchive(bytes) {
+export function readStoreZipArchive(bytes, { binary = () => false } = {}) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   // Archive member names are untrusted data, so they must not be assigned to a
   // normal object's inherited setters. In particular, `files['__proto__'] =`
@@ -309,7 +309,7 @@ export function readStoreZipArchive(bytes) {
     if (crc32(data) !== crc) {
       throw new Error(`CRC mismatch for "${name}"`);
     }
-    const text = decodeUtf8(data, `file "${name}"`);
+    const text = binary(name) ? undefined : decodeUtf8(data, `file "${name}"`);
     files[name] = text;
     const sourceEntry = {
       path: name,

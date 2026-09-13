@@ -8,6 +8,14 @@ import { createStoreZip, exportModPack, MANIFEST_PATH, readStoreZipArchive } fro
 import { UndoStack } from './undo-stack.js';
 
 const encode = text => new TextEncoder().encode(text);
+export const isWorkshopBinary = path => /\.(glb|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(path);
+const copy = value => typeof value === 'string' || value == null ? value : Uint8Array.from(value);
+const equal = (a, b) => typeof a === 'string' || typeof b === 'string' || a == null || b == null
+  ? a === b : a.length === b.length && a.every((byte, index) => byte === b[index]);
+const mapsEqual = (a, b) => a.size === b.size && [...a].every(([path, value]) => equal(value, b.get(path)));
+const byteArray = value => Array.isArray(value) && value.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
+const safePath = path => typeof path === 'string' && !/[\\:\0]/.test(path)
+  && path.split('/').every(part => part && part !== '.' && part !== '..' && !/[. ]$/.test(part));
 
 function editedLineEndings(previous, edited) {
   // A textarea exposes LF even where source had CRLF. Locate the actual edit
@@ -36,30 +44,50 @@ function editedLineEndings(previous, edited) {
 }
 
 export class WorkshopDocument {
-  constructor(bytes) {
-    const archive = readStoreZipArchive(Uint8Array.from(bytes));
-    if (!Object.hasOwn(archive.files, MANIFEST_PATH)) {
+  constructor(bytes, { kind = 'mod' } = {}) {
+    if (!['mod', 'project'].includes(kind)) throw new Error('Invalid Workshop kind');
+    const archive = readStoreZipArchive(Uint8Array.from(bytes), { binary: isWorkshopBinary });
+    if (kind === 'mod' && !Object.hasOwn(archive.files, MANIFEST_PATH)) {
       const error = new Error(MANIFEST_PATH);
       error.code = 'workshop-missing-manifest';
       throw error;
     }
+    this.kind = kind;
     this._source = archive.source;
-    this._files = new Map(Object.entries(archive.files));
+    this._files = new Map(archive.source.entries.map(entry => [entry.path, entry.text ?? entry.bytes]));
     this._exported = new Map(this._files);
     this._history = new UndoStack();
   }
 
   paths() { return [...this._files.keys()]; }
-  read(path) { return this._files.get(path); }
+  read(path) { const value = this._files.get(path); return typeof value === 'string' ? value : undefined; }
+  isBinary(path) { return this._files.has(path) && typeof this._files.get(path) !== 'string'; }
+  bytes(path) { const value = this._files.get(path); return value == null ? undefined : Uint8Array.from(typeof value === 'string' ? encode(value) : value); }
+  toFiles() { return Object.fromEntries(this.paths().map(path => [path, Array.from(this.bytes(path))])); }
+  static fromFiles(files, options) {
+    if (!files || Object.entries(files).some(([path, value]) => !safePath(path) || !(value instanceof Uint8Array || byteArray(value)))) throw new Error('Invalid Workshop source bundle');
+    return new WorkshopDocument(createStoreZip(Object.entries(files).map(([path, bytes]) => ({ path, bytes: Uint8Array.from(bytes) }))), options);
+  }
+  /** Add or replace one authored source/asset in the same chronological history. */
+  put(path, value) {
+    if (!safePath(path) || !(typeof value === 'string' || value instanceof Uint8Array)) throw new Error('Invalid Workshop document');
+    if (isWorkshopBinary(path) !== (value instanceof Uint8Array)) throw new Error('Workshop document type does not match path');
+    const before = this._files.get(path) ?? null;
+    const after = copy(value);
+    if (equal(before, after)) return false;
+    this._history.push({ path, before: copy(before), after });
+    this._files.set(path, after);
+    return true;
+  }
   sourceBytes() { return Uint8Array.from(this._source.bytes); }
   canUndo() { return this._history.canUndo(); }
   canRedo() { return this._history.canRedo(); }
   isDirty() {
-    return [...this._files].some(([path, text]) => this._exported.get(path) !== text);
+    return !mapsEqual(this._files, this._exported);
   }
 
   edit(path, text) {
-    if (!this._files.has(path) || typeof text !== 'string') return false;
+    if (typeof this._files.get(path) !== 'string' || typeof text !== 'string') return false;
     const before = this._files.get(path);
     const after = editedLineEndings(before, text);
     if (before === after) return false;
@@ -71,32 +99,30 @@ export class WorkshopDocument {
   undo() {
     const entry = this._history.undo();
     if (!entry) return null;
-    this._files.set(entry.path, entry.before);
+    if (entry.before === null) this._files.delete(entry.path);
+    else this._files.set(entry.path, copy(entry.before));
     return entry.path;
   }
 
   redo() {
     const entry = this._history.redo();
     if (!entry) return null;
-    this._files.set(entry.path, entry.after);
+    this._files.set(entry.path, copy(entry.after));
     return entry.path;
   }
 
   /** Exact candidate for runtime validation/export, even while its text is
    * invalid. No normalizing serializer and no second semantic validation. */
   archive() {
-    if ([...this._files].every(([path, text]) => this._source.entries.findLast(entry => entry.path === path)?.text === text)) {
-      return this.sourceBytes();
-    }
-    return createStoreZip([...this._files].map(([path, text]) => {
-      const original = this._source.entries.findLast(entry => entry.path === path);
-      return { path, text, bytes: original?.text === text ? original.bytes : encode(text) };
-    }));
+    const original = new Map(this._source.entries.map(entry => [entry.path, entry.text ?? entry.bytes]));
+    if (mapsEqual(this._files, original)) return this.sourceBytes();
+    return createStoreZip(this.paths().map(path => ({ path, bytes: this.bytes(path) })));
   }
 
   /** Structural checks only; the ordinary host still compiles/gates Rhai. */
   check() {
     try {
+      if (this.paths().some(path => this.isBinary(path))) throw new Error('Binary pack runtime admission is unavailable');
       const entries = [...this._files].map(([path, text]) => {
         const original = this._source.entries.findLast(entry => entry.path === path);
         // The archive reader uses ignoreBOM:true: its text RETAINS U+FEFF, so
@@ -118,41 +144,56 @@ export class WorkshopDocument {
   /** Data only: no filesystem handles, credentials, runtime state or profile. */
   snapshot() {
     const history = this._history.snapshot();
-    return { version: 1, source: this.sourceBytes(), files: [...this._files],
-      exported: [...this._exported], history: {
-        undo: history.undo.map(entry => ({ ...entry })), redo: history.redo.map(entry => ({ ...entry })),
+    const serialize = value => value instanceof Uint8Array ? Array.from(value) : value;
+    const entry = value => ({ ...value, before: serialize(value.before), after: serialize(value.after) });
+    return { version: 2, kind: this.kind, source: this.sourceBytes(),
+      files: [...this._files].map(([path, value]) => [path, serialize(value)]),
+      exported: [...this._exported].map(([path, value]) => [path, serialize(value)]), history: {
+        undo: history.undo.map(entry), redo: history.redo.map(entry),
       } };
   }
 
   static restore(snapshot) {
-    if (snapshot?.version !== 1 || !(snapshot.source instanceof Uint8Array)) throw new Error('Unsupported Workshop recovery record.');
-    const draft = new WorkshopDocument(snapshot.source);
+    if (![1, 2].includes(snapshot?.version) || !(snapshot.source instanceof Uint8Array)) throw new Error('Unsupported Workshop recovery record.');
+    const draft = new WorkshopDocument(snapshot.source, { kind: snapshot.kind || 'mod' });
+    const decode = (path, value, nullable = false) => {
+      if (nullable && value === null) return null;
+      if (typeof value === 'string' && !isWorkshopBinary(path)) return value;
+      if (isWorkshopBinary(path) && byteArray(value)) return Uint8Array.from(value);
+      throw new Error('Invalid recovery document.');
+    };
     const readFiles = entries => {
-      if (!Array.isArray(entries) || entries.length !== draft._files.size) throw new Error('Invalid recovery documents.');
+      if (!Array.isArray(entries) || entries.length > 16384) throw new Error('Invalid recovery documents.');
       const files = new Map();
       for (const entry of entries) {
-        if (!Array.isArray(entry) || entry.length !== 2 || !draft._files.has(entry[0])
-          || files.has(entry[0]) || typeof entry[1] !== 'string') throw new Error('Invalid recovery document.');
-        files.set(entry[0], entry[1]);
+        if (!Array.isArray(entry) || entry.length !== 2 || !safePath(entry[0]) || files.has(entry[0])) throw new Error('Invalid recovery document.');
+        files.set(entry[0], decode(entry[0], entry[1]));
       }
+      for (const path of draft._files.keys()) if (!files.has(path)) throw new Error('Invalid recovery document.');
       return files;
     };
     const files = readFiles(snapshot.files);
     const exported = readFiles(snapshot.exported);
     const { undo, redo } = snapshot.history || {};
+    const decoded = [];
     for (const entries of [undo, redo]) {
       if (!Array.isArray(entries) || entries.length > 100) throw new Error('Invalid recovery history.');
+      const values = entries.map(entry => {
+        if (!safePath(entry?.path)) throw new Error('Invalid recovery document.');
+        return { path: entry.path, before: decode(entry.path, entry.before, true), after: decode(entry.path, entry.after) };
+      });
       const current = new Map(files);
-      for (const entry of entries.toReversed()) {
+      for (const entry of values.toReversed()) {
         const direction = entries === undo;
-        if (!files.has(entry?.path) || typeof entry.before !== 'string' || typeof entry.after !== 'string'
-          || current.get(entry.path) !== (direction ? entry.after : entry.before)) throw new Error('Inconsistent recovery history.');
-        current.set(entry.path, direction ? entry.before : entry.after);
+        if (!equal(current.get(entry.path) ?? null, direction ? entry.after : entry.before)) throw new Error('Inconsistent recovery history.');
+        const value = direction ? entry.before : entry.after;
+        if (value === null) current.delete(entry.path); else current.set(entry.path, value);
       }
+      decoded.push(values);
     }
     draft._files = files;
     draft._exported = exported;
-    draft._history.restore({ undo: undo.map(entry => ({ ...entry })), redo: redo.map(entry => ({ ...entry })) });
+    draft._history.restore({ undo: decoded[0], redo: decoded[1] });
     return draft;
   }
 }

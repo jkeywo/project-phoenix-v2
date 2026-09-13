@@ -6,6 +6,7 @@ import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/w
 import { OPERATOR_PROFILE_KEY, createOperatorProfileSnapshot } from '../../gui/operator-profile.js';
 import { t } from '../../gui/strings.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
+import { createNativeWorkshopProvider } from '../../editor/workshop-provider.js';
 
 let mounted;
 let download;
@@ -39,6 +40,57 @@ beforeEach(() => {
 afterEach(() => { mounted.dispose(); vi.restoreAllMocks(); });
 
 describe('Workshop Authoring browser surface', () => {
+  it('creates one pack and imports a binary asset through chronological undo without editing dependency source', async () => {
+    mounted.dispose();
+    const dependencies = { base_files: { 'assets/scenarios.toml': '[content]\nid="phoenix-base"\nepoch=1\n' }, packs: [] };
+    runtime.dependencies = async () => dependencies;
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
+    await mounted.ready;
+    byId('new').click();
+    await vi.waitFor(() => expect(byId('files').options.length).toBe(2));
+    byId('add-path').value = 'assets/models/test.glb';
+    const assetInput = document.querySelectorAll('input[type=file]')[1];
+    Object.defineProperty(assetInput, 'files', { configurable: true, value: [{ arrayBuffer: async () => new Uint8Array([0, 255, 13, 10]) }] });
+    assetInput.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(byId('files').value).toBe('assets/models/test.glb'));
+    expect(byId('source').disabled).toBe(true);
+    expect(byId('source').value).toContain('4');
+    byId('undo').click();
+    expect([...byId('files').options].map(option => option.value)).not.toContain('assets/models/test.glb');
+    byId('redo').click();
+    expect(byId('files').value).toBe('assets/models/test.glb');
+    byId('dependencies-load').click();
+    await vi.waitFor(() => expect(byId('dependency-source').value).toContain('phoenix-base'));
+    expect(byId('dependency-source').readOnly).toBe(true);
+  });
+
+  it('loads the native project into the same controls and retains the draft after a refused save', async () => {
+    mounted.dispose();
+    const files = { 'assets/scenarios.toml': Array.from(new TextEncoder().encode('[content]\nid="base"\nepoch=1\n')),
+      [WORKSHOP_WORLD]: Array.from(new TextEncoder().encode(WORKSHOP_WORLD_TEXT)) };
+    let saved = false;
+    const request = vi.fn(async value => {
+      if (value.op === 'load') return { status: 'loaded', kind: 'project', revision: 'initial', files };
+      if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
+      if (value.op === 'save') return saved ? { status: 'saved', revision: 'next' } : { status: 'refused', message: 'External edit', report: null };
+      return { status: 'done' };
+    });
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), provider: createNativeWorkshopProvider({ request }) });
+    await mounted.ready;
+    expect(byId('import').hidden).toBe(true);
+    expect(byId('save').hidden).toBe(false);
+    select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# native change\n`);
+    byId('save').click();
+    await vi.waitFor(() => expect(byId('save').disabled).toBe(false));
+    expect(byId('source').value).toContain('# native change');
+    expect(byId('dirty').textContent).toBe(t('workshop.dirty'));
+    expect(document.querySelector('.workshop-findings').textContent).toContain('External edit');
+    saved = true;
+    byId('save').click();
+    await vi.waitFor(() => expect(byId('dirty').textContent).toBe(t('workshop.saved')));
+    const save = request.mock.calls.filter(([value]) => value.op === 'save').at(-1)[0];
+    expect(new TextDecoder().decode(Uint8Array.from(save.files[WORKSHOP_WORLD]))).toContain('# native change');
+  });
   it('imports and edits with chronological cross-document undo and checked export', async () => {
     await importBytes();
     select(WORKSHOP_WORLD);

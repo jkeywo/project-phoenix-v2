@@ -8,7 +8,7 @@
 body { margin: 0; }
 #workshop { max-width: 90rem; margin: auto; padding: 1.5rem; }
 h1 { margin: 0; font-size: 1.75rem; }
-button, select, textarea { font: inherit; color: inherit; background: #182634; border: 1px solid #8195a8; border-radius: .2rem; }
+button, input, select, textarea { font: inherit; color: inherit; background: #182634; border: 1px solid #8195a8; border-radius: .2rem; min-width: 0; }
 button, select { min-height: 2.75rem; padding: .35rem .7rem; }
 button:disabled { opacity: .6; }
 button:not(:disabled) { cursor: pointer; }
@@ -17,7 +17,8 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-mode { font-weight: 700; }
 .workshop-layout { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 4fr); gap: 1.25rem; }
 .workshop-files { display: grid; align-content: start; gap: .6rem; }
-.workshop-files select { width: 100%; }
+.workshop-files select, .workshop-files input { width: 100%; }
+#workshop-dependency, #workshop-dependency-source { display: block; width: 100%; margin: .5rem 0; }
 .workshop-inspector { min-width: 0; }
 .workshop-inspector label { display: block; margin-top: .6rem; }
 .workshop-inspector textarea { width: 100%; }

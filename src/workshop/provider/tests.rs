@@ -1,0 +1,448 @@
+use super::*;
+
+struct Fixture {
+    directory: PathBuf,
+    root: PathBuf,
+    recovery: PathBuf,
+}
+impl Fixture {
+    fn new() -> Self {
+        let directory =
+            std::env::temp_dir().join(format!("phoenix-workshop-{}", uuid::Uuid::new_v4()));
+        let root = directory.join("project");
+        let recovery = directory.join("private");
+        fs::create_dir_all(root.join("assets/worlds")).unwrap();
+        fs::write(root.join("assets/scenarios.toml"), b"[content]\nid='phoenix-base'\nepoch=1\n[[scenario]]\nid='test'\nworld='assets/worlds/test.toml'\n").unwrap();
+        fs::write(
+            root.join("assets/worlds/test.toml"),
+            b"# Keep this\r\n[global]\r\ntitle='Test' # keep tail\r\n",
+        )
+        .unwrap();
+        Self {
+            directory,
+            root,
+            recovery,
+        }
+    }
+    fn open(&self) -> NativeWorkshopProvider {
+        NativeWorkshopProvider::open(
+            WorkspaceKind::Project,
+            &self.root,
+            &self.recovery,
+            WorkshopDependencies::default(),
+        )
+        .unwrap()
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.directory);
+    }
+}
+
+#[test]
+fn private_json_bridge_loads_exact_source_and_roundtrips_a_runtime_validated_save() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    let reply = provider.handle_json(r#"{"id":3,"op":"load"}"#);
+    assert!(reply.contains("\"status\":\"loaded\""), "{reply}");
+    assert!(reply.contains("\"id\":3"), "{reply}");
+    assert!(matches!(
+        crate::core::codec::decode_workshop_request(
+            r#"{"id":9,"op":"save","files":{},"expected_revision":"test"}"#
+        )
+        .unwrap()
+        .operation,
+        Operation::Save { .. }
+    ));
+    for refused in [
+        r#"{"id":4,"op":"load","root":"elsewhere"}"#,
+        r#"{"id":4,"op":"validate","files":{},"root":"elsewhere"}"#,
+        r#"{"op":"load"}"#,
+        r#"{"id":-1,"op":"load"}"#,
+        r#"{"id":4,"op":"unknown"}"#,
+    ] {
+        assert!(
+            crate::core::codec::decode_workshop_request(refused).is_err(),
+            "{refused}"
+        );
+    }
+    let mut files = provider.baseline.clone();
+    let original = files["assets/worlds/test.toml"].clone();
+    files.insert(
+        "assets/worlds/test.toml".into(),
+        original
+            .iter()
+            .copied()
+            .chain(b"# edited\r\n".iter().copied())
+            .collect(),
+    );
+    fs::write(fixture.root.join("README.md"), "Unrelated project document").unwrap();
+    let result = provider
+        .apply(Operation::Save {
+            files: files.clone(),
+            expected_revision: provider.revision.clone(),
+        })
+        .unwrap();
+    assert!(matches!(result, Response::Saved { .. }), "{result:?}");
+    assert_eq!(
+        fs::read(fixture.root.join("assets/worlds/test.toml")).unwrap(),
+        files["assets/worlds/test.toml"]
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("README.md")).unwrap(),
+        "Unrelated project document"
+    );
+    assert!(!provider.private.join("transaction.json").exists());
+    assert!(provider
+        .handle_json(r#"{"id":4,"op":"load","root":"elsewhere"}"#)
+        .contains("refused"));
+}
+
+#[test]
+fn runtime_script_refusal_and_external_edits_preserve_disk_and_provider_baseline() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    let original = provider.baseline.clone();
+    let mut files = original.clone();
+    files.insert(
+        "assets/worlds/test.toml".into(),
+        b"script='bad.rhai'\n[global]\n".to_vec(),
+    );
+    files.insert("assets/worlds/bad.rhai".into(), b"fn broken( {".to_vec());
+    assert!(matches!(
+        provider
+            .apply(Operation::Save {
+                files,
+                expected_revision: provider.revision.clone()
+            })
+            .unwrap(),
+        Response::Refused {
+            report: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(provider.read_files().unwrap(), original);
+    fs::write(
+        fixture.root.join("assets/worlds/test.toml"),
+        "# external\n[global]\n",
+    )
+    .unwrap();
+    assert!(provider
+        .apply(Operation::Save {
+            files: original.clone(),
+            expected_revision: provider.revision.clone()
+        })
+        .unwrap_err()
+        .contains("changed on disk"));
+    assert_eq!(provider.baseline, original);
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("assets/worlds/test.toml")).unwrap(),
+        "# external\n[global]\n"
+    );
+}
+
+#[test]
+fn selected_root_refuses_escape_aliases_and_broken_deletions_before_any_write() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    for path in [
+        "../outside.toml",
+        "assets/../outside.toml",
+        "C:/outside.toml",
+        "assets/worlds/test.toml:stream",
+        "assets/worlds/con.toml",
+    ] {
+        let mut files = provider.baseline.clone();
+        files.insert(path.into(), Vec::new());
+        assert!(
+            provider
+                .apply(Operation::Save {
+                    files,
+                    expected_revision: provider.revision.clone()
+                })
+                .is_err(),
+            "{path}"
+        );
+    }
+    let mut aliases = provider.baseline.clone();
+    aliases.insert("assets/worlds/TEST.toml".into(), b"[global]".to_vec());
+    assert!(provider
+        .check_files(&aliases)
+        .unwrap_err()
+        .contains("Duplicate"));
+    let mut missing = provider.baseline.clone();
+    missing.remove("assets/worlds/test.toml");
+    assert!(matches!(
+        provider
+            .apply(Operation::Save {
+                files: missing,
+                expected_revision: provider.revision.clone()
+            })
+            .unwrap(),
+        Response::Refused {
+            report: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn private_draft_survives_reopen_and_its_old_revision_cannot_overwrite_later_disk_edits() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    assert!(NativeWorkshopProvider::open(
+        WorkspaceKind::Project,
+        &fixture.root,
+        &fixture.recovery,
+        WorkshopDependencies::default()
+    )
+    .is_err());
+    let old_revision = provider.revision.clone();
+    provider
+        .apply(Operation::RecoverySave {
+            record: "invalid source and chronological history".into(),
+            expected_revision: old_revision.clone(),
+        })
+        .unwrap();
+    drop(provider);
+    fs::write(
+        fixture.root.join("assets/worlds/test.toml"),
+        "# outside edit\n[global]\n",
+    )
+    .unwrap();
+    let mut reopened = fixture.open();
+    let Response::Recovery {
+        recovery: Some(record),
+    } = reopened.apply(Operation::RecoveryLoad).unwrap()
+    else {
+        panic!("missing draft")
+    };
+    assert_eq!(record.revision, old_revision);
+    assert_eq!(record.record, "invalid source and chronological history");
+    assert!(reopened
+        .apply(Operation::Save {
+            files: reopened.baseline.clone(),
+            expected_revision: old_revision
+        })
+        .is_err());
+    reopened.apply(Operation::RecoveryClear).unwrap();
+    assert!(matches!(
+        reopened.apply(Operation::RecoveryLoad).unwrap(),
+        Response::Recovery { recovery: None }
+    ));
+}
+
+#[test]
+fn crash_between_replacements_finishes_the_exact_validated_transaction_on_reopen() {
+    let fixture = Fixture::new();
+    let provider = fixture.open();
+    let first = "assets/worlds/test.toml".to_string();
+    let second = "assets/worlds/extra.toml".to_string();
+    let transaction = Transaction {
+        root: provider.root.to_string_lossy().into_owned(),
+        before: BTreeMap::from([
+            (first.clone(), provider.baseline.get(&first).cloned()),
+            (second.clone(), None),
+        ]),
+        after: BTreeMap::from([
+            (first.clone(), Some(b"# saved\n[global]\n".to_vec())),
+            (second.clone(), Some(b"[global]\n".to_vec())),
+        ]),
+    };
+    atomic_write(
+        &provider.private.join("transaction.json"),
+        crate::core::codec::encode_workshop_transaction(&transaction)
+            .unwrap()
+            .as_bytes(),
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join(&first),
+        transaction.after[&first].as_ref().unwrap(),
+    )
+    .unwrap();
+    drop(provider);
+    let reopened = fixture.open();
+    assert_eq!(
+        &reopened.baseline[&first],
+        transaction.after[&first].as_ref().unwrap()
+    );
+    assert_eq!(
+        &reopened.baseline[&second],
+        transaction.after[&second].as_ref().unwrap()
+    );
+    assert!(!reopened.private.join("transaction.json").exists());
+}
+
+#[test]
+fn project_binary_members_are_exact() {
+    let fixture = Fixture::new();
+    fs::create_dir_all(fixture.root.join("assets/models")).unwrap();
+    let bytes = vec![0, 255, 13, 10, 128, 10];
+    fs::write(fixture.root.join("assets/models/test.glb"), &bytes).unwrap();
+    let mut provider = fixture.open();
+    assert_eq!(provider.baseline["assets/models/test.glb"], bytes);
+    let mut files = provider.baseline.clone();
+    files.insert("assets/models/new.glb".into(), bytes.clone());
+    assert!(matches!(
+        provider
+            .apply(Operation::Save {
+                files,
+                expected_revision: provider.revision.clone()
+            })
+            .unwrap(),
+        Response::Saved { .. }
+    ));
+    assert_eq!(
+        fs::read(fixture.root.join("assets/models/new.glb")).unwrap(),
+        bytes
+    );
+    assert!(allowed_path(WorkspaceKind::Mod, "assets/models/test.glb"));
+    assert!(allowed_path(
+        WorkspaceKind::Project,
+        "assets/sounds/exploration.mp3"
+    ));
+}
+
+#[test]
+fn mod_workspace_saves_exact_sources_and_retains_binary_members_while_runtime_refuses_them() {
+    let fixture = Fixture::new();
+    let files = crate::world::mod_pack::read_store_zip(include_bytes!(
+        "../../../tests/fixtures/mod-packs/valid-v1.zip"
+    ))
+    .unwrap();
+    for (path, text) in &files {
+        let target = fixture.root.join(path);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(target, text).unwrap();
+    }
+    let dependencies = WorkshopDependencies {
+        base_files: BTreeMap::from([(
+            "assets/scenarios.toml".into(),
+            "[content]\nid='phoenix-base'\nepoch=1\n".into(),
+        )]),
+        packs: Vec::new(),
+    };
+    let open = || {
+        NativeWorkshopProvider::open(
+            WorkspaceKind::Mod,
+            &fixture.root,
+            &fixture.recovery,
+            dependencies.clone(),
+        )
+        .unwrap()
+    };
+    let mut provider = open();
+    let mut edited = provider.baseline.clone();
+    edited
+        .get_mut("scenarios.toml")
+        .unwrap()
+        .extend(b"# exact new comment\r\n");
+    assert!(matches!(
+        provider
+            .apply(Operation::Save {
+                files: edited.clone(),
+                expected_revision: provider.revision.clone(),
+            })
+            .unwrap(),
+        Response::Saved { .. }
+    ));
+    drop(provider);
+    assert_eq!(open().baseline, edited);
+    let path = "assets/sounds/test.mp3";
+    let bytes = vec![0, 255, 13, 10, 128];
+    fs::create_dir_all(fixture.root.join("assets/sounds")).unwrap();
+    fs::write(fixture.root.join(path), &bytes).unwrap();
+    let mut provider = open();
+    assert_eq!(provider.baseline[path], bytes);
+    let baseline = provider.baseline.clone();
+    assert!(matches!(
+        provider
+            .apply(Operation::Save {
+                files: baseline.clone(),
+                expected_revision: provider.revision.clone(),
+            })
+            .unwrap(),
+        Response::Refused {
+            report: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(provider.read_files().unwrap(), baseline);
+}
+
+#[test]
+fn adding_saving_undoing_and_saving_removes_only_the_added_file_and_survives_reopen() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    let original = provider.baseline.clone();
+    let mut added = original.clone();
+    added.insert("assets/worlds/added.toml".into(), b"[global]\n".to_vec());
+    assert!(matches!(
+        provider
+            .apply(Operation::Save {
+                files: added,
+                expected_revision: provider.revision.clone()
+            })
+            .unwrap(),
+        Response::Saved { .. }
+    ));
+    assert!(fixture.root.join("assets/worlds/added.toml").exists());
+    assert!(matches!(
+        provider
+            .apply(Operation::Save {
+                files: original.clone(),
+                expected_revision: provider.revision.clone()
+            })
+            .unwrap(),
+        Response::Saved { .. }
+    ));
+    drop(provider);
+    assert_eq!(fixture.open().baseline, original);
+    assert!(!fixture.root.join("assets/worlds/added.toml").exists());
+}
+
+#[test]
+fn deletion_recovery_is_idempotent_and_preserves_an_external_replacement() {
+    for conflict in [false, true] {
+        let fixture = Fixture::new();
+        let path = "assets/worlds/added.toml";
+        let original = b"[global]\n".to_vec();
+        fs::write(fixture.root.join(path), &original).unwrap();
+        let provider = fixture.open();
+        let transaction = Transaction {
+            root: provider.root.to_string_lossy().into_owned(),
+            before: BTreeMap::from([(path.into(), Some(original))]),
+            after: BTreeMap::from([(path.into(), None)]),
+        };
+        atomic_write(
+            &provider.private.join("transaction.json"),
+            crate::core::codec::encode_workshop_transaction(&transaction)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        if conflict {
+            fs::write(fixture.root.join(path), "# external\n[global]\n").unwrap();
+        } else {
+            fs::remove_file(fixture.root.join(path)).unwrap();
+        } // deleted before hard shutdown
+        drop(provider);
+        let reopened = NativeWorkshopProvider::open(
+            WorkspaceKind::Project,
+            &fixture.root,
+            &fixture.recovery,
+            WorkshopDependencies::default(),
+        );
+        if conflict {
+            assert!(reopened.err().unwrap().contains("external edit"));
+            assert_eq!(
+                fs::read_to_string(fixture.root.join(path)).unwrap(),
+                "# external\n[global]\n"
+            );
+        } else {
+            assert!(!reopened.unwrap().baseline.contains_key(path));
+        }
+    }
+}

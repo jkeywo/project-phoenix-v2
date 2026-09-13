@@ -4,6 +4,49 @@ import { readStoreZip, readStoreZipArchive, createStoreZip } from '../mod-pack-e
 import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT, WORKSHOP_MANIFEST } from '../../tests/fixtures/workshop-pack.js';
 
 describe('offline Workshop source documents', () => {
+  it('imports arbitrary asset bytes without text decoding and undoes additions in chronological order', () => {
+    const draft = new WorkshopDocument(workshopPack());
+    const asset = new Uint8Array([0, 255, 13, 10, 128, 10]);
+    draft.put('assets/models/test.glb', asset);
+    asset.fill(0);
+    expect(draft.isBinary('assets/models/test.glb')).toBe(true);
+    expect(draft.read('assets/models/test.glb')).toBeUndefined();
+    expect(draft.bytes('assets/models/test.glb')).toEqual(new Uint8Array([0, 255, 13, 10, 128, 10]));
+    const cloned = new WorkshopDocument(draft.archive());
+    expect(cloned.bytes('assets/models/test.glb')).toEqual(draft.bytes('assets/models/test.glb'));
+    draft.edit(WORKSHOP_WORLD, '# changed\n[global]\n');
+    draft.undo();
+    expect(draft.undo()).toBe('assets/models/test.glb');
+    expect(draft.archive()).toEqual(workshopPack());
+    const recovered = WorkshopDocument.restore(draft.snapshot());
+    recovered.redo();
+    expect(recovered.bytes('assets/models/test.glb')).toEqual(cloned.bytes('assets/models/test.glb'));
+    expect(recovered.check().ok).toBe(false); // ordinary pack admission is still text-only
+  });
+
+  it('loads a native project with its actual manifest path and preserves exact binary/text members', () => {
+    const files = { 'assets/scenarios.toml': [...new TextEncoder().encode('[content]\nid="base"\nepoch=1\n')],
+      'assets/models/mesh.glb': [255, 0, 10, 13] };
+    const project = WorkshopDocument.fromFiles(files, { kind: 'project' });
+    expect(project.toFiles()).toEqual(files);
+    project.put('assets/worlds/new.toml', '[global]\n');
+    const recovered = WorkshopDocument.restore(project.snapshot());
+    expect(recovered.kind).toBe('project');
+    expect(recovered.toFiles()).toEqual(project.toFiles());
+    expect(recovered.undo()).toBe('assets/worlds/new.toml');
+    expect(recovered.toFiles()).toEqual(files);
+  });
+  it('retains MP3 music bytes through source import, history and recovery before runtime pack admission', () => {
+    const bytes = new Uint8Array([73, 68, 51, 255, 128, 0]);
+    const draft = new WorkshopDocument(workshopPack());
+    draft.put('assets/sounds/music.mp3', bytes);
+    const imported = new WorkshopDocument(draft.archive());
+    expect(imported.bytes('assets/sounds/music.mp3')).toEqual(bytes);
+    draft.undo();
+    const recovered = WorkshopDocument.restore(draft.snapshot());
+    recovered.redo();
+    expect(recovered.bytes('assets/sounds/music.mp3')).toEqual(bytes);
+  });
   it('retains the complete original ZIP container when no member source changed', () => {
     const base = workshopPack();
     const original = new Uint8Array([...base, 7, 8]);

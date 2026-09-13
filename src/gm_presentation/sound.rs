@@ -79,7 +79,7 @@ pub struct LiveSoundCue {
 pub fn publish(
     mut requests: MessageReader<LiveSoundRequest>,
     mut serial: Local<u64>,
-    lifecycle: Res<crate::server::audio_lifecycle::RoomAudioLifecycle>,
+    lifecycle: Res<crate::audio_lifecycle::RoomAudioLifecycle>,
     content: Option<Res<crate::world::server::WorldContentRuntime>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     local: Query<

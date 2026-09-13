@@ -75,7 +75,7 @@ type BlackboardReconnectParams<'w, 's> = (
     Res<'w, crate::core::broadcast::ReconnectRequests>,
     crate::console::repair::visibility::HullProjectionInputs<'w, 's>,
     Query<'w, 's, &'static ShipSystemBlackboards, With<LocalShip>>,
-    Option<Res<'w, crate::server::audio_lifecycle::RoomAudioLifecycle>>,
+    Option<Res<'w, crate::audio_lifecycle::RoomAudioLifecycle>>,
 );
 
 fn reset_blackboard_replication(world: &mut World) {
@@ -91,7 +91,7 @@ fn reconnect_blackboard_projection(
     requests: Res<crate::core::broadcast::ReconnectRequests>,
     inputs: crate::console::repair::visibility::HullProjectionInputs,
     query: Query<&ShipSystemBlackboards, With<LocalShip>>,
-    lifecycle: Option<Res<crate::server::audio_lifecycle::RoomAudioLifecycle>>,
+    lifecycle: Option<Res<crate::audio_lifecycle::RoomAudioLifecycle>>,
 ) -> crate::core::broadcast::ReconnectBatch {
     use crate::console::repair::visibility;
     if requests.0.is_empty() {
@@ -608,7 +608,7 @@ pub fn broadcast_blackboard_updates(
 
     world.init_resource::<visibility::LastVisibleRepairBlackboard>();
     let presentation_generation = world
-        .get_resource::<crate::server::audio_lifecycle::RoomAudioLifecycle>()
+        .get_resource::<crate::audio_lifecycle::RoomAudioLifecycle>()
         .map(|owner| owner.state.generation);
     let rebase = *last_generation != presentation_generation;
     if rebase {
@@ -1339,7 +1339,7 @@ station = "engineering"
 
     #[test]
     fn presentation_rebase_republishes_unchanged_recipient_boards_and_reconnect_stamp() {
-        use crate::server::audio_lifecycle::RoomAudioLifecycle;
+        use crate::audio_lifecycle::RoomAudioLifecycle;
         let mut app = blackboard_lifecycle_app();
         app.init_resource::<SimOutbox>()
             .init_resource::<RoomAudioLifecycle>()

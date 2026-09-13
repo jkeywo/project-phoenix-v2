@@ -80,7 +80,11 @@ impl Plugin for ServerAudioPlugin {
                 StateClass::Presentation,
                 "room-audio-lifecycle",
             )
-            .add_systems(PostUpdate, super::audio_lifecycle::publish_audio_lifecycle)
+            .add_systems(
+                PostUpdate,
+                super::audio_lifecycle::publish_audio_lifecycle
+                    .in_set(crate::audio_lifecycle::AudioLifecyclePublished),
+            )
             .add_systems(OnEnter(GamePhase::InProgress), reset_audio_config_sent)
             .add_systems(
                 Update,

@@ -42,4 +42,4 @@ entities:
       status: declared
       paths: [src/gm_presentation.rs, src/gm_presentation/sound.rs, src/gm_projection.rs, src/server/audio.rs, src/server/audio_lifecycle.rs, src/native_host/audio/mod.rs, src/native_host/audio/device.rs, src/native_host/audio/player.rs, src/native_host/audio/visual.rs, src/world/dispatch.rs, src/world/script/effects.rs, gui/gm-presentation-panel.js, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-live-equivalents.js]
       symbols: [LiveSoundRequest, LiveSoundCue, PreparedAuthored, createHostAudio]
-      tests: [src/native_host/audio/authored_tests.rs, src/server/audio_lifecycle.rs, src/world/script/effects.rs, tests/client/live-authored-audio.test.js, tests/client/gm-presentation-panel.test.js, tests/smoke/live-authored-audio.spec.js]
+      tests: [src/native_host/audio/authored_tests.rs, src/audio_lifecycle.rs, src/world/script/effects.rs, tests/client/live-authored-audio.test.js, tests/client/gm-presentation-panel.test.js, tests/smoke/live-authored-audio.spec.js]

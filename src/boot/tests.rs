@@ -219,6 +219,29 @@ fn all_five_profiles_register_the_same_asset_and_message_floor() {
     crate::content_ledger::reset();
 }
 
+#[test]
+fn ordinary_profiles_classify_the_shared_audio_boundary_without_installing_playback() {
+    use crate::{
+        audio_lifecycle::RoomAudioLifecycle,
+        authoritative::{StateCensus, StateClass},
+    };
+    for (profile, label) in PROFILES {
+        let app = build(plan_for(profile)).unwrap();
+        assert!(
+            !app.world().contains_resource::<RoomAudioLifecycle>(),
+            "{label}"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<StateCensus>()
+                .get(std::any::type_name::<RoomAudioLifecycle>()),
+            Some((StateClass::Presentation, "room-audio-lifecycle")),
+            "{label}",
+        );
+    }
+    crate::content_ledger::reset();
+}
+
 /// The standalone game master's binding, on the real profile its page boots.
 ///
 /// `wasm_init` runs `bind_standalone_game_master` against exactly this App,

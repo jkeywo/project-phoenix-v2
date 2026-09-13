@@ -638,7 +638,7 @@ pub fn publish_health_projection(
     paused: Option<Res<SimulationPaused>>,
     recovery: Option<Res<RecoveryState>>,
     restore: Option<Res<crate::gm_restore::GmLiveRestore>>,
-    lifecycle: Option<Res<crate::server::audio_lifecycle::RoomAudioLifecycle>>,
+    lifecycle: Option<Res<crate::audio_lifecycle::RoomAudioLifecycle>>,
     ships: Query<(
         &EntityUuid,
         Option<&EntityName>,
@@ -1015,7 +1015,7 @@ impl Plugin for GmHealthPlugin {
             .add_systems(
                 PostUpdate,
                 publish_health_projection
-                    .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
+                    .after(crate::audio_lifecycle::AudioLifecyclePublished)
                     .before(crate::gm_attention::publish_attention_projection)
                     .run_if(crate::gm_projection::gm_presentation_active),
             );

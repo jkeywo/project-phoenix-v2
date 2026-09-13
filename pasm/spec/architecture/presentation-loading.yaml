@@ -187,6 +187,7 @@ entities:
       summary: "Peer-local current generation/running/restore-hold projection derived from GamePhase, accepted live restore, the startup capture gate and mesh restoration. It resets playback/config/envelope at a real continuation boundary. The generation is ephemeral presentation comparison state; it carries no cue records or command backlog, enters neither snapshot nor digest, and leaves existing canonical Admission bookkeeping intact."
       rationale:
         - "[ai] BlackboardUpdate and GM attention/health envelopes copy this generation with their current permitted facts. It is not stored inside canonical blackboards. The blackboard publisher rebases both shared and recipient repair caches; native sparse queues never combine different generations. GM producers run after this owner so restored facts and their boundary share one frame."
+        - "[ai] The continuation type and accepted-boundary projection compile independently of the optional server presentation feature. The room adapter completes current audio/HUD rebasing inside the shared AudioLifecyclePublished set; shared GM producers order after that set. Ordinary boot profiles declare the same presentation state without instantiating playback or fabricating a generation when no adapter exists."
     architecture:
       classification: local-view
       owner: browser-room-audio
@@ -194,9 +195,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/server/audio_lifecycle.rs, src/server/audio.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/console_bridge.rs, src/core/codec.rs]
-      symbols: [RoomAudioLifecycle, AudioLifecycleState, publish_audio_lifecycle, rebase_audio_presentation, rebase_hud_state, encode_audio_lifecycle]
-      tests: [tests/gm_restore.rs, cargo test --features headless --lib server::audio, cargo test --features headless --lib restore_rebase]
+      paths: [src/audio_lifecycle.rs, src/server/audio_lifecycle.rs, src/server/audio.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/console_bridge.rs, src/core/codec.rs, src/boot/mod.rs]
+      symbols: [RoomAudioLifecycle, AudioLifecycleState, AudioLifecyclePublished, advance_audio_lifecycle, publish_audio_lifecycle, rebase_audio_presentation, rebase_hud_state, encode_audio_lifecycle]
+      tests: [src/audio_lifecycle.rs, src/boot/tests.rs, tests/gm_restore.rs, cargo test --features headless --lib server::audio, cargo test --features headless --lib restore_rebase]
 
   - component: native-room-audio-player
     core:

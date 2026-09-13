@@ -460,10 +460,10 @@ fn build_inner(
             StateClass::DeferredFold,
             "t4-audio-live-catalog",
         );
-        // Shared GM/Station projection systems register this optional resource
-        // on headless peers too, where the playback plugin is absent. Its
-        // continuation comparison remains local presentation on every profile.
-        app.declare_state::<crate::server::audio_lifecycle::RoomAudioLifecycle>(
+        // Optional GM/Station projection parameters register this type even
+        // when no room presentation adapter is installed. Declaration grants
+        // no playback capability and does not instantiate continuation state.
+        app.declare_state::<crate::audio_lifecycle::RoomAudioLifecycle>(
             StateClass::Presentation,
             "room-audio-lifecycle",
         );

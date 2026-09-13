@@ -34,6 +34,8 @@ pub mod perf;
 // Not behind the headless feature — two of its three profiles are browser
 // (wasm) inventories.
 pub mod audio_decode;
+/// Shared current presentation continuation, independent of room playback.
+pub mod audio_lifecycle;
 pub mod boot;
 
 pub mod ai;

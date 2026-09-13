@@ -1113,7 +1113,7 @@ pub fn publish_attention_projection(
     sim_time: Option<Res<Time>>,
     idle: Option<Res<GmIdleNpcWatch>>,
     health: Option<Res<GmHealthWatch>>,
-    lifecycle: Option<Res<crate::server::audio_lifecycle::RoomAudioLifecycle>>,
+    lifecycle: Option<Res<crate::audio_lifecycle::RoomAudioLifecycle>>,
     mut state: ResMut<GmAttentionState>,
     mut activity: ResMut<crate::gm_quiet::GmCrewActivity>,
     mut writer: MessageWriter<GmAttentionChanged>,
@@ -1321,7 +1321,7 @@ impl Plugin for GmAttentionPlugin {
             .add_systems(
                 PostUpdate,
                 publish_attention_projection
-                    .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
+                    .after(crate::audio_lifecycle::AudioLifecyclePublished)
                     .run_if(crate::gm_projection::gm_presentation_active),
             );
     }

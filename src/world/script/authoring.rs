@@ -304,6 +304,20 @@ mod tests {
         ("effects", "order_divert_anchor", &["entity", "anchor"]),
         ("effects", "order_dock", &["entity", "structure"]),
         ("effects", "open_comms", &["spec"]),
+        // Timed per-ship Viewscreen staging (issue #1468), exposed through
+        // the same action owner as the GM presentation controls.
+        ("effects", "force_view", &["ship", "mode", "duration_ticks"]),
+        (
+            "effects",
+            "title_card",
+            &["ship", "title", "subtitle", "duration_ticks"],
+        ),
+        (
+            "effects",
+            "incoming_comms",
+            &["ship", "message", "duration_ticks"],
+        ),
+        ("effects", "clear_presentation", &["ship", "part"]),
         // The Viewscreen computer-message vocabulary (issue #1342): a scenario
         // author schedules a timed, severity-graded message the same way they
         // author any other effect.

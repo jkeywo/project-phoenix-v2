@@ -1,7 +1,7 @@
 //! Server audio: config push, forcefield envelope, and positional cues.
 //!
-//! Playback itself lives in the host page's JS — Bevy audio was tried and
-//! reverted in-browser. What this plugin does is feed that JS:
+//! Playback lives in the browser provider or the native process-owned room
+//! provider. Both consume the same audience-filtered geometry and envelope:
 //!
 //! - **Config push** — [`push_audio_config`] merges the local ship's `[audio]`
 //!   block with the world's `[audio.red_alert]` and sends it once on game
@@ -228,8 +228,8 @@ fn drive_forcefield_level(
     push_forcefield_level(level);
 }
 
-/// WASM forwards the level to JS; native has nowhere to send it. Mirrors the
-/// cfg split in `viewscreen_border::apply_camera_shake`.
+/// WASM forwards the level to JS. The native room provider reads the same
+/// current intensity and authored volume law in its PostUpdate adapter.
 #[cfg(target_arch = "wasm32")]
 fn push_forcefield_level(level: f32) {
     crate::server::bridge::set_forcefield_level(level);
@@ -242,19 +242,50 @@ fn push_forcefield_level(_level: f32) {}
 /// every NPC's, since all of them are broadcast.
 fn push_blaster_cues(
     mut outbound: MessageReader<OutboundMessage>,
-    ship_q: Query<(&ShipAudioSection, &ShipPhysics), With<LocalShip>>,
+    ship_q: Query<
+        (
+            &ShipAudioSection,
+            &ShipPhysics,
+            Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::ship::state::ShipViewMode>,
+        ),
+        With<LocalShip>,
+    >,
     mut writer: MessageWriter<AudioCueEvent>,
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
 ) {
-    let Ok((section, physics)) = ship_q.single() else {
+    let Ok((section, physics, observer, view)) = ship_q.single() else {
         return;
     };
     let Some(cfg) = section.0.blaster.as_ref() else {
         return;
     };
     for msg in outbound.read() {
-        let ServerMessage::BlasterFired { x, z, .. } = &msg.msg else {
+        let ServerMessage::BlasterFired {
+            x, z, source_uuid, ..
+        } = &msg.msg
+        else {
             continue;
         };
+        if let (Some(content), Some(observer), Some(view)) = (content.as_deref(), observer, view) {
+            let effective = crate::gm_presentation::resolved_view_mode(
+                content.presentation.get(&observer.0),
+                tick.as_deref().map_or(0, |tick| tick.0),
+                view,
+            );
+            if crate::gm_information::suppresses_spatial_cue(
+                &content.contact_information,
+                &content.contact_overrides,
+                &observer.0,
+                source_uuid,
+                &effective,
+            ) {
+                // Consume the public combat occurrence, never delay/replay it
+                // or expose true geometry through an altered Sensors picture.
+                continue;
+            }
+        }
         let pos = crate::audio_config::listener_relative(physics.x, physics.z, physics.yaw, *x, *z);
         // Cull shots beyond the configured falloff: they'd be inaudible, but
         // each one still costs an AudioBufferSourceNode allocation in JS.
@@ -626,6 +657,87 @@ mod tests {
     }
 
     // ── Ship's-computer tone (issue #1342) ─────────────────────────────
+
+    #[test]
+    fn blaster_audience_uses_current_canonical_forced_view_without_replaying_suppressed_shots() {
+        use crate::gm_presentation::{PresentationView, ShipPresentation, TimedView};
+        let mut app = App::new();
+        app.add_message::<OutboundMessage>()
+            .add_message::<AudioCueEvent>()
+            .insert_resource(crate::sim_tick::SimTick(1))
+            .add_systems(Update, push_blaster_cues);
+        let mut content = crate::world::server::WorldContentRuntime::default();
+        crate::gm_contact::set(
+            &mut content.contact_overrides,
+            "observer",
+            "source",
+            crate::gm_contact::ContactMode::Conceal,
+        );
+        content.presentation.insert(
+            "observer".into(),
+            ShipPresentation {
+                forced_view: Some(TimedView {
+                    view: PresentationView::SensorsRadar,
+                    until_tick: 10,
+                }),
+                card: None,
+            },
+        );
+        app.insert_resource(content);
+        app.world_mut().spawn((
+            LocalShip,
+            crate::entities::spawner::EntityUuid("observer".into()),
+            crate::ship::state::ShipViewMode::default(),
+            ShipPhysics::default(),
+            ShipAudioSection(ShipAudioConfig {
+                blaster: Some(crate::audio_config::BlasterAudio {
+                    file: "assets/sounds/Blaster.mp3".into(),
+                    volume: 0.9,
+                    ref_distance: 30.0,
+                    max_distance: 800.0,
+                    rolloff_factor: 1.2,
+                    distance_model: crate::audio_config::DistanceModel::Inverse,
+                    panning_model: crate::audio_config::PanningModel::EqualPower,
+                }),
+                ..Default::default()
+            }),
+        ));
+        let shot = || OutboundMessage {
+            target: Target::All,
+            delivery: DeliveryClass::Reliable,
+            msg: ServerMessage::BlasterFired {
+                bank: "fore".into(),
+                source_uuid: "source".into(),
+                projectile_id: "shot".into(),
+                x: 30.0,
+                z: 0.0,
+                heading: 0.0,
+                visual_scale: 1.0,
+            },
+        };
+        app.world_mut().write_message(shot());
+        app.update();
+        assert!(app.world().resource::<Messages<AudioCueEvent>>().is_empty());
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 10;
+        app.update();
+        assert!(
+            app.world().resource::<Messages<AudioCueEvent>>().is_empty(),
+            "expired force cannot replay the suppressed occurrence"
+        );
+        app.world_mut().write_message(shot());
+        app.update();
+        let cues: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AudioCueEvent>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            cues.len(),
+            1,
+            "ordinary camera returns to its public combat geometry"
+        );
+        assert!(!cues[0].json.contains("source"));
+    }
 
     fn app_with_computer_message_audio(cfg: crate::audio_config::ComputerMessageAudio) -> App {
         let mut app = App::new();

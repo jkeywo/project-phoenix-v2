@@ -147,6 +147,21 @@ pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, ser
     serde_json::to_string(c)
 }
 
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn decode_native_audio_cue(
+    json: &str,
+) -> Result<crate::audio_config::AudioCue, serde_json::Error> {
+    serde_json::from_str(json)
+}
+
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn encode_native_audio_visual(
+    cue: &crate::native_host::audio::visual::VisualCue,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(cue)
+        .map(|json| vellum_ultralight::bridge::push_call("window.__phoenixHudAudioCue", &json))
+}
+
 pub fn encode_audio_lifecycle(
     state: &crate::console_bridge::AudioLifecycleState,
 ) -> Result<String, serde_json::Error> {

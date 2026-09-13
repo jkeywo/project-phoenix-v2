@@ -10,4 +10,5 @@
 .vs-presentation-card:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
 .vs-presentation-card h1 { flex-shrink: 0; margin-top: auto; font-size: 2rem; line-height: 1.2; overflow-wrap: anywhere; }
 .vs-presentation-card p { flex-shrink: 0; margin-bottom: auto; font-size: 1.25rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+:root[data-contrast="more"] .vs-presentation-card { background: var(--surface-base, #000); color: var(--ink, #fff); }
 @media (forced-colors: active) { .vs-presentation-card { background: Canvas; color: CanvasText; } }

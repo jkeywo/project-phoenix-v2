@@ -4,9 +4,12 @@ pub mod decoder;
 #[cfg(feature = "host")]
 mod device;
 pub mod engine;
+pub mod hrtf;
 pub mod mix;
 pub mod player;
+pub mod spatial;
 pub mod store;
+pub mod visual;
 
 use super::{
     bridge_profile::{BridgeProfile, ValidatedProfile},
@@ -16,7 +19,7 @@ use super::{
 use crate::authoritative::{DeclareState, StateClass};
 use crate::{
     audio_config::build_audio_payload,
-    console_bridge::HudStateChanged,
+    console_bridge::{AudioCueEvent, HudStateChanged},
     core::{codec, messages::GamePhase},
     entities::spawner::ShipAudioSection,
     server::audio_lifecycle::RoomAudioLifecycle,
@@ -58,7 +61,7 @@ impl Default for NativeAudioState {
         Self {
             room: true,
             mix: AudioMix::default(),
-            categories: vec!["music", "ambience", "alerts"],
+            categories: vec!["music", "ambience", "effects", "alerts"],
             status: "loading",
             test: "idle",
             persistence: "unavailable",
@@ -80,12 +83,14 @@ struct Control {
     test: u64,
     test_at: Option<Instant>,
     alert_at: Option<Instant>,
+    blaster: Option<(Instant, [f32; 3])>,
     quit: bool,
 }
 /// Requests contain only current settings/state and one expiring deliberate test.
 /// They are overwritten, never an audio event queue.
 #[derive(Resource)]
 pub struct NativeRoomAudio {
+    pub visuals: visual::NativeAudioVisual,
     control: Arc<Mutex<Control>>,
     state: Arc<Mutex<NativeAudioState>>,
     mixer: Arc<Mutex<engine::Mixer>>,
@@ -164,6 +169,7 @@ impl NativeRoomAudio {
             test: 0,
             test_at: None,
             alert_at: None,
+            blaster: None,
             quit: false,
         }));
         let player = RoomPlayer::default();
@@ -189,6 +195,7 @@ impl NativeRoomAudio {
             state.lock().unwrap().status = "unavailable";
         }
         Self {
+            visuals: visual::NativeAudioVisual::default(),
             control,
             state,
             mixer,
@@ -206,6 +213,7 @@ impl NativeRoomAudio {
         if control.input == input {
             return;
         }
+        self.visuals.update(&input);
         if control.input.lifecycle.generation != input.lifecycle.generation
             || control.input.config != input.config
             || input.lifecycle.suspended
@@ -213,10 +221,20 @@ impl NativeRoomAudio {
             self.mixer.lock().unwrap().stop_all();
             control.test_at = None;
             control.alert_at = None;
+            control.blaster = None;
         } else if control.input.red_alert != input.red_alert {
             control.alert_at = input.red_alert.then(Instant::now);
         }
         control.input = input;
+    }
+    pub fn blaster(&self, position: [f32; 3]) {
+        let mut control = self.control.lock().unwrap();
+        if control.input.lifecycle.running && !control.input.lifecycle.suspended {
+            // One short-lived current request. Repetition coalesces; a blocked
+            // decoder/device never accumulates a playback queue.
+            control.blaster = Some((Instant::now(), position));
+            self.visuals.blaster(position);
+        }
     }
     pub fn command(&mut self, record: &HostLobbyRecord) {
         match record {
@@ -286,6 +304,7 @@ impl NativeRoomAudio {
                         control.retry = control.retry.wrapping_add(1);
                         control.test_at = None;
                         control.alert_at = None;
+                        control.blaster = None;
                         self.mixer.lock().unwrap().stop_all();
                     }
                     Err(error) => {
@@ -299,6 +318,7 @@ impl NativeRoomAudio {
                 control.retry = control.retry.wrapping_add(1);
                 control.test_at = None;
                 control.alert_at = None;
+                control.blaster = None;
                 self.mixer.lock().unwrap().stop_all();
             }
             HostLobbyRecord::TestAudioOutput => {
@@ -341,6 +361,8 @@ fn update_room(
     ship: Query<&ShipAudioSection, With<LocalShip>>,
     world: Option<Res<WorldConfig>>,
     mut hud: MessageReader<HudStateChanged>,
+    mut cues: MessageReader<AudioCueEvent>,
+    forcefield: Option<Res<crate::server::audio::ForcefieldAudioState>>,
     mut current: Local<Option<crate::core::messages::ViewscreenHudState>>,
     bridge: Option<Res<HostLobbyBridgeResource>>,
 ) {
@@ -367,7 +389,26 @@ fn update_room(
         menu: matches!(phase.get(), GamePhase::Lobby | GamePhase::Loading),
         red_alert: current.as_ref().is_some_and(|hud| hud.red_alert),
         thrust: current.as_ref().map_or(0.0, |hud| hud.engine_thrust),
+        phaser: current.as_ref().is_some_and(|hud| hud.phaser_firing),
+        forcefield: ship
+            .single()
+            .ok()
+            .and_then(|ship| ship.0.forcefield.as_ref())
+            .map_or(0.0, |spec| {
+                crate::audio_config::forcefield_volume(
+                    forcefield.map_or(0.0, |state| state.intensity),
+                    spec.base_volume,
+                    spec.spike_volume,
+                )
+            }),
     });
+    for event in cues.read() {
+        if let Ok(cue) = codec::decode_native_audio_cue(&event.json) {
+            if cue.kind == "blaster" {
+                audio.blaster([cue.x, cue.y, cue.z]);
+            }
+        }
+    }
     if let Some(bridge) = bridge {
         if let Ok(json) = codec::encode_native_audio_state(&audio.snapshot()) {
             bridge.0.push_audio(json);
@@ -375,6 +416,8 @@ fn update_room(
     }
 }
 
+#[cfg(test)]
+mod combat_tests;
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // Random UUIDs isolate temporary test directories.
 mod tests;

@@ -9,6 +9,7 @@ struct Voice {
     cursor: f64,
     looping: bool,
     remaining: Option<f64>,
+    spatial: Option<super::spatial::StereoMatrix>,
 }
 #[derive(Default)]
 pub struct Mixer {
@@ -44,6 +45,7 @@ impl Mixer {
                 cursor: 0.0,
                 looping: true,
                 remaining: None,
+                spatial: None,
             },
         );
     }
@@ -68,8 +70,21 @@ impl Mixer {
                 cursor: 0.0,
                 looping: false,
                 remaining: duration,
+                spatial: None,
             },
         );
+    }
+    pub fn cue_spatial(
+        &mut self,
+        id: &str,
+        pcm: Arc<Pcm>,
+        gain: f32,
+        matrix: super::spatial::StereoMatrix,
+    ) {
+        self.cue(id, pcm, "effects", gain, None);
+        if let Some(voice) = self.voices.get_mut(id) {
+            voice.spatial = Some(matrix);
+        }
     }
     /// Fill interleaved device frames directly. Linear resampling preserves the
     /// authored speed on outputs whose negotiated rate differs from an asset.
@@ -107,11 +122,15 @@ impl Mixer {
                     let b = voice.pcm.samples[next * voice.pcm.channels + channel];
                     (a + (b - a) * fraction) * gain
                 };
+                let stereo = voice.spatial.map_or_else(
+                    || [sample(0), sample(1)],
+                    |matrix| matrix.apply(sample(0), sample(1)),
+                );
                 if channels == 1 {
-                    frame[0] += (sample(0) + sample(1)) * 0.5;
+                    frame[0] += (stereo[0] + stereo[1]) * 0.5;
                 } else {
-                    frame[0] += sample(0);
-                    frame[1] += sample(1);
+                    frame[0] += stereo[0];
+                    frame[1] += stereo[1];
                 }
                 voice.cursor += f64::from(voice.pcm.rate) / f64::from(rate);
                 if let Some(remaining) = &mut voice.remaining {

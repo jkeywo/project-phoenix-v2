@@ -8,8 +8,9 @@
 .audio-settings button { min-height: 44px; padding: 0.5em 0.75em; font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; }
 .audio-settings button[aria-pressed="true"] { border-width: 3px; font-weight: bold; }
 .audio-settings :focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
-.audio-live-equivalents { position: fixed; z-index: 20; bottom: 5em; left: 1em; max-width: min(34em, 85vw); font: inherit; pointer-events: none; }
+.audio-live-equivalents { position: fixed; z-index: 91; bottom: 5em; left: 1em; max-width: min(34em, 85vw); font: inherit; pointer-events: none; }
 .audio-live-equivalents > div { background: #08111f; color: #fff; padding: 0.35em 0.6em; border: 1px solid currentColor; }
+:root[data-contrast="more"] .audio-live-equivalents > div { background: var(--surface-base, #000); color: var(--ink, #fff); }
 @media (forced-colors: active) {
   .audio-live-equivalents > div { background: Canvas; color: CanvasText; }
 }

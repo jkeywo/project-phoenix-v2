@@ -1,0 +1,8 @@
+[
+  {"name":"mono front at reference","position":[0,0,-30],"samples":[1],"spec":{"file":"unused","volume":1,"ref_distance":30,"max_distance":800,"rolloff_factor":1,"distance_model":"inverse","panning_model":"equalpower"},"expected":[0.70710678,0.70710678]},
+  {"name":"mono right inverse distance","position":[60,0,0],"samples":[1],"spec":{"file":"unused","volume":1,"ref_distance":30,"max_distance":800,"rolloff_factor":1,"distance_model":"inverse","panning_model":"equalpower"},"expected":[0,0.5]},
+  {"name":"stereo centre preserved","position":[0,0,-30],"samples":[0.4,0.2],"spec":{"file":"unused","volume":1,"ref_distance":30,"max_distance":800,"rolloff_factor":1,"distance_model":"inverse","panning_model":"equalpower"},"expected":[0.4,0.2]},
+  {"name":"stereo hard left","position":[-30,0,0],"samples":[0.4,0.2],"spec":{"file":"unused","volume":1,"ref_distance":30,"max_distance":800,"rolloff_factor":1,"distance_model":"inverse","panning_model":"equalpower"},"expected":[0.6,0]},
+  {"name":"mono right linear distance","position":[55,0,0],"samples":[1],"spec":{"file":"unused","volume":1,"ref_distance":10,"max_distance":100,"rolloff_factor":1,"distance_model":"linear","panning_model":"equalpower"},"expected":[0,0.5]},
+  {"name":"mono left exponential distance","position":[-40,0,0],"samples":[1],"spec":{"file":"unused","volume":1,"ref_distance":10,"max_distance":100,"rolloff_factor":2,"distance_model":"exponential","panning_model":"equalpower"},"expected":[0.0625,0]}
+]

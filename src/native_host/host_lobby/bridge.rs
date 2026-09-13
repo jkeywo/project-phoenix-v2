@@ -129,6 +129,8 @@ struct Inner {
     records: VecDeque<String>,
     audio: Option<String>,
     last_accepted_audio: Option<String>,
+    hud_reading: Option<String>,
+    hud_os_defaults: crate::native_host::panes::os_prefs::OsAccessibilityPrefs,
 }
 
 /// The host ↔ lobby-surface bridge.
@@ -146,6 +148,57 @@ impl HostLobbyBridge {
     /// A bridge with nothing pending.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The HUD has its own document; retain its current reading preferences
+    /// beside this endpoint's existing bridge, independently of lobby pumping.
+    pub fn set_hud_presentation(
+        &self,
+        record: &crate::native_host::viewscreen_presentation::ViewscreenPresentation,
+        os: Option<crate::native_host::panes::os_prefs::OsAccessibilityPrefs>,
+    ) {
+        let mut inner = self.lock();
+        if let Some(os) = os {
+            inner.hud_os_defaults = os;
+        }
+        inner.hud_reading = Some(
+            crate::native_host::viewscreen_presentation::hud_reading_script(
+                record,
+                &inner.hud_os_defaults,
+            ),
+        );
+    }
+
+    pub fn hud_reading_script(&self) -> Option<String> {
+        self.lock().hud_reading.clone()
+    }
+
+    /// Used by the typed SetPresentation handler before its best-effort file
+    /// write, so a storage failure still leaves the whole live Viewscreen legible.
+    pub fn apply_hud_presentation_record(
+        &self,
+        record: &super::HostLobbyRecord,
+    ) -> Option<crate::native_host::viewscreen_presentation::ViewscreenPresentation> {
+        let super::HostLobbyRecord::SetPresentation {
+            text_scale_percent,
+            contrast,
+            shake_percent,
+            flash_percent,
+            decorative_motion_percent,
+        } = record
+        else {
+            return None;
+        };
+        let presentation = crate::native_host::viewscreen_presentation::ViewscreenPresentation {
+            text_scale_percent: *text_scale_percent,
+            contrast: *contrast,
+            shake_percent: *shake_percent,
+            flash_percent: *flash_percent,
+            decorative_motion_percent: *decorative_motion_percent,
+        }
+        .sanitised();
+        self.set_hud_presentation(&presentation, None);
+        Some(presentation)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {

@@ -625,6 +625,7 @@ pub struct PaneThreadConfig {
     pub bus: Option<PaneBus>,
     pub lobby: Option<HostLobbyBridge>,
     pub gm: Option<crate::native_host::native_gm::bridge::NativeGmBridge>,
+    pub audio_visuals: Option<crate::native_host::audio::visual::NativeAudioVisual>,
     pub period: Duration,
     pub buffers_per_pane: usize,
     pub measure: bool,
@@ -639,6 +640,7 @@ impl Default for PaneThreadConfig {
             bus: None,
             lobby: None,
             gm: None,
+            audio_visuals: None,
             period: Duration::from_millis(16),
             buffers_per_pane: PANE_STAGING_BUFFERS,
             measure: false,
@@ -890,6 +892,7 @@ where
                 driver.set_bus(config.bus);
                 driver.set_lobby(config.lobby);
                 driver.gm = config.gm;
+                driver.audio_visuals = config.audio_visuals;
                 driver.set_measure(config.measure);
                 driver.set_observer(config.observer);
                 let mut sink = PooledFrames::new(config.buffers_per_pane);
@@ -1005,6 +1008,7 @@ struct LoopPane<V> {
     /// A lifecycle edge may need the same revision again. Clear only on a
     /// successful push, independently of the copy obligation in `needs_full`.
     hud_apply_owed: bool,
+    audio_reader: crate::native_host::audio::visual::VisualReader,
 }
 
 impl<V> LoopPane<V> {
@@ -1058,6 +1062,7 @@ pub struct PaneLoop<R: PaneRuntime> {
     /// reach the bus.
     lobby: Option<HostLobbyBridge>,
     gm: Option<crate::native_host::native_gm::bridge::NativeGmBridge>,
+    audio_visuals: Option<crate::native_host::audio::visual::NativeAudioVisual>,
     /// The newest HUD readout, retained for changed revisions and lifecycle
     /// reapplication — a latest-wins slot, see the module note.
     hud_script: Option<String>,
@@ -1080,6 +1085,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
             bus: None,
             lobby: None,
             gm: None,
+            audio_visuals: None,
             hud_script: None,
             hud_revision: 0,
             gamepad_script: None,
@@ -1188,6 +1194,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
                             copy_failures: 0,
                             applied_hud_revision: None,
                             hud_apply_owed: true,
+                            audio_reader: Default::default(),
                         });
                         if let Some(observer) = &observer {
                             observer.record(
@@ -1301,6 +1308,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
             bus,
             lobby,
             gm,
+            audio_visuals,
             hud_script,
             hud_revision,
             gamepad_script,
@@ -1391,6 +1399,34 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 // This runs before render so the new DOM is painted this pass;
                 // a quiet revision leaves animation dirty detection intact.
                 PaneKind::Hud => {
+                    if let Some(audio) = &*audio_visuals {
+                        // Current equivalents are observed here, never queued in
+                        // the retained HUD script. New/hidden/loading documents
+                        // seed silently; failed pushes consume the occurrence.
+                        for cue in pane.audio_reader.read(
+                            audio,
+                            pane.view.is_ready(),
+                            pane.visible,
+                            Instant::now(),
+                        ) {
+                            if let Ok(script) = crate::core::codec::encode_native_audio_visual(&cue)
+                            {
+                                if pane.view.push(&script).is_ok() {
+                                    pane.pushed_this_iteration = true;
+                                    applied += 1;
+                                } else {
+                                    failed += 1;
+                                    if matches!(
+                                        cue,
+                                        crate::native_host::audio::visual::VisualCue::Lifecycle { .. }
+                                            | crate::native_host::audio::visual::VisualCue::Beam { .. }
+                                    ) {
+                                        pane.audio_reader.retry_current();
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if let (Some(script), true) = (
                         &*hud_script,
                         pane.view.is_ready()
@@ -1401,9 +1437,9 @@ impl<R: PaneRuntime> PaneLoop<R> {
                             pane.pushed_this_iteration = true;
                             pane.applied_hud_revision = Some(*hud_revision);
                             pane.hud_apply_owed = false;
-                            applied = 1;
+                            applied += 1;
                         } else {
-                            failed = 1;
+                            failed += 1;
                         }
                     }
                 }
@@ -3348,6 +3384,85 @@ mod loop_tests {
             .expect("the retry produced a frame");
         assert_eq!(revision, Some(2));
         assert!(reasons.hud_push && reasons.buffer_retry && reasons.copy_retry);
+    }
+
+    #[test]
+    fn audio_hud_delivers_current_beam_and_discards_missed_transients() {
+        use crate::native_host::audio::{player::RoomInput, visual::NativeAudioVisual};
+
+        let shared = NativeAudioVisual::default();
+        let mut input = RoomInput {
+            lifecycle: crate::console_bridge::AudioLifecycleState {
+                generation: 1,
+                running: true,
+                suspended: false,
+            },
+            phaser: true,
+            ..Default::default()
+        };
+        shared.update(&input);
+        shared.blaster([1.0, 0.0, 0.0]);
+        let mut driver = one_pane(HUD, PaneKind::Hud);
+        driver.audio_visuals = Some(shared.clone());
+        let mut sink = RecordingSink::new();
+        let mut out = Vec::new();
+        let take = |driver: &mut PaneLoop<RecordingRuntime>| {
+            std::mem::take(&mut driver.view_mut(HUD).unwrap().surface.pushed)
+        };
+        driver.iterate(&mut sink, &mut out);
+        let initial = take(&mut driver);
+        assert_eq!(initial.len(), 2);
+        assert!(initial[0].contains("lifecycle"));
+        assert!(initial[1].contains("beam") && initial[1].contains("true"));
+        assert!(!initial.iter().any(|script| script.contains("blaster")));
+
+        shared.blaster([2.0, 0.0, 0.0]);
+        driver.iterate(&mut sink, &mut out);
+        assert!(matches!(take(&mut driver).as_slice(), [shot] if shot.contains("blaster")));
+        driver.iterate(&mut sink, &mut out);
+        assert!(take(&mut driver).is_empty());
+
+        shared.blaster([3.0, 0.0, 0.0]);
+        driver.view_mut(HUD).unwrap().surface.failing_pushes = 1;
+        driver.iterate(&mut sink, &mut out);
+        driver.iterate(&mut sink, &mut out);
+        assert!(
+            take(&mut driver).is_empty(),
+            "failed transients never retry"
+        );
+
+        for visible in [false, true] {
+            driver.apply(
+                PaneCommand::SetVisible { id: HUD, visible },
+                &mut sink,
+                &mut out,
+            );
+            shared.blaster([4.0, 0.0, 0.0]);
+            driver.iterate(&mut sink, &mut out);
+            assert!(!take(&mut driver)
+                .iter()
+                .any(|script| script.contains("blaster")));
+        }
+
+        input.phaser = false;
+        shared.update(&input);
+        driver.view_mut(HUD).unwrap().surface.failing_pushes = 1;
+        driver.iterate(&mut sink, &mut out);
+        assert!(take(&mut driver).is_empty());
+        driver.iterate(&mut sink, &mut out);
+        let retried = take(&mut driver);
+        assert_eq!(retried.len(), 2, "current lifecycle and beam state retry");
+        assert!(retried[1].contains("beam") && retried[1].contains("false"));
+
+        shared.blaster([5.0, 0.0, 0.0]);
+        input.lifecycle.generation += 1;
+        input.lifecycle.suspended = true;
+        shared.update(&input);
+        driver.iterate(&mut sink, &mut out);
+        let held = take(&mut driver);
+        assert_eq!(held.len(), 2);
+        assert!(held[0].contains("lifecycle") && held[0].contains("false"));
+        assert!(!held.iter().any(|script| script.contains("blaster")));
     }
 
     #[test]

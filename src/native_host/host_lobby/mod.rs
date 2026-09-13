@@ -435,6 +435,7 @@ impl LocalHostLobby {
         // Ultralight view is assembled the same way whichever surface it is —
         // which is exactly why the slice that needed it found it already there.
         let prefs = super::panes::os_prefs::query_os_accessibility_prefs();
+        self.bridge.set_hud_presentation(&saved, Some(prefs));
         let body = super::panes::document::inject_os_accessibility_defaults(
             &build_host_lobby_document(host_index_html)?,
             &prefs,
@@ -1198,32 +1199,23 @@ pub(crate) fn drain_surface_records(
                 }
                 continue;
             }
-            HostLobbyRecord::SetPresentation {
-                text_scale_percent,
-                contrast,
-                shake_percent,
-                flash_percent,
-                decorative_motion_percent,
-            } => {
+            record @ HostLobbyRecord::SetPresentation { .. } => {
                 // Issue #1427. Written straight through to this machine's own
                 // file: the page has already applied it to its own root (that is
                 // the live preview, and it must not wait on a round trip), so
-                // what the host owes is only that the NEXT launch comes up the
-                // same way. Nothing else in the process is touched — no
-                // simulation state, no scenario, no save, no participant.
+                // the host forwards the same choice to its separate live HUD
+                // document and remembers it for the next launch. No simulation,
+                // scenario, session save or participant state is changed.
                 //
                 // A host that cannot name a settings directory, or cannot write
                 // to it, keeps the setting for this session and says so once:
                 // the operator can see the screen has changed, so a refusal
                 // would be a worse sentence than an honest "it will not be
                 // remembered".
-                let record = super::viewscreen_presentation::ViewscreenPresentation {
-                    text_scale_percent,
-                    contrast,
-                    shake_percent,
-                    flash_percent,
-                    decorative_motion_percent,
-                };
+                let record = bridge
+                    .0
+                    .apply_hud_presentation_record(&record)
+                    .expect("matched SetPresentation");
                 // The two effects a RENDERER owns reach it now, not at the next
                 // launch (issue #1428): the page has already applied the CSS
                 // half to its own root, and a camera shake the operator just

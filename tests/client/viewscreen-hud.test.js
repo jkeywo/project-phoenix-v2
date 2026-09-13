@@ -26,7 +26,7 @@
  *   3. the host pushes before the deferred module has evaluated.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -40,8 +40,9 @@ import {
 } from '../../gui/visual-effects.js';
 import { localiseHostPayload } from '../../gui/host-channel.js';
 import { gameOverView } from '../../gui/game-over-view.js';
-import { mountSensorReport } from '../../gui/sensor-report.js';
 import { createPresentationCard } from '../../gui/presentation-card.js';
+import { mountSensorReport } from '../../gui/sensor-report.js';
+import { createAudioLiveEquivalents } from '../../gui/audio-live-equivalents.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HTML = readFileSync(path.join(root, 'gui/viewscreen-hud.html'), 'utf8');
@@ -89,7 +90,7 @@ const IMPORTED = [...MODULE.matchAll(/^\s*import\s*\{([^}]*)\}/gm)]
   .sort();
 
 /** What `runIsland` binds those names to, in declaration order. */
-const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView, createPresentationCard, mountSensorReport };
+const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView, createPresentationCard, mountSensorReport, createAudioLiveEquivalents };
 
 /**
  * Run the island's body with its imports bound to the real gui/ modules.
@@ -129,14 +130,81 @@ const slotLabel = (id) => document.querySelector(`[data-i18n="${id}"]`)?.textCon
 /** The real table, restored after any test that takes it away. */
 const REAL_TABLE = getTable();
 
+describe('native live combat equivalents', () => {
+  const cue = value => window.__phoenixHudAudioCue(JSON.stringify(value));
+  const equivalent = kind => document.querySelector(`[data-audio-equivalent="${kind}"]`);
+
+  it('shows current beam and permitted direction independently of a muted or missing output', () => {
+    vi.useFakeTimers(); mountPage(); runIsland();
+    cue({ kind: 'lifecycle', active: true });
+    push({ phaser_firing: true });
+    cue({ kind: 'beam', active: true });
+    expect(equivalent('beam').textContent).toBe(t('audio.cue.beam'));
+    cue({ kind: 'blaster', x: 10, y: 0, z: 0, source_uuid: 'hidden-id', name: 'Secret hull' });
+    expect(equivalent('blaster').textContent).toBe(t('audio.cue.blaster', { bearing: 90, elevation: 0 }));
+    expect(document.body.textContent).not.toContain('Secret hull');
+    cue({ kind: 'impact' });
+    expect(equivalent('impact').textContent).toBe(t('audio.cue.impact'));
+    vi.advanceTimersByTime(2001);
+    expect(equivalent('blaster')).toBeNull();
+    expect(equivalent('impact')).toBeNull();
+    expect(equivalent('beam')).not.toBeNull();
+    push({ phaser_firing: false });
+    cue({ kind: 'beam', active: false });
+    expect(equivalent('beam')).toBeNull();
+    expect(document.querySelector('#audio-live-equivalents').children.length).toBe(0);
+  });
+
+  it('holds clear through restore even when an old HUD says beam is active', () => {
+    mountPage(); runIsland(); cue({ kind: 'lifecycle', active: true });
+    push({ phaser_firing: true }); cue({ kind: 'beam', active: true }); cue({ kind: 'impact' });
+    cue({ kind: 'lifecycle', active: false });
+    push({ phaser_firing: true }); cue({ kind: 'blaster', x: 1, y: 0, z: 0 });
+    expect(document.querySelector('#audio-live-equivalents').children.length).toBe(0);
+    cue({ kind: 'lifecycle', active: true });
+    expect(equivalent('beam')).toBeNull();
+    cue({ kind: 'beam', active: true });
+    expect(equivalent('beam')).not.toBeNull();
+    expect(equivalent('blaster')).toBeNull();
+  });
+
+  it('a late module can derive the current beam but cannot catch up a missed shot', () => {
+    mountPage(); cue({ kind: 'lifecycle', active: true });
+    push({ phaser_firing: true });
+    cue({ kind: 'beam', active: true });
+    cue({ kind: 'blaster', x: 1, y: 0, z: 0 });
+    runIsland();
+    expect(equivalent('beam')).not.toBeNull();
+    expect(equivalent('blaster')).toBeNull();
+  });
+});
+
 beforeEach(() => {
   setTable(REAL_TABLE);
   document.body.innerHTML = '';
   delete window.__phoenixHud;
   delete window.__updateHud;
+  document.documentElement.style.removeProperty('--a11y-text-scale');
+  document.documentElement.removeAttribute('data-contrast');
+});
+
+it('accepts the real native reading scripts before module load and retains them through reload', () => {
+  const cases = JSON.parse(readFileSync(path.join(root, 'tests/fixtures/native-hud-reading.json'), 'utf8'));
+  mountPage();
+  for (const entry of cases) {
+    new Function(entry.script)();
+    const explicit = entry.record.text_scale_percent;
+    expect(document.documentElement.style.getPropertyValue('--a11y-text-scale')).toBe(String(explicit == null ? 1.25 : explicit / 100));
+    expect(document.documentElement.dataset.contrast).toBe(entry.record.contrast === true ? 'more' : 'standard');
+  }
+  runIsland();
+  expect(document.documentElement.style.getPropertyValue('--a11y-text-scale')).toBe('1');
+  expect(document.documentElement.dataset.contrast).toBe('standard');
 });
 
 afterEach(() => {
+  window.__phoenixHud?.audioEquivalent?.dispose();
+  vi.useRealTimers();
   setTable(REAL_TABLE);
 });
 
@@ -165,7 +233,7 @@ describe('the page localises itself from the String Table', () => {
     // header — the island never evaluates and the prelude's fallback carries
     // the Viewscreen — and a name added to an import list would otherwise be
     // an undefined binding here rather than a failing expectation.
-    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js', 'game-over-view.js', 'presentation-card.js', 'sensor-report.js']);
+    expect(SPECIFIERS).toEqual(['strings-boot.js', 'strings.js', 'host-channel.js', 'game-over-view.js', 'presentation-card.js', 'sensor-report.js', 'audio-live-equivalents.js']);
     for (const file of SPECIFIERS) {
       expect(existsSync(path.join(root, 'gui', file)), `gui/${file}`).toBe(true);
     }

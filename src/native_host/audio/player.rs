@@ -7,6 +7,7 @@ use crate::{audio_config::AudioConfigPayload, console_bridge::AudioLifecycleStat
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 pub const MENU: &str = "assets/sounds/exploration.mp3";
@@ -17,6 +18,8 @@ pub struct RoomInput {
     pub red_alert: bool,
     pub thrust: f32,
     pub menu: bool,
+    pub phaser: bool,
+    pub forcefield: f32,
 }
 pub struct RoomPlayer {
     pub mixer: Arc<Mutex<Mixer>>,
@@ -24,6 +27,11 @@ pub struct RoomPlayer {
     previous: Option<RoomInput>,
     was_ready: bool,
     pub failures: Vec<String>,
+}
+pub struct PreparedBlaster {
+    pcm: Arc<Pcm>,
+    gain: f32,
+    matrix: super::spatial::StereoMatrix,
 }
 impl Default for RoomPlayer {
     fn default() -> Self {
@@ -42,6 +50,9 @@ impl RoomPlayer {
             Some(MENU),
             input.config.ambient.as_ref().map(|s| s.file.as_str()),
             input.config.engine.as_ref().map(|s| s.file.as_str()),
+            input.config.phaser_loop.as_ref().map(|s| s.file.as_str()),
+            input.config.forcefield.as_ref().map(|s| s.file.as_str()),
+            input.config.blaster.as_ref().map(|s| s.file.as_str()),
             input
                 .config
                 .red_alert
@@ -62,6 +73,9 @@ impl RoomPlayer {
         for path in [
             input.config.ambient.as_ref().map(|s| s.file.as_str()),
             input.config.engine.as_ref().map(|s| s.file.as_str()),
+            input.config.phaser_loop.as_ref().map(|s| s.file.as_str()),
+            input.config.forcefield.as_ref().map(|s| s.file.as_str()),
+            input.config.blaster.as_ref().map(|s| s.file.as_str()),
             input
                 .config
                 .red_alert
@@ -141,9 +155,22 @@ impl RoomPlayer {
                     ));
                 }
             }
+            if input.phaser {
+                if let Some(spec) = &input.config.phaser_loop {
+                    desired.push(("phaser", spec.file.as_str(), "effects", spec.volume));
+                }
+            }
+            if let Some(spec) = &input.config.forcefield {
+                desired.push((
+                    "forcefield",
+                    spec.file.as_str(),
+                    "effects",
+                    input.forcefield,
+                ));
+            }
         }
         let desired_ids: Vec<_> = desired.iter().map(|(id, _, _, _)| *id).collect();
-        for id in ["menu", "ambient", "engine", "music"] {
+        for id in ["menu", "ambient", "engine", "music", "phaser", "forcefield"] {
             if !desired_ids.contains(&id) {
                 self.mixer.lock().unwrap().stop(id);
             }
@@ -187,6 +214,46 @@ impl RoomPlayer {
                 .lock()
                 .unwrap()
                 .cue("test", pcm, "music", 0.5, Some(2.0));
+        }
+    }
+    pub fn prepare_blaster(
+        &mut self,
+        input: &RoomInput,
+        position: [f32; 3],
+        deadline: Option<Instant>,
+    ) -> Option<PreparedBlaster> {
+        if !input.lifecycle.running || input.lifecycle.suspended {
+            return None;
+        }
+        let spec = input.config.blaster.as_ref()?;
+        if position.iter().any(|value| !value.is_finite())
+            || position.into_iter().map(|v| v * v).sum::<f32>()
+                > spec.max_distance * spec.max_distance
+        {
+            return None;
+        }
+        let pcm = self.asset(&spec.file)?;
+        let gain = spec.volume * super::spatial::distance_gain(spec, position);
+        let (pcm, matrix) = match spec.panning_model {
+            crate::audio_config::PanningModel::EqualPower => {
+                let matrix = super::spatial::equal_power(position, pcm.channels);
+                (pcm, matrix)
+            }
+            crate::audio_config::PanningModel::Hrtf => (
+                super::hrtf::render(&pcm, position, deadline)?,
+                super::spatial::StereoMatrix([[1.0, 0.0], [0.0, 1.0]]),
+            ),
+        };
+        Some(PreparedBlaster { pcm, gain, matrix })
+    }
+    pub fn play_blaster(&mut self, input: &RoomInput, ready: bool, prepared: PreparedBlaster) {
+        if ready && input.lifecycle.running && !input.lifecycle.suspended {
+            self.mixer.lock().unwrap().cue_spatial(
+                "blaster",
+                prepared.pcm,
+                prepared.gain,
+                prepared.matrix,
+            );
         }
     }
 }

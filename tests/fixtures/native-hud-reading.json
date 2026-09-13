@@ -1,0 +1,7 @@
+[
+  {"name":"follow OS","record":{"kind":"set_presentation","text_scale_percent":null,"contrast":null,"shake_percent":null,"flash_percent":null,"decorative_motion_percent":null},"script":"window.__phoenixSetHudReading({textScale:1.25,contrast:false})"},
+  {"name":"large text","record":{"kind":"set_presentation","text_scale_percent":200,"contrast":null,"shake_percent":null,"flash_percent":null,"decorative_motion_percent":null},"script":"window.__phoenixSetHudReading({textScale:2,contrast:false})"},
+  {"name":"large high contrast","record":{"kind":"set_presentation","text_scale_percent":200,"contrast":true,"shake_percent":null,"flash_percent":null,"decorative_motion_percent":null},"script":"window.__phoenixSetHudReading({textScale:2,contrast:true})"},
+  {"name":"reset text only","record":{"kind":"set_presentation","text_scale_percent":null,"contrast":true,"shake_percent":null,"flash_percent":null,"decorative_motion_percent":null},"script":"window.__phoenixSetHudReading({textScale:1.25,contrast:true})"},
+  {"name":"explicit standard","record":{"kind":"set_presentation","text_scale_percent":100,"contrast":false,"shake_percent":null,"flash_percent":null,"decorative_motion_percent":null},"script":"window.__phoenixSetHudReading({textScale:1,contrast:false})"}
+]

@@ -195,11 +195,14 @@ entities:
       confidence: confirmed
       origin: ai
       title: Native Viewscreen Room Audio Player
-      summary: "One native process owner decodes shipped MP3 and Vorbis/OGG assets and mixes lobby music, ambient/engine beds and the Red Alert siren/music through one selected CPAL output. The embedded settings document sends typed local controls and observes current status; document mount, hide and reload never own or restart playback."
+      summary: "One native process owner decodes shipped MP3 and Vorbis/OGG assets and mixes lobby music, ambient/engine beds, Red Alert siren/music, phaser, positional blaster and forcefield audio through one selected CPAL output. The embedded settings document sends typed local controls and observes current status; document mount, hide and reload never own or restart playback."
       rationale:
         - "[ai] The production decoder and PCM mixer run against a fake device sample sink in ordinary native tests. CPAL callbacks only consume mixed samples; file decoding, enumeration and stream destruction stay on the owner worker. Category and Master gains multiply the existing authored levels, and a bounded Music output test uses this same path."
         - "[ai] Native preferences merge an audio section into the existing Viewscreen endpoint record. Hardware routes persist separately as bridge-media assignments. Launch profiles override saved media only for explicitly named surfaces; display-only profiles preserve saved audio routes. The merged media must still satisfy sharing consent. Missing or ambiguous selected outputs remain silent until deliberate recovery. Room output never follows a private surface assignment."
         - "[ai] Current config/HUD and the runtime-owned continuation state drive playback. Restore holds stop loops/tests immediately; output loss and late decoding discard missed one-shots. A generation-checked commit prevents the worker from recreating old sound after a newer boundary. Only live comparison state is retained: no audio cue history, catch-up, journal or replay. Existing Red Alert text/frame remains visible with sound unavailable or muted."
+        - "[ai] Combat uses the same source events, forcefield envelope, authored gain and distance laws as the browser. Equal-power panning preserves mono/stereo input rules; authored HRTF uses the vendored public-domain measured IRCAM/WebKit response data, with convolution prepared outside the device callback. Only a fresh current blaster request may commit."
+        - "[ai] The shared Rust blaster producer applies the current canonical forced-or-ordinary Viewscreen mode and the observer's existing M7 conceal/report-policy predicate. Suppressed Sensors shots are consumed silently without delayed synthesis. Unnamed public combat geometry in ordinary camera mode remains eligible. A shared current lifecycle/beam and expiring combat slots feed the one HUD, independent of device success or mute. New, loading, hidden and restored documents seed transient comparison silently; only current lifecycle/beam state retries after a failed push."
+        - "[ai] Existing native Display controls forward resolved endpoint text scale and contrast through the same retained HUD command as current content. The lobby and HUD share one saved preference record and OS default layer; no new store is introduced. Audio equivalents remain above a simultaneous presentation card."
     architecture:
       kind: client-presentation
       authority: local
@@ -208,9 +211,9 @@ entities:
       runs_in: [native-host-runtime]
     implementation:
       status: declared
-      paths: [src/native_host/audio/mod.rs, src/native_host/audio/decoder.rs, src/native_host/audio/engine.rs, src/native_host/audio/player.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, src/native_host/audio/mix.rs, src/native_host/viewscreen_presentation.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/scenario.rs, src/native_host/host_lobby/mod.rs, gui/native-audio.js, gui/native-settings.js, gui/audio-settings-panel.js]
-      symbols: [NativeRoomAudio, NativeRoomAudioPlugin, RoomPlayer, Mixer, HardwareStore, createNativeAudio, renderNativeAudioOutput]
-      tests: [cargo test --features headless --lib native_host::audio, tests/client/native-audio.test.js, tests/client/native-settings.test.js, tests/smoke/native-audio.spec.js]
+      paths: [src/native_host/audio/mod.rs, src/native_host/audio/decoder.rs, src/native_host/audio/engine.rs, src/native_host/audio/player.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, src/native_host/audio/mix.rs, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/ultralight.rs, src/server/audio.rs, src/native_host/viewscreen_presentation.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/scenario.rs, src/native_host/host_lobby/mod.rs, gui/native-audio.js, gui/native-settings.js, gui/audio-settings-panel.js, gui/viewscreen-hud.html, gui/audio-live-equivalents.js]
+      symbols: [NativeRoomAudio, NativeRoomAudioPlugin, RoomPlayer, Mixer, HardwareStore, NativeAudioVisual, VisualReader, createNativeAudio, renderNativeAudioOutput]
+      tests: [cargo test --features headless --lib native_host::audio, cargo test --features headless --lib audio_hud_delivers, cargo test --features headless --lib blaster_audience, tests/client/native-audio.test.js, tests/client/native-settings.test.js, tests/client/viewscreen-hud.test.js, tests/smoke/native-audio.spec.js, tests/smoke/native-combat-audio.spec.js]
 
   - state: native-room-audio
     core:
@@ -218,7 +221,7 @@ entities:
       confidence: confirmed
       origin: ai
       title: Native Room Audio Endpoint State
-      summary: "Process-local current room input, mix, selected output, decoded asset cache and provider status. The sole owner discards one-shots at continuation/output boundaries. Only endpoint preferences and hardware assignments persist in their respective local files; no playback event is saved or enters simulation state."
+      summary: "Process-local current room input, mix, selected output, decoded asset cache, provider status and current visual equivalents. The sole owner discards one-shots at continuation/output boundaries. Per-document visual comparison consumes missed occurrences. Only endpoint preferences and hardware assignments persist in their respective local files; no playback event is saved or enters simulation state."
     architecture:
       classification: local-view
       owner: native-room-audio-player

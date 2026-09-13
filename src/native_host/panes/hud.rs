@@ -32,6 +32,7 @@ pub(super) fn hud_z_index(lobby_composited: bool) -> i32 {
 pub(crate) struct HudScriptCache {
     json: Option<String>,
     effects: Option<String>,
+    reading: Option<String>,
     script: Option<String>,
     revision: u64,
 }
@@ -71,11 +72,26 @@ impl HudScriptCache {
             (None, Some(update)) => Some(update),
             (Some(effects), Some(update)) => Some(format!("{effects};{update}")),
         };
+        if let Some(reading) = &self.reading {
+            self.script = Some(format!(
+                "{reading};{}",
+                self.script.as_deref().unwrap_or_default()
+            ));
+        }
         self.revision = self.revision.wrapping_add(1);
     }
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub fn set_reading(&mut self, statement: Option<String>) -> bool {
+        if self.reading == statement {
+            return false;
+        }
+        self.reading = statement;
+        self.recompose();
+        true
     }
 
     pub fn script(&self) -> Option<&str> {
@@ -141,6 +157,76 @@ fn effect_literal(intensity: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hud_reading_preferences_follow_typed_controls_and_survive_cached_reapplication() {
+        use crate::native_host::{
+            host_lobby::{pump_host_lobby, HostLobbyBridge, HostLobbyRecord},
+            panes::{os_prefs::OsAccessibilityPrefs, RecordingSurface},
+            viewscreen_presentation::ViewscreenPresentation,
+        };
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            record: serde_json::Value,
+            script: String,
+        }
+        let cases: Vec<Case> = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/native-hud-reading.json"
+        ))
+        .unwrap();
+        let bridge = HostLobbyBridge::new();
+        bridge.set_hud_presentation(
+            &ViewscreenPresentation::default(),
+            Some(OsAccessibilityPrefs {
+                text_scale: 1.25,
+                ..Default::default()
+            }),
+        );
+        let mut cache = HudScriptCache::default();
+        cache.update(r#"{"heading":90}"#);
+        for case in cases {
+            let mut surface = RecordingSurface::ready();
+            surface.queue_record(case.record.to_string());
+            pump_host_lobby(&bridge, &mut surface);
+            let records = bridge.take_records();
+            assert_eq!(records.len(), 1);
+            let record = HostLobbyRecord::decode(&records[0]).unwrap();
+            let saved = bridge.apply_hud_presentation_record(&record).unwrap();
+            cache.set_reading(bridge.hud_reading_script());
+            assert_eq!(
+                bridge.hud_reading_script().as_deref(),
+                Some(case.script.as_str()),
+                "{}",
+                case.name
+            );
+            assert!(cache
+                .script()
+                .unwrap()
+                .starts_with(&(case.script.clone() + ";")));
+            assert!(cache.script().unwrap().contains("__updateHud"));
+            assert!(
+                !cache.set_reading(bridge.hud_reading_script()),
+                "unchanged settings cost no new revision"
+            );
+            let mut recreated = HudScriptCache::default();
+            recreated.set_reading(bridge.hud_reading_script());
+            recreated.update(r#"{"heading":90}"#);
+            assert_eq!(recreated.script(), cache.script());
+            // The saved record can seed another process without borrowing this
+            // bridge's current state; no new persistence channel is needed.
+            let relaunched = HostLobbyBridge::new();
+            relaunched.set_hud_presentation(
+                &saved,
+                Some(OsAccessibilityPrefs {
+                    text_scale: 1.25,
+                    ..Default::default()
+                }),
+            );
+            assert_eq!(relaunched.hud_reading_script(), bridge.hud_reading_script());
+        }
+        assert!(HostLobbyBridge::new().hud_reading_script().is_none());
+    }
 
     #[test]
     fn revealed_lobby_clears_the_hud_without_covering_tiled_consoles() {

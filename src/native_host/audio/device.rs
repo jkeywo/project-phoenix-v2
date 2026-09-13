@@ -113,11 +113,25 @@ pub(super) fn run(
         // File IO and decoding never hold the callback's mixer lock. A newer
         // continuation/output request invalidates the prepared old state.
         player.prepare(&request.input);
-        let fresh = control.lock().unwrap();
+        let prepared_blaster = request.blaster.and_then(|(at, position)| {
+            (stream.is_some() && at.elapsed() <= Duration::from_millis(250))
+                .then(|| {
+                    player.prepare_blaster(
+                        &request.input,
+                        position,
+                        Some(at + Duration::from_millis(250)),
+                    )
+                })
+                .flatten()
+        });
+        let mut fresh = control.lock().unwrap();
         if fresh.quit {
             break;
         }
-        if fresh.input != request.input || fresh.retry != request.retry {
+        if fresh.input != request.input
+            || fresh.retry != request.retry
+            || fresh.blaster != request.blaster
+        {
             continue;
         }
         let ready = stream.is_some();
@@ -128,6 +142,13 @@ pub(super) fn run(
             player.suppress_edges();
         }
         player.apply(&fresh.input, ready);
+        if let Some((at, _)) = fresh.blaster.take() {
+            if at.elapsed() <= Duration::from_millis(250) {
+                if let Some(prepared) = prepared_blaster {
+                    player.play_blaster(&fresh.input, ready, prepared);
+                }
+            }
+        }
         if fresh.test != last_test {
             last_test = fresh.test;
             if fresh

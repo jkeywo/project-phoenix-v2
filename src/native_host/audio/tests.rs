@@ -32,6 +32,8 @@ fn input() -> RoomInput {
         red_alert: false,
         thrust: 0.0,
         menu: false,
+        phaser: false,
+        forcefield: 0.0,
     }
 }
 fn ship() -> ShipAudioConfig {
@@ -84,6 +86,7 @@ fn native_application_adapter_decodes_authored_mp3_and_ogg_into_device_samples()
         })
         .insert_resource(NativeRoomAudio::with_stores(None, false, None, None))
         .add_message::<HudStateChanged>()
+        .add_message::<AudioCueEvent>()
         .add_systems(Update, update_room);
     app.world_mut().spawn((LocalShip, ShipAudioSection(ship())));
     app.world_mut().resource_mut::<RoomAudioLifecycle>().state = input().lifecycle;

@@ -1053,6 +1053,9 @@ fn init_pane_host(world: &mut World) {
     // exist. Phase two waits for the explicit Started handshake.
     if world.get_resource::<PaneHostStarting>().is_none() {
         let config = PaneThreadConfig {
+            audio_visuals: world
+                .get_resource::<crate::native_host::audio::NativeRoomAudio>()
+                .map(|audio| audio.visuals.clone()),
             gm: world
                 .get_resource::<crate::native_host::native_gm::NativeGmSurface>()
                 .map(|gm| gm.bridge.clone()),
@@ -1449,10 +1452,14 @@ fn cache_hud_state(
     // that carry no `ViewscreenBorderPlugin`, and one of those has no HUD
     // surface to stamp either.
     motion: Option<Res<crate::server::viewscreen_border::ViewscreenMotion>>,
+    bridge: Option<Res<crate::native_host::host_lobby::HostLobbyBridgeResource>>,
 ) {
     if let Some(event) = events.read().last() {
         latest.0.update(&event.json);
     }
+    latest
+        .0
+        .set_reading(bridge.and_then(|bridge| bridge.0.hud_reading_script()));
     latest.0.set_effects(motion.map(|motion| {
         super::hud::hud_effects_script(
             motion.shake_intensity,

@@ -255,6 +255,26 @@ pub fn presentation_script(record: &ViewscreenPresentation) -> String {
     )
 }
 
+/// Current reading preferences for the separate native HUD document. The same
+/// endpoint override and OS default layer as the lobby; no second saved record.
+pub fn hud_reading_script(
+    record: &ViewscreenPresentation,
+    os: &super::panes::os_prefs::OsAccessibilityPrefs,
+) -> String {
+    let sane = record.sanitised();
+    let scale = sane.text_scale().unwrap_or(f64::from(os.text_scale));
+    let scale = if scale.is_finite() {
+        scale.clamp(SUPPORTED_TEXT_SCALE_MIN, SUPPORTED_TEXT_SCALE_MAX)
+    } else {
+        1.0
+    };
+    format!(
+        "window.__phoenixSetHudReading({{textScale:{},contrast:{}}})",
+        format_scale(scale),
+        sane.contrast.unwrap_or(os.high_contrast)
+    )
+}
+
 /// Format a scale as a JS number literal with no trailing-dot noise (`1` and
 /// `1.25`, never `1.` or an empty string). The twin of `os_prefs::format_scale`,
 /// which is private to that module.

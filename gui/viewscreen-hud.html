@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="server.hud_doc_title">Phoenix Viewscreen HUD</title>
+  <link rel="stylesheet" href="audio-settings.css">
   <!--
     The native host's viewscreen HUD overlay (issue #422's HTML overlay, ported
     to the native path). server.html renders this same #hud-overlay above its
@@ -18,7 +19,9 @@
     display's three resolved visual-effect intensities, which land as the same
     `data-shake` / `data-flash` / `data-decorative-motion` bands and
     `--a11y-*-scale` properties the private profile stamps on every other root.
-    Both arrive in ONE retained command (see the HUD-state push in
+    Text scale and contrast arrive through __phoenixSetHudReading using the
+    same endpoint record and OS defaults as the lobby. All arrive in ONE
+    retained command (see the HUD-state push in
     src/native_host/panes/ultralight.rs), because this surface has no other way
     to hear about them: it is not the lobby document, so the presentation script
     injected into that document's head never reaches it, and an Ultralight view
@@ -65,6 +68,7 @@
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="game-over.css">
   <style>
+    html { font-size: calc(var(--root-size-viewscreen, 16px) * var(--a11y-text-scale, 1)); }
     /* The page itself paints nothing — only the frame pieces below do, so the
        3-D viewscreen shows through everywhere else (the surface is transparent). */
     html, body {
@@ -543,6 +547,34 @@
         hud.paint();
       };
 
+      // This is the lobby's same resolved endpoint reading preference, carried
+      // in the retained HUD command before content. It also works before modules.
+      window.__phoenixSetHudReading = function (reading) {
+        if (!reading || typeof reading.textScale !== 'number' || !Number.isFinite(reading.textScale)) return;
+        document.documentElement.style.setProperty('--a11y-text-scale', String(Math.max(1, Math.min(2, reading.textScale))));
+        document.documentElement.setAttribute('data-contrast', reading.contrast === true ? 'more' : 'standard');
+      };
+
+      // The lifecycle is current state; transient cues are never retained for
+      // a late module load or replayed when this document reappears.
+      hud.audioActive = false;
+      hud.audioBeam = false;
+      window.__phoenixHudAudioCue = function (json) {
+        var cue;
+        try { cue = JSON.parse(json); } catch (e) { return; }
+        if (cue.kind === 'lifecycle') {
+          hud.audioActive = !!cue.active;
+          hud.audioBeam = false;
+          if (hud.audioEquivalent) hud.audioEquivalent.update({ kind: 'clear' });
+          if (hud.paintAudio) hud.paintAudio();
+        } else if (cue.kind === 'beam') {
+          hud.audioBeam = !!cue.active;
+          if (hud.paintAudio) hud.paintAudio();
+        } else if (hud.audioActive && hud.audioEquivalent) {
+          hud.audioEquivalent.update(cue);
+        }
+      };
+
       // The effects half (issue #1428). Pushed in the SAME retained command as
       // the state above and ahead of it, so the bands are in force before the
       // alert class flips and the vignette never gets a frame of unstamped
@@ -567,6 +599,7 @@
     import { gameOverView } from './game-over-view.js';
     import { createPresentationCard } from './presentation-card.js';
     import { mountSensorReport } from './sensor-report.js';
+    import { createAudioLiveEquivalents } from './audio-live-equivalents.js';
 
     // ONE guard for the whole page: with a table, this island localises the
     // markup and installs the localising renderer; without one it does neither
@@ -596,6 +629,11 @@
     // rather than being dropped.
     const strings = { localiseTree };
     const hud = window.__phoenixHud;
+    hud.audioEquivalent = createAudioLiveEquivalents(document);
+    hud.paintAudio = () => {
+      hud.audioEquivalent.update({ kind: 'beam', active: hud.audioActive && hud.audioBeam });
+    };
+    hud.paintAudio();
 
     // The four runtime status-slot values, through the same four ids
     // server.html's `__updateHud` resolves (server.html:2688-2702). Their

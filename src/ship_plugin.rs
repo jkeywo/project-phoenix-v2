@@ -441,6 +441,7 @@ impl Plugin for ShipPlugin {
         .add_systems(
             FixedUpdate,
             crate::gm_puppet::prune_removed_station_puppets
+                .in_set(crate::sim_sets::FixedStep::PublishPruneRemovedStationPuppets)
                 .in_set(crate::sim_sets::SimSet::Publish),
         );
 
@@ -456,6 +457,7 @@ impl Plugin for ShipPlugin {
         app.add_systems(
             FixedUpdate,
             tick_intent_narration
+                .in_set(crate::sim_sets::FixedStep::PublishIntentNarration)
                 .in_set(crate::sim_sets::SimSet::Publish)
                 .after(crate::lobby::LobbySystemSet)
                 .run_if(ai_tick_ready),

@@ -1,0 +1,24 @@
+entities:
+  - component: workshop-model-source-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Workshop Model Source Authoring
+      summary: "The shared offline Authoring surface groups existing rig, marker, target-point, LOD, bounds and build fields through the Workshop runtime inspector. Model variants clone exact source into the same draft and chronological history."
+      rationale:
+        - "[ai] Browser and native surfaces use their existing source providers. The panel has no project filesystem API, Live action route, model serializer or separate undo stack. Model and variant selection are local presentation."
+        - "[ai] A grouped edit prepares each changed scalar through the source-span patch API. It writes one draft edit only after every patch succeeds and exact source, selected variant, draft identity and context remain current. A refusal or late response changes no source."
+        - "[ai] Variant creation refuses overwriting an existing path and copies comments, line endings and unknown fields byte-for-byte. A model without a sidecar starts with the runtime's empty identity rig. Normal runtime validation remains the gate for Test, save and export."
+        - "[ai] Test holds these controls and hides the Authoring panel. Controls retain labels, keyboard access, visible non-colour status and wrapping layouts. External generation and structural metadata parity remain separate work."
+        - "[ai] Model preview uses the explicit modelPreview provider and the shared disposable preview owner. Refresh captures source deliberately; edits and selection changes mark the retained picture stale. Test, draft replacement and exit retire the preview. Camera, distance, gizmos, lighting and LOD controls affect only this renderer, with statistics measured by ViewerPlugin."
+    architecture:
+      kind: authoring-presentation
+      authority: non-authoritative
+      coordinates: [gm-milestone-integrated-workshop, workshop-runtime-asset-validation]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-authoring.js, gui/workshop.css, scripts/build-workshop.mjs]
+      symbols: [modelDocuments, createModelVariant, patchModelFields, mountWorkshopModels, mountWorkshopModelPreview]
+      tests: [editor/tests/workshop-models.test.js, tests/client/workshop-models-panel.test.js, tests/client/workshop-model-preview-panel.test.js, tests/client/workshop-authoring.test.js]

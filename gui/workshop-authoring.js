@@ -7,6 +7,7 @@ import { createWorkshopRuntime } from '../editor/workshop-runtime.js';
 import { createWorkshopRecovery } from '../editor/workshop-recovery.js';
 import { mountWorkshopTestPanel } from './workshop-test-panel.js';
 import { mountWorkshopSoundCues } from '../editor/workshop-sound-cues.js';
+import { mountWorkshopModels } from './workshop-models-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -126,6 +127,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let persistenceGeneration = 0;
   let testPanel = null;
   let soundAudition = null;
+  let modelPanel = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -215,6 +217,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     }
     const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
     const testing = testPanel?.testing() || false;
+    modelPanel?.refresh({ hidden: testing });
     toolbar.hidden = recoveryPanel.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     sourceScope.hidden = testing;
     dependencies.hidden = testing || !runtime.dependencies;
@@ -544,6 +547,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   soundAudition = mountWorkshopSoundCues({root,win,draft:()=>draft,native:!!provider?.save,
     resolveAsset:path=>runtime.readAsset?.(path)??null,
     readAudio:()=>profile.audio,saveAudio:audio=>{profile={...profile,audio};return saveOperatorProfile(win.PhoenixOperatorStorage||win.localStorage,profile);}});
+  modelPanel = mountWorkshopModels({ root, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   win.addEventListener('beforeunload', beforeUnload);
   testPanel = mountWorkshopTestPanel({ root, provider, draft: () => draft,
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed: () => refresh(), win });
@@ -591,6 +598,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     disposed = true;
     testPanel.dispose();
     soundAudition?.dispose();
+    modelPanel?.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);
     win.removeEventListener('beforeunload', beforeUnload);

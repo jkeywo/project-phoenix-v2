@@ -29,6 +29,15 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-source label, .workshop-files label { overflow-wrap: anywhere; }
 .workshop-findings { white-space: pre-wrap; overflow-wrap: anywhere; border-left: .2rem solid currentColor; padding: .75rem; margin-top: 1rem; }
 .workshop-feedback { display: flex; flex-wrap: wrap; gap: .75rem; }
+.workshop-models > :is(label, select, input) { display: block; width: 100%; margin: .5rem 0; }
+.workshop-models :is(p, label, legend, small) { overflow-wrap: anywhere; }
+.workshop-model-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr)); gap: 1rem; }
+.workshop-model-fields fieldset { min-width: 0; }
+.workshop-model-field { display: grid; gap: .25rem; margin: .5rem 0; }
+.workshop-model-field input { width: 100%; min-height: 2.75rem; }
+.workshop-model-preview :is(input, select) { max-width: 100%; }
+.workshop-model-preview-viewport { width: 100%; }
+.workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }
 .workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: 1.5rem; }
 .workshop-test h2, .workshop-test p { flex-basis: 100%; margin: .25rem 0; overflow-wrap: anywhere; }
 .workshop-test select, .workshop-test input { max-width: 100%; }

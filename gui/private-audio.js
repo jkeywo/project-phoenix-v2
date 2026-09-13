@@ -40,6 +40,7 @@ export function createPrivateAudio({
   catch (_) { provider = silentProvider(); }
   provider.setMix(preferences.mix);
   provider.setMono?.(preferences.mono);
+  provider.setReducedRange?.(preferences.reducedRange);
   function configure(value) {
     if (disposed || value?.version !== 1 || !value.sounds) return false;
     const accepted = {};
@@ -89,13 +90,14 @@ export function createPrivateAudio({
     return cue(STATES[value.state]);
   }
   function reload() { preferences = normalizePrivateAudio(read()); provider.setMix(preferences.mix);
-    provider.setMono?.(preferences.mono); notify(); }
+    provider.setMono?.(preferences.mono); provider.setReducedRange?.(preferences.reducedRange); notify(); }
   function change(next) {
     preferences = normalizePrivateAudio(next);
     let result;
     try { result = save(preferences); } catch (_) { result = { status: 'unavailable' }; }
     persistence = result?.status === 'saved' ? 'saved' : 'unavailable';
-    provider.setMix(preferences.mix); provider.setMono?.(preferences.mono); notify();
+    provider.setMix(preferences.mix); provider.setMono?.(preferences.mono);
+    provider.setReducedRange?.(preferences.reducedRange); notify();
     return result;
   }
   function setActive(value) {
@@ -109,13 +111,15 @@ export function createPrivateAudio({
     debug: () => ({ outputPeak: provider.outputPeak?.() || 0 }),
     state: () => ({ ...provider.snapshot(), mix: preferences.mix, cues: preferences.cues,
       mono: preferences.mono, monoAvailable: typeof provider.setMono === 'function',
+      reducedRange: preferences.reducedRange,
       persistence, private: true, room: false, buses: PRIVATE_AUDIO_BUSES, testBus: 'interface' }),
     setBus: (id, value) => PRIVATE_AUDIO_BUSES.includes(id) && change({ ...preferences,
       mix: { ...preferences.mix, [id]: { ...preferences.mix[id], ...value } } }),
     setCue: (id, value) => Object.hasOwn(PRIVATE_AUDIO_CUES, id) && change({ ...preferences,
       cues: { ...preferences.cues, [id]: value === true } }),
     setMono: value => change({ ...preferences, mono: value === true }),
-    resetMix: () => change({ ...preferences, mono: false, mix: normalizePrivateAudio().mix }),
+    setReducedRange: value => change({ ...preferences, reducedRange: value === true }),
+    resetMix: () => change({ ...preferences, mono: false, reducedRange: false, mix: normalizePrivateAudio().mix }),
     enable: async () => { try { return active && await provider.enable(); } catch (_) { return false; } },
     testOutput: async () => { try { return active && !!spec && await provider.testOutput('test'); } catch (_) { return false; } },
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },

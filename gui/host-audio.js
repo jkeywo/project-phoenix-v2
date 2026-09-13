@@ -42,6 +42,7 @@ export function createHostAudio({
   });
   provider.setMix(mix);
   provider.setMono?.(mono);
+  provider.setReducedRange?.(preferences.read().reducedRange);
   const duckingReady = Promise.resolve().then(() => duckingSpec || (isRoom() ? fetchDucking() : null))
     .then(spec => { duckingSpec = spec; provider.setDucking?.(isRoom() && preferences.read().ducking, spec); })
     .catch(() => {});
@@ -69,10 +70,11 @@ export function createHostAudio({
   function resetMix() {
     mix = defaultAudioMix();
     mono = false;
-    preferences.save(mix, mono, false);
+    preferences.save(mix, mono, false, false);
     provider.setMix(mix);
     provider.setMono?.(mono);
     provider.setDucking?.(false, duckingSpec);
+    provider.setReducedRange?.(false);
   }
   function setMono(value) {
     if (!isRoom()) return;
@@ -85,6 +87,12 @@ export function createHostAudio({
     if (!isRoom()) return;
     preferences.save(mix, mono, value === true);
     provider.setDucking?.(value === true, duckingSpec);
+    notify();
+  }
+  function setReducedRange(value) {
+    if (!isRoom()) return;
+    preferences.save(mix, mono, preferences.read().ducking, value === true);
+    provider.setReducedRange?.(value === true);
     notify();
   }
 
@@ -241,7 +249,7 @@ export function createHostAudio({
   }
   return {
     audioConfig, audioCue, audioLevel, audioLifecycle, applyHudAudio, startGameAudio, startMenuMusic, stopMenuMusic,
-    resetSession, setPageActive, state, setBus, setMono, resetMix, setDucking, duckingReady,
+    resetSession, setPageActive, state, setBus, setMono, resetMix, setDucking, duckingReady, setReducedRange,
     enable: () => isRoom() ? provider.enable() : Promise.resolve(false),
     testOutput: () => { ensureMenu(); return isRoom() ? provider.testOutput('menu') : Promise.resolve(false); },
     getMasterVolume: () => mix.master.level,

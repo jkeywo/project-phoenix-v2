@@ -6,14 +6,15 @@ import { t } from './strings.js';
 export function createNativeAudio({ win = globalThis, send = () => {} } = {}) {
   const listeners = new Set();
   let current = { room: false, supportsDucking: true, ducking: false, mix: defaultAudioMix(), categories: [], mono: false, monoAvailable: false,
-    status: 'unavailable', test: 'idle', persistence: 'unavailable',
+    status: 'unavailable', test: 'idle', persistence: 'unavailable', reducedRange: false, reducedRangeAvailable: false,
     hardware_persistence: 'unavailable', output: null, devices: [], detail: '', asset_failures: [] };
   function apply(json) {
     let value;
     try { value = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return; }
     if (!value || value.room !== true || !Array.isArray(value.categories)) return;
     current = { ...current, ...value, mix: normalizeAudioMix(value.mix),
-      mono: value.mono === true, monoAvailable: typeof value.mono === 'boolean' };
+      mono: value.mono === true, monoAvailable: typeof value.mono === 'boolean',
+      reducedRange: value.reducedRange === true, reducedRangeAvailable: typeof value.reducedRange === 'boolean' };
     for (const listener of listeners) listener();
   }
   win.__phoenixNativeAudioApply = apply;
@@ -31,6 +32,7 @@ export function createNativeAudio({ win = globalThis, send = () => {} } = {}) {
     resetMix: () => request({ kind: 'reset_audio_mix' }),
     setMono: enabled => request({ kind: 'set_audio_mono', enabled: enabled === true }),
     setDucking: enabled => request({ kind: 'set_audio_ducking', enabled: enabled === true }),
+    setReducedRange: enabled => request({ kind: 'set_audio_reduced_range', enabled: enabled === true }),
     enable: () => request({ kind: 'retry_audio_output' }),
     testOutput: () => request({ kind: 'test_audio_output' }),
     selectOutput: output => request({ kind: 'select_audio_output', output: output || null }),

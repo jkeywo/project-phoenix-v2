@@ -356,7 +356,12 @@ impl ViewscreenPresentationStore {
     /// Merge audio with the existing endpoint record. Hardware output identities
     /// are deliberately stored by bridge-media instead, and no cues are stored.
     pub fn save_audio(&self, mix: super::audio::mix::AudioMix) -> std::io::Result<()> {
-        self.save_audio_comfort(mix, self.load_audio_mono(), self.load_audio_ducking())
+        self.save_audio_comfort(
+            mix,
+            self.load_audio_mono(),
+            self.load_audio_ducking(),
+            self.load_audio_reduced_range(),
+        )
     }
 
     pub fn save_audio_mono(
@@ -364,7 +369,12 @@ impl ViewscreenPresentationStore {
         mix: super::audio::mix::AudioMix,
         mono: bool,
     ) -> std::io::Result<()> {
-        self.save_audio_comfort(mix, mono, self.load_audio_ducking())
+        self.save_audio_comfort(
+            mix,
+            mono,
+            self.load_audio_ducking(),
+            self.load_audio_reduced_range(),
+        )
     }
 
     pub fn save_audio_preferences(
@@ -372,7 +382,12 @@ impl ViewscreenPresentationStore {
         mix: super::audio::mix::AudioMix,
         ducking: bool,
     ) -> std::io::Result<()> {
-        self.save_audio_comfort(mix, self.load_audio_mono(), ducking)
+        self.save_audio_comfort(
+            mix,
+            self.load_audio_mono(),
+            ducking,
+            self.load_audio_reduced_range(),
+        )
     }
 
     pub fn save_audio_comfort(
@@ -380,6 +395,7 @@ impl ViewscreenPresentationStore {
         mix: super::audio::mix::AudioMix,
         mono: bool,
         ducking: bool,
+        reduced_range: bool,
     ) -> std::io::Result<()> {
         // Preserve independently owned audio options as well as display fields.
         let mut audio = std::fs::read_to_string(self.path())
@@ -396,6 +412,7 @@ impl ViewscreenPresentationStore {
         );
         table.insert("mono".into(), toml::Value::Boolean(mono));
         table.insert("ducking".into(), toml::Value::Boolean(ducking));
+        table.insert("reducedRange".into(), toml::Value::Boolean(reduced_range));
         self.save_sections(&self.load(), Some(audio))
     }
 
@@ -417,6 +434,15 @@ impl ViewscreenPresentationStore {
             .and_then(|saved| saved.audio)
             .and_then(|audio| audio.try_into::<SavedAudio>().ok())
             .is_some_and(|audio| audio.version == 1 && audio.ducking)
+    }
+
+    pub fn load_audio_reduced_range(&self) -> bool {
+        std::fs::read_to_string(self.path())
+            .ok()
+            .and_then(|text| toml::from_str::<SavedPresentation>(&text).ok())
+            .and_then(|saved| saved.audio)
+            .and_then(|audio| audio.try_into::<SavedAudio>().ok())
+            .is_some_and(|audio| audio.version == 1 && audio.reduced_range)
     }
 
     pub fn load_audio(&self) -> (super::audio::mix::AudioMix, &'static str) {
@@ -474,6 +500,8 @@ struct SavedAudio {
     mono: bool,
     #[serde(default)]
     ducking: bool,
+    #[serde(default, rename = "reducedRange")]
+    reduced_range: bool,
 }
 
 fn create_dir(dir: &Path) -> std::io::Result<()> {

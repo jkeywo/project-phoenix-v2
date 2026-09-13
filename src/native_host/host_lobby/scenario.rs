@@ -292,6 +292,9 @@ pub enum HostLobbyRecord {
     SetAudioMono {
         enabled: bool,
     },
+    SetAudioReducedRange {
+        enabled: bool,
+    },
     SelectAudioOutput {
         output: Option<String>,
     },

@@ -119,6 +119,7 @@ fn native_mono_uses_endpoint_storage_and_audio_reset_keeps_display_preferences()
     assert!(!audio.snapshot().mono);
     audio.command(&HostLobbyRecord::SetAudioMono { enabled: true });
     audio.command(&HostLobbyRecord::SetAudioDucking { enabled: true });
+    audio.command(&HostLobbyRecord::SetAudioReducedRange { enabled: true });
     audio.command(&HostLobbyRecord::SetAudioBus {
         bus: "master".into(),
         level_percent: 23,
@@ -127,11 +128,13 @@ fn native_mono_uses_endpoint_storage_and_audio_reset_keeps_display_preferences()
     let mut next = NativeRoomAudio::with_stores(None, false, Some(store.clone()), None);
     assert!(next.snapshot().mono);
     assert!(next.snapshot().ducking);
+    assert!(next.snapshot().reduced_range);
     assert!(next.snapshot().mix.master.muted);
     assert_eq!(next.snapshot().mix.master.level, 0.23);
     next.command(&HostLobbyRecord::ResetAudioMix);
     assert!(!store.load_audio_mono());
     assert!(!store.load_audio_ducking());
+    assert!(!store.load_audio_reduced_range());
     assert_eq!(store.load().text_scale_percent, Some(175));
     std::fs::remove_dir_all(root).unwrap();
 }

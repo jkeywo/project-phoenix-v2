@@ -10,6 +10,7 @@ export function normalizePrivateAudio(value) {
   return {
     version: 1,
     mono: value?.mono === true,
+    reducedRange: value?.reducedRange === true,
     mix: Object.fromEntries(PRIVATE_AUDIO_BUSES.map(id => {
       const bus = value?.mix?.[id];
       return [id, {

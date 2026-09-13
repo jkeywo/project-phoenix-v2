@@ -68,6 +68,13 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
   const monoHint = text('p', 'settings.audio.mono_hint');
   monoHint.className = 'server-settings-hint';
   panel.append(monoLabel, monoHint);
+  const rangeLabel = doc.createElement('label'); rangeLabel.className = 'audio-range';
+  const range = doc.createElement('input'); range.type = 'checkbox'; range.dataset.audioRange = '';
+  range.addEventListener('change', () => audio?.setReducedRange?.(range.checked));
+  rangeLabel.append(range, text('span', 'settings.audio.reduced_range'));
+  const rangeHint = text('p', 'settings.audio.reduced_range_hint');
+  rangeHint.className = 'server-settings-hint';
+  panel.append(rangeLabel, rangeHint);
   const cueControls = new Map();
   let duckingControl = null, duckingHint = null;
   if (!privateSurface && (audio?.state().room || audio?.state().supportsDucking) && audio?.setDucking) {
@@ -133,6 +140,10 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
     mono.disabled = !(state?.room || state?.private) || state?.monoAvailable !== true;
     monoHint.textContent = t(state?.monoAvailable === true
       ? 'settings.audio.mono_hint' : 'settings.audio.mono_unavailable');
+    range.checked = state?.reducedRange === true;
+    range.disabled = !(state?.room || state?.private) || state?.reducedRangeAvailable !== true;
+    rangeHint.textContent = t(state?.reducedRangeAvailable === true
+      ? 'settings.audio.reduced_range_hint' : 'settings.audio.reduced_range_unavailable');
     if (duckingControl) {
       duckingControl.checked = state.ducking === true;
       duckingControl.disabled = !state.room || state.duckingAvailable === false;

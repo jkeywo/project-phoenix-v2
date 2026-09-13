@@ -9,6 +9,7 @@ pub mod hrtf;
 pub mod mix;
 pub mod player;
 pub mod private;
+pub mod range;
 pub mod spatial;
 pub mod store;
 pub mod visual;
@@ -49,6 +50,8 @@ pub struct NativeAudioState {
     pub ducking: bool,
     pub mix: AudioMix,
     pub mono: bool,
+    #[serde(rename = "reducedRange")]
+    pub reduced_range: bool,
     pub categories: Vec<&'static str>,
     pub status: &'static str,
     pub test: &'static str,
@@ -67,6 +70,7 @@ impl Default for NativeAudioState {
             ducking: false,
             mix: AudioMix::default(),
             mono: false,
+            reduced_range: false,
             categories: vec!["music", "ambience", "effects", "alerts"],
             status: "loading",
             test: "idle",
@@ -138,6 +142,9 @@ impl NativeRoomAudio {
         let mono = preferences
             .as_ref()
             .is_some_and(|store| store.load_audio_mono());
+        let reduced_range = preferences
+            .as_ref()
+            .is_some_and(|store| store.load_audio_reduced_range());
         let saved = hardware
             .as_ref()
             .map(|store| store.load())
@@ -170,6 +177,7 @@ impl NativeRoomAudio {
         let state = Arc::new(Mutex::new(NativeAudioState {
             mix,
             mono,
+            reduced_range,
             ducking: preferences
                 .as_ref()
                 .is_some_and(|store| store.load_audio_ducking()),
@@ -202,6 +210,7 @@ impl NativeRoomAudio {
         let mixer = player.mixer.clone();
         mixer.lock().unwrap().mix = mix;
         mixer.lock().unwrap().set_mono(mono);
+        mixer.lock().unwrap().set_reduced_range(reduced_range);
         mixer
             .lock()
             .unwrap()
@@ -301,13 +310,37 @@ impl NativeRoomAudio {
     }
     pub fn command(&mut self, record: &HostLobbyRecord) {
         match record {
+            HostLobbyRecord::SetAudioReducedRange { enabled } => {
+                let mut state = self.state.lock().unwrap();
+                state.reduced_range = *enabled;
+                self.mixer.lock().unwrap().set_reduced_range(*enabled);
+                state.persistence = if self.preferences.as_ref().is_some_and(|store| {
+                    store
+                        .save_audio_comfort(
+                            state.mix,
+                            state.mono,
+                            state.ducking,
+                            state.reduced_range,
+                        )
+                        .is_ok()
+                }) {
+                    "saved"
+                } else {
+                    "unavailable"
+                };
+            }
             HostLobbyRecord::SetAudioDucking { enabled } => {
                 let mut state = self.state.lock().unwrap();
                 state.ducking = *enabled;
                 self.mixer.lock().unwrap().set_ducking(*enabled);
                 state.persistence = if self.preferences.as_ref().is_some_and(|store| {
                     store
-                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .save_audio_comfort(
+                            state.mix,
+                            state.mono,
+                            state.ducking,
+                            state.reduced_range,
+                        )
                         .is_ok()
                 }) {
                     "saved"
@@ -339,7 +372,12 @@ impl NativeRoomAudio {
                 }
                 state.persistence = if self.preferences.as_ref().is_some_and(|store| {
                     store
-                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .save_audio_comfort(
+                            state.mix,
+                            state.mono,
+                            state.ducking,
+                            state.reduced_range,
+                        )
                         .is_ok()
                 }) {
                     "saved"
@@ -353,7 +391,12 @@ impl NativeRoomAudio {
                 self.mixer.lock().unwrap().set_mono(*enabled);
                 state.persistence = if self.preferences.as_ref().is_some_and(|store| {
                     store
-                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .save_audio_comfort(
+                            state.mix,
+                            state.mono,
+                            state.ducking,
+                            state.reduced_range,
+                        )
                         .is_ok()
                 }) {
                     "saved"
@@ -365,13 +408,20 @@ impl NativeRoomAudio {
                 let mut state = self.state.lock().unwrap();
                 state.mix = AudioMix::default();
                 state.mono = false;
+                state.reduced_range = false;
+                self.mixer.lock().unwrap().set_reduced_range(false);
                 state.ducking = false;
                 self.mixer.lock().unwrap().set_ducking(false);
                 self.mixer.lock().unwrap().set_mix(state.mix);
                 self.mixer.lock().unwrap().set_mono(false);
                 state.persistence = if self.preferences.as_ref().is_some_and(|store| {
                     store
-                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .save_audio_comfort(
+                            state.mix,
+                            state.mono,
+                            state.ducking,
+                            state.reduced_range,
+                        )
                         .is_ok()
                 }) {
                     "saved"
@@ -550,6 +600,8 @@ fn update_room(
 mod combat_tests;
 #[cfg(test)]
 mod computer_tests;
+#[cfg(test)]
+mod range_tests;
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // Random UUIDs isolate temporary test directories.
 mod tests;

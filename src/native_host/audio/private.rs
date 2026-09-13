@@ -38,6 +38,7 @@ struct Entry {
     pending: Option<(Instant, String, bool)>,
     mix: AudioMix,
     mono: bool,
+    reduced_range: bool,
     mixers: Vec<Arc<Mutex<Mixer>>>,
 }
 impl Entry {
@@ -81,6 +82,8 @@ pub(crate) struct Request {
     generation: u64,
     mix: Option<PrivateMix>,
     mono: Option<bool>,
+    #[serde(rename = "reducedRange")]
+    reduced_range: Option<bool>,
     #[serde(default)]
     stop: bool,
     #[serde(default)]
@@ -146,6 +149,7 @@ impl PrivateAudio {
                 pending: None,
                 mix: AudioMix::default(),
                 mono: false,
+                reduced_range: false,
                 mixers: vec![],
             },
         );
@@ -231,6 +235,12 @@ impl PrivateAudio {
             entry.mono = enabled;
             for mixer in &entry.mixers {
                 mixer.lock().unwrap().set_mono(enabled);
+            }
+        }
+        if let Some(enabled) = request.reduced_range {
+            entry.reduced_range = enabled;
+            for mixer in &entry.mixers {
+                mixer.lock().unwrap().set_reduced_range(enabled);
             }
         }
         if let Some(mix) = request.mix {
@@ -474,6 +484,7 @@ impl<B: Backend> Worker<B> {
                     let mut mixer = Mixer::default();
                     mixer.set_mix(entry.mix);
                     mixer.set_mono(entry.mono);
+                    mixer.set_reduced_range(entry.reduced_range);
                     let mixer = Arc::new(Mutex::new(mixer));
                     match self.backend.open(id, mixer.clone()) {
                         Ok(stream) => live.outputs.push(Output { stream, mixer }),

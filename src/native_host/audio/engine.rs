@@ -15,6 +15,7 @@ struct Voice {
 pub struct Mixer {
     pub mix: AudioMix,
     mono: bool,
+    reduced_range: super::range::ReducedRange,
     voices: BTreeMap<String, Voice>,
     ducking: super::ducking::Ducking,
     sample_time: f64,
@@ -22,6 +23,9 @@ pub struct Mixer {
 impl Mixer {
     pub fn set_mono(&mut self, enabled: bool) {
         self.mono = enabled;
+    }
+    pub fn set_reduced_range(&mut self, enabled: bool) {
+        self.reduced_range.set_enabled(enabled);
     }
     pub fn set_ducking(&mut self, enabled: bool) {
         self.ducking.set_enabled(enabled, self.sample_time);
@@ -34,6 +38,7 @@ impl Mixer {
     pub fn stop_all(&mut self) {
         self.voices.clear();
         self.ducking.clear();
+        self.reduced_range.clear();
     }
     pub fn stop(&mut self, id: &str) {
         self.voices.remove(id);
@@ -113,7 +118,14 @@ impl Mixer {
             return;
         }
         for voice in self.voices.values_mut() {
-            let gain = self.mix.gain(voice.category, voice.gain);
+            let gain = if self.reduced_range.enabled() {
+                // Master belongs after the aggregate dynamics detector. The
+                // disabled branch retains the original full-dynamics arithmetic.
+                self.mix.bus(voice.category).map_or(0.0, |bus| bus.gain())
+                    * super::mix::level(voice.gain)
+            } else {
+                self.mix.gain(voice.category, voice.gain)
+            };
             for (index, frame) in output.chunks_exact_mut(channels).enumerate() {
                 let gain = gain
                     * if matches!(voice.category, "music" | "ambience") {
@@ -174,8 +186,16 @@ impl Mixer {
                 && !voice.remaining.is_some_and(|remaining| remaining <= 0.0)
         });
         self.sample_time += (output.len() / channels) as f64 / f64::from(rate);
-        for sample in output {
-            *sample = sample.clamp(-1.0, 1.0);
+        for frame in output.chunks_exact_mut(channels) {
+            if self.reduced_range.enabled() {
+                self.reduced_range.process(frame, rate);
+                for sample in &mut *frame {
+                    *sample *= self.mix.master.gain();
+                }
+            }
+            for sample in frame {
+                *sample = sample.clamp(-1.0, 1.0);
+            }
         }
     }
 }

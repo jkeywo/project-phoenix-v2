@@ -1,4 +1,7 @@
 id,context,en
+settings.audio.reduced_range,Optional audio level contrast control,[Reduce dynamic range]
+settings.audio.reduced_range_hint,Effect and default of reduced audio dynamics,[Off by default. Raises quiet sounds slightly and reduces louder peaks before Master volume. Applies to this audio output only.]
+settings.audio.reduced_range_unavailable,Audio processor capability unavailable,[Reduced dynamic range is unavailable on this audio output. Master and category volume controls still apply.]
 settings.audio.private_assignment,Native private endpoint assigned outputs,[{surface}: {outputs}]
 settings.audio.private_no_output,Native private endpoint with no assigned output,[No assigned output]
 settings.audio.private_backend_unavailable,Native private backend did not start,[The native private audio provider is unavailable. Controls and portable choices remain usable.]

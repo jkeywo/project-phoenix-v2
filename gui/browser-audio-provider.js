@@ -1,5 +1,6 @@
 import { AUDIO_CATEGORIES, normalizeAudioMix, audioBusGain, audioSoundGain, clampAudioLevel } from './audio-mix.js';
 import { validDuckingSpec, nextDuck, duckGain, releaseDuck } from './audio-ducking.js';
+import { createAudioRange } from './audio-range.js';
 
 /** Production browser playback adapter. [ai] Every sample takes the same route:
  * decoded buffer -> authored gain (optional listener-relative panner) -> category
@@ -24,6 +25,8 @@ export function createBrowserAudioProvider({
   let testState = 'idle';
   let mix = normalizeAudioMix();
   let mono = false;
+  let reducedRange = false;
+  let range = null;
   const buses = new Map();
   const sounds = new Map();
   const voices = new Set();
@@ -75,13 +78,16 @@ export function createBrowserAudioProvider({
       meter = context.createAnalyser();
       meter.fftSize = 256;
       master.connect(meter).connect(context.destination);
+      const rangeInput = context.createGain();
+      range = createAudioRange(context, rangeInput, master);
+      range.set(reducedRange);
       for (const id of AUDIO_CATEGORIES) {
         const gain = context.createGain();
         if (id === 'music' || id === 'ambience') {
           const bed = context.createGain();
-          gain.connect(bed).connect(master);
+          gain.connect(bed).connect(rangeInput);
           beds.set(id, bed);
-        } else gain.connect(master);
+        } else gain.connect(rangeInput);
         buses.set(id, gain);
       }
       context.onstatechange = () => {
@@ -92,6 +98,7 @@ export function createBrowserAudioProvider({
           testGeneration++;
           testState = 'idle';
           for (const voice of [...voices]) stopVoice(voice);
+          range?.reset();
           scheduleDuck(null);
           // Desired loops are current state and can be rederived on resume.
         }
@@ -107,9 +114,22 @@ export function createBrowserAudioProvider({
   }
 
   function setMix(value) {
-    mix = normalizeAudioMix(value);
+    const next = normalizeAudioMix(value);
+    const quieted = ['master', ...AUDIO_CATEGORIES].filter(id =>
+      audioBusGain(mix, id) > 0 && audioBusGain(next, id) === 0);
+    mix = next;
     if (master) master.gain.value = audioBusGain(mix, 'master');
     for (const [id, gain] of buses) gain.gain.value = audioBusGain(mix, id);
+    if (quieted.length) {
+      // The compressor delays a few milliseconds of already-mixed samples.
+      // Rebuild it at the mute boundary so a quick unmute cannot expose them.
+      range?.reset();
+      testGeneration++;
+      testState = 'idle';
+      for (const voice of [...voices]) {
+        if (!voice.source.loop && (quieted.includes('master') || quieted.includes(voice.sound.category))) stopVoice(voice);
+      }
+    }
     changed();
   }
 
@@ -123,6 +143,11 @@ export function createBrowserAudioProvider({
   function setMono(value) {
     mono = value === true;
     for (const voice of voices) monoInput(voice.gain);
+    changed();
+  }
+  function setReducedRange(value) {
+    reducedRange = value === true;
+    range?.set(reducedRange);
     changed();
   }
 
@@ -256,6 +281,7 @@ export function createBrowserAudioProvider({
   }
 
   function stopAll() {
+    range?.reset();
     testGeneration++;
     testState = 'idle';
     for (const sound of sounds.values()) sound.wanted = false;
@@ -307,7 +333,8 @@ export function createBrowserAudioProvider({
       : voices.size ? 'playing'
       : entries.some(sound => sound.loading) ? 'loading' : 'idle';
     return {
-      status, test: testState,
+      status, test: testState, reducedRange,
+      reducedRangeAvailable: range?.available === true,
       categories: AUDIO_CATEGORIES.filter(id => entries.some(sound => sound.category === id)),
       active: [...voices].map(voice => ({ id: voice.sound.id, category: voice.sound.category, test: voice.test })),
       ready: entries.filter(sound => sound.buffer).map(sound => sound.id),
@@ -326,10 +353,11 @@ export function createBrowserAudioProvider({
     disposed = true;
     sounds.clear();
     cache.clear();
+    range?.dispose();
     if (context) {
       context.onstatechange = null;
       Promise.resolve(context.close()).catch(() => {});
     }
   }
-  return { register, remove, loop, cue, setMix, setMono, setDucking, enable, testOutput, stopAll, snapshot, outputPeak, dispose };
+  return { register, remove, loop, cue, setMix, setMono, setDucking, setReducedRange, enable, testOutput, stopAll, snapshot, outputPeak, dispose };
 }

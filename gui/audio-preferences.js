@@ -13,6 +13,7 @@ export function createRoomAudioPreferences(storage) {
   let mix = defaultAudioMix();
   let mono = false;
   let ducking = false;
+  let reducedRange = false;
   let migrated = false;
   try {
     const text = storage?.getItem(VIEWSCREEN_PRESENTATION_KEY);
@@ -27,6 +28,7 @@ export function createRoomAudioPreferences(storage) {
     if (record?.audio?.version === 1) {
       mono = record.audio.mono === true;
       ducking = record.audio.ducking === true;
+      reducedRange = record.audio.reducedRange === true;
     }
     if (record?.audio?.version === 1 && record.audio.mix && typeof record.audio.mix === 'object') {
       mix = normalizeAudioMix(record.audio.mix);
@@ -45,17 +47,18 @@ export function createRoomAudioPreferences(storage) {
     }
   } catch (_) { status = 'unavailable'; }
 
-  function save(next, nextMono = mono, nextDucking = ducking) {
+  function save(next, nextMono = mono, nextDucking = ducking, nextRange = reducedRange) {
     mix = normalizeAudioMix(next);
     mono = nextMono === true;
     ducking = nextDucking === true;
+    reducedRange = nextRange === true;
     try {
       if (!storage) throw new Error('No endpoint storage');
       let current;
       try { current = JSON.parse(storage.getItem(VIEWSCREEN_PRESENTATION_KEY)); }
       catch (_) { current = null; }
       const record = JSON.parse(serializeViewscreenPresentation(current));
-      record.audio = { ...current?.audio, version: 1, mix, mono, ducking };
+      record.audio = { ...current?.audio, version: 1, mix, mono, ducking, reducedRange };
       storage.setItem(VIEWSCREEN_PRESENTATION_KEY, JSON.stringify(record));
       // Only retire the old value AFTER the replacement has been saved.
       storage.removeItem?.(LEGACY_MASTER_VOLUME_KEY);
@@ -63,7 +66,7 @@ export function createRoomAudioPreferences(storage) {
     } catch (_) { status = 'unavailable'; }
     return read();
   }
-  function read() { return { mix: normalizeAudioMix(mix), mono, ducking, persistence: status }; }
+  function read() { return { mix: normalizeAudioMix(mix), mono, ducking, reducedRange, persistence: status }; }
   if (migrated && status === 'saved') save(mix);
   return { read, save };
 }

@@ -151,6 +151,66 @@ const REFUSED: &str = include_str!("../../../tests/fixtures/native-private-refus
 const TEST: &str = include_str!("../../../tests/fixtures/native-private-test.json");
 
 #[test]
+fn both_private_adapters_apply_reduced_range_to_real_decoded_feedback_without_output_spill() {
+    let samples = |enabled: bool| {
+        let hub = PrivateAudio::new(profile());
+        let fake = Fake::with(&["output:Helm", "output:GM", "output:Room"]);
+        let mut worker = Worker::new(fake.clone());
+        let bus = PaneBus::default();
+        let pane = bus.open(PaneIdentity::adopt("range-private-token", "helm").unwrap());
+        bus.attach_audio(hub.clone());
+        let gm = NativeGmBridge::default();
+        let gm_id = PaneId(99);
+        gm.activate(gm_id);
+        gm.attach_audio(hub.clone());
+        worker.step(&hub);
+        let mut surface = RecordingSurface::ready();
+        let mut output = Vec::new();
+        for (key, endpoint, other) in [
+            (Endpoint::Console(pane), "output:Helm", "output:GM"),
+            (Endpoint::Gm(gm_id), "output:GM", "output:Helm"),
+        ] {
+            let mut value: serde_json::Value =
+                serde_json::from_str(&record(&hub, key, REFUSED)).unwrap();
+            value["reducedRange"] = enabled.into();
+            surface.queue_record(serde_json::to_string(&value).unwrap());
+            if key == Endpoint::Console(pane) {
+                let result = pump_pane(&bus, pane, &mut surface);
+                assert_eq!(result.accepted, 0);
+                assert!(result.refusals.is_empty());
+            } else {
+                gm.pump(gm_id, &mut surface);
+                assert!(gm.take_records().is_empty());
+            }
+            worker.step(&hub);
+            let current = fake.sink(endpoint);
+            assert!(audible(&current));
+            assert!(!audible(&fake.sink(other)));
+            assert!(!audible(&fake.sink("output:Room")));
+            output.push(current);
+            // A lost device retires the occurrence, never sends it to room output.
+            fake.0
+                .lock()
+                .unwrap()
+                .devices
+                .retain(|(id, _)| id != endpoint);
+            worker.step(&hub);
+            assert!(!audible(&fake.sink(endpoint)));
+        }
+        output
+    };
+    let full = samples(false);
+    let reduced = samples(true);
+    for (full, reduced) in full.iter().zip(&reduced) {
+        let energy = |samples: &[f32]| samples.iter().map(|sample| sample * sample).sum::<f32>();
+        assert!(energy(reduced) > energy(full) * 1.1);
+        assert!(reduced
+            .iter()
+            .all(|sample| sample.abs() <= super::super::range::RangeSpec::default().ceiling));
+    }
+}
+
+#[test]
 fn both_actual_native_adapters_decode_shared_action_fixture_to_only_their_assigned_samples() {
     // The browser smoke captures these bytes after actual initConsole and
     // mountNativeGmWorkspace correlated Refused actions with visible results.

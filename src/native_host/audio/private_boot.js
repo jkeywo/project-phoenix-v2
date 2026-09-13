@@ -6,7 +6,7 @@
   const ids = ['clicks', 'pending', 'applied', 'refused', 'timedOut', 'actionable', 'test'];
   const registered = new Map(), listeners = new Set();
   let state = {status:'loading',test:'idle',generation:null,categories:['alerts','interface'],native:true};
-  let mix = {}, mono = false, dirtyMix = false, pending = null, stop = false, retry = false, disposed = false;
+  let mix = {}, mono = false, reducedRange = false, dirtyMix = false, pending = null, stop = false, retry = false, disposed = false;
   const notify = () => { for (const fn of listeners) fn(); };
   const profileReady = () => root.PhoenixOperatorStorage?.isReady?.() === true;
   function discard() {
@@ -34,7 +34,7 @@
   root.__phoenixPrivateAudioDrain = function () {
     if (!Number.isSafeInteger(state.generation)) return '';
     const request = {type:'NativePrivateAudio',generation:state.generation};
-    if (dirtyMix && profileReady()) { request.mix = mix; request.mono = mono; dirtyMix = false; }
+    if (dirtyMix && profileReady()) { request.mix = mix; request.mono = mono; request.reducedRange = reducedRange; dirtyMix = false; }
     if (stop) { request.stop = true; stop = false; }
     if (retry && profileReady()) { request.retry = true; retry = false; }
     if (pending && profileReady() && !disposed) {
@@ -61,6 +61,7 @@
       },
       cue,
       setMono(value) { mono = value === true; dirtyMix = true; },
+      setReducedRange(value) { reducedRange = value === true; dirtyMix = true; },
       async enable() {
         if (disposed || !profileReady()) return false;
         if (state.status !== 'playing') retry = true;
@@ -68,7 +69,7 @@
       },
       async testOutput(id) { return cue(id, true); },
       stopAll() { discard(); stop = true; },
-      snapshot() { return {...state}; },
+      snapshot() { return {...state,reducedRange,reducedRangeAvailable:true}; },
       dispose() { disposed = true; discard(); stop = true; listeners.clear(); },
     };
   };

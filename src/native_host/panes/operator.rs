@@ -282,7 +282,8 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
     // Portable private audio choices, never hardware routes or cue records.
     // Keep absent audio absent so the JS owner can perform its legacy migration.
     if raw["audio"].is_object() {
-        safe["audio"] = json!({"version": 1, "mono": raw["audio"]["mono"].as_bool().unwrap_or(false), "mix": {}, "cues": {}});
+        safe["audio"] = json!({"version": 1, "mono": raw["audio"]["mono"].as_bool().unwrap_or(false),
+            "reducedRange": raw["audio"]["reducedRange"].as_bool().unwrap_or(false), "mix": {}, "cues": {}});
         for bus in ["master", "alerts", "interface"] {
             let value = &raw["audio"]["mix"][bus];
             safe["audio"]["mix"][bus] = json!({
@@ -390,7 +391,7 @@ mod tests {
         let profile = json!({"kind":"project-phoenix/operator-profile", "version":1,
             "token":"secret", "gamepad":{"preferredDevice":{"id":"pad", "mapping":"standard", "token":"secret"}, "hideTouchControls":false},
             "bindings":{"helm.thrust":[{"type":"gamepad", "input":"axis", "control":"left-stick-y", "token":"secret"}, null]},
-            "audio":{"version":1,"mono":true,"output":"secret","history":["secret"],
+            "audio":{"version":1,"mono":true,"reducedRange":true,"output":"secret","history":["secret"],
                 "mix":{"master":{"level":0.12,"muted":true},"music":{"level":0.5}},
                 "cues":{"applied":true,"unknown":"secret"}}});
         state.handle(
@@ -409,6 +410,7 @@ mod tests {
         assert!(saved["audio"]["mix"].get("music").is_none());
         assert_eq!(saved["audio"]["cues"]["applied"], true);
         assert_eq!(saved["audio"]["mono"], true);
+        assert_eq!(saved["audio"]["reducedRange"], true);
         state.handle(
             PaneId(2),
             "helm",

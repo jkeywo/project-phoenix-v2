@@ -64,9 +64,11 @@ describe('Viewscreen mix reaching actual provider output', () => {
     audio.setBus('master', { muted: true });
     expect(context.sample()).toBe(0);
     audio.audioCue(JSON.stringify({ kind: 'blaster', x: 1, y: 0, z: 0 }));
-    expect(audio.state().active.filter(voice => voice.id === 'blaster')).toHaveLength(2);
+    expect(audio.state().active.filter(voice => voice.id === 'blaster')).toHaveLength(0);
     audio.setBus('master', { muted: false });
-    expect(context.sample()).toBeCloseTo(beforeMute);
+    expect(context.sample()).toBeGreaterThan(0);
+    expect(context.sample()).toBeLessThan(beforeMute);
+    expect(audio.state().active.some(voice => voice.id === 'siren' || voice.id === 'computer_critical')).toBe(false);
     expect(audio.getMasterVolume()).toBe(0.5);
     audio.setBus('effects', { muted: true });
     expect(context.sample()).toBeLessThan(beforeMute);

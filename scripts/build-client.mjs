@@ -22,6 +22,7 @@ import { assertDebugSurfaceModuleCurrent } from './generate-debug-surfaces.mjs';
 import { clientStampField } from './client-stamp.mjs';
 import { joinCodesJson, JOIN_CODES_JSON } from './join-codes.mjs';
 import { roomDuckingJson } from './room-ducking.mjs';
+import { audioRangeModule } from './audio-range.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'dist', 'client');
@@ -61,6 +62,7 @@ async function main() {
   // tests/client/join-codes-data.test.js.
   await writeFile(path.join(root, JOIN_CODES_JSON), await joinCodesJson(root), 'utf8');
   await writeFile(path.join(root, 'assets/audio/room-ducking.json'), await roomDuckingJson(root), 'utf8');
+  await writeFile(path.join(root, 'gui/audio-range-data.js'), await audioRangeModule(root), 'utf8');
 
   // index.html ← client.html, with this build's delivery stamp written into
   // the placeholder meta tag (issue #1111). The client page has no WASM to

@@ -83,6 +83,7 @@ entities:
         - "[ai] Sample-level checks should prove both-channel mono, bounded dynamic processing, allowed-category ducking/recovery and Master-zero output. Separate real-device listening checks assess comfort without treating automated metrics as human acceptance."
         - "[ai] Deliver mono, reduced dynamics and room ducking as separate complete paths. Each tests authored-cue-shaped provider input independently; optional comfort work does not block authored definition/audition or live cue integration."
         - "[ai] Mono averages the allowed post-spatial left/right signal before authored, category and Master gain, then duplicates it to both output channels. A live toggle preserves source cursors and never reconstructs missed cues. Room mono is endpoint-local; private mono is portable with operator audio choices and is resent with current mix when the native presentation generation changes."
+        - "[ai] Reduced range processes the summed allowed categories after their authored/spatial/mono gains and optional bed ducking, before final Master. Full dynamics is a direct bypass. Canonical presentation tuning drives a browser compressor with bounded output and a native linked peak/gain envelope; the implementations need equivalent comfort behavior, not identical waveforms. Live toggles preserve cursors; mute and lifecycle boundaries discard any processor lookahead, never retain a missed cue for later output. Store only the reducedRange preference, beside mono and mix."
 
   - decision: t4-m8-authored-sound-cues
     core:

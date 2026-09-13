@@ -1,7 +1,7 @@
 import { mountNativeGmWorkspace } from './gui/native-gm-workspace.js';
 
 document.documentElement.classList.add('phoenix-gm-page');
-const channels = ['metadata', 'gm_entity', 'gm_activity', 'gm_station', 'gm_session', 'gm_mission', 'gm_spawn', 'gm_comms'];
+const channels = ['metadata', 'gm_entity', 'gm_activity', 'gm_station', 'gm_session', 'gm_mission', 'gm_spawn', 'gm_comms', 'gm_attention', 'gm_health', 'gm_workload'];
 const listeners = new Set();
 const latest = new Map();
 let operator = null;

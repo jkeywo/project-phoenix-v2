@@ -111,7 +111,7 @@ fn producer_common_and_recipient_repair_deltas_both_reach_each_pane() {
         assert_eq!(messages.len(), 1);
         let mut retained = BTreeMap::new();
         for message in messages {
-            let ServerMessage::BlackboardUpdate { updates } = message else {
+            let ServerMessage::BlackboardUpdate { updates, .. } = message else {
                 panic!("blackboard")
             };
             retained.extend(updates);
@@ -187,6 +187,7 @@ fn producer_final_contact_movement_survives_a_later_unrelated_entity_delta() {
 
 fn helm_update(x: f32) -> ServerMessage {
     ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
         updates: vec![(
             SystemId("helm".into()),
             SystemBlackboard::Helm(HelmBlackboard {
@@ -198,12 +199,63 @@ fn helm_update(x: f32) -> ServerMessage {
 }
 
 #[test]
+fn new_presentation_generation_keeps_the_rebased_repair_in_the_real_pane_queue() {
+    use crate::server::audio_lifecycle::RoomAudioLifecycle;
+    let bus = PaneBus::default();
+    let id = open(&bus, 1);
+    let mut sessions = Sessions(crate::lobby::session::SessionManager::new());
+    sessions
+        .0
+        .register(bus.token_of(id).unwrap(), "Crew".into())
+        .unwrap();
+    let mut app = App::new();
+    app.insert_resource(sessions)
+        .init_resource::<LastBroadcastBlackboards>()
+        .init_resource::<SimOutbox>()
+        .init_resource::<RoomAudioLifecycle>()
+        .add_systems(Update, broadcast_blackboard_updates);
+    let mut boards = ShipSystemBlackboards::default();
+    boards.0.insert(
+        SystemId("helm".into()),
+        SystemBlackboard::Helm(HelmBlackboard::default()),
+    );
+    boards.0.insert(
+        SystemId("repair".into()),
+        SystemBlackboard::Repair(RepairBlackboard::default()),
+    );
+    app.world_mut().spawn((LocalShip, boards));
+    for generation in [1, 2] {
+        app.world_mut()
+            .resource_mut::<RoomAudioLifecycle>()
+            .state
+            .generation = generation;
+        app.update();
+        for entry in app.world_mut().resource_mut::<SimOutbox>().drain() {
+            send(&bus, entry.target, &entry.message, entry.delivery);
+        }
+    }
+    let messages = decode(&bus, id);
+    assert_eq!(messages.len(), 1);
+    let ServerMessage::BlackboardUpdate {
+        updates,
+        presentation_generation,
+    } = &messages[0]
+    else {
+        panic!("board")
+    };
+    assert_eq!(*presentation_generation, Some(2));
+    assert!(updates.iter().any(|(id, _)| id.0 == "repair"));
+    assert!(updates.iter().any(|(id, _)| id.0 == "helm"));
+}
+
+#[test]
 fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
     let bus = PaneBus::default();
     let first = open(&bus, 1);
     let second = open(&bus, 2);
     let target = Target::Token(bus.token_of(first).unwrap());
     let old = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
         updates: vec![(
             SystemId("repair".into()),
             SystemBlackboard::Repair(RepairBlackboard {
@@ -221,6 +273,7 @@ fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
         DeliveryClass::Snapshot,
     );
     let withheld = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
         updates: vec![(
             SystemId("repair".into()),
             SystemBlackboard::Repair(RepairBlackboard::default()),
@@ -231,7 +284,7 @@ fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
     assert!(decode(&bus, second).is_empty());
     let messages = decode(&bus, first);
     assert_eq!(messages.len(), 1);
-    let ServerMessage::BlackboardUpdate { updates } = &messages[0] else {
+    let ServerMessage::BlackboardUpdate { updates, .. } = &messages[0] else {
         panic!("blackboard")
     };
     assert_eq!(updates.len(), 2);

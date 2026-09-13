@@ -453,7 +453,8 @@ describe('authored advisory config cannot reach the technical treatment', () => 
     // because the post-M5 bar carries a tick-health pill; it is a third READER
     // of this one payload, never a second channel.
     expect(workspace).toContain(
-      'gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); shell.refresh(); }');
+      'if (gmHealthPanel.update(p))');
+    expect(workspace).toContain('gmRestoreControl.update(p); shell.refresh();');
     // The banner's hull action is the SAME selection the map already answers to.
     expect(workspace).toContain('gmProjection.select(alert.ship.entity_id)');
   });

@@ -734,7 +734,10 @@ pub fn project_repair_blackboards(
     if !shared.is_empty() {
         out.push((
             Target::All,
-            ServerMessage::BlackboardUpdate { updates: shared },
+            ServerMessage::BlackboardUpdate {
+                updates: shared,
+                presentation_generation: None,
+            },
         ));
     }
 
@@ -766,6 +769,7 @@ pub fn project_repair_blackboards(
                 Target::Token(token.clone()),
                 ServerMessage::BlackboardUpdate {
                     updates: vec![(system_id.clone(), SystemBlackboard::Repair(projected))],
+                    presentation_generation: None,
                 },
             ));
         }
@@ -1877,7 +1881,7 @@ station = "engineering"
                     assert_eq!(row.target, Target::Token(token.into()));
                     assert_eq!(row.delivery, DeliveryClass::Snapshot);
                 }
-                let ServerMessage::BlackboardUpdate { updates } = &pair[0].message else {
+                let ServerMessage::BlackboardUpdate { updates, .. } = &pair[0].message else {
                     panic!("blackboards precede hull")
                 };
                 let SystemBlackboard::Repair(board) = &updates[0].1 else {
@@ -1973,7 +1977,8 @@ station = "engineering"
             "a repair blackboard carrying hull detail must never go to Target::All"
         );
         for (target, msg) in &out {
-            let (Target::Token(token), ServerMessage::BlackboardUpdate { updates }) = (target, msg)
+            let (Target::Token(token), ServerMessage::BlackboardUpdate { updates, .. }) =
+                (target, msg)
             else {
                 panic!("expected a token-targeted BlackboardUpdate")
             };

@@ -39,9 +39,21 @@ import { t, has } from './strings.js';
 import { mountGmWorkspaceShell } from './gm-workspace-shell.js';
 import { createPrivateAudio, attachPrivateAudioLifecycle, privateFeedbackReceiver } from './private-audio.js';
 import { createPrivateRequestFeedback } from './private-request-feedback.js';
+import { createPrivateAlerts, attachPrivateAlertLifecycle } from './private-alerts.js';
 
 export function mountGmWorkspace({ win = window, doc = win.document, requireNativeProvider = false } = {}) {
   let privateAudio = null;
+  const privateAlerts = createPrivateAlerts({ audio: { actionable: () => privateAudio?.actionable() } });
+  const disposePrivateAlerts = attachPrivateAlertLifecycle(privateAlerts, win);
+  const alertScope = () => {
+    const operator = win.__hostLocalGm?.();
+    const session = win.__hostGmSessionId?.();
+    // Native local GM has no fleet join-code identity. This comparison owner
+    // is document-local; the runtime generation still marks every new round
+    // and restore, without inventing a persistent native session key.
+    return privateAudio && operator?.connected && operator.id
+      ? JSON.stringify([session || null, operator.id]) : null;
+  };
   const requestFeedback = createPrivateRequestFeedback({
     audio: { action: (...args) => privateAudio?.action(...args) },
     getOperator: () => win.__hostLocalGm?.(),
@@ -512,15 +524,29 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     // the roster carries the workload word, so each of these three also
     // repaints the shell. Both paints are signature-guarded, so an unchanged
     // bar or roster is never rebuilt under an operator's pointer.
-    gm_attention: function(p) { gmAttentionPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
-    gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); shell.refresh(); },
+    gm_attention: function(p) {
+      if (gmAttentionPanel.update(p)) {
+        const state = gmAttentionPanel.state();
+        privateAlerts.attention({ key: alertScope(), generation: state.presentation_generation,
+          occurrences: state.occurrences, held: state.held, visible: gmAttentionFilters.visible });
+      }
+      gmWidgetsPanel.repaint(); shell.refresh();
+    },
+    gm_health: function(p) {
+      if (gmHealthPanel.update(p)) {
+        const state = gmHealthPanel.state().projection;
+        privateAlerts.health({ key: alertScope(), generation: state.presentation_generation, alerts: state.alerts });
+      }
+      gmRestoreControl.update(p); shell.refresh();
+    },
     gm_workload:  function(p) { gmWorkloadPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
     handlers,
-    dispose() { requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
+      if (!alertScope()) privateAlerts.reset();
       shell.refresh();
       gmSessionControls.refreshAdmission();
       win.__hostGmMissionRefresh();
@@ -536,6 +562,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       win.__hostGmEffectRefresh();
     },
     reset() {
+      privateAlerts.reset();
       requestFeedback.reset();
       privateAudio?.setActive(false);
       privateAudio?.setActive(!doc.hidden);

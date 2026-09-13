@@ -2,7 +2,7 @@
 title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
-sources: [server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/operator-profile.js, gui/gm-workspace.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
+sources: [server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/private-alerts.js, src/native_host/native_gm/boot.js, src/server_app/broadcast_publish.rs, gui/operator-profile.js, gui/gm-workspace.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
 updated: 2026-09-13
 ---
 
@@ -53,7 +53,22 @@ explicit provider; a missing adapter stays visibly unavailable, even when an
 embedded engine exposes browser-shaped audio APIs. The authored inventory and
 levels are `assets/audio/private-feedback.json`; the three new brief non-speech
 tones have their generator and provenance under `scripts/` and `assets/audio/`.
-Actionable alert delivery is a separate consumer of this owner's Alerts bus.
+`gui/private-alerts.js` consumes only current permitted Comms, GM attention and
+GM health projections through this owner's Alerts bus. Comms belongs to the
+live human host of the actual System, including visiting Captain/Tactical
+hosting; latest live unread Urgent and read-or-unread Critical messages qualify.
+Both shared Comms components display explicit urgency words. GM attention is
+limited to urgent pending Comms, eligible beats and idle NPCs, respecting the
+existing hold/filter/snooze controls. The four technical health failure kinds
+use the unfilterable banner path instead.
+
+The existing runtime audio lifecycle stamps `presentation_generation` on
+BlackboardUpdate and GM attention/health envelopes, outside canonical boards.
+The client stores the generation beside each received board; native sparse
+queues never merge boards across it. Mount, reconnect, restore, entitlement and
+document return establish silent baselines. Muted, held and unavailable cues
+are consumed without storing history or offering catch-up. Native GM boot
+forwards the same attention/health/workload channels to the shared workspace.
 
 The split exists because there are now **two** surfaces rendering this lobby from the same payload: the host page, and the native host's viewscreen surface (see [Native Host](./native-host.md#the-host-lobby-on-the-viewscreen-issue-1325)), whose document is built from this page's own `#lobby-panel` markup. Both call the same `renderHostLobby`. A second implementation of these element ids would drift the first time either was touched, so there is not one.
 

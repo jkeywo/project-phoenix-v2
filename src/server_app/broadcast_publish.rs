@@ -64,10 +64,10 @@ pub(crate) fn register_blackboard_replication_lifecycle(app: &mut App) {
         BlackboardReconnect,
         BlackboardReconnectParams<'static, 'static>,
     >(app, BLACKBOARD_REPLICATION_KEY, |params| {
-        let (requests, inputs, query) = params
+        let (requests, inputs, query, lifecycle) = params
             .downcast::<BlackboardReconnectParams>()
             .expect("registered owner parameter type");
-        reconnect_blackboard_projection(requests, inputs, query)
+        reconnect_blackboard_projection(requests, inputs, query, lifecycle)
     });
 }
 struct BlackboardReconnect;
@@ -75,6 +75,7 @@ type BlackboardReconnectParams<'w, 's> = (
     Res<'w, crate::core::broadcast::ReconnectRequests>,
     crate::console::repair::visibility::HullProjectionInputs<'w, 's>,
     Query<'w, 's, &'static ShipSystemBlackboards, With<LocalShip>>,
+    Option<Res<'w, crate::server::audio_lifecycle::RoomAudioLifecycle>>,
 );
 
 fn reset_blackboard_replication(world: &mut World) {
@@ -90,6 +91,7 @@ fn reconnect_blackboard_projection(
     requests: Res<crate::core::broadcast::ReconnectRequests>,
     inputs: crate::console::repair::visibility::HullProjectionInputs,
     query: Query<&ShipSystemBlackboards, With<LocalShip>>,
+    lifecycle: Option<Res<crate::server::audio_lifecycle::RoomAudioLifecycle>>,
 ) -> crate::core::broadcast::ReconnectBatch {
     use crate::console::repair::visibility;
     if requests.0.is_empty() {
@@ -125,7 +127,10 @@ fn reconnect_blackboard_projection(
             if updates.is_empty() {
                 Vec::new()
             } else {
-                vec![ServerMessage::BlackboardUpdate { updates }]
+                vec![ServerMessage::BlackboardUpdate {
+                    updates,
+                    presentation_generation: lifecycle.as_ref().map(|owner| owner.state.generation),
+                }]
             }
         })
         .collect()
@@ -597,10 +602,23 @@ pub(crate) fn reset_broadcast_caches_on_start(world: &mut World) {
 pub fn broadcast_blackboard_updates(
     world: &mut World,
     mut bb_query: Local<Option<QueryState<&'static ShipSystemBlackboards, With<LocalShip>>>>,
+    mut last_generation: Local<Option<u64>>,
 ) {
     use crate::console::repair::visibility;
 
     world.init_resource::<visibility::LastVisibleRepairBlackboard>();
+    let presentation_generation = world
+        .get_resource::<crate::server::audio_lifecycle::RoomAudioLifecycle>()
+        .map(|owner| owner.state.generation);
+    let rebase = *last_generation != presentation_generation;
+    if rebase {
+        // Native sparse queues discard older-generation batches wholesale.
+        // Re-send recipient projections too, even when their visible repair
+        // fields did not change across this continuation boundary.
+        world
+            .resource_mut::<visibility::LastVisibleRepairBlackboard>()
+            .clear();
+    }
 
     let mut updates: Vec<(
         crate::core::messages::SystemId,
@@ -618,7 +636,7 @@ pub fn broadcast_blackboard_updates(
             crate::core::messages::SystemBlackboard,
         )> =
             bb.0.iter()
-                .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
+                .filter(|(id, bb)| rebase || last.0.get(*id) != Some(*bb))
                 .map(|(id, bb)| (id.clone(), bb.clone()))
                 .collect();
         // Sorted because this vec becomes the `BlackboardUpdate` payload, and
@@ -690,9 +708,19 @@ pub fn broadcast_blackboard_updates(
     let mut cache = world
         .remove_resource::<visibility::LastVisibleRepairBlackboard>()
         .unwrap_or_default();
-    let pending =
+    let mut pending =
         visibility::project_repair_blackboards(updates, vis.as_ref(), &viewers, &mut cache);
     world.insert_resource(cache);
+    for (_, message) in &mut pending {
+        if let ServerMessage::BlackboardUpdate {
+            presentation_generation: stamp,
+            ..
+        } = message
+        {
+            *stamp = presentation_generation;
+        }
+    }
+    *last_generation = presentation_generation;
     world.resource_mut::<SimOutbox>().extend_snapshot(pending);
 }
 
@@ -1214,7 +1242,7 @@ station = "engineering"
             if !for_recipient {
                 continue;
             }
-            if let ServerMessage::BlackboardUpdate { updates } = message {
+            if let ServerMessage::BlackboardUpdate { updates, .. } = message {
                 visible.extend(updates);
             }
         }
@@ -1229,7 +1257,7 @@ station = "engineering"
         reconnect_registered_replication(app.world_mut(), token)
             .into_iter()
             .flat_map(|message| match message {
-                ServerMessage::BlackboardUpdate { updates } => updates,
+                ServerMessage::BlackboardUpdate { updates, .. } => updates,
                 _ => Vec::new(),
             })
             .collect()
@@ -1307,5 +1335,61 @@ station = "engineering"
         assert!(repair.damageable_systems.is_empty());
         assert!(repair.aggregate_hull_fraction.is_none());
         assert!(repair.destroyed_hull_fraction.is_none());
+    }
+
+    #[test]
+    fn presentation_rebase_republishes_unchanged_recipient_boards_and_reconnect_stamp() {
+        use crate::server::audio_lifecycle::RoomAudioLifecycle;
+        let mut app = blackboard_lifecycle_app();
+        app.init_resource::<SimOutbox>()
+            .init_resource::<RoomAudioLifecycle>()
+            .add_systems(Update, broadcast_blackboard_updates);
+        app.world_mut()
+            .resource_mut::<RoomAudioLifecycle>()
+            .state
+            .generation = 7;
+        app.update();
+        let first = app.world_mut().resource_mut::<SimOutbox>().drain();
+        assert_eq!(first.len(), 3);
+        app.update();
+        assert!(app
+            .world_mut()
+            .resource_mut::<SimOutbox>()
+            .drain()
+            .is_empty());
+        app.world_mut()
+            .resource_mut::<RoomAudioLifecycle>()
+            .state
+            .generation = 8;
+        app.update();
+        let rebased = app.world_mut().resource_mut::<SimOutbox>().drain();
+        assert_eq!(rebased.len(), first.len());
+        for (old, new) in first.iter().zip(&rebased) {
+            assert_eq!(old.target, new.target);
+            let ServerMessage::BlackboardUpdate {
+                updates: old_rows, ..
+            } = &old.message
+            else {
+                panic!("old-board")
+            };
+            let ServerMessage::BlackboardUpdate {
+                updates: new_rows,
+                presentation_generation,
+            } = &new.message
+            else {
+                panic!("new-board")
+            };
+            assert_eq!(old_rows, new_rows);
+            assert_eq!(*presentation_generation, Some(8));
+        }
+        for message in reconnect_registered_replication(app.world_mut(), "eng") {
+            if let ServerMessage::BlackboardUpdate {
+                presentation_generation,
+                ..
+            } = message
+            {
+                assert_eq!(presentation_generation, Some(8));
+            }
+        }
     }
 }

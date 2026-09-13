@@ -9,6 +9,18 @@ const boot = readFileSync(resolve('src/native_host/native_gm/boot.js'), 'utf8')
 const queue = readFileSync(resolve('src/native_host/native_gm/queue.js'), 'utf8');
 
 describe('native GM private bridge boot', () => {
+  it('delivers the advertised attention, health and workload projections to the shared workspace', () => {
+    document.body.innerHTML = '<main id="gm-console"></main>';
+    window.phoenixNativeGmOut = { send: vi.fn() };
+    new Function('mountNativeGmWorkspace', boot)(vi.fn());
+    const receive = vi.fn(); window.phoenixNativeGm.subscribe(receive);
+    for (const channel of ['gm_attention', 'gm_health', 'gm_workload']) {
+      const payload = { presentation_generation: 4, current: channel };
+      window.__phoenixNativeGmChannels[channel](JSON.stringify(payload));
+      expect(receive).toHaveBeenLastCalledWith(channel, payload);
+    }
+    expect(receive).toHaveBeenCalledTimes(3);
+  });
   it('drains individual encoded records in the native surface line framing', () => {
     new Function(queue)();
     expect(window.__phoenixNativeGmOutDrain()).toBe('');

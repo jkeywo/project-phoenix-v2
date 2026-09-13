@@ -199,7 +199,7 @@ fn latest_navigation_blackboard(
     out: &[OutboundMessage],
 ) -> Option<crate::core::messages::NavigationBlackboard> {
     out.iter().rev().find_map(|m| match &m.msg {
-        ServerMessage::BlackboardUpdate { updates } => {
+        ServerMessage::BlackboardUpdate { updates, .. } => {
             updates.iter().find_map(|(_, bb)| match bb {
                 crate::core::messages::SystemBlackboard::Navigation(nav) => Some(nav.clone()),
                 _ => None,

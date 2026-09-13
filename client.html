@@ -118,6 +118,7 @@
        Captain blackboard remains the sole Red Alert gameplay state. -->
   <script type="module" src="gui/action-feedback.js"></script>
   <script type="module" src="gui/private-audio.js"></script>
+  <script type="module" src="gui/private-alerts.js"></script>
   <link rel="stylesheet" href="gui/audio-settings.css">
   <script type="module" src="gui/action-map.js"></script>
   <!-- One explicitly selected standard gamepad is sampled in this parent
@@ -2452,6 +2453,7 @@
       if (state !== 'ready') {
         linkHasData = false;
         window.__privateAudio?.reset();
+        window.__privateAlerts?.reset();
       }
       lastConnectionState = state;
       chromeSetConnectionStatus(state);
@@ -4453,6 +4455,8 @@
       bezelAlertOn = result.bezelAlertOn;
       if (result.myName !== undefined) myName = result.myName;
       for (const fx of result.sideEffects) applySideEffect(fx);
+      window.__privateAlerts?.update({ state: window.simState, uiState, token: myToken,
+        connected: lastConnectionState === 'ready', changes });
       // Console input-to-feedback latency (issue #1169), on the same "report a
       // locally-derived minimum" footing as the eligibility effect: only
       // durations this device measured for itself leave the phone, batched.
@@ -4628,6 +4632,8 @@
           },
         });
         window.__privateAudio = privateAudio;
+        window.__privateAlerts = window.PrivateAlerts?.createStationPrivateAlerts({ audio: privateAudio });
+        if (window.__privateAlerts) window.PrivateAlerts.attachPrivateAlertLifecycle(window.__privateAlerts, window);
         window.__privateActionFeedback = window.PrivateAudio.privateFeedbackReceiver({
           getAudio: () => privateAudio,
           currentSource: () => activeConsole && $(consoleIframeId(activeConsole))?.contentWindow,

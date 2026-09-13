@@ -97,7 +97,7 @@ fn assert_selected_wire(wire: &[OutboundMessage]) {
     let (mut engineering_hull, mut science_hull) = (false, false);
     for message in wire {
         match &message.msg {
-            ServerMessage::BlackboardUpdate { updates } => {
+            ServerMessage::BlackboardUpdate { updates, .. } => {
                 for (id, board) in updates {
                     match (id.0.as_str(), board, &message.target) {
                         ("power", SystemBlackboard::Power(_), Target::All) => power = true,

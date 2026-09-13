@@ -203,6 +203,7 @@ fn a_quiet_session_gets_exactly_one_background_row_that_explains_the_interval() 
     let encoded = phoenix::core::codec::encode_gm_attention_projection(
         &phoenix::gm_attention::GmAttentionProjection {
             occurrences: rows.clone(),
+            presentation_generation: None,
         },
     )
     .expect("the projection encodes");

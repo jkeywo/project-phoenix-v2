@@ -795,6 +795,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
         (
             ServerMessageDiscriminants::BlackboardUpdate,
             ServerMessage::BlackboardUpdate {
+                presentation_generation: Some(17),
                 updates: vec![(
                     SystemId("helm".into()),
                     SystemBlackboard::Helm(HelmBlackboard {
@@ -3045,6 +3046,7 @@ fn system_blackboard_tractor_round_trips_and_is_additive() {
         refusal: None,
     });
     assert_server_roundtrip(ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
         updates: vec![(
             SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
             held.clone(),
@@ -3181,6 +3183,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     );
 
     let msg = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
         updates: vec![(SystemId(crate::science::SCAN_BLACKBOARD_KEY.into()), bb)],
     };
     assert_server_roundtrip(msg.clone());
@@ -3415,6 +3418,7 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
     }
 
     let msg = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
         updates: vec![(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)],
     };
     assert_server_roundtrip(msg.clone());
@@ -5195,6 +5199,7 @@ fn system_blackboard_repair_round_trips() {
     // sent per token (`Target::Token`), not broadcast, but the encoding is
     // the same one the resync path reuses.
     let msg = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
         updates: vec![(SystemId("repair".into()), bb)],
     };
     assert_server_roundtrip(msg.clone());

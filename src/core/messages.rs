@@ -3783,6 +3783,10 @@ pub enum ServerMessage {
     /// `updates` is a list of `(SystemId, SystemBlackboard)` pairs.
     BlackboardUpdate {
         updates: Vec<(SystemId, SystemBlackboard)>,
+        /// Current presentation continuation, outside canonical blackboards.
+        /// Private cue readers silently baseline when absent or changed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        presentation_generation: Option<u64>,
     },
     /// Read-only ship manual replicated to the phone client (issue #772).
     ///

@@ -138,16 +138,22 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Client Audio Presentation
-      summary: "Phone clients play a local UI interaction click controlled by their own master setting. The room's music, engine ambience, combat effects and Red Alert audio are owned by the browser Viewscreen through gui/host-audio.js, not by phone clients. Native game playback and richer private semantic feedback remain T4 work."
+      origin: ai
+      title: Private Operator Audio Presentation
+      summary: "One private parent-document owner consumes real semantic action transitions and a finite current Comms/GM alert projection. Master, Alerts and Interface gains and cue choices use the portable operator profile. Quiet clicks, refusals, timeouts and actionable alerts are on by default; Pending and Applied are opt-in. Continuous and held controls remain silent. Private GM never acquires the room soundtrack; native private playback requires an explicit provider."
+      rationale:
+        - "[ai] Comms cues belong only to the live human host of the actual Comms System, including visiting hosting. Latest live unread Urgent and read-or-unread Critical messages retain source text and explicit urgency words. GM attention accepts only urgent pending_comms, eligible_beat and idle_npc occurrences under existing hold/filter/snooze; station_disconnected, ship_peer_lost, operator_disconnected and recovery_failed use the unfilterable health path."
+        - "[ai] Source envelopes carry the existing runtime presentation generation outside canonical blackboards. Mount, reconnect, restore, entitlement and document return baseline silently; older generations cannot become current private cue inputs. Current comparison maps are bounded and contain no text, history or replay queue. Muted, held, filtered or failed output consumes its edges."
     architecture:
       kind: client-presentation
       authority: local
-      reads: [client-presentation-state]
-      runs_in: [phone-browser-runtime]
+      reads: [client-presentation-state, room-audio-lifecycle]
+      runs_in: [phone-browser-runtime, host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [client.html, gui/settings-panel.js, assets/sounds/ui_click.ogg]
+      paths: [client.html, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/private-alerts.js, gui/operator-profile.js, gui/audio-settings-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, src/native_host/native_gm/boot.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json]
+      symbols: [createPrivateAudio, createPrivateAlerts, createStationPrivateAlerts]
+      tests: [tests/client/private-audio.test.js, tests/client/private-alerts.test.js, tests/smoke/private-audio.spec.js, tests/smoke/private-alerts.spec.js]
 
   - component: browser-room-audio
     core:
@@ -178,6 +184,8 @@ entities:
       origin: ai
       title: Room Audio Continuation State
       summary: "Peer-local current generation/running/restore-hold projection derived from GamePhase, accepted live restore, the startup capture gate and mesh restoration. It resets playback/config/envelope at a real continuation boundary. The generation is ephemeral presentation comparison state; it carries no cue records or command backlog, enters neither snapshot nor digest, and leaves existing canonical Admission bookkeeping intact."
+      rationale:
+        - "[ai] BlackboardUpdate and GM attention/health envelopes copy this generation with their current permitted facts. It is not stored inside canonical blackboards. The blackboard publisher rebases both shared and recipient repair caches; native sparse queues never combine different generations. GM producers run after this owner so restored facts and their boundary share one frame."
     architecture:
       classification: local-view
       owner: browser-room-audio

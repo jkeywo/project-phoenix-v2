@@ -45,15 +45,27 @@ impl PendingSnapshot {
 pub(super) fn merge_delta(older: &ServerMessage, newer: &ServerMessage) -> Option<ServerMessage> {
     match (older, newer) {
         (
-            ServerMessage::BlackboardUpdate { updates: old },
-            ServerMessage::BlackboardUpdate { updates: new },
+            ServerMessage::BlackboardUpdate {
+                updates: old,
+                presentation_generation: old_generation,
+            },
+            ServerMessage::BlackboardUpdate {
+                updates: new,
+                presentation_generation: new_generation,
+            },
         ) => {
+            // Never stamp an old continuation's sparse board with the new
+            // generation. The producer rebases all boards at the boundary.
+            if old_generation != new_generation {
+                return Some(newer.clone());
+            }
             // Each value is a COMPLETE blackboard, including withheld/empty
             // repair projections. Never merge fields inside a blackboard.
             let mut updates: BTreeMap<_, _> = old.iter().cloned().collect();
             updates.extend(new.iter().cloned());
             Some(ServerMessage::BlackboardUpdate {
                 updates: updates.into_iter().collect(),
+                presentation_generation: *new_generation,
             })
         }
         (ServerMessage::SimState { snapshot: old }, ServerMessage::SimState { snapshot: new }) => {

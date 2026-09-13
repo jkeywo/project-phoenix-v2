@@ -363,6 +363,8 @@ pub struct GmHealthProjection {
     /// Every persistent technical failure. The banner region and the Urgent
     /// Station rows both read exactly this.
     pub alerts: Vec<GmHealthAlert>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation_generation: Option<u64>,
 }
 
 impl GmHealthProjection {
@@ -636,6 +638,7 @@ pub fn publish_health_projection(
     paused: Option<Res<SimulationPaused>>,
     recovery: Option<Res<RecoveryState>>,
     restore: Option<Res<crate::gm_restore::GmLiveRestore>>,
+    lifecycle: Option<Res<crate::server::audio_lifecycle::RoomAudioLifecycle>>,
     ships: Query<(
         &EntityUuid,
         Option<&EntityName>,
@@ -976,11 +979,13 @@ pub fn publish_health_projection(
         stations,
         operators: operator_rows,
         alerts: alert_rows,
+        presentation_generation: lifecycle.map(|owner| owner.state.generation),
     };
     // The tick alone is not a change: it advances every step by construction.
     // Compare what a Game Master actually reads.
     let changed = state.last.as_ref().is_none_or(|last| {
-        last.paused != next.paused
+        last.presentation_generation != next.presentation_generation
+            || last.paused != next.paused
             || last.recovery != next.recovery
             || last.input_delay_ticks != next.input_delay_ticks
             || last.peers != next.peers
@@ -1010,6 +1015,7 @@ impl Plugin for GmHealthPlugin {
             .add_systems(
                 PostUpdate,
                 publish_health_projection
+                    .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
                     .before(crate::gm_attention::publish_attention_projection)
                     .run_if(crate::gm_projection::gm_presentation_active),
             );

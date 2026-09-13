@@ -54,7 +54,10 @@ fn outbox_reconnect_projection(
                 }),
                 "the real reconnect projection must still see the pending Welcome before the drain"
             );
-            vec![ServerMessage::BlackboardUpdate { updates: vec![] }]
+            vec![ServerMessage::BlackboardUpdate {
+                updates: vec![],
+                presentation_generation: None,
+            }]
         })
         .collect()
 }

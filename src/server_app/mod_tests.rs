@@ -6235,7 +6235,7 @@ fn midgame_reconnect_resets_blackboard_cache() {
 
     let has_bb_for_helm = |out: &[OutboundMessage]| -> bool {
         out.iter().any(|m| match &m.msg {
-            ServerMessage::BlackboardUpdate { updates } => {
+            ServerMessage::BlackboardUpdate { updates, .. } => {
                 updates.iter().any(|(id, _)| id.0 == "helm")
             }
             _ => false,
@@ -6309,7 +6309,7 @@ fn npc_weapons_blackboards_add_no_wire_traffic() {
 
     // ...and none of it reaches any client.
     for m in &out {
-        if let ServerMessage::BlackboardUpdate { updates } = &m.msg {
+        if let ServerMessage::BlackboardUpdate { updates, .. } = &m.msg {
             for (id, bb) in updates {
                 if let crate::core::messages::SystemBlackboard::Weapons(w) = bb {
                     assert_ne!(

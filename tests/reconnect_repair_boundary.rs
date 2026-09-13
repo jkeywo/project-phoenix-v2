@@ -156,7 +156,7 @@ fn helm_snapshots(messages: &[OutboundMessage]) -> Value {
                     }
             })
             .inspect(|m| {
-                if let ServerMessage::BlackboardUpdate { updates } = &m.msg {
+                if let ServerMessage::BlackboardUpdate { updates, .. } = &m.msg {
                     for (_, board) in updates {
                         if let SystemBlackboard::Repair(board) = board {
                             assert!(board.teams.is_empty());
@@ -205,7 +205,7 @@ fn coherent_pair(extra: &[ServerMessage], target: &SystemId) -> bool {
         2,
         "one full blackboard + hull cohort for one real Identify"
     );
-    let ServerMessage::BlackboardUpdate { updates } = &extra[0] else {
+    let ServerMessage::BlackboardUpdate { updates, .. } = &extra[0] else {
         panic!("lexical blackboards owner must precede hull")
     };
     let repair: Vec<_> = updates

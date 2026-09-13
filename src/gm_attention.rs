@@ -312,6 +312,8 @@ pub struct GmAttentionOccurrence {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct GmAttentionProjection {
     pub occurrences: Vec<GmAttentionOccurrence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation_generation: Option<u64>,
 }
 
 /// When this peer first saw one occurrence, in both bases.
@@ -1111,6 +1113,7 @@ pub fn publish_attention_projection(
     sim_time: Option<Res<Time>>,
     idle: Option<Res<GmIdleNpcWatch>>,
     health: Option<Res<GmHealthWatch>>,
+    lifecycle: Option<Res<crate::server::audio_lifecycle::RoomAudioLifecycle>>,
     mut state: ResMut<GmAttentionState>,
     mut activity: ResMut<crate::gm_quiet::GmCrewActivity>,
     mut writer: MessageWriter<GmAttentionChanged>,
@@ -1251,13 +1254,17 @@ pub fn publish_attention_projection(
     });
     occurrences.truncate(MAX_GM_ATTENTION_OCCURRENCES);
 
-    let next = GmAttentionProjection { occurrences };
+    let next = GmAttentionProjection {
+        occurrences,
+        presentation_generation: lifecycle.map(|owner| owner.state.generation),
+    };
     // Age alone is not a change: it advances every frame by construction, and
     // republishing on it would make "held" meaningless. Compare the queue's
     // membership, order, band, reason and target instead — the things a GM
     // reads — and let the page age its own rows from the last honest sample.
     let changed = state.last.as_ref().is_none_or(|last| {
-        last.occurrences.len() != next.occurrences.len()
+        last.presentation_generation != next.presentation_generation
+            || last.occurrences.len() != next.occurrences.len()
             || last
                 .occurrences
                 .iter()
@@ -1313,7 +1320,9 @@ impl Plugin for GmAttentionPlugin {
             )
             .add_systems(
                 PostUpdate,
-                publish_attention_projection.run_if(crate::gm_projection::gm_presentation_active),
+                publish_attention_projection
+                    .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
+                    .run_if(crate::gm_projection::gm_presentation_active),
             );
     }
 }

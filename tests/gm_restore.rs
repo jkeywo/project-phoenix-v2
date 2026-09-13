@@ -1218,6 +1218,11 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
     let store = PeerStore::default();
     let mut app = build(store.clone());
     run_to_in_progress(&mut app);
+    let before_presentation = app
+        .world()
+        .resource::<RoomAudioLifecycle>()
+        .state
+        .generation;
     let slot_id = bookmark(&mut app, "Held");
     for _ in 0..60 {
         app.update();
@@ -1226,6 +1231,17 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
     assert_eq!(result, GmActionOutcome::Applied);
     assert_eq!(phase(&app), GmRestorePhase::Restored, "{:?}", failure(&app));
     assert!(app.world().resource::<RoomAudioLifecycle>().state.suspended);
+    assert!(
+        app.world()
+            .resource::<RoomAudioLifecycle>()
+            .state
+            .generation
+            > before_presentation
+    );
+    let mut presentation_messages = app
+        .world()
+        .resource::<Messages<project_phoenix::lobby::OutboundMessage>>()
+        .get_cursor_current();
 
     // Nothing resumes on its own, however long the desk is left alone.
     for _ in 0..60 {
@@ -1286,9 +1302,33 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
 
     // The world is not merely marked running: it spends ticks again.
     let resumed_at = tick(&app);
+    let mut comms_generations = Vec::new();
     for _ in 0..30 {
         app.update();
+        for event in presentation_messages.read(
+            app.world()
+                .resource::<Messages<project_phoenix::lobby::OutboundMessage>>(),
+        ) {
+            if let project_phoenix::core::messages::ServerMessage::BlackboardUpdate {
+                updates,
+                presentation_generation,
+            } = &event.msg
+            {
+                if updates.iter().any(|(_, board)| {
+                    matches!(
+                        board,
+                        project_phoenix::core::messages::SystemBlackboard::Comms(_)
+                    )
+                }) {
+                    comms_generations.push(*presentation_generation);
+                }
+            }
+        }
     }
+    assert!(!comms_generations.is_empty(), "resumed-comms-presentation");
+    assert!(comms_generations
+        .iter()
+        .all(|generation| generation.is_some_and(|value| value > before_presentation)));
     assert!(
         tick(&app) > resumed_at,
         "the restored world runs on from the tick it was held at"

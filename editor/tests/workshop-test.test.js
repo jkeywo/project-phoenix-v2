@@ -21,6 +21,16 @@ function fixture() {
 const selection = { world: 'assets/worlds/test.toml', ship: 'assets/entities/hull.toml', seed: 7 };
 
 describe('disposable Workshop Test lifecycle', () => {
+  it('cancels a queued start before it acquires any runtime or frame', async () => {
+    const { session, provider } = fixture();
+    const started = session.start(selection);
+    const stopped = session.stop();
+    await Promise.all([started, stopped]);
+    expect(provider.start).not.toHaveBeenCalled();
+    expect(provider.stop).toHaveBeenCalledOnce();
+    expect(session.state()).toMatchObject({ mode: 'authoring', run: null, busy: false });
+  });
+
   it('retains child failure details during a control and does not send visibility to a closed child', async () => {
     const { session, provider } = fixture();
     await session.start(selection);
@@ -76,6 +86,21 @@ describe('disposable Workshop Test lifecycle', () => {
     await Promise.all([started, stopped]);
     expect(provider.stop).toHaveBeenCalledOnce();
     expect(changes).toHaveBeenCalledTimes(notifications);
+  });
+
+  it('immediately cancels an isolated browser boot while keeping native source work serialized', async () => {
+    const { session, provider } = fixture();
+    let complete;
+    provider.start.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    provider.cancelStart = vi.fn();
+    const started = session.start(selection);
+    await Promise.resolve();
+    const stopped = session.dispose();
+    expect(provider.cancelStart).toHaveBeenCalledOnce();
+    expect(provider.stop).not.toHaveBeenCalled();
+    complete({ running: false });
+    await Promise.all([started, stopped]);
+    expect(provider.stop).toHaveBeenCalledOnce();
   });
   it('returns to Authoring when the disposable child closes and serializes Stop after controls', async () => {
     const { session, provider } = fixture();

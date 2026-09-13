@@ -379,15 +379,16 @@ fn current_save_phase(world: &World) -> SavePhase {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn has_capture_consumer(_world: &World) -> bool {
-    // The browser host's canonical bridge always drains PendingStoredRuns to
-    // LocalStorage after fixed updates.
-    true
+fn has_capture_consumer(world: &World) -> bool {
+    // Live browser hosts drain to LocalStorage. Disposable Test installs no
+    // persistence flush and must not retain undeliverable snapshot artifacts.
+    !world.contains_resource::<crate::workshop::test_clock::DisposableTest>()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn has_capture_consumer(world: &World) -> bool {
     world.contains_resource::<SaveCaptureConsumer>()
+        && !world.contains_resource::<crate::workshop::test_clock::DisposableTest>()
 }
 
 #[cfg(test)]
@@ -560,6 +561,15 @@ mod tests {
             crate::save_slots::CaptureReason::Periodic
         );
         assert_eq!(captured.run.ledger.final_tick, 1_001);
+    }
+
+    #[test]
+    fn disposable_test_never_captures_even_with_an_accidental_live_consumer() {
+        let mut app = test_app_with_consumer(5, true);
+        app.insert_resource(crate::workshop::test_clock::DisposableTest);
+        run_ticks(&mut app, 1, 1_000);
+        assert!(app.world().resource::<PendingStoredRuns>().is_empty());
+        assert!(app.world().contains_resource::<SaveCaptureConsumer>());
     }
 
     #[test]

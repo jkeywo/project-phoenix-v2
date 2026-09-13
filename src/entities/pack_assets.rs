@@ -21,8 +21,15 @@ use super::config_cache::{mod_pack_asset, mod_pack_assets, mod_pack_revision};
 
 #[cfg(test)]
 mod runtime_tests;
+mod snapshot;
 mod versioned;
+pub use snapshot::SnapshotAssets;
 pub use versioned::{asset_path, root_dependency};
+
+/// Bind a disposable App to exact captured bytes before adding AssetPlugin.
+pub fn register_snapshot(app: &mut App, files: SnapshotAssets) {
+    snapshot::register(app, files);
+}
 
 /// A child owned by the authored render adapter, safe to retire with its asset
 /// revision without touching any simulation entity or gameplay child.
@@ -152,6 +159,9 @@ impl ErasedAssetReader for PackAssetReader {
 
 /// Must run before AssetPlugin, in every native/browser composition path.
 pub fn register(app: &mut App) {
+    if snapshot::installed(app) {
+        return;
+    }
     let mut fallback = AssetSource::get_default_reader("assets".into());
     app.register_asset_source(
         AssetSourceId::Default,

@@ -774,6 +774,24 @@ pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsV
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
+    wasm_init_inner(None);
+}
+
+/// Start only the explicitly captured, disposable iframe runtime.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_workshop_test_init(launch: &str, source: JsValue) -> Result<(), JsValue> {
+    if !crate::entities::config_cache::wasm_is_preload_complete() {
+        return Err(JsValue::from_str("Workshop Test preload is incomplete"));
+    }
+    let test = crate::workshop::test_browser::BrowserTest::capture(launch, source)?;
+    wasm_init_inner(Some(test));
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
+    let is_test = test.is_some();
     if !crate::entities::config_cache::wasm_is_preload_complete() {
         web_sys::console::error_1(&JsValue::from_str(
             "Content preload is incomplete; refusing to initialise",
@@ -799,7 +817,7 @@ pub fn wasm_init() {
                 .and_then(|v| v.as_bool())
         })
         .unwrap_or(false);
-    let is_browser_gm = edge::read_gm_host_boot_requested();
+    let is_browser_gm = !is_test && edge::read_gm_host_boot_requested();
 
     // Boot clock starts here, before any plugin is added, and stops when the
     // app is handed to the frame loop (issue #868). `is_automation` is passed
@@ -836,11 +854,15 @@ pub fn wasm_init() {
     } else {
         BootProfile::BrowserHost
     };
-    edge::publish_active_boot_profile(match profile {
-        BootProfile::BrowserGameMaster => "browser-game-master",
-        BootProfile::BrowserAutomation => "browser-automation",
-        BootProfile::BrowserHost => "browser-host",
-        _ => unreachable!("wasm_init selects only browser profiles"),
+    edge::publish_active_boot_profile(if is_test {
+        "browser-workshop-test"
+    } else {
+        match profile {
+            BootProfile::BrowserGameMaster => "browser-game-master",
+            BootProfile::BrowserAutomation => "browser-automation",
+            BootProfile::BrowserHost => "browser-host",
+            _ => unreachable!("wasm_init selects only browser profiles"),
+        }
     });
     let plan = BootPlan {
         profile,
@@ -855,7 +877,7 @@ pub fn wasm_init() {
             .unwrap_or_default(),
         reader: Box::new(WasmReader),
         script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
-        single_threaded: false,
+        single_threaded: is_test,
         raw_transform: None,
         // Inert for a browser profile: which renderer the browser stands up is
         // decided by the target (`#[cfg(target_arch = "wasm32")]`), not by the
@@ -865,8 +887,12 @@ pub fn wasm_init() {
     };
     // Completed catalog preload was validated before this call. Ingest captures
     // the same immutable bytes without starting a late fetch.
-    let mut app =
-        crate::boot::build(plan).expect("browser boot composes a HostPreloaded plan infallibly");
+    let mut app = if let Some(test) = &test {
+        crate::boot::build_with_snapshot(plan, test.assets.clone())
+    } else {
+        crate::boot::build(plan)
+    }
+    .expect("browser boot composes a HostPreloaded plan infallibly");
 
     if is_browser_gm {
         app.insert_resource(BrowserGameMaster);
@@ -940,7 +966,7 @@ pub fn wasm_init() {
     // recreate the old FleetLockstep wait set: this peer's local ship can be
     // claimed afresh and the other saved ships begin on AI backfill.
     // `wasm_prepare_resume` has already rejected a different selected hull.
-    if let Some(boot) = edge::restore_boot_identity() {
+    if let Some(boot) = (!is_test).then(edge::restore_boot_identity).flatten() {
         crate::server_app::stage_resume_game_start_entity_uuids(app.world_mut(), &boot);
         crate::lockstep::start_saved_fleet_standalone(app.world_mut(), boot.fleet);
     }
@@ -973,105 +999,117 @@ pub fn wasm_init() {
     // The shared startup-restore driver takes the pre-init save below.
     // `BridgeWorldSource` is
     // inserted just below, only when a world was loaded.
-    .init_resource::<crate::server_app::Instagib>()
-    .add_systems(
-        PreUpdate,
-        (
-            drain_inbound,
-            drain_gm_roster,
-            // A leave and reopen can be queued in one animation frame. Apply
-            // the world teardown/adoption first, then the new generation's
-            // managed/validation edges; otherwise scheduler order could let
-            // teardown erase the newly opened lobby state.
-            drain_disconnects,
-            drain_snapshot_requests,
-            drain_host_controls
-                .before(crate::debug::catalogue::refresh_readback)
-                // The marker/mesh barrier is the final Time<Virtual> decision
-                // before the fixed runner. A same-frame host unpause must land
-                // first so it cannot reopen a clock held for authoritative rig
-                // delivery (issue #1291).
+    .init_resource::<crate::server_app::Instagib>();
+    if !is_test {
+        app.add_systems(
+            PreUpdate,
+            (
+                drain_inbound,
+                drain_gm_roster,
+                // A leave and reopen can be queued in one animation frame. Apply
+                // the world teardown/adoption first, then the new generation's
+                // managed/validation edges; otherwise scheduler order could let
+                // teardown erase the newly opened lobby state.
+                drain_disconnects,
+                drain_snapshot_requests,
+                drain_host_controls
+                    .before(crate::debug::catalogue::refresh_readback)
+                    // The marker/mesh barrier is the final Time<Virtual> decision
+                    // before the fixed runner. A same-frame host unpause must land
+                    // first so it cannot reopen a clock held for authoritative rig
+                    // delivery (issue #1291).
+                    .before(crate::lockstep::MeshSet),
+                drain_force_start_input,
+                drain_teleport_to_waypoint,
+                drain_god_mode_toggle,
+                drain_instagib_toggle,
+                publish_waypoint_existence,
+            ),
+        )
+        // The fleet's ingress and generation-scoped lobby projections form one
+        // explicit sequence before the barrier: adopt the pending roster first,
+        // then apply only that generation's managed/validation/grant inputs.
+        .add_systems(
+            PreUpdate,
+            (drain_mesh_inbound, drain_fleet_lobby_input)
+                .chain()
                 .before(crate::lockstep::MeshSet),
-            drain_force_start_input,
-            drain_teleport_to_waypoint,
-            drain_god_mode_toggle,
-            drain_instagib_toggle,
-            publish_waypoint_existence,
-        ),
-    )
-    // The fleet's ingress and generation-scoped lobby projections form one
-    // explicit sequence before the barrier: adopt the pending roster first,
-    // then apply only that generation's managed/validation/grant inputs.
-    .add_systems(
-        PreUpdate,
-        (drain_mesh_inbound, drain_fleet_lobby_input)
-            .chain()
-            .before(crate::lockstep::MeshSet),
-    )
-    .add_systems(
-        PreUpdate,
-        // Mesh input establishes the owner's latest canonical sequence first;
-        // local GM ingress then joins that order before the reducer and before
-        // any fixed step. This is what makes an apply-at-now standalone Pause
-        // incapable of leaking one forbidden simulation tick.
-        (drain_gm_join_input, drain_gm_action_input)
-            .chain()
-            .after(crate::lockstep::apply_mesh_inbox)
-            .before(crate::gm_action::apply_due_actions)
-            .in_set(crate::lockstep::MeshSet),
-    )
-    // `apply_force_start` writes `NextState<GamePhase>`, so it lives in
-    // `FixedUpdate` rather than alongside its own input drain above — see the
-    // #907 review note on `apply_force_start` for why.
-    .add_systems(
-        FixedUpdate,
-        apply_force_start.before(crate::sim_sets::SimSet::Input),
-    )
-    // The JS ingress/egress seams stay frame-driven (issue #895): `PreUpdate`
-    // runs before the fixed loop and `PostUpdate` after it, so a frame drains
-    // inbound messages before any of its sim ticks and flushes everything
-    // those ticks broadcast. Bevy defers message cleanup until the fixed
-    // schedules have observed a frame's messages, so a frame that runs zero
-    // fixed steps loses nothing.
-    .add_systems(
-        PostUpdate,
-        (
-            flush_outbound,
-            flush_host_channels
-                .after(crate::gm_projection::HeldGmProjection)
-                .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
-                .after(crate::gm_presentation::sound::publish)
-                .after(crate::gm_action::publish_session_projection)
-                .after(crate::gm_event::publish_mission_projection)
-                .after(crate::gm_spawn::publish_spawn_projection)
-                .after(crate::gm_comms::publish_comms_projection)
-                .after(crate::gm_attention::publish_attention_projection)
-                .after(crate::gm_health::publish_health_projection)
-                .after(crate::gm_workload::publish_workload_projection)
-                .after(crate::gm_activity::publish_frame_activity),
-            publish_sim_tick,
-            publish_live_seating,
-            publish_god_mode,
-            // Before the host channels, so the page never paints a GM desk
-            // from a mirror this frame has not refreshed yet.
-            publish_local_gm_operator.before(flush_host_channels),
-            publish_instagib,
-            publish_pause_mirror,
-            publish_gm_join_status,
-            // The snapshot seam (issues #862 and #865). FixedLast already
-            // captured every due run at its exact logical tick; PostUpdate
-            // performs only peer-local storage/export and fresh-app restore,
-            // after all of this frame's fixed steps have completed.
-            drain_lifecycle_saves,
-            drain_snapshot_restore.before(crate::server::audio_lifecycle::publish_audio_lifecycle),
-            // The fleet's egress (issue #1116). `PostUpdate` for the same
-            // reason as its neighbours: it runs after the frame's fixed steps,
-            // so everything those ticks sealed goes out in one batch.
-            flush_mesh_outbound,
-            publish_mesh_status,
-            flush_start_grant_results.after(crate::gm_activity::publish_frame_activity),
-        ),
-    );
+        )
+        .add_systems(
+            PreUpdate,
+            // Mesh input establishes the owner's latest canonical sequence first;
+            // local GM ingress then joins that order before the reducer and before
+            // any fixed step. This is what makes an apply-at-now standalone Pause
+            // incapable of leaking one forbidden simulation tick.
+            (drain_gm_join_input, drain_gm_action_input)
+                .chain()
+                .after(crate::lockstep::apply_mesh_inbox)
+                .before(crate::gm_action::apply_due_actions)
+                .in_set(crate::lockstep::MeshSet),
+        )
+        // `apply_force_start` writes `NextState<GamePhase>`, so it lives in
+        // `FixedUpdate` rather than alongside its own input drain above — see the
+        // #907 review note on `apply_force_start` for why.
+        .add_systems(
+            FixedUpdate,
+            apply_force_start.before(crate::sim_sets::SimSet::Input),
+        )
+        // The JS ingress/egress seams stay frame-driven (issue #895): `PreUpdate`
+        // runs before the fixed loop and `PostUpdate` after it, so a frame drains
+        // inbound messages before any of its sim ticks and flushes everything
+        // those ticks broadcast. Bevy defers message cleanup until the fixed
+        // schedules have observed a frame's messages, so a frame that runs zero
+        // fixed steps loses nothing.
+        .add_systems(
+            PostUpdate,
+            (
+                flush_outbound,
+                flush_host_channels
+                    .after(crate::gm_projection::HeldGmProjection)
+                    .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
+                    .after(crate::gm_presentation::sound::publish)
+                    .after(crate::gm_action::publish_session_projection)
+                    .after(crate::gm_event::publish_mission_projection)
+                    .after(crate::gm_spawn::publish_spawn_projection)
+                    .after(crate::gm_comms::publish_comms_projection)
+                    .after(crate::gm_attention::publish_attention_projection)
+                    .after(crate::gm_health::publish_health_projection)
+                    .after(crate::gm_workload::publish_workload_projection)
+                    .after(crate::gm_activity::publish_frame_activity),
+                publish_sim_tick,
+                publish_live_seating,
+                publish_god_mode,
+                // Before the host channels, so the page never paints a GM desk
+                // from a mirror this frame has not refreshed yet.
+                publish_local_gm_operator.before(flush_host_channels),
+                publish_instagib,
+                publish_pause_mirror,
+                publish_gm_join_status,
+                // The snapshot seam (issues #862 and #865). FixedLast already
+                // captured every due run at its exact logical tick; PostUpdate
+                // performs only peer-local storage/export and fresh-app restore,
+                // after all of this frame's fixed steps have completed.
+                drain_lifecycle_saves,
+                drain_snapshot_restore
+                    .before(crate::server::audio_lifecycle::publish_audio_lifecycle),
+                // The fleet's egress (issue #1116). `PostUpdate` for the same
+                // reason as its neighbours: it runs after the frame's fixed steps,
+                // so everything those ticks sealed goes out in one batch.
+                flush_mesh_outbound,
+                publish_mesh_status,
+                flush_start_grant_results.after(crate::gm_activity::publish_frame_activity),
+            ),
+        );
+    } else {
+        app.add_systems(
+            FixedUpdate,
+            apply_force_start.before(crate::sim_sets::SimSet::Input),
+        )
+        .add_systems(
+            PostUpdate,
+            flush_host_channels.after(crate::server::audio_lifecycle::publish_audio_lifecycle),
+        );
+    }
 
     // Insert the validated ShipStations resource if it was pre-validated.
     if let Some(stations) = edge::read_ship_stations() {
@@ -1103,8 +1141,12 @@ pub fn wasm_init() {
     // A compatible record was staged before this App existed. Install the
     // lifecycle gate before `run` can execute even one fixed step, preventing
     // the fresh bootstrap's automatic saves from overwriting that record.
-    if let Some(run) = edge::take_pending_restore_staged() {
+    if let Some(run) = (!is_test).then(edge::take_pending_restore_staged).flatten() {
         crate::startup_restore::stage(app.world_mut(), run);
+    }
+
+    if let Some(test) = test {
+        crate::workshop::test_browser::install(&mut app, test.launch);
     }
 
     crate::perf::browser::boot_end();
@@ -2079,7 +2121,19 @@ fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
 /// intent until the captured run reaches `PostUpdate`.
 #[cfg(target_arch = "wasm32")]
 fn queue_browser_save(intent: BrowserSaveIntent) -> Option<String> {
+    if edge::boot_profile() == "browser-workshop-test" {
+        return None;
+    }
     edge::queue_browser_save(intent)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn require_browser_save_context() -> Result<(), String> {
+    if edge::boot_profile() == "browser-workshop-test" {
+        Err("Saved runs are unavailable in disposable Workshop Test".into())
+    } else {
+        Ok(())
+    }
 }
 
 /// Queue a save of the running session into `slot`.
@@ -2144,6 +2198,7 @@ pub fn wasm_export_file_name() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_list_save_slots() -> Result<Array, JsValue> {
+    require_browser_save_context().map_err(|error| JsValue::from_str(&error))?;
     let store = browser_save_store();
     let current = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
     let mut entries = crate::save_slots::list_slots_with_content_check(
@@ -2457,6 +2512,9 @@ fn save_js_field(object: &Object, field: &str, value: &JsValue) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_rename_save_slot(slot_id: String, display_name: String) -> String {
+    if let Err(error) = require_browser_save_context() {
+        return error;
+    }
     let store = browser_save_store();
     crate::save_slots::rename_slot(&store, &slot_id, display_name)
         .err()
@@ -2468,6 +2526,9 @@ pub fn wasm_rename_save_slot(slot_id: String, display_name: String) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_export_save_slot(slot_id: String) -> String {
+    if let Err(error) = require_browser_save_context() {
+        return error;
+    }
     let store = browser_save_store();
     match crate::save_slots::export_slot(&store, &slot_id) {
         Ok(text) => {
@@ -2483,6 +2544,9 @@ pub fn wasm_export_save_slot(slot_id: String) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_delete_save_slot(slot_id: String, confirmed: bool) -> String {
+    if let Err(error) = require_browser_save_context() {
+        return error;
+    }
     if !confirmed {
         return "confirmation-required".to_string();
     }
@@ -2549,6 +2613,9 @@ pub fn wasm_snapshot_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_resume(slot: String) -> String {
+    if let Err(error) = require_browser_save_context() {
+        return error;
+    }
     if !crate::entities::config_cache::wasm_is_preload_complete() {
         return "scenario content preload is incomplete".to_string();
     }
@@ -2820,6 +2887,9 @@ pub fn wasm_peek_import(text: String) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_import_save_slot(text: String, display_name: String) -> String {
+    if let Err(error) = require_browser_save_context() {
+        return error;
+    }
     match import_artifact_into_catalogue(&browser_save_store(), &text, &display_name) {
         Ok(_) => String::new(),
         Err(refusal) => refusal.to_string(),

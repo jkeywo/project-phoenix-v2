@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs]
 updated: 2026-09-13
 ---
 
@@ -189,7 +189,7 @@ no fallback to current project files. The native Live layout store is disabled.
 Inherited pipes carry only typed clock/visibility controls and current status.
 The native host's ordinary solo launch assigns every Station Backfill.
 
-`test_clock.rs` feeds the ordinary fixed schedules: Pause holds the virtual clock,
+`workshop/test_clock.rs` feeds the ordinary fixed schedules: Pause holds the virtual clock,
 Step supplies exactly one fixed timestep after discarding a partial frame, and
 1×/2×/4×/8× acceleration changes the virtual rate. The shared
 `editor/workshop-test.js` controller and `gui/workshop-test-panel.js` keep Test
@@ -200,9 +200,29 @@ the draft and previous run. Stop, child/output failure and view-epoch retirement
 kill/wait the child and release staged files. Worker startup reclaims abandoned
 UUID staging directories with valid typed markers under its existing root claim.
 
-The browser Test adapter, GM/other-player-ship views, traces, breakpoints, role
-preview and specialised entity/definition/model panels remain M6 continuation
-work. The existing editor/viewer remain until
+Browser Test uses the same source catalogue, selection gate and fixed clock.
+`editor/workshop-test-snapshot.js` validates the exact unsaved pack and merges
+captured base, ordered dependencies and candidate bytes. Text remains text;
+binary members cross a private MessagePort as transferred defensive Uint8Array
+copies, without detaching the Authoring document or expanding assets into JSON
+number arrays. Each accepted replacement creates a fresh `workshop-test.html`
+iframe and WASM App. A refused replacement retains the previous run. Stop and
+disposal immediately retire even a pending frame; a late completion cannot
+adopt a cancelled run. A pending frame stays in the viewport but transparent,
+inert and excluded from accessibility until adoption: Winit's canvas
+intersection tracking must not stall startup below the Authoring form.
+
+`editor/workshop-test-runtime.js` supplies captured TOML, Rhai and model sidecars
+through the ordinary preload callbacks before the shared browser boot. Its
+asset sources are confined to the per-App snapshot. The Test edge accepts only
+bounded clock controls and status requests. It installs no Live transport,
+profile or save adapters; the disposable marker disables lifecycle capture and
+the browser save APIs refuse access. Returning to a hidden held iframe shows
+it before awaiting the next clock acknowledgement, because browsers may
+suspend animation frames while it is hidden.
+
+GM/other-player-ship views, traces, breakpoints, role
+preview and specialised entity/definition/model panels remain M6 continuation work. The existing editor/viewer remain until
 the parity workflow is delivered.
 
 ## Validation boundary

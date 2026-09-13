@@ -7,11 +7,13 @@ export function createWorkshopTest({ provider, snapshot, onChange = () => {} }) 
   let mode = 'authoring';
   let run = null;
   let pending = 0;
+  let starting = 0;
   let polling = false;
   let disposed = false;
+  let cancellation = 0;
   let error = null;
   let queue = Promise.resolve();
-  const state = () => ({ mode, run, busy: pending > 0, stale: run !== null && generation !== runGeneration, error });
+  const state = () => ({ mode, run, busy: pending > 0, starting: starting > 0, stale: run !== null && generation !== runGeneration, error });
   const notify = () => { if (!disposed) onChange(state()); };
   const serialize = action => {
     pending++; notify();
@@ -39,14 +41,16 @@ export function createWorkshopTest({ provider, snapshot, onChange = () => {} }) 
       const captured = structuredClone(snapshot());
       const capturedGeneration = generation;
       const options = structuredClone(selection);
+      const accepted = cancellation;
+      starting++;
       return serialize(async () => {
-        if (disposed) return;
+        if (disposed || accepted !== cancellation) return;
         error = null;
         const result = await provider.start(captured, options);
-        if (disposed) return;
+        if (disposed || accepted !== cancellation) return;
         accept(result);
         if (run) { runGeneration = capturedGeneration; mode = 'test'; }
-      });
+      }).finally(() => { starting--; notify(); });
     },
     authoring() {
       return serialize(async () => {
@@ -85,6 +89,8 @@ export function createWorkshopTest({ provider, snapshot, onChange = () => {} }) 
         .finally(() => { polling = false; notify(); });
     },
     stop() {
+      cancellation++;
+      provider.cancelStart?.();
       return serialize(async () => {
         await provider.stop();
         if (!disposed) { run = null; mode = 'authoring'; runGeneration = null; error = null; }
@@ -93,6 +99,8 @@ export function createWorkshopTest({ provider, snapshot, onChange = () => {} }) 
     dispose() {
       if (disposed) return queue;
       disposed = true;
+      cancellation++;
+      provider.cancelStart?.();
       // An accepted start may still be materializing when the document goes
       // away. Stop is queued after it, so no late child survives disposal.
       const stopped = queue.then(() => provider.stop());

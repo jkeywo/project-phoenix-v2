@@ -22,6 +22,19 @@ describe('explicit Workshop capability providers', () => {
     expect(provider.save).toBeUndefined();
   });
 
+  it('keeps supplied binary dependencies compact and immutable through the browser provider', async () => {
+    const path = 'assets/models/fixture.bin', bytes = Uint8Array.of(0, 255, 13, 10);
+    const provider = createBrowserWorkshopProvider({ dependencies: { ...dependencies,
+      packs: [{ id: 'read-only', files: {}, assets: { [path]: bytes } }] },
+    load: async () => ({ wasm_workshop_validate_pack() {} }) });
+    bytes.fill(8);
+    expect(await provider.runtime.readAsset(path)).toEqual(Uint8Array.of(0, 255, 13, 10));
+    const snapshot = await provider.runtime.testDependencies();
+    expect(snapshot.packs[0].assets[path]).toBeInstanceOf(Uint8Array);
+    snapshot.packs[0].assets[path].fill(9);
+    expect(await provider.runtime.readAsset(path)).toEqual(Uint8Array.of(0, 255, 13, 10));
+  });
+
   it('saves native exact source through the private provider and advances only acknowledged revisions', async () => {
     const source = new WorkshopDocument(workshopPack());
     const request = vi.fn(async value => {

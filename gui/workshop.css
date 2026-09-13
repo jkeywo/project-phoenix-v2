@@ -33,6 +33,9 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-test h2, .workshop-test p { flex-basis: 100%; margin: .25rem 0; overflow-wrap: anywhere; }
 .workshop-test select, .workshop-test input { max-width: 100%; }
 .workshop-test label { overflow-wrap: anywhere; }
+.workshop-test-viewport { width: 100%; }
+.workshop-test-viewscreen { display: block; width: 100%; height: clamp(24rem, 65vh, 55rem); border: 1px solid #8195a8; }
+.workshop-test-viewscreen[data-pending] { position: fixed; inset: 0; width: 100vw; height: 100vh; opacity: 0; pointer-events: none; }
 details { margin-top: 1.5rem; }
 :root[data-contrast="more"] { background: #000; color: #fff; }
 :root[data-contrast="more"] :is(button, select, textarea) { background: #000; border-color: #fff; }

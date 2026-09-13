@@ -657,11 +657,7 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         b"// captured shader\r\n",
     )
     .unwrap();
-    fs::write(
-        fixture.root.join("assets/entities/test.toml"),
-        b"class='lancer'\nname='Test hull'\n",
-    )
-    .unwrap();
+    fs::write(fixture.root.join("assets/entities/test.toml"), TEST_HULL).unwrap();
     let model = include_bytes!("../../../assets/gui/dpad-button-idle.png").to_vec();
     fs::write(fixture.root.join("assets/models/test.png"), &model).unwrap();
     let provider = fixture.open();
@@ -710,6 +706,25 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         .prepare_test(sources.clone(), selection.clone())
         .unwrap();
     assert_eq!(snapshot.revision, repeated.revision);
+    // This is a valid NPC entity but both native and browser player boot need
+    // a ship configuration. Refuse it before creating any disposable child.
+    let mut no_ship_config = sources.clone();
+    no_ship_config.insert(
+        selection.ship.clone(),
+        assets::Source::Text("class='lancer'\n".into()),
+    );
+    let Err(Response::Refused {
+        report: Some(report),
+        ..
+    }) = provider.prepare_test(no_ship_config, selection.clone())
+    else {
+        panic!("Test must refuse a hull the runtime cannot select")
+    };
+    assert!(report
+        .findings
+        .iter()
+        .any(|finding| finding.file == selection.ship
+            && finding.message.contains("ship configuration")));
     sources.insert(
         selection.world.clone(),
         assets::Source::Text("[global\n".into()),
@@ -724,21 +739,26 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
     assert!(!fixture.recovery.join("test").exists());
 }
 
+const TEST_HULL: &str = "class='lancer'\nname='Test hull'\n\
+[[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
+[[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
+
 #[test]
 fn test_catalog_resolves_read_only_hulls_and_unsaved_include_edits_without_binary_materialization()
 {
     let fixture = Fixture::new();
     let dependencies = WorkshopDependencies {
         base_files: BTreeMap::from([
-            (
-                "assets/entities/base.toml".into(),
-                "class='lancer'\n".into(),
-            ),
+            ("assets/entities/base.toml".into(), TEST_HULL.into()),
             (
                 "assets/entities/fragment.toml".into(),
                 "name='Partial'\n".into(),
             ),
             ("assets/worlds/base.toml".into(), "[global]\n".into()),
+            (
+                "assets/entities/uncrewed.toml".into(),
+                "class='lancer'\n".into(),
+            ),
         ]),
         ..Default::default()
     };

@@ -4,6 +4,8 @@ import { parse, stringify } from 'smol-toml';
 import { WorkshopDocument, isNativeAssetReference } from './workshop-document.js';
 import { createWorkshopRuntime } from './workshop-runtime.js';
 import { createStoreZip } from './mod-pack-export.js';
+import { createBrowserWorkshopTest, createWorkshopTestFrame } from './workshop-test-frame.js';
+import { createWorkshopTestPreparation } from './workshop-test-snapshot.js';
 
 export function newWorkshopPack(dependencies) {
   const content = parse(dependencies.base_files['assets/scenarios.toml']).content;
@@ -18,14 +20,22 @@ export function newWorkshopPack(dependencies) {
 
 /** Caller supplies an immutable loaded pack only after leaving Live. No GM
  * state, credentials, profile, document object or installation API is accepted. */
-export function createBrowserWorkshopProvider({ loadedPack = null, dependencies, load } = {}) {
+export function createBrowserWorkshopProvider({ loadedPack = null, dependencies, load,
+  testFrame = createWorkshopTestFrame } = {}) {
   const pack = loadedPack ? Uint8Array.from(loadedPack) : null;
   const editableId = pack ? parse(new WorkshopDocument(pack).read('scenarios.toml')).pack?.id : null;
   const source = dependencies ? structuredClone({ ...dependencies,
     packs: (dependencies.packs || []).filter(candidate => candidate.id !== editableId) }) : null;
   const runtime = createWorkshopRuntime({ ...(load ? { load } : {}),
     ...(source ? { dependencies: async () => structuredClone(source) } : {}) });
+  const preparation = createWorkshopTestPreparation({ runtime, dependencies: () => runtime.testDependencies() });
+  let viewport = null, title = '';
+  const test = createBrowserWorkshopTest({ ...preparation, frame: () => {
+    if (!viewport) throw new Error('Workshop Test viewport is unavailable');
+    return testFrame({ mount: viewport, title });
+  } });
   return { runtime, canImport: true, canCreate: true,
+    test: { ...test, mount(target, label) { viewport = target; title = label; } },
     async load() { return pack ? new WorkshopDocument(pack) : null; },
   };
 }

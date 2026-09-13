@@ -1,36 +1,42 @@
 use crate::core::messages::{ClientMessage, ServerMessage};
 
-#[cfg(not(target_arch = "wasm32"))]
+pub fn decode_workshop_test_source(
+    value: &str,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    serde_json::from_str(value).map_err(|error| error.to_string())
+}
+
+pub fn encode_workshop_test_catalog(
+    value: &crate::workshop::test_source::TestCatalog,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+
 pub fn encode_workshop_test_launch(
     value: &crate::workshop::test_protocol::Launch,
 ) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| e.to_string())
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub fn decode_workshop_test_launch(
     value: &[u8],
 ) -> Result<crate::workshop::test_protocol::Launch, String> {
     serde_json::from_slice(value).map_err(|e| e.to_string())
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub fn encode_workshop_test_status(
     value: &crate::workshop::test_protocol::TestStatus,
 ) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| e.to_string())
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub fn decode_workshop_test_status(
     value: &str,
 ) -> Result<crate::workshop::test_protocol::TestStatus, String> {
     serde_json::from_str(value).map_err(|e| e.to_string())
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub fn encode_workshop_test_control(
     value: &crate::workshop::test_protocol::ControlRecord,
 ) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| e.to_string())
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub fn decode_workshop_test_control(
     value: &str,
 ) -> Result<crate::workshop::test_protocol::ControlRecord, String> {

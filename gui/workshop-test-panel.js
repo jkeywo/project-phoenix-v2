@@ -57,12 +57,17 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   label(world, 'workshop.test_world'); label(ship, 'workshop.test_ship'); label(seed, 'workshop.test_seed');
   panel.append(start, returnTest, authoring, pause, resume, step);
   label(speed, 'workshop.test_speed'); panel.append(stop, status); root.append(panel);
+  if (provider.test.mount) {
+    const viewport = doc.createElement('div'); viewport.className = 'workshop-test-viewport';
+    panel.append(viewport); provider.test.mount(viewport, t('workshop.test_heading'));
+  }
   function render() {
     if (!session) return;
     const state = session.state(), draft = getDraft();
     const busy = isBusy() || state.busy;
     const testing = state.mode === 'test';
     const running = !!state.run;
+    panel.setAttribute('aria-busy', String(busy));
     start.disabled = busy || catalogPending || !draft || !validSelection();
     start.textContent = t(running ? 'workshop.test_restart' : 'workshop.test_start');
     world.disabled = ship.disabled = seed.disabled = busy || testing;
@@ -72,10 +77,14 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     resume.disabled = busy || !testing || !state.run?.paused || state.run?.starting;
     step.disabled = resume.disabled;
     speed.disabled = busy || !testing || state.run?.starting;
-    stop.disabled = busy || !running;
+    // A browser boot can wait on large captured assets or a GPU. Its explicit
+    // cancellation retires an in-flight frame before the serialized Stop.
+    const cancellable = state.busy && typeof provider.test.cancelStart === 'function';
+    stop.disabled = !cancellable && (busy || !running);
     speed.value = String(state.run?.multiplier || 1);
     const lines = [t(testing ? 'workshop.test_mode' : 'workshop.test_authoring_mode')];
-    if (running) lines.push(t(state.run.starting ? 'workshop.test_starting' : state.run.paused ? 'workshop.test_held' : 'workshop.test_running', { tick: String(state.run.tick) }));
+    if (state.starting || state.run?.starting) lines.push(t('workshop.test_starting'));
+    else if (running) lines.push(t(state.run.paused ? 'workshop.test_held' : 'workshop.test_running', { tick: String(state.run.tick) }));
     if (state.stale) lines.push(t('workshop.test_stale'));
     if (choicesReady && !catalogPending && !validSelection()) lines.push(t('workshop.test_selection_invalid'));
     const error = localError || state.error;
@@ -83,7 +92,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     for (const finding of error?.report?.findings || []) lines.push(`${finding.file}${finding.line ? `:${finding.line}` : ''}: ${finding.message}`);
     status.textContent = lines.join(' '); status.setAttribute('role', error ? 'alert' : 'status');
   }
-  session = createWorkshopTest({ provider: provider.test, snapshot: () => getDraft().toNativeSources(),
+  session = createWorkshopTest({ provider: provider.test,
+    snapshot: () => provider.test.capture ? provider.test.capture(getDraft()) : getDraft().toNativeSources(),
     onChange() { render(); changed(); } });
   function refresh() {
     const draft = getDraft();
@@ -96,8 +106,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
       catalogPending = !!draft;
       if (!draft) { world.replaceChildren(); ship.replaceChildren(); }
       else catalogTimer = win.setTimeout(async () => {
-        const files = Object.fromEntries(Object.entries(draft.toNativeSources())
-          .filter(([path, value]) => typeof value === 'string' && /\.(toml|rhai)$/.test(path)));
+        const files = Object.fromEntries(draft.paths().filter(path => !draft.isBinary(path) && /\.(toml|rhai)$/.test(path))
+          .map(path => [path, draft.read(path)]));
         try {
           const catalog = await provider.test.catalog(files);
           if (disposed || generation !== catalogGeneration) return;

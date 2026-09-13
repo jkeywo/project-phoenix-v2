@@ -22,17 +22,26 @@ export function createWorkshopRuntime({
       if (typeof runtime?.wasm_workshop_validate_pack !== 'function' || !source?.base_files) {
         throw new Error('Workshop runtime capability is unavailable');
       }
-      return { runtime, dependencies: JSON.stringify(source), assets: createWorkshopAssetSnapshot(source,
+      return { runtime, dependencies: structuredClone(source), assets: createWorkshopAssetSnapshot(source,
         fetchAsset ? { fetch: fetchAsset } : {}) };
     }).catch(error => { pending = null; throw error; });
     return pending;
   }
   return {
-    async dependencies() { return JSON.parse((await ready()).dependencies); },
+    async dependencies() { return structuredClone((await ready()).dependencies); },
+    async testDependencies() { return (await ready()).assets.captureAllBuffers(); },
+    async testCatalog(files) {
+      const { runtime } = await ready();
+      return JSON.parse(runtime.wasm_workshop_test_catalog(JSON.stringify(files)));
+    },
+    async checkTestSelection(files, selection) {
+      const { runtime } = await ready();
+      return JSON.parse(runtime.wasm_workshop_test_check_selection(JSON.stringify(files), JSON.stringify({ selection, revision: '' })));
+    },
     /** Read-only dependencies for local previews. Editable candidate bytes
      * stay with WorkshopDocument; no live overlay or uncaptured HTTP fallback. */
     async readAsset(path) {
-      const snapshot = await (await ready()).assets.capture([path]);
+      const snapshot = await (await ready()).assets.captureBuffers([path]);
       for (const pack of [...(snapshot.packs || [])].reverse()) {
         if (Object.hasOwn(pack.assets || {}, path)) return Uint8Array.from(pack.assets[path]);
       }

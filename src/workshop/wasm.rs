@@ -26,6 +26,27 @@ pub fn wasm_workshop_asset_dependencies(bytes: &[u8]) -> Vec<String> {
 }
 
 #[wasm_bindgen]
+pub fn wasm_workshop_test_catalog(files: &str) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_test_source(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    crate::core::codec::encode_workshop_test_catalog(&super::test_source::catalog(files))
+        .map_err(|error| JsValue::from_str(&error))
+}
+
+#[wasm_bindgen]
+pub fn wasm_workshop_test_check_selection(files: &str, launch: &str) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_test_source(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let launch = crate::core::codec::decode_workshop_test_launch(launch.as_bytes())
+        .map_err(|error| JsValue::from_str(&error))?;
+    crate::core::codec::encode_workshop_validation(&super::test_source::validate_selection(
+        files,
+        &launch.selection,
+    ))
+    .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
 pub fn wasm_workshop_validate_pack(bytes: &[u8], dependencies: &str) -> Result<String, JsValue> {
     let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;

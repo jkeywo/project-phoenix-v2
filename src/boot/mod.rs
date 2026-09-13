@@ -420,7 +420,17 @@ struct RenderStackApplied;
 /// `wasm_init`) — this function owns only what actually differs per profile plus
 /// the world-ingestion order.
 pub fn build(plan: BootPlan) -> Result<App, BootError> {
-    build_inner(plan, false)
+    build_inner(plan, false, None)
+}
+
+/// The same composition with assets confined to one immutable source bundle.
+/// Disposable browser Test supplies this explicitly; normal hosts keep their
+/// ordinary pack-aware disk/HTTP source registration.
+pub fn build_with_snapshot(
+    plan: BootPlan,
+    assets: crate::entities::pack_assets::SnapshotAssets,
+) -> Result<App, BootError> {
+    build_inner(plan, false, Some(assets))
 }
 
 /// The profiling harness owns its process-global subscriber before any cached
@@ -428,10 +438,14 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 pub(crate) fn build_headless_with_external_logging(plan: BootPlan) -> Result<App, BootError> {
     assert_eq!(plan.profile, BootProfile::Headless);
-    build_inner(plan, true)
+    build_inner(plan, true, None)
 }
 
-fn build_inner(plan: BootPlan, external_logging: bool) -> Result<App, BootError> {
+fn build_inner(
+    plan: BootPlan,
+    external_logging: bool,
+    snapshot: Option<crate::entities::pack_assets::SnapshotAssets>,
+) -> Result<App, BootError> {
     if plan.profile == BootProfile::NativeWorkshop && plan.world_ingest != WorldIngest::Deferred {
         return Err(BootError::WorldInvalid(
             "Offline Workshop cannot ingest a live world".into(),
@@ -446,6 +460,9 @@ fn build_inner(plan: BootPlan, external_logging: bool) -> Result<App, BootError>
             StateClass::DeferredFold,
             "t4-audio-live-catalog",
         );
+    }
+    if let Some(assets) = snapshot {
+        crate::entities::pack_assets::register_snapshot(&mut app, assets);
     }
 
     // Command/system errors WARN rather than abort the process (Bevy 0.18's

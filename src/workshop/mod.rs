@@ -1,5 +1,6 @@
-//! Offline Workshop services over explicit source bundles. These functions do
-//! not install content, start a simulation, or touch a running session.
+//! Offline Workshop services over explicit source bundles. Authoring validation
+//! never touches a running session; Test owns a fresh disposable runtime with
+//! captured source and a private, finite clock-control boundary.
 
 use std::collections::BTreeMap;
 
@@ -25,7 +26,11 @@ pub mod archive;
 pub mod document;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
+#[cfg(all(target_arch = "wasm32", feature = "server"))]
+pub(crate) mod test_browser;
+pub mod test_clock;
 pub mod test_protocol;
+pub mod test_source;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

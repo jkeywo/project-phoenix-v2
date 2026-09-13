@@ -16,6 +16,7 @@ const editorModules = [
   'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'undo-stack', 'validation', 'entity-includes', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
+  'workshop-test-frame', 'workshop-test-child', 'workshop-test-runtime', 'workshop-test-snapshot',
 ];
 await mkdir(path.join(out, 'editor'), { recursive: true });
 await mkdir(path.join(out, 'assets', 'strings'), { recursive: true });
@@ -24,6 +25,7 @@ await writeFile(path.join(root,SOUND_CUE_INVENTORY),await soundCueInventoryJs(ro
 await cp(path.join(root,'assets/audio'),path.join(out,'assets/audio'),{recursive:true});
 await cp(path.join(root,'assets/sounds'),path.join(out,'assets/sounds'),{recursive:true});
 await copyFile(path.join(root, 'workshop.html'), path.join(out, 'workshop.html'));
+await copyFile(path.join(root, 'workshop-test.html'), path.join(out, 'workshop-test.html'));
 await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
 await copyFile(path.join(root, 'assets/strings/strings.csv'), path.join(out, 'assets/strings/strings.csv'));
 for (const name of editorModules) {
@@ -42,7 +44,7 @@ async function collect(directory) {
     const relative = `${directory}/${entry.name}`;
     if (entry.isDirectory()) await collect(relative);
     else if (/\.(toml|rhai)$/.test(entry.name)) baseFiles[relative] = await readFile(path.join(root, relative), 'utf8');
-    else if (/\.(glb|bin|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(entry.name)) {
+    else if (/\.(glb|bin|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3|wgsl)$/.test(entry.name)) {
       const bytes = await readFile(path.join(root, relative));
       baseAssetManifest[relative] = { length: bytes.length, crc32: crc32(bytes), requires: assetDependencies(relative, bytes) };
     }

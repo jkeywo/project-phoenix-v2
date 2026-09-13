@@ -4,20 +4,14 @@ use super::{
     assets::Sources as DraftSources, Files, NativeWorkshopProvider, Response, WorkspaceKind,
 };
 pub use crate::workshop::test_protocol::TestSelection;
-use crate::workshop::{Sources, WorkshopValidation};
-use serde::Serialize;
+pub use crate::workshop::test_source::TestCatalog;
+use crate::workshop::Sources;
 
 #[derive(Debug)]
 pub struct TestSnapshot {
     pub files: Files,
     pub selection: TestSelection,
     pub revision: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TestCatalog {
-    pub worlds: Vec<String>,
-    pub ships: Vec<String>,
 }
 
 /// Runtime-owned render support is captured read-only. This does not widen the
@@ -98,28 +92,7 @@ impl NativeWorkshopProvider {
             }
         }
         text.extend(files);
-        let source = Sources(text);
-        use crate::entities::loader::TemplateLoader;
-        Ok(TestCatalog {
-            worlds: source
-                .0
-                .keys()
-                .filter(|path| path.starts_with("assets/worlds/") && path.ends_with(".toml"))
-                .cloned()
-                .collect(),
-            ships: source
-                .0
-                .keys()
-                .filter(|path| {
-                    path.starts_with("assets/entities/")
-                        && path.ends_with(".toml")
-                        && source
-                            .load_template(path)
-                            .is_some_and(|hull| hull.class.is_some())
-                })
-                .cloned()
-                .collect(),
-        })
+        Ok(crate::workshop::test_source::catalog(text))
     }
 
     pub fn prepare_test(
@@ -183,37 +156,7 @@ impl NativeWorkshopProvider {
                 })
                 .collect(),
         );
-        let mut report = WorkshopValidation::default();
-        if !super::safe_path(&selection.world)
-            || !selection.world.starts_with("assets/worlds/")
-            || !selection.world.ends_with(".toml")
-        {
-            report.error(
-                "runtime-world-invalid",
-                &selection.world,
-                "Select an authored world".into(),
-            );
-        } else {
-            crate::workshop::validate_world(&selection.world, &text, &mut report);
-        }
-        use crate::entities::loader::TemplateLoader;
-        if !super::safe_path(&selection.ship)
-            || !selection.ship.starts_with("assets/entities/")
-            || !selection.ship.ends_with(".toml")
-            || !text
-                .load_template(&selection.ship)
-                .is_some_and(|hull| hull.class.is_some())
-        {
-            report.error(
-                "runtime-template-invalid",
-                &selection.ship,
-                "Selected Test hull is not a complete composed runtime template".into(),
-            );
-        }
-        report.accepted = !report
-            .findings
-            .iter()
-            .any(|finding| finding.severity == "error");
+        let report = crate::workshop::test_source::validate_selection(text.0, &selection);
         if !report.accepted {
             return Err(Response::Refused {
                 message: "Runtime validation refused the Test selection".into(),

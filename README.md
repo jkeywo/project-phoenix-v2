@@ -119,13 +119,15 @@ its recovery draft and private preferences on this computer. Large binary assets
 use immutable local versions and chunked imports. The shell runs offline with
 loopback-only static delivery; it opens no mission or crew connection. A source
 write refuses external edits, and reopening a pane offers its saved recovery draft.
-Native Test validates the unsaved draft and launches a fresh deterministic
-Viewscreen process, with every Station on Backfill. Select a world, composed
+Test validates the unsaved draft and launches a fresh deterministic Viewscreen,
+in a native child process or a browser iframe, with every Station on Backfill. Select a world, composed
 player hull and seed; pause, step one fixed tick or run at 1×/2×/4×/8× speed.
 Return to Authoring holds and hides the Test window. An edit marks that run
 stale; Restart from draft creates a new run. Stop, a closed or failed Test, and
-Workshop view replacement retire the child and its private staged source.
-The browser Test adapter, GM/other-ship views, traces, breakpoints, role preview
+Workshop view replacement retire the child and its private captured source.
+Browser Test reads its captured assets without HTTP fallback and has no Live
+transport or saved-run storage. Stop also cancels a pending browser launch.
+GM/other-ship views, traces, breakpoints, role preview
 and model tooling remain M6 continuation work.
 See [Editor and Workshop](wiki/entities/editor.md) for the current boundary.
 

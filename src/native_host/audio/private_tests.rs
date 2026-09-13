@@ -60,6 +60,57 @@ impl Fake {
 fn audible(samples: &[f32]) -> bool {
     samples.iter().any(|sample| sample.abs() > 0.00001)
 }
+
+#[test]
+fn private_mono_reaches_actual_pcm_on_only_its_endpoint_and_survives_reopening_output() {
+    let hub = PrivateAudio::new(profile());
+    let key = Endpoint::Console(PaneId(1));
+    hub.bind(key, "helm");
+    let fake = Fake::with(&["output:Helm", "output:GM"]);
+    let mut worker = Worker::new(fake.clone());
+    worker.step(&hub);
+    // Decode an asymmetric authored-shaped asset through production decoding;
+    // the worker consumes that prepared asset through its ordinary cue path.
+    let pcm = decoder::decode(
+        include_bytes!("../../../tests/fixtures/audio-mono-right.wav").to_vec(),
+        "wav",
+    )
+    .unwrap();
+    worker
+        .pcm
+        .insert(worker.manifest["refused"].file.clone(), Ok(pcm));
+    hub.submit(key, &record(&hub, key, REFUSED));
+    worker.step(&hub);
+    let stereo = fake.sink("output:Helm");
+    assert!(audible(&stereo));
+    assert!(stereo.chunks_exact(2).all(|pair| pair[0] == 0.0));
+    let generation = hub.status(key).unwrap().generation;
+    hub.submit(
+        key,
+        &format!("{{\"type\":\"NativePrivateAudio\",\"generation\":{generation},\"mono\":true}}"),
+    );
+    hub.submit(key, &record(&hub, key, REFUSED));
+    worker.step(&hub);
+    let output = fake.sink("output:Helm");
+    assert!(audible(&output));
+    assert!(output.chunks_exact(2).all(|pair| pair[0] == pair[1]));
+    assert!(!audible(&fake.sink("output:GM")));
+    hub.submit(
+        key,
+        &format!("{{\"type\":\"NativePrivateAudio\",\"generation\":{generation},\"retry\":true}}"),
+    );
+    worker.step(&hub);
+    assert!(!audible(&fake.sink("output:Helm")));
+    hub.submit(key, &record(&hub, key, REFUSED));
+    worker.step(&hub);
+    let output = fake.sink("output:Helm");
+    assert!(audible(&output));
+    assert!(output.chunks_exact(2).all(|pair| pair[0] == pair[1]));
+    hub.submit(key,&format!("{{\"type\":\"NativePrivateAudio\",\"generation\":{generation},\"mix\":{{\"master\":{{\"level\":0,\"muted\":false}},\"alerts\":{{\"level\":1,\"muted\":false}},\"interface\":{{\"level\":1,\"muted\":false}}}}}}"));
+    hub.submit(key, &record(&hub, key, REFUSED));
+    worker.step(&hub);
+    assert!(!audible(&fake.sink("output:Helm")));
+}
 fn media(surface: &str, outputs: &[&str]) -> MediaSurfaceEntry {
     MediaSurfaceEntry {
         surface: surface.into(),
@@ -237,7 +288,11 @@ fn private_generations_mute_rebuild_and_failed_device_discard_old_voices_and_tes
     for bus_name in ["master", "interface"] {
         hub.submit(key, &record(&hub, key, TEST));
         worker.step(&hub);
-        let mix = format!("{{\"master\":{{\"level\":1,\"muted\":{}}},\"alerts\":{{\"level\":1,\"muted\":false}},\"interface\":{{\"level\":1,\"muted\":{}}}}}", bus_name == "master", bus_name == "interface");
+        let mix = format!(
+            "{{\"master\":{{\"level\":1,\"muted\":{}}},\"alerts\":{{\"level\":1,\"muted\":false}},\"interface\":{{\"level\":1,\"muted\":{}}}}}",
+            bus_name == "master",
+            bus_name == "interface"
+        );
         hub.submit(
             key,
             &format!(

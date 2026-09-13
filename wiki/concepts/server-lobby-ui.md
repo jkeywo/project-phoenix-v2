@@ -24,6 +24,11 @@ output test report blocked, failed and unavailable output separately from mute.
 `gui/audio-preferences.js` migrates the old Master key into the audio section of
 this endpoint's existing Viewscreen preference record. Audio and visual writes
 merge their own sections, and each reset preserves the other section.
+The shared Mono output checkbox averages allowed left/right samples after
+spatial positioning and before authored/category/Master gains. The browser
+provider keeps an explicit stereo endpoint, so the result reaches both ears.
+It changes active voices in place, preserving loop position; visual direction
+and information do not change. Stereo is the initial and audio-reset default.
 
 `src/server/audio_lifecycle.rs` derives a local audio continuation boundary from
 actual mission and restore/recovery state. The browser flush sends that boundary
@@ -53,6 +58,9 @@ explicit provider; a missing adapter stays visibly unavailable, even when an
 embedded engine exposes browser-shaped audio APIs. The authored inventory and
 levels are `assets/audio/private-feedback.json`; the three new brief non-speech
 tones have their generator and provenance under `scripts/` and `assets/audio/`.
+Private mono follows the same portable profile and shared control. It affects
+only this endpoint's allowed Interface/Alerts output. Missing mono capability
+disables the control with an explanation while retaining the saved choice.
 `gui/private-alerts.js` consumes only current permitted Comms, GM attention and
 GM health projections through this owner's Alerts bus. Comms belongs to the
 live human host of the actual System, including visiting Captain/Tactical

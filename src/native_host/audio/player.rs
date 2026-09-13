@@ -11,6 +11,9 @@ use std::{
 };
 
 pub const MENU: &str = "assets/sounds/exploration.mp3";
+#[cfg(test)]
+#[path = "mono_tests.rs"]
+mod mono_tests;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RoomInput {
     pub lifecycle: AudioLifecycleState,

@@ -46,6 +46,7 @@ pub struct OutputChoice {
 pub struct NativeAudioState {
     pub room: bool,
     pub mix: AudioMix,
+    pub mono: bool,
     pub categories: Vec<&'static str>,
     pub status: &'static str,
     pub test: &'static str,
@@ -62,6 +63,7 @@ impl Default for NativeAudioState {
         Self {
             room: true,
             mix: AudioMix::default(),
+            mono: false,
             categories: vec!["music", "ambience", "effects", "alerts"],
             status: "loading",
             test: "idle",
@@ -130,6 +132,9 @@ impl NativeRoomAudio {
             .as_ref()
             .map(|store| store.load_audio())
             .unwrap_or((AudioMix::default(), "unavailable"));
+        let mono = preferences
+            .as_ref()
+            .is_some_and(|store| store.load_audio_mono());
         let saved = hardware
             .as_ref()
             .map(|store| store.load())
@@ -161,6 +166,7 @@ impl NativeRoomAudio {
         let output = route.unwrap_or_default();
         let state = Arc::new(Mutex::new(NativeAudioState {
             mix,
+            mono,
             persistence,
             hardware_persistence,
             profile_override,
@@ -189,6 +195,7 @@ impl NativeRoomAudio {
         let private = private::PrivateAudio::new(profile.clone());
         let mixer = player.mixer.clone();
         mixer.lock().unwrap().mix = mix;
+        mixer.lock().unwrap().set_mono(mono);
         #[cfg(feature = "host")]
         let worker = if start_device {
             let control = control.clone();
@@ -309,7 +316,21 @@ impl NativeRoomAudio {
                 state.persistence = if self
                     .preferences
                     .as_ref()
-                    .is_some_and(|store| store.save_audio(state.mix).is_ok())
+                    .is_some_and(|store| store.save_audio_mono(state.mix, state.mono).is_ok())
+                {
+                    "saved"
+                } else {
+                    "unavailable"
+                };
+            }
+            HostLobbyRecord::SetAudioMono { enabled } => {
+                let mut state = self.state.lock().unwrap();
+                state.mono = *enabled;
+                self.mixer.lock().unwrap().set_mono(*enabled);
+                state.persistence = if self
+                    .preferences
+                    .as_ref()
+                    .is_some_and(|store| store.save_audio_mono(state.mix, state.mono).is_ok())
                 {
                     "saved"
                 } else {
@@ -319,11 +340,13 @@ impl NativeRoomAudio {
             HostLobbyRecord::ResetAudioMix => {
                 let mut state = self.state.lock().unwrap();
                 state.mix = AudioMix::default();
+                state.mono = false;
                 self.mixer.lock().unwrap().set_mix(state.mix);
+                self.mixer.lock().unwrap().set_mono(false);
                 state.persistence = if self
                     .preferences
                     .as_ref()
-                    .is_some_and(|store| store.save_audio(state.mix).is_ok())
+                    .is_some_and(|store| store.save_audio_mono(state.mix, state.mono).is_ok())
                 {
                     "saved"
                 } else {

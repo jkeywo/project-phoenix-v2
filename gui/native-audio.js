@@ -5,14 +5,15 @@ import { t } from './strings.js';
  * decoder, localStorage, game authority or private output fallback. */
 export function createNativeAudio({ win = globalThis, send = () => {} } = {}) {
   const listeners = new Set();
-  let current = { room: false, mix: defaultAudioMix(), categories: [],
+  let current = { room: false, mix: defaultAudioMix(), categories: [], mono: false, monoAvailable: false,
     status: 'unavailable', test: 'idle', persistence: 'unavailable',
     hardware_persistence: 'unavailable', output: null, devices: [], detail: '', asset_failures: [] };
   function apply(json) {
     let value;
     try { value = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return; }
     if (!value || value.room !== true || !Array.isArray(value.categories)) return;
-    current = { ...current, ...value, mix: normalizeAudioMix(value.mix) };
+    current = { ...current, ...value, mix: normalizeAudioMix(value.mix),
+      mono: value.mono === true, monoAvailable: typeof value.mono === 'boolean' };
     for (const listener of listeners) listener();
   }
   win.__phoenixNativeAudioApply = apply;
@@ -28,6 +29,7 @@ export function createNativeAudio({ win = globalThis, send = () => {} } = {}) {
       request({ kind: 'set_audio_bus', bus, level_percent: Math.round(value.level * 100), muted: value.muted });
     },
     resetMix: () => request({ kind: 'reset_audio_mix' }),
+    setMono: enabled => request({ kind: 'set_audio_mono', enabled: enabled === true }),
     enable: () => request({ kind: 'retry_audio_output' }),
     testOutput: () => request({ kind: 'test_audio_output' }),
     selectOutput: output => request({ kind: 'select_audio_output', output: output || null }),

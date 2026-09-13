@@ -1251,6 +1251,16 @@ vocabulary in `bridge-media.toml`, separate from endpoint preferences. An explic
 launch profile overrides saved media only for the surfaces it explicitly names;
 a display-only profile preserves the saved audio route. The initial room route is
 labelled System default; selecting a named output never permits a silent fallback.
+The room's Mono output choice is saved beside its mix; private Station/GM mono
+is part of the portable operator audio profile. Both use the same live
+`audio/engine.rs` mixer conversion after spatial processing and before authored,
+category and Master gains. Existing voice cursors survive a toggle, new output
+instances inherit the current choice, and resets return audio to stereo while
+preserving display settings and hardware routes. The shared private bridge
+resends the current mix and mono on presentation-generation changes; it never
+resends missed cues. `audio/mono_tests.rs`, `tests/client/audio-mono.test.js` and
+`tests/smoke/audio-mono.spec.js` exercise asymmetric decoded samples through these
+provider paths.
 
 Combat's Effects path follows the existing phaser state and forcefield envelope;
 blaster positions come from the same Rust producer as browser playback.

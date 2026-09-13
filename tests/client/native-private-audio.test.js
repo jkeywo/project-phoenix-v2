@@ -65,12 +65,12 @@ it('deliberate output tests respect private mute and unavailable assigned output
 });
 
 it('resends current quiet mix after generation replacement and ignores an older status', async () => {
-  const preferences=normalizePrivateAudio({mix:{master:{level:0.14,muted:false}}});
+  const preferences=normalizePrivateAudio({mono:true,mix:{master:{level:0.14,muted:false}}});
   const audio=createPrivateAudio({root:window,manifest,read:()=>preferences});
   await audio.ready;publish(1);expect(drain().mix.master.level).toBe(0.14);
   // A host boundary may have discarded that in-flight old-generation record.
   publish(2);audio.click();
-  const record=drain();expect(record.generation).toBe(2);expect(record.mix.master.level).toBe(0.14);expect(record.cue.id).toBe('clicks');
+  const record=drain();expect(record.generation).toBe(2);expect(record.mix.master.level).toBe(0.14);expect(record.mono).toBe(true);expect(record.cue.id).toBe('clicks');
   publish(1,'failed');expect(audio.state().generation).toBe(2);expect(audio.state().status).toBe('playing');
   audio.dispose();
 });

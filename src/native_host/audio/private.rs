@@ -37,6 +37,7 @@ struct Entry {
     retry: u64,
     pending: Option<(Instant, String, bool)>,
     mix: AudioMix,
+    mono: bool,
     mixers: Vec<Arc<Mutex<Mixer>>>,
 }
 impl Entry {
@@ -79,6 +80,7 @@ pub(crate) struct Request {
     kind: String,
     generation: u64,
     mix: Option<PrivateMix>,
+    mono: Option<bool>,
     #[serde(default)]
     stop: bool,
     #[serde(default)]
@@ -143,6 +145,7 @@ impl PrivateAudio {
                 retry: 0,
                 pending: None,
                 mix: AudioMix::default(),
+                mono: false,
                 mixers: vec![],
             },
         );
@@ -224,6 +227,12 @@ impl PrivateAudio {
             return true;
         }
         entry.status.revision += 1;
+        if let Some(enabled) = request.mono {
+            entry.mono = enabled;
+            for mixer in &entry.mixers {
+                mixer.lock().unwrap().set_mono(enabled);
+            }
+        }
         if let Some(mix) = request.mix {
             entry.mix = AudioMix {
                 master: mix.master,
@@ -464,6 +473,7 @@ impl<B: Backend> Worker<B> {
                 for id in &entry.status.outputs {
                     let mut mixer = Mixer::default();
                     mixer.set_mix(entry.mix);
+                    mixer.set_mono(entry.mono);
                     let mixer = Arc::new(Mutex::new(mixer));
                     match self.backend.open(id, mixer.clone()) {
                         Ok(stream) => live.outputs.push(Output { stream, mixer }),

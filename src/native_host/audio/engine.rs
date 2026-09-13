@@ -14,9 +14,13 @@ struct Voice {
 #[derive(Default)]
 pub struct Mixer {
     pub mix: AudioMix,
+    mono: bool,
     voices: BTreeMap<String, Voice>,
 }
 impl Mixer {
+    pub fn set_mono(&mut self, enabled: bool) {
+        self.mono = enabled;
+    }
     pub fn set_mix(&mut self, mix: AudioMix) {
         self.mix = mix.sanitised();
         self.voices
@@ -120,17 +124,22 @@ impl Mixer {
                     let channel = channel.min(voice.pcm.channels - 1);
                     let a = voice.pcm.samples[base * voice.pcm.channels + channel];
                     let b = voice.pcm.samples[next * voice.pcm.channels + channel];
-                    (a + (b - a) * fraction) * gain
+                    a + (b - a) * fraction
                 };
-                let stereo = voice.spatial.map_or_else(
+                let mut stereo = voice.spatial.map_or_else(
                     || [sample(0), sample(1)],
                     |matrix| matrix.apply(sample(0), sample(1)),
                 );
+                // Convert the spatialized signal before the authored/category/
+                // Master gains. Changing this flag never restarts a voice.
+                if self.mono {
+                    stereo = [(stereo[0] + stereo[1]) * 0.5; 2];
+                }
                 if channels == 1 {
-                    frame[0] += (stereo[0] + stereo[1]) * 0.5;
+                    frame[0] += (stereo[0] + stereo[1]) * 0.5 * gain;
                 } else {
-                    frame[0] += stereo[0];
-                    frame[1] += stereo[1];
+                    frame[0] += stereo[0] * gain;
+                    frame[1] += stereo[1] * gain;
                 }
                 voice.cursor += f64::from(voice.pcm.rate) / f64::from(rate);
                 if let Some(remaining) = &mut voice.remaining {

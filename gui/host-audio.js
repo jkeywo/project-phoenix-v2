@@ -11,6 +11,7 @@ export function createHostAudio({
 } = {}) {
   const preferences = createRoomAudioPreferences(storage);
   let mix = preferences.read().mix;
+  let mono = preferences.read().mono;
   let cfg = null;
   let cfgText = null;
   let running = false;
@@ -35,6 +36,7 @@ export function createHostAudio({
     onChange: () => { for (const listener of listeners) listener(); },
   });
   provider.setMix(mix);
+  provider.setMono?.(mono);
 
   function emit(cue) { if (isRoom()) onEquivalent(cue); }
   function ensureMenu() {
@@ -47,7 +49,8 @@ export function createHostAudio({
   // Available before a world is selected, including the deliberate output test.
   ensureMenu();
 
-  function state() { return { ...provider.snapshot(), ...preferences.read(), room: isRoom() }; }
+  function state() { return { ...provider.snapshot(), ...preferences.read(), room: isRoom(),
+    monoAvailable: typeof provider.setMono === 'function' }; }
   function notify() { for (const listener of listeners) listener(); }
   function setBus(id, change) {
     if (!AUDIO_BUSES.includes(id)) return;
@@ -57,8 +60,17 @@ export function createHostAudio({
   }
   function resetMix() {
     mix = defaultAudioMix();
-    preferences.save(mix);
+    mono = false;
+    preferences.save(mix, mono);
     provider.setMix(mix);
+    provider.setMono?.(mono);
+  }
+  function setMono(value) {
+    if (!isRoom()) return;
+    mono = value === true;
+    preferences.save(mix, mono);
+    provider.setMono?.(mono);
+    notify();
   }
 
   function audioConfig(json) {
@@ -213,7 +225,7 @@ export function createHostAudio({
   }
   return {
     audioConfig, audioCue, audioLevel, audioLifecycle, applyHudAudio, startGameAudio, startMenuMusic, stopMenuMusic,
-    resetSession, setPageActive, state, setBus, resetMix,
+    resetSession, setPageActive, state, setBus, setMono, resetMix,
     enable: () => isRoom() ? provider.enable() : Promise.resolve(false),
     testOutput: () => { ensureMenu(); return isRoom() ? provider.testOutput('menu') : Promise.resolve(false); },
     getMasterVolume: () => mix.master.level,

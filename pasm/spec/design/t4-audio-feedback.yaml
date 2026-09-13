@@ -82,6 +82,7 @@ entities:
         - "[ai] Initial defaults are stereo, full dynamics and ducking off, with category gains at identity and existing Master values migrated. These preserve the authored baseline until an operator chooses otherwise."
         - "[ai] Sample-level checks should prove both-channel mono, bounded dynamic processing, allowed-category ducking/recovery and Master-zero output. Separate real-device listening checks assess comfort without treating automated metrics as human acceptance."
         - "[ai] Deliver mono, reduced dynamics and room ducking as separate complete paths. Each tests authored-cue-shaped provider input independently; optional comfort work does not block authored definition/audition or live cue integration."
+        - "[ai] Mono averages the allowed post-spatial left/right signal before authored, category and Master gain, then duplicates it to both output channels. A live toggle preserves source cursors and never reconstructs missed cues. Room mono is endpoint-local; private mono is portable with operator audio choices and is resent with current mix when the native presentation generation changes."
 
   - decision: t4-m8-authored-sound-cues
     core:

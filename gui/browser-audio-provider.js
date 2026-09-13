@@ -22,6 +22,7 @@ export function createBrowserAudioProvider({
   let testGeneration = 0;
   let testState = 'idle';
   let mix = normalizeAudioMix();
+  let mono = false;
   const buses = new Map();
   const sounds = new Map();
   const voices = new Set();
@@ -35,6 +36,11 @@ export function createBrowserAudioProvider({
       context = contextFactory();
       if (!context) { unavailable = true; changed(); return null; }
       master = context.createGain();
+      // Keep the endpoint stereo even when every active voice is mono, so
+      // speaker up-mixing duplicates the allowed mono signal before Master.
+      master.channelCount = 2;
+      master.channelCountMode = 'explicit';
+      master.channelInterpretation = 'speakers';
       meter = context.createAnalyser();
       meter.fftSize = 256;
       master.connect(meter).connect(context.destination);
@@ -68,6 +74,19 @@ export function createBrowserAudioProvider({
     mix = normalizeAudioMix(value);
     if (master) master.gain.value = audioBusGain(mix, 'master');
     for (const [id, gain] of buses) gain.gain.value = audioBusGain(mix, id);
+    changed();
+  }
+
+  // Explicit one-channel speaker mixing averages L/R before the authored and
+  // category gains; downstream speaker mixing sends that signal to both ears.
+  function monoInput(gain) {
+    gain.channelCount = mono ? 1 : 2;
+    gain.channelCountMode = mono ? 'explicit' : 'max';
+    gain.channelInterpretation = 'speakers';
+  }
+  function setMono(value) {
+    mono = value === true;
+    for (const voice of voices) monoInput(voice.gain);
     changed();
   }
 
@@ -132,6 +151,7 @@ export function createBrowserAudioProvider({
       source.buffer = sound.buffer;
       source.loop = !!sound.loop && !test;
       const gain = context.createGain();
+      monoInput(gain);
       gain.gain.value = sound.level;
       const nodes = [source, gain];
       let tail = source;
@@ -273,5 +293,5 @@ export function createBrowserAudioProvider({
       Promise.resolve(context.close()).catch(() => {});
     }
   }
-  return { register, remove, loop, cue, setMix, enable, testOutput, stopAll, snapshot, outputPeak, dispose };
+  return { register, remove, loop, cue, setMix, setMono, enable, testOutput, stopAll, snapshot, outputPeak, dispose };
 }

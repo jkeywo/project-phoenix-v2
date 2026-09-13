@@ -3487,3 +3487,6 @@ server.gm.contact.ghost-remove,GM clear ghost action,[Remove ghost]
 "server.gm.contact.report_current","GM active report policy values","[Delay {delay} ticks · grid {step} mm · identity {identity}]"
 "server.gm.contact.report_hidden","GM report identity state","[hidden]"
 "server.gm.contact.report_visible","GM report identity state","[observed]"
+"settings.audio.mono","Audio mono output checkbox","[Mono output]"
+"settings.audio.mono_hint","Audio mono output scope","[Send the complete allowed mix to both ears. Direction remains available in live visual cues.]"
+"settings.audio.mono_unavailable","Audio mono unavailable provider explanation","[Mono output is unavailable on this provider. Your saved choice is retained.]"

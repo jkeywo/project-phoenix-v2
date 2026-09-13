@@ -289,6 +289,9 @@ pub enum HostLobbyRecord {
         muted: bool,
     },
     ResetAudioMix,
+    SetAudioMono {
+        enabled: bool,
+    },
     SelectAudioOutput {
         output: Option<String>,
     },

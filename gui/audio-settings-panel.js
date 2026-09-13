@@ -59,6 +59,15 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
   actions.append(enable, test, reset);
   panel.append(status, storageStatus, actions, text('p', privateSurface
     ? 'settings.audio.private_test_hint' : 'settings.audio.test_hint'));
+  const monoLabel = doc.createElement('label');
+  monoLabel.className = 'audio-mono';
+  const mono = doc.createElement('input');
+  mono.type = 'checkbox'; mono.dataset.audioMono = '';
+  mono.addEventListener('change', () => audio?.setMono?.(mono.checked));
+  monoLabel.append(mono, text('span', 'settings.audio.mono'));
+  const monoHint = text('p', 'settings.audio.mono_hint');
+  monoHint.className = 'server-settings-hint';
+  panel.append(monoLabel, monoHint);
   const cueControls = new Map();
   if (privateSurface) {
     const group = doc.createElement('fieldset');
@@ -110,6 +119,10 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
     enable.disabled = !(state?.room || state?.private) || output === 'unavailable';
     test.disabled = !(state?.room || state?.private) || output === 'unavailable' || state?.test === 'loading';
     reset.disabled = !(state?.room || state?.private);
+    mono.checked = state?.mono === true;
+    mono.disabled = !(state?.room || state?.private) || state?.monoAvailable !== true;
+    monoHint.textContent = t(state?.monoAvailable === true
+      ? 'settings.audio.mono_hint' : 'settings.audio.mono_unavailable');
     for (const [id, input] of cueControls) input.checked = state.cues[id];
   }
   const unsubscribe = audio?.subscribe(paint);

@@ -1253,6 +1253,7 @@ pub(crate) fn drain_surface_records(
                 continue;
             }
             record @ (HostLobbyRecord::SetAudioBus { .. }
+            | HostLobbyRecord::SetAudioMono { .. }
             | HostLobbyRecord::ResetAudioMix
             | HostLobbyRecord::SelectAudioOutput { .. }
             | HostLobbyRecord::RetryAudioOutput

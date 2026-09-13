@@ -39,21 +39,31 @@ export class FakeAudioContext {
   }
   async decodeAudioData(bytes) {
     if (this.rejectDecode) throw new Error('Unsupported codec');
-    return { duration: 10, sample: new Float32Array(bytes)[0] };
+    const samples = new Float32Array(bytes);
+    return { duration: 10, sample: samples[0], stereo: [samples[0], samples[1] ?? samples[0]] };
   }
   async resume() {
     if (this.refuseResume) throw new Error('Gesture required');
     this.state = 'running'; this.onstatechange?.();
   }
   async close() { this.state = 'closed'; }
-  sample() {
-    if (this.state !== 'running') return 0;
+  sampleChannels() {
+    if (this.state !== 'running') return [0, 0];
     function through(node, value) {
       if (node.sink) return value;
-      return node.targets.reduce((sum, target) => sum + through(target, value * (node.gain?.value ?? 1)), 0);
+      if (node.channelCountMode === 'explicit' && node.channelCount === 1) value = [(value[0] + value[1]) / 2, (value[0] + value[1]) / 2];
+      const scaled = value.map(sample => sample * (node.gain?.value ?? 1));
+      return node.targets.reduce((sum, target) => {
+        const output = through(target, scaled);
+        return sum.map((sample, channel) => sample + output[channel]);
+      }, [0, 0]);
     }
-    return this.sources.filter(source => source.started).reduce((sum, source) => sum + through(source, source.buffer.sample), 0);
+    return this.sources.filter(source => source.started).reduce((sum, source) => {
+      const output = through(source, source.buffer.stereo);
+      return sum.map((sample, channel) => sample + output[channel]);
+    }, [0, 0]);
   }
+  sample() { return this.sampleChannels().reduce((a, b) => a + b, 0) / 2; }
   advance(seconds) {
     this.currentTime += seconds;
     for (const source of this.sources) {

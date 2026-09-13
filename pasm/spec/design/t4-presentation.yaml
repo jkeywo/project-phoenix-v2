@@ -22,4 +22,4 @@ entities:
       status: declared
       paths: [src/gm_presentation.rs, src/gm_action.rs, src/core/codec.rs, src/core/messages.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/server.rs, src/gm_projection.rs, src/gm_activity.rs, src/snapshot.rs, src/sim_digest.rs, src/lockstep/mod.rs, src/ship/viewscreen.rs, src/ship/state.rs, src/server/viewscreen_border.rs, gui/gm-presentation-panel.js, gui/presentation-card.js, gui/presentation-card.css, gui/gm-workspace.js, gui/native-gm-workspace.js, gui/viewscreen-hud.html, server.html]
       symbols: [PresentationCue, PresentationState, PresentationControl, apply_scenario_command, PresentationHud, card_wire, createGmPresentationPanel, createPresentationCard]
-      tests: [tests/gm_presentation.rs, src/world/script/effects.rs, tests/client/gm-presentation-panel.test.js, tests/smoke/gm-presentation.spec.js, tests/smoke/gm-presentation-runtime.spec.js]
+      tests: [tests/gm_presentation.rs, src/world/script/effects.rs, tests/client/gm-presentation-panel.test.js, tests/smoke/gm-presentation.spec.js, tests/smoke/gm-presentation-runtime.render.spec.js]

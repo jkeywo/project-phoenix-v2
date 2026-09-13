@@ -19,6 +19,10 @@ test('real GM presentation admission reaches the host card and crew view while r
   test.setTimeout(180_000);
   await context.route('**/assets/worlds/default.toml', route => route.fulfill({ contentType: 'text/plain', body: WORLD }));
   const host = await context.newPage(), gm = await context.newPage();
+  // The ordinary automation boot deliberately omits ViewscreenBorderPlugin,
+  // which owns the HUD/card producer. Exercise the real Viewscreen with this
+  // project's SwiftShader backend; the independent GM keeps its ordinary boot.
+  await host.addInitScript(() => Object.defineProperty(navigator, 'webdriver', { get: () => false }));
   await host.goto('/?scenario=assets/worlds/default.toml'); await waitForWasmReady(host);
   const crew = await createTestClient(context, await readHostPeerId(host), { name: 'Presentation witness' });
   await crew.send('SelectStation', { station: 'Captain' });

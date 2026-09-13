@@ -121,6 +121,17 @@ revision, so restoring a draft cannot silently overwrite newer files on disk.
 callback and reply receiver; no browser HTTP/file provider is introduced. The
 native shell/CLI wiring is the next integration step.
 
+Native `load-sources` returns source text bytes and immutable asset-version
+references from `src/workshop/provider/assets.rs`. The selected root owns the
+private blob store; references cannot name authored or arbitrary filesystem paths.
+Asset imports and preview reads use 64 KiB chunks. Save materializes and verifies
+each referenced version before the existing runtime and external-edit gates.
+Native recovery uses document version 3 to retain those references in the same
+chronological history, including a saved replacement later undone after reopening.
+Ordinary browser documents refuse reference-bearing recovery. The store has a
+bounded 2 GiB capacity and refuses new versions when full; retained versions are
+not automatically discarded while a recovery record or undo history may need them.
+
 Disposable Test simulation, specialised entity/definition/model panels and runtime
 model asset overlays remain later M6 work. The existing editor/viewer remain
 until the parity workflow is delivered.

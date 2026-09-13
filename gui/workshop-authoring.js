@@ -185,7 +185,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         const option = el('option', null, { value: path }); option.textContent = path; return option;
       }));
       files.value = selected || '';
-      source.value = draft?.isBinary(selected) ? t('workshop.binary_source', { bytes: draft.bytes(selected).length }) : draft?.read(selected) || '';
+      source.value = draft?.isBinary(selected) ? t('workshop.binary_source', { bytes: draft.byteLength(selected) }) : draft?.read(selected) || '';
       sourceLabel.textContent = selected ? t('workshop.source_path', { path: selected }) : t('workshop.source');
     }
     const busy = Boolean(pendingImport || pendingValidation || pendingRecovery);
@@ -382,7 +382,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     const path = addPath.value.trim();
     pendingValidation = true; refresh();
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
+      const nativeAsset = isWorkshopBinary(path) && provider?.importAsset;
+      const bytes = nativeAsset ? await provider.importAsset(file) : new Uint8Array(await file.arrayBuffer());
       if (disposed || draft !== target) return;
       pendingValidation = false;
       addPath.value = path;
@@ -539,7 +540,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     discardButton.hidden = false;
     try {
       if (record.version !== 1) throw new Error('Unsupported recovery version');
-      const restored = WorkshopDocument.restore(record.draft);
+      const restored = provider?.restoreDocument ? provider.restoreDocument(record.draft) : WorkshopDocument.restore(record.draft);
       recoveredDraft = { record, draft: restored, selected: restored.paths().includes(record.selected) ? record.selected : restored.paths()[0] };
       restoreButton.hidden = false;
       recoveryStatus.textContent = t('workshop.recovery_available');

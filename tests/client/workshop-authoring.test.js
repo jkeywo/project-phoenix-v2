@@ -70,9 +70,9 @@ describe('Workshop Authoring browser surface', () => {
       [WORKSHOP_WORLD]: Array.from(new TextEncoder().encode(WORKSHOP_WORLD_TEXT)) };
     let saved = false;
     const request = vi.fn(async value => {
-      if (value.op === 'load') return { status: 'loaded', kind: 'project', revision: 'initial', files };
+      if (value.op === 'load-sources') return { status: 'sources', kind: 'project', revision: 'initial', files };
       if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
-      if (value.op === 'save') return saved ? { status: 'saved', revision: 'next' } : { status: 'refused', message: 'External edit', report: null };
+      if (value.op === 'save-sources') return saved ? { status: 'saved', revision: 'next' } : { status: 'refused', message: 'External edit', report: null };
       return { status: 'done' };
     });
     mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), provider: createNativeWorkshopProvider({ request }) });
@@ -88,8 +88,32 @@ describe('Workshop Authoring browser surface', () => {
     saved = true;
     byId('save').click();
     await vi.waitFor(() => expect(byId('dirty').textContent).toBe(t('workshop.saved')));
-    const save = request.mock.calls.filter(([value]) => value.op === 'save').at(-1)[0];
-    expect(new TextDecoder().decode(Uint8Array.from(save.files[WORKSHOP_WORLD]))).toContain('# native change');
+    const save = request.mock.calls.filter(([value]) => value.op === 'save-sources').at(-1)[0];
+    expect(save.files[WORKSHOP_WORLD]).toContain('# native change');
+  });
+  it('displays and recovers native asset references without asking the document for huge byte arrays', async () => {
+    mounted.dispose();
+    const path = 'assets/models/large.glb';
+    const reference = { asset: '0000000000000001-400000000', length: 400000000 };
+    const request = vi.fn(async value => {
+      if (value.op === 'load-sources') return { status: 'sources', kind: 'project', revision: 'initial', files: {
+        [WORKSHOP_WORLD]: Array.from(new TextEncoder().encode(WORKSHOP_WORLD_TEXT)), [path]: reference,
+      } };
+      if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
+      return { status: 'done' };
+    });
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), provider: createNativeWorkshopProvider({ request }) });
+    await mounted.ready;
+    select(path);
+    expect(byId('source').disabled).toBe(true);
+    expect(byId('source').value).toContain('400000000');
+    select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# native draft\n`);
+    await vi.waitFor(() => expect(request.mock.calls.some(([value]) => value.op === 'recovery-save')).toBe(true));
+    const record = JSON.parse(request.mock.calls.filter(([value]) => value.op === 'recovery-save').at(-1)[0].record);
+    expect(record.draft.version).toBe(3);
+    expect(record.draft.sourceFiles.find(([file]) => file === path)[1]).toEqual(reference);
+    expect(JSON.stringify(record).length).toBeLessThan(20000);
+    expect(request.mock.calls.some(([value]) => value.op === 'asset-read')).toBe(false);
   });
   it('imports and edits with chronological cross-document undo and checked export', async () => {
     await importBytes();

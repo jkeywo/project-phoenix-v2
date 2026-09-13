@@ -193,4 +193,30 @@ describe('offline Workshop source documents', () => {
     inconsistent.history.undo[0].after = 'different source';
     expect(() => WorkshopDocument.restore(inconsistent)).toThrow('Inconsistent recovery history');
   });
+
+  it('keeps native asset versions compact through replacement, save, undo and recovery without granting browser references', () => {
+    const original = { asset: '0000000000000001-400000000', length: 400000000 };
+    const next = { asset: '0000000000000002-123', length: 123 };
+    const draft = WorkshopDocument.fromNativeFiles({
+      'assets/worlds/test.toml': new TextEncoder().encode('# Exact\r\n[global]\n'),
+      'assets/models/test.glb': original,
+    }, { kind: 'project' });
+    original.length = 5;
+    expect(draft.byteLength('assets/models/test.glb')).toBe(400000000);
+    expect(() => draft.bytes('assets/models/test.glb')).toThrow('private provider');
+    draft.put('assets/models/test.glb', next); draft.markExported();
+    draft.edit('assets/worlds/test.toml', '# Edited\n[global]\n');
+    draft.undo(); draft.undo();
+    expect(draft.isDirty()).toBe(true);
+    const snapshot = draft.snapshot();
+    expect(JSON.stringify(snapshot).length).toBeLessThan(2000);
+    expect(() => WorkshopDocument.restore(snapshot)).toThrow('Unsupported');
+    const recovered = WorkshopDocument.restore(snapshot, { native: true });
+    expect(recovered.read('assets/worlds/test.toml')).toBe('# Exact\r\n[global]\n');
+    recovered.redo(); expect(recovered.isDirty()).toBe(false);
+    expect(recovered.toFiles()['assets/models/test.glb']).toEqual(next);
+    expect(() => new WorkshopDocument(workshopPack()).put('assets/models/test.glb', next)).toThrow('Invalid Workshop document');
+    snapshot.history.redo[0].after = { ...next, asset: '../outside' };
+    expect(() => WorkshopDocument.restore(snapshot, { native: true })).toThrow('recovery document');
+  });
 });

@@ -25,9 +25,9 @@ describe('explicit Workshop capability providers', () => {
   it('saves native exact source through the private provider and advances only acknowledged revisions', async () => {
     const source = new WorkshopDocument(workshopPack());
     const request = vi.fn(async value => {
-      if (value.op === 'load') return { status: 'loaded', kind: 'mod', revision: 'original', files: source.toFiles() };
-      if (value.op === 'save') return { status: 'saved', revision: 'saved' };
-      if (value.op === 'validate') return { status: 'validated', report: { accepted: true, findings: [] } };
+      if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'original', files: source.toFiles() };
+      if (value.op === 'save-sources') return { status: 'saved', revision: 'saved' };
+      if (value.op === 'validate-sources') return { status: 'validated', report: { accepted: true, findings: [] } };
       return { status: 'done' };
     });
     const provider = createNativeWorkshopProvider({ request });
@@ -35,11 +35,11 @@ describe('explicit Workshop capability providers', () => {
     draft.edit(WORKSHOP_WORLD, '# native edit\n[global]\n');
     await provider.runtime.validate(null, draft);
     await provider.save(draft);
-    expect(request).toHaveBeenCalledWith({ op: 'save', files: draft.toFiles(), expected_revision: 'original' });
+    expect(request).toHaveBeenCalledWith({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: 'original' });
     await provider.recovery.save({ version: 1, draft: draft.snapshot() });
     const stored = request.mock.calls.at(-1)[0];
     expect(stored.expected_revision).toBe('saved');
-    expect(JSON.parse(stored.record).draft.source).toEqual(Array.from(draft.sourceBytes()));
+    expect(JSON.parse(stored.record).draft.sourceFiles).toEqual(draft.snapshot().sourceFiles);
     expect(provider.canImport).toBe(false);
   });
 
@@ -47,7 +47,7 @@ describe('explicit Workshop capability providers', () => {
     const draft = new WorkshopDocument(workshopPack());
     const saved = { version: 1, selected: WORKSHOP_WORLD, draft: draft.snapshot() };
     const request = vi.fn(async value => {
-      if (value.op === 'load') return { status: 'loaded', kind: 'mod', revision: 'disk-newer', files: draft.toFiles() };
+      if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'disk-newer', files: draft.toFiles() };
       if (value.op === 'recovery-load') return { status: 'recovery', recovery: { revision: 'draft-older', record: JSON.stringify(saved, (_k, value) => value instanceof Uint8Array ? Array.from(value) : value) } };
       return { status: 'refused', message: 'External edit', report: null };
     });
@@ -70,5 +70,43 @@ describe('explicit Workshop capability providers', () => {
     await expect(first).resolves.toMatchObject({ status: 'loaded' });
     bridge.dispose();
     await expect(second).rejects.toThrow('surface closed');
+  });
+
+  it('transfers native assets in bounded chunks and leaves recovery/history compact', async () => {
+    const bytes = Uint8Array.from({ length: 150000 }, (_, index) => index % 251);
+    const reference = { asset: `0000000000000001-${bytes.length}`, length: bytes.length };
+    const source = new WorkshopDocument(workshopPack());
+    const received = [];
+    const request = vi.fn(async value => {
+      if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'original', files: source.toFiles() };
+      if (value.op === 'asset-begin') return { status: 'asset-upload', token: 'one' };
+      if (value.op === 'asset-chunk') { expect(value.offset).toBe(received.length); received.push(...value.bytes); return { status: 'done' }; }
+      if (value.op === 'asset-finish') return { status: 'asset-stored', reference };
+      if (value.op === 'asset-read') return { status: 'asset-chunk', bytes: Array.from(bytes.slice(value.offset, value.offset + 65536)) };
+      return { status: 'done' };
+    });
+    const provider = createNativeWorkshopProvider({ request });
+    const draft = await provider.load();
+    const imported = await provider.importAsset(new Blob([bytes]));
+    draft.put('assets/sounds/test.mp3', imported);
+    expect(received).toEqual(Array.from(bytes));
+    expect(request.mock.calls.filter(([value]) => value.op === 'asset-chunk').map(([value]) => value.bytes.length)).toEqual([65536, 65536, 18928]);
+    expect(await provider.readAsset(imported)).toEqual(bytes);
+    expect(JSON.stringify(draft.snapshot()).length).toBeLessThan(20000);
+    const recovered = provider.restoreDocument(draft.snapshot());
+    expect(recovered.toFiles()['assets/sounds/test.mp3']).toEqual(reference);
+    recovered.undo(); expect(recovered.paths()).not.toContain('assets/sounds/test.mp3');
+    recovered.redo(); expect(recovered.toFiles()['assets/sounds/test.mp3']).toEqual(reference);
+  });
+
+  it('cancels refused imports and rejects empty or oversized reads instead of hanging', async () => {
+    const request = vi.fn(async value => value.op === 'asset-begin' ? { status: 'asset-upload', token: 'one' }
+      : value.op === 'asset-cancel' ? { status: 'done' }
+        : { status: 'refused', message: 'Storage unavailable' });
+    const provider = createNativeWorkshopProvider({ request });
+    await expect(provider.importAsset(new Blob(['abc']))).rejects.toThrow('Storage unavailable');
+    expect(request.mock.calls.at(-1)[0]).toEqual({ op: 'asset-cancel', token: 'one' });
+    const broken = createNativeWorkshopProvider({ request: async () => ({ status: 'asset-chunk', bytes: [] }) });
+    await expect(broken.readAsset({ asset: '0000000000000001-3', length: 3 })).rejects.toThrow('Invalid native asset chunk');
   });
 });

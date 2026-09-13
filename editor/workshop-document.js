@@ -9,9 +9,17 @@ import { UndoStack } from './undo-stack.js';
 
 const encode = text => new TextEncoder().encode(text);
 export const isWorkshopBinary = path => /\.(glb|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(path);
-const copy = value => typeof value === 'string' || value == null ? value : Uint8Array.from(value);
+export const isNativeAssetReference = value => value && typeof value === 'object'
+  && Object.keys(value).length === 2 && typeof value.asset === 'string'
+  && /^[0-9a-f]{16}-[0-9]+$/.test(value.asset) && Number.isSafeInteger(value.length)
+  && value.length >= 0 && value.length <= 512 * 1024 * 1024
+  && value.asset.split('-')[1] === String(value.length);
+const copy = value => typeof value === 'string' || value == null ? value
+  : isNativeAssetReference(value) ? Object.freeze({ ...value }) : Uint8Array.from(value);
 const equal = (a, b) => typeof a === 'string' || typeof b === 'string' || a == null || b == null
-  ? a === b : a.length === b.length && a.every((byte, index) => byte === b[index]);
+  ? a === b : isNativeAssetReference(a) || isNativeAssetReference(b)
+    ? isNativeAssetReference(a) && isNativeAssetReference(b) && a.asset === b.asset && a.length === b.length
+    : a.length === b.length && a.every((byte, index) => byte === b[index]);
 const mapsEqual = (a, b) => a.size === b.size && [...a].every(([path, value]) => equal(value, b.get(path)));
 const byteArray = value => Array.isArray(value) && value.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
 const safePath = path => typeof path === 'string' && !/[\\:\0]/.test(path)
@@ -62,16 +70,50 @@ export class WorkshopDocument {
   paths() { return [...this._files.keys()]; }
   read(path) { const value = this._files.get(path); return typeof value === 'string' ? value : undefined; }
   isBinary(path) { return this._files.has(path) && typeof this._files.get(path) !== 'string'; }
-  bytes(path) { const value = this._files.get(path); return value == null ? undefined : Uint8Array.from(typeof value === 'string' ? encode(value) : value); }
-  toFiles() { return Object.fromEntries(this.paths().map(path => [path, Array.from(this.bytes(path))])); }
+  bytes(path) {
+    const value = this._files.get(path);
+    if (isNativeAssetReference(value)) throw new Error('Native asset bytes require the private provider');
+    return value == null ? undefined : Uint8Array.from(typeof value === 'string' ? encode(value) : value);
+  }
+  byteLength(path) { const value = this._files.get(path); return typeof value === 'string' ? encode(value).length : value?.length; }
+  toFiles() { return Object.fromEntries(this.paths().map(path => {
+    const value = this._files.get(path);
+    return [path, isNativeAssetReference(value) ? { ...value } : Array.from(this.bytes(path))];
+  })); }
+  toNativeSources() {
+    if (!this._native) return this.toFiles();
+    return Object.fromEntries([...this._files].map(([path, value]) => [path,
+      value instanceof Uint8Array ? Array.from(value) : isNativeAssetReference(value) ? { ...value } : value]));
+  }
+  /** Native capability only: immutable references never enter a browser pack.
+   * They name byte versions in the provider's private store, never paths. */
+  static fromNativeFiles(files, { kind } = {}) {
+    if (!['project', 'mod'].includes(kind) || !files || Object.keys(files).length > 16384) throw new Error('Invalid native Workshop bundle');
+    const entries = Object.entries(files).map(([path, value]) => {
+      if (!safePath(path)) throw new Error('Invalid native Workshop source path');
+      if (isWorkshopBinary(path) && isNativeAssetReference(value)) return { path, value: copy(value) };
+      if (!isWorkshopBinary(path) && typeof value === 'string') return { path, value };
+      if (!(value instanceof Uint8Array || byteArray(value))) throw new Error('Invalid native Workshop source');
+      const bytes = Uint8Array.from(value);
+      return { path, value: isWorkshopBinary(path) ? bytes : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) };
+    });
+    if (kind === 'mod' && !entries.some(entry => entry.path === MANIFEST_PATH)) throw new Error('Missing native Workshop manifest');
+    const draft = Object.create(WorkshopDocument.prototype);
+    draft.kind = kind; draft._native = true;
+    draft._source = { entries: entries.map(({ path, value }) => ({ path, text: typeof value === 'string' ? value : undefined, bytes: copy(value) })) };
+    draft._files = new Map(entries.map(({ path, value }) => [path, value]));
+    draft._exported = new Map(draft._files); draft._history = new UndoStack();
+    return draft;
+  }
   static fromFiles(files, options) {
     if (!files || Object.entries(files).some(([path, value]) => !safePath(path) || !(value instanceof Uint8Array || byteArray(value)))) throw new Error('Invalid Workshop source bundle');
     return new WorkshopDocument(createStoreZip(Object.entries(files).map(([path, bytes]) => ({ path, bytes: Uint8Array.from(bytes) }))), options);
   }
   /** Add or replace one authored source/asset in the same chronological history. */
   put(path, value) {
-    if (!safePath(path) || !(typeof value === 'string' || value instanceof Uint8Array)) throw new Error('Invalid Workshop document');
-    if (isWorkshopBinary(path) !== (value instanceof Uint8Array)) throw new Error('Workshop document type does not match path');
+    const binary = value instanceof Uint8Array || (this._native && isNativeAssetReference(value));
+    if (!safePath(path) || !(typeof value === 'string' || binary)) throw new Error('Invalid Workshop document');
+    if (isWorkshopBinary(path) !== Boolean(binary)) throw new Error('Workshop document type does not match path');
     const before = this._files.get(path) ?? null;
     const after = copy(value);
     if (equal(before, after)) return false;
@@ -79,7 +121,10 @@ export class WorkshopDocument {
     this._files.set(path, after);
     return true;
   }
-  sourceBytes() { return Uint8Array.from(this._source.bytes); }
+  sourceBytes() {
+    if (this._native) throw new Error('Native source has no imported archive');
+    return Uint8Array.from(this._source.bytes);
+  }
   canUndo() { return this._history.canUndo(); }
   canRedo() { return this._history.canRedo(); }
   isDirty() {
@@ -115,7 +160,7 @@ export class WorkshopDocument {
    * invalid. No normalizing serializer and no second semantic validation. */
   archive() {
     const original = new Map(this._source.entries.map(entry => [entry.path, entry.text ?? entry.bytes]));
-    if (mapsEqual(this._files, original)) return this.sourceBytes();
+    if (!this._native && mapsEqual(this._files, original)) return this.sourceBytes();
     return createStoreZip(this.paths().map(path => ({ path, bytes: this.bytes(path) })));
   }
 
@@ -144,22 +189,31 @@ export class WorkshopDocument {
   /** Data only: no filesystem handles, credentials, runtime state or profile. */
   snapshot() {
     const history = this._history.snapshot();
-    const serialize = value => value instanceof Uint8Array ? Array.from(value) : value;
+    const serialize = value => value instanceof Uint8Array ? Array.from(value) : isNativeAssetReference(value) ? { ...value } : value;
     const entry = value => ({ ...value, before: serialize(value.before), after: serialize(value.after) });
-    return { version: 2, kind: this.kind, source: this.sourceBytes(),
+    return { version: this._native ? 3 : 2, kind: this.kind,
+      ...(this._native ? { sourceFiles: this._source.entries.map(entry => [entry.path, serialize(entry.text ?? entry.bytes)]) } : { source: this.sourceBytes() }),
       files: [...this._files].map(([path, value]) => [path, serialize(value)]),
       exported: [...this._exported].map(([path, value]) => [path, serialize(value)]), history: {
         undo: history.undo.map(entry), redo: history.redo.map(entry),
       } };
   }
 
-  static restore(snapshot) {
-    if (![1, 2].includes(snapshot?.version) || !(snapshot.source instanceof Uint8Array)) throw new Error('Unsupported Workshop recovery record.');
-    const draft = new WorkshopDocument(snapshot.source, { kind: snapshot.kind || 'mod' });
+  static restore(snapshot, { native = false } = {}) {
+    const nativeSource = native && snapshot?.version === 3;
+    if (!nativeSource && (![1, 2].includes(snapshot?.version) || !(snapshot.source instanceof Uint8Array))) throw new Error('Unsupported Workshop recovery record.');
+    let draft;
+    if (nativeSource) {
+      if (!Array.isArray(snapshot.sourceFiles) || new Set(snapshot.sourceFiles.map(entry => entry?.[0])).size !== snapshot.sourceFiles.length
+        || snapshot.sourceFiles.some(entry => !Array.isArray(entry) || entry.length !== 2)) throw new Error('Invalid native recovery source');
+      draft = WorkshopDocument.fromNativeFiles(Object.fromEntries(snapshot.sourceFiles.map(([path, value]) => [path,
+        typeof value === 'string' ? encode(value) : value])), { kind: snapshot.kind });
+    } else draft = new WorkshopDocument(snapshot.source, { kind: snapshot.kind || 'mod' });
     const decode = (path, value, nullable = false) => {
       if (nullable && value === null) return null;
       if (typeof value === 'string' && !isWorkshopBinary(path)) return value;
       if (isWorkshopBinary(path) && byteArray(value)) return Uint8Array.from(value);
+      if (nativeSource && isWorkshopBinary(path) && isNativeAssetReference(value)) return copy(value);
       throw new Error('Invalid recovery document.');
     };
     const readFiles = entries => {

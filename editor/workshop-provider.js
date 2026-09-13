@@ -1,7 +1,7 @@
 /** Explicit Authoring capabilities. Native requests exist only on the private
  * embedded bridge; ordinary browser entry points have no filesystem methods. */
 import { parse, stringify } from 'smol-toml';
-import { WorkshopDocument } from './workshop-document.js';
+import { WorkshopDocument, isNativeAssetReference } from './workshop-document.js';
 import { createWorkshopRuntime } from './workshop-runtime.js';
 import { createStoreZip } from './mod-pack-export.js';
 
@@ -47,18 +47,18 @@ export function createNativeWorkshopProvider({ request }) {
   return {
     canImport: false, canCreate: false,
     async load() {
-      const value = await call({ op: 'load' });
-      if (value?.status !== 'loaded' || !['project', 'mod'].includes(value.kind) || typeof value.revision !== 'string') throw new Error('Invalid native Workshop load');
+      const value = await call({ op: 'load-sources' });
+      if (value?.status !== 'sources' || !['project', 'mod'].includes(value.kind) || typeof value.revision !== 'string') throw new Error('Invalid native Workshop load');
       revision = value.revision; kind = value.kind;
-      return WorkshopDocument.fromFiles(value.files, { kind });
+      return WorkshopDocument.fromNativeFiles(value.files, { kind });
     },
     runtime: {
-      async validate(_archive, draft) { return (await call({ op: 'validate', files: draft.toFiles() })).report; },
+      async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
       async inspect(source, document_path) { return (await call({ op: 'inspect', source, document_path })).fields; },
       async patch(source, patch) { return (await call({ op: 'patch', source, patch })).source; },
     },
     async save(draft) {
-      const result = await call({ op: 'save', files: draft.toFiles(), expected_revision: revision });
+      const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });
       if (result?.status !== 'saved' || typeof result.revision !== 'string') throw new Error('Invalid native Workshop save');
       revision = result.revision;
     },
@@ -66,13 +66,49 @@ export function createNativeWorkshopProvider({ request }) {
       if (typeof record.nativeRevision !== 'string' || record.draft.kind !== kind) throw new Error('Invalid native Workshop recovery');
       revision = record.nativeRevision;
     },
+    restoreDocument(snapshot) { return WorkshopDocument.restore(snapshot, { native: true }); },
+    async importAsset(file) {
+      const begin = await call({ op: 'asset-begin', length: file.size });
+      if (begin?.status !== 'asset-upload' || typeof begin.token !== 'string') throw new Error('Invalid native asset upload');
+      let finished = false;
+      try {
+        for (let offset = 0; offset < file.size; offset += 65536) {
+          const bytes = new Uint8Array(await file.slice(offset, offset + 65536).arrayBuffer());
+          await call({ op: 'asset-chunk', token: begin.token, offset, bytes: Array.from(bytes) });
+        }
+        const result = await call({ op: 'asset-finish', token: begin.token });
+        if (result?.status !== 'asset-stored' || !isNativeAssetReference(result.reference) || result.reference.length !== file.size) throw new Error('Invalid native asset version');
+        finished = true;
+        return result.reference;
+      } finally {
+        if (!finished) await call({ op: 'asset-cancel', token: begin.token }).catch(() => {});
+      }
+    },
+    async readAsset(reference) {
+      if (!isNativeAssetReference(reference)) throw new Error('Invalid native asset reference');
+      const bytes = new Uint8Array(reference.length);
+      if (!bytes.length) {
+        const result = await call({ op: 'asset-read', reference, offset: 0 });
+        if (result?.status !== 'asset-chunk' || !Array.isArray(result.bytes) || result.bytes.length) throw new Error('Invalid native asset chunk');
+      }
+      for (let offset = 0; offset < bytes.length;) {
+        const result = await call({ op: 'asset-read', reference, offset });
+        if (result?.status !== 'asset-chunk' || !Array.isArray(result.bytes) || !result.bytes.length
+          || result.bytes.length > Math.min(65536, bytes.length - offset)
+          || result.bytes.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw new Error('Invalid native asset chunk');
+        bytes.set(result.bytes, offset); offset += result.bytes.length;
+      }
+      return bytes;
+    },
     recovery: {
       async load() {
         const value = (await call({ op: 'recovery-load' })).recovery;
         if (!value) return null;
         const record = JSON.parse(value.record);
-        if (!Array.isArray(record?.draft?.source) || !record.draft.source.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) throw new Error('Invalid native recovery archive');
-        record.draft.source = Uint8Array.from(record.draft.source);
+        if (record?.draft?.version !== 3) {
+          if (!Array.isArray(record?.draft?.source) || !record.draft.source.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) throw new Error('Invalid native recovery archive');
+          record.draft.source = Uint8Array.from(record.draft.source);
+        }
         return { ...record, nativeRevision: value.revision };
       },
       async save(record) {

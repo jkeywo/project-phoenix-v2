@@ -306,6 +306,178 @@ fn project_binary_members_are_exact() {
 }
 
 #[test]
+fn compact_native_versions_survive_save_undo_and_reopen_without_sending_asset_bytes() {
+    let fixture = Fixture::new();
+    let asset = "assets/sounds/test.mp3";
+    fs::create_dir_all(fixture.root.join("assets/sounds")).unwrap();
+    let original = vec![0xff; 150_000];
+    fs::write(fixture.root.join(asset), &original).unwrap();
+    let mut provider = fixture.open();
+    let json = provider.handle_json(r#"{"id":1,"op":"load-sources"}"#);
+    assert!(json.contains("\"status\":\"sources\""), "{json}");
+    assert!(
+        json.len() < 10_000,
+        "large assets must not become JSON integer arrays"
+    );
+    assert!(crate::core::codec::decode_workshop_request(
+        r#"{"id":1,"op":"load-sources","root":"elsewhere"}"#
+    )
+    .is_err());
+    let Response::Sources { files: before, .. } = provider.apply(Operation::LoadSources).unwrap()
+    else {
+        panic!("sources");
+    };
+    let assets::Source::Asset(old) = &before[asset] else {
+        panic!("reference");
+    };
+    let Response::AssetUpload { token } = provider
+        .apply(Operation::AssetBegin { length: 150_003 })
+        .unwrap()
+    else {
+        panic!("upload");
+    };
+    let replacement: Vec<u8> = (0..150_003).map(|index| (index % 251) as u8).collect();
+    for (index, chunk) in replacement.chunks(assets::CHUNK_BYTES).enumerate() {
+        provider
+            .apply(Operation::AssetChunk {
+                token: token.clone(),
+                offset: index * assets::CHUNK_BYTES,
+                bytes: chunk.to_vec(),
+            })
+            .unwrap();
+    }
+    let Response::AssetStored { reference } =
+        provider.apply(Operation::AssetFinish { token }).unwrap()
+    else {
+        panic!("stored");
+    };
+    let mut after = before.clone();
+    after.insert(asset.into(), assets::Source::Asset(reference.clone()));
+    assert!(matches!(
+        provider
+            .apply(Operation::SaveSources {
+                files: after,
+                expected_revision: provider.revision.clone()
+            })
+            .unwrap(),
+        Response::Saved { .. }
+    ));
+    assert_eq!(fs::read(fixture.root.join(asset)).unwrap(), replacement);
+    drop(provider);
+    let mut reopened = fixture.open();
+    let mut read = Vec::new();
+    while read.len() < reference.length {
+        let Response::AssetChunk { bytes } = reopened
+            .apply(Operation::AssetRead {
+                reference: reference.clone(),
+                offset: read.len(),
+            })
+            .unwrap()
+        else {
+            panic!("chunk");
+        };
+        assert!(bytes.len() <= assets::CHUNK_BYTES);
+        read.extend(bytes);
+    }
+    assert_eq!(read, replacement);
+    // An undo entry references the ORIGINAL version after a successful save,
+    // and still resolves that version after a native process restart.
+    assert_ne!(old, &reference);
+    assert!(matches!(
+        reopened
+            .apply(Operation::SaveSources {
+                files: before,
+                expected_revision: reopened.revision.clone()
+            })
+            .unwrap(),
+        Response::Saved { .. }
+    ));
+    assert_eq!(fs::read(fixture.root.join(asset)).unwrap(), original);
+}
+
+#[test]
+fn native_asset_chunks_and_versions_refuse_corruption_without_changing_the_draft_source() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    let before = provider.baseline.clone();
+    let Response::AssetUpload { token } =
+        provider.apply(Operation::AssetBegin { length: 3 }).unwrap()
+    else {
+        panic!("upload");
+    };
+    for (candidate, offset, bytes) in [
+        ("wrong".into(), 0, vec![1]),
+        (token.clone(), 1, vec![1]),
+        (token.clone(), 0, vec![1; assets::CHUNK_BYTES + 1]),
+    ] {
+        assert!(provider
+            .apply(Operation::AssetChunk {
+                token: candidate,
+                offset,
+                bytes
+            })
+            .is_err());
+    }
+    assert!(provider
+        .apply(Operation::AssetFinish {
+            token: token.clone()
+        })
+        .is_err());
+    provider
+        .apply(Operation::AssetChunk {
+            token: token.clone(),
+            offset: 0,
+            bytes: vec![0, 255, 10],
+        })
+        .unwrap();
+    let Response::AssetStored { reference } =
+        provider.apply(Operation::AssetFinish { token }).unwrap()
+    else {
+        panic!("stored");
+    };
+    assert!(provider
+        .apply(Operation::AssetRead {
+            reference: assets::AssetReference {
+                asset: "../draft.json".into(),
+                length: 3
+            },
+            offset: 0
+        })
+        .is_err());
+    let mut files = provider.assets.compact(&before).unwrap();
+    files.insert(
+        "assets/worlds/test.toml".into(),
+        assets::Source::Asset(reference.clone()),
+    );
+    assert!(provider
+        .apply(Operation::SaveSources {
+            files,
+            expected_revision: provider.revision.clone()
+        })
+        .is_err());
+    fs::write(
+        provider
+            .private
+            .join("assets")
+            .join(format!("{}.blob", reference.asset)),
+        [1, 2, 3],
+    )
+    .unwrap();
+    let mut files = provider.assets.compact(&before).unwrap();
+    files.insert(
+        "assets/sounds/test.mp3".into(),
+        assets::Source::Asset(reference),
+    );
+    assert!(provider
+        .apply(Operation::SaveSources {
+            files,
+            expected_revision: provider.revision.clone()
+        })
+        .is_err());
+    assert_eq!(provider.read_files().unwrap(), before);
+}
+
+#[test]
 fn mod_workspace_saves_exact_sources_and_retains_binary_members_while_runtime_refuses_them() {
     let fixture = Fixture::new();
     let files = crate::world::mod_pack::read_store_zip(include_bytes!(

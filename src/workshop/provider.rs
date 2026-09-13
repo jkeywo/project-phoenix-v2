@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{document, WorkshopDependencies, WorkshopValidation};
+pub mod assets;
 
 pub type Files = BTreeMap<String, Vec<u8>>;
 const MAX_BYTES: usize = 512 * 1024 * 1024;
@@ -30,6 +31,32 @@ pub struct WorkshopRequest {
 #[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Operation {
     Load,
+    LoadSources,
+    ValidateSources {
+        files: assets::Sources,
+    },
+    SaveSources {
+        files: assets::Sources,
+        expected_revision: String,
+    },
+    AssetRead {
+        reference: assets::AssetReference,
+        offset: usize,
+    },
+    AssetBegin {
+        length: usize,
+    },
+    AssetChunk {
+        token: String,
+        offset: usize,
+        bytes: Vec<u8>,
+    },
+    AssetFinish {
+        token: String,
+    },
+    AssetCancel {
+        token: String,
+    },
     Validate {
         files: Files,
     },
@@ -63,6 +90,20 @@ pub struct WorkshopResponse {
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
 pub enum Response {
+    Sources {
+        kind: WorkspaceKind,
+        revision: String,
+        files: assets::Sources,
+    },
+    AssetChunk {
+        bytes: Vec<u8>,
+    },
+    AssetUpload {
+        token: String,
+    },
+    AssetStored {
+        reference: assets::AssetReference,
+    },
     Loaded {
         kind: WorkspaceKind,
         revision: String,
@@ -114,6 +155,7 @@ pub struct NativeWorkshopProvider {
     dependencies: WorkshopDependencies,
     baseline: Files,
     revision: String,
+    assets: assets::AssetStore,
     _claim: File,
 }
 
@@ -145,6 +187,7 @@ impl NativeWorkshopProvider {
             .try_lock()
             .map_err(|_| "This Workshop root is already open".to_string())?;
         let mut provider = Self {
+            assets: assets::AssetStore::new(private.join("assets")),
             root,
             private,
             kind,
@@ -190,6 +233,46 @@ impl NativeWorkshopProvider {
 
     fn apply(&mut self, operation: Operation) -> Result<Response, String> {
         Ok(match operation {
+            Operation::LoadSources => Response::Sources {
+                kind: self.kind,
+                revision: self.revision.clone(),
+                files: self.assets.compact(&self.baseline)?,
+            },
+            Operation::ValidateSources { files } => {
+                let files = self.assets.materialize(files)?;
+                return self.apply(Operation::Validate { files });
+            }
+            Operation::SaveSources {
+                files,
+                expected_revision,
+            } => {
+                let files = self.assets.materialize(files)?;
+                return self.apply(Operation::Save {
+                    files,
+                    expected_revision,
+                });
+            }
+            Operation::AssetRead { reference, offset } => Response::AssetChunk {
+                bytes: self.assets.read_chunk(reference, offset)?,
+            },
+            Operation::AssetBegin { length } => Response::AssetUpload {
+                token: self.assets.begin(length)?,
+            },
+            Operation::AssetChunk {
+                token,
+                offset,
+                bytes,
+            } => {
+                self.assets.append(&token, offset, &bytes)?;
+                Response::Done
+            }
+            Operation::AssetFinish { token } => Response::AssetStored {
+                reference: self.assets.finish(&token)?,
+            },
+            Operation::AssetCancel { token } => {
+                self.assets.cancel(&token)?;
+                Response::Done
+            }
             Operation::Load => Response::Loaded {
                 kind: self.kind,
                 revision: self.revision.clone(),

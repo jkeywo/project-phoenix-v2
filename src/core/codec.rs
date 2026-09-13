@@ -2625,7 +2625,10 @@ pub fn decode_workshop_request(
         .map_err(|error| error.to_string())?;
     if matches!(
         operation,
-        Operation::Load | Operation::RecoveryLoad | Operation::RecoveryClear
+        Operation::Load
+            | Operation::LoadSources
+            | Operation::RecoveryLoad
+            | Operation::RecoveryClear
     ) && field_count != 1
     {
         return Err("Unexpected Workshop operation field".into());

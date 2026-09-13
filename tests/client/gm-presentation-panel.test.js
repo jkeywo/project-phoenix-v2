@@ -2,13 +2,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGmPresentationPanel } from '../../gui/gm-presentation-panel.js';
 import { createPresentationCard } from '../../gui/presentation-card.js';
+import { DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from '../../gui/action-feedback.js';
 
 beforeEach(() => { document.body.innerHTML = '<section id="gm-mission-panel"></section>'; });
 const t = id => id.split('.').at(-1);
 function setup() {
   const submit = vi.fn(() => true), scheduled = [];
   const panel = createGmPresentationPanel({ t, getOperator: () => ({ id: 'Ada' }), submit,
-    correlation: () => 'cue-1', schedule: fn => { scheduled.push(fn); return 1; }, cancelSchedule: vi.fn() });
+    correlation: () => 'cue-1', schedule: (callback, delay) => { scheduled.push({ callback, delay }); return 1; }, cancelSchedule: vi.fn() });
   panel.update({ entities: [{ kind: 'player_ship', entity_id: 'ship-a', name: 'Horizon' }], presentation_cameras: { 'ship-a': ['camera_fore'] } });
   document.getElementById('gm-presentation-duration').value = '120';
   const click = label => [...document.querySelectorAll('button')].find(b => b.textContent === label).click();
@@ -50,9 +51,15 @@ describe('shared presentation GM controls', () => {
     const { panel, submit, click, scheduled } = setup();
     document.getElementById('gm-presentation-duration').value = '-1'; click('force');
     expect(submit).not.toHaveBeenCalled();
-    document.getElementById('gm-presentation-duration').value = '120'; click('force'); scheduled[0]();
+    document.getElementById('gm-presentation-duration').value = '120'; click('force'); scheduled[0].callback();
     expect(panel.state().pending).toBeNull(); expect(submit).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[role=status]').textContent).toBe('timed_out');
+  });
+  it('keeps a presentation request pending through a loaded viewscreen frame', () => {
+    const { click, scheduled } = setup();
+    click('force');
+    expect(scheduled[0].delay).toBe(DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
+    expect(DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS).toBe(30_000);
   });
   it('retains focused dropdown options across unchanged live snapshots', () => {
     const { panel } = setup(); const option = document.querySelector('#gm-presentation-ship option');

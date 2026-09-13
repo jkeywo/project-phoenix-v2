@@ -1037,6 +1037,7 @@ pub(crate) fn drain_surface_records(
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
     mut assignments: Option<ResMut<super::console_assignment::ConsoleAssignments>>,
     mut pending_save: Option<ResMut<super::layout_store_systems::PendingLayoutSave>>,
+    mut audio: Option<ResMut<super::audio::NativeRoomAudio>>,
 ) {
     let Some(bridge) = bridge else {
         return;
@@ -1252,6 +1253,20 @@ pub(crate) fn drain_surface_records(
                         "host lobby: this machine names no settings directory, so this \
                          display's presentation settings apply for this session only"
                     ),
+                }
+                continue;
+            }
+            HostLobbyRecord::ObserveAudio => {
+                bridge.0.republish_audio();
+                continue;
+            }
+            record @ (HostLobbyRecord::SetAudioBus { .. }
+            | HostLobbyRecord::ResetAudioMix
+            | HostLobbyRecord::SelectAudioOutput { .. }
+            | HostLobbyRecord::RetryAudioOutput
+            | HostLobbyRecord::TestAudioOutput) => {
+                if let Some(audio) = audio.as_mut() {
+                    audio.command(&record);
                 }
                 continue;
             }

@@ -1,0 +1,8 @@
+[
+  {"mix": {}, "category": "music", "authored": 0.5, "expected": 0.5},
+  {"mix": {"master": {"level": 0.4}, "ambience": {"level": 0.25}}, "category": "ambience", "authored": 0.2, "expected": 0.02},
+  {"mix": {"master": {"muted": true}}, "category": "alerts", "authored": 1, "expected": 0},
+  {"mix": {"alerts": {"muted": true}}, "category": "alerts", "authored": 0.7, "expected": 0},
+  {"mix": {"music": {"muted": true}}, "category": "alerts", "authored": 0.7, "expected": 0.7},
+  {"mix": {"master": {"level": 0}}, "category": "music", "authored": 0.5, "expected": 0}
+]

@@ -114,11 +114,17 @@ impl ScenarioPanelPayload {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HostLobbyRecord {
     #[serde(rename = "set-game-master")]
-    SetGameMaster { monitor: Option<String> },
+    SetGameMaster {
+        monitor: Option<String>,
+    },
     /// The operator picked a scenario.
-    SelectScenario { scenario_id: String },
+    SelectScenario {
+        scenario_id: String,
+    },
     /// The operator picked a hull (or the single-hull auto-resolve did).
-    SelectShip { template_path: String },
+    SelectShip {
+        template_path: String,
+    },
     /// The operator pressed the lobby's AI-launch control.
     ///
     /// Answered by `server::bridge::apply_force_start`, which is the browser
@@ -134,7 +140,9 @@ pub enum HostLobbyRecord {
     /// on a bridge whose page comes out of a bundle that may be older than the
     /// host. The explicit rename is the whole cost of keeping it.
     #[serde(rename = "set-viewscreen")]
-    SetViewscreen { monitor: String },
+    SetViewscreen {
+        monitor: String,
+    },
     /// The operator pressed a screen button in a station's row: open — or
     /// re-seat — that station's console on this display (issue #1331).
     ///
@@ -147,11 +155,16 @@ pub enum HostLobbyRecord {
     /// move, so the row presses one button either way and cannot pick the wrong
     /// verb.
     #[serde(rename = "assign-station")]
-    AssignStation { station: String, monitor: String },
+    AssignStation {
+        station: String,
+        monitor: String,
+    },
     /// The operator pressed a station row's "off" button: close that station's
     /// console (issue #1331). Kebab-tagged, for the reason above.
     #[serde(rename = "unassign-station")]
-    UnassignStation { station: String },
+    UnassignStation {
+        station: String,
+    },
     /// The operator opened a route on the landing screen (issue #1361).
     ///
     /// `entry` is a row's `id` from `gui/host-landing-view.js`'s
@@ -174,7 +187,9 @@ pub enum HostLobbyRecord {
     /// spellings are the layout row's alone, and are historical (see
     /// [`SetViewscreen`](Self::SetViewscreen)) rather than a convention to
     /// extend.
-    LandingOpen { entry: String },
+    LandingOpen {
+        entry: String,
+    },
     /// The operator closed the open route — a second press on the entry that
     /// opened it (issue #1361).
     ///
@@ -238,7 +253,9 @@ pub enum HostLobbyRecord {
     /// doctrine forbids. `needs: 'packs'` stays on the row beside it and says
     /// the other half: a native host started without `--mod-pack-dir` has
     /// nothing to offer either, so the row is inert on that run too.
-    InstallModPack { pack: String },
+    InstallModPack {
+        pack: String,
+    },
     /// The operator pressed the landing's fullscreen control (issue #1367).
     ///
     /// The THIRD landing verb the host has to answer, and the only one that is
@@ -265,6 +282,20 @@ pub enum HostLobbyRecord {
     /// spellings are the layout row's alone and are historical (see
     /// [`SetViewscreen`](Self::SetViewscreen)).
     ToggleFullscreen,
+    /// Endpoint-local audio controls. No command admission or simulation state.
+    SetAudioBus {
+        bus: String,
+        level_percent: u32,
+        muted: bool,
+    },
+    ResetAudioMix,
+    SelectAudioOutput {
+        output: Option<String>,
+    },
+    RetryAudioOutput,
+    TestAudioOutput,
+    /// A reloaded settings document asks for current state, never playback.
+    ObserveAudio,
     /// The operator changed this display's text size or contrast in the settings
     /// menu's Display tab (issue #1427).
     ///

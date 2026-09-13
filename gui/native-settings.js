@@ -56,6 +56,8 @@ import {
   makeRowBuilder,
 } from './settings-overlay-kit.js';
 import { renderViewscreenPresentationPanel } from './viewscreen-presentation-panel.js';
+import { renderAudioSettingsPanel } from './audio-settings-panel.js';
+import { renderNativeAudioOutput } from './native-audio.js';
 
 /** The cog's element id. Exported so a test and the CSS agree on one name. */
 export const NATIVE_SETTINGS_BUTTON_ID = 'native-settings-btn';
@@ -83,6 +85,7 @@ export const NATIVE_SETTINGS_OVERLAY_ID = 'native-settings-overlay';
  * own comment, and `kind` in the table above.
  */
 export const NATIVE_SETTINGS_CONTROLS = [
+  { id: 'audio', kind: 'audio', tab: 'audio', sectionId: null },
   {
     // The one control this surface already had, as a bespoke `<div
     // role="button">` the document supplies
@@ -278,13 +281,17 @@ export function mountNativeSettings(doc, hooks, opts) {
    */
   const rows = (Array.isArray(o.controls) ? o.controls : NATIVE_SETTINGS_CONTROLS)
     .filter(function (entry) {
-      return !entry || entry.kind !== 'presentation' || !!h.presentation;
+      return !entry || ((entry.kind !== 'presentation' || !!h.presentation)
+        && (entry.kind !== 'audio' || !!h.audio));
     });
 
   /** This surface's memory of which tab is selected. See `nativeSettingsView`. */
   let activeTab = null;
+  let cleanupAudio = [];
 
   function buildPanel() {
+    for (const cleanup of cleanupAudio) cleanup();
+    cleanupAudio = [];
     const vm = nativeSettingsView({ demo: demo, activeTab: activeTab, controls: rows });
     activeTab = vm.activeTab;
 
@@ -312,6 +319,11 @@ export function mountNativeSettings(doc, hooks, opts) {
     const body = doc.createElement('div');
     body.className = 'native-settings-body';
     vm.sections.forEach(function (spec) {
+      if (spec.kind === 'audio') {
+        cleanupAudio.push(renderNativeAudioOutput(doc, body, h.audio));
+        cleanupAudio.push(renderAudioSettingsPanel(doc, body, h.audio));
+        return;
+      }
       if (spec.kind === 'presentation') {
         // The whole section is the shared panel's — the same controls, the same
         // live preview and the same two reset scopes `server.html`'s cog shows,

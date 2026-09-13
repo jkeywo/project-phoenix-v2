@@ -178,6 +178,10 @@ pub fn host_lobby_layout_script(json: &str) -> String {
     vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyLayout", json)
 }
 
+pub fn host_lobby_audio_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyAudio", json)
+}
+
 /// The script that hands the surface one encoded [`JoinInvite`] (issue #1329).
 ///
 /// The crew's join code, the structured code its QR carries, and the address a
@@ -576,6 +580,7 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          <link rel=\"stylesheet\" href=\"gui/host-scenarios.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-landing.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/native-settings.css\" />\n\
+         <link rel=\"stylesheet\" href=\"gui/audio-settings.css\" />\n\
          <style>\n{GROUND_CSS}</style>{head}\
          <script src=\"{QR_ENCODER_SRC}\"></script>\n\
          </head>\n\

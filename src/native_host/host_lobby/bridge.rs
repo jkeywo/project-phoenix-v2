@@ -127,6 +127,8 @@ struct Inner {
     last_accepted_layout: Option<String>,
     /// What the page has asked for, awaiting a reader.
     records: VecDeque<String>,
+    audio: Option<String>,
+    last_accepted_audio: Option<String>,
 }
 
 /// The host ↔ lobby-surface bridge.
@@ -246,6 +248,7 @@ impl HostLobbyBridge {
             || inner.landing.is_some()
             || inner.packs.is_some()
             || inner.layout.is_some()
+            || inner.audio.is_some()
             || inner.qr_toggles > 0
     }
 
@@ -302,6 +305,7 @@ impl HostLobbyBridge {
             landing: inner.landing.take(),
             packs: inner.packs.take(),
             layout: inner.layout.take(),
+            audio: inner.audio.take(),
             payload: inner.payload.take(),
             qr_toggles: std::mem::take(&mut inner.qr_toggles),
         }
@@ -358,6 +362,26 @@ impl HostLobbyBridge {
         }
     }
 
+    /// Current settings/status only. This lane never carries playback events.
+    pub fn push_audio(&self, json: String) {
+        let mut inner = self.lock();
+        if inner.last_accepted_audio.as_ref() == Some(&json) {
+            return;
+        }
+        inner.last_accepted_audio = Some(json.clone());
+        inner.audio = Some(json);
+    }
+    pub fn republish_audio(&self) {
+        let mut inner = self.lock();
+        inner.audio = inner.last_accepted_audio.clone();
+    }
+    fn restore_audio(&self, json: String) {
+        let mut inner = self.lock();
+        if inner.audio.is_none() {
+            inner.audio = Some(json);
+        }
+    }
+
     /// Give back toggles that were not delivered.
     ///
     /// Added rather than replaced, unlike every other slot here: these are
@@ -370,6 +394,7 @@ impl HostLobbyBridge {
 
 /// One frame's worth of everything waiting to cross.
 struct Pending {
+    audio: Option<String>,
     reveal: Option<bool>,
     join: Option<String>,
     landing: Option<String>,
@@ -550,6 +575,23 @@ pub fn pump_host_lobby(
                     report.push_failure = Some(e);
                     report.deferred += 1;
                     bridge.restore_layout(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if let Some(json) = pending.audio {
+        if failed {
+            report.deferred += 1;
+            bridge.restore_audio(json);
+        } else {
+            match surface.push(&super::document::host_lobby_audio_script(&json)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.restore_audio(json);
                     failed = true;
                 }
             }
@@ -966,6 +1008,25 @@ mod tests {
         assert!(surface.pushed[0].contains("__phoenixHostLobbyReveal('true')"));
         assert!(surface.pushed[1].contains("__phoenixHostLobbyLayout("));
         assert!(surface.pushed[2].contains("__phoenixHostLobbyApply("));
+    }
+
+    #[test]
+    fn audio_document_observation_republishes_only_current_status_without_playback() {
+        let bridge = HostLobbyBridge::new();
+        let mut surface = RecordingSurface::ready();
+        bridge.push_audio("{\"status\":\"playing\"}".into());
+        pump_host_lobby(&bridge, &mut surface);
+        bridge.push_audio("{\"status\":\"playing\"}".into());
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(surface.pushed.len(), 1);
+        bridge.republish_audio();
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(surface.pushed.len(), 2);
+        assert!(surface
+            .pushed
+            .iter()
+            .all(|script| script.contains("__phoenixHostLobbyAudio")));
+        assert!(bridge.take_records().is_empty());
     }
 
     #[test]

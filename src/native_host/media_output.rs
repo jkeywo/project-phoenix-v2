@@ -13,8 +13,8 @@ use std::time::Duration;
 
 pub struct OutputDevices {
     pub discovered: Vec<DiscoveredMediaDevice>,
-    handles: Vec<cpal::Device>,
-    ambiguous: Vec<bool>,
+    pub(crate) handles: Vec<cpal::Device>,
+    pub(crate) ambiguous: Vec<bool>,
 }
 
 impl OutputDevices {

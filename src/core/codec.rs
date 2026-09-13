@@ -153,6 +153,20 @@ pub fn encode_audio_lifecycle(
     serde_json::to_string(state)
 }
 
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn encode_native_audio_state(
+    state: &crate::native_host::audio::NativeAudioState,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(state)
+}
+
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn decode_native_audio_hud(
+    json: &str,
+) -> Result<crate::core::messages::ViewscreenHudState, serde_json::Error> {
+    serde_json::from_str(json)
+}
+
 /// Encode the rendererless GM peer's absolute local map Host Channel projection.
 pub fn encode_gm_entity_projection(
     payload: &crate::gm_projection::GmEntityProjectionPayload,

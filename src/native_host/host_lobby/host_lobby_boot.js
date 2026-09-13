@@ -33,6 +33,11 @@
 //     every repaint is driven synchronously from a host push, inside the
 //     host's own evaluate_script. There is nothing to starve.
 (function () {
+  window.__phoenixNativeAudioState = null;
+  window.__phoenixHostLobbyAudio = function (json) {
+    window.__phoenixNativeAudioState = json;
+    if (window.__phoenixNativeAudioApply) window.__phoenixNativeAudioApply(json);
+  };
   // The last state each side of the bridge sent, and the renderer the module
   // island installs. Kept as STATE rather than as a queue: a lobby payload is a
   // snapshot of the whole lobby, so an older one has nothing to say that the

@@ -112,6 +112,8 @@ pub const MAX_EFFECT_PERCENT: u32 = 100;
 #[serde(deny_unknown_fields)]
 struct SavedPresentation {
     #[serde(default)]
+    audio: Option<toml::Value>,
+    #[serde(default)]
     text_scale_percent: Option<u32>,
     #[serde(default)]
     contrast: Option<bool>,
@@ -324,9 +326,53 @@ impl ViewscreenPresentationStore {
     /// has never had a display setting" are the same state, and leaving a stub
     /// behind makes the next reader wonder which.
     pub fn save(&self, record: &ViewscreenPresentation) -> std::io::Result<()> {
+        let audio = std::fs::read_to_string(self.path())
+            .ok()
+            .and_then(|text| toml::from_str::<SavedPresentation>(&text).ok())
+            .and_then(|record| record.audio);
+        self.save_sections(record, audio)
+    }
+
+    /// Merge audio with the existing endpoint record. Hardware output identities
+    /// are deliberately stored by bridge-media instead, and no cues are stored.
+    pub fn save_audio(&self, mix: super::audio::mix::AudioMix) -> std::io::Result<()> {
+        let audio = toml::Value::try_from(SavedAudio {
+            version: 1,
+            mix: mix.sanitised(),
+        })
+        .map_err(std::io::Error::other)?;
+        self.save_sections(&self.load(), Some(audio))
+    }
+
+    pub fn load_audio(&self) -> (super::audio::mix::AudioMix, &'static str) {
+        let text = match std::fs::read_to_string(self.path()) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return (Default::default(), "saved")
+            }
+            Err(_) => return (Default::default(), "unavailable"),
+        };
+        let saved = match toml::from_str::<SavedPresentation>(&text) {
+            Ok(saved) => saved,
+            Err(_) => return (Default::default(), "corrupt"),
+        };
+        let Some(audio) = saved.audio else {
+            return (Default::default(), "saved");
+        };
+        match audio.try_into::<SavedAudio>() {
+            Ok(record) if record.version == 1 => (record.mix.sanitised(), "saved"),
+            _ => (Default::default(), "corrupt"),
+        }
+    }
+
+    fn save_sections(
+        &self,
+        record: &ViewscreenPresentation,
+        audio: Option<toml::Value>,
+    ) -> std::io::Result<()> {
         let sane = record.sanitised();
         let path = self.path();
-        if sane.is_default() {
+        if sane.is_default() && audio.is_none() {
             return match std::fs::remove_file(&path) {
                 Ok(()) => Ok(()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -334,8 +380,21 @@ impl ViewscreenPresentationStore {
             };
         }
         create_dir(&self.dir)?;
-        super::layout_store::write_atomically(&path, &sane.to_toml())
+        let mut table: toml::Table =
+            toml::from_str(&sane.to_toml()).map_err(std::io::Error::other)?;
+        if let Some(audio) = audio {
+            table.insert("audio".into(), audio);
+        }
+        let text = toml::to_string(&table).map_err(std::io::Error::other)?;
+        super::layout_store::write_atomically(&path, &text)
     }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedAudio {
+    version: u32,
+    mix: super::audio::mix::AudioMix,
 }
 
 fn create_dir(dir: &Path) -> std::io::Result<()> {

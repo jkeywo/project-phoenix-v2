@@ -866,6 +866,11 @@ pub fn build_native_host_app(
     // pane pipeline, it compiles and is tested with the feature off, and on a
     // renderer-less Contract host it is what drains a queue nothing can upload.
     app.add_plugins(crate::native_host::panes::upload::PaneUploadPlugin);
+    app.insert_resource(crate::native_host::audio::NativeRoomAudio::new(
+        cfg.bridge_profile.as_ref(),
+        cfg.surface == NativeRenderSurface::Window,
+    ));
+    app.add_plugins(crate::native_host::audio::NativeRoomAudioPlugin);
 
     // Bridge-display profile (issue #1123). Installed unconditionally, and the
     // config is inserted only when a validated profile was given — an

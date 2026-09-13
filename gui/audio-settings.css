@@ -1,5 +1,7 @@
 .audio-settings { display: grid; gap: 0.75em; min-width: 0; }
 .audio-settings p { margin: 0; }
+.audio-settings label { display: grid; gap: 0.5em; min-width: 0; }
+.audio-settings select { max-width: 100%; min-width: 0; min-height: 44px; padding: 0.5em; font: inherit; color: inherit; background: var(--bg-panel, Canvas); border: 1px solid currentColor; }
 .audio-settings-bus { min-width: 0; padding: 0.5em; border: 1px solid currentColor; }
 .audio-settings-controls, .audio-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75em; }
 .audio-settings-controls input { min-width: 6em; width: 9em; flex: 1; }

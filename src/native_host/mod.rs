@@ -41,6 +41,8 @@
 //! they must be made to agree — see [`pin_content_root`].
 
 pub mod app;
+/// Native process-owned room playback, selected outputs and endpoint mixer.
+pub mod audio;
 /// The winit/Bevy adapter (issue #1123) that reads real monitors and opens one
 /// borderless-fullscreen surface per configured monitor from a resolved
 /// [`bridge_profile`]. Provable only under the ignored integration test.

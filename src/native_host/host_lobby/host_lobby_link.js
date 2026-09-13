@@ -58,6 +58,7 @@ import { renderHostScenarios } from './gui/host-scenario-render.js';
 import { landingEntries, landingViewModel, nextOpenEntry } from './gui/host-landing-view.js';
 import { renderHostLanding } from './gui/host-landing-render.js';
 import { mountNativeSettings } from './gui/native-settings.js';
+import { createNativeAudio } from './gui/native-audio.js';
 import {
   createViewscreenPresentation,
   readInjectedViewscreenPresentation,
@@ -540,6 +541,7 @@ const presentation = createViewscreenPresentation({
 presentation.apply();
 
 mountNativeSettings(document, {
+  audio: createNativeAudio({ win: window, send }),
   // The row's verb, forwarded — never a name this file decides.
   run: (action) => {
     const local = LOCAL_SETTINGS_VERBS[action];

@@ -181,10 +181,51 @@ entities:
     architecture:
       classification: local-view
       owner: browser-room-audio
-      writers: [browser-room-audio]
-      runs_in: [host-browser-runtime]
+      writers: [browser-room-audio, native-room-audio-player]
+      runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
       paths: [src/server/audio_lifecycle.rs, src/server/audio.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/console_bridge.rs, src/core/codec.rs]
       symbols: [RoomAudioLifecycle, AudioLifecycleState, publish_audio_lifecycle, rebase_audio_presentation, rebase_hud_state, encode_audio_lifecycle]
       tests: [tests/gm_restore.rs, cargo test --features headless --lib server::audio, cargo test --features headless --lib restore_rebase]
+
+  - component: native-room-audio-player
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Native Viewscreen Room Audio Player
+      summary: "One native process owner decodes shipped MP3 and Vorbis/OGG assets and mixes lobby music, ambient/engine beds and the Red Alert siren/music through one selected CPAL output. The embedded settings document sends typed local controls and observes current status; document mount, hide and reload never own or restart playback."
+      rationale:
+        - "[ai] The production decoder and PCM mixer run against a fake device sample sink in ordinary native tests. CPAL callbacks only consume mixed samples; file decoding, enumeration and stream destruction stay on the owner worker. Category and Master gains multiply the existing authored levels, and a bounded Music output test uses this same path."
+        - "[ai] Native preferences merge an audio section into the existing Viewscreen endpoint record. Hardware routes persist separately as bridge-media assignments. Launch profiles override saved media only for explicitly named surfaces; display-only profiles preserve saved audio routes. The merged media must still satisfy sharing consent. Missing or ambiguous selected outputs remain silent until deliberate recovery. Room output never follows a private surface assignment."
+        - "[ai] Current config/HUD and the runtime-owned continuation state drive playback. Restore holds stop loops/tests immediately; output loss and late decoding discard missed one-shots. A generation-checked commit prevents the worker from recreating old sound after a newer boundary. Only live comparison state is retained: no audio cue history, catch-up, journal or replay. Existing Red Alert text/frame remains visible with sound unavailable or muted."
+    architecture:
+      kind: client-presentation
+      authority: local
+      owns: [native-room-audio]
+      reads: [room-audio-lifecycle]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/native_host/audio/mod.rs, src/native_host/audio/decoder.rs, src/native_host/audio/engine.rs, src/native_host/audio/player.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, src/native_host/audio/mix.rs, src/native_host/viewscreen_presentation.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/scenario.rs, src/native_host/host_lobby/mod.rs, gui/native-audio.js, gui/native-settings.js, gui/audio-settings-panel.js]
+      symbols: [NativeRoomAudio, NativeRoomAudioPlugin, RoomPlayer, Mixer, HardwareStore, createNativeAudio, renderNativeAudioOutput]
+      tests: [cargo test --features headless --lib native_host::audio, tests/client/native-audio.test.js, tests/client/native-settings.test.js, tests/smoke/native-audio.spec.js]
+
+  - state: native-room-audio
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Native Room Audio Endpoint State
+      summary: "Process-local current room input, mix, selected output, decoded asset cache and provider status. The sole owner discards one-shots at continuation/output boundaries. Only endpoint preferences and hardware assignments persist in their respective local files; no playback event is saved or enters simulation state."
+    architecture:
+      classification: local-view
+      owner: native-room-audio-player
+      writers: [native-room-audio-player]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/engine.rs, src/native_host/audio/store.rs]
+      symbols: [NativeRoomAudio]
+      tests: [cargo test --features headless --lib native_host::audio]

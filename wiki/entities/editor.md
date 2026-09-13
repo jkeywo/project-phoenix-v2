@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml]
 updated: 2026-09-13
 ---
 
@@ -70,6 +70,16 @@ late completion of an old load cannot overwrite a current handle. Canonical
 simulation entities remain in place.
 
 ## Standalone Workshop Authoring
+
+The browser GM's source control uses `gui/workshop-source-link.js` to retain an
+exact loaded source pack, close the GM connection and navigate to Workshop.
+`editor/workshop-handoff.js` carries only authored archives and read-only base
+declarations through a bounded, expiring, single-use IndexedDB record. The URL
+fragment is consumed on arrival. `editor/workshop-source-provider.js` creates
+a fresh document/history for the selected archive and immutable dependencies
+from the other packs. Storage refusal preserves Live. It does not export live
+simulation state or grant project filesystem access; native GM surfaces do not
+advertise this browser capability.
 
 `workshop.html` is M6's offline browser Authoring surface. `trunk build` ships
 the page and its runtime WASM artifact; `npm run build:workshop` updates the
@@ -191,8 +201,8 @@ kill/wait the child and release staged files. Worker startup reclaims abandoned
 UUID staging directories with valid typed markers under its existing root claim.
 
 The browser Test adapter, GM/other-player-ship views, traces, breakpoints, role
-preview, specialised entity/definition/model panels and runtime model asset
-overlays remain M6 continuation work. The existing editor/viewer remain until
+preview and specialised entity/definition/model panels remain M6 continuation
+work. The existing editor/viewer remain until
 the parity workflow is delivered.
 
 ## Validation boundary

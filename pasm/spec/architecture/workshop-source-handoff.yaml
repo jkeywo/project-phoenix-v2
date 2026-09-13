@@ -1,0 +1,23 @@
+entities:
+  - component: workshop-source-handoff
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Workshop Source Handoff
+      summary: A browser GM selects an exact retained pack archive, captures read-only base declarations and other retained pack sources, and closes its ordinary GM connection before navigating to standalone Authoring. A one-use origin-local transfer is bounded to 512 MiB, expires after five minutes and never contains runtime state, credentials or shared undo history. The selected source creates a fresh editable document; other packs stay immutable dependencies. Storage refusal leaves the existing GM connection intact. The URL fragment survives static-host redirects and is removed after consumption. Native surfaces without this explicit source-transfer capability keep the control hidden.
+    architecture:
+      kind: authoring-adapter
+      authority: local
+      reads: [composed-world-content-pack-state]
+      depends_on: [workshop-runtime-asset-reader]
+    implementation:
+      status: declared
+      paths:
+        - editor/workshop-handoff.js
+        - editor/workshop-source-provider.js
+        - gui/workshop-source-link.js
+        - gui/workshop-boot.js
+        - server.html
+      tests:
+        - npx vitest run tests/client/workshop-handoff.test.js tests/client/workshop-source-link.test.js
+        - npx playwright test workshop-handoff.spec.js gm-workshop-source.spec.js --project chromium

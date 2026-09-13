@@ -21,10 +21,10 @@ export function newWorkshopPack(dependencies) {
 export function createBrowserWorkshopProvider({ loadedPack = null, dependencies, load } = {}) {
   const pack = loadedPack ? Uint8Array.from(loadedPack) : null;
   const editableId = pack ? parse(new WorkshopDocument(pack).read('scenarios.toml')).pack?.id : null;
-  const source = dependencies ? JSON.stringify({ ...dependencies,
+  const source = dependencies ? structuredClone({ ...dependencies,
     packs: (dependencies.packs || []).filter(candidate => candidate.id !== editableId) }) : null;
   const runtime = createWorkshopRuntime({ ...(load ? { load } : {}),
-    ...(source ? { dependencies: async () => JSON.parse(source) } : {}) });
+    ...(source ? { dependencies: async () => structuredClone(source) } : {}) });
   return { runtime, canImport: true, canCreate: true,
     async load() { return pack ? new WorkshopDocument(pack) : null; },
   };

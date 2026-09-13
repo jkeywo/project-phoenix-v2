@@ -37,6 +37,7 @@ import {
 import { createHostActionRegistry } from './host-actions.js';
 import { t, has } from './strings.js';
 import { mountGmWorkspaceShell } from './gm-workspace-shell.js';
+import { mountWorkshopSourceLink } from './workshop-source-link.js';
 import { createPrivateAudio, attachPrivateAudioLifecycle, privateFeedbackReceiver } from './private-audio.js';
 import { mountSoundAudition } from './sound-audition-panel.js';
 import { createPrivateRequestFeedback } from './private-request-feedback.js';
@@ -62,6 +63,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   const privateSubmit = (actionId, request, send) => privateAudio
     ? requestFeedback.submit(actionId, request, send) : send();
   const shell = mountGmWorkspaceShell({ doc, win, t, has, selectEntity: id => gmProjection.select(id) });
+  const workshopSource = mountWorkshopSourceLink({ root: doc.getElementById('gm-console'), win, t });
   win.__hostGmShellMetadata = shell.metadata;
   // Late-bound because the panel needs the projection's selection and the
   // projection needs the panel's `select`; the closure resolves at call time,
@@ -550,8 +552,9 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
-    dispose() { soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
+      workshopSource.refresh();
       if (!alertScope()) privateAlerts.reset();
       shell.refresh();
       gmSessionControls.refreshAdmission();

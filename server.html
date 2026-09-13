@@ -4302,6 +4302,43 @@
     };
     window.__hostGmName = gmName;
 
+    // Browser M6 source handoff. These readers expose retained authored packs,
+    // never a reconstruction of the live World or its GM interventions.
+    const canOpenWorkshopSource = () => !!window.__phoenixGmPage && !!localGm();
+    window.__hostWorkshopPacks = function() {
+      if (!canOpenWorkshopSource()) return [];
+      return Array.from(wasmBindings.wasm_active_pack_manifest().packs || [])
+        .map(pack => ({ id: pack.id, name: pack.name }));
+    };
+    window.__hostWorkshopSource = async function(selectedId) {
+      if (!canOpenWorkshopSource()) throw Error('GM connection is unavailable');
+      const revision = wasmBindings.wasm_pack_revision();
+      const packs = window.__hostWorkshopPacks();
+      if (!packs.some(pack => pack.id === selectedId)) throw Error('Source pack is unavailable');
+      const archives = packs.map(pack => {
+        const bytes = wasmBindings.wasm_pack_source_archive(pack.id);
+        if (!(bytes instanceof Uint8Array) || !bytes.length) throw Error('Source pack was not retained');
+        return { id: pack.id, bytes };
+      });
+      const response = await fetch('workshop-base.json', { signal: AbortSignal.timeout(30000) });
+      if (!response.ok) throw Error('Read-only source dependencies are unavailable');
+      const base = await response.json();
+      if (!canOpenWorkshopSource() || revision !== wasmBindings.wasm_pack_revision()) throw Error('Loaded content changed');
+      return { selectedId, archives, base };
+    };
+    window.__hostWorkshopDisconnect = function() {
+      if (!canOpenWorkshopSource()) return false;
+      // This is a GM peer going away, like closing its tab. Do not invoke the
+      // lobby-only leave/rebase path or turn a running fleet into solo play.
+      if (fleetHandle) {
+        if (normaliseFleetRole(fleetHandle.role || fleetRole) !== 'gm') return false;
+        fleetHandle.close();
+        fleetHandle = null;
+      }
+      return true; // The caller immediately replaces this page with Authoring.
+    };
+    window.dispatchEvent(new Event('PhoenixWorkshopSourceReady'));
+
     /**
      * Submit one explicit, attributed GM session state command.
      *

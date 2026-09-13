@@ -1,4 +1,9 @@
 id,context,en
+workshop.source_pack,Retained loaded source pack selector,[Source pack]
+workshop.leave_live,Explicit GM disconnect and source clone action,[Leave session and edit source]
+workshop.source_empty,No immutable loaded pack available to clone,[No loaded source packs are available.]
+workshop.source_opening,Preparing a source clone before leaving Live,[Opening source in Workshop…]
+workshop.source_failed,Source handoff unavailable or refused,[The source pack could not be opened in Workshop.]
 settings.audio.reduced_range,Optional audio level contrast control,[Reduce dynamic range]
 settings.audio.reduced_range_hint,Effect and default of reduced audio dynamics,[Off by default. Raises quiet sounds slightly and reduces louder peaks before Master volume. Applies to this audio output only.]
 settings.audio.reduced_range_unavailable,Audio processor capability unavailable,[Reduced dynamic range is unavailable on this audio output. Master and category volume controls still apply.]

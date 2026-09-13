@@ -647,3 +647,197 @@ fn viewscreen_classification_keeps_detection_geometry_and_truth_intact() {
     );
     assert_eq!(other, truth);
 }
+
+fn ghost_grant(
+    sequence: u64,
+    tick: u64,
+    observer: &str,
+    change: phoenix::gm_information::ContactInformationChange,
+) -> GmActionGrant {
+    let mut request = grant(sequence, tick, observer, "unused", ContactMode::Normal);
+    request.action = GmAction::SetContactInformation {
+        ship: ShipKey(observer.into()),
+        change,
+    };
+    request
+}
+fn ghost_set() -> phoenix::gm_information::ContactInformationChange {
+    phoenix::gm_information::ContactInformationChange::SetGhost {
+        id: "echo".into(),
+        palette: "freighter".into(),
+        position_mm: [200_000, 0, -20_000],
+    }
+}
+#[test]
+fn ghost_is_an_attributed_absolute_observer_report_and_never_an_entity() {
+    let mut app = bare();
+    classification_palette(&mut app);
+    let count = app.world().entities().len();
+    apply(&mut app, ghost_grant(1, 42, "observer", ghost_set()));
+    apply(&mut app, ghost_grant(2, 42, "observer", ghost_set()));
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    let points = phoenix::gm_information::ghost_snapshots(&runtime.contact_information, "observer");
+    assert_eq!(points.len(), 1);
+    assert_eq!(points[0].uuid, "__gm_ghost:observer:echo");
+    assert_eq!(points[0].position, Some([200.0, 0.0, -20.0]));
+    assert_eq!(points[0].name.as_deref(), Some("test.reported.freighter"));
+    assert_eq!(points[0].tags, vec![phoenix::gm_contact::BASIC_RADAR_TAG]);
+    assert!(
+        phoenix::gm_information::ghost_snapshots(&runtime.contact_information, "other").is_empty()
+    );
+    let screen = phoenix::gm_information::viewscreen_ghosts(
+        &runtime.contact_information,
+        "observer",
+        0.0,
+        0.0,
+        100.0,
+    );
+    assert_eq!(screen[0].name, points[0].name);
+    assert!(phoenix::simmath::hypot(screen[0].x(), screen[0].z()) <= 100.0);
+    assert_eq!(app.world().entities().len(), count);
+    assert!(!app
+        .world_mut()
+        .query::<&EntityUuid>()
+        .iter(app.world())
+        .any(|id| id.0 == points[0].uuid));
+    let facts = app.world().resource::<GmActionLog>().entries();
+    assert_eq!(facts[0].action_kind, GmActionKind::ContactInformation);
+    assert_eq!(facts[0].observer.as_deref(), Some("observer"));
+    assert_eq!(facts[0].target.as_deref(), Some("echo"));
+    assert_eq!(facts[1].outcome, GmActionOutcome::NoOp);
+    apply(
+        &mut app,
+        ghost_grant(
+            3,
+            42,
+            "observer",
+            phoenix::gm_information::ContactInformationChange::RemoveGhost { id: "echo".into() },
+        ),
+    );
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_information
+        .is_empty());
+}
+#[test]
+fn ghost_refuses_non_observers_unknown_palettes_and_extra_wire_fields() {
+    for observer in ["missing", "target"] {
+        let mut app = bare();
+        classification_palette(&mut app);
+        apply(&mut app, ghost_grant(1, 42, observer, ghost_set()));
+        assert_eq!(
+            app.world().resource::<GmActionLog>().entries()[0].outcome,
+            GmActionOutcome::Refused
+        );
+        assert!(app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .contact_information
+            .is_empty());
+    }
+    let text = r#"{"operator_id":"gm","correlation":"echo","action":"set_contact_information","ship":"observer","change":{"set_ghost":{"id":"echo","palette":"freighter","position_mm":[1,2,3]}}}"#;
+    let request = phoenix::core::codec::decode_gm_action_request(text).unwrap();
+    let mut app = bare();
+    assert!(submit_local(app.world_mut(), request).is_err());
+    apply(&mut app, ghost_grant(1, 42, "observer", ghost_set()));
+    assert_eq!(
+        app.world().resource::<GmActionLog>().entries()[0].outcome,
+        GmActionOutcome::Refused
+    );
+    for invalid in [
+        text.replace("[1,2,3]", "[1,2]"),
+        text.replace("[1,2,3]", "[1,2,3.5]"),
+        text.replace("[1,2,3]", "[1,2,3],\"physical\":true"),
+    ] {
+        assert!(phoenix::core::codec::decode_gm_action_request(&invalid).is_none());
+    }
+}
+#[test]
+fn ghost_replays_restores_and_prunes_without_rewriting_truth() {
+    let (mut live, observer, _) = seeded();
+    classification_palette(&mut live);
+    let (mut replay, _, _) = seeded();
+    classification_palette(&mut replay);
+    let tick = live.world().resource::<SimTick>().0 + 2;
+    let request = ghost_grant(1, tick, &observer, ghost_set());
+    let frame = phoenix::lockstep::MeshFrame::GmAction(GmActionFrame::Granted(request.clone()));
+    let encoded = phoenix::core::codec::encode_mesh_frame(&frame).unwrap();
+    assert_eq!(
+        phoenix::core::codec::decode_mesh_frame(&encoded),
+        Some(frame)
+    );
+    for app in [&mut live, &mut replay] {
+        app.world_mut()
+            .resource_mut::<GmActionJournal>()
+            .insert(request.clone())
+            .unwrap();
+    }
+    for _ in 0..5 {
+        live.update();
+        replay.update();
+    }
+    assert_eq!(
+        phoenix::sim_digest::world_digest(live.world()),
+        phoenix::sim_digest::world_digest(replay.world())
+    );
+    let picture = sensors_picture(&mut live, &observer);
+    assert_eq!(picture.contact_ghosts.len(), 1);
+    let saved = phoenix::snapshot::capture(live.world());
+    let report = phoenix::snapshot::restore(replay.world_mut(), &saved);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    replay
+        .world_mut()
+        .run_system_once(phoenix::ship::sensors::publish_sensors_blackboard)
+        .unwrap();
+    assert_eq!(sensors_picture(&mut replay, &observer), picture);
+    let with_ghost = phoenix::sim_digest::world_digest(replay.world());
+    replay
+        .world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .contact_information = Default::default();
+    assert_ne!(
+        with_ghost,
+        phoenix::sim_digest::world_digest(replay.world())
+    );
+    let entity = live
+        .world_mut()
+        .query::<(Entity, &EntityUuid)>()
+        .iter(live.world())
+        .find(|(_, id)| id.0 == observer)
+        .unwrap()
+        .0;
+    live.world_mut().despawn(entity);
+    live.world_mut()
+        .run_system_once(phoenix::gm_contact::prune)
+        .unwrap();
+    assert!(live
+        .world()
+        .resource::<WorldContentRuntime>()
+        .contact_information
+        .is_empty());
+}
+#[test]
+fn ghost_mission_and_gm_controls_share_the_same_resolved_state() {
+    let mut app = bare();
+    classification_palette(&mut app);
+    assert_eq!(
+        phoenix::gm_information::apply_scenario_command(app.world_mut(), "observer", &ghost_set()),
+        Ok(true)
+    );
+    assert_eq!(
+        phoenix::gm_information::apply_scenario_command(app.world_mut(), "observer", &ghost_set()),
+        Ok(false)
+    );
+    apply(&mut app, ghost_grant(1, 42, "observer", ghost_set()));
+    assert_eq!(
+        app.world().resource::<GmActionLog>().entries()[0].outcome,
+        GmActionOutcome::NoOp
+    );
+    assert!(phoenix::gm_information::apply_scenario_command(
+        app.world_mut(),
+        "target",
+        &ghost_set()
+    )
+    .is_err());
+}

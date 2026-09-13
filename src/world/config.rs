@@ -731,6 +731,8 @@ pub(crate) struct RawActionEntry {
     #[serde(default)]
     pub(crate) entity: Option<String>,
     #[serde(default)]
+    pub(crate) contact_information: Option<crate::gm_information::ContactInformationChange>,
+    #[serde(default)]
     pub(crate) state: Option<String>,
     #[serde(default)]
     pub(crate) target: Option<String>,
@@ -1580,6 +1582,10 @@ pub enum TriggerAction {
         ship: String,
         cue: crate::gm_presentation::PresentationCue,
     },
+    SetContactInformation {
+        ship: String,
+        change: crate::gm_information::ContactInformationChange,
+    },
     SetNpcDoctrine {
         entity: String,
         id: String,
@@ -1967,6 +1973,19 @@ pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerA
                         "presentation requires a valid typed cue and explicit positive duration",
                     )?;
                 TriggerAction::Presentation { ship, cue }
+            }
+            "set_contact_information" => {
+                let ship = raw_action
+                    .entity
+                    .clone()
+                    .filter(|id| crate::gm_npc::bounded_id(id))
+                    .ok_or("set_contact_information requires a bounded observing entity")?;
+                let change = raw_action
+                    .contact_information
+                    .clone()
+                    .filter(|change| change.bounded())
+                    .ok_or("set_contact_information requires a typed contact_information change")?;
+                TriggerAction::SetContactInformation { ship, change }
             }
             "set_npc_doctrine" => {
                 let entity = raw_action

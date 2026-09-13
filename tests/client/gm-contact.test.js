@@ -189,3 +189,36 @@ it('live entity updates preserve the focused classification choice and its nativ
   panel.update({ entities, contact_classification_palette: [palette[0]] });
   expect(select.value).toBe('');
 });
+
+it('shows an observer ghost as a basic untargetable crew-only report with no physical facts', () => {
+  const input = state(null, 100);
+  input.blackboards.sensors.contact_ghosts = [{ uuid: '__gm_ghost:observer:echo', name: 'Reported freighter', position: [200, 0, -20] }];
+  input.sensorsTarget = '__gm_ghost:observer:echo';
+  const output = JSON.parse(buildSensorsConsoleState(input));
+  expect(output.blips).toHaveLength(1);
+  expect(output.blips[0]).toMatchObject({ uuid: '__gm_ghost:observer:echo', name: 'Reported freighter', basic_contact: true, selectable: false, edge: true });
+  expect(output.target_uuid).toBeNull();
+  expect(output.target_alert).toBeNull(); expect(output.target_weapons).toBeNull(); expect(output.target_projection).toBeNull();
+  expect(crewContactRows(output.blips, input.asteroids)).toEqual([{ id: '__gm_ghost:observer:echo', name: 'Reported freighter', hull_percent: null, destroyed: null }]);
+  expect(JSON.parse(buildSensorsConsoleState(state(null, 100))).blips).toEqual([]);
+});
+it('controls ghosts without a real target and correlates exactly while retaining live focused controls', () => {
+  const submitInformation = vi.fn(() => true);
+  const { panel, entities } = mount({ submitInformation });
+  panel.select(null);
+  document.body.insertAdjacentHTML('beforeend', '<input id="gm-contact-ghost-id"><select id="gm-contact-ghost-palette"></select><input id="gm-contact-ghost-x" value="0"><input id="gm-contact-ghost-y" value="0"><input id="gm-contact-ghost-z" value="0"><button id="gm-contact-ghost-set"></button><button id="gm-contact-ghost-remove"></button><ul id="gm-contact-ghosts"></ul>');
+  const palette = [{ palette: 'freighter', label: 'Reported freighter' }];
+  const ghost = { id: 'echo', palette: 'freighter', label: 'Reported freighter', position_mm: [1000, 0, -2000] };
+  panel.update({ entities, contact_classification_palette: palette, contact_information: { ghosts: { observer: { echo: ghost } } } });
+  const button = document.querySelector('#gm-contact-ghosts button'); button.focus();
+  panel.update({ entities: entities.map(row => ({ ...row, pose: { x: 20 } })), contact_classification_palette: palette, contact_information: { ghosts: { observer: { echo: ghost } } } });
+  expect(document.activeElement).toBe(button); expect(document.querySelector('#gm-contact-ghosts button')).toBe(button);
+  const change = { set_ghost: { id: 'echo', palette: 'freighter', position_mm: [1000, 0, -2000] } };
+  expect(panel.chooseInformation(change)).toBe(true);
+  expect(submitInformation).toHaveBeenCalledExactlyOnceWith({ operator_id: 'gm', correlation: 'request', ship: 'observer', change });
+  const row = { operator_id: 'gm', correlation: 'request', observer: 'observer', target: 'echo', action_kind: 'contact-information', tick: 42, outcome: 'applied' };
+  panel.update({ entities, contact_results: [{ ...row, observer: 'other' }] }); expect(panel.state().pending).not.toBeNull();
+  panel.update({ entities, contact_results: [row] }); expect(panel.state().pending).toBeNull();
+  expect(panel.chooseInformation({ remove_ghost: { id: 'echo' } })).toBe(true);
+  expect(submitInformation.mock.calls[1][0].change).toEqual({ remove_ghost: { id: 'echo' } });
+});

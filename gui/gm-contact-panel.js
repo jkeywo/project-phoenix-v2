@@ -2,17 +2,22 @@ import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './a
 import { wireText } from './strings.js';
 
 const MODES = ['reveal', 'conceal', 'normal'];
-const RESULT_MODES = [...MODES, 'misclassify', 'classification-normal'];
-const requestedKind = request => Object.hasOwn(request, 'palette') ? (request.palette === null ? 'contact-classification-normal' : 'contact-misclassify') : `contact-${request.mode}`;
+const RESULT_MODES = [...MODES, 'misclassify', 'classification-normal', 'information'];
+const informationTarget = change => Object.values(change || {})[0]?.id;
+const requestedKind = request => request.change ? 'contact-information' : Object.hasOwn(request, 'palette') ? (request.palette === null ? 'contact-classification-normal' : 'contact-misclassify') : `contact-${request.mode}`;
 
 /** One observing player ship and one real world target; absolute state survives reconnect. */
 export function createGmContactPanel({ doc = globalThis.document, t = id => id,
-  getOperator = () => null, submit = () => false, submitClassification = () => false, correlation = createActionCorrelation,
+  getOperator = () => null, submit = () => false, submitClassification = () => false, submitInformation = () => false, correlation = createActionCorrelation,
   confirmAction = request => request.accept(),
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = suffix => doc?.getElementById(`gm-contact-${suffix}`);
-  let selected = null, observer = '', entities = [], overrides = {}, classifications = {}, palette = [], pending = null, timer = null;
-  let renderedPalette = null;
+  let selected = null, observer = '', entities = [], overrides = {}, classifications = {}, palette = [], information = { ghosts: {} }, pending = null, timer = null;
+  let renderedPalette = null, renderedObservers = null, renderedGhosts = null;
+  const validObserver = () => getOperator() && !pending && entities.some(row => row.entity_id === observer && row.kind === 'player_ship');
+  const boundedId = value => typeof value === 'string' && value.length > 0 && new TextEncoder().encode(value).length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+  const ghostPosition = () => ['x', 'y', 'z'].map(axis => { const value = el(`ghost-${axis}`)?.value; return value?.trim() ? Number(value) : NaN; });
+  const validPosition = values => values.every(value => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647);
   const valid = () => getOperator() && !pending && selected && selected.entity_id !== observer
     && entities.some(row => row.entity_id === observer && row.kind === 'player_ship')
     && entities.some(row => row.entity_id === selected.entity_id);
@@ -25,6 +30,23 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     if (el('classification')) el('classification').disabled = !valid() || !palette.length;
     if (el('misclassify')) el('misclassify').disabled = !valid() || !palette.some(row => row.palette === el('classification')?.value);
     if (el('classification-normal')) el('classification-normal').disabled = !valid() || !current;
+    const ghostId = el('ghost-id')?.value;
+    for (const id of ['ghost-id', 'ghost-palette', 'ghost-x', 'ghost-y', 'ghost-z']) if (el(id)) el(id).disabled = !validObserver();
+    if (el('ghost-set')) el('ghost-set').disabled = !validObserver() || !boundedId(ghostId) || !validPosition(ghostPosition()) || !palette.some(row => row.palette === el('ghost-palette')?.value);
+    if (el('ghost-remove')) el('ghost-remove').disabled = !validObserver() || !information.ghosts?.[observer]?.[ghostId];
+    const ghostKey = JSON.stringify([observer, information.ghosts?.[observer], !!validObserver()]);
+    if (el('ghosts') && renderedGhosts !== ghostKey) {
+      renderedGhosts = ghostKey;
+      el('ghosts').replaceChildren();
+      for (const ghost of Object.values(information.ghosts?.[observer] || {})) {
+        const li = doc.createElement('li'), button = doc.createElement('button'); button.type = 'button';
+        button.textContent = `${ghost.id}: ${wireText(ghost.label)} (${ghost.position_mm.join(', ')})`;
+        button.disabled = !validObserver(); button.addEventListener('click', () => {
+          el('ghost-id').value = ghost.id; el('ghost-palette').value = ghost.palette;
+          ['x', 'y', 'z'].forEach((axis, index) => { el(`ghost-${axis}`).value = ghost.position_mm[index]; }); render(); el('ghost-id').focus();
+        }); li.appendChild(button); el('ghosts').appendChild(li);
+      }
+    }
   }
   function feedback(state) {
     if (el('feedback')) { el('feedback').dataset.state = state; el('feedback').textContent = t(`server.gm.contact.${state}`); }
@@ -50,11 +72,22 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     return confirmAction({ category: 'contact.override', description, preview: () => description,
       accept: () => submitChosen(chosen) });
   }
+  function chooseInformation(change) {
+    const target = informationTarget(change);
+    if (!validObserver() || !boundedId(target)) return false;
+    const ghost = change.set_ghost;
+    if (ghost && (!validPosition(ghost.position_mm) || !palette.some(row => row.palette === ghost.palette))) return false;
+    if (!ghost && !change.remove_ghost) return false;
+    const chosen = { operator_id: getOperator().id, ship: observer, change: structuredClone(change) };
+    const description = t('settings.gm.confirmation.contact', { mode: t(ghost ? 'server.gm.contact.ghost-set' : 'server.gm.contact.ghost-remove'), target,
+      ship: wireText(entities.find(row => row.entity_id === observer)?.name || observer) });
+    return confirmAction({ category: 'contact.override', description, preview: () => description, accept: () => submitChosen(chosen) });
+  }
   function submitChosen(chosen) {
     if (pending || getOperator()?.id !== chosen.operator_id) return false;
     const request = { ...chosen, correlation: correlation() };
     let accepted = false;
-    try { accepted = (Object.hasOwn(request, 'palette') ? submitClassification(request) : submit(request)) !== false; } catch (_) { /* report below */ }
+    try { accepted = (request.change ? submitInformation(request) : Object.hasOwn(request, 'palette') ? submitClassification(request) : submit(request)) !== false; } catch (_) { /* report below */ }
     if (!accepted) { feedback('refused'); return false; }
     pending = request;
     feedback('pending');
@@ -81,12 +114,15 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
       || !nextClassifications || typeof nextClassifications !== 'object' || Array.isArray(nextClassifications)
       || Object.values(nextClassifications).some(targets => !targets || typeof targets !== 'object' || Array.isArray(targets)
         || Object.values(targets).some(row => !reported(row)))) return false;
+    const nextInformation = value.contact_information || { ghosts: {} };
+    if (!nextInformation || typeof nextInformation !== 'object' || !nextInformation.ghosts || typeof nextInformation.ghosts !== 'object'
+      || Object.values(nextInformation.ghosts).some(rows => !rows || typeof rows !== 'object' || Object.entries(rows).some(([id, ghost]) => !ghost || ghost.id !== id || !boundedId(id) || !reported(ghost) || !Array.isArray(ghost.position_mm) || ghost.position_mm.length !== 3 || !validPosition(ghost.position_mm)))) return false;
+    information = nextInformation;
     entities = value.entities; overrides = nextOverrides; classifications = nextClassifications; palette = nextPalette;
-    const classificationSelect = el('classification');
     // Moving entities publish continuously. Keep the native dropdown's option
     // nodes intact while an operator is choosing from an unchanged palette.
     const paletteKey = JSON.stringify(palette.map(row => [row.palette, row.label]));
-    if (classificationSelect && renderedPalette !== paletteKey) {
+    if (renderedPalette !== paletteKey) for (const classificationSelect of [el('classification'), el('ghost-palette')].filter(Boolean)) {
       const prior = classificationSelect.value;
       classificationSelect.replaceChildren();
       const placeholder = doc.createElement('option'); placeholder.value = ''; placeholder.textContent = t('server.gm.contact.classification'); classificationSelect.appendChild(placeholder);
@@ -94,10 +130,12 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
         const option = doc.createElement('option'); option.value = row.palette; option.textContent = wireText(row.label); classificationSelect.appendChild(option);
       }
       classificationSelect.value = palette.some(row => row.palette === prior) ? prior : '';
-      renderedPalette = paletteKey;
     }
+    renderedPalette = paletteKey;
     const select = el('observer');
-    if (select) {
+    const observerKey = JSON.stringify(entities.filter(row => row.kind === 'player_ship').map(row => [row.entity_id, row.name]));
+    if (select && renderedObservers !== observerKey) {
+      renderedObservers = observerKey;
       select.replaceChildren();
       const placeholder = doc.createElement('option'); placeholder.value = ''; placeholder.textContent = t('server.gm.contact.observer'); select.appendChild(placeholder);
       for (const ship of entities.filter(row => row.kind === 'player_ship')) {
@@ -108,7 +146,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     }
     if (selected) selected = entities.find(row => row.entity_id === selected.entity_id) || null;
     const terminal = pending && rows.find(row => row.operator_id === pending.operator_id && row.correlation === pending.correlation
-      && row.observer === pending.ship && row.target === pending.target && row.action_kind === requestedKind(pending));
+      && row.observer === pending.ship && row.target === (pending.change ? informationTarget(pending.change) : pending.target) && row.action_kind === requestedKind(pending));
     if (terminal) {
       if (timer !== null) cancelSchedule(timer);
       timer = null; pending = null; feedback(terminal.outcome === 'refused' ? 'refused' : 'applied');
@@ -128,7 +166,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   function reset() {
     if (timer !== null) cancelSchedule(timer);
     timer = null; pending = null; selected = null; observer = ''; entities = []; overrides = {}; classifications = {}; palette = [];
-    renderedPalette = null;
+    renderedPalette = null; renderedObservers = null; renderedGhosts = null; information = { ghosts: {} };
     el('results')?.replaceChildren(); if (el('feedback')) el('feedback').textContent = ''; render();
   }
   el('observer')?.addEventListener('change', () => { observer = el('observer').value; render(); });
@@ -136,7 +174,10 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   el('classification')?.addEventListener('change', render);
   el('misclassify')?.addEventListener('click', () => chooseClassification(el('classification').value));
   el('classification-normal')?.addEventListener('click', () => chooseClassification(null));
+  for (const id of ['ghost-id', 'ghost-palette', 'ghost-x', 'ghost-y', 'ghost-z']) el(id)?.addEventListener('input', render);
+  el('ghost-set')?.addEventListener('click', () => chooseInformation({ set_ghost: { id: el('ghost-id').value, palette: el('ghost-palette').value, position_mm: ghostPosition() } }));
+  el('ghost-remove')?.addEventListener('click', () => chooseInformation({ remove_ghost: { id: el('ghost-id').value } }));
   render();
-  return { update, choose, chooseClassification, reset, refreshAdmission: render, select: entity => { selected = entity; render(); },
-    state: () => ({ observer, target: selected?.entity_id || null, pending, overrides, classifications, palette }) };
+  return { update, choose, chooseClassification, chooseInformation, reset, refreshAdmission: render, select: entity => { selected = entity; render(); },
+    state: () => ({ observer, target: selected?.entity_id || null, pending, overrides, classifications, palette, information }) };
 }

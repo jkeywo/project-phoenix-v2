@@ -420,6 +420,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
     submit: request => win.__hostSetContactOverride(request),
     submitClassification: request => win.__hostSetContactClassification(request),
+    submitInformation: request => win.__hostSetContactInformation(request),
   });
   win.__hostGmContactState = gmContact.state;
   gmPresentation = createGmPresentationPanel({ doc, t,

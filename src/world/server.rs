@@ -212,6 +212,7 @@ pub struct WorldContentRuntime {
     pub contact_overrides: crate::gm_contact::ContactOverrides,
     pub contact_classifications: crate::gm_contact::ContactClassifications,
     pub presentation: crate::gm_presentation::PresentationState,
+    pub contact_information: crate::gm_information::ContactInformation,
     /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
     /// (issue #1303).
     ///
@@ -3372,6 +3373,15 @@ pub(crate) fn apply_dispatch_result(
                         crate::gm_presentation::apply_scenario_command,
                         (ship, cue),
                     );
+                });
+            }
+            ActionCmd::SetContactInformation { observer, change } => {
+                commands.queue(move |world: &mut World| {
+                    if let Err(reason) =
+                        crate::gm_information::apply_scenario_command(world, &observer, &change)
+                    {
+                        bevy::log::warn!("Contact information action refused: {reason}");
+                    }
                 });
             }
             ActionCmd::SetNpcDoctrine { uuid, id } => {

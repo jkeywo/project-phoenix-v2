@@ -820,6 +820,13 @@ pub fn publish_sensors_blackboard(
             .cloned()
             .unwrap_or_default();
         let bb = SensorsBlackboard {
+            contact_ghosts: uuid
+                .and_then(|id| {
+                    content.as_ref().map(|runtime| {
+                        crate::gm_information::ghost_snapshots(&runtime.contact_information, &id.0)
+                    })
+                })
+                .unwrap_or_default(),
             contact_overrides: overrides.clone(),
             contact_classifications: uuid
                 .and_then(|id| {

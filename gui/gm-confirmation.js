@@ -73,6 +73,7 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   DespawnEntity: ['world.despawn'],
   ObjectiveAction: ['objective.activate', 'objective.complete', 'objective.fail'],
   SetContactOverride: ['contact.override'],
+  SetContactInformation: ['contact.override'],
   SetContactClassification: ['contact.override'],
   SetSystemDisabled: ['system.disable', 'system.restore'],
   TransmitComms: ['comms.send'],

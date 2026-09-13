@@ -212,7 +212,7 @@ export function crewContactRows(sensorsBlips, rawEntities) {
   return (sensorsBlips || [])
     .filter((blip) => blip && typeof blip.uuid === 'string'
       && !SYNTHETIC_CONTACT_KINDS.has(blip.kind) && !SYNTHETIC_CONTACT_IDS.has(blip.uuid))
-    .filter((blip) => truthModelsRawEntity(rawById.get(blip.uuid)))
+    .filter((blip) => (blip.basic_contact && blip.uuid.startsWith('__gm_ghost:')) || truthModelsRawEntity(rawById.get(blip.uuid)))
     .map((blip) => {
       const raw = rawById.get(blip.uuid);
       const hullFraction = !blip.basic_contact && raw && typeof raw.hull_fraction === 'number' ? raw.hull_fraction : null;

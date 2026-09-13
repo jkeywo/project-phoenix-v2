@@ -180,6 +180,10 @@ pub enum ActionCmd {
         ship: String,
         cue: crate::gm_presentation::PresentationCue,
     },
+    SetContactInformation {
+        observer: String,
+        change: crate::gm_information::ContactInformationChange,
+    },
     SetNpcDoctrine {
         uuid: String,
         id: String,
@@ -605,6 +609,21 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                 out.warnings.push(format!(
                     "presentation names unknown receiving ship '{ship}'"
                 ));
+            }
+        }
+        TriggerAction::SetContactInformation { ship, change } => {
+            if let Some(observer) = context
+                .name_to_uuid
+                .get(ship)
+                .or_else(|| context.name_to_uuid.values().find(|uuid| *uuid == ship))
+            {
+                out.commands.push(ActionCmd::SetContactInformation {
+                    observer: observer.clone(),
+                    change: change.clone(),
+                });
+            } else {
+                out.warnings
+                    .push(format!("Contact observer '{ship}' is not live"));
             }
         }
         TriggerAction::SetNpcDoctrine { entity, id } => {

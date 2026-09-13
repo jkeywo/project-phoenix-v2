@@ -1877,6 +1877,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   const bb = blackboardOfKind(state, 'Sensors', systemIds)?.data;
   const overrides = bb?.contact_overrides || {};
   const classifications = bb?.contact_classifications || {};
+  const selectedGhost = (bb?.contact_ghosts || []).some(ghost => ghost.uuid === state.sensorsTarget);
   const originalEntities = state.asteroids || [];
   const ordinary = originalEntities.filter(entity => overrides[entity.uuid] !== 'conceal').map(entity => {
     const label = classifications[entity.uuid];
@@ -1884,7 +1885,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   });
   const selectedMode = overrides[state.sensorsTarget] || 'normal';
   state = { ...state, asteroids: ordinary,
-    sensorsTarget: selectedMode === 'conceal' ? null : state.sensorsTarget };
+    sensorsTarget: selectedMode === 'conceal' || selectedGhost ? null : state.sensorsTarget };
   const range = bb ? (bb.radar_range ?? SENSORS_RADAR_RANGE)
                    : (state.sensorsRadarRange ?? SENSORS_RADAR_RANGE);
   const radarShows   = bb ? (bb.radar_shows   ?? state.sensorsRadarShows)
@@ -1917,6 +1918,13 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     const blip = buildTargetBlip(entity.uuid, [entity], state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
       range, { rotate: true, edgeClamp: true, kind: 'contact', icon: 'contact', label: t('console.sensors.basic_contact') });
     if (blip) { blip.icon = null; blip.basic_contact = true; blip.selectable = true; blips.push(blip); }
+  }
+
+  // False reports are observer-scoped basic points with no physical target.
+  for (const ghost of bb?.contact_ghosts || []) {
+    const blip = buildTargetBlip(ghost.uuid, [ghost], state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+      range, { rotate: true, edgeClamp: true, kind: 'contact', icon: 'contact', label: ghost.name });
+    if (blip) { blip.icon = null; blip.basic_contact = true; blip.selectable = false; blips.push(blip); }
   }
 
   // Classification is applied after detection, including a deliberately revealed
@@ -1960,7 +1968,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   // so the intelligence stays confined to the Sensors scan surface. The host
   // publishes `Some(bool)` only for a Red-Alert-capable ship it has selected;
   // absent field (non-ship/incapable/no selection) reads as `null` → no row.
-  const sensorRadarBb = selectedMode !== 'conceal' && !selectedBasic ? blackboardOfKind(state, 'SensorRadar', systemIds)?.data : null;
+  const sensorRadarBb = selectedMode !== 'conceal' && !selectedBasic && !selectedGhost ? blackboardOfKind(state, 'SensorRadar', systemIds)?.data : null;
   const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
 
   // Selected-target weapons power (issue #1397). Same authoritative path and

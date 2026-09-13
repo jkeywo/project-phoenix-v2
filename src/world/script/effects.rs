@@ -532,6 +532,41 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         },
     );
     host_fn!(
+        engine, "set_ghost_contact", receiver = "effects", category = "effect",
+        params = ["observer", "id", "palette", "position_mm"],
+        summary = "Set a false Sensors report for one observing ship. Position is three integer world millimetres; no physical entity is created.",
+        |sink: &mut EffectSink, observer: ImmutableString, id: ImmutableString, palette: ImmutableString, position: rhai::Array| -> Result<(), Box<EvalAltResult>> {
+            let values: Result<Vec<i32>, _> = position.iter().map(|value| value.as_int().ok().and_then(|n| i32::try_from(n).ok()).ok_or_else(|| raise("ghost position requires three i32 millimetres".into()))).collect();
+            let position_mm = values?.try_into().map_err(|_| raise("ghost position requires three i32 millimetres".into()))?;
+            let change = crate::gm_information::ContactInformationChange::SetGhost { id: id.to_string(), palette: palette.to_string(), position_mm };
+            if !crate::gm_npc::bounded_id(&observer) || !change.bounded() { return Err(raise("invalid contact information identity".into())); }
+            sink.push_action(TriggerAction::SetContactInformation { ship: observer.to_string(), change }); Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "remove_ghost_contact",
+        receiver = "effects",
+        category = "effect",
+        params = ["observer", "id"],
+        summary = "Remove one observing ship's false Sensors report.",
+        |sink: &mut EffectSink,
+         observer: ImmutableString,
+         id: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            let change =
+                crate::gm_information::ContactInformationChange::RemoveGhost { id: id.to_string() };
+            if !crate::gm_npc::bounded_id(&observer) || !change.bounded() {
+                return Err(raise("invalid contact information identity".into()));
+            }
+            sink.push_action(TriggerAction::SetContactInformation {
+                ship: observer.to_string(),
+                change,
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
         engine,
         "set_npc_doctrine",
         receiver = "effects",

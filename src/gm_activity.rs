@@ -254,6 +254,10 @@ pub enum GmActivityAction {
     Presentation {
         ship: String,
     },
+    SetContactInformation {
+        observer: String,
+        target: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -530,6 +534,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         GmActivityAction::RequestLiveRestore => (17, false, ""),
         GmActivityAction::SetContactClassification { active, target, .. } => (18, *active, target),
         GmActivityAction::Presentation { ship } => (19, false, ship),
+        GmActivityAction::SetContactInformation { target, .. } => (20, false, target),
     }
 }
 
@@ -1370,6 +1375,7 @@ fn terminal_action_entries(
                     | crate::gm_action::GmActionKind::ContactNormal
                     | crate::gm_action::GmActionKind::ContactMisclassify
                     | crate::gm_action::GmActionKind::ContactClassificationNormal
+                    | crate::gm_action::GmActionKind::ContactInformation
             ) {
                 // Contact history retains its recorded observer even after that
                 // ship disappears; reference supplies the cached name or UUID.
@@ -1499,6 +1505,12 @@ fn terminal_action_entries(
                             target: fact.target.clone()?,
                             active: kind == crate::gm_action::GmActionKind::ContactMisclassify,
                         },
+                        (crate::gm_action::GmActionKind::ContactInformation, _) => {
+                            GmActivityAction::SetContactInformation {
+                                observer: fact.observer.clone()?,
+                                target: fact.target.clone()?,
+                            }
+                        }
                         (crate::gm_action::GmActionKind::Comms, _) => {
                             GmActivityAction::TransmitComms {
                                 sender: fact.target.clone()?,

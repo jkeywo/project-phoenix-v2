@@ -1060,6 +1060,13 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
         acc = fold_str(acc, "presentation");
         acc = fold_u64(acc, vellum_digest::digest_postcard(&runtime.presentation));
     }
+    if !runtime.contact_information.is_empty() {
+        acc = fold_str(acc, "contact_information");
+        acc = fold_u64(
+            acc,
+            vellum_digest::digest_postcard(&runtime.contact_information),
+        );
+    }
     if !runtime.contact_classifications.is_empty() {
         acc = fold_str(acc, "contact_classifications");
         acc = fold_u64(

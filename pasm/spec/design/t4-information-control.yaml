@@ -12,7 +12,7 @@ entities:
         - "[ai] Browser and native GM controls share the contact panel, confirmation category and typed Admission route. Absolute apply/clear requests wait for their exact attributed correlated result. Classification results appear in the ordinary journal and activity feed; there is no second command or history lane."
         - "[ai] The observing-ship/target map is canonical run state: ordered maps, agreed apply ticks, idempotent requests, snapshot capture/restore and conditional deterministic digest folding. The Sensors blackboard publishes only its observer's resolved labels, not the GM palette selection or another observer's interpretation."
         - "[ai] Entity disappearance prunes the pair; an attributed despawn captures its classification beside the existing visibility override and a despawn undo restores both without overwriting a newer pair. A new run clears the map. Clear classification leaves Reveal/Conceal untouched."
-        - "[ai] Ghost contacts and delayed/degraded intel remain subsequent M7 paths. This delivery does not claim a complete per-ship evidence store or alter crew authority, Backfill targeting, live truth or deterministic physics."
+        - "[ai] Delayed/degraded intel remains a subsequent M7 path; ghost contacts have their own implemented owner below. This delivery does not claim a complete per-ship evidence store or alter crew authority, Backfill targeting, live truth or deterministic physics."
     architecture:
       kind: gm-information-control
       authority: authoritative
@@ -23,3 +23,27 @@ entities:
       paths: [src/gm_contact.rs, src/gm_action.rs, src/core/codec.rs, src/core/messages.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/gm_despawn.rs, src/gm_despawn_undo.rs, src/ship/sensors.rs, src/server/radar.rs, src/world/server.rs, src/snapshot.rs, src/sim_digest.rs, gui/console-state.js, gui/gm-contact-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, gui/gm-journal-panel.js, gui/gm-activity-feed.js, server.html]
       symbols: [ReportedClassification, ContactClassifications, set_classification, classification_labels, classify_viewscreen_contacts, SetContactClassification, ContactMisclassify, ContactClassificationNormal, createGmContactPanel]
       tests: ["cargo test --features headless --test gm_contact --test gm_despawn_undo", "npx vitest run tests/client/gm-contact.test.js tests/client/gm-knowledge-compare.test.js tests/client/gm-activity-feed.test.js tests/client/native-gm-workspace.test.js"]
+
+  - component: gm-t4-ghost-contacts
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Observer-Specific Ghost Contact Reports
+      summary: "SetContactInformation sets or removes one named false Sensors report for a live observing player ship. The report resolves an authored GM palette label and explicit integer world millimetres into a basic point. It has a reserved observer-local identity and never spawns an ECS entity, grants target authority or supplies physical facts. The same per-ship Sensors builder supplies the Crew Knowledge comparison, where the report is crew-only."
+      rationale:
+        - "[ai] Ghosts extend the accepted M7 radar-projection seam without a future C2 evidence-store or T5 dependency. The ordinary truth entity catalogue, physics, faction, Backfill and combat remain unchanged. Other observers receive none of the report."
+        - "[ai] The browser and native GM workspace share the contact panel, palette, confirmation policy, exact correlated canonical result, journal and activity family. Ghost controls require an observer but no real target. Keyboard focus and palette options survive unrelated live entity updates."
+        - "[ai] The canonical ordered observer/id map stores the resolved label and integer position. It participates in the deterministic digest and snapshot, clears on new run, and prunes on observing-ship disappearance. Set and remove are absolute and idempotent; a missing observer or palette refuses without mutation."
+        - "[ai] Sensors and the Sensors Viewscreen use the existing basic-contact edge floor. The point is untargetable and carries no hull, faction, geometry or independently earned scan data. Crew Knowledge admits the reserved report identity without enriching it from raw entity truth."
+        - "[ai] Mission TOML uses set_contact_information with an observing entity and typed contact_information change. Rhai set_ghost_contact and remove_ghost_contact buffer the same TriggerAction; dispatch resolves the observer and calls the same apply owner as GM admission. No second entity spawn or raw mutation path exists."
+    architecture:
+      kind: gm-information-control
+      authority: authoritative
+      coordinates: [gm-milestone-information-control, gm-t4-contact-classification]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_information.rs, src/gm_action.rs, src/core/codec.rs, src/core/messages.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_contact.rs, src/ship/sensors.rs, src/server/radar.rs, src/world/config.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/world/script/authoring.rs, src/snapshot.rs, src/sim_digest.rs, gui/console-state.js, gui/gm-contact-panel.js, gui/gm-knowledge-compare.js, gui/gm-workspace.js, gui/native-gm-workspace.js, server.html]
+      symbols: [ContactInformation, ContactInformationChange, GhostContact, SetContactInformation, ghost_snapshots, viewscreen_ghosts, apply_scenario_command]
+      tests: ["cargo test --features headless --test gm_contact ghost_", "cargo test --lib gm_information::", "npx vitest run tests/client/gm-contact.test.js tests/client/gm-knowledge-compare.test.js tests/client/native-gm-workspace.test.js tests/client/gm-confirmation.test.js"]

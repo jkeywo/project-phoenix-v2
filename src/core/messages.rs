@@ -5685,6 +5685,8 @@ pub struct ViewscreenBlackboard {
 /// blackboard (issue #566).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SensorsBlackboard {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contact_ghosts: Vec<EntitySnapshot>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub contact_overrides: std::collections::BTreeMap<String, crate::gm_contact::ContactMode>,
     /// Already resolved reported labels for this observer only.
@@ -5711,6 +5713,7 @@ impl Default for SensorsBlackboard {
             radar_range: default_sensors_radar_range(),
             contact_overrides: Default::default(),
             contact_classifications: Default::default(),
+            contact_ghosts: Default::default(),
             radar_shows: Vec::new(),
             radar_selects: Vec::new(),
             science_target_uuid: None,

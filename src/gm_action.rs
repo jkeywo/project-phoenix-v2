@@ -290,6 +290,10 @@ pub enum GmAction {
         ship: crate::command_admission::log::ShipKey,
         cue: crate::gm_presentation::PresentationCue,
     },
+    SetContactInformation {
+        ship: crate::command_admission::log::ShipKey,
+        change: crate::gm_information::ContactInformationChange,
+    },
 }
 
 /// The exact affected field one GM action changed, with its before and after
@@ -518,6 +522,7 @@ pub enum GmActionKind {
     ContactMisclassify,
     ContactClassificationNormal,
     Presentation,
+    ContactInformation,
 }
 
 impl GmActionKind {
@@ -544,6 +549,7 @@ impl GmActionKind {
             | Self::ContactMisclassify
             | Self::ContactClassificationNormal
             | Self::Presentation
+            | Self::ContactInformation
             | Self::Comms
             // The faction whose OWN enemies list moves. The other half of the
             // pair rides `LoggedGmAction::affected` rather than being folded
@@ -598,9 +604,9 @@ impl GmActionProposal {
 impl GmAction {
     pub fn observer_id(&self) -> Option<String> {
         match self {
-            Self::SetContactOverride { ship, .. } | Self::SetContactClassification { ship, .. } => {
-                Some(ship.0.clone())
-            }
+            Self::SetContactOverride { ship, .. }
+            | Self::SetContactClassification { ship, .. }
+            | Self::SetContactInformation { ship, .. } => Some(ship.0.clone()),
             _ => None,
         }
     }
@@ -624,7 +630,8 @@ impl GmAction {
             | Self::IssueStationCommand { ship, .. }
             | Self::SetContactOverride { ship, .. }
             | Self::SetContactClassification { ship, .. }
-            | Self::Presentation { ship, .. } => Some(ship),
+            | Self::Presentation { ship, .. }
+            | Self::SetContactInformation { ship, .. } => Some(ship),
         }
     }
 
@@ -654,6 +661,7 @@ impl GmAction {
             Self::SpawnPaletteEntity { palette, .. } => Some(palette.as_str()),
             Self::ObjectiveAction { objective, .. } => Some(objective),
             Self::TransmitComms { transmission } => Some(&transmission.sender),
+            Self::SetContactInformation { change, .. } => Some(change.target()),
             // The faction whose own enemies list moves. The enemy half is on
             // the durable `affected` fact, where the inverse reads it.
             Self::SetFactionHostility { faction, .. } => Some(faction.as_str()),
@@ -715,6 +723,11 @@ impl GmAction {
                 && recipients.len() <= crate::gm_objective::MAX_OBJECTIVE_RECIPIENTS
                 && recipients.iter().all(|id| bounded(id))
                 && recipients.windows(2).all(|pair| pair[0] < pair[1]) =>
+            {
+                Ok(())
+            }
+            Self::SetContactInformation { ship, change }
+                if bounded(&ship.0) && change.bounded() =>
             {
                 Ok(())
             }
@@ -829,6 +842,7 @@ impl GmAction {
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
             Self::DespawnEntity { .. } => GmActionKind::WorldDespawn,
             Self::ObjectiveAction { .. } => GmActionKind::ObjectiveControl,
+            Self::SetContactInformation { .. } => GmActionKind::ContactInformation,
             Self::SetContactClassification { palette, .. } => {
                 if palette.is_some() {
                     GmActionKind::ContactMisclassify
@@ -863,6 +877,7 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
             | Self::Presentation { .. }
+            | Self::SetContactInformation { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
@@ -955,6 +970,7 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
             | Self::Presentation { .. }
+            | Self::SetContactInformation { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
@@ -992,6 +1008,7 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
             | Self::Presentation { .. }
+            | Self::SetContactInformation { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
@@ -1024,6 +1041,7 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
             | Self::Presentation { .. }
+            | Self::SetContactInformation { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
@@ -1285,6 +1303,7 @@ pub fn validate_fleet_frame(
                     | GmActionKind::ContactNormal
                     | GmActionKind::ContactMisclassify
                     | GmActionKind::ContactClassificationNormal
+                    | GmActionKind::ContactInformation
             ) != refusal.observer.is_some()
             {
                 return Err(GmActionRefusalReason::InvalidAction);
@@ -2401,6 +2420,7 @@ impl GmActionJournal {
                         | GmAction::SetContactOverride { .. }
                         | GmAction::SetContactClassification { .. }
                         | GmAction::Presentation { .. }
+                        | GmAction::SetContactInformation { .. }
                         | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. }
@@ -2489,6 +2509,7 @@ impl GmActionJournal {
                 | GmAction::SetContactOverride { .. }
                 | GmAction::SetContactClassification { .. }
                 | GmAction::Presentation { .. }
+                | GmAction::SetContactInformation { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
@@ -2614,6 +2635,7 @@ impl GmActionJournal {
                 | GmAction::SetContactOverride { .. }
                 | GmAction::SetContactClassification { .. }
                 | GmAction::Presentation { .. }
+                | GmAction::SetContactInformation { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
@@ -3754,6 +3776,31 @@ pub fn apply_due_actions(
             // from a scripted one. Everything that decides the RESULT (the
             // palette entry, the variant, the placement) is answered here, at
             // the agreed apply tick, so every peer commits the same outcome.
+            GmAction::SetContactInformation { ship, change } => {
+                let observer = removal_targets.iter().find(|(uuid, ..)| uuid.0 == ship.0);
+                match (content.as_deref_mut(), observer) {
+                    (Some(runtime), Some((_, _, true, true, ..))) => {
+                        match crate::gm_information::apply_change(runtime, &ship.0, change) {
+                            Ok(changed) => (
+                                if changed {
+                                    GmActionOutcome::Applied
+                                } else {
+                                    GmActionOutcome::NoOp
+                                },
+                                None,
+                            ),
+                            Err(_) => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::InvalidAction),
+                            ),
+                        }
+                    }
+                    _ => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownEntity),
+                    ),
+                }
+            }
             GmAction::SetContactClassification {
                 ship,
                 target,
@@ -4394,6 +4441,7 @@ pub fn reset(world: &mut World) {
         content.contact_overrides.clear();
         content.contact_classifications.clear();
         content.presentation.clear();
+        content.contact_information = Default::default();
     }
     // The armed direct effects go with the journal that authorised them: an
     // arm that outlived its run would land damage in the NEXT one, attributed

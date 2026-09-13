@@ -409,6 +409,9 @@
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
+    #gm-contact-panel fieldset { display: grid; gap: .5rem; min-width: 0; }
+    #gm-contact-ghosts { margin: 0; padding: 0; list-style: none; }
+    #gm-contact-ghosts button { width: 100%; white-space: normal; overflow-wrap: anywhere; }
     #gm-spawn-palette { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
     .gm-spawn-entry { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
     .gm-spawn-entry-label { flex: 1 1 12rem; }
@@ -2246,6 +2249,17 @@
           <p id="gm-contact-classification-current" role="status"></p>
           <button id="gm-contact-misclassify" type="button" disabled data-i18n="server.gm.contact.misclassify"></button>
           <button id="gm-contact-classification-normal" type="button" disabled data-i18n="server.gm.contact.classification-normal"></button>
+          <fieldset><legend data-i18n="server.gm.contact.ghosts"></legend>
+            <p data-i18n="server.gm.contact.ghost-explanation"></p>
+            <label for="gm-contact-ghost-id" data-i18n="server.gm.contact.ghost-id"></label><input id="gm-contact-ghost-id" type="text" maxlength="128">
+            <label for="gm-contact-ghost-palette" data-i18n="server.gm.contact.classification"></label><select id="gm-contact-ghost-palette"></select>
+            <label for="gm-contact-ghost-x" data-i18n="server.gm.contact.ghost-x"></label><input id="gm-contact-ghost-x" type="number" step="1" min="-2147483648" max="2147483647" value="0">
+            <label for="gm-contact-ghost-y" data-i18n="server.gm.contact.ghost-y"></label><input id="gm-contact-ghost-y" type="number" step="1" min="-2147483648" max="2147483647" value="0">
+            <label for="gm-contact-ghost-z" data-i18n="server.gm.contact.ghost-z"></label><input id="gm-contact-ghost-z" type="number" step="1" min="-2147483648" max="2147483647" value="0">
+            <button id="gm-contact-ghost-set" type="button" disabled data-i18n="server.gm.contact.ghost-set"></button>
+            <button id="gm-contact-ghost-remove" type="button" disabled data-i18n="server.gm.contact.ghost-remove"></button>
+            <ul id="gm-contact-ghosts" aria-label="" data-i18n-aria-label="server.gm.contact.ghosts"></ul>
+          </fieldset>
           <p data-i18n="server.gm.contact.classification-explanation"></p>
           <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
           <ol id="gm-contact-results"></ol>
@@ -4513,6 +4527,13 @@
       if (!operator || !request || request.operator_id !== operator.id || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
         correlation: request.correlation, action: 'presentation', ship: request.ship, cue: request.cue }));
+    };
+    window.__hostSetContactInformation = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
+          || !request.change || typeof request.change !== 'object' || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
+        action: 'set_contact_information', ship: request.ship, change: request.change }));
     };
     window.__hostSetContactClassification = function(request) {
       const operator = localGm();

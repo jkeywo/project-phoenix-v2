@@ -370,6 +370,18 @@ pub(crate) fn sync_server_radar_bridge(
     };
     if active == ConsoleRadar::ViewscreenScience {
         if let (Some(runtime), Ok(observer)) = (contact_runtime.as_ref(), observer_q.single()) {
+            let ghosts = crate::gm_information::viewscreen_ghosts(
+                &runtime.contact_information,
+                &observer.0,
+                physics.x,
+                physics.z,
+                settings.range,
+            );
+            if !ghosts.is_empty() {
+                projected
+                    .get_or_insert_with(|| entities.clone())
+                    .extend(ghosts);
+            }
             if runtime.contact_classifications.contains_key(&observer.0) {
                 crate::gm_contact::classify_viewscreen_contacts(
                     projected.get_or_insert_with(|| entities.clone()),

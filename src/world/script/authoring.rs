@@ -276,6 +276,12 @@ mod tests {
         ("effects", "report_row", &["spec"]),
         ("effects", "reset_trigger", &["id"]),
         ("effects", "set_npc_doctrine", &["entity", "id"]),
+        (
+            "effects",
+            "set_ghost_contact",
+            &["observer", "id", "palette", "position_mm"],
+        ),
+        ("effects", "remove_ghost_contact", &["observer", "id"]),
         ("effects", "load_world", &["path"]),
         ("effects", "unload_world", &["path"]),
         ("effects", "game_over", &["reason"]),

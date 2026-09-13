@@ -183,6 +183,10 @@ pub fn prune(
         .iter()
         .map(|(id, fleet)| (id.0.as_str(), fleet))
         .collect();
+    content
+        .contact_information
+        .ghosts
+        .retain(|observer, _| live.get(observer.as_str()) == Some(&true));
     content.contact_overrides.retain(|observer, rows| {
         if live.get(observer.as_str()) != Some(&true) {
             return false;

@@ -221,6 +221,11 @@ pub struct GmEntityProjectionPayload {
     pub presentation_messages: Vec<crate::gm_presentation::PresentationMessageChoice>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub presentation_cameras: BTreeMap<String, Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::gm_information::ContactInformation::is_empty"
+    )]
+    pub contact_information: crate::gm_information::ContactInformation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contact_classification_palette: Vec<crate::gm_contact::ReportedClassification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -719,6 +724,7 @@ fn publish_local_projection(
         crate::gm_action::GmActionKind::ContactNormal,
         crate::gm_action::GmActionKind::ContactMisclassify,
         crate::gm_action::GmActionKind::ContactClassificationNormal,
+        crate::gm_action::GmActionKind::ContactInformation,
     ]
     .into_iter()
     .flat_map(|kind| crate::gm_action::projected_results(kind, &action_log, &local_refusals))
@@ -783,6 +789,10 @@ fn publish_local_projection(
             &action_log,
             &local_refusals,
         ),
+        contact_information: world_content
+            .as_ref()
+            .map(|runtime| runtime.contact_information.clone())
+            .unwrap_or_default(),
         contact_classifications: world_content
             .as_ref()
             .map(|runtime| runtime.contact_classifications.clone())

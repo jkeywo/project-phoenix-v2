@@ -989,6 +989,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                             | crate::gm_action::GmActionKind::ContactNormal
                             | crate::gm_action::GmActionKind::ContactMisclassify
                             | crate::gm_action::GmActionKind::ContactClassificationNormal
+                            | crate::gm_action::GmActionKind::ContactInformation
                     ) != observer.is_some()
                     {
                         return None;
@@ -1412,6 +1413,16 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                     object.get("ship")?.as_str()?,
                 )?),
                 cue: serde_json::from_value(object.get("cue")?.clone()).ok()?,
+            };
+            action.validate().ok()?;
+            action
+        }
+        "set_contact_information" if object.len() == 5 => {
+            let action = crate::gm_action::GmAction::SetContactInformation {
+                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
+                    object.get("ship")?.as_str()?,
+                )?),
+                change: serde_json::from_value(object.get("change")?.clone()).ok()?,
             };
             action.validate().ok()?;
             action

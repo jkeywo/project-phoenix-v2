@@ -66,6 +66,7 @@ export const GM_JOURNAL_ACTION_KIND_LABELS = Object.freeze({
   'faction-relation': 'server.gm.journal.kind.faction_relation',
   'action-undo': 'server.gm.journal.kind.action_undo',
   'live-restore': 'server.gm.journal.kind.live_restore',
+  presentation: 'server.gm.presentation.title',
 });
 
 const text = (value) => typeof value === 'string' && value.length > 0;

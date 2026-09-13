@@ -1,0 +1,13 @@
+.vs-presentation-card {
+  position: fixed; inset: 10%; z-index: 90; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  padding: clamp(1rem, 4vw, 4rem); border: 2px solid currentColor;
+  background: var(--surface, #08131c); color: var(--text, #eef7ff);
+  text-align: center; overflow: auto; pointer-events: auto;
+  font-family: var(--font-display, system-ui, sans-serif);
+}
+.vs-presentation-card[hidden] { display: none; }
+.vs-presentation-card:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.vs-presentation-card h1 { flex-shrink: 0; margin-top: auto; font-size: 2rem; line-height: 1.2; overflow-wrap: anywhere; }
+.vs-presentation-card p { flex-shrink: 0; margin-bottom: auto; font-size: 1.25rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (forced-colors: active) { .vs-presentation-card { background: Canvas; color: CanvasText; } }

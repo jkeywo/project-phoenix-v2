@@ -17,6 +17,7 @@ const ACTIONS = Object.freeze({
   __hostSetSystemDisabled: 'set_system_disabled',
   __hostSetContactOverride: 'set_contact_override',
   __hostSetContactClassification: 'set_contact_classification',
+  __hostPresentation: 'presentation',
   __hostDespawnEntity: 'despawn_entity',
   __hostSetNpcDoctrine: 'set_npc_doctrine',
   __hostSetFactionHostility: 'set_faction_hostility',

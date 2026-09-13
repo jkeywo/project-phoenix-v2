@@ -14,6 +14,7 @@ import { createGmCommsPanel } from './gm-comms-panel.js';
 import { createGmSpawnPanel } from './gm-spawn-panel.js';
 import { createGmSystemPanel } from './gm-system-panel.js';
 import { createGmContactPanel } from './gm-contact-panel.js';
+import { createGmPresentationPanel } from './gm-presentation-panel.js';
 import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
@@ -45,6 +46,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   // after both exist.
   let gmDirectEffect = null;
   let gmContact = null;
+  let gmPresentation = null;
   let gmSystem = null;
   let gmDespawn = null;
   let gmNpc = null;
@@ -420,6 +422,11 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     submitClassification: request => win.__hostSetContactClassification(request),
   });
   win.__hostGmContactState = gmContact.state;
+  gmPresentation = createGmPresentationPanel({ doc, t,
+    getOperator: () => win.__hostLocalGm?.() || null,
+    submit: request => win.__hostPresentation(request),
+  });
+  win.__hostGmPresentationState = gmPresentation.state;
   gmDespawn = createGmDespawnPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
@@ -431,9 +438,9 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     confirmAction: gmConfirmations.request,
   });
   win.__hostGmNpcState = gmNpc.state;
-  win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
+  win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmSystem.reset(); gmNpc.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -441,6 +448,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     gm_entity:    function(p) {
       gmDespawn.update(p);
       gmContact.update(p);
+      gmPresentation.update(p);
       gmSystem.update(p);
       gmNpc.update(p);
       if (gmProjection.update(p)) {

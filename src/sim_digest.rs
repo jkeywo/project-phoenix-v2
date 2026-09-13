@@ -1056,6 +1056,10 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
     // The queue's own order is folded rather than a sorted copy of it: two
     // placements swapped would draw each other's `WorldIdMint` id, which is a
     // real divergence this fold exists to catch.
+    if !runtime.presentation.is_empty() {
+        acc = fold_str(acc, "presentation");
+        acc = fold_u64(acc, vellum_digest::digest_postcard(&runtime.presentation));
+    }
     if !runtime.contact_classifications.is_empty() {
         acc = fold_str(acc, "contact_classifications");
         acc = fold_u64(

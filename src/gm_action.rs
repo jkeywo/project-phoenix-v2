@@ -285,6 +285,11 @@ pub enum GmAction {
         target: String,
         palette: Option<String>,
     },
+    /// Appended: canonical presentation uses the same reducer as authored cues.
+    Presentation {
+        ship: crate::command_admission::log::ShipKey,
+        cue: crate::gm_presentation::PresentationCue,
+    },
 }
 
 /// The exact affected field one GM action changed, with its before and after
@@ -512,6 +517,7 @@ pub enum GmActionKind {
     LiveRestore,
     ContactMisclassify,
     ContactClassificationNormal,
+    Presentation,
 }
 
 impl GmActionKind {
@@ -537,6 +543,7 @@ impl GmActionKind {
             | Self::ContactNormal
             | Self::ContactMisclassify
             | Self::ContactClassificationNormal
+            | Self::Presentation
             | Self::Comms
             // The faction whose OWN enemies list moves. The other half of the
             // pair rides `LoggedGmAction::affected` rather than being folded
@@ -616,7 +623,8 @@ impl GmAction {
             Self::SetStationPuppet { ship, .. }
             | Self::IssueStationCommand { ship, .. }
             | Self::SetContactOverride { ship, .. }
-            | Self::SetContactClassification { ship, .. } => Some(ship),
+            | Self::SetContactClassification { ship, .. }
+            | Self::Presentation { ship, .. } => Some(ship),
         }
     }
 
@@ -630,6 +638,7 @@ impl GmAction {
     /// no single stable target", not "unknown".
     pub fn target_id(&self) -> Option<&str> {
         match self {
+            Self::Presentation { ship, .. } => Some(&ship.0),
             Self::FireGmEvent { event }
             | Self::SetEventPaused { event, .. }
             | Self::ArmGmEventSkip { event } => Some(event.as_str()),
@@ -664,6 +673,7 @@ impl GmAction {
             !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
         };
         match self {
+            Self::Presentation { ship, cue } if bounded(&ship.0) && cue.valid() => Ok(()),
             Self::SetSessionPaused { .. } => Ok(()),
             Self::SetSystemDisabled { target, system, .. }
                 if bounded(target) && bounded(&system.0) =>
@@ -808,6 +818,7 @@ impl GmAction {
                     GmActionKind::SystemRestore
                 }
             }
+            Self::Presentation { .. } => GmActionKind::Presentation,
             Self::SetSessionPaused { .. } => GmActionKind::SessionPause,
             Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
@@ -851,6 +862,7 @@ impl GmAction {
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
+            | Self::Presentation { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
@@ -942,6 +954,7 @@ impl GmAction {
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
+            | Self::Presentation { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
@@ -978,6 +991,7 @@ impl GmAction {
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
+            | Self::Presentation { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
@@ -1009,6 +1023,7 @@ impl GmAction {
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
             | Self::SetContactClassification { .. }
+            | Self::Presentation { .. }
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
@@ -2385,6 +2400,7 @@ impl GmActionJournal {
                         | GmAction::SpawnPaletteEntity { .. }
                         | GmAction::SetContactOverride { .. }
                         | GmAction::SetContactClassification { .. }
+                        | GmAction::Presentation { .. }
                         | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. }
@@ -2472,6 +2488,7 @@ impl GmActionJournal {
                 | GmAction::SpawnPaletteEntity { .. }
                 | GmAction::SetContactOverride { .. }
                 | GmAction::SetContactClassification { .. }
+                | GmAction::Presentation { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
@@ -2596,6 +2613,7 @@ impl GmActionJournal {
                 | GmAction::SpawnPaletteEntity { .. }
                 | GmAction::SetContactOverride { .. }
                 | GmAction::SetContactClassification { .. }
+                | GmAction::Presentation { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
@@ -3151,6 +3169,9 @@ pub fn apply_due_actions(
         crate::gm_puppet::capability::StationCapabilities,
         crate::gm_comms::GmCommsParams,
         crate::gm_npc::NpcDoctrineControl,
+        // Incoming takeover reads the inbox the Comms action may write. Each
+        // action acquires only its own view at the canonical apply boundary.
+        crate::gm_presentation::PresentationControl,
     )>,
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
@@ -3217,6 +3238,33 @@ pub fn apply_due_actions(
             losses.as_deref(),
         );
         let (outcome, reason) = match &grant.action {
+            GmAction::Presentation { ship, cue } => {
+                let live = removal_targets
+                    .iter()
+                    .any(|(uuid, _, is_ship, fleet, ..)| uuid.0 == ship.0 && is_ship && fleet);
+                match content.as_deref_mut().filter(|_| live) {
+                    Some(content) => {
+                        match ship_access
+                            .p4()
+                            .apply(&mut content.presentation, &ship.0, cue, now)
+                        {
+                            Ok(changed) => (
+                                if changed {
+                                    GmActionOutcome::Applied
+                                } else {
+                                    GmActionOutcome::NoOp
+                                },
+                                None,
+                            ),
+                            Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+                        }
+                    }
+                    None => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownEntity),
+                    ),
+                }
+            }
             GmAction::SetNpcDoctrine { target, doctrine } => match content.as_deref() {
                 Some(runtime) => {
                     // Read the live doctrine BEFORE the mutation: the applied
@@ -4345,6 +4393,7 @@ pub fn reset(world: &mut World) {
     {
         content.contact_overrides.clear();
         content.contact_classifications.clear();
+        content.presentation.clear();
     }
     // The armed direct effects go with the journal that authorised them: an
     // arm that outlived its run would land damage in the NEXT one, attributed

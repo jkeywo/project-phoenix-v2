@@ -269,7 +269,7 @@ impl Plugin for ViewscreenBorderPlugin {
             .add_systems(
                 Update,
                 (
-                    recompute_hud_state,
+                    recompute_hud_state.after(crate::gm_presentation::sync_views),
                     push_hud_state.after(recompute_hud_state),
                 )
                     .run_if(in_state(GamePhase::InProgress)),
@@ -747,6 +747,7 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         phaser_firing: false,
         game_over_message: None,
         computer_message: None,
+        presentation_card: None,
         game_over_report: Vec::new(),
         game_over_outcome: None,
         scenario_title: None,
@@ -851,6 +852,7 @@ fn compute_hud_state(
         phaser_firing,
         game_over_message,
         computer_message,
+        presentation_card: None,
         game_over_report,
         game_over_outcome,
         scenario_title,
@@ -885,6 +887,7 @@ fn recompute_hud_state(
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::server_app::LocalShip>>,
     beam_q: Query<&crate::console::weapons::ActiveBeam, With<crate::server_app::LocalShip>>,
     computer_message: Option<Res<ActiveComputerMessage>>,
+    presentation: crate::gm_presentation::PresentationHud,
     world_resource: Option<Res<WorldResource>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
@@ -908,7 +911,7 @@ fn recompute_hud_state(
         .as_deref()
         .and_then(|m| m.current.as_ref())
         .map(to_computer_message_wire);
-    let next = compute_hud_state(
+    let mut next = compute_hud_state(
         red_alert,
         &physics,
         hull_current,
@@ -923,6 +926,9 @@ fn recompute_hud_state(
             .as_deref()
             .map(|w| w.0.scenario_title.as_str()),
     );
+    if *phase.get() == GamePhase::InProgress {
+        next.presentation_card = presentation.card();
+    }
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
             hud.0 = next.clone();

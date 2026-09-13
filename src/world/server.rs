@@ -211,6 +211,7 @@ pub struct WorldContentRuntime {
     pub gm_despawn_captures: crate::gm_despawn_undo::GmDespawnCaptures,
     pub contact_overrides: crate::gm_contact::ContactOverrides,
     pub contact_classifications: crate::gm_contact::ContactClassifications,
+    pub presentation: crate::gm_presentation::PresentationState,
     /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
     /// (issue #1303).
     ///
@@ -3364,6 +3365,15 @@ pub(crate) fn apply_dispatch_result(
 
     for cmd in action_cmds {
         match cmd {
+            ActionCmd::Presentation { ship, cue } => {
+                commands.queue(move |world: &mut World| {
+                    use bevy::ecs::system::RunSystemOnce;
+                    let _ = world.run_system_once_with(
+                        crate::gm_presentation::apply_scenario_command,
+                        (ship, cue),
+                    );
+                });
+            }
             ActionCmd::SetNpcDoctrine { uuid, id } => {
                 commands.queue(move |world: &mut World| {
                     use bevy::ecs::system::RunSystemOnce;

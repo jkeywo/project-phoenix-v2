@@ -213,6 +213,14 @@ pub struct GmEntityProjectionPayload {
     pub contact_overrides: crate::gm_contact::ContactOverrides,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub contact_classifications: crate::gm_contact::ContactClassifications,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub presentation: crate::gm_presentation::PresentationState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presentation_results: Vec<crate::gm_action::LoggedGmAction>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presentation_messages: Vec<crate::gm_presentation::PresentationMessageChoice>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub presentation_cameras: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contact_classification_palette: Vec<crate::gm_contact::ReportedClassification>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -305,6 +313,9 @@ pub struct GmStationProjectionPayload {
 
 pub struct GmProjectionPlugin;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HeldGmProjection;
+
 impl Plugin for GmProjectionPlugin {
     fn build(&self, app: &mut App) {
         use crate::authoritative::{DeclareState, StateClass};
@@ -321,8 +332,25 @@ impl Plugin for GmProjectionPlugin {
         .add_systems(
             FixedLast,
             (publish_local_projection, publish_station_projection).run_if(gm_presentation_active),
+        )
+        .add_systems(
+            PostUpdate,
+            // Presentation actions are admitted at a held tick too. Publish
+            // their current state and terminal result without requiring Resume.
+            // The existing absolute projection owns this payload in both cases.
+            publish_local_projection
+                .in_set(HeldGmProjection)
+                .run_if(gm_presentation_active)
+                .run_if(presentation_clock_held),
         );
     }
+}
+
+fn presentation_clock_held(
+    paused: Option<Res<crate::gm_action::SimulationPaused>>,
+    time: Option<Res<Time<Virtual>>>,
+) -> bool {
+    paused.is_some_and(|paused| paused.0) || time.is_some_and(|time| time.is_paused())
 }
 
 type GmShipProjectionQuery<'w, 's> = Query<
@@ -544,6 +572,7 @@ fn publish_local_projection(
     mut previous: Local<Option<GmEntityProjectionPayload>>,
     mut changed: MessageWriter<GmEntityProjectionChanged>,
     removal_targets: crate::gm_despawn::RemovalQuery,
+    presentation_control: crate::gm_presentation::PresentationControl,
 ) {
     // Resolve names in a separate deterministic lookup so target links never
     // leak a Bevy `Entity` and remain useful after a projection refresh.
@@ -743,6 +772,17 @@ fn publish_local_projection(
             .as_ref()
             .map(|runtime| runtime.contact_overrides.clone())
             .unwrap_or_default(),
+        presentation: world_content
+            .as_deref()
+            .map(|r| r.presentation.clone())
+            .unwrap_or_default(),
+        presentation_messages: presentation_control.message_choices(),
+        presentation_cameras: presentation_control.cameras(),
+        presentation_results: crate::gm_action::projected_results(
+            crate::gm_action::GmActionKind::Presentation,
+            &action_log,
+            &local_refusals,
+        ),
         contact_classifications: world_content
             .as_ref()
             .map(|runtime| runtime.contact_classifications.clone())

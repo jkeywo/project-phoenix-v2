@@ -107,6 +107,10 @@ impl Default for ShipViewMode {
 }
 
 impl ShipViewMode {
+    pub fn force_view_mode(&mut self, mode: Option<ViewMode>) {
+        self.view_mode = self.viewscreen.force(mode).mode;
+    }
+
     pub fn request_view_mode(&mut self, mode: ViewMode) {
         let requester = source_system_for_view_mode(&mode);
         self.request_view_mode_from(requester, mode);

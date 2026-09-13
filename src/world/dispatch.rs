@@ -176,6 +176,10 @@ pub enum FlagMutation {
 /// `Uuid`s. Nothing here names a Bevy `Entity`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ActionCmd {
+    Presentation {
+        ship: String,
+        cue: crate::gm_presentation::PresentationCue,
+    },
     SetNpcDoctrine {
         uuid: String,
         id: String,
@@ -591,6 +595,18 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
     let mut out = DispatchResult::default();
 
     match action {
+        TriggerAction::Presentation { ship, cue } => {
+            if let Some(uuid) = context.name_to_uuid.get(ship) {
+                out.commands.push(ActionCmd::Presentation {
+                    ship: uuid.clone(),
+                    cue: cue.clone(),
+                });
+            } else {
+                out.warnings.push(format!(
+                    "presentation names unknown receiving ship '{ship}'"
+                ));
+            }
+        }
         TriggerAction::SetNpcDoctrine { entity, id } => {
             if let Some(uuid) = context
                 .name_to_uuid

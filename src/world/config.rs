@@ -711,6 +711,8 @@ pub(crate) struct RawActionEntry {
     #[serde(rename = "type")]
     pub(crate) kind: String,
     #[serde(default)]
+    pub(crate) presentation: Option<crate::gm_presentation::PresentationCue>,
+    #[serde(default)]
     pub(crate) id: Option<String>,
     #[serde(default)]
     pub(crate) text: Option<String>,
@@ -1574,6 +1576,10 @@ impl GmEventControls {
 /// An action to execute when a trigger fires.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TriggerAction {
+    Presentation {
+        ship: String,
+        cue: crate::gm_presentation::PresentationCue,
+    },
     SetNpcDoctrine {
         entity: String,
         id: String,
@@ -1947,6 +1953,21 @@ fn parse_flag_kind(s: &str) -> Result<crate::core::messages::FlagKind, String> {
 pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerAction, String> {
     let action =
         match raw_action.kind.as_str() {
+            "presentation" => {
+                let ship = raw_action
+                    .entity
+                    .clone()
+                    .filter(|s| crate::gm_npc::bounded_id(s))
+                    .ok_or("presentation requires a receiving player ship entity")?;
+                let cue = raw_action
+                    .presentation
+                    .clone()
+                    .filter(|cue| cue.valid())
+                    .ok_or(
+                        "presentation requires a valid typed cue and explicit positive duration",
+                    )?;
+                TriggerAction::Presentation { ship, cue }
+            }
             "set_npc_doctrine" => {
                 let entity = raw_action
                     .entity

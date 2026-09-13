@@ -990,6 +990,10 @@ fn encode_chatter_wire_shape_matches_js_handler() {
 #[test]
 fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     let payload = crate::gm_projection::GmEntityProjectionPayload {
+        presentation: Default::default(),
+        presentation_results: Vec::new(),
+        presentation_messages: Vec::new(),
+        presentation_cameras: Default::default(),
         system_controls: Default::default(),
         system_results: Default::default(),
         npc_doctrines: Default::default(),
@@ -4922,6 +4926,7 @@ fn entity_state_snapshot_without_shields_field_defaults_to_none() {
 #[test]
 fn encode_hud_state_round_trips() {
     let state = ViewscreenHudState {
+        presentation_card: None,
         heading: 90,
         hull_pct: 75,
         condition: "ALERT".into(),
@@ -4942,6 +4947,7 @@ fn encode_hud_state_round_trips() {
 #[test]
 fn encode_hud_state_emits_snake_case_fields() {
     let state = ViewscreenHudState {
+        presentation_card: None,
         heading: 0,
         hull_pct: 100,
         condition: "NOMINAL".into(),
@@ -4978,6 +4984,7 @@ fn encode_hud_state_carries_the_computer_message_when_present() {
             severity: "advisory".into(),
             station: Some("tactical".into()),
         }),
+        presentation_card: None,
         game_over_report: Vec::new(),
         game_over_outcome: None,
         scenario_title: None,
@@ -4991,6 +4998,7 @@ fn encode_hud_state_carries_the_computer_message_when_present() {
 #[test]
 fn encode_hud_state_omits_absent_computer_message() {
     let state = ViewscreenHudState {
+        presentation_card: None,
         heading: 0,
         hull_pct: 100,
         condition: "NOMINAL".into(),

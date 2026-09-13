@@ -1406,6 +1406,16 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
             action.validate().ok()?;
             action
         }
+        "presentation" if object.len() == 5 => {
+            let action = crate::gm_action::GmAction::Presentation {
+                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
+                    object.get("ship")?.as_str()?,
+                )?),
+                cue: serde_json::from_value(object.get("cue")?.clone()).ok()?,
+            };
+            action.validate().ok()?;
+            action
+        }
         "set_contact_classification" if object.len() == 6 => {
             let palette = object.get("palette")?;
             crate::gm_action::GmAction::SetContactClassification {

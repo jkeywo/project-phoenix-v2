@@ -3441,6 +3441,8 @@
   window.__updateHud = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
+    window.__latestPresentationCard = s.presentation_card || null;
+    window.__updatePresentationCard?.(window.__latestPresentationCard);
     const overlay   = document.getElementById('hud-overlay');
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
     // Red-alert siren/music, engine volume from thrust, and the phaser loop's
@@ -4505,6 +4507,12 @@
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_system_disabled', target: request.target, system: request.system, disabled: request.disabled }));
+    };
+    window.__hostPresentation = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
+        correlation: request.correlation, action: 'presentation', ship: request.ship, cue: request.cue }));
     };
     window.__hostSetContactClassification = function(request) {
       const operator = localGm();
@@ -8801,5 +8809,12 @@ window.addEventListener('TrunkApplicationStarted', () => {
       window.__republishViewscreenMotion();
     }
   </script>
+<link rel="stylesheet" href="gui/presentation-card.css">
+<script type="module">
+  import { createPresentationCard } from './gui/presentation-card.js';
+  const presentationCard = createPresentationCard();
+  window.__updatePresentationCard = presentationCard.update;
+  presentationCard.update(window.__latestPresentationCard || null);
+</script>
 </body>
 </html>

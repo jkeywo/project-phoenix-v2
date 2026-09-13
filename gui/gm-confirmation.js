@@ -80,6 +80,7 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   SetFactionHostility: ['faction.relation'],
   UndoGmAction: ['action.undo'],
   RequestLiveRestore: ['world.restore'],
+  Presentation: [],
 }).map(([action, ids]) => [action, Object.freeze(ids.map(gmConfirmationMetadata))])));
 
 /** Registration must name a real category, including its accepted default. */

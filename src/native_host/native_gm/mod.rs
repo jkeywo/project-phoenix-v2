@@ -87,6 +87,7 @@ impl Plugin for NativeGmPlugin {
                 PostUpdate,
                 (sync_presence, feed_projections)
                     .chain()
+                    .after(crate::gm_projection::HeldGmProjection)
                     .after(crate::gm_activity::publish_frame_activity)
                     .after(crate::gm_action::publish_session_projection)
                     .after(crate::gm_event::publish_mission_projection)

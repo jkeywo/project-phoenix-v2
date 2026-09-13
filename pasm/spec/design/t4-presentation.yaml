@@ -1,0 +1,25 @@
+entities:
+  - component: gm-t4-presentation-cues
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Per-Ship Viewscreen Presentation Cues
+      summary: "M8 issue #1468 stages a receiving player ship's shared display through one typed GM and scenario owner: force/release a camera or radar/chart mode, show/clear a title card, or take over with an existing eligible Comms message. Browser and native surfaces consume the same current state. Audio #1466 extends this dispatch with validated authored sound after its playback dependencies."
+      rationale:
+        - "[ai] GmAction::Presentation appends to the canonical action vocabulary, preserves attribution/idempotency and revalidates at the agreed apply tick. Declarative presentation and Rhai force_view/title_card/incoming_comms/clear_presentation resolve the same receiving ship and call the same owner. No direct window or ECS editing path."
+        - "[ai] Durations are explicit positive simulation-tick values. A pause holds the cue. Active state is per ship and participates in snapshot/digest; expiry, missing ships and mission reset remove it. Rendering and reconnect cannot extend a deadline or recreate an expired cue."
+        - "[ai] Forced view is a layer over normal Viewscreen arbitration. Crew requests continue updating their underlying selection; release or expiry reveals the latest selection. Camera names must exist in the receiving ship's authoritative primary rig."
+        - "[ai] Incoming takeover names an existing Comms message, never creates a message or widens routing. Eligibility and orphaning are checked on application and live rendering; exact literal text and authored interpolation retain existing Comms semantics."
+        - "[ai] Cards are current presentation only, with no history/backlog/replay. GM action journal bookkeeping remains canonical. Titles contain bounded operator text; informative sound and playback comfort/device behavior stay in the audio plan."
+        - "[ai] Shared GM forms and cards support keyboard focus, non-colour outcome text, enlarged wrapping text, forced colours and structured text alternatives. No animation or sound is needed to operate them."
+    architecture:
+      kind: gm-presentation-control
+      authority: authoritative
+      coordinates: [gm-milestone-presentation]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_presentation.rs, src/gm_action.rs, src/core/codec.rs, src/core/messages.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/server.rs, src/gm_projection.rs, src/gm_activity.rs, src/snapshot.rs, src/sim_digest.rs, src/lockstep/mod.rs, src/ship/viewscreen.rs, src/ship/state.rs, src/server/viewscreen_border.rs, gui/gm-presentation-panel.js, gui/presentation-card.js, gui/presentation-card.css, gui/gm-workspace.js, gui/native-gm-workspace.js, gui/viewscreen-hud.html, server.html]
+      symbols: [PresentationCue, PresentationState, PresentationControl, apply_scenario_command, PresentationHud, card_wire, createGmPresentationPanel, createPresentationCard]
+      tests: [tests/gm_presentation.rs, src/world/script/effects.rs, tests/client/gm-presentation-panel.test.js, tests/smoke/gm-presentation.spec.js, tests/smoke/gm-presentation-runtime.spec.js]

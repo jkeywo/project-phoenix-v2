@@ -594,6 +594,12 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-widget-reason, #gm-console.gm-desk .gm-widget-station { flex: 1 1 12ch; min-width: 0; }
 /* The buttons wrap rather than squeezing, and keep the shared hit floor: a
    widget button is a second press of a shipped control, not a smaller one. */
+#gm-console.gm-desk #gm-presentation-panel { display: flex; flex-wrap: wrap; gap: var(--space-3); min-width: 0; }
+#gm-console.gm-desk #gm-presentation-panel label { display: flex; flex-direction: column; flex: 1 1 16ch; min-width: 0; }
+#gm-console.gm-desk #gm-presentation-panel :is(input, select, textarea) { box-sizing: border-box; max-width: 100%; min-width: 0; }
+#gm-console.gm-desk #gm-presentation-panel button { min-height: var(--control-hit-min); }
+#gm-console.gm-desk #gm-presentation-panel :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gm-console.gm-desk #gm-presentation-panel p { flex-basis: 100%; overflow-wrap: anywhere; }
 #gm-console.gm-desk .gm-widget-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); min-width: 0; }
 #gm-console.gm-desk .gm-widget-actions button { flex: 1 1 12ch; min-height: var(--control-hit-min); min-width: 0; }
 #gm-console.gm-desk .gm-widget-actions button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }

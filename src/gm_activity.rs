@@ -251,6 +251,9 @@ pub enum GmActivityAction {
         target: String,
         active: bool,
     },
+    Presentation {
+        ship: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -526,6 +529,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // operator and correlation the entry itself carries.
         GmActivityAction::RequestLiveRestore => (17, false, ""),
         GmActivityAction::SetContactClassification { active, target, .. } => (18, *active, target),
+        GmActivityAction::Presentation { ship } => (19, false, ship),
     }
 }
 
@@ -1572,6 +1576,11 @@ fn terminal_action_entries(
                         // itself. Written out rather than left as a wildcard so
                         // the next family that mutates the world cannot compile
                         // while being published as somebody's session pause.
+                        (crate::gm_action::GmActionKind::Presentation, _) => {
+                            GmActivityAction::Presentation {
+                                ship: fact.target.clone().unwrap_or_default(),
+                            }
+                        }
                         (crate::gm_action::GmActionKind::LiveRestore, _) => {
                             GmActivityAction::RequestLiveRestore
                         }

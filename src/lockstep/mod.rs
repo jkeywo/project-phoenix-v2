@@ -1102,6 +1102,7 @@ pub fn register_lockstep(app: &mut App) {
             (
                 apply_mesh_inbox,
                 crate::gm_contact::prune,
+                crate::gm_presentation::prune,
                 // Mirror the peer count and live seating the reducer's own
                 // parameter budget cannot reach, immediately before it reads
                 // them (issue #1446).
@@ -1122,7 +1123,11 @@ pub fn register_lockstep(app: &mut App) {
         )
         .add_systems(
             FixedLast,
-            (crate::gm_contact::prune, seal_tick_frame)
+            (
+                crate::gm_contact::prune,
+                crate::gm_presentation::prune,
+                seal_tick_frame,
+            )
                 .chain()
                 .before(crate::sim_tick::advance_sim_tick)
                 .before(sample_and_publish_digest),
@@ -1165,6 +1170,7 @@ pub fn register_lockstep(app: &mut App) {
                 crate::gm_comms::publish_comms_projection,
             ),
         )
+        .add_systems(Update, crate::gm_presentation::sync_views)
         // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the
         // agreed tick, on the lost ship — the same phase the ordinary rating
         // change and the human-seeking resolver run in. Ordered

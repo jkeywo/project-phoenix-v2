@@ -565,6 +565,7 @@ pub fn render_condition(condition: &TriggerCondition) -> String {
 /// given a rendering, rather than silently vanishing from the queue view.
 pub fn render_action(action: &TriggerAction) -> String {
     match action {
+        TriggerAction::Presentation { ship, cue } => format!("presentation({ship}, {cue:?})"),
         TriggerAction::SetNpcDoctrine { entity, id } => format!("set_npc_doctrine({entity}, {id})"),
         TriggerAction::AddObjective { id, .. } => format!("add_objective({id})"),
         TriggerAction::CompleteObjective { id } => format!("complete_objective({id})"),

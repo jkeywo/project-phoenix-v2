@@ -3874,6 +3874,8 @@ pub struct ViewscreenHudState {
     /// a HUD push with this field absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub computer_message: Option<ComputerMessageWire>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation_card: Option<crate::gm_presentation::PresentationCardWire>,
     /// The structured post-mission report (issue #1344), in authored row order,
     /// set only while the game has ended and only when the scenario authored
     /// one. The SAME [`GameOverReportRow`] the phone receives on

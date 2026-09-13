@@ -1039,6 +1039,7 @@ pub fn wasm_init() {
         (
             flush_outbound,
             flush_host_channels
+                .after(crate::gm_projection::HeldGmProjection)
                 .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
                 .after(crate::gm_action::publish_session_projection)
                 .after(crate::gm_event::publish_mission_projection)

@@ -358,6 +358,90 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
             Ok(())
         },
     );
+    host_fn!(engine, "force_view", receiver = "effects", category = "effect",
+        params = ["ship", "mode", "duration_ticks"], summary = "Force a receiving player's Viewscreen until the explicit simulation-tick duration expires.",
+        |sink: &mut EffectSink, ship: ImmutableString, mode: ImmutableString, duration_ticks: i64| -> Result<(), Box<EvalAltResult>> {
+            let view = crate::gm_presentation::PresentationView::parse(&mode).ok_or_else(|| raise("unknown presentation view".into()))?;
+            sink.push_action(presentation_action(&ship, crate::gm_presentation::PresentationCue::ForceView {
+                view, duration_ticks: u32::try_from(duration_ticks).map_err(|_| raise("invalid duration_ticks".into()))?,
+            }).map_err(raise)?); Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "title_card",
+        receiver = "effects",
+        category = "effect",
+        params = ["ship", "title", "subtitle", "duration_ticks"],
+        summary = "Show a timed title card on the receiving ship's Viewscreen.",
+        |sink: &mut EffectSink,
+         ship: ImmutableString,
+         title: ImmutableString,
+         subtitle: ImmutableString,
+         duration_ticks: i64|
+         -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(
+                presentation_action(
+                    &ship,
+                    crate::gm_presentation::PresentationCue::TitleCard {
+                        title: title.to_string(),
+                        subtitle: subtitle.to_string(),
+                        duration_ticks: u32::try_from(duration_ticks)
+                            .map_err(|_| raise("invalid duration_ticks".into()))?,
+                    },
+                )
+                .map_err(raise)?,
+            );
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "incoming_comms",
+        receiver = "effects",
+        category = "effect",
+        params = ["ship", "message", "duration_ticks"],
+        summary =
+            "Take over a receiving ship's Viewscreen with an existing message that ship may read.",
+        |sink: &mut EffectSink,
+         ship: ImmutableString,
+         message: ImmutableString,
+         duration_ticks: i64|
+         -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(
+                presentation_action(
+                    &ship,
+                    crate::gm_presentation::PresentationCue::IncomingComms {
+                        message: message.to_string(),
+                        duration_ticks: u32::try_from(duration_ticks)
+                            .map_err(|_| raise("invalid duration_ticks".into()))?,
+                    },
+                )
+                .map_err(raise)?,
+            );
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "clear_presentation",
+        receiver = "effects",
+        category = "effect",
+        params = ["ship", "part"],
+        summary = "Release a forced view or clear the current card; part is view or card.",
+        |sink: &mut EffectSink,
+         ship: ImmutableString,
+         part: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            let cue = match part.as_str() {
+                "view" => crate::gm_presentation::PresentationCue::ReleaseView,
+                "card" => crate::gm_presentation::PresentationCue::ClearCard,
+                _ => return Err(raise("part must be view or card".into())),
+            };
+            sink.push_action(presentation_action(&ship, cue).map_err(raise)?);
+            Ok(())
+        },
+    );
     host_fn!(
         engine,
         "show_message",
@@ -1237,6 +1321,18 @@ fn dynamic_to_toml(value: &Dynamic) -> Result<toml::Value, String> {
 /// `parse_utility_config` (run inside `parse_action_entry`) builds the byte-identical
 /// `UtilityConfig` the declarative twin does — the scripted and TOML `add_objective`
 /// are two front-ends over one parser, not two implementations kept in sync.
+fn presentation_action(
+    ship: &str,
+    cue: crate::gm_presentation::PresentationCue,
+) -> Result<TriggerAction, String> {
+    parse_action_entry(&RawActionEntry {
+        kind: "presentation".into(),
+        entity: Some(ship.into()),
+        presentation: Some(cue),
+        ..Default::default()
+    })
+}
+
 fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
     const KNOWN_FIELDS: &[&str] = &[
         "id",
@@ -2068,6 +2164,44 @@ mod tests {
         )
         .expect_err("an unknown severity must raise");
         assert!(err.to_string().contains("severity"), "{err}");
+    }
+
+    #[test]
+    fn presentation_hosts_use_the_declarative_parser_and_buffer_one_shared_action() {
+        let raw: RawActionEntry = toml::from_str("type = 'presentation'\nentity = 'player'\n[presentation.title_card]\ntitle = 'Arrival'\nsubtitle = 'Stand by'\nduration_ticks = 10\n").unwrap();
+        assert!(matches!(
+            parse_action_entry(&raw).unwrap(),
+            TriggerAction::Presentation {
+                cue: crate::gm_presentation::PresentationCue::TitleCard {
+                    duration_ticks: 10,
+                    ..
+                },
+                ..
+            }
+        ));
+        let effects = run_buffered(
+            r#"fn on_x(ctx) { ctx.effects.title_card("player", "Arrival", "Stand by", 10); ctx.effects.force_view("player", "sensors_radar", 20); ctx.effects.incoming_comms("player", "message", 30); ctx.effects.clear_presentation("player", "card"); }"#,
+            "on_x",
+        );
+        assert_eq!(effects.len(), 4);
+        assert!(effects.iter().all(|effect| matches!(effect, BufferedEffect::Action(TriggerAction::Presentation { ship, .. }) if ship == "player")));
+        assert!(matches!(
+            &effects[0],
+            BufferedEffect::Action(TriggerAction::Presentation {
+                cue: crate::gm_presentation::PresentationCue::TitleCard {
+                    duration_ticks: 10,
+                    ..
+                },
+                ..
+            })
+        ));
+        for source in [
+            r#"fn on_x(ctx) { ctx.effects.title_card("player", "Title", "", 0); }"#,
+            r#"fn on_x(ctx) { ctx.effects.force_view("player", "invalid", 20); }"#,
+            r#"fn on_x(ctx) { ctx.effects.clear_presentation("player", "world"); }"#,
+        ] {
+            assert!(run_result(source, "on_x").is_err());
+        }
     }
 
     /// A non-positive duration raises too — "positive simulation-time

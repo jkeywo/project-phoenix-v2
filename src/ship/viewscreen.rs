@@ -25,6 +25,7 @@ pub struct ViewscreenArbiter {
     cinematic: bool,
     active: Option<ActiveView>,
     sequence: u64,
+    forced: Option<ViewMode>,
 }
 
 impl Default for ViewscreenArbiter {
@@ -40,10 +41,22 @@ impl ViewscreenArbiter {
             cinematic: false,
             active: None,
             sequence: 0,
+            forced: None,
         }
     }
 
     pub fn resolved(&self) -> ViewscreenResolution {
+        if let Some(mode) = &self.forced {
+            return ViewscreenResolution {
+                owner: source_system_for_view_mode(mode),
+                mode: mode.clone(),
+            };
+        }
+        self.unforced_resolution()
+    }
+
+    /// Latest ordinary crew choice beneath any temporary presentation cue.
+    pub fn unforced_resolution(&self) -> ViewscreenResolution {
         if let Some(active) = &self.active {
             ViewscreenResolution {
                 owner: active.requester.clone(),
@@ -108,10 +121,19 @@ impl ViewscreenArbiter {
         self.resolved()
     }
 
+    pub fn forced_view(&self) -> Option<&ViewMode> {
+        self.forced.as_ref()
+    }
+
+    pub fn force(&mut self, mode: Option<ViewMode>) -> ViewscreenResolution {
+        self.forced = mode;
+        self.resolved()
+    }
+
     pub fn restore_captain_view(&mut self) -> ViewscreenResolution {
         self.cinematic = false;
         self.active = None;
-        self.captain_resolution()
+        self.resolved()
     }
 
     pub fn captain_view(&self) -> CameraView {

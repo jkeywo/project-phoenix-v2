@@ -1807,6 +1807,67 @@ pub fn encode_native_gm_metadata(
     serde_json::to_string(value)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn decode_workshop_request(
+    text: &str,
+) -> Result<crate::workshop::provider::WorkshopRequest, String> {
+    use crate::workshop::provider::{Operation, WorkshopRequest};
+    let mut fields = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(text)
+        .map_err(|error| error.to_string())?;
+    let id = fields
+        .remove("id")
+        .and_then(|value| value.as_u64())
+        .ok_or("Invalid Workshop request id")?;
+    let field_count = fields.len();
+    // A flattened internally tagged enum cannot use deny_unknown_fields on
+    // its outer envelope. Remove only that envelope field, then deserialize
+    // the typed operation. Serde's unit variants ignore additional fields,
+    // so those empty operations also need an exact envelope-size check.
+    let operation: Operation = serde_json::from_value(serde_json::Value::Object(fields))
+        .map_err(|error| error.to_string())?;
+    if matches!(
+        operation,
+        Operation::Load
+            | Operation::LoadSources
+            | Operation::RecoveryLoad
+            | Operation::RecoveryClear
+    ) && field_count != 1
+    {
+        return Err("Unexpected Workshop operation field".into());
+    }
+    Ok(WorkshopRequest { id, operation })
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn encode_workshop_response(
+    value: &crate::workshop::provider::WorkshopResponse,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn encode_workshop_transaction(
+    value: &crate::workshop::provider::Transaction,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn decode_workshop_transaction(
+    bytes: &[u8],
+) -> Result<crate::workshop::provider::Transaction, String> {
+    serde_json::from_slice(bytes).map_err(|error| error.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn encode_workshop_recovery(
+    value: &crate::workshop::provider::RecoveryRecord,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn decode_workshop_recovery(
+    bytes: &[u8],
+) -> Result<crate::workshop::provider::RecoveryRecord, String> {
+    serde_json::from_slice(bytes).map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
@@ -2604,64 +2665,4 @@ mod mesh_frame_tests {
             );
         }
     }
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub fn decode_workshop_request(
-    text: &str,
-) -> Result<crate::workshop::provider::WorkshopRequest, String> {
-    use crate::workshop::provider::{Operation, WorkshopRequest};
-    let mut fields = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(text)
-        .map_err(|error| error.to_string())?;
-    let id = fields
-        .remove("id")
-        .and_then(|value| value.as_u64())
-        .ok_or("Invalid Workshop request id")?;
-    let field_count = fields.len();
-    // A flattened internally tagged enum cannot use deny_unknown_fields on
-    // its outer envelope. Remove only that envelope field, then deserialize
-    // the typed operation. Serde's unit variants ignore additional fields,
-    // so those empty operations also need an exact envelope-size check.
-    let operation: Operation = serde_json::from_value(serde_json::Value::Object(fields))
-        .map_err(|error| error.to_string())?;
-    if matches!(
-        operation,
-        Operation::Load
-            | Operation::LoadSources
-            | Operation::RecoveryLoad
-            | Operation::RecoveryClear
-    ) && field_count != 1
-    {
-        return Err("Unexpected Workshop operation field".into());
-    }
-    Ok(WorkshopRequest { id, operation })
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub fn encode_workshop_response(
-    value: &crate::workshop::provider::WorkshopResponse,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn encode_workshop_transaction(
-    value: &crate::workshop::provider::Transaction,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn decode_workshop_transaction(
-    bytes: &[u8],
-) -> Result<crate::workshop::provider::Transaction, String> {
-    serde_json::from_slice(bytes).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub fn encode_workshop_recovery(
-    value: &crate::workshop::provider::RecoveryRecord,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub fn decode_workshop_recovery(
-    bytes: &[u8],
-) -> Result<crate::workshop::provider::RecoveryRecord, String> {
-    serde_json::from_slice(bytes).map_err(|error| error.to_string())
 }

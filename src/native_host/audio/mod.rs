@@ -376,4 +376,5 @@ fn update_room(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Random UUIDs isolate temporary test directories.
 mod tests;

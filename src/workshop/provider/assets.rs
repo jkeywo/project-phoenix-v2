@@ -183,6 +183,8 @@ impl AssetStore {
         let bytes = &self.preview.as_ref().ok_or("Missing native asset")?.1;
         Ok(bytes[offset..bytes.len().min(offset.saturating_add(CHUNK_BYTES))].to_vec())
     }
+    // Private upload capability, never a simulation entity or replay identity.
+    #[allow(clippy::disallowed_methods)]
     pub fn begin(&mut self, length: usize) -> Result<String, String> {
         if length > MAX_BYTES || self.upload.is_some() {
             return Err("Workshop asset upload is unavailable".into());

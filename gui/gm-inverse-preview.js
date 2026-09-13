@@ -93,6 +93,7 @@ export const GM_INVERSE_SUPPORT = Object.freeze({
   'station-puppet': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'objective-control': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'contact-information': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
+  presentation: OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'contact-misclassify': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'contact-classification-normal': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'contact-reveal': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),

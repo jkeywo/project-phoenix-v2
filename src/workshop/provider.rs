@@ -586,6 +586,8 @@ fn remove_optional(path: &Path) -> Result<(), String> {
         Err(error) => Err(io_error(error)),
     }
 }
+// Host-local temporary filename, never a simulation entity or replay identity.
+#[allow(clippy::disallowed_methods)]
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("Missing Workshop parent directory")?;
     fs::create_dir_all(parent).map_err(io_error)?;
@@ -607,4 +609,5 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Random UUIDs isolate temporary test directories.
 mod tests;

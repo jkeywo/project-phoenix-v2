@@ -121,9 +121,9 @@ pub(super) fn run(
             continue;
         }
         let ready = stream.is_some();
-        if !fresh
+        if fresh
             .alert_at
-            .is_some_and(|time| time.elapsed() <= Duration::from_millis(250))
+            .is_none_or(|time| time.elapsed() > Duration::from_millis(250))
         {
             player.suppress_edges();
         }

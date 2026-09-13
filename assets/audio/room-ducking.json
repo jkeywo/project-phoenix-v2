@@ -1,0 +1,7 @@
+{
+  "gain": 0.35,
+  "attack_seconds": 0.08,
+  "hold_seconds": 1.5,
+  "max_hold_seconds": 4,
+  "release_seconds": 0.75
+}

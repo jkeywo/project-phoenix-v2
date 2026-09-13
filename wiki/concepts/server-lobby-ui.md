@@ -2,7 +2,7 @@
 title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
-sources: [server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/private-alerts.js, src/native_host/native_gm/boot.js, src/server_app/broadcast_publish.rs, gui/operator-profile.js, gui/gm-workspace.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
+sources: [assets/audio/room-ducking.toml, gui/audio-ducking.js, scripts/room-ducking.mjs, tests/client/audio-ducking.test.js, tests/smoke/audio-ducking.spec.js, server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/private-alerts.js, src/native_host/native_gm/boot.js, src/server_app/broadcast_publish.rs, gui/operator-profile.js, gui/gm-workspace.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
 updated: 2026-09-13
 ---
 
@@ -29,6 +29,14 @@ spatial positioning and before authored/category/Master gains. The browser
 provider keeps an explicit stereo endpoint, so the result reaches both ears.
 It changes active voices in place, preserving loop position; visual direction
 and information do not change. Stereo is the initial and audio-reset default.
+
+Optional alert ducking in the same panel lowers only Music and Ambience; it is
+off by default. `gui/audio-ducking.js` schedules smooth sample-clock attack and
+recovery through separate provider gain nodes. Red Alert onset and configured
+warning/critical computer tones enter that path only when they actually play.
+Repeated alerts extend one bounded hold and cannot prevent its eventual release.
+`assets/audio/room-ducking.toml` owns the envelope; `scripts/room-ducking.mjs`
+generates the browser JSON projection with a drift test. Private panels omit it.
 
 `src/server/audio_lifecycle.rs` derives a local audio continuation boundary from
 actual mission and restore/recovery state. The browser flush sends that boundary

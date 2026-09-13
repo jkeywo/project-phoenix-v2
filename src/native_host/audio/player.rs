@@ -39,6 +39,7 @@ pub struct PreparedBlaster {
 pub struct PreparedComputer {
     pcm: Arc<Pcm>,
     gain: f32,
+    important: bool,
 }
 impl Default for RoomPlayer {
     fn default() -> Self {
@@ -190,7 +191,7 @@ impl RoomPlayer {
                     self.mixer
                         .lock()
                         .unwrap()
-                        .cue("siren", pcm, "alerts", spec.siren_volume, None);
+                        .important_cue("siren", pcm, spec.siren_volume);
                 }
             }
         } else if let Some(spec) = &input.config.red_alert {
@@ -265,14 +266,17 @@ impl RoomPlayer {
         Some(PreparedComputer {
             pcm: self.asset(&spec.file)?,
             gain: spec.volume,
+            important: matches!(severity, "warning" | "critical"),
         })
     }
     pub fn play_computer(&mut self, input: &RoomInput, ready: bool, prepared: PreparedComputer) {
         if ready && input.lifecycle.running && !input.lifecycle.suspended {
-            self.mixer
-                .lock()
-                .unwrap()
-                .cue("computer", prepared.pcm, "alerts", prepared.gain, None);
+            let mut mixer = self.mixer.lock().unwrap();
+            if prepared.important {
+                mixer.important_cue("computer", prepared.pcm, prepared.gain);
+            } else {
+                mixer.cue("computer", prepared.pcm, "alerts", prepared.gain, None);
+            }
         }
     }
 }

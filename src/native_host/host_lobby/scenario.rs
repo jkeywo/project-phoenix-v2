@@ -299,6 +299,9 @@ pub enum HostLobbyRecord {
     TestAudioOutput,
     /// A reloaded settings document asks for current state, never playback.
     ObserveAudio,
+    SetAudioDucking {
+        enabled: bool,
+    },
     /// The operator changed this display's text size or contrast in the settings
     /// menu's Display tab (issue #1427).
     ///

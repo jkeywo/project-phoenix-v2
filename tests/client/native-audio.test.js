@@ -5,6 +5,7 @@ import { mountNativeSettings } from '../../gui/native-settings.js';
 import { defaultAudioMix, normalizeAudioMix, audioSoundGain } from '../../gui/audio-mix.js';
 import policies from '../fixtures/audio-gain-policy.json';
 import { t } from '../../gui/strings.js';
+import { renderAudioSettingsPanel } from '../../gui/audio-settings-panel.js';
 
 afterEach(() => document.body.replaceChildren());
 function setup() {
@@ -17,6 +18,22 @@ function setup() {
   apply(); return { audio, send, win, state, apply };
 }
 describe('native Viewscreen audio controls', () => {
+  it('keeps a keyboard-focused ducking choice across native hydration and output status updates', () => {
+    const win = {}, send = vi.fn(); const audio = createNativeAudio({ win, send });
+    renderAudioSettingsPanel(document, document.body, audio);
+    const input = document.querySelector('[data-audio-ducking]');
+    expect(input.disabled).toBe(true);
+    const state = { room: true, mix: defaultAudioMix(), categories: [], ducking: false, status: 'idle' };
+    win.__phoenixNativeAudioApply(state); input.focus(); input.click();
+    expect(send).toHaveBeenLastCalledWith({ kind: 'set_audio_ducking', enabled: true });
+    win.__phoenixNativeAudioApply({ ...state, ducking: true, status: 'playing' });
+    expect(document.activeElement).toBe(input); expect(input.checked).toBe(true);
+    expect(document.querySelector('[data-audio-ducking]')).toBe(input);
+    document.body.replaceChildren();
+    renderAudioSettingsPanel(document, document.body, { state: () => ({ private: true, room: false,
+      mix: defaultAudioMix(), buses: [], cues: {}, categories: [] }), subscribe() {} });
+    expect(document.querySelector('[data-audio-ducking]')).toBeNull();
+  });
   it('shares authored gain and mute policy fixtures with the native sample provider', () => {
     for (const policy of policies) {
       expect(audioSoundGain(normalizeAudioMix(policy.mix), policy.category, policy.authored)).toBeCloseTo(policy.expected);

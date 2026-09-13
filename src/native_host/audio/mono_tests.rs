@@ -75,6 +75,7 @@ fn native_mono_changes_live_room_loops_without_reset_and_converts_authored_alert
     assert!(stereo.chunks_exact(2).all(|pair| pair[0] == 0.0));
     assert!(stereo.iter().any(|value| value.abs() > 0.0001));
     audio.command(&HostLobbyRecord::SetAudioMono { enabled: true });
+    audio.command(&HostLobbyRecord::SetAudioDucking { enabled: true });
     let converted = samples(&actual);
     mono(&converted);
     assert_eq!(converted, samples(&expected));
@@ -117,6 +118,7 @@ fn native_mono_uses_endpoint_storage_and_audio_reset_keeps_display_preferences()
     let mut audio = NativeRoomAudio::with_stores(None, false, Some(store.clone()), None);
     assert!(!audio.snapshot().mono);
     audio.command(&HostLobbyRecord::SetAudioMono { enabled: true });
+    audio.command(&HostLobbyRecord::SetAudioDucking { enabled: true });
     audio.command(&HostLobbyRecord::SetAudioBus {
         bus: "master".into(),
         level_percent: 23,
@@ -124,10 +126,12 @@ fn native_mono_uses_endpoint_storage_and_audio_reset_keeps_display_preferences()
     });
     let mut next = NativeRoomAudio::with_stores(None, false, Some(store.clone()), None);
     assert!(next.snapshot().mono);
+    assert!(next.snapshot().ducking);
     assert!(next.snapshot().mix.master.muted);
     assert_eq!(next.snapshot().mix.master.level, 0.23);
     next.command(&HostLobbyRecord::ResetAudioMix);
     assert!(!store.load_audio_mono());
+    assert!(!store.load_audio_ducking());
     assert_eq!(store.load().text_scale_percent, Some(175));
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -5,7 +5,7 @@ import { t } from './strings.js';
  * decoder, localStorage, game authority or private output fallback. */
 export function createNativeAudio({ win = globalThis, send = () => {} } = {}) {
   const listeners = new Set();
-  let current = { room: false, mix: defaultAudioMix(), categories: [], mono: false, monoAvailable: false,
+  let current = { room: false, supportsDucking: true, ducking: false, mix: defaultAudioMix(), categories: [], mono: false, monoAvailable: false,
     status: 'unavailable', test: 'idle', persistence: 'unavailable',
     hardware_persistence: 'unavailable', output: null, devices: [], detail: '', asset_failures: [] };
   function apply(json) {
@@ -30,6 +30,7 @@ export function createNativeAudio({ win = globalThis, send = () => {} } = {}) {
     },
     resetMix: () => request({ kind: 'reset_audio_mix' }),
     setMono: enabled => request({ kind: 'set_audio_mono', enabled: enabled === true }),
+    setDucking: enabled => request({ kind: 'set_audio_ducking', enabled: enabled === true }),
     enable: () => request({ kind: 'retry_audio_output' }),
     testOutput: () => request({ kind: 'test_audio_output' }),
     selectOutput: output => request({ kind: 'select_audio_output', output: output || null }),

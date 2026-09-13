@@ -4,6 +4,117 @@ use crate::audio_config::{
 };
 
 #[test]
+fn room_ducking_reaches_samples_only_on_beds_and_overlap_has_a_finite_release() {
+    let spec = ducking::DuckingSpec::default();
+    let pcm = Arc::new(decoder::Pcm {
+        samples: vec![0.1; 48_000 * 2 * 6],
+        rate: 48_000,
+        channels: 2,
+    });
+    let mut mixer = engine::Mixer::default();
+    for category in ["music", "ambience", "effects", "interface"] {
+        mixer.set_loop(category, pcm.clone(), category, 1.0);
+    }
+    let render = |mixer: &mut engine::Mixer, seconds: f64| {
+        let mut output = vec![0.0; (seconds * 48_000.0) as usize * 2];
+        mixer.render(&mut output, 48_000, 2);
+        output
+    };
+    mixer.important_cue("authored_alert", pcm.clone(), 1.0);
+    assert!(render(&mut mixer, 0.1)
+        .iter()
+        .all(|v| (*v - 0.5).abs() < 0.00001));
+    mixer.stop("authored_alert");
+    mixer.set_ducking(true);
+    mixer.important_cue("authored_alert", pcm.clone(), 1.0);
+    let attack = render(&mut mixer, spec.attack_seconds);
+    assert!((attack[0] - 0.5).abs() < 0.00001);
+    assert!((*attack.last().unwrap() - (0.3 + 0.2 * spec.gain as f32)).abs() < 0.0001);
+    for _ in 0..7 {
+        mixer.important_cue("authored_alert", pcm.clone(), 1.0);
+        let hold = render(&mut mixer, 0.5);
+        assert!(hold
+            .iter()
+            .all(|v| (*v - (0.3 + 0.2 * spec.gain as f32)).abs() < 0.0001));
+    }
+    // Keep posting through the burst cap: release still completes.
+    for _ in 0..3 {
+        mixer.important_cue("authored_alert", pcm.clone(), 1.0);
+        render(&mut mixer, 0.5);
+    }
+    assert!(render(&mut mixer, 0.1)
+        .iter()
+        .all(|v| (*v - 0.5).abs() < 0.0001));
+    mixer.mix.music.muted = true;
+    mixer.mix.ambience.muted = true;
+    assert!(render(&mut mixer, 0.1)
+        .iter()
+        .all(|v| (*v - 0.3).abs() < 0.0001));
+    mixer.mix.master.muted = true;
+    assert!(render(&mut mixer, 0.1).iter().all(|v| *v == 0.0));
+}
+
+#[test]
+fn real_authored_red_alert_decoding_ducks_native_beds_and_restore_resets_the_window() {
+    let mut dry = RoomPlayer::default();
+    let mut wet = RoomPlayer::default();
+    wet.mixer.lock().unwrap().set_ducking(true);
+    let mut live = input();
+    for player in [&mut dry, &mut wet] {
+        player.prepare(&live);
+        player.apply(&live, true);
+    }
+    live.red_alert = true;
+    for player in [&mut dry, &mut wet] {
+        player.apply(&live, true);
+        assert!(player.mixer.lock().unwrap().active("siren"));
+        // Isolate decoded beds in the sink after their real siren edge.
+        player.mixer.lock().unwrap().stop("siren");
+    }
+    let dry_samples = sink(&dry, 0.25);
+    let wet_samples = sink(&wet, 0.25);
+    assert_sound(&dry_samples);
+    assert_sound(&wet_samples);
+    let gain = ducking::DuckingSpec::default().gain as f32;
+    for (a, b) in dry_samples[10_000..].iter().zip(&wet_samples[10_000..]) {
+        assert!((*b - *a * gain).abs() < 0.00001);
+    }
+    live.lifecycle.generation += 1;
+    for player in [&mut dry, &mut wet] {
+        player.apply(&live, true);
+    }
+    assert_eq!(sink(&dry, 0.1), sink(&wet, 0.1));
+    assert!(!wet.mixer.lock().unwrap().active("siren"));
+}
+
+#[test]
+fn room_ducking_persists_with_mix_preserves_display_and_resets_only_audio() {
+    let directory = scratch();
+    let store = ViewscreenPresentationStore::at(&directory);
+    let display = super::super::viewscreen_presentation::ViewscreenPresentation {
+        text_scale_percent: Some(175),
+        ..Default::default()
+    };
+    store.save(&display).unwrap();
+    let mut audio = NativeRoomAudio::with_stores(None, false, Some(store.clone()), None);
+    assert!(!audio.snapshot().ducking);
+    audio.command(&HostLobbyRecord::SetAudioDucking { enabled: true });
+    audio.command(&HostLobbyRecord::SetAudioBus {
+        bus: "music".into(),
+        level_percent: 35,
+        muted: true,
+    });
+    let mut reloaded = NativeRoomAudio::with_stores(None, false, Some(store.clone()), None);
+    assert!(reloaded.snapshot().ducking);
+    assert!(reloaded.snapshot().mix.music.muted);
+    assert_eq!(store.load(), display);
+    reloaded.command(&HostLobbyRecord::ResetAudioMix);
+    assert!(!store.load_audio_ducking());
+    assert_eq!(store.load(), display);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn browser_and_native_share_gain_policy_fixtures() {
     #[derive(serde::Deserialize)]
     struct Policy {

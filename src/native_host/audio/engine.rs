@@ -16,10 +16,15 @@ pub struct Mixer {
     pub mix: AudioMix,
     mono: bool,
     voices: BTreeMap<String, Voice>,
+    ducking: super::ducking::Ducking,
+    sample_time: f64,
 }
 impl Mixer {
     pub fn set_mono(&mut self, enabled: bool) {
         self.mono = enabled;
+    }
+    pub fn set_ducking(&mut self, enabled: bool) {
+        self.ducking.set_enabled(enabled, self.sample_time);
     }
     pub fn set_mix(&mut self, mix: AudioMix) {
         self.mix = mix.sanitised();
@@ -28,6 +33,7 @@ impl Mixer {
     }
     pub fn stop_all(&mut self) {
         self.voices.clear();
+        self.ducking.clear();
     }
     pub fn stop(&mut self, id: &str) {
         self.voices.remove(id);
@@ -90,6 +96,15 @@ impl Mixer {
             voice.spatial = Some(matrix);
         }
     }
+    /// Only a successfully admitted, audible important Alert attenuates beds.
+    /// Private feedback and ordinary Effects use `cue` and cannot invoke this.
+    pub fn important_cue(&mut self, id: &str, pcm: Arc<Pcm>, gain: f32) {
+        if self.mix.gain("alerts", gain) == 0.0 {
+            return;
+        }
+        self.cue(id, pcm, "alerts", gain, None);
+        self.ducking.trigger(self.sample_time);
+    }
     /// Fill interleaved device frames directly. Linear resampling preserves the
     /// authored speed on outputs whose negotiated rate differs from an asset.
     pub fn render(&mut self, output: &mut [f32], rate: u32, channels: usize) {
@@ -99,7 +114,14 @@ impl Mixer {
         }
         for voice in self.voices.values_mut() {
             let gain = self.mix.gain(voice.category, voice.gain);
-            for frame in output.chunks_exact_mut(channels) {
+            for (index, frame) in output.chunks_exact_mut(channels).enumerate() {
+                let gain = gain
+                    * if matches!(voice.category, "music" | "ambience") {
+                        self.ducking
+                            .gain(self.sample_time + index as f64 / f64::from(rate))
+                    } else {
+                        1.0
+                    };
                 let count = voice.pcm.frames();
                 if voice.cursor >= count as f64 {
                     if voice.looping {
@@ -151,6 +173,7 @@ impl Mixer {
             (voice.looping || voice.cursor < voice.pcm.frames() as f64)
                 && !voice.remaining.is_some_and(|remaining| remaining <= 0.0)
         });
+        self.sample_time += (output.len() / channels) as f64 / f64::from(rate);
         for sample in output {
             *sample = sample.clamp(-1.0, 1.0);
         }

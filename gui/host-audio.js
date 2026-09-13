@@ -1,6 +1,7 @@
 import { AUDIO_BUSES, normalizeAudioMix, defaultAudioMix, clampAudioLevel, audioSoundGain } from './audio-mix.js';
 import { createRoomAudioPreferences } from './audio-preferences.js';
 import { createBrowserAudioProvider } from './browser-audio-provider.js';
+import { validDuckingSpec } from './audio-ducking.js';
 
 /** Viewscreen consumer of existing authored config, live cue and HUD channels.
  * The host owns gameplay/envelopes/geometry; this module owns local presentation.
@@ -8,6 +9,10 @@ import { createBrowserAudioProvider } from './browser-audio-provider.js';
 export function createHostAudio({
   doc = globalThis.document, storage = null, providerFactory = createBrowserAudioProvider,
   contextFactory, fetchAudio, onEquivalent = () => {}, isRoom = () => true,
+  duckingSpec = null, fetchDucking = () => globalThis.fetch('assets/audio/room-ducking.json').then(response => {
+    if (!response.ok) throw new Error('Audio settings unavailable');
+    return response.json();
+  }),
 } = {}) {
   const preferences = createRoomAudioPreferences(storage);
   let mix = preferences.read().mix;
@@ -37,6 +42,9 @@ export function createHostAudio({
   });
   provider.setMix(mix);
   provider.setMono?.(mono);
+  const duckingReady = Promise.resolve().then(() => duckingSpec || (isRoom() ? fetchDucking() : null))
+    .then(spec => { duckingSpec = spec; provider.setDucking?.(isRoom() && preferences.read().ducking, spec); })
+    .catch(() => {});
 
   function emit(cue) { if (isRoom()) onEquivalent(cue); }
   function ensureMenu() {
@@ -50,7 +58,7 @@ export function createHostAudio({
   ensureMenu();
 
   function state() { return { ...provider.snapshot(), ...preferences.read(), room: isRoom(),
-    monoAvailable: typeof provider.setMono === 'function' }; }
+    monoAvailable: typeof provider.setMono === 'function', duckingAvailable: validDuckingSpec(duckingSpec) === true }; }
   function notify() { for (const listener of listeners) listener(); }
   function setBus(id, change) {
     if (!AUDIO_BUSES.includes(id)) return;
@@ -61,15 +69,22 @@ export function createHostAudio({
   function resetMix() {
     mix = defaultAudioMix();
     mono = false;
-    preferences.save(mix, mono);
+    preferences.save(mix, mono, false);
     provider.setMix(mix);
     provider.setMono?.(mono);
+    provider.setDucking?.(false, duckingSpec);
   }
   function setMono(value) {
     if (!isRoom()) return;
     mono = value === true;
     preferences.save(mix, mono);
     provider.setMono?.(mono);
+    notify();
+  }
+  function setDucking(value) {
+    if (!isRoom()) return;
+    preferences.save(mix, mono, value === true);
+    provider.setDucking?.(value === true, duckingSpec);
     notify();
   }
 
@@ -87,7 +102,8 @@ export function createHostAudio({
     if (!isRoom()) { provider.stopAll(); notify(); return; }
     function add(id, spec, category, volume, loop = true, spatial = null) {
       if (!spec?.file) return;
-      provider.register(id, { file: spec.file, category, volume, loop, spatial });
+      provider.register(id, { file: spec.file, category, volume, loop, spatial,
+        important: id === 'siren' || id === 'computer_warning' || id === 'computer_critical' });
       roomIds.add(id);
     }
     add('ambient', next.ambient, 'ambience', next.ambient?.volume);
@@ -225,7 +241,7 @@ export function createHostAudio({
   }
   return {
     audioConfig, audioCue, audioLevel, audioLifecycle, applyHudAudio, startGameAudio, startMenuMusic, stopMenuMusic,
-    resetSession, setPageActive, state, setBus, setMono, resetMix,
+    resetSession, setPageActive, state, setBus, setMono, resetMix, setDucking, duckingReady,
     enable: () => isRoom() ? provider.enable() : Promise.resolve(false),
     testOutput: () => { ensureMenu(); return isRoom() ? provider.testOutput('menu') : Promise.resolve(false); },
     getMasterVolume: () => mix.master.level,

@@ -3,6 +3,7 @@
 pub mod decoder;
 #[cfg(feature = "host")]
 mod device;
+pub mod ducking;
 pub mod engine;
 pub mod hrtf;
 pub mod mix;
@@ -45,6 +46,7 @@ pub struct OutputChoice {
 #[derive(Clone, Debug, Serialize)]
 pub struct NativeAudioState {
     pub room: bool,
+    pub ducking: bool,
     pub mix: AudioMix,
     pub mono: bool,
     pub categories: Vec<&'static str>,
@@ -62,6 +64,7 @@ impl Default for NativeAudioState {
     fn default() -> Self {
         Self {
             room: true,
+            ducking: false,
             mix: AudioMix::default(),
             mono: false,
             categories: vec!["music", "ambience", "effects", "alerts"],
@@ -167,6 +170,9 @@ impl NativeRoomAudio {
         let state = Arc::new(Mutex::new(NativeAudioState {
             mix,
             mono,
+            ducking: preferences
+                .as_ref()
+                .is_some_and(|store| store.load_audio_ducking()),
             persistence,
             hardware_persistence,
             profile_override,
@@ -196,6 +202,10 @@ impl NativeRoomAudio {
         let mixer = player.mixer.clone();
         mixer.lock().unwrap().mix = mix;
         mixer.lock().unwrap().set_mono(mono);
+        mixer
+            .lock()
+            .unwrap()
+            .set_ducking(state.lock().unwrap().ducking);
         #[cfg(feature = "host")]
         let worker = if start_device {
             let control = control.clone();
@@ -291,6 +301,20 @@ impl NativeRoomAudio {
     }
     pub fn command(&mut self, record: &HostLobbyRecord) {
         match record {
+            HostLobbyRecord::SetAudioDucking { enabled } => {
+                let mut state = self.state.lock().unwrap();
+                state.ducking = *enabled;
+                self.mixer.lock().unwrap().set_ducking(*enabled);
+                state.persistence = if self.preferences.as_ref().is_some_and(|store| {
+                    store
+                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .is_ok()
+                }) {
+                    "saved"
+                } else {
+                    "unavailable"
+                };
+            }
             HostLobbyRecord::SetAudioBus {
                 bus,
                 level_percent,
@@ -313,11 +337,11 @@ impl NativeRoomAudio {
                 if state.mix.gain("alerts", 1.0) == 0.0 {
                     self.control.lock().unwrap().computer = None;
                 }
-                state.persistence = if self
-                    .preferences
-                    .as_ref()
-                    .is_some_and(|store| store.save_audio_mono(state.mix, state.mono).is_ok())
-                {
+                state.persistence = if self.preferences.as_ref().is_some_and(|store| {
+                    store
+                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .is_ok()
+                }) {
                     "saved"
                 } else {
                     "unavailable"
@@ -327,11 +351,11 @@ impl NativeRoomAudio {
                 let mut state = self.state.lock().unwrap();
                 state.mono = *enabled;
                 self.mixer.lock().unwrap().set_mono(*enabled);
-                state.persistence = if self
-                    .preferences
-                    .as_ref()
-                    .is_some_and(|store| store.save_audio_mono(state.mix, state.mono).is_ok())
-                {
+                state.persistence = if self.preferences.as_ref().is_some_and(|store| {
+                    store
+                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .is_ok()
+                }) {
                     "saved"
                 } else {
                     "unavailable"
@@ -341,13 +365,15 @@ impl NativeRoomAudio {
                 let mut state = self.state.lock().unwrap();
                 state.mix = AudioMix::default();
                 state.mono = false;
+                state.ducking = false;
+                self.mixer.lock().unwrap().set_ducking(false);
                 self.mixer.lock().unwrap().set_mix(state.mix);
                 self.mixer.lock().unwrap().set_mono(false);
-                state.persistence = if self
-                    .preferences
-                    .as_ref()
-                    .is_some_and(|store| store.save_audio_mono(state.mix, state.mono).is_ok())
-                {
+                state.persistence = if self.preferences.as_ref().is_some_and(|store| {
+                    store
+                        .save_audio_comfort(state.mix, state.mono, state.ducking)
+                        .is_ok()
+                }) {
                     "saved"
                 } else {
                     "unavailable"

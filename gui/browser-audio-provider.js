@@ -1,4 +1,5 @@
 import { AUDIO_CATEGORIES, normalizeAudioMix, audioBusGain, audioSoundGain, clampAudioLevel } from './audio-mix.js';
+import { validDuckingSpec, nextDuck, duckGain, releaseDuck } from './audio-ducking.js';
 
 /** Production browser playback adapter. [ai] Every sample takes the same route:
  * decoded buffer -> authored gain (optional listener-relative panner) -> category
@@ -27,7 +28,37 @@ export function createBrowserAudioProvider({
   const sounds = new Map();
   const voices = new Set();
   const cache = new Map();
+  const beds = new Map();
+  let ducking = false, duckSpec = null, duckWindow = null;
   function changed() { onChange(); }
+
+  function scheduleDuck(window) {
+    duckWindow = window;
+    const now = context?.currentTime ?? 0;
+    for (const node of beds.values()) {
+      const gain = node.gain;
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(duckGain(window, now, duckSpec), now);
+      if (window) {
+        if (window.attackEnd > now) gain.linearRampToValueAtTime(window.floor, window.attackEnd);
+        gain.setValueAtTime(window.floor, window.hold);
+        gain.linearRampToValueAtTime(1, window.end);
+      }
+    }
+  }
+  function setDucking(enabled, spec = duckSpec) {
+    const wasEnabled = ducking;
+    ducking = enabled === true && validDuckingSpec(spec);
+    duckSpec = validDuckingSpec(spec) ? spec : null;
+    if (!duckSpec) scheduleDuck(null);
+    else if (wasEnabled && !ducking) scheduleDuck(releaseDuck(duckWindow, context?.currentTime ?? 0, duckSpec));
+    changed();
+  }
+  function duck() {
+    if (!ducking || context?.state !== 'running') return;
+    const next = nextDuck(duckWindow, context.currentTime, duckSpec);
+    if (next !== duckWindow) scheduleDuck(next);
+  }
 
   function graph() {
     if (unavailable || disposed) return null;
@@ -46,7 +77,11 @@ export function createBrowserAudioProvider({
       master.connect(meter).connect(context.destination);
       for (const id of AUDIO_CATEGORIES) {
         const gain = context.createGain();
-        gain.connect(master);
+        if (id === 'music' || id === 'ambience') {
+          const bed = context.createGain();
+          gain.connect(bed).connect(master);
+          beds.set(id, bed);
+        } else gain.connect(master);
         buses.set(id, gain);
       }
       context.onstatechange = () => {
@@ -57,6 +92,7 @@ export function createBrowserAudioProvider({
           testGeneration++;
           testState = 'idle';
           for (const voice of [...voices]) stopVoice(voice);
+          scheduleDuck(null);
           // Desired loops are current state and can be rederived on resume.
         }
         changed();
@@ -175,6 +211,7 @@ export function createBrowserAudioProvider({
       voices.add(voice);
       source.onended = () => cleanVoice(voice);
       source.start();
+      if (sound.important && sound.category === 'alerts' && !test) duck();
       if (duration != null) source.stop(context.currentTime + Math.min(duration, sound.buffer.duration));
       if (source.loop) sound.voice = voice;
       if (test) testState = 'playing';
@@ -223,6 +260,7 @@ export function createBrowserAudioProvider({
     testState = 'idle';
     for (const sound of sounds.values()) sound.wanted = false;
     for (const voice of [...voices]) stopVoice(voice);
+    scheduleDuck(null);
     changed();
   }
 
@@ -293,5 +331,5 @@ export function createBrowserAudioProvider({
       Promise.resolve(context.close()).catch(() => {});
     }
   }
-  return { register, remove, loop, cue, setMix, setMono, enable, testOutput, stopAll, snapshot, outputPeak, dispose };
+  return { register, remove, loop, cue, setMix, setMono, setDucking, enable, testOutput, stopAll, snapshot, outputPeak, dispose };
 }

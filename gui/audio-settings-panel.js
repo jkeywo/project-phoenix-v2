@@ -69,6 +69,16 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
   monoHint.className = 'server-settings-hint';
   panel.append(monoLabel, monoHint);
   const cueControls = new Map();
+  let duckingControl = null, duckingHint = null;
+  if (!privateSurface && (audio?.state().room || audio?.state().supportsDucking) && audio?.setDucking) {
+    const label = doc.createElement('label');
+    duckingControl = doc.createElement('input');
+    duckingControl.type = 'checkbox'; duckingControl.dataset.audioDucking = '';
+    duckingControl.addEventListener('change', () => audio.setDucking(duckingControl.checked));
+    label.append(duckingControl, text('span', 'settings.audio.ducking'));
+    duckingHint = text('p', 'settings.audio.ducking_hint');
+    panel.append(label, duckingHint);
+  }
   if (privateSurface) {
     const group = doc.createElement('fieldset');
     group.append(text('legend', 'settings.audio.private_cues'));
@@ -123,6 +133,12 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
     mono.disabled = !(state?.room || state?.private) || state?.monoAvailable !== true;
     monoHint.textContent = t(state?.monoAvailable === true
       ? 'settings.audio.mono_hint' : 'settings.audio.mono_unavailable');
+    if (duckingControl) {
+      duckingControl.checked = state.ducking === true;
+      duckingControl.disabled = !state.room || state.duckingAvailable === false;
+      duckingHint.textContent = t(state.duckingAvailable === false
+        ? 'settings.audio.ducking_unavailable' : 'settings.audio.ducking_hint');
+    }
     for (const [id, input] of cueControls) input.checked = state.cues[id];
   }
   const unsubscribe = audio?.subscribe(paint);

@@ -169,3 +169,56 @@ fn computer_tones_obey_live_mute_loss_deadline_and_restore_without_replay() {
     audio.apply_input(input);
     assert!(!sounded(&deliver(audio, &mut player, true, Instant::now())));
 }
+
+#[test]
+fn only_a_played_warning_or_critical_computer_tone_ducks_current_music() {
+    for severity in ["info", "advisory", "warning", "critical"] {
+        let mut app = app();
+        let cue = ComputerMessageCue {
+            file: "assets/sounds/ui_click.ogg".into(),
+            volume: 0.6,
+        };
+        let mut query = app.world_mut().query::<&mut ShipAudioSection>();
+        query
+            .single_mut(app.world_mut())
+            .unwrap()
+            .0
+            .computer_message = Some(ComputerMessageAudio {
+            info: Some(cue.clone()),
+            advisory: Some(cue.clone()),
+            warning: Some(cue.clone()),
+            critical: Some(cue),
+        });
+        post(&mut app, severity);
+        let audio = app.world().resource::<NativeRoomAudio>();
+        let mut player = player(&app);
+        let current = audio.control.lock().unwrap();
+        let prepared = player.prepare_computer(&current.input, severity).unwrap();
+        player.mixer.lock().unwrap().set_ducking(true);
+        player.play_computer(&current.input, true, prepared);
+        let mut mixer = player.mixer.lock().unwrap();
+        assert!(mixer.active("computer"));
+        // Separate the admitted tone from the existing beds to measure only
+        // the bed envelope. The tone itself is decoded/rendered above tests.
+        mixer.stop("computer");
+        let pcm = |left, right| {
+            std::sync::Arc::new(decoder::Pcm {
+                samples: vec![left, right],
+                rate: 44100,
+                channels: 2,
+            })
+        };
+        mixer.set_loop("music-bed", pcm(0.2, 0.0), "music", 1.0);
+        mixer.set_loop("effects-bed", pcm(0.0, 0.3), "effects", 1.0);
+        let mut samples = vec![0.0; 4410 * 2];
+        mixer.render(&mut samples, 44100, 2);
+        let final_frame = &samples[samples.len() - 2..];
+        assert!((final_frame[1] - 0.3).abs() < 0.0001);
+        let expected = if matches!(severity, "warning" | "critical") {
+            0.2 * super::ducking::DuckingSpec::default().gain as f32
+        } else {
+            0.2
+        };
+        assert!((final_frame[0] - expected).abs() < 0.0001, "{severity}");
+    }
+}

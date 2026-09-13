@@ -356,13 +356,30 @@ impl ViewscreenPresentationStore {
     /// Merge audio with the existing endpoint record. Hardware output identities
     /// are deliberately stored by bridge-media instead, and no cues are stored.
     pub fn save_audio(&self, mix: super::audio::mix::AudioMix) -> std::io::Result<()> {
-        self.save_audio_mono(mix, self.load_audio_mono())
+        self.save_audio_comfort(mix, self.load_audio_mono(), self.load_audio_ducking())
     }
 
     pub fn save_audio_mono(
         &self,
         mix: super::audio::mix::AudioMix,
         mono: bool,
+    ) -> std::io::Result<()> {
+        self.save_audio_comfort(mix, mono, self.load_audio_ducking())
+    }
+
+    pub fn save_audio_preferences(
+        &self,
+        mix: super::audio::mix::AudioMix,
+        ducking: bool,
+    ) -> std::io::Result<()> {
+        self.save_audio_comfort(mix, self.load_audio_mono(), ducking)
+    }
+
+    pub fn save_audio_comfort(
+        &self,
+        mix: super::audio::mix::AudioMix,
+        mono: bool,
+        ducking: bool,
     ) -> std::io::Result<()> {
         // Preserve independently owned audio options as well as display fields.
         let mut audio = std::fs::read_to_string(self.path())
@@ -378,6 +395,7 @@ impl ViewscreenPresentationStore {
             toml::Value::try_from(mix.sanitised()).map_err(std::io::Error::other)?,
         );
         table.insert("mono".into(), toml::Value::Boolean(mono));
+        table.insert("ducking".into(), toml::Value::Boolean(ducking));
         self.save_sections(&self.load(), Some(audio))
     }
 
@@ -390,6 +408,15 @@ impl ViewscreenPresentationStore {
             .filter(|audio| audio.version == 1)
             .map(|audio| audio.mono)
             .unwrap_or(false)
+    }
+
+    pub fn load_audio_ducking(&self) -> bool {
+        std::fs::read_to_string(self.path())
+            .ok()
+            .and_then(|text| toml::from_str::<SavedPresentation>(&text).ok())
+            .and_then(|saved| saved.audio)
+            .and_then(|audio| audio.try_into::<SavedAudio>().ok())
+            .is_some_and(|audio| audio.version == 1 && audio.ducking)
     }
 
     pub fn load_audio(&self) -> (super::audio::mix::AudioMix, &'static str) {
@@ -445,6 +472,8 @@ struct SavedAudio {
     mix: super::audio::mix::AudioMix,
     #[serde(default)]
     mono: bool,
+    #[serde(default)]
+    ducking: bool,
 }
 
 fn create_dir(dir: &Path) -> std::io::Result<()> {

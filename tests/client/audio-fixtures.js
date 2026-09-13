@@ -14,7 +14,28 @@ export class FakeAudioContext {
       disconnect() { this.targets = []; },
     }, extra);
   }
-  createGain() { return this.node({ gain: { value: 1 } }); }
+  createGain() {
+    const context = this; let value = 1; let events = [];
+    const gain = {
+      get value() {
+        let before = { value, time: 0 };
+        for (const event of events) {
+          if (event.time > context.currentTime) {
+            if (event.ramp) return before.value + (event.value - before.value)
+              * Math.max(0, (context.currentTime - before.time) / (event.time - before.time));
+            return before.value;
+          }
+          before = event;
+        }
+        return before.value;
+      },
+      set value(next) { value = next; events = []; },
+      cancelScheduledValues(time) { events = events.filter(event => event.time < time); },
+      setValueAtTime(value, time) { events.push({ value, time }); return this; },
+      linearRampToValueAtTime(value, time) { events.push({ value, time, ramp: true }); return this; },
+    };
+    return this.node({ gain });
+  }
   createPanner() {
     return this.node({ positionX: { value: 0 }, positionY: { value: 0 }, positionZ: { value: 0 } });
   }

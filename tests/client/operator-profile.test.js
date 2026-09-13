@@ -308,7 +308,7 @@ describe('private persistence and export boundary', () => {
     profile.pendingFeedback = { correlation: 'secret-pending' };
     const exported = JSON.parse(serializeOperatorProfile(profile));
     expect(Object.keys(exported).sort()).toEqual([
-      'accessibility', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
+      'accessibility', 'audio', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
       'kind', 'version',
     ]);
     expect(JSON.stringify(exported)).not.toMatch(

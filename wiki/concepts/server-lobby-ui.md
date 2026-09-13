@@ -2,7 +2,7 @@
 title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
-sources: [server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
+sources: [server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/operator-profile.js, gui/gm-workspace.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
 updated: 2026-09-13
 ---
 
@@ -31,7 +31,29 @@ before current config/HUD and discards old one-shots; `gui/audio-live-equivalent
 shows only live weapons bearing, ship impact and current beam firing. Existing
 Red Alert and computer-message readouts retain their meaning when muted.
 There is no audio history, catch-up or replay. Private GM pages remain silent
-for this shared soundtrack; native room playback is separate T4 work.
+for this shared soundtrack; native room playback is described in
+[Native Host](./native-host.md).
+
+Private Station and GM feedback uses one parent-document owner in
+`gui/private-audio.js`. The current Station iframe forwards real semantic
+lifecycle transitions to that owner; replaced or inactive iframe sources are
+ignored. Handled actions produce quiet clicks, refusal and timeout cues by
+default; Pending and Applied tones are opt-in. Continuous and held controls
+remain silent. Older typed GM families use bounded in-flight correlations in
+`gui/private-request-feedback.js` against their existing attributed journal
+results, including M8 presentation actions. Reading old results never creates
+new feedback.
+
+The same Audio tab shows only private Master, Alerts and Interface controls,
+cue toggles and a bounded Interface output test. Portable choices live in the
+operator profile; legacy client Master migration preserves the previous level
+and saves once. Native profile storage preserves these bounded fields without
+hardware output IDs or occurrences. Native private playback requires an
+explicit provider; a missing adapter stays visibly unavailable, even when an
+embedded engine exposes browser-shaped audio APIs. The authored inventory and
+levels are `assets/audio/private-feedback.json`; the three new brief non-speech
+tones have their generator and provenance under `scripts/` and `assets/audio/`.
+Actionable alert delivery is a separate consumer of this owner's Alerts bus.
 
 The split exists because there are now **two** surfaces rendering this lobby from the same payload: the host page, and the native host's viewscreen surface (see [Native Host](./native-host.md#the-host-lobby-on-the-viewscreen-issue-1325)), whose document is built from this page's own `#lobby-panel` markup. Both call the same `renderHostLobby`. A second implementation of these element ids would drift the first time either was touched, so there is not one.
 

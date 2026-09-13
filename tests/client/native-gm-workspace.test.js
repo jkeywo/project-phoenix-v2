@@ -45,6 +45,16 @@ describe('native GM workspace over the shared GM presenters', () => {
     expect(window.__hostSetContactClassification({ ...request, operator_id: 'other' })).toBe(false);
     app.view.dispose(); expect(window.__hostSetContactClassification(request)).toBe(false);
   });
+  it('requires an explicit native private audio provider even without an operator capability declaration', async () => {
+    delete window.PhoenixOperatorCapabilities;
+    const audioContext = vi.fn(); window.AudioContext = audioContext;
+    const app = mount();
+    await window.__privateAudio.ready;
+    expect(window.__privateAudio.state().status).toBe('unavailable');
+    expect(await window.__privateAudio.enable()).toBe(false);
+    expect(audioContext).not.toHaveBeenCalled();
+    app.view.dispose(); delete window.AudioContext;
+  });
 
   it('uses the ordinary GM session projection and submits attributed absolute pause state', () => {
     const app = mount();

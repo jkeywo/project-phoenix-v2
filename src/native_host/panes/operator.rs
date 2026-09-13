@@ -279,6 +279,29 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
         }
     }
     safe["feedback"] = fields(&raw["feedback"], &["vibration", "semanticCues"]);
+    // Portable private audio choices, never hardware routes or cue records.
+    // Keep absent audio absent so the JS owner can perform its legacy migration.
+    if raw["audio"].is_object() {
+        safe["audio"] = json!({"version": 1, "mix": {}, "cues": {}});
+        for bus in ["master", "alerts", "interface"] {
+            let value = &raw["audio"]["mix"][bus];
+            safe["audio"]["mix"][bus] = json!({
+                "level": value["level"].as_f64().filter(|v| v.is_finite()).unwrap_or(1.0).clamp(0.0, 1.0),
+                "muted": value["muted"].as_bool().unwrap_or(false),
+            });
+        }
+        for (cue, default) in [
+            ("clicks", true),
+            ("refused", true),
+            ("timedOut", true),
+            ("applied", false),
+            ("pending", false),
+            ("actionable", true),
+        ] {
+            safe["audio"]["cues"][cue] =
+                json!(raw["audio"]["cues"][cue].as_bool().unwrap_or(default));
+        }
+    }
     safe["gmConfirmations"] = json!({});
     if let Some(confirmations) = raw["gmConfirmations"].as_object() {
         for (id, value) in confirmations.iter().take(512) {
@@ -366,7 +389,10 @@ mod tests {
         };
         let profile = json!({"kind":"project-phoenix/operator-profile", "version":1,
             "token":"secret", "gamepad":{"preferredDevice":{"id":"pad", "mapping":"standard", "token":"secret"}, "hideTouchControls":false},
-            "bindings":{"helm.thrust":[{"type":"gamepad", "input":"axis", "control":"left-stick-y", "token":"secret"}, null]}});
+            "bindings":{"helm.thrust":[{"type":"gamepad", "input":"axis", "control":"left-stick-y", "token":"secret"}, null]},
+            "audio":{"version":1,"output":"secret","history":["secret"],
+                "mix":{"master":{"level":0.12,"muted":true},"music":{"level":0.5}},
+                "cues":{"applied":true,"unknown":"secret"}}});
         state.handle(
             PaneId(1),
             "helm",
@@ -375,12 +401,20 @@ mod tests {
         );
         let text = std::fs::read_to_string(state.path("helm").unwrap()).unwrap();
         assert!(!text.contains("secret"));
+        let saved: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            saved["audio"]["mix"]["master"],
+            json!({"level":0.12,"muted":true})
+        );
+        assert!(saved["audio"]["mix"].get("music").is_none());
+        assert_eq!(saved["audio"]["cues"]["applied"], true);
         state.handle(
             PaneId(2),
             "helm",
             r#"{"type":"NativeOperator","operation":"load"}"#,
         );
         assert!(state.replies[&PaneId(2)][0].contains("left-stick-y"));
+        assert!(state.replies[&PaneId(2)][0].contains("0.12"));
         assert_ne!(state.path("../helm"), state.path("helm"));
         state.scope = Some("destroyer".into());
         assert!(!state.path("helm").unwrap().exists());

@@ -117,6 +117,8 @@
        only client-local lifecycle state and exact iframe routing; the normal
        Captain blackboard remains the sole Red Alert gameplay state. -->
   <script type="module" src="gui/action-feedback.js"></script>
+  <script type="module" src="gui/private-audio.js"></script>
+  <link rel="stylesheet" href="gui/audio-settings.css">
   <script type="module" src="gui/action-map.js"></script>
   <!-- One explicitly selected standard gamepad is sampled in this parent
        realm. Logical bindings are copied to console iframes, but only the
@@ -1998,7 +2000,6 @@
 </head>
 <body>
   <!-- UI click sound (played from JS). -->
-  <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
 
   <!-- This is a pure-JS console (issue #463): no client-side WASM. The page
        and its assets are shipped to dist/client/ by scripts/build-client.mjs
@@ -2386,30 +2387,10 @@
       return st ? wireText(st.description, '') : '';
     }
 
-    // -- Click sound --------------------------------------------------------
-    // Message types that should NOT trigger a click (continuous / connection
-    // setup messages that are not the result of a deliberate button press).
-    // `ReportConsoleLatency` (issue #1169) belongs here for a reason sharper than
-    // "not a button press": it is a diagnostic report sent WHILE latency is being
-    // measured, so a click on it would put an audio decode on the very path whose
-    // timing is the subject.
-    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName', 'ReportStationEligibility', 'ReportConsoleLatency']);
-
-    const CLICK_PITCH_VARIANCE = 0.08; // +/- 8% playback-rate jitter so repeated clicks don't sound identical
-
-    function playClick() {
-      const el = document.getElementById('ui-click');
-      if (!el) return;
-      el.currentTime = 0;
-      // preservesPitch defaults to true in modern browsers, which normalizes
-      // pitch back out of playbackRate changes — disable it so the rate
-      // jitter below actually varies the pitch.
-      el.preservesPitch = false;
-      el.webkitPreservesPitch = false;
-      el.mozPreservesPitch = false;
-      el.playbackRate = 1 + (Math.random() * 2 - 1) * CLICK_PITCH_VARIANCE;
-      el.play().catch(() => {});
-    }
+    // Lobby controls have no Station semantic lifecycle. This finite list is
+    // deliberately separate from correlated console actions and diagnostics.
+    const LOBBY_CLICK = new Set(['SelectStation', 'ReleaseStation', 'SetReady',
+      'SetSpectator', 'SelectScenario', 'SelectPlayerShip', 'ReturnToLobby']);
 
     // -- Connection status --------------------------------------------------
 
@@ -2468,7 +2449,10 @@
       // the scheduler's own `let _renderFrame`, and touching it from here put
       // the whole inline script in a temporal dead zone. The onStatus callback
       // that drives every LATER transition repaints instead.
-      if (state !== 'ready') linkHasData = false;
+      if (state !== 'ready') {
+        linkHasData = false;
+        window.__privateAudio?.reset();
+      }
       lastConnectionState = state;
       chromeSetConnectionStatus(state);
       // Which pre-play surface is up STILL does not depend on the link state
@@ -2739,6 +2723,7 @@
     let operatorSurfaceCapabilities = null;
     let activeFeedbackPreferences = { vibration: true, semanticCues: true };
     let _actionFeedbackRouter = null;
+    let privateAudio = null;
     /// Parent-only gamepad sampler. Iframes never poll navigator.getGamepads(),
     /// so an inactive or disconnected Station cannot receive controller input.
     let gamepadInputRuntime = null;
@@ -2857,10 +2842,9 @@
     function send(type, data) {
       const link = currentLink();
       if (!link || !link.connected) return;
-      const clickType = (type === 'ControlSystem' && data && data.payload) ? data.payload.type : type;
-      if (!NO_CLICK.has(clickType)) playClick();
       // Client messages (commands, lobby actions) are always reliable
       link.send(type, data, 'reliable');
+      if (LOBBY_CLICK.has(type)) privateAudio?.click();
     }
 
     function setStatus(text) { $('status').textContent = text; }
@@ -3795,6 +3779,7 @@
         hideTouchControls: operatorProfile?.gamepad?.hideTouchControls,
         tuning: semanticActionRegistry ? semanticActionRegistry.tuningProfile() : {},
         feedback: operatorProfile && operatorProfile.feedback,
+        audio: operatorProfile && operatorProfile.audio,
         gmConfirmations: operatorProfile && operatorProfile.gmConfirmations,
       });
       return operatorProfile;
@@ -3854,6 +3839,7 @@
       );
       if (!applied || applied.status !== 'applied') return applied;
       operatorProfile = applied.portableProfile;
+      privateAudio?.reload();
       operatorSurfaceCapabilities = applied.capabilities;
       activeFeedbackPreferences = applied.active.feedback;
       preferredGamepadSlot = operatorProfile.gamepad.preferredSlot;
@@ -4632,6 +4618,23 @@
         applyPreparedOperatorProfile(loadedProfile);
       }
 
+      if (window.PrivateAudio && operatorProfile) {
+        privateAudio = window.PrivateAudio.createPrivateAudio({ root: window,
+          read: () => operatorProfile.audio,
+          isEnabled: () => activeFeedbackPreferences.semanticCues !== false,
+          save: audio => {
+            operatorProfile.audio = audio;
+            return window.OperatorProfile.saveOperatorProfile(operatorProfileStorage(), snapshotOperatorProfile());
+          },
+        });
+        window.__privateAudio = privateAudio;
+        window.__privateActionFeedback = window.PrivateAudio.privateFeedbackReceiver({
+          getAudio: () => privateAudio,
+          currentSource: () => activeConsole && $(consoleIframeId(activeConsole))?.contentWindow,
+        });
+        window.PrivateAudio.attachPrivateAudioLifecycle(privateAudio, window);
+      }
+
       gamepadInputRuntime = (!operatorSurfaceCapabilities || operatorSurfaceCapabilities.gamepad)
         && typeof window.createGamepadInputRuntime === 'function'
         ? window.createGamepadInputRuntime({
@@ -4795,7 +4798,7 @@
           // Every audio channel this page owns. Master volume scales each
           // element's own authored level rather than replacing it, so adding
           // a channel here needs no other change (issue #940).
-          audioEls: [document.getElementById('ui-click')],
+          audio: privateAudio,
           getManual: () => (window.simState ? window.simState.shipManual : null),
           myToken: myToken,
         });

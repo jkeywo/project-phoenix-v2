@@ -1,5 +1,6 @@
 /** Private GM confirmation policy. This module never creates a game command. */
 import { createFocusTrap } from './focus-trap.js';
+import { normalizePrivateAudio } from './private-audio-preferences.js';
 import { createSemanticActionRegistry } from './semantic-action-registry.js';
 import { createClientSemanticActionRegistry } from './client-semantic-actions.js';
 import {
@@ -101,6 +102,7 @@ export function createGmConfirmationProfile({ storage, registry = createSemantic
   }
   const loaded = loadOperatorProfile(storage, { registry: catalogue });
   let profile = loaded.profile;
+  const listeners = new Set();
   registry.replaceProfile({ bindings: profile.bindings, tuning: profile.gamepad.tuning });
   function snapshot() {
     return { ...profile, bindings: { ...profile.bindings, ...registry.bindingProfile() },
@@ -125,9 +127,15 @@ export function createGmConfirmationProfile({ storage, registry = createSemantic
     if (result.status !== 'saved') return result;
     profile = prepared.profile;
     registry.replaceProfile({ bindings: profile.bindings, tuning: profile.gamepad.tuning });
+    for (const listener of listeners) listener();
     return prepared;
   }
-  return { mode, setMode, importProfile,
+  function setAudio(value) {
+    profile = { ...snapshot(), audio: normalizePrivateAudio(value) };
+    return saveOperatorProfile(storage, profile);
+  }
+  return { mode, setMode, importProfile, setAudio, audio: () => profile.audio, feedback: () => profile.feedback,
+    subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     exportProfile: () => serializeOperatorProfile(snapshot()),
     initialStatus: loaded.status,
   };

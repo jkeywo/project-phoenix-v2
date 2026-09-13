@@ -409,6 +409,7 @@ export function mountModMode({
       preferredGamepadSlot: operatorProfile?.gamepad?.preferredSlot,
       tuning: semanticActions.tuningProfile(),
       feedback: operatorProfile?.feedback,
+      audio: operatorProfile?.audio,
       gmConfirmations: operatorProfile?.gmConfirmations,
     });
     const saved = saveOperatorProfile(profileStorage, operatorProfile);

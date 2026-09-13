@@ -12,8 +12,9 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
     element.textContent = t(id);
     return element;
   };
-  panel.append(text('p', 'settings.audio.scope'));
-  for (const id of AUDIO_BUSES) {
+  const privateSurface = audio?.state().private === true;
+  panel.append(text('p', privateSurface ? 'settings.audio.private_scope' : 'settings.audio.scope'));
+  for (const id of privateSurface ? audio.state().buses : AUDIO_BUSES) {
     const row = doc.createElement('fieldset');
     row.className = 'audio-settings-bus';
     row.dataset.audioBus = id;
@@ -47,7 +48,7 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
   const enable = text('button', 'settings.audio.enable');
   enable.type = 'button'; enable.dataset.audioEnable = '';
   enable.addEventListener('click', () => { void audio?.enable(); });
-  const test = text('button', 'settings.audio.test');
+  const test = text('button', privateSurface ? 'settings.audio.private_test' : 'settings.audio.test');
   test.type = 'button'; test.dataset.audioTest = '';
   test.addEventListener('click', () => { void audio?.testOutput(); });
   const reset = text('button', 'settings.audio.reset');
@@ -56,14 +57,29 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
   const actions = doc.createElement('div');
   actions.className = 'audio-settings-actions';
   actions.append(enable, test, reset);
-  panel.append(status, storageStatus, actions, text('p', 'settings.audio.test_hint'));
+  panel.append(status, storageStatus, actions, text('p', privateSurface
+    ? 'settings.audio.private_test_hint' : 'settings.audio.test_hint'));
+  const cueControls = new Map();
+  if (privateSurface) {
+    const group = doc.createElement('fieldset');
+    group.append(text('legend', 'settings.audio.private_cues'));
+    for (const id of Object.keys(audio.state().cues)) {
+      const label = doc.createElement('label');
+      const input = doc.createElement('input');
+      input.type = 'checkbox'; input.dataset.audioCue = id;
+      input.addEventListener('change', () => audio.setCue(id, input.checked));
+      label.append(input, text('span', `settings.audio.cue_${id}`));
+      group.append(label); cueControls.set(id, input);
+    }
+    panel.append(group);
+  }
   parent.append(panel);
 
   function paint() {
     const state = audio?.state();
     for (const [id, controls] of rows) {
       const bus = state?.mix[id] || { level: 1, muted: false };
-      const available = !!state?.room && (id === 'master' || state.categories.includes(id));
+      const available = !!(state?.room || state?.private) && (id === 'master' || state.categories.includes(id));
       controls.slider.value = String(bus.level);
       controls.slider.disabled = !available;
       controls.mute.disabled = !available;
@@ -78,13 +94,17 @@ export function renderAudioSettingsPanel(doc, parent, audio) {
     const lines = [t(`settings.audio.output_${output}`)];
     if (state?.mix.master.muted || state?.mix.master.level === 0) lines.push(t('settings.audio.master_silent'));
     if (state?.test === 'playing') lines.push(t('settings.audio.test_playing'));
-    if (state?.mix.music.muted || state?.mix.music.level === 0) lines.push(t('settings.audio.test_silent'));
-    if (state && !state.room) lines.push(t('settings.audio.private_surface'));
+    const testBus = state?.mix[state?.testBus || 'music'];
+    if (testBus?.muted || testBus?.level === 0) lines.push(t(privateSurface
+      ? 'settings.audio.private_test_silent' : 'settings.audio.test_silent'));
+    if (state && !state.room && !state.private) lines.push(t('settings.audio.private_surface'));
     status.textContent = lines.join(' ');
-    storageStatus.textContent = t(`settings.audio.storage_${state?.persistence || 'unavailable'}`);
-    enable.disabled = !state?.room || output === 'unavailable';
-    test.disabled = !state?.room || output === 'unavailable' || state?.test === 'loading';
-    reset.disabled = !state?.room;
+    storageStatus.textContent = t(privateSurface && state?.persistence === 'saved'
+      ? 'settings.audio.private_saved' : `settings.audio.storage_${state?.persistence || 'unavailable'}`);
+    enable.disabled = !(state?.room || state?.private) || output === 'unavailable';
+    test.disabled = !(state?.room || state?.private) || output === 'unavailable' || state?.test === 'loading';
+    reset.disabled = !(state?.room || state?.private);
+    for (const [id, input] of cueControls) input.checked = state.cues[id];
   }
   const unsubscribe = audio?.subscribe(paint);
   paint();

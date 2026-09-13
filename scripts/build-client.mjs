@@ -41,6 +41,7 @@ const ASSET_DIRS = [
   'shield_console',
   'radar_icons',
   'sounds',
+  'audio',
 ];
 
 async function main() {

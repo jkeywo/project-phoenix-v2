@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHostAudio } from '../../gui/host-audio.js';
+import { createPrivateAudio } from '../../gui/private-audio.js';
+import privateManifest from '../../assets/audio/private-feedback.json';
 import { renderAudioSettingsPanel } from '../../gui/audio-settings-panel.js';
 import { createAudioLiveEquivalents } from '../../gui/audio-live-equivalents.js';
 import { t } from '../../gui/strings.js';
@@ -19,6 +21,23 @@ function mount() {
 }
 
 describe('complete Audio controls', () => {
+  it('private controls identify the real Interface test and preserve focus while changing portable preferences', async () => {
+    const manifest = privateManifest;
+    const context = new FakeAudioContext(); let saved;
+    const audio = createPrivateAudio({manifest, contextFactory:()=>context, fetchAudio:audioFetch(),
+      save:value=>{saved=value;return {status:'saved'};}});
+    const dispose = renderAudioSettingsPanel(document, document.body, audio);
+    await audio.ready; await settleAudio();
+    expect([...document.querySelectorAll('[data-audio-bus]')].map(el=>el.dataset.audioBus)).toEqual(['master','alerts','interface']);
+    expect(document.querySelector('[data-audio-test]').textContent).toBe(t('settings.audio.private_test'));
+    expect(document.body.textContent).toContain(t('settings.audio.private_test_hint'));
+    const slider = input('interface'); slider.focus(); slider.value='0.2'; slider.dispatchEvent(new Event('input'));
+    expect(document.activeElement).toBe(slider); expect(saved.mix.interface.level).toBe(0.2);
+    const applied = document.querySelector('[data-audio-cue="applied"]');
+    expect(applied.checked).toBe(false); applied.click(); expect(saved.cues.applied).toBe(true);
+    expect(document.querySelector('.audio-storage-status').textContent).toBe(t('settings.audio.private_saved'));
+    dispose(); audio.dispose();
+  });
   it('a private GM surface cannot reset the Viewscreen endpoint mix', () => {
     const storage = memoryStorage();
     const room = createHostAudio({ storage, contextFactory: () => null });

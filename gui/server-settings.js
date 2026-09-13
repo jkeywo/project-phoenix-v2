@@ -609,7 +609,8 @@ export function mountServerSettings(opts = {}) {
   }
 
   function buildAudioTab(body) {
-    disposeAudioPanel = renderAudioSettingsPanel(doc, body, opts.audio || bindings.__roomAudio);
+    disposeAudioPanel = renderAudioSettingsPanel(doc, body,
+      opts.audio || (bindings.__phoenixGmPage ? bindings.__privateAudio : bindings.__roomAudio));
   }
 
   /**

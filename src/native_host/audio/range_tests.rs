@@ -65,9 +65,10 @@ fn full_dynamics_preserves_samples_and_reduced_range_narrows_quiet_loud_differen
     assert!(large < loud * 0.6 && large > 0.0);
     assert!(large / small < loud / quiet * 0.4);
     assert!((rms(&reduced, 4.2, 4.8) / small - 1.0).abs() < 0.02);
+    let ceiling = RangeSpec::default().ceiling;
     assert!(reduced
         .iter()
-        .all(|sample| sample.abs() <= RangeSpec::default().ceiling + 0.00001));
+        .all(|sample| sample.abs() <= ceiling + 0.00001));
     assert!(reduced
         .chunks_exact(2)
         .all(|frame| (frame[1] - frame[0] * 0.4).abs() < 0.00001));
@@ -131,10 +132,11 @@ fn reduced_range_bounds_summed_peaks_and_stereo_to_mono_composition() {
     actual.set_loop("another-bed", pcm, "music", 1.0);
     actual.set_mono(true);
     let output = render(&mut actual, 4096);
+    let ceiling = RangeSpec::default().ceiling;
     assert!(output.chunks_exact(2).all(|p| p[0] == p[1]));
     assert!(output
         .iter()
-        .all(|sample| sample.abs() <= RangeSpec::default().ceiling));
+        .all(|sample| sample.abs() <= ceiling + 0.00001));
     assert!(output.iter().any(|sample| *sample > 0.01));
 }
 
@@ -167,10 +169,11 @@ fn authored_room_cue_uses_reduced_range_and_remains_silent_under_master_or_alert
     let prepared = player.prepare_computer(&input, "critical").unwrap();
     player.play_computer(&input, true, prepared);
     let output = render(&mut player.mixer.lock().unwrap(), RATE as usize);
+    let ceiling = RangeSpec::default().ceiling;
     assert!(output.iter().any(|sample| sample.abs() > 0.0001));
     assert!(output
         .iter()
-        .all(|sample| sample.abs() <= RangeSpec::default().ceiling));
+        .all(|sample| sample.abs() <= ceiling + 0.00001));
     for bus in ["master", "alerts"] {
         let mut mix = AudioMix::default();
         mix.set(

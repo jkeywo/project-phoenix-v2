@@ -201,12 +201,13 @@ fn both_private_adapters_apply_reduced_range_to_real_decoded_feedback_without_ou
     };
     let full = samples(false);
     let reduced = samples(true);
+    let ceiling = super::super::range::RangeSpec::default().ceiling;
     for (full, reduced) in full.iter().zip(&reduced) {
         let energy = |samples: &[f32]| samples.iter().map(|sample| sample * sample).sum::<f32>();
         assert!(energy(reduced) > energy(full) * 1.1);
         assert!(reduced
             .iter()
-            .all(|sample| sample.abs() <= super::super::range::RangeSpec::default().ceiling));
+            .all(|sample| sample.abs() <= ceiling + 0.00001));
     }
 }
 

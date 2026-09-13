@@ -141,9 +141,12 @@ impl Plugin for ShipSensorsPlugin {
                         .in_set(crate::sim_sets::FixedStep::TickSensorsThreatWarning)
                         .in_set(crate::sim_sets::SimSet::Input),
                     crate::gm_information::reports::advance
+                        .in_set(crate::sim_sets::FixedStep::AdvanceSensorReports)
                         .in_set(crate::sim_sets::SimSet::Publish)
-                        .before(publish_sensors_blackboard)
-                        .before(publish_sensor_radar_blackboard),
+                        // Capture the settled observation before publication
+                        // and the two independent Publish housekeeping writers.
+                        .before(crate::gm_puppet::prune_removed_station_puppets)
+                        .before(crate::ship::intent_narration_systems::tick_intent_narration),
                     publish_sensors_blackboard
                         .in_set(crate::sim_sets::FixedStep::PublishSensorsBlackboard)
                         .in_set(crate::sim_sets::SimSet::Publish),

@@ -183,6 +183,7 @@ pub(crate) enum FixedStep {
     TickScans,
     AdvanceObjectiveCursors,
     FlushCoordinationPopups,
+    AdvanceSensorReports,
     PublishWeaponsCoreBlackboard,
     PublishTacticalRadarBlackboard,
     PublishPhaserBankBlackboards,
@@ -422,6 +423,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
     sequence(
         &mut order,
         &[
+            AdvanceSensorReports,
             PublishWeaponsCoreBlackboard,
             PublishTacticalRadarBlackboard,
             PublishPhaserBankBlackboards,

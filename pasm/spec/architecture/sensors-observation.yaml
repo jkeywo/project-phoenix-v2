@@ -1,0 +1,19 @@
+entities:
+  - state: sensors-observation-configuration-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Observer Sensors Configuration
+      summary: "An immutable per-entity copy of the resolved template's Sensors radar configuration supplies the range and tag policy for observer-specific delayed reports, independently of the peer's LocalShip."
+      rationale:
+        - "[ai] DeferredFold with zero independent world_digest fields: every field comes from the content_digest-pinned entity template, nothing mutates it, and ordinary entity spawn or restore reconstructs the component. Fixed Publish reads it to select allowed report samples, so it is authoritative authored input rather than presentation or a delta-suppression cache. This follows the SecurityTargetActions and DemolitionTarget declaration policy."
+    architecture:
+      classification: authoritative
+      owner: gm-t4-sensor-report-policy
+      writers: [gm-t4-sensor-report-policy]
+    implementation:
+      status: declared
+      paths: [src/gm_information/reports.rs, src/entities/spawner.rs, src/server_app/registration.rs]
+      symbols: [SensorsObservationConfig, SensorsObservationSpawn]
+      tests: ["cargo test --features headless --test authoritative_state_enumeration", "cargo test --features headless --test gm_contact report_policy"]

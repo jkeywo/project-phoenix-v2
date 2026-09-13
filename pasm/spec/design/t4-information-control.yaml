@@ -67,6 +67,7 @@ entities:
       kind: gm-information-control
       authority: authoritative
       coordinates: [gm-milestone-information-control, gm-t4-contact-classification, gm-t4-ghost-contacts]
+      owns: [sensors-observation-configuration-state]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared

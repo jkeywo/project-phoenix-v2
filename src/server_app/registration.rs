@@ -920,6 +920,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             StateClass::DeferredFold,
             "sensors-threat-debounce-state",
         )
+        // Immutable per-entity authored range/tag policy used by fixed Publish.
+        // Zero fields fold independently: content_digest pins the resolved
+        // template, and spawn/restore reconstructs this read-only component.
+        // Like SecurityTargetActions, it is authoritative content, not a
+        // presentation or delta-suppression cache.
+        .declare_state::<crate::gm_information::reports::SensorsObservationConfig>(
+            StateClass::DeferredFold,
+            "sensors-observation-configuration-state",
+        )
         .declare_state::<crate::ship::shields::ShieldsDamageHistory>(
             StateClass::DeferredFold,
             "shields-damage-history-state",

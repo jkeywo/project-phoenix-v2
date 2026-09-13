@@ -1037,19 +1037,19 @@ fn push_hud_state(
 pub(super) fn rebase_hud_state(world: &mut World) {
     use bevy::ecs::system::RunSystemOnce;
 
-    let Some(mut messages) = world.get_resource_mut::<Messages<HudStateChanged>>() else {
-        return;
-    };
-    messages.clear();
     if world
         .get_resource::<State<GamePhase>>()
         .is_some_and(|phase| *phase.get() == GamePhase::GameOver)
     {
-        world
-            .run_system_once(push_game_over_hud_state)
-            .expect("hud-projection-system-valid");
+        // OnEnter captured the terminal HUD before its broadcast consumed the
+        // ending reason. Preserve that final frame: the audio phase boundary
+        // runs afterward and cannot reconstruct it from the consumed resource.
         return;
     }
+    let Some(mut messages) = world.get_resource_mut::<Messages<HudStateChanged>>() else {
+        return;
+    };
+    messages.clear();
     world
         .run_system_once(recompute_hud_state)
         .expect("hud-projection-system-valid");

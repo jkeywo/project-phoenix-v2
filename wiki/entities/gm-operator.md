@@ -614,6 +614,12 @@ Below the cutoff the inverse is the ordinary safe removal: `gm_despawn::validate
 - [Server Lobby UI](../concepts/server-lobby-ui.md)
 - [Stations](../concepts/stations.md)
 
+The fixed Publish pass samples delayed reports before the blackboard publishers.
+`SensorsObservationConfig` is immutable authored input copied at entity spawn;
+its template is pinned by the content digest and reconstructed during restore.
+Its state classification is recorded in
+`pasm/spec/architecture/sensors-observation.yaml`.
+
 ## Viewscreen staging
 
 `src/gm_presentation.rs` owns per-ship active forced views and title/Comms cards. `GmAction::Presentation`, declarative `presentation` and the Rhai `force_view`, `title_card`, `incoming_comms` and `clear_presentation` hosts meet at the same validator/state transition. The receiving ship’s primary-rig camera markers and Comms audience are checked at application; the live Comms projection checks audience and orphaning again.

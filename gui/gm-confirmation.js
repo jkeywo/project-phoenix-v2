@@ -79,6 +79,7 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   SetSystemDisabled: ['system.disable', 'system.restore'],
   TransmitComms: ['comms.send'],
   SetNpcDoctrine: ['npc.directive'],
+  SetNpcDoctrineChecked: ['npc.directive'],
   SetFactionHostility: ['faction.relation'],
   UndoGmAction: ['action.undo'],
   RequestLiveRestore: ['world.restore'],

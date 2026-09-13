@@ -113,6 +113,9 @@ pub enum BootProfile {
     /// the native template cache it insists on (see
     /// [`BootProfile::requires_native_templates`]).
     NativeHost,
+    /// Offline Authoring: shared native render core, with no simulation,
+    /// Viewscreen or transport plugins. Test runs in a disposable runtime.
+    NativeWorkshop,
 }
 
 impl BootProfile {
@@ -137,7 +140,10 @@ impl BootProfile {
     /// Whether this profile drives the real renderer ([`render_stack`]) rather
     /// than the [`render_surrogate`].
     fn has_render_stack(self) -> bool {
-        matches!(self, BootProfile::BrowserHost | BootProfile::NativeHost)
+        matches!(
+            self,
+            BootProfile::BrowserHost | BootProfile::NativeHost | BootProfile::NativeWorkshop
+        )
     }
 
     /// Whether this profile runs inside a browser window and so needs the
@@ -427,6 +433,11 @@ pub(crate) fn build_headless_with_external_logging(plan: BootPlan) -> Result<App
 }
 
 fn build_inner(plan: BootPlan, external_logging: bool) -> Result<App, BootError> {
+    if plan.profile == BootProfile::NativeWorkshop && plan.world_ingest != WorldIngest::Deferred {
+        return Err(BootError::WorldInvalid(
+            "Offline Workshop cannot ingest a live world".into(),
+        ));
+    }
     let mut app = App::new();
 
     // Command/system errors WARN rather than abort the process (Bevy 0.18's
@@ -665,8 +676,11 @@ fn render_stack(
     app.insert_resource(RenderStackApplied);
 
     #[cfg(not(target_arch = "wasm32"))]
-    if profile == BootProfile::NativeHost {
-        native_render_stack(app, log_filter, surface, single_threaded);
+    if matches!(
+        profile,
+        BootProfile::NativeHost | BootProfile::NativeWorkshop
+    ) {
+        native_render_stack(app, log_filter, surface, single_threaded, profile);
         return;
     }
     // Consumed only by the native arm above / the wasm arm below; naming them
@@ -786,10 +800,15 @@ fn native_render_stack(
     log_filter: &str,
     surface: NativeRenderSurface,
     single_threaded: bool,
+    profile: BootProfile,
 ) {
     if !surface.is_wgpu() {
-        core_plugins(app, BootProfile::NativeHost, log_filter, single_threaded);
-        register_render_contract(app);
+        core_plugins(app, profile, log_filter, single_threaded);
+        if profile == BootProfile::NativeWorkshop {
+            register_render_assets(app);
+        } else {
+            register_render_contract(app);
+        }
         return;
     }
 
@@ -804,7 +823,11 @@ fn native_render_stack(
             },
             _ => WindowPlugin {
                 primary_window: Some(Window {
-                    title: crate::native_host::WINDOW_TITLE.to_string(),
+                    title: if profile == BootProfile::NativeWorkshop {
+                        "Project Phoenix — Workshop".into()
+                    } else {
+                        crate::native_host::WINDOW_TITLE.to_string()
+                    },
                     ..default()
                 }),
                 ..default()
@@ -826,9 +849,11 @@ fn native_render_stack(
         } else {
             app.add_plugins(plugins);
         }
-        app.add_message::<AiChatterEvent>();
-        app.add_plugins(crate::server::renderer::RendererPlugin)
-            .add_plugins(crate::server::viewscreen_border::ViewscreenBorderPlugin);
+        if profile != BootProfile::NativeWorkshop {
+            app.add_message::<AiChatterEvent>();
+            app.add_plugins(crate::server::renderer::RendererPlugin)
+                .add_plugins(crate::server::viewscreen_border::ViewscreenBorderPlugin);
+        }
     }
     // A `--no-default-features` build has no presentation half to render with,
     // so there is no native viewscreen to stand up — take the contract, exactly
@@ -836,8 +861,12 @@ fn native_render_stack(
     // compiles it.
     #[cfg(not(feature = "server"))]
     {
-        core_plugins(app, BootProfile::NativeHost, log_filter, single_threaded);
-        register_render_contract(app);
+        core_plugins(app, profile, log_filter, single_threaded);
+        if profile == BootProfile::NativeWorkshop {
+            register_render_assets(app);
+        } else {
+            register_render_contract(app);
+        }
     }
 }
 

@@ -57,6 +57,14 @@ fn main() {
         }
     };
 
+    if args.workshop.is_some() {
+        if let Err(error) = native_host::workshop::run(&args) {
+            eprintln!("phoenix-host: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // The bridge-display profile (issue #1123). Read here, BEFORE
     // `pin_content_root` re-roots the process at `--content-dir`, because the
     // profile is operator configuration resolved against the launch directory,

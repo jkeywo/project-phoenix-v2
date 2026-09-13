@@ -146,6 +146,7 @@ impl Delivery {
     /// pin protects.
     fn start() -> Self {
         let args = HostArgs {
+            workshop: None,
             addr: "127.0.0.1:0".to_string(),
             client: ClientSource::Bundled {
                 dir: CLIENT_DIR.to_string(),

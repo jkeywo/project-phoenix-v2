@@ -518,6 +518,11 @@ impl PaneRuntime for UltralightHost {
         // The lobby drains its OWN queue — the one place the two surfaces differ
         // below the URL.
         let mut surface = match kind {
+            PaneKind::Workshop => {
+                let mut surface = UltralightPaneSurface::with_transparency(view, false);
+                surface.drain_script = crate::native_host::workshop::document::drain_script();
+                surface
+            }
             PaneKind::GameMaster => {
                 let mut surface = UltralightPaneSurface::with_transparency(view, false);
                 surface.drain_script = crate::native_host::native_gm::document::drain_script();
@@ -791,11 +796,16 @@ impl Plugin for PaneDisplayPlugin {
         app.add_plugins(super::gamepad_discovery::GamepadDiscoveryPlugin);
         app.init_resource::<ViewscreenHudLatest>();
         app.init_resource::<NativeGmDisplayState>();
+        app.init_resource::<NativeWorkshopDisplayState>();
         {
             use crate::authoritative::{DeclareState, StateClass};
             app.declare_state::<NativeGmDisplayState>(
                 StateClass::Presentation,
                 "native-local-gm-workspace",
+            );
+            app.declare_state::<NativeWorkshopDisplayState>(
+                StateClass::Presentation,
+                "gm-milestone-integrated-workshop",
             );
         }
         app.add_systems(PostUpdate, stop_pane_host_on_exit);
@@ -843,6 +853,9 @@ impl Plugin for PaneDisplayPlugin {
                     .after(crate::native_host::bridge_display::BridgeDisplaySet)
                     .run_if(resource_exists::<Assets<Image>>)
                     .run_if(resource_exists::<crate::native_host::native_gm::NativeGmSurface>),
+                follow_workshop_display
+                    .run_if(resource_exists::<Assets<Image>>)
+                    .run_if(resource_exists::<crate::native_host::workshop::WorkshopSurface>),
             )
                 .chain(),
         );
@@ -862,7 +875,8 @@ fn init_pane_host(world: &mut World) {
         // with no `--pane` still shows the lobby (issue #1325), and a host with
         // panes and no bundle to build a lobby from still shows the panes.
         || (world.get_resource::<PaneDisplayConfig>().is_none()
-            && world.get_resource::<HostLobbyDisplayConfig>().is_none())
+            && world.get_resource::<HostLobbyDisplayConfig>().is_none()
+            && world.get_resource::<crate::native_host::workshop::WorkshopSurface>().is_none())
     {
         return;
     }
@@ -897,7 +911,10 @@ fn init_pane_host(world: &mut World) {
         .unwrap_or(PaneDisplayConfig { panes: Vec::new() });
     let lobby_config = world.get_resource::<HostLobbyDisplayConfig>().cloned();
     let hud_config = world.get_resource::<ViewscreenHudDisplayConfig>().cloned();
-    if config.panes.is_empty() && lobby_config.is_none() {
+    if config.panes.is_empty()
+        && lobby_config.is_none()
+        && !world.contains_resource::<crate::native_host::workshop::WorkshopSurface>()
+    {
         world.insert_resource(PaneHostFailed);
         return;
     }
@@ -1056,6 +1073,9 @@ fn init_pane_host(world: &mut World) {
             audio_visuals: world
                 .get_resource::<crate::native_host::audio::NativeRoomAudio>()
                 .map(|audio| audio.visuals.clone()),
+            workshop: world
+                .get_resource::<crate::native_host::workshop::WorkshopSurface>()
+                .map(|surface| surface.bridge.clone()),
             gm: world
                 .get_resource::<crate::native_host::native_gm::NativeGmSurface>()
                 .map(|gm| gm.bridge.clone()),
@@ -2186,8 +2206,12 @@ fn drive_pane_host(
     mut stats: Option<ResMut<PaneFrameStats>>,
     observer: Option<Res<SurfaceObserver>>,
     gm: Option<Res<crate::native_host::native_gm::NativeGmSurface>>,
+    workshop: Option<Res<crate::native_host::workshop::WorkshopSurface>>,
 ) {
     if failed.is_some() {
+        if let Some(workshop) = &workshop {
+            workshop.bridge.fault();
+        }
         if let Some(gm) = &gm {
             gm.bridge.fault();
         }
@@ -2200,6 +2224,9 @@ fn drive_pane_host(
         return;
     };
     if host.thread.is_none() {
+        if let Some(workshop) = &workshop {
+            workshop.bridge.fault();
+        }
         if let Some(gm) = &gm {
             gm.bridge.fault();
         }
@@ -2271,6 +2298,11 @@ fn drive_pane_host(
                         gm.bridge.fault();
                     }
                 }
+                if pane.kind == PaneKind::Workshop {
+                    if let Some(workshop) = &workshop {
+                        workshop.bridge.fault();
+                    }
+                }
                 if !pane.kind.permanent() {
                     if let Some(bus) = &bus {
                         bus.0.fault(id, PaneFault::ViewCrashed);
@@ -2296,6 +2328,15 @@ fn drive_pane_host(
                 crate::pwarn!(log, LogCat::Lobby,
                     "pane host: {id} frame copy failed ({consecutive}/{VIEW_CRASH_COPY_FAILURES}): {reason}");
                 if let Some(fault) = host.mirror.record_copy_failure(id, consecutive) {
+                    if host
+                        .mirror
+                        .get(id)
+                        .is_some_and(|pane| pane.kind == PaneKind::Workshop)
+                    {
+                        if let Some(workshop) = &workshop {
+                            workshop.bridge.fault();
+                        }
+                    }
                     if host
                         .mirror
                         .get(id)
@@ -2586,6 +2627,82 @@ fn open_pending_views(
     if recreated_any {
         host.rebuild_layout();
     }
+}
+
+#[derive(Resource, Default)]
+struct NativeWorkshopDisplayState {
+    pane: Option<PaneId>,
+    serial: u32,
+    retries: u32,
+    loading_frames: u32,
+}
+
+/// Offline Workshop fills its one native window and uses the same compositing,
+/// keyboard, resize and crash-rebuild path as the other private native panes.
+fn follow_workshop_display(
+    host: Option<ResMut<PaneHost>>,
+    workshop: Res<crate::native_host::workshop::WorkshopSurface>,
+    mut state: ResMut<NativeWorkshopDisplayState>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut images: ResMut<Assets<Image>>,
+    mut commands: Commands,
+) {
+    let Some(mut host) = host else {
+        return;
+    };
+    if host.thread.is_none() {
+        return;
+    }
+    let Ok((window, geometry)) = windows.single() else {
+        return;
+    };
+    if state.pane.is_some() && !workshop.bridge.live() {
+        state.loading_frames = state.loading_frames.saturating_add(1);
+        if state.loading_frames >= 600 {
+            workshop.bridge.fault();
+        }
+    }
+    if let Some(pane) = state.pane {
+        if workshop.bridge.failed() || host.mirror.get(pane).is_none() {
+            host.send(PaneCommand::Close(pane));
+            if let Some(pane) = host.mirror.remove(pane) {
+                commands.entity(pane.canvas).try_despawn();
+            }
+            release_pane_capture(&mut host, pane);
+            host.rebuild_layout();
+            state.pane = None;
+            state.retries = state.retries.saturating_add(1);
+        }
+    }
+    if state.pane.is_some() || state.retries > 3 {
+        return;
+    }
+    state.serial = state.serial.saturating_add(1);
+    let pane = PaneId(u32::MAX / 2 - state.serial);
+    workshop.bridge.activate(pane);
+    let canvas = make_pane_view(
+        &host,
+        &mut images,
+        &mut commands,
+        pane,
+        &workshop.url,
+        PaneKind::Workshop,
+        PaneSeat {
+            window,
+            station_camera: None,
+            origin: (0, 0),
+            size: (
+                geometry.physical_width().max(1),
+                geometry.physical_height().max(1),
+            ),
+            scale: geometry.scale_factor() as f64,
+            window_origin: (0, 0),
+        },
+    );
+    host.mirror.insert(pane, PaneKind::Workshop, true, canvas);
+    host.rebuild_layout();
+    state.pane = Some(pane);
+    state.loading_frames = 0;
 }
 
 struct NativeGmWindow {
@@ -2914,6 +3031,7 @@ fn retire_closed_panes(
     let survives = |w: &PaneWindow| {
         open.contains(&w.id)
             || w.kind == PaneKind::GameMaster
+            || w.kind == PaneKind::Workshop
             || w.is_host_lobby()
             || w.is_hud_overlay()
     };

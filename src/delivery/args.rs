@@ -44,6 +44,8 @@ pub struct HostArgs {
     /// same code either way, and a second binary would have had to either fork
     /// them or link them anyway.
     pub sim: Option<SimArgs>,
+    /// Explicit offline Authoring root; mutually exclusive with live/setup work.
+    pub workshop: Option<WorkshopArgs>,
     /// `--setup`: enumerate the connected monitors, print their stable
     /// identities and geometry, validate `--profile` against them if one was
     /// given, and exit (issue #1123). A standalone diagnostic — it needs no
@@ -60,6 +62,12 @@ pub struct HostArgs {
     /// single-window #1121 behaviour. Kept at the top level rather than in
     /// [`SimArgs`] because `--setup` reads it without a world.
     pub profile: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkshopArgs {
+    pub root: String,
+    pub project: bool,
 }
 
 /// The authoritative simulation's arguments, present when `--world` (issue
@@ -187,6 +195,13 @@ scenario catalogue from a native PC process instead of a browser tab, and
 
 USAGE:
     phoenix-host [OPTIONS]
+
+WORKSHOP
+    --workshop-project <DIR> Open an offline editable project in the shared
+                          Workshop UI. Requires --client-dir and an Ultralight
+                          build. Delivery binds loopback only; no live session.
+    --workshop-mod <DIR>   Open an offline editable mod workspace instead.
+                          --content-dir supplies its read-only base content.
 
 SIMULATION
     --world <PATH>        Run the authoritative simulation for this world,
@@ -341,6 +356,7 @@ ENDPOINTS
 /// Parse `phoenix-host`'s arguments.
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcome, String> {
     let mut addr = DEFAULT_ADDR.to_string();
+    let mut addr_given = false;
     let mut client_dir: Option<String> = None;
     let mut manifest = DEFAULT_MANIFEST.to_string();
     let mut content_dir = DEFAULT_CONTENT_DIR.to_string();
@@ -367,12 +383,16 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut preview_camera = None;
     let mut profile: Option<String> = None;
     let mut lobby = false;
+    let mut workshop: Option<WorkshopArgs> = None;
 
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "-h" | "--help" => return Ok(ParseOutcome::Help),
-            "--addr" => addr = value_for(&arg, &mut it)?,
+            "--addr" => {
+                addr = value_for(&arg, &mut it)?;
+                addr_given = true;
+            }
             "--client-dir" => client_dir = Some(value_for(&arg, &mut it)?),
             "--manifest" => manifest = value_for(&arg, &mut it)?,
             "--content-dir" => content_dir = value_for(&arg, &mut it)?,
@@ -383,6 +403,15 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--preview-camera" => preview_camera = Some(value_for(&arg, &mut it)?),
             "--profile" => profile = Some(value_for(&arg, &mut it)?),
             "--world" => world = Some(value_for(&arg, &mut it)?),
+            "--workshop-project" | "--workshop-mod" => {
+                if workshop.is_some() {
+                    return Err("Select exactly one Workshop root".into());
+                }
+                workshop = Some(WorkshopArgs {
+                    root: value_for(&arg, &mut it)?,
+                    project: arg == "--workshop-project",
+                });
+            }
             "--lobby" => lobby = true,
             "--ship" => ship = Some(value_for(&arg, &mut it)?),
             "--seed" => {
@@ -426,6 +455,44 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         }
     }
 
+    if workshop.is_some() {
+        if addr_given {
+            return Err(
+                "Workshop owns a loopback-only delivery endpoint; --addr is not a Workshop option"
+                    .into(),
+            );
+        }
+        if client_dir.is_none() {
+            return Err("Workshop needs --client-dir with the built Workshop bundle".into());
+        }
+        if world.is_some()
+            || lobby
+            || setup
+            || profile.is_some()
+            || rendezvous.is_some()
+            || origin.is_some()
+            || ship.is_some()
+            || seed.is_some()
+            || solo
+            || save_dir_given
+            || !save_actions.is_empty()
+            || confirm_delete
+            || resume_slot.is_some()
+            || !panes.is_empty()
+            || frame_stats
+            || mod_pack_dir.is_some()
+            || test_output.is_some()
+            || meter_microphone.is_some()
+            || preview_camera.is_some()
+            || !log_spec.is_empty()
+            || !log_entity.is_empty()
+        {
+            return Err("Workshop is offline and cannot combine with simulation, crew, setup or bridge-profile flags".into());
+        }
+        // The ordinary CLI default is LAN delivery. An offline Workshop never
+        // inherits that default, and cannot expose an authored root over LAN.
+        addr = "127.0.0.1:0".into();
+    }
     let has_delete = save_actions
         .iter()
         .any(|action| matches!(action, SaveOperatorAction::Delete { .. }));
@@ -643,6 +710,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         content_dir,
         skip_bundle_check,
         sim,
+        workshop,
         setup,
         test_output,
         meter_microphone,
@@ -674,6 +742,45 @@ mod tests {
 
     fn err(args: &[&str]) -> String {
         parse(args).expect_err("expected a refusal")
+    }
+
+    #[test]
+    fn workshop_selects_one_offline_root_and_never_inherits_lan_delivery() {
+        for (flag, project) in [("--workshop-project", true), ("--workshop-mod", false)] {
+            let args = run(&[flag, "chosen root", "--client-dir", "dist"]);
+            assert_eq!(
+                args.workshop,
+                Some(WorkshopArgs {
+                    root: "chosen root".into(),
+                    project
+                })
+            );
+            assert_eq!(args.addr, "127.0.0.1:0");
+            assert!(args.sim.is_none());
+            assert!(!args.setup);
+        }
+    }
+
+    #[test]
+    fn workshop_refuses_live_authority_and_ambiguous_launches() {
+        assert!(err(&["--workshop-project", "root"]).contains("--client-dir"));
+        for extra in [
+            vec!["--workshop-mod", "second"],
+            vec!["--world", "w.toml"],
+            vec!["--lobby"],
+            vec!["--solo"],
+            vec!["--pane", "operator"],
+            vec!["--addr", "0.0.0.0:8080"],
+            vec!["--rendezvous", "wss://example.test"],
+            vec!["--profile", "bridge.toml"],
+            vec!["--seed", "42"],
+            vec!["--resume-save", "slot"],
+            vec!["--mod-pack-dir", "shelf"],
+        ] {
+            let mut args = vec!["--workshop-project", "root", "--client-dir", "dist"];
+            args.extend(extra);
+            assert!(parse(&args).is_err(), "{args:?}");
+        }
     }
 
     #[test]

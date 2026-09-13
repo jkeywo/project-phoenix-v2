@@ -15,13 +15,29 @@ import { t } from './strings.js';
 
 // wasm-bindgen may reject with a string JsValue rather than an Error object.
 const errorText = error => String(error?.message ?? error);
+const NATIVE_COPY = {
+  'workshop.authoring': 'workshop.native_authoring', 'workshop.files': 'workshop.native_files',
+  'workshop.empty': 'workshop.native_empty', 'workshop.dirty': 'workshop.native_dirty',
+  'workshop.saved': 'workshop.native_clean', 'workshop.changed': 'workshop.native_changed',
+  'workshop.start': 'workshop.native_start',
+  'workshop.recovery_loading': 'workshop.native_recovery_loading',
+  'workshop.recovery_saving': 'workshop.native_recovery_saving',
+  'workshop.recovery_saved': 'workshop.native_recovery_saved',
+  'workshop.recovery_failed': 'workshop.native_recovery_failed',
+  'workshop.recovery_restored': 'workshop.native_recovery_restored',
+  'workshop.recovery_discarded': 'workshop.native_recovery_discarded',
+  'workshop.recovery_empty': 'workshop.native_recovery_empty',
+  'workshop.recovery_available': 'workshop.native_recovery_available',
+  'workshop.recovery_invalid': 'workshop.native_recovery_invalid',
+};
 
 export function mountWorkshopAuthoring({ root, win = window, download = downloadZip, provider = null,
   runtime = provider?.runtime || createWorkshopRuntime(), recovery = provider?.recovery || createWorkshopRecovery({ indexedDB: win.indexedDB }) } = {}) {
   const doc = root.ownerDocument;
+  const translate = (id, params) => t(provider?.save ? (NATIVE_COPY[id] || id) : id, params);
   function el(tag, textId, attrs = {}) {
     const node = doc.createElement(tag);
-    if (textId) node.textContent = t(textId);
+    if (textId) node.textContent = translate(textId);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
     return node;
   }
@@ -114,8 +130,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     else feedbackRows.set(value.actionId, value);
     feedback.replaceChildren(...[...feedbackRows.values()].map(entry => {
       const row = el('span', null, { 'data-action-id': entry.actionId, 'data-state': entry.state });
-      row.textContent = t('action_feedback.summary', {
-        action: t(actions.action(entry.actionId).labelId), status: t(entry.statusId),
+      row.textContent = translate('action_feedback.summary', {
+        action: translate(actions.action(entry.actionId).labelId), status: translate(entry.statusId),
       });
       return row;
     }));
@@ -124,7 +140,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     actionFeedback: lifecycle,
     openImport(activation) {
       if (provider?.canImport === false || pendingImport || pendingValidation || pendingRecovery) return false;
-      if (draft?.isDirty() && !win.confirm(t('workshop.replace_confirm'))) return false;
+      if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return false;
       pendingImport = activation;
       fileInput.value = '';
       try { fileInput.click(); }
@@ -139,7 +155,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     exportPack: activation => evaluate(true, activation),
   });
   let storage = null;
-  try { storage = win.localStorage; } catch { /* private mode */ }
+  try { storage = win.PhoenixOperatorStorage || win.localStorage; } catch { /* private mode */ }
   const loaded = loadOperatorProfile(storage, { registry: actions });
   let profile = loaded.profile;
   applyOperatorProfile(profile, actions);
@@ -172,9 +188,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     });
   }
   renderSettings();
+  function nativeStorageStatus() {
+    if (win.PhoenixOperatorStorageStatus?.status === 'error') show('editor.mod.settings.storage_refused', [], true);
+  }
+  win.addEventListener('phoenix-operator-storage-status', nativeStorageStatus);
 
   function show(id, details = [], refused = false) {
-    findings.textContent = [t(id), ...details].join('\n');
+    findings.textContent = [translate(id), ...details].join('\n');
     findings.setAttribute('role', refused ? 'alert' : 'status');
     findings.dataset.outcome = refused ? 'refused' : 'applied';
     if (refused) findings.focus();
@@ -185,8 +205,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         const option = el('option', null, { value: path }); option.textContent = path; return option;
       }));
       files.value = selected || '';
-      source.value = draft?.isBinary(selected) ? t('workshop.binary_source', { bytes: draft.byteLength(selected) }) : draft?.read(selected) || '';
-      sourceLabel.textContent = selected ? t('workshop.source_path', { path: selected }) : t('workshop.source');
+      source.value = draft?.isBinary(selected) ? translate('workshop.binary_source', { bytes: draft.byteLength(selected) }) : draft?.read(selected) || '';
+      sourceLabel.textContent = selected ? translate('workshop.source_path', { path: selected }) : translate('workshop.source');
     }
     const busy = Boolean(pendingImport || pendingValidation || pendingRecovery);
     files.disabled = !draft || busy;
@@ -208,9 +228,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       inspected = null;
       fieldSelect.replaceChildren();
       fieldValue.value = '';
-      fieldInfo.textContent = t('workshop.inspector_stale');
+      fieldInfo.textContent = translate('workshop.inspector_stale');
     }
-    dirty.textContent = t(!draft ? 'workshop.empty' : draft.isDirty() ? 'workshop.dirty' : 'workshop.saved');
+    dirty.textContent = translate(!draft ? 'workshop.empty' : draft.isDirty() ? 'workshop.dirty' : 'workshop.saved');
   }
   function travel(redo) {
     if (pendingImport || pendingValidation || pendingRecovery) return;
@@ -246,10 +266,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   function renderField() {
     const field = inspected?.fields[Number(fieldSelect.value)];
     fieldValue.value = field?.source || '';
-    fieldInfo.textContent = field ? t(field.runtime_owned ? 'workshop.field_runtime' : 'workshop.field_fallback', {
+    fieldInfo.textContent = field ? translate(field.runtime_owned ? 'workshop.field_runtime' : 'workshop.field_fallback', {
       type: field.kind, line: String(field.line),
-    }) : t('workshop.inspector_empty');
-    if (field?.default_source != null) fieldInfo.textContent += ` ${t('workshop.field_default', { value: field.default_source })}`;
+    }) : translate('workshop.inspector_empty');
+    if (field?.default_source != null) fieldInfo.textContent += ` ${translate('workshop.field_default', { value: field.default_source })}`;
   }
   fieldSelect.addEventListener('change', renderField);
   async function patchField() {
@@ -264,7 +284,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         document_path: snapshot.path, path: field.path, expected_source: snapshot.source, value_source: fieldValue.value,
       });
       if (disposed) return;
-      if (draft.read(snapshot.path) !== snapshot.source) throw new Error(t('workshop.inspector_stale'));
+      if (draft.read(snapshot.path) !== snapshot.source) throw new Error(translate('workshop.inspector_stale'));
       if (draft.edit(snapshot.path, patched)) {
         selected = snapshot.path;
         refresh({ selection: true });
@@ -335,13 +355,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         target.textContent = location;
         row.append(target);
       } else row.append(doc.createTextNode(location));
-      row.append(doc.createTextNode(` — ${t(`workshop.severity.${record.severity}`)}: ${record.message}`));
+      row.append(doc.createTextNode(` — ${translate(`workshop.severity.${record.severity}`)}: ${record.message}`));
       findings.append(row);
     }
   }
   async function createPack() {
     if (pendingImport || pendingValidation || pendingRecovery || provider?.canCreate === false) return;
-    if (draft?.isDirty() && !win.confirm(t('workshop.replace_confirm'))) return;
+    if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return;
     pendingValidation = true; refresh();
     try {
       const replacement = newWorkshopPack(await runtime.dependencies());
@@ -370,7 +390,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if ((!path.startsWith('assets/') || !/\.(toml|rhai|glb|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(path))) {
       show('workshop.add_refused', [], true); return;
     }
-    if (draft.paths().includes(path) && !win.confirm(t('workshop.replace_file_confirm', { path }))) return;
+    if (draft.paths().includes(path) && !win.confirm(translate('workshop.replace_file_confirm', { path }))) return;
     try {
       if (draft.put(path, value)) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); }
     } catch (error) { show('workshop.add_refused', [errorText(error)], true); }
@@ -422,7 +442,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       pending.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
     } catch (error) {
       show('editor.mod.import.previous_workspace_preserved', [
-        error?.code === 'workshop-missing-manifest' ? t('workshop.missing_manifest') : errorText(error),
+        error?.code === 'workshop-missing-manifest' ? translate('workshop.missing_manifest') : errorText(error),
       ], true);
       pending.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
     } finally {
@@ -443,7 +463,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   source.addEventListener('input', () => {
     if (pendingImport || pendingValidation || pendingRecovery) return;
     if (draft?.edit(selected, source.value)) {
-      findings.textContent = t('workshop.changed');
+      findings.textContent = translate('workshop.changed');
       findings.setAttribute('role', 'status');
       delete findings.dataset.outcome;
       refresh();
@@ -453,11 +473,11 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   function persistDraft() {
     if (!draft || pendingRecovery) return;
     const generation = ++persistenceGeneration;
-    recoveryStatus.textContent = t('workshop.recovery_saving');
+    recoveryStatus.textContent = translate('workshop.recovery_saving');
     void recovery.save({ version: 1, selected, draft: draft.snapshot() }).then(() => {
-      if (!disposed && generation === persistenceGeneration) recoveryStatus.textContent = t('workshop.recovery_saved');
+      if (!disposed && generation === persistenceGeneration) recoveryStatus.textContent = translate('workshop.recovery_saved');
     }, () => {
-      if (!disposed && generation === persistenceGeneration) recoveryStatus.textContent = t('workshop.recovery_failed');
+      if (!disposed && generation === persistenceGeneration) recoveryStatus.textContent = translate('workshop.recovery_failed');
     });
   }
   function restoreDraft() {
@@ -469,7 +489,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     recoveredDraft = null;
     pendingRecovery = false;
     restoreButton.hidden = discardButton.hidden = true;
-    recoveryStatus.textContent = t('workshop.recovery_restored');
+    recoveryStatus.textContent = translate('workshop.recovery_restored');
     refresh({ selection: true });
     source.focus();
   }
@@ -481,11 +501,11 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       recoveredDraft = null;
       pendingRecovery = false;
       restoreButton.hidden = discardButton.hidden = true;
-      recoveryStatus.textContent = t('workshop.recovery_discarded');
+      recoveryStatus.textContent = translate('workshop.recovery_discarded');
       refresh();
       importButton.focus();
     } catch {
-      if (!disposed) recoveryStatus.textContent = t('workshop.recovery_failed');
+      if (!disposed) recoveryStatus.textContent = translate('workshop.recovery_failed');
     } finally { discardButton.disabled = restoreButton.disabled = false; }
   }
   function keydown(event) {
@@ -509,6 +529,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   win.addEventListener('beforeunload', beforeUnload);
   refresh({ selection: true });
   show('workshop.start');
+  nativeStorageStatus();
   const ready = (async () => {
     let record;
     if (provider?.load) {
@@ -525,7 +546,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     catch {
       if (!disposed) {
         pendingRecovery = false;
-        recoveryStatus.textContent = t('workshop.recovery_failed');
+        recoveryStatus.textContent = translate('workshop.recovery_failed');
         refresh();
       }
       return;
@@ -533,7 +554,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (disposed) return;
     if (!record) {
       pendingRecovery = false;
-      recoveryStatus.textContent = t('workshop.recovery_empty');
+      recoveryStatus.textContent = translate('workshop.recovery_empty');
       refresh();
       return;
     }
@@ -543,14 +564,15 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       const restored = provider?.restoreDocument ? provider.restoreDocument(record.draft) : WorkshopDocument.restore(record.draft);
       recoveredDraft = { record, draft: restored, selected: restored.paths().includes(record.selected) ? record.selected : restored.paths()[0] };
       restoreButton.hidden = false;
-      recoveryStatus.textContent = t('workshop.recovery_available');
-    } catch { recoveryStatus.textContent = t('workshop.recovery_invalid'); }
+      recoveryStatus.textContent = translate('workshop.recovery_available');
+    } catch { recoveryStatus.textContent = translate('workshop.recovery_invalid'); }
   })();
   return { ready, dispose() {
     disposed = true;
     controls.destroy();
     doc.removeEventListener('keydown', keydown);
     win.removeEventListener('beforeunload', beforeUnload);
+    win.removeEventListener('phoenix-operator-storage-status', nativeStorageStatus);
   } };
 }
 

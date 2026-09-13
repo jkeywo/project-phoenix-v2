@@ -105,6 +105,20 @@ updates the HTML/JS and read-only dependency bundle alongside that artifact.
 On Windows, double-click `run-workshop.bat` to build it, start a local server on
 port 8083 and open the Workshop. It needs Trunk, the Rust WASM target and installed
 npm dependencies. Keep its window open while editing; Ctrl+C stops the server.
+The same UI opens natively on an explicitly selected project or mod directory:
+
+```powershell
+cargo build --features host,ultralight --bin phoenix-host
+./target/debug/phoenix-host --client-dir dist --workshop-project .
+# Or select one editable mod workspace over the installed read-only content:
+./target/debug/phoenix-host --client-dir dist --workshop-mod path/to/mod
+```
+
+Native Workshop saves validated source directly to that selected root and keeps
+its recovery draft and private preferences on this computer. Large binary assets
+use immutable local versions and chunked imports. The shell runs offline with
+loopback-only static delivery; it opens no mission or crew connection. A source
+write refuses external edits, and reopening a pane offers its saved recovery draft.
 Disposable Test simulation and model tooling remain later M6 work.
 See [Editor and Workshop](wiki/entities/editor.md) for the current boundary.
 

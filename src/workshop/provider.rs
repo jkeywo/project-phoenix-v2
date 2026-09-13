@@ -160,6 +160,11 @@ pub struct NativeWorkshopProvider {
 }
 
 impl NativeWorkshopProvider {
+    /// Host-only document lifecycle boundary. Completed immutable versions and
+    /// accepted writes survive; an abandoned upload cannot block the next view.
+    pub(crate) fn retire_view(&mut self) {
+        self.assets.retire_view();
+    }
     pub fn open(
         kind: WorkspaceKind,
         root: impl AsRef<Path>,

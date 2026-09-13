@@ -229,4 +229,8 @@ impl AssetStore {
         self.upload = None;
         Ok(())
     }
+    pub(super) fn retire_view(&mut self) {
+        self.upload = None;
+        self.preview = None;
+    }
 }

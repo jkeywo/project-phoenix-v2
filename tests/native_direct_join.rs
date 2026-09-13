@@ -55,6 +55,7 @@ const JOIN_TABLE: &str = "assets/join/join-codes.toml";
 
 fn args() -> HostArgs {
     HostArgs {
+        workshop: None,
         // Port 0: the OS picks a free one and `local_addr()` reports it, so
         // parallel test binaries never collide on a fixed port.
         addr: "127.0.0.1:0".to_string(),

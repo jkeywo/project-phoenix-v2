@@ -83,11 +83,11 @@ describe('Workshop Authoring browser surface', () => {
     byId('save').click();
     await vi.waitFor(() => expect(byId('save').disabled).toBe(false));
     expect(byId('source').value).toContain('# native change');
-    expect(byId('dirty').textContent).toBe(t('workshop.dirty'));
+    expect(byId('dirty').textContent).toBe(t('workshop.native_dirty'));
     expect(document.querySelector('.workshop-findings').textContent).toContain('External edit');
     saved = true;
     byId('save').click();
-    await vi.waitFor(() => expect(byId('dirty').textContent).toBe(t('workshop.saved')));
+    await vi.waitFor(() => expect(byId('dirty').textContent).toBe(t('workshop.native_clean')));
     const save = request.mock.calls.filter(([value]) => value.op === 'save-sources').at(-1)[0];
     expect(save.files[WORKSHOP_WORLD]).toContain('# native change');
   });

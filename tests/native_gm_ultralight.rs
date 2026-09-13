@@ -44,6 +44,7 @@ struct Delivery {
 impl Delivery {
     fn start() -> Self {
         let server = HostServer::bind(&HostArgs {
+            workshop: None,
             addr: "127.0.0.1:0".into(),
             client: ClientSource::Bundled { dir: "dist".into() },
             manifest: "assets/scenarios.toml".into(),

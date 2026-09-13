@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
 updated: 2026-09-13
 ---
 
@@ -119,7 +119,8 @@ OS workspace claim, save journal and crash-draft record. Recovery retains the ol
 revision, so restoring a draft cannot silently overwrite newer files on disk.
 `mountNativeWorkshop` mounts the same shared Authoring UI over a private request
 callback and reply receiver; no browser HTTP/file provider is introduced. The
-native shell/CLI wiring is the next integration step.
+native shell opens through `phoenix-host --workshop-project DIR` or
+`--workshop-mod DIR`, with `--client-dir` and an Ultralight build.
 
 Native `load-sources` returns source text bytes and immutable asset-version
 references from `src/workshop/provider/assets.rs`. The selected root owns the
@@ -131,6 +132,18 @@ chronological history, including a saved replacement later undone after reopenin
 Ordinary browser documents refuse reference-bearing recovery. The store has a
 bounded 2 GiB capacity and refuses new versions when full; retained versions are
 not automatically discarded while a recovery record or undo history may need them.
+
+`src/native_host/workshop` composes the offline `BootProfile::NativeWorkshop`.
+It retains the shared native render core and the existing pane input, resize and
+texture-upload pipeline, while refusing world ingestion and live/crew launch
+flags. The in-memory native document replaces only the shared browser boot;
+its loopback delivery server receives no filesystem request endpoint or selected
+source path. An ordered worker owns source IO and durable private operator
+preferences, so validation and asset reads do not block the pane renderer.
+Replies belong to one view epoch. Recreating a failed pane preserves the provider
+and recovery draft, and retires an unfinished import after older accepted work
+finishes. A pane becomes live only after its modules and source startup settle;
+failed initialisation follows the bounded pane rebuild path.
 
 Disposable Test simulation, specialised entity/definition/model panels and runtime
 model asset overlays remain later M6 work. The existing editor/viewer remain

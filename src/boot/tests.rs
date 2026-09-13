@@ -99,6 +99,26 @@ const PROFILES: [(BootProfile, &str); 5] = [
     (BootProfile::NativeHost, "native-host"),
 ];
 
+#[test]
+fn offline_workshop_keeps_shared_render_assets_without_a_world_or_live_session() {
+    let mut plan = plan_for(BootProfile::NativeWorkshop);
+    plan.world_ingest = WorldIngest::Deferred;
+    let mut app = build(plan).unwrap();
+    assert!(app.world().contains_resource::<Assets<Mesh>>());
+    assert!(app.world().contains_resource::<Assets<StandardMaterial>>());
+    assert!(!app
+        .world()
+        .contains_resource::<crate::world::config::WorldConfig>());
+    assert!(!app
+        .world()
+        .contains_resource::<crate::lockstep::FleetLockstep>());
+    assert!(!app
+        .world()
+        .contains_resource::<State<crate::core::messages::GamePhase>>());
+    app.update();
+    assert!(build(plan_for(BootProfile::NativeWorkshop)).is_err());
+}
+
 /// Assert the four render assets and three bridge messages are all registered.
 fn assert_render_contract(app: &App, label: &str) {
     let w = app.world();

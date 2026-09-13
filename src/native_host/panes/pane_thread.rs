@@ -93,6 +93,8 @@ use crate::native_host::host_lobby::{pump_host_lobby, HostLobbyBridge};
 /// incoherent (a transparent lobby, a permanent console).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PaneKind {
+    /// Offline Authoring capability; no crew or GM identity.
+    Workshop,
     /// Privileged local GM; uses a private bridge and no crew session.
     GameMaster,
     /// A participant's console: an entry on the pane bus, an identity, a station
@@ -626,6 +628,7 @@ pub struct PaneThreadConfig {
     pub lobby: Option<HostLobbyBridge>,
     pub gm: Option<crate::native_host::native_gm::bridge::NativeGmBridge>,
     pub audio_visuals: Option<crate::native_host::audio::visual::NativeAudioVisual>,
+    pub workshop: Option<crate::native_host::workshop::bridge::WorkshopBridge>,
     pub period: Duration,
     pub buffers_per_pane: usize,
     pub measure: bool,
@@ -641,6 +644,7 @@ impl Default for PaneThreadConfig {
             lobby: None,
             gm: None,
             audio_visuals: None,
+            workshop: None,
             period: Duration::from_millis(16),
             buffers_per_pane: PANE_STAGING_BUFFERS,
             measure: false,
@@ -893,6 +897,7 @@ where
                 driver.set_lobby(config.lobby);
                 driver.gm = config.gm;
                 driver.audio_visuals = config.audio_visuals;
+                driver.workshop = config.workshop;
                 driver.set_measure(config.measure);
                 driver.set_observer(config.observer);
                 let mut sink = PooledFrames::new(config.buffers_per_pane);
@@ -1018,6 +1023,7 @@ impl<V> LoopPane<V> {
             epoch: self.epoch,
             kind: match self.kind {
                 PaneKind::GameMaster => "gm",
+                PaneKind::Workshop => "workshop",
                 PaneKind::Console => "console",
                 PaneKind::Lobby => "lobby",
                 PaneKind::Hud => "hud",
@@ -1063,6 +1069,7 @@ pub struct PaneLoop<R: PaneRuntime> {
     lobby: Option<HostLobbyBridge>,
     gm: Option<crate::native_host::native_gm::bridge::NativeGmBridge>,
     audio_visuals: Option<crate::native_host::audio::visual::NativeAudioVisual>,
+    workshop: Option<crate::native_host::workshop::bridge::WorkshopBridge>,
     /// The newest HUD readout, retained for changed revisions and lifecycle
     /// reapplication — a latest-wins slot, see the module note.
     hud_script: Option<String>,
@@ -1086,6 +1093,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
             lobby: None,
             gm: None,
             audio_visuals: None,
+            workshop: None,
             hud_script: None,
             hud_revision: 0,
             gamepad_script: None,
@@ -1309,6 +1317,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
             lobby,
             gm,
             audio_visuals,
+            workshop,
             hud_script,
             hud_revision,
             gamepad_script,
@@ -1386,6 +1395,13 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 out.push(PaneEvent::Loaded(pane.id));
             }
             match pane.kind {
+                PaneKind::Workshop => {
+                    if let Some(bridge) = &*workshop {
+                        let count = bridge.pump(pane.id, &mut pane.view);
+                        pane.pushed_this_iteration = count > 0;
+                        applied = count as u64;
+                    }
+                }
                 PaneKind::GameMaster => {
                     if let Some(bridge) = &*gm {
                         let count = bridge.pump(pane.id, &mut pane.view);

@@ -156,6 +156,7 @@ pub mod viewscreen_presentation;
 /// [`crate::boot::ingest_world`] a `--world` boot runs — on the `World` of the
 /// app that is already drawing the lobby.
 pub mod world_load;
+pub mod workshop;
 
 pub use app::{
     build_native_host_app, curated_hulls_for_world, preload_content_templates, run,

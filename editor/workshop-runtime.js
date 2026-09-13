@@ -1,6 +1,7 @@
 /** Offline runtime capability. Loading the local WASM module does not start
  * the simulation. Every validation call gets an explicit immutable dependency
  * bundle and the exact candidate bytes, never a live host overlay. */
+import { createWorkshopAssetSnapshot } from './workshop-assets.js';
 export function createWorkshopRuntime({
   load = async () => {
     const moduleUrl = new URL('../phoenix.js', import.meta.url).href;
@@ -13,6 +14,7 @@ export function createWorkshopRuntime({
     if (!response.ok) throw new Error(`Workshop dependencies: HTTP ${response.status}`);
     return response.json();
   },
+  fetchAsset,
 } = {}) {
   let pending = null;
   async function ready() {
@@ -20,12 +22,23 @@ export function createWorkshopRuntime({
       if (typeof runtime?.wasm_workshop_validate_pack !== 'function' || !source?.base_files) {
         throw new Error('Workshop runtime capability is unavailable');
       }
-      return { runtime, dependencies: JSON.stringify(source) };
+      return { runtime, dependencies: JSON.stringify(source), assets: createWorkshopAssetSnapshot(source,
+        fetchAsset ? { fetch: fetchAsset } : {}) };
     }).catch(error => { pending = null; throw error; });
     return pending;
   }
   return {
     async dependencies() { return JSON.parse((await ready()).dependencies); },
+    /** Read-only dependencies for local previews. Editable candidate bytes
+     * stay with WorkshopDocument; no live overlay or uncaptured HTTP fallback. */
+    async readAsset(path) {
+      const snapshot = await (await ready()).assets.capture([path]);
+      for (const pack of [...(snapshot.packs || [])].reverse()) {
+        if (Object.hasOwn(pack.assets || {}, path)) return Uint8Array.from(pack.assets[path]);
+      }
+      return Object.hasOwn(snapshot.base_assets || {}, path)
+        ? Uint8Array.from(snapshot.base_assets[path]) : null;
+    },
     async inspect(source, documentPath) {
       const { runtime } = await ready();
       return JSON.parse(runtime.wasm_workshop_fields(source, documentPath));
@@ -36,7 +49,9 @@ export function createWorkshopRuntime({
     },
     async validate(bytes) {
       const loaded = await ready();
-      const report = JSON.parse(loaded.runtime.wasm_workshop_validate_pack(bytes, loaded.dependencies));
+      const required = loaded.runtime.wasm_workshop_asset_dependencies?.(bytes) || [];
+      const snapshot = await loaded.assets.capture(required);
+      const report = JSON.parse(loaded.runtime.wasm_workshop_validate_pack(bytes, JSON.stringify(snapshot)));
       if (typeof report?.accepted !== 'boolean' || !Array.isArray(report.findings)
           || report.findings.some(finding => !['error', 'warning'].includes(finding.severity)
             || typeof finding.message !== 'string' || typeof finding.file !== 'string')) {

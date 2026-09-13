@@ -280,7 +280,11 @@ fn project_binary_members_are_exact() {
     for suffix in ["glb", "bin"] {
         let fixture = Fixture::new();
         fs::create_dir_all(fixture.root.join("assets/models")).unwrap();
-        let bytes = vec![0, 255, 13, 10, 128, 10];
+        let bytes = if suffix == "glb" {
+            include_bytes!("../../../assets/models/alliance_courier_recreated_lod2.glb").to_vec()
+        } else {
+            vec![0, 255, 13, 10, 128, 10]
+        };
         fs::write(
             fixture.root.join(format!("assets/models/test.{suffix}")),
             &bytes,
@@ -329,8 +333,9 @@ fn project_binary_members_are_exact() {
 #[test]
 fn compact_native_versions_survive_save_undo_and_reopen_without_sending_asset_bytes() {
     let fixture = Fixture::new();
-    let asset = "assets/sounds/test.mp3";
-    fs::create_dir_all(fixture.root.join("assets/sounds")).unwrap();
+    // Opaque external buffer bytes exercise chunking without claiming to be decoded audio.
+    let asset = "assets/models/test.bin";
+    fs::create_dir_all(fixture.root.join("assets/models")).unwrap();
     let original = vec![0xff; 150_000];
     fs::write(fixture.root.join(asset), &original).unwrap();
     let mut provider = fixture.open();

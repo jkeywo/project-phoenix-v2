@@ -32,6 +32,49 @@ use std::collections::HashMap;
 #[derive(Component)]
 pub(crate) struct RenderProcessed;
 
+/// Retire authored visual state before any new revision is loaded. AssetServer
+/// uses distinct paths for the replacement, so late old loads cannot reattach.
+pub(crate) fn reset_pack_visuals(world: &mut World) {
+    // The shared asset source also exists in rendererless boot profiles. Do
+    // not register or remove presentation components in those worlds.
+    if !world.contains_resource::<ProceduralMeshCache>() {
+        return;
+    }
+    let entities: Vec<Entity> = world
+        .query::<(
+            Entity,
+            Option<&crate::entities::spawner::MeshSection>,
+            Has<crate::entities::spawner::PlanetSection>,
+        )>()
+        .iter(world)
+        .filter_map(|(entity, mesh, planet)| {
+            (planet || mesh.is_some_and(|mesh| mesh.0.model.is_some())).then_some(entity)
+        })
+        .collect();
+    for entity in entities {
+        let children: Vec<Entity> = world
+            .get::<Children>(entity)
+            .into_iter()
+            .flat_map(|children| children.iter())
+            .filter(|child| {
+                world
+                    .get::<crate::entities::pack_assets::PackVisualRoot>(*child)
+                    .is_some()
+            })
+            .collect();
+        for child in children {
+            world.entity_mut(child).despawn();
+        }
+        world.entity_mut(entity).remove::<(
+            RenderProcessed,
+            PendingSceneHandle,
+            MeshLods,
+            Mesh3d,
+            MeshMaterial3d<crate::entities::planet::PlanetSurfaceMaterial>,
+        )>();
+    }
+}
+
 /// Tag a freshly spawned GLB `SceneRoot` as the local ship's model: hidden by
 /// default (shown only by the cinematic camera) and exempt from frustum culling
 /// because it sits at the camera origin.
@@ -248,7 +291,12 @@ fn retire_lod_visual(commands: &mut Commands, lods: &mut MeshLods, fade_secs: f3
 /// below that entity. The extra root also preserves the old transform order for
 /// non-uniform scales: `entity -> tier scale -> rig/level rotation -> geometry`.
 fn wrap_lod_visual(commands: &mut Commands, entity: Entity, visual: Entity, scale: Vec3) -> Entity {
-    let root = commands.spawn(Transform::from_scale(scale)).id();
+    let root = commands
+        .spawn((
+            Transform::from_scale(scale),
+            crate::entities::pack_assets::PackVisualRoot,
+        ))
+        .id();
     commands.entity(root).add_child(visual);
     commands.entity(entity).add_child(root);
     root
@@ -521,7 +569,11 @@ pub(crate) fn update_mesh_lod(
                 .and_then(|level| level.model.as_deref())
             {
                 let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-                let _: Handle<bevy::scene::Scene> = asset_server.load(format!("{rel}#Scene0"));
+                let _: Handle<bevy::scene::Scene> =
+                    asset_server.load(crate::entities::pack_assets::asset_path(
+                        &asset_server,
+                        &format!("{rel}#Scene0"),
+                    ));
             }
         }
 
@@ -695,6 +747,9 @@ pub(crate) fn update_mesh_lod(
                 views,
             );
             commands.entity(entity).add_child(child);
+            commands
+                .entity(child)
+                .insert(crate::entities::pack_assets::PackVisualRoot);
             if let Some(fade) = arrival {
                 commands.entity(child).insert(fade);
             }
@@ -752,6 +807,7 @@ fn spawn_child_light(
                 shadows_enabled: false,
                 ..default()
             });
+            child.insert(crate::entities::pack_assets::PackVisualRoot);
             if light.face_player {
                 child.insert(FacePlayerLight);
             }
@@ -763,6 +819,7 @@ fn spawn_child_light(
                 shadows_enabled: false,
                 ..default()
             });
+            child.insert(crate::entities::pack_assets::PackVisualRoot);
             if light.face_player {
                 child.insert(FacePlayerLight);
             }

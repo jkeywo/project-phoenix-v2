@@ -222,7 +222,10 @@ pub fn preload_levels(asset_server: &AssetServer, levels: &[LodLevel]) -> Vec<Ha
         .map(|model| {
             // The asset root is `assets/`, but sidecar paths carry the prefix.
             let rel = model.strip_prefix("assets/").unwrap_or(model);
-            asset_server.load(format!("{rel}#Scene0"))
+            asset_server.load(crate::entities::pack_assets::asset_path(
+                asset_server,
+                &format!("{rel}#Scene0"),
+            ))
         })
         .collect()
 }

@@ -165,6 +165,24 @@ pub fn decode_workshop_dependencies(
     serde_json::from_str(s)
 }
 
+pub fn decode_workshop_asset_bytes(
+    text: &str,
+) -> Result<std::collections::BTreeMap<String, Vec<u8>>, serde_json::Error> {
+    serde_json::from_str(text)
+}
+
+pub(crate) fn decode_planet_texture_source(
+    bytes: &[u8],
+) -> Result<crate::entities::planet_texture::TextureSource, String> {
+    serde_json::from_slice(bytes).map_err(|error| error.to_string())
+}
+
+pub fn encode_asset_dependency_index(
+    index: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<String, String> {
+    serde_json::to_string(index).map_err(|error| error.to_string())
+}
+
 pub fn encode_workshop_validation(
     value: &crate::workshop::WorkshopValidation,
 ) -> Result<String, serde_json::Error> {

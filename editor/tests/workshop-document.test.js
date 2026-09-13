@@ -21,7 +21,8 @@ describe('offline Workshop source documents', () => {
     const recovered = WorkshopDocument.restore(draft.snapshot());
     recovered.redo();
     expect(recovered.bytes(path)).toEqual(cloned.bytes(path));
-    expect(recovered.check().ok).toBe(false); // ordinary pack admission is still text-only
+    // Structural round-trip; export still requires the runtime decoder.
+    expect(recovered.check()).toMatchObject({ ok: true, zip: recovered.archive() });
   });
 
   it('loads a native project with its actual manifest path and preserves exact binary/text members', () => {
@@ -36,16 +37,16 @@ describe('offline Workshop source documents', () => {
     expect(recovered.undo()).toBe('assets/worlds/new.toml');
     expect(recovered.toFiles()).toEqual(files);
   });
-  it('retains MP3 music bytes through source import, history and recovery before runtime pack admission', () => {
+  it.each(['assets/sounds/music.mp3', 'assets/models/mesh.bin'])('retains %s bytes through source import, history and recovery before runtime pack admission', path => {
     const bytes = new Uint8Array([73, 68, 51, 255, 128, 0]);
     const draft = new WorkshopDocument(workshopPack());
-    draft.put('assets/sounds/music.mp3', bytes);
+    draft.put(path, bytes);
     const imported = new WorkshopDocument(draft.archive());
-    expect(imported.bytes('assets/sounds/music.mp3')).toEqual(bytes);
+    expect(imported.bytes(path)).toEqual(bytes);
     draft.undo();
     const recovered = WorkshopDocument.restore(draft.snapshot());
     recovered.redo();
-    expect(recovered.bytes('assets/sounds/music.mp3')).toEqual(bytes);
+    expect(recovered.bytes(path)).toEqual(bytes);
   });
   it('retains the complete original ZIP container when no member source changed', () => {
     const base = workshopPack();

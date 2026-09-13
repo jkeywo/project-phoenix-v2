@@ -207,7 +207,8 @@ pub fn load_planet_image(asset_server: &AssetServer, path: &str, srgb: bool) -> 
     let rel = path.strip_prefix("assets/").unwrap_or(path).to_string();
     #[cfg(target_arch = "wasm32")]
     let rel = super::planet_texture::browser_path(&rel, srgb).to_string();
-    asset_server.load_with_settings(rel, move |s: &mut ImageLoaderSettings| {
+    let path = super::pack_assets::asset_path(asset_server, &rel);
+    asset_server.load_with_settings(path, move |s: &mut ImageLoaderSettings| {
         s.is_srgb = srgb;
         s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
             address_mode_u: ImageAddressMode::Repeat,

@@ -2868,6 +2868,22 @@ fn cleanup_pfx(
     engine_state.emitters.clear();
 }
 
+/// Dust is the PFX consumer of authored texture paths. Retire its old motes
+/// and material handles when the accepted asset stack changes.
+pub(crate) fn reset_pack_textures(world: &mut World) {
+    let Some(mut state) = world.get_resource_mut::<DustFieldState>() else {
+        return;
+    };
+    state.reset();
+    let motes: Vec<_> = world
+        .query_filtered::<Entity, With<DustMote>>()
+        .iter(world)
+        .collect();
+    for entity in motes {
+        world.entity_mut(entity).despawn();
+    }
+}
+
 fn choose_target_point_index(
     key: &str,
     target_point_count: usize,
@@ -3415,25 +3431,36 @@ fn ensure_dust_assets(
         state.quad = Some(meshes.add(dust_quad_mesh()));
     }
     if state.layers.len() != cfg.layers.len() {
-        state.layers =
-            cfg.layers
-                .iter()
-                .map(|layer| DustLayerMaterials {
-                    main: materials.add(dust_material(
-                        asset_server.load(&layer.texture),
-                        layer.additive,
-                        cfg,
+        state.layers = cfg
+            .layers
+            .iter()
+            .map(|layer| DustLayerMaterials {
+                main: materials.add(dust_material(
+                    asset_server.load(crate::entities::pack_assets::asset_path(
+                        asset_server,
+                        &layer.texture,
                     )),
-                    glint: layer.glint_texture.as_ref().map(|path| {
-                        materials.add(dust_material(asset_server.load(path), true, cfg))
-                    }),
-                })
-                .collect();
+                    layer.additive,
+                    cfg,
+                )),
+                glint: layer.glint_texture.as_ref().map(|path| {
+                    materials.add(dust_material(
+                        asset_server
+                            .load(crate::entities::pack_assets::asset_path(asset_server, path)),
+                        true,
+                        cfg,
+                    ))
+                }),
+            })
+            .collect();
         state.spawn_acc = vec![0.0; cfg.layers.len()];
     }
     if state.warp_material.is_none() {
         state.warp_material = Some(materials.add(dust_material(
-            asset_server.load(&cfg.warp.texture),
+            asset_server.load(crate::entities::pack_assets::asset_path(
+                asset_server,
+                &cfg.warp.texture,
+            )),
             true,
             cfg,
         )));
@@ -4090,6 +4117,26 @@ fn legacy_dust_enabled() -> bool {
 #[cfg(test)]
 mod dust_tests {
     use super::*;
+
+    #[test]
+    fn pack_texture_refresh_retires_dust_without_removing_unrelated_pfx() {
+        let mut world = World::new();
+        world.insert_resource(DustFieldState::default());
+        let mote = world
+            .spawn(DustMote {
+                kind: DustMoteKind::Layer(0),
+                width: 1.0,
+                length_scale: 1.0,
+                turbulence: Vec3::ZERO,
+            })
+            .id();
+        let unrelated = world.spawn(PfxEntity).id();
+        world.resource_mut::<DustFieldState>().spawn_s = 1.0;
+        reset_pack_textures(&mut world);
+        assert!(world.get_entity(mote).is_err());
+        assert!(world.get_entity(unrelated).is_ok());
+        assert_eq!(world.resource::<DustFieldState>().spawn_s, 0.0);
+    }
 
     fn physics(yaw: f32, forward: f32, lateral: f32) -> ShipPhysics {
         ShipPhysics {

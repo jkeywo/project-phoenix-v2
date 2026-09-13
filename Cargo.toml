@@ -249,6 +249,11 @@ capture = ["server", "dep:image", "dep:crossbeam-channel"]
 ultralight = ["host", "vellum-ultralight/ultralight"]
 
 [dependencies]
+# The ordinary glTF parser and audio decoder also validate Workshop assets.
+gltf = { version = "1.4.1", default-features = false, features = ["utils"] }
+base64 = "0.22.1"
+ktx2 = "0.4.0"
+symphonia = { version = "0.5.5", default-features = false, features = ["mp3", "ogg", "vorbis", "wav", "pcm"] }
 # The deterministic-math foundation (issue #1184), extracted into its own
 # Bevy-free workspace crate. The root crate re-exports every module here
 # (`pub use phoenix_math::simmath;` and friends in src/lib.rs), so existing
@@ -486,7 +491,6 @@ bevy = { version = "0.18.1", features = ["debug"] }
 # the guard that makes silently re-adding it fail.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = { version = "0.15.3", optional = true }
-symphonia = { version = "0.5.5", default-features = false, features = ["mp3", "ogg", "vorbis", "wav", "pcm"] }
 # Enable ONLY ECS spans, not bevy/trace's unrelated renderer/logging layers.
 # This is Bevy's already-pinned ECS crate, unified with the ordinary engine.
 bevy_ecs = { version = "0.18.1", default-features = false, features = ["trace"], optional = true }

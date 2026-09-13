@@ -596,6 +596,12 @@ impl AssetPreloadResource {
 /// Build the asset manifest and begin loading. Runs every Update frame
 /// (gated by internal guards) so it works with `init_state()` which does
 /// not fire `OnEnter` for the initial state.
+pub(crate) fn reset_pack_preloads(world: &mut World) {
+    if let Some(mut preload) = world.get_resource_mut::<AssetPreloadResource>() {
+        *preload = AssetPreloadResource::default();
+    }
+}
+
 pub fn begin_asset_preload(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -646,7 +652,9 @@ pub fn begin_asset_preload(
     let mut glb_handles = Vec::new();
     for glb_path in &manifest.glb_models {
         let path = format!("{}#Scene0", glb_path);
-        let handle: Handle<bevy::scene::Scene> = asset_server.load(&path);
+        let handle: Handle<bevy::scene::Scene> = asset_server.load(
+            crate::entities::pack_assets::asset_path(&asset_server, &path),
+        );
         glb_handles.push((glb_path.clone(), handle));
     }
 
@@ -654,7 +662,10 @@ pub fn begin_asset_preload(
     // are plain `Handle<Image>`, so they share the same load tracking.
     let mut icon_handles = Vec::new();
     for icon_path in manifest.radar_icons.iter().chain(&manifest.pfx_textures) {
-        let handle: Handle<Image> = asset_server.load(icon_path);
+        let handle: Handle<Image> = asset_server.load(crate::entities::pack_assets::asset_path(
+            &asset_server,
+            &icon_path,
+        ));
         icon_handles.push((icon_path.clone(), handle));
     }
     // Planet textures ride the icon path too (plain `Handle<Image>`), but must
@@ -699,7 +710,9 @@ pub fn begin_asset_preload(
                 // Load any newly discovered GLBs/icons/sidecars
                 for glb_path in &manifest_mut.glb_models {
                     let path = format!("{}#Scene0", glb_path);
-                    let handle: Handle<bevy::scene::Scene> = asset_server.load(&path);
+                    let handle: Handle<bevy::scene::Scene> = asset_server.load(
+                        crate::entities::pack_assets::asset_path(&asset_server, &path),
+                    );
                     glb_handles.push((glb_path.clone(), handle));
                 }
                 for icon_path in manifest_mut
@@ -707,7 +720,9 @@ pub fn begin_asset_preload(
                     .iter()
                     .chain(&manifest_mut.pfx_textures)
                 {
-                    let handle: Handle<Image> = asset_server.load(icon_path);
+                    let handle: Handle<Image> = asset_server.load(
+                        crate::entities::pack_assets::asset_path(&asset_server, &icon_path),
+                    );
                     icon_handles.push((icon_path.clone(), handle));
                 }
                 for (path, srgb) in &manifest_mut.planet_textures {
@@ -853,7 +868,10 @@ pub fn poll_asset_preload(
                 continue;
             }
             let handle: Handle<bevy::scene::Scene> =
-                asset_server.load(format!("{glb_path}#Scene0"));
+                asset_server.load(crate::entities::pack_assets::asset_path(
+                    &asset_server,
+                    &format!("{glb_path}#Scene0"),
+                ));
             preload.glb_handles.push((glb_path.clone(), handle));
         }
         for sc_path in &ladder.sidecars {
@@ -947,11 +965,15 @@ pub fn poll_asset_preload(
         // Load newly discovered assets from sub-worlds
         for glb_path in &new_glbs {
             let path = format!("{}#Scene0", glb_path);
-            let handle: Handle<bevy::scene::Scene> = asset_server.load(&path);
+            let handle: Handle<bevy::scene::Scene> = asset_server.load(
+                crate::entities::pack_assets::asset_path(&asset_server, &path),
+            );
             preload.glb_handles.push((glb_path.clone(), handle));
         }
         for icon_path in &new_icons {
-            let handle: Handle<Image> = asset_server.load(icon_path);
+            let handle: Handle<Image> = asset_server.load(
+                crate::entities::pack_assets::asset_path(&asset_server, &icon_path),
+            );
             preload.icon_handles.push((icon_path.clone(), handle));
         }
         for (path, srgb) in &new_planet_textures {

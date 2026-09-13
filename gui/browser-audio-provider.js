@@ -1,6 +1,7 @@
 import { AUDIO_CATEGORIES, normalizeAudioMix, audioBusGain, audioSoundGain, clampAudioLevel } from './audio-mix.js';
 import { validDuckingSpec, nextDuck, duckGain, releaseDuck } from './audio-ducking.js';
 import { createAudioRange } from './audio-range.js';
+import { fetchContentAsset } from './content-assets.js';
 
 /** Production browser playback adapter. [ai] Every sample takes the same route:
  * decoded buffer -> authored gain (optional listener-relative panner) -> category
@@ -12,7 +13,7 @@ export function createBrowserAudioProvider({
     const Ctor = globalThis.AudioContext || globalThis.webkitAudioContext;
     return Ctor ? new Ctor() : null;
   },
-  fetchAudio = (...args) => globalThis.fetch(...args),
+  fetchAudio = fetchContentAsset,
   onChange = () => {},
 } = {}) {
   let context = null;

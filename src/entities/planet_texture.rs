@@ -9,7 +9,9 @@ use bevy::{
 
 #[cfg(any(target_arch = "wasm32", test))]
 pub(super) fn browser_path(path: &str, srgb: bool) -> &str {
-    if !srgb {
+    // The shipped compressed sibling describes the shipped original only.
+    // A replacement original must not be bypassed by that unrelated sibling.
+    if !srgb || super::config_cache::mod_pack_asset(&format!("assets/{path}")).is_some() {
         return path;
     }
     match path {
@@ -39,10 +41,10 @@ struct PlanetTextureLoader {
 }
 
 #[derive(serde::Deserialize)]
-struct TextureSource {
+pub(crate) struct TextureSource {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    source: String,
-    fallback: String,
+    pub source: String,
+    pub fallback: String,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -89,12 +91,13 @@ impl AssetLoader for PlanetTextureLoader {
         // Descriptor is deliberately tiny and versioned with its fallback.
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
-        let source: TextureSource = serde_json::from_slice(&bytes)?;
+        let source = crate::core::codec::decode_planet_texture_source(&bytes)
+            .map_err(std::io::Error::other)?;
         #[cfg(target_arch = "wasm32")]
         {
             let result = async {
                 let bytes = context
-                    .read_asset_bytes(source.source.clone())
+                    .read_asset_bytes(super::pack_assets::root_dependency(context, &source.source))
                     .await
                     .map_err(|e| e.to_string())?;
                 let converted = transcode(&bytes, target(self.formats)).await?;
@@ -109,7 +112,8 @@ impl AssetLoader for PlanetTextureLoader {
                 Err(error) => warn!("Planet UASTC fallback: {error}"),
             }
         }
-        let bytes = context.read_asset_bytes(source.fallback).await?;
+        let dependency = super::pack_assets::root_dependency(context, &source.fallback);
+        let bytes = context.read_asset_bytes(dependency).await?;
         Ok(self.decode(&bytes, settings)?)
     }
     fn extensions(&self) -> &[&str] {
@@ -192,6 +196,7 @@ mod tests {
 
     #[test]
     fn only_the_approved_srgb_base_uses_uastc() {
+        let _lock = crate::entities::config_cache::overlay_test_guard();
         for path in [
             "planets/gas_giant/surface_colour.ktx2",
             "planets/ice_moon/surface_colour.ktx2",
@@ -207,6 +212,20 @@ mod tests {
         ] {
             assert_eq!(browser_path(path, srgb), path);
         }
+    }
+    #[test]
+    fn an_overridden_original_does_not_use_the_shipped_compressed_sibling() {
+        use crate::entities::config_cache::{push_mod_pack, remove_mod_pack, ActivePack};
+        let _lock = crate::entities::config_cache::overlay_test_guard();
+        let path = "planets/gas_giant/surface_colour.ktx2";
+        push_mod_pack(ActivePack {
+            id: "planet-original-replacement".into(),
+            assets: [(format!("assets/{path}"), std::sync::Arc::from([1u8, 2, 3]))].into(),
+            ..default()
+        });
+        assert_eq!(browser_path(path, true), path);
+        remove_mod_pack("planet-original-replacement");
+        assert!(browser_path(path, true).ends_with(".ptex"));
     }
     #[test]
     fn unavailable_device_features_use_rgba() {

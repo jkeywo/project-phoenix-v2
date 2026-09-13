@@ -11,7 +11,11 @@ use crate::entities::include_resolve::{canonical_template_path, resolve_template
 use crate::entities::loader::TemplateLoader;
 use crate::world::load::{load, LoadPolicy, LoadRequest, WorldReader};
 use crate::world::manifest::{parse_content_identity, parse_manifest};
-use crate::world::mod_pack::{read_store_zip, validate_mod_pack};
+#[cfg(test)]
+use crate::world::mod_pack::read_store_zip;
+#[cfg(test)]
+use crate::world::mod_pack::validate_mod_pack;
+use crate::world::mod_pack::validate_mod_pack_with_assets;
 use crate::world::script::load::ScriptResolver;
 use crate::world::validate::{
     validate_composition_with_fragments, Severity, WorldFinding, WorldSource,
@@ -148,6 +152,11 @@ pub fn validate_pack(bytes: &[u8], dependencies: &WorkshopDependencies) -> Works
             id: pack.id.clone(),
             manifest_toml: pack.manifest_toml.clone(),
             files: pack.files.clone().into_iter().collect(),
+            assets: pack
+                .assets
+                .iter()
+                .map(|(path, bytes)| (path.clone(), std::sync::Arc::from(bytes.as_slice())))
+                .collect(),
             ..Default::default()
         })
         .collect();
@@ -156,7 +165,7 @@ pub fn validate_pack(bytes: &[u8], dependencies: &WorkshopDependencies) -> Works
         beneath.extend(pack.files.clone());
     }
     let base_templates = Sources(beneath.clone());
-    let validation = validate_mod_pack(
+    let validation = validate_mod_pack_with_assets(
         bytes,
         &identity,
         |path| {
@@ -167,11 +176,17 @@ pub fn validate_pack(bytes: &[u8], dependencies: &WorkshopDependencies) -> Works
         },
         &base_templates,
         &active,
+        &|path| {
+            dependencies
+                .base_assets
+                .get(path)
+                .map(|bytes| std::sync::Arc::from(bytes.as_slice()))
+        },
+        &dependencies.base_assets.keys().cloned().collect::<Vec<_>>(),
     );
     report.extend(validation.findings);
-    let Ok(candidate) = read_store_zip(bytes) else {
-        return report;
-    };
+    let mut candidate = validation.files;
+    candidate.insert("scenarios.toml".into(), validation.manifest_toml);
     let mut sources = beneath;
     sources.extend(candidate.clone());
     let sources = Sources(sources);
@@ -270,8 +285,25 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
     crate::world::script::init_hashing_seed();
     let mut report = WorkshopValidation::default();
     let mut text_files = BTreeMap::new();
+    let descriptor_sources = crate::world::pack_asset_validation::descriptor_sources(
+        files
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), bytes.as_slice())),
+    );
     for (path, bytes) in files {
         if !path.ends_with(".toml") && !path.ends_with(".rhai") {
+            if let Err(error) = crate::world::pack_asset_validation::validate_member(
+                path,
+                bytes,
+                &|path| {
+                    files
+                        .get(path)
+                        .map(|bytes| std::sync::Arc::from(bytes.as_slice()))
+                },
+                &descriptor_sources,
+            ) {
+                report.error("invalid-runtime-asset", path, error);
+            }
             continue;
         }
         match std::str::from_utf8(bytes) {

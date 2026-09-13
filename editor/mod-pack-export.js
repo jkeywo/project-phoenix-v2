@@ -44,6 +44,8 @@ import { stringify as tomlStringify, parse as tomlParse } from 'smol-toml';
 import { SOUND_CUES_PATH, validateSoundCatalog } from '../gui/sound-cues.js';
 import { validateFile, partitionFindings } from './validation.js';
 import { resolveTemplate, canonicalTemplatePath, INCLUDES_KEY } from './entity-includes.js';
+import { crc32 } from './crc32.js';
+export { crc32 } from './crc32.js';
 
 /** The manifest path a mod pack always carries. */
 export const MANIFEST_PATH = 'scenarios.toml';
@@ -95,6 +97,7 @@ export function isAllowedContentPath(path) {
   if (path === SOUND_CUES_PATH) return true;
   if (typeof path !== 'string' || path.length === 0) return false;
   if (path.includes('..') || path.includes('\\')) return false;
+  if (isPackAssetPath(path)) return true;
   if (path === MANIFEST_PATH) return true;
   // Rhai scripts sit beside the world that loads them: a sibling
   // assets/worlds/*.rhai, and nowhere else.
@@ -114,6 +117,15 @@ export function isAllowedContentPath(path) {
   return false;
 }
 
+/** Exact-byte formats understood by the runtime asset loaders. */
+export function isPackAssetPath(path) {
+  if (typeof path !== 'string' || path.includes('..') || !path.split('/').every(part => part && part !== '.' && part !== '..'
+      && !/[. ]$/.test(part) && !/[\\:\x00-\x1f\x7f-\x9f]/.test(part))) return false;
+  return /^assets\/models\/.+\.(glb|bin|png|jpg|jpeg|ktx2)$/.test(path)
+    || /^assets\/(textures|planets)\/.+\.(png|jpg|jpeg|ktx2|ptex)$/.test(path)
+    || /^assets\/sounds\/.+\.(wav|ogg|mp3)$/.test(path);
+}
+
 /**
  * Resolve a world's sibling script path, mirroring `sibling_path` in
  * `src/world/script/load.rs`: forward slashes, relative to the world file's
@@ -123,29 +135,6 @@ export function siblingScriptPath(worldPath, rel) {
   const r = String(rel).replace(/\\/g, '/');
   const i = Math.max(worldPath.lastIndexOf('/'), worldPath.lastIndexOf('\\'));
   return i >= 0 ? `${worldPath.slice(0, i).replace(/\\/g, '/')}/${r}` : r;
-}
-
-// ── CRC-32 (IEEE) ───────────────────────────────────────────────────────────
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
-
-/** CRC-32 of a byte array, as an unsigned 32-bit integer. */
-export function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) {
-    crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
 }
 
 const encoder = new TextEncoder();
@@ -288,6 +277,8 @@ export function readStoreZipArchive(bytes, { binary = () => false } = {}) {
       throw new Error('malformed ZIP archive: truncated local file header');
     }
     const method = view.getUint16(pos + 8, true);
+    const flags = view.getUint16(pos + 6, true);
+    if (flags & ~0x0800) throw new Error('encrypted or streaming ZIP members are unsupported');
     const crc = view.getUint32(pos + 14, true);
     const compSize = view.getUint32(pos + 18, true);
     const uncompSize = view.getUint32(pos + 22, true);
@@ -312,6 +303,7 @@ export function readStoreZipArchive(bytes, { binary = () => false } = {}) {
       throw new Error(`CRC mismatch for "${name}"`);
     }
     const text = binary(name) ? undefined : decodeUtf8(data, `file "${name}"`);
+    if (Object.hasOwn(files, name)) throw new Error(`duplicate ZIP member "${name}"`);
     files[name] = text;
     const sourceEntry = {
       path: name,
@@ -324,6 +316,7 @@ export function readStoreZipArchive(bytes, { binary = () => false } = {}) {
       name,
       nameBytes: sourceEntry.pathBytes,
       method,
+      flags,
       crc,
       compSize,
       uncompSize,
@@ -343,6 +336,8 @@ export function readStoreZipArchive(bytes, { binary = () => false } = {}) {
       throw new Error('malformed ZIP archive: truncated central directory entry');
     }
     const method = view.getUint16(pos + 10, true);
+    const flags = view.getUint16(pos + 8, true);
+    const disk = view.getUint16(pos + 34, true);
     const crc = view.getUint32(pos + 16, true);
     const compSize = view.getUint32(pos + 20, true);
     const uncompSize = view.getUint32(pos + 24, true);
@@ -364,6 +359,7 @@ export function readStoreZipArchive(bytes, { binary = () => false } = {}) {
       local.nameBytes.length !== centralNameBytes.length ||
       !local.nameBytes.every((value, index) => value === centralNameBytes[index]) ||
       local.method !== method ||
+      local.flags !== flags || disk !== 0 ||
       local.crc !== crc ||
       local.compSize !== compSize ||
       local.uncompSize !== uncompSize

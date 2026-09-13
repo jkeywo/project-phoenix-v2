@@ -85,6 +85,7 @@ pub fn insert_planet_visual(
                 Mesh3d(cloud_mesh),
                 MeshMaterial3d(cloud_mat),
                 Transform::default(),
+                super::pack_assets::PackVisualRoot,
             ));
         });
     }
@@ -98,7 +99,12 @@ pub fn insert_planet_visual(
         ));
         let material = cloud_materials.add(atmosphere);
         ec.with_children(|parent| {
-            parent.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::default()));
+            parent.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::default(),
+                super::pack_assets::PackVisualRoot,
+            ));
         });
     }
 }

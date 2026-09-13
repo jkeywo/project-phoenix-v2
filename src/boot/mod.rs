@@ -543,6 +543,7 @@ fn core_plugins_with_logging(
     external_logging: bool,
 ) {
     let task_pool = task_pool_plugin(single_threaded);
+    crate::entities::pack_assets::register(app);
     app.add_plugins(PanicHandlerPlugin);
     if !external_logging {
         app.add_plugins(LogPlugin {
@@ -703,6 +704,7 @@ fn render_stack(
         // with its SPA `index.html` at HTTP 200, which the default check reads as a
         // corrupt sidecar and dies on. `DefaultPlugins` carries every plugin
         // [`core_plugins`] would add, so this REPLACES it for BrowserHost.
+        crate::entities::pack_assets::register(app);
         app.add_plugins(
             bevy::DefaultPlugins
                 .set(bevy::window::WindowPlugin {
@@ -833,6 +835,7 @@ fn native_render_stack(
                 ..default()
             },
         };
+        crate::entities::pack_assets::register(app);
         let plugins = bevy::DefaultPlugins
             .set(window_plugin)
             .set(LogPlugin {

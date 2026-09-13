@@ -5116,6 +5116,7 @@ dependencies = [
 name = "project-phoenix"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bevy",
  "bevy_ecs",
  "bevy_rapier3d",
@@ -5125,9 +5126,11 @@ dependencies = [
  "directories",
  "getrandom 0.3.4",
  "glam 0.30.10",
+ "gltf",
  "image",
  "indexmap",
  "js-sys",
+ "ktx2",
  "libm",
  "nalgebra",
  "noise",

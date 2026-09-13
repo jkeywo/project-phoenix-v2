@@ -32,8 +32,9 @@ pub mod mesh_stats;
 /// each entity's primary authored model rig (issue #1291).
 pub mod model_markers;
 pub mod model_rig;
+pub mod pack_assets;
 pub mod planet;
-mod planet_texture;
+pub(crate) mod planet_texture;
 pub mod spawner;
 pub mod star;
 pub mod tags;

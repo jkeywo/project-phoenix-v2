@@ -43,6 +43,24 @@ pub use camera::OrbitCamera;
 pub use lighting::LightingMode;
 pub use lod::{LadderState, LodMode};
 
+pub(crate) fn reset_pack_visuals(world: &mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+    if !world.contains_resource::<subject::SubjectState>() {
+        return;
+    }
+    if let Some(mut ladder) = world.get_resource_mut::<LadderState>() {
+        *ladder = LadderState::default();
+    }
+    world
+        .run_system_once(
+            |mut commands: Commands, mut state: ResMut<subject::SubjectState>| {
+                state.showing = subject::Showing::Base;
+                state.respawn(&mut commands);
+            },
+        )
+        .expect("viewer reset owns its existing subject");
+}
+
 /// Parsed URL parameters, resolved once at startup.
 #[derive(Resource, Debug, Clone)]
 pub struct ViewerArgs {
@@ -383,8 +401,10 @@ fn apply_commands(
                     .collect();
                 paths.extend(args.model.clone());
                 for path in paths {
-                    let rel = path.strip_prefix("assets/").unwrap_or(&path).to_string();
-                    asset_server.reload(rel);
+                    asset_server.reload(crate::entities::pack_assets::asset_path(
+                        &asset_server,
+                        &path,
+                    ));
                 }
                 // The rebuild waits for the new bytes; see
                 // `respawn_on_asset_reload`. Respawning now would rebuild from

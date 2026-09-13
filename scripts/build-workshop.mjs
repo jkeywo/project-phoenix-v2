@@ -5,11 +5,14 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { soundCuesJson, SOUND_CUES_JSON, soundCueInventoryJs, SOUND_CUE_INVENTORY } from './sound-cues.mjs';
+import { crc32 } from '../editor/crc32.js';
+import { assetDependencies } from '../editor/asset-dependencies.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const out = path.resolve(root, process.argv[2] || 'dist');
 const editorModules = [
+  'asset-dependencies', 'crc32', 'workshop-assets',
   'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'undo-stack', 'validation', 'entity-includes', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
@@ -33,13 +36,18 @@ await copyFile(path.resolve(tomlDist, '../LICENSE'), path.join(out, 'vendor/smol
 // Snapshot the shipped textual content under its ordinary asset paths so the
 // same runtime parser/include/compiler can resolve an unsaved pack offline.
 const baseFiles = {};
+const baseAssetManifest = {};
 async function collect(directory) {
   for (const entry of await readdir(path.join(root, directory), { withFileTypes: true })) {
     const relative = `${directory}/${entry.name}`;
     if (entry.isDirectory()) await collect(relative);
     else if (/\.(toml|rhai)$/.test(entry.name)) baseFiles[relative] = await readFile(path.join(root, relative), 'utf8');
+    else if (/\.(glb|bin|png|jpg|jpeg|ktx2|ptex|wav|ogg|mp3)$/.test(entry.name)) {
+      const bytes = await readFile(path.join(root, relative));
+      baseAssetManifest[relative] = { length: bytes.length, crc32: crc32(bytes), requires: assetDependencies(relative, bytes) };
+    }
   }
 }
 await collect('assets');
-await writeFile(path.join(out, 'workshop-base.json'), JSON.stringify({ base_files: baseFiles, packs: [] }));
+await writeFile(path.join(out, 'workshop-base.json'), JSON.stringify({ base_files: baseFiles, base_asset_manifest: baseAssetManifest, packs: [] }));
 console.log(`Workshop Authoring built → ${path.join(out, 'workshop.html')}`);

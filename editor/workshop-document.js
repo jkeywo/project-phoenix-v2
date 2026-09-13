@@ -4,7 +4,7 @@
  * semantic workspace from the current source and never writes it back.
  */
 import { ModPackWorkspace } from './mod-pack-workspace.js';
-import { createStoreZip, exportModPack, MANIFEST_PATH, readStoreZipArchive } from './mod-pack-export.js';
+import { createStoreZip, exportModPack, isPackAssetPath, MANIFEST_PATH, readStoreZipArchive } from './mod-pack-export.js';
 import { UndoStack } from './undo-stack.js';
 
 const encode = text => new TextEncoder().encode(text);
@@ -173,17 +173,21 @@ export class WorkshopDocument {
   /** Structural checks only; the ordinary host still compiles/gates Rhai. */
   check() {
     try {
-      if (this.paths().some(path => this.isBinary(path))) throw new Error('Binary pack runtime admission is unavailable');
-      const entries = [...this._files].map(([path, text]) => {
+      for (const path of this.paths().filter(path => this.isBinary(path))) {
+        if (!isPackAssetPath(path)) throw new Error(`Unsupported asset path "${path}"`);
+      }
+      const textFiles = [...this._files].filter(([, value]) => typeof value === 'string');
+      const entries = textFiles.map(([path, text]) => {
         const original = this._source.entries.findLast(entry => entry.path === path);
         // The archive reader uses ignoreBOM:true: its text RETAINS U+FEFF, so
         // ordinary encoding preserves the original BOM without prefixing twice.
         return { path, text, bytes: original?.text === text ? original.bytes : encode(text) };
       });
       const workspace = ModPackWorkspace.fromArchiveFiles(
-        Object.fromEntries(this._files), {}, { bytes: this._source.bytes, entries },
+        Object.fromEntries(textFiles), {}, { bytes: this._source.bytes, entries },
       );
-      return { ...exportModPack(workspace.toExportInput()), packId: workspace.getPack().id };
+      const result = exportModPack(workspace.toExportInput());
+      return { ...result, ...(result.ok ? { zip: this.archive(), paths: this.paths() } : {}), packId: workspace.getPack().id };
     } catch (error) {
       return { ok: false, errors: [String(error.message)], warnings: [] };
     }

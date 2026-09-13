@@ -337,6 +337,12 @@ pub struct ActivePack {
     pub version: String,
     /// Exact authored path -> TOML for every supported file the pack carries.
     pub files: HashMap<String, String>,
+    /// Immutable render/audio members. Every runtime reader uses this same
+    /// ordered overlay; archive bytes never need a temporary public URL.
+    pub assets: std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
+    /// The exact accepted source bundle, used when cloning into offline
+    /// Workshop. Runtime interventions never reconstruct authored source.
+    pub source_archive: Option<std::sync::Arc<[u8]>>,
     /// The pack's raw `scenarios.toml` manifest.
     pub manifest_toml: String,
 }
@@ -370,7 +376,7 @@ pub fn overlay_source_in<'a>(packs: &'a [ActivePack], path: &str) -> Option<&'a 
     packs
         .iter()
         .rev()
-        .find(|p| p.files.contains_key(path))
+        .find(|p| p.files.contains_key(path) || p.assets.contains_key(path))
         .map(|p| p.id.as_str())
 }
 
@@ -381,7 +387,7 @@ pub fn overlay_conflicts(packs: &[ActivePack]) -> Vec<PathConflict> {
     use std::collections::BTreeMap;
     let mut by_path: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for pack in packs {
-        for path in pack.files.keys() {
+        for path in pack.files.keys().chain(pack.assets.keys()) {
             by_path
                 .entry(path.as_str())
                 .or_default()
@@ -430,6 +436,7 @@ thread_local! {
     /// The ordered mod-pack overlay stack for the current host session
     /// (oldest → newest). See the precedence policy above.
     static ACTIVE_PACKS: RefCell<Vec<ActivePack>> = const { RefCell::new(Vec::new()) };
+    static PACK_REVISION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The ordered mod-pack overlay stack for the current host PROCESS
@@ -437,6 +444,21 @@ thread_local! {
 /// is shared rather than per-thread off the browser.
 #[cfg(not(target_arch = "wasm32"))]
 static ACTIVE_PACKS: std::sync::RwLock<Vec<ActivePack>> = std::sync::RwLock::new(Vec::new());
+
+#[cfg(not(target_arch = "wasm32"))]
+static PACK_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Presentation cache generation, independent of simulation ticks and digests.
+pub fn mod_pack_revision() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        PACK_REVISION.with(std::cell::Cell::get)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        PACK_REVISION.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
 
 /// Read the stack. Every public lookup goes through here, so the two storages
 /// are described once and the readers stay identical.
@@ -454,12 +476,19 @@ fn with_active_packs<R>(f: impl FnOnce(&[ActivePack]) -> R) -> R {
 /// reason.
 #[cfg(target_arch = "wasm32")]
 fn with_active_packs_mut<R>(f: impl FnOnce(&mut Vec<ActivePack>) -> R) -> R {
-    ACTIVE_PACKS.with(|s| f(&mut s.borrow_mut()))
+    ACTIVE_PACKS.with(|s| {
+        let result = f(&mut s.borrow_mut());
+        PACK_REVISION.with(|revision| revision.set(revision.get().wrapping_add(1)));
+        result
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn with_active_packs_mut<R>(f: impl FnOnce(&mut Vec<ActivePack>) -> R) -> R {
-    f(&mut ACTIVE_PACKS.write().expect("mod-pack overlay poisoned"))
+    let mut packs = ACTIVE_PACKS.write().expect("mod-pack overlay poisoned");
+    let result = f(&mut packs);
+    PACK_REVISION.fetch_add(1, std::sync::atomic::Ordering::Release);
+    result
 }
 
 /// A snapshot of the active pack stack, oldest → newest (issue #987).
@@ -511,6 +540,40 @@ pub fn reorder_mod_packs(ids: &[String]) {
 /// any exact authored path it carries.
 pub fn mod_pack_overlay_get(path: &str) -> Option<String> {
     with_active_packs(|packs| overlay_lookup(packs, path).map(str::to_string))
+}
+
+/// Exact accepted binary bytes for native and browser render/audio adapters.
+pub fn mod_pack_asset(path: &str) -> Option<std::sync::Arc<[u8]>> {
+    with_active_packs(|packs| {
+        packs
+            .iter()
+            .rev()
+            .find_map(|pack| pack.assets.get(path).cloned())
+    })
+}
+
+/// One immutable winning map for presentation cache refresh. Arc clones do not
+/// copy models or decoded input. Called only when the overlay revision changes.
+pub fn mod_pack_assets() -> std::collections::BTreeMap<String, std::sync::Arc<[u8]>> {
+    with_active_packs(|packs| {
+        packs
+            .iter()
+            .flat_map(|pack| {
+                pack.assets
+                    .iter()
+                    .map(|(path, data)| (path.clone(), data.clone()))
+            })
+            .collect()
+    })
+}
+
+pub fn mod_pack_source_archive(id: &str) -> Option<std::sync::Arc<[u8]>> {
+    with_active_packs(|packs| {
+        packs
+            .iter()
+            .find(|pack| pack.id == id)
+            .and_then(|pack| pack.source_archive.clone())
+    })
 }
 
 /// The id of the pack that currently owns `path` in the overlay stack, if any
@@ -1966,6 +2029,7 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
             version: "1.0.0".to_string(),
             files: map,
             manifest_toml: String::new(),
+            ..Default::default()
         }
     }
 

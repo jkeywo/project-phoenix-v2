@@ -1,0 +1,48 @@
+entities:
+  - component: workshop-runtime-asset-validation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Workshop Runtime Asset Validation
+      summary: Exact ZIP members and explicit immutable dependency bytes pass the current glTF, image and audio decoders before a Workshop export or host pack installation is accepted. Unsupported pack formats stop before binary decoding. External buffer replacements also validate unchanged base and active model consumers; missing consumer bytes refuse acceptance. Model nodes must form a forest with distinct parentless roots in each scene and no more than 128 levels, checked iteratively before recursive renderer loading. Expanded accessor values and generated primitive/morph data share a conservative 256 MiB per-model admission budget, including sparse zero-filled entries and repeated uses. Raw references and portable counts are checked before upstream hooks and typed readers; mesh, skin, morph and animation metadata must meet the installed renderer's contracts. Asset findings identify the affected member or dependency rather than the archive manifest.
+    architecture:
+      kind: authoring-validator
+      authority: local
+      reads: [composed-world-content-pack-state]
+      depends_on: [mod-content-overlay-resolver]
+    implementation:
+      status: declared
+      paths:
+        - src/world/pack_asset_validation.rs
+        - src/world/pack_asset_validation/metadata.rs
+        - src/world/pack_asset_validation/semantics.rs
+        - src/audio_decode.rs
+        - editor/asset-dependencies.js
+        - editor/workshop-assets.js
+        - tests/smoke/workshop-assets.spec.js
+      tests:
+        - cargo test --lib world::pack_asset_validation
+        - cargo test --lib world::mod_pack
+        - npx vitest run tests/client/workshop-assets.test.js
+        - npx playwright test workshop-assets.spec.js --project chromium
+
+  - component: workshop-runtime-asset-reader
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Workshop Runtime Asset Reader
+      summary: Browser and native renderers resolve accepted pack bytes ahead of their ordinary asset reader. A new stack revision gets distinct AssetServer identities, including relative glTF and root-relative planet texture dependencies. Last retires old authored visual roots, preload state, viewer subjects and dust textures before extraction without changing simulation entities.
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      reads: [composed-world-content-pack-state]
+      depends_on: [mod-content-overlay-resolver, workshop-runtime-asset-validation]
+    implementation:
+      status: declared
+      paths:
+        - src/entities/pack_assets.rs
+        - src/entities/pack_assets/versioned.rs
+        - src/entities/pack_assets/runtime_tests.rs
+        - gui/content-assets.js
+      tests:
+        - cargo test --lib entities::pack_assets

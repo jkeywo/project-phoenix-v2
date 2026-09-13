@@ -149,6 +149,7 @@ pub mod transport;
 /// the bridge layouts so the room comes back up the way it was left. Endpoint
 /// data — never a scenario save, and never a player's private profile.
 pub mod viewscreen_presentation;
+pub mod workshop;
 /// Loading a world into a **running** host (issue #1326): the native half of the
 /// pre-scenario flow. Boots into an empty `GamePhase::Lobby` holding the merged
 /// scenario catalogue, arbitrates `SelectScenario` + `SelectPlayerShip` through
@@ -156,7 +157,6 @@ pub mod viewscreen_presentation;
 /// [`crate::boot::ingest_world`] a `--world` boot runs — on the `World` of the
 /// app that is already drawing the lobby.
 pub mod world_load;
-pub mod workshop;
 
 pub use app::{
     build_native_host_app, curated_hulls_for_world, preload_content_templates, run,

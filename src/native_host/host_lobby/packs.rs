@@ -52,8 +52,39 @@ use crate::entities::config_cache::{active_packs, overlay_conflicts, push_mod_pa
 use crate::entities::loader::TemplateLoader;
 use crate::native_host::mod_packs::{self, ShelfPack};
 use crate::world::manifest::{parse_content_identity, parse_pack_manifest};
-use crate::world::mod_pack::validate_mod_pack;
+use crate::world::mod_pack::validate_mod_pack_with_assets;
 use crate::world::validate::Severity;
+
+/// Descriptor names only; validation memoizes each actual byte read within
+/// the caller's immutable snapshot. Linked directories are never traversed.
+pub(super) fn base_asset_descriptors(root: &std::path::Path) -> Vec<String> {
+    let mut pending = vec![root.join("assets")];
+    let mut paths = Vec::new();
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                pending.push(entry.path());
+            } else if kind.is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "glb")
+            {
+                if let Ok(relative) = entry.path().strip_prefix(root) {
+                    paths.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    paths.sort();
+    paths
+}
 
 /// One pack the shelf offers, as the surface sees it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,14 +267,34 @@ pub fn install_pack(
     resolve_base: impl Fn(&str) -> Option<String>,
     template_loader: &dyn TemplateLoader,
 ) -> InstallOutcome {
+    install_pack_with_assets(
+        zip_bytes,
+        base_manifest_toml,
+        resolve_base,
+        template_loader,
+        &|_| None,
+        &[],
+    )
+}
+
+pub fn install_pack_with_assets(
+    zip_bytes: &[u8],
+    base_manifest_toml: &str,
+    resolve_base: impl Fn(&str) -> Option<String>,
+    template_loader: &dyn TemplateLoader,
+    resolve_base_asset: &crate::world::pack_asset_validation::AssetResolver<'_>,
+    base_asset_paths: &[String],
+) -> InstallOutcome {
     let base_content = parse_content_identity(base_manifest_toml).unwrap_or_default();
     let active = active_packs();
-    let result = validate_mod_pack(
+    let result = validate_mod_pack_with_assets(
         zip_bytes,
         &base_content,
         resolve_base,
         template_loader,
         &active,
+        resolve_base_asset,
+        base_asset_paths,
     );
     let findings = result
         .findings
@@ -270,6 +321,8 @@ pub fn install_pack(
         version,
         files: result.files.into_iter().collect(),
         manifest_toml: result.manifest_toml,
+        assets: result.assets,
+        source_archive: result.source_archive,
     });
     InstallOutcome {
         accepted: true,
@@ -460,6 +513,7 @@ mod tests {
             version: "1".to_string(),
             files: [(path.to_string(), body.to_string())].into_iter().collect(),
             manifest_toml: String::new(),
+            ..Default::default()
         };
         push_mod_pack(pack("i1366-a", "A"));
         push_mod_pack(pack("i1366-b", "B"));

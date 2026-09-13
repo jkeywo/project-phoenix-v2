@@ -217,7 +217,7 @@ pub fn spawn_glb_visual(
             // the TOML `model` field carries an `assets/` prefix. Strip it so
             // the GLB resolves instead of looking for `assets/assets/...`.
             let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-            let path = format!("{}#Scene0", rel);
+            let path = super::pack_assets::asset_path(asset_server, &format!("{rel}#Scene0"));
             let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
             bevy::log::info!(
                 "spawn_glb_visual: requesting scene {path} (load_state={:?})",
@@ -265,7 +265,11 @@ pub fn spawn_glb_visual(
     // CHILD carrying `base_bevy_transform()`.
     let base_tf = rig.base_bevy_transform();
     let child = commands
-        .spawn((bevy::scene::SceneRoot(scene), base_tf))
+        .spawn((
+            bevy::scene::SceneRoot(scene),
+            base_tf,
+            super::pack_assets::PackVisualRoot,
+        ))
         .id();
     commands.entity(entity).add_child(child);
     GlbSpawnOutcome::Spawned(child)

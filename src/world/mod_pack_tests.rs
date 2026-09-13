@@ -1,6 +1,164 @@
 use super::*;
 use crate::world::load::MemoryTemplateLoader;
 
+#[test]
+fn buffer_only_replacement_revalidates_unchanged_base_and_active_models() {
+    let mut json = br#"{"asset":{"version":"2.0"},"buffers":[{"uri":"vertices.bin","byteLength":36}],"bufferViews":[{"buffer":0,"byteLength":36}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}],"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}]}"#.to_vec();
+    while !json.len().is_multiple_of(4) {
+        json.push(b' ');
+    }
+    let mut model = b"glTF".to_vec();
+    model.extend(2u32.to_le_bytes());
+    model.extend(((20 + json.len()) as u32).to_le_bytes());
+    model.extend((json.len() as u32).to_le_bytes());
+    model.extend(b"JSON");
+    model.extend(json);
+    let model_path = "assets/models/probe/triangle.glb";
+    let buffer_path = "assets/models/probe/vertices.bin";
+    for from_active in [false, true] {
+        let active = if from_active {
+            vec![ActivePack {
+                id: "existing-geometry".into(),
+                assets: [(model_path.into(), std::sync::Arc::from(model.as_slice()))].into(),
+                ..Default::default()
+            }]
+        } else {
+            vec![]
+        };
+        for length in [1, 36] {
+            let files = [
+                (
+                    MANIFEST_PATH.into(),
+                    manifest_for("buffer-only", "assets/worlds/buffer.toml").into_bytes(),
+                ),
+                (
+                    "assets/worlds/buffer.toml".into(),
+                    simple_world("Buffer").into_bytes(),
+                ),
+                (buffer_path.into(), vec![0; length]),
+            ]
+            .into();
+            let archive = crate::workshop::archive::store_zip(&files).unwrap();
+            let result = validate_mod_pack_with_assets(
+                &archive,
+                &base_identity(),
+                no_base,
+                &no_templates(),
+                &active,
+                &|path| (path == model_path).then(|| std::sync::Arc::from(model.as_slice())),
+                &[model_path.to_owned()],
+            );
+            assert_eq!(
+                result.is_accepted(),
+                length == 36,
+                "active={from_active}: {:?}",
+                result.findings
+            );
+            if length == 1 {
+                let finding = result
+                    .findings
+                    .iter()
+                    .find(|finding| finding.category == "invalid-runtime-asset")
+                    .expect("the unchanged model must reject its truncated buffer");
+                assert_eq!(finding.source.file, model_path);
+                let visible = crate::workshop::WorkshopFinding::from(finding.clone());
+                assert_eq!(visible.file, model_path);
+            }
+            if !from_active && length == 36 {
+                let missing = validate_mod_pack_with_assets(
+                    &archive,
+                    &base_identity(),
+                    no_base,
+                    &no_templates(),
+                    &[],
+                    &|_| None,
+                    &[model_path.to_owned()],
+                );
+                assert!(!missing.is_accepted());
+                assert!(missing.findings.iter().any(|finding| {
+                    finding.category == "unavailable-asset-consumer"
+                        && finding.source.file == model_path
+                }));
+            }
+        }
+    }
+}
+
+#[test]
+fn exact_binary_assets_and_source_archive_survive_the_runtime_pack_gate() {
+    let sound = include_bytes!("../../assets/sounds/ui_click.ogg").to_vec();
+    let files = [
+        (
+            "scenarios.toml".into(),
+            manifest_for("binary", "assets/worlds/binary.toml").into_bytes(),
+        ),
+        (
+            "assets/worlds/binary.toml".into(),
+            simple_world("Binary").into_bytes(),
+        ),
+        ("assets/sounds/workshop/tone.ogg".into(), sound.clone()),
+    ]
+    .into();
+    let zip = crate::workshop::archive::store_zip(&files).unwrap();
+    let result = validate_mod_pack(
+        &zip,
+        &base_identity(),
+        |_| None,
+        &MemoryTemplateLoader::default(),
+        &[],
+    );
+    assert!(result.is_accepted(), "{:?}", result.findings);
+    assert_eq!(
+        result.assets["assets/sounds/workshop/tone.ogg"].as_ref(),
+        sound
+    );
+    assert_eq!(result.source_archive.unwrap().as_ref(), zip);
+    assert!(!result.files.contains_key("assets/sounds/workshop/tone.ogg"));
+    assert!(
+        read_store_zip(&zip).is_err(),
+        "the explicitly text-only reader stays strict"
+    );
+}
+
+#[test]
+fn duplicate_binary_members_and_nonportable_asset_paths_are_refused() {
+    let duplicate = create_store_zip(&[("assets/sounds/a.ogg", "A"), ("assets/sounds/a.ogg", "B")]);
+    assert!(read_store_zip_bytes(&duplicate)
+        .unwrap_err()
+        .contains("duplicate"));
+    for path in [
+        "assets/sounds/../escape.ogg",
+        "assets/sounds/folder./tone.ogg",
+        "assets/sounds/C:/tone.ogg",
+        "assets/models/a.exe",
+    ] {
+        assert!(!is_allowed_content_path(path), "{path}");
+    }
+}
+
+#[test]
+fn binary_archive_refuses_ambiguous_or_incomplete_directory_records() {
+    let zip = crate::workshop::archive::store_zip(
+        &[("assets/models/probe.glb".into(), vec![0, 255, 2])].into(),
+    )
+    .unwrap();
+    let central = zip
+        .windows(4)
+        .position(|bytes| bytes == 0x0201_4b50u32.to_le_bytes())
+        .unwrap();
+    let end = zip.len() - 22;
+    for offset in [central + 16, central + 42, central + 46, end + 8, end + 16] {
+        let mut corrupt = zip.clone();
+        corrupt[offset] ^= 1;
+        assert!(read_store_zip_bytes(&corrupt).is_err(), "offset {offset}");
+    }
+    assert!(read_store_zip_bytes(&zip[..central]).is_err());
+    assert!(read_store_zip_bytes(&zip[..zip.len() - 1]).is_err());
+    let mut trailing = zip;
+    trailing.push(0);
+    assert!(read_store_zip_bytes(&trailing).is_err());
+}
+
 // ── Store ZIP writer (test-only twin of createStoreZip) ──────────────────
 
 /// Minimal store-only ZIP writer, the inverse of [`read_store_zip`], shaped
@@ -402,9 +560,8 @@ fn corrupt_archive_rejects_whole_pack() {
 
 #[test]
 fn non_archive_bytes_reject_whole_pack() {
-    // Bytes with no local-file-header signature parse as an empty archive,
-    // so the required manifest is absent — still an atomic rejection with
-    // nothing applied.
+    // Bytes without a complete ZIP container fail before manifest parsing.
+    // Rejection remains atomic with no source or assets installed.
     let result = validate_mod_pack(
         b"not a zip at all",
         &base_identity(),
@@ -417,7 +574,7 @@ fn non_archive_bytes_reject_whole_pack() {
     assert!(result
         .findings
         .iter()
-        .any(|f| f.category == "missing-manifest"));
+        .any(|f| f.category == "invalid-archive"));
 }
 
 #[test]
@@ -779,7 +936,11 @@ fn unsupported_pack_format_rejects_before_content_validation() {
          [[scenario]]\nid = \"ghost\"\nworld = \"assets/worlds/ghost.toml\"\n",
         SUPPORTED_PACK_FORMAT + 1,
     );
-    let zip = create_store_zip(&[("scenarios.toml", &manifest)]);
+    let zip = create_store_zip(&[
+        ("scenarios.toml", &manifest),
+        ("assets/models/future.glb", "uninterpretable future data"),
+        ("assets/sounds/future.ogg", ""),
+    ]);
     let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
     assert!(!result.is_accepted());
     assert!(has_category(&result, "unsupported-pack-format"));
@@ -1096,6 +1257,7 @@ fn active_pack(id: &str, files: &[(&str, &str)]) -> ActivePack {
         version: "1.0.0".to_string(),
         files: map,
         manifest_toml: String::new(),
+        ..Default::default()
     }
 }
 

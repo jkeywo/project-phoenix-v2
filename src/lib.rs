@@ -33,6 +33,7 @@ pub mod perf;
 // `boot::build` yet (the headless and wasm adapters adopt it in #1218/#1219).
 // Not behind the headless feature — two of its three profiles are browser
 // (wasm) inventories.
+pub mod audio_decode;
 pub mod boot;
 
 pub mod ai;

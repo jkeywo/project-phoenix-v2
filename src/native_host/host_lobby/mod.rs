@@ -828,7 +828,12 @@ fn apply_mod_pack_choice(
                     let root = std::path::PathBuf::from(&shelf.content_dir);
                     let manifest_toml =
                         std::fs::read_to_string(root.join(&shelf.manifest_rel)).unwrap_or_default();
-                    packs::install_pack(
+                    let asset_snapshot = std::cell::RefCell::new(std::collections::BTreeMap::<
+                        String,
+                        Option<std::sync::Arc<[u8]>>,
+                    >::new());
+                    let content_root = std::fs::canonicalize(&root).ok();
+                    packs::install_pack_with_assets(
                         &bytes,
                         &manifest_toml,
                         // The native `resolve_base` seam. Base content here is
@@ -847,6 +852,21 @@ fn apply_mod_pack_choice(
                         // content tree, so a pack naming a hull nothing carries
                         // is caught here rather than at spawn.
                         &crate::entities::loader::FsTemplateLoader,
+                        &|authored| {
+                            asset_snapshot
+                                .borrow_mut()
+                                .entry(authored.to_owned())
+                                .or_insert_with(|| {
+                                    let root = content_root.as_ref()?;
+                                    let path = std::fs::canonicalize(root.join(authored)).ok()?;
+                                    if !path.starts_with(root.join("assets")) {
+                                        return None;
+                                    }
+                                    std::fs::read(path).ok().map(std::sync::Arc::from)
+                                })
+                                .clone()
+                        },
+                        &packs::base_asset_descriptors(&root),
                     )
                 }
             }

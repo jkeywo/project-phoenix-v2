@@ -87,10 +87,14 @@ pub fn is_allowed_content_path(path: &str) -> bool {
     if path.is_empty() {
         return false;
     }
-    if path.contains("..") || path.contains('\\') {
+    if path.contains("..")
+        || path.contains('\\')
+        || path.contains(':')
+        || path.chars().any(char::is_control)
+    {
         return false;
     }
-    if path == MANIFEST_PATH || path == crate::sound_cues::PATH {
+    if is_pack_asset_path(path) || path == MANIFEST_PATH || path == crate::sound_cues::PATH {
         return true;
     }
     // Rhai scripts sit beside the world that loads them: a sibling
@@ -111,6 +115,29 @@ pub fn is_allowed_content_path(path: &str) -> bool {
         }
     }
     false
+}
+
+/// Formats consumed by the current model/image/audio loaders. Binary members
+/// may use subdirectories; every component is a portable content name.
+pub fn is_pack_asset_path(path: &str) -> bool {
+    if !path.split('/').all(|part| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && !part.ends_with(['.', ' '])
+            && !part.contains(['\\', ':'])
+            && !part.chars().any(char::is_control)
+    }) {
+        return false;
+    }
+    let Some((_, extension)) = path.rsplit_once('.') else {
+        return false;
+    };
+    (path.starts_with("assets/models/")
+        && matches!(extension, "glb" | "bin" | "png" | "jpg" | "jpeg" | "ktx2"))
+        || ((path.starts_with("assets/textures/") || path.starts_with("assets/planets/"))
+            && matches!(extension, "png" | "jpg" | "jpeg" | "ktx2" | "ptex"))
+        || (path.starts_with("assets/sounds/") && matches!(extension, "wav" | "ogg" | "mp3"))
 }
 
 // ── CRC-32 (IEEE) ────────────────────────────────────────────────────────────
@@ -153,23 +180,52 @@ fn read_u32_le(bytes: &[u8], at: usize) -> Option<u32> {
 /// any entry that is not compression method 0 (store). Returns `Err` on a
 /// malformed archive. Mirrors `readStoreZip` in `editor/mod-pack-export.js`.
 ///
-/// Iteration stops at the first bytes that are not a local file header (the
-/// central directory / EOCD), matching the JS reader.
+/// Local headers and the central directory must describe exactly the same
+/// members. Trailing bytes and incomplete envelopes are refused.
 pub fn read_store_zip(bytes: &[u8]) -> Result<BTreeMap<String, String>, String> {
+    read_store_zip_bytes(bytes)?
+        .into_iter()
+        .map(|(path, bytes)| {
+            String::from_utf8(bytes)
+                .map(|text| (path.clone(), text))
+                .map_err(|_| format!("file {path:?} is not valid UTF-8"))
+        })
+        .collect()
+}
+
+/// Decode the same archive envelope while retaining exact model, texture and
+/// sound bytes. Source validators decide which members must be UTF-8. Duplicate
+/// member names are refused, so no reader can disagree about the winning file.
+pub fn read_store_zip_bytes(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let mut files = BTreeMap::new();
+    let mut locals = BTreeMap::new();
     let mut pos = 0usize;
 
     while pos + 4 <= bytes.len() && read_u32_le(bytes, pos) == Some(LOCAL_FILE_HEADER_SIG) {
+        let flags = read_u16_le(bytes, pos + 6).ok_or("truncated local file header")?;
         let method = read_u16_le(bytes, pos + 8).ok_or("truncated local file header")?;
         let crc = read_u32_le(bytes, pos + 14).ok_or("truncated local file header")?;
         let comp_size = read_u32_le(bytes, pos + 18).ok_or("truncated local file header")? as usize;
+        let size = read_u32_le(bytes, pos + 22).ok_or("truncated local file header")? as usize;
         let name_len = read_u16_le(bytes, pos + 26).ok_or("truncated local file header")? as usize;
         let extra_len = read_u16_le(bytes, pos + 28).ok_or("truncated local file header")? as usize;
         let name_start = pos + 30;
-        let data_start = name_start + name_len + extra_len;
+        let data_start = name_start
+            .checked_add(name_len)
+            .and_then(|value| value.checked_add(extra_len))
+            .ok_or("ZIP member offset overflows")?;
+        let data_end = data_start
+            .checked_add(comp_size)
+            .ok_or("ZIP member size overflows")?;
 
+        if flags & !0x0800 != 0 {
+            return Err("encrypted or streaming ZIP members are unsupported".into());
+        }
         if method != 0 {
             return Err(format!("unsupported compression method {method}"));
+        }
+        if comp_size != size {
+            return Err("stored ZIP member sizes disagree".into());
         }
 
         let name_bytes = bytes
@@ -180,17 +236,73 @@ pub fn read_store_zip(bytes: &[u8]) -> Result<BTreeMap<String, String>, String> 
             .to_string();
 
         let data = bytes
-            .get(data_start..data_start + comp_size)
+            .get(data_start..data_end)
             .ok_or("truncated file data")?;
         if crc32(data) != crc {
             return Err(format!("CRC mismatch for {name:?}"));
         }
-        let text = std::str::from_utf8(data)
-            .map_err(|_| format!("file {name:?} is not valid UTF-8"))?
-            .to_string();
+        if files.insert(name.clone(), data.to_vec()).is_some() {
+            return Err(format!("duplicate ZIP member {name:?}"));
+        }
+        locals.insert(name, (pos, flags, crc, size));
+        pos = data_end;
+    }
 
-        files.insert(name, text);
-        pos = data_start + comp_size;
+    let central_start = pos;
+    let mut central_names = std::collections::BTreeSet::new();
+    while read_u32_le(bytes, pos) == Some(0x0201_4b50) {
+        if bytes.get(pos..pos + 46).is_none() {
+            return Err("truncated central directory".into());
+        }
+        let flags = read_u16_le(bytes, pos + 8).ok_or("truncated central flags")?;
+        let method = read_u16_le(bytes, pos + 10).ok_or("truncated central method")?;
+        let crc = read_u32_le(bytes, pos + 16).ok_or("truncated central CRC")?;
+        let compressed = read_u32_le(bytes, pos + 20).ok_or("truncated central size")? as usize;
+        let size = read_u32_le(bytes, pos + 24).ok_or("truncated central size")? as usize;
+        let name_len = read_u16_le(bytes, pos + 28).ok_or("truncated central name")? as usize;
+        let extra_len = read_u16_le(bytes, pos + 30).ok_or("truncated central extra")? as usize;
+        let comment_len = read_u16_le(bytes, pos + 32).ok_or("truncated central comment")? as usize;
+        let disk = read_u16_le(bytes, pos + 34).ok_or("truncated central disk")?;
+        let offset = read_u32_le(bytes, pos + 42).ok_or("truncated central offset")? as usize;
+        let name_start = pos + 46;
+        let next = name_start
+            .checked_add(name_len)
+            .and_then(|value| value.checked_add(extra_len))
+            .and_then(|value| value.checked_add(comment_len))
+            .filter(|end| *end <= bytes.len())
+            .ok_or("truncated central entry")?;
+        let name = std::str::from_utf8(&bytes[name_start..name_start + name_len])
+            .map_err(|_| "central file name is not valid UTF-8")?;
+        if method != 0
+            || compressed != size
+            || disk != 0
+            || locals.get(name) != Some(&(offset, flags, crc, size))
+            || !central_names.insert(name)
+        {
+            return Err(format!("central directory disagrees with member {name:?}"));
+        }
+        pos = next;
+    }
+    if read_u32_le(bytes, pos) != Some(0x0605_4b50) {
+        return Err("missing ZIP end record".into());
+    }
+    let disk = read_u16_le(bytes, pos + 4).ok_or("truncated ZIP end record")?;
+    let central_disk = read_u16_le(bytes, pos + 6).ok_or("truncated ZIP end record")?;
+    let disk_count = read_u16_le(bytes, pos + 8).ok_or("truncated ZIP end record")? as usize;
+    let count = read_u16_le(bytes, pos + 10).ok_or("truncated ZIP end record")? as usize;
+    let central_size = read_u32_le(bytes, pos + 12).ok_or("truncated ZIP end record")? as usize;
+    let offset = read_u32_le(bytes, pos + 16).ok_or("truncated ZIP end record")? as usize;
+    let comment = read_u16_le(bytes, pos + 20).ok_or("truncated ZIP end record")? as usize;
+    if disk != 0
+        || central_disk != 0
+        || disk_count != count
+        || count != locals.len()
+        || count != central_names.len()
+        || offset != central_start
+        || central_size != pos - central_start
+        || pos.checked_add(22).and_then(|end| end.checked_add(comment)) != Some(bytes.len())
+    {
+        return Err("ZIP end record disagrees with its members".into());
     }
 
     Ok(files)
@@ -210,6 +322,8 @@ pub struct ValidatedModPack {
     pub findings: Vec<WorldFinding>,
     pub files: BTreeMap<String, String>,
     pub manifest_toml: String,
+    pub assets: BTreeMap<String, std::sync::Arc<[u8]>>,
+    pub source_archive: Option<std::sync::Arc<[u8]>>,
 }
 
 impl ValidatedModPack {
@@ -242,6 +356,14 @@ fn archive_finding(
 /// An archive-scoped ERROR finding (blocks acceptance).
 fn archive_error(category: &'static str, reference: &str, message: String) -> WorldFinding {
     archive_finding(Severity::Error, category, reference, message)
+}
+
+/// A decoded member (including an unchanged dependency) failed validation.
+/// Attribute it to the file the author must repair, not the pack manifest.
+fn member_error(category: &'static str, path: &str, message: String) -> WorldFinding {
+    let mut finding = archive_error(category, path, message);
+    finding.source.file = path.to_owned();
+    finding
 }
 
 /// The raw-TOML source an uploaded pack's entity composition resolves against
@@ -403,9 +525,31 @@ pub fn validate_mod_pack(
     template_loader: &dyn TemplateLoader,
     active: &[ActivePack],
 ) -> ValidatedModPack {
+    validate_mod_pack_with_assets(
+        zip_bytes,
+        base_content,
+        resolve_base,
+        template_loader,
+        active,
+        &|_| None,
+        &[],
+    )
+}
+
+/// The same admission with an explicit immutable base-asset snapshot. A
+/// dependency resolves candidate first, then accepted packs, then this base.
+pub fn validate_mod_pack_with_assets(
+    zip_bytes: &[u8],
+    base_content: &ContentIdentity,
+    resolve_base: impl Fn(&str) -> Option<String>,
+    template_loader: &dyn TemplateLoader,
+    active: &[ActivePack],
+    resolve_base_asset: &crate::world::pack_asset_validation::AssetResolver<'_>,
+    base_asset_paths: &[String],
+) -> ValidatedModPack {
     // 1. Parse the store ZIP — a malformed / non-store / CRC-mismatched archive
     //    rejects the whole pack.
-    let files = match read_store_zip(zip_bytes) {
+    let members = match read_store_zip_bytes(zip_bytes) {
         Ok(files) => files,
         Err(e) => {
             return ValidatedModPack {
@@ -420,7 +564,32 @@ pub fn validate_mod_pack(
     };
 
     let mut findings = Vec::new();
-
+    let mut deferred_content_findings = Vec::new();
+    let mut files = BTreeMap::new();
+    let mut assets: BTreeMap<String, std::sync::Arc<[u8]>> = BTreeMap::new();
+    for (path, bytes) in members {
+        if is_pack_asset_path(&path) {
+            if bytes.is_empty() {
+                deferred_content_findings.push(archive_error(
+                    "empty-asset",
+                    &path,
+                    "Pack asset is empty".into(),
+                ));
+            }
+            assets.insert(path, std::sync::Arc::from(bytes));
+        } else {
+            match String::from_utf8(bytes) {
+                Ok(text) => {
+                    files.insert(path, text);
+                }
+                Err(_) => deferred_content_findings.push(archive_error(
+                    "invalid-content-encoding",
+                    &path,
+                    "Authored source is not valid UTF-8".into(),
+                )),
+            }
+        }
+    }
     // 2. Require the manifest FIRST — the pack identity header is read from it,
     //    and the header gate (step 3) runs before any content or path check so
     //    an unsupported future format is not buried under those.
@@ -520,12 +689,12 @@ pub fn validate_mod_pack(
             format!("a mod pack with id {:?} is already active", pack.id),
         ));
     }
-    for path in files.keys() {
+    for path in files.keys().chain(assets.keys()) {
         if path == MANIFEST_PATH {
             continue;
         }
         for active_pack in active {
-            if active_pack.files.contains_key(path) {
+            if active_pack.files.contains_key(path) || active_pack.assets.contains_key(path) {
                 findings.push(archive_finding(
                     Severity::Warning,
                     "overlapping-pack-path",
@@ -535,6 +704,77 @@ pub fn validate_mod_pack(
                         pack.id, active_pack.id, pack.id
                     ),
                 ));
+            }
+        }
+    }
+
+    // Content decoding follows the supported-format gate. Do not spend work
+    // interpreting, or report misleading asset errors for, a future format.
+    findings.append(&mut deferred_content_findings);
+    let resolve_asset = |path: &str| {
+        assets
+            .get(path)
+            .cloned()
+            .or_else(|| {
+                active
+                    .iter()
+                    .rev()
+                    .find_map(|pack| pack.assets.get(path).cloned())
+            })
+            .or_else(|| resolve_base_asset(path))
+    };
+    let descriptor_sources = crate::world::pack_asset_validation::descriptor_sources(
+        assets
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), bytes.as_ref())),
+    );
+    for (path, bytes) in &assets {
+        if let Err(error) = crate::world::pack_asset_validation::validate_member(
+            path,
+            bytes,
+            &resolve_asset,
+            &descriptor_sources,
+        ) {
+            findings.push(member_error("invalid-runtime-asset", path, error));
+        }
+    }
+
+    // External buffers can replace bytes under an unchanged base/active GLB.
+    // Validate those consumers too, before any new stack revision is visible.
+    let changed_buffers: std::collections::BTreeSet<_> = assets
+        .keys()
+        .filter(|path| path.ends_with(".bin"))
+        .collect();
+    if !changed_buffers.is_empty() {
+        let descriptors: std::collections::BTreeSet<_> = base_asset_paths
+            .iter()
+            .chain(active.iter().flat_map(|pack| pack.assets.keys()))
+            .filter(|path| path.ends_with(".glb") && !assets.contains_key(*path))
+            .collect();
+        for path in descriptors {
+            let Some(bytes) = resolve_asset(path) else {
+                findings.push(member_error(
+                    "unavailable-asset-consumer",
+                    path,
+                    "Cannot validate a buffer replacement without its immutable model dependency"
+                        .into(),
+                ));
+                continue;
+            };
+            let required = match crate::world::pack_asset_validation::required_assets(path, &bytes)
+            {
+                Ok(required) => required,
+                Err(error) => {
+                    findings.push(member_error("invalid-runtime-asset", path, error));
+                    continue;
+                }
+            };
+            if required.iter().any(|path| changed_buffers.contains(path)) {
+                if let Err(error) =
+                    crate::world::pack_asset_validation::validate(path, &bytes, &resolve_asset)
+                {
+                    findings.push(member_error("invalid-runtime-asset", path, error));
+                }
             }
         }
     }
@@ -676,6 +916,8 @@ pub fn validate_mod_pack(
         findings,
         files: overlay_files,
         manifest_toml,
+        assets,
+        source_archive: Some(std::sync::Arc::from(zip_bytes)),
     }
 }
 

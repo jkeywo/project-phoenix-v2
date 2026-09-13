@@ -3617,6 +3617,22 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
 #[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
 #[wasm_bindgen]
 pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
+    add_mod_pack_with_assets(bytes, &std::collections::BTreeMap::new())
+}
+
+#[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
+#[wasm_bindgen]
+pub fn wasm_add_mod_pack_with_assets(bytes: &[u8], base_assets: &str) -> Result<Array, JsValue> {
+    let assets = crate::core::codec::decode_workshop_asset_bytes(base_assets)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(add_mod_pack_with_assets(bytes, &assets))
+}
+
+#[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
+fn add_mod_pack_with_assets(
+    bytes: &[u8],
+    assets: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Array {
     // The host side of the mod-pack compatibility contract (issue #986): read
     // the base manifest's `[content]` identity and INJECT it, rather than let
     // the pure validator reach for a host default — the same seam discipline as
@@ -3628,7 +3644,7 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
         .unwrap_or_default();
     // The already-active overlay stack the candidate is judged against (#987).
     let active = crate::entities::config_cache::active_packs();
-    let result = crate::world::mod_pack::validate_mod_pack(
+    let result = crate::world::mod_pack::validate_mod_pack_with_assets(
         bytes,
         &base_content,
         |path| {
@@ -3642,6 +3658,12 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
         },
         &crate::entities::loader::WasmTemplateLoader,
         &active,
+        &|path| {
+            assets
+                .get(path)
+                .map(|bytes| std::sync::Arc::from(bytes.as_slice()))
+        },
+        &assets.keys().cloned().collect::<Vec<_>>(),
     );
 
     let arr = Array::new();
@@ -3702,6 +3724,8 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
             version,
             files: result.files.into_iter().collect(),
             manifest_toml: result.manifest_toml,
+            assets: result.assets,
+            source_archive: result.source_archive,
         });
     }
     arr
@@ -3716,6 +3740,42 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
 #[wasm_bindgen]
 pub fn wasm_clear_mod_pack() {
     crate::entities::config_cache::clear_mod_pack_overlay();
+}
+
+/// Presentation readers receive only immutable members of accepted packs.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_pack_asset(path: String) -> Option<Vec<u8>> {
+    crate::entities::config_cache::mod_pack_asset(&path).map(|bytes| bytes.to_vec())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_pack_asset_dependencies() -> String {
+    let index = crate::entities::config_cache::mod_pack_assets()
+        .iter()
+        .map(|(path, bytes)| {
+            let required = crate::world::pack_asset_validation::required_assets(path, bytes)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            (path.clone(), required)
+        })
+        .collect();
+    crate::core::codec::encode_asset_dependency_index(&index)
+        .expect("asset index contains only strings")
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_pack_source_archive(id: String) -> Option<Vec<u8>> {
+    crate::entities::config_cache::mod_pack_source_archive(&id).map(|bytes| bytes.to_vec())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_pack_revision() -> f64 {
+    crate::entities::config_cache::mod_pack_revision() as f64
 }
 
 /// Remove the pack with `id` from the overlay stack (issue #987). Precedence for

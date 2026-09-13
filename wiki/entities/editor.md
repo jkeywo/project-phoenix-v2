@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml]
 updated: 2026-09-13
 ---
 
@@ -50,6 +50,24 @@ authored defaults together. Feedback presentation is keyed per semantic action,
 so a busy Export or Import refusal remains alongside an outstanding Validate
 Pending state instead of erasing it. This tracer adds no unified inspector,
 project-root editing, model tooling, or Workshop redesign.
+
+## Runtime assets
+
+Workshop retains supported model, texture and sound members as exact bytes.
+The ordinary host upload and offline Workshop validator both use
+`src/world/pack_asset_validation.rs`: actual glTF buffer/accessor/primitive
+checks, image decoding and the shared MP3/OGG/WAV decoder. Browser dependency
+capture uses the build's length/CRC manifest and dependency names; native
+validation uses an explicit byte snapshot. Replacing an external buffer also
+validates its existing model consumers. A missing or changed immutable
+dependency refuses the operation. These checks do not install the candidate.
+
+Accepted packs retain their source archive alongside source and asset members.
+`src/entities/pack_assets.rs` registers the common Bevy reader, giving every
+accepted stack revision new asset identities. Model, planet, LOD, viewer and
+dust consumers retire their previous visual state before render extraction;
+late completion of an old load cannot overwrite a current handle. Canonical
+simulation entities remain in place.
 
 ## Standalone Workshop Authoring
 

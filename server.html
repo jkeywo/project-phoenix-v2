@@ -7688,7 +7688,25 @@
         // stack, so a duplicate pack id or a broken pack applies nothing.
         let findings;
         try {
-          findings = Array.from(wasmBindings.wasm_add_mod_pack(bytes) || []);
+          const revision = wasmBindings.wasm_pack_revision();
+          const required = Array.from(wasmBindings.wasm_workshop_asset_dependencies(bytes));
+          let baseAssets = {};
+          if (required.length) {
+            const response = await fetch('workshop-base.json');
+            if (!response.ok) throw new Error('Base asset catalogue is unavailable');
+            const base = await response.json();
+            const active = Object.create(null);
+            for (const path of required) {
+              const value = wasmBindings.wasm_pack_asset(path);
+              if (value instanceof Uint8Array) active[path] = Array.from(value);
+            }
+            const { createWorkshopAssetSnapshot } = await import('./editor/workshop-assets.js');
+            const asset_dependencies = JSON.parse(wasmBindings.wasm_pack_asset_dependencies());
+            const snapshot = createWorkshopAssetSnapshot({ ...base, packs: [{ assets: active, asset_dependencies }] });
+            baseAssets = (await snapshot.capture(required)).base_assets;
+          }
+          if (revision !== wasmBindings.wasm_pack_revision()) throw new Error('Loaded content changed during asset validation; retry the import');
+          findings = Array.from(wasmBindings.wasm_add_mod_pack_with_assets(bytes, JSON.stringify(baseAssets)) || []);
         } catch (e) {
           console.error('[Phoenix] mod pack validation threw:', e);
           setStatus('server.mod_pack_rejected');
@@ -8651,6 +8669,10 @@ window.addEventListener('PhoenixSaveSlotsModuleReady', mountSaveSlotsWhenReady);
 
 window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
+  // Pack imports and menu audio exist before a world or host App is started.
+  window.__hostReadPackAsset = window.wasmBindings.wasm_pack_asset;
+  window.__hostPackRevision = window.wasmBindings.wasm_pack_revision;
+  window.__hostPackSourceArchive = window.wasmBindings.wasm_pack_source_archive;
   mountSaveSlotsWhenReady();
   // The demo-build flag (issue #939) is bound here rather than in
   // finishInit()'s list: the settings cog can be opened long before a world is

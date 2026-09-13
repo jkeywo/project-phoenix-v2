@@ -135,7 +135,7 @@ pub fn spawn_billboard_child(
     let quad = meshes.add(Rectangle::new(1.0, 1.0));
     // Asset paths are authored `assets/…`; the loader roots at `assets/`.
     let rel = atlas_path.strip_prefix("assets/").unwrap_or(atlas_path);
-    let texture = asset_server.load(rel.to_string());
+    let texture = asset_server.load(super::pack_assets::asset_path(asset_server, rel));
     let views = views.max(1);
 
     let root = commands

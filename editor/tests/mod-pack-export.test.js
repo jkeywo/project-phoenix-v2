@@ -61,13 +61,16 @@ describe('isAllowedContentPath (AC1 whitelist)', () => {
     expect(isAllowedContentPath('assets/entities/cruiser.toml')).toBe(true);
     expect(isAllowedContentPath('assets/factions/alliance.toml')).toBe(true);
     expect(isAllowedContentPath('assets/models/cruiser.model.toml')).toBe(true);
+    expect(isAllowedContentPath('assets/models/mesh.glb')).toBe(true);
+    expect(isAllowedContentPath('assets/models/mesh/vertices.bin')).toBe(true);
+    expect(isAllowedContentPath('assets/planets/gas_giant/surface_colour.ktx2')).toBe(true);
     expect(isAllowedContentPath('scenarios.toml')).toBe(true);
   });
 
   it('rejects anything outside the supported authored paths', () => {
     expect(isAllowedContentPath('assets/worlds/nested/x.toml')).toBe(false);
     expect(isAllowedContentPath('assets/scripts/x.toml')).toBe(false);
-    expect(isAllowedContentPath('assets/models/mesh.glb')).toBe(false);
+    expect(isAllowedContentPath('assets/models/mesh.exe')).toBe(false);
     expect(isAllowedContentPath('assets/worlds/x.json')).toBe(false);
     expect(isAllowedContentPath('assets/worlds/.toml')).toBe(false);
     expect(isAllowedContentPath('../secret.toml')).toBe(false);

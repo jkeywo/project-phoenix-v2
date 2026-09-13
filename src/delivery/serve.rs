@@ -1016,14 +1016,22 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
         Route::Static { rel_path } => {
             let root = state.client_root.as_ref();
             let full = root.map(|r| r.join(&rel_path));
-            let bytes = full.as_ref().and_then(|p| std::fs::read(p).ok());
+            let overlay = crate::entities::config_cache::mod_pack_asset(&rel_path);
+            let bytes = overlay
+                .as_ref()
+                .map(|bytes| bytes.to_vec())
+                .or_else(|| full.as_ref().and_then(|p| std::fs::read(p).ok()));
             match bytes {
                 Some(bytes) => {
                     let head = http::response_head(
                         200,
                         "OK",
                         http::content_type_for(&rel_path),
-                        http::cache_policy_for(&rel_path),
+                        if overlay.is_some() {
+                            CachePolicy::Revalidate
+                        } else {
+                            http::cache_policy_for(&rel_path)
+                        },
                         bytes.len(),
                         &[],
                     );
@@ -1242,6 +1250,7 @@ world = \"assets/worlds/pack_only.toml\"
             .into_iter()
             .collect(),
             manifest_toml: PACK_MANIFEST.to_string(),
+            ..Default::default()
         });
 
         let merged = source.merged_catalog();

@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, gui/workshop-authoring.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs]
 updated: 2026-09-13
 ---
 
@@ -53,11 +53,12 @@ project-root editing, model tooling, or Workshop redesign.
 
 ## Standalone Workshop Authoring
 
-`workshop.html` is M6's first offline browser Authoring slice. Build it with
-`npm run build:workshop` and serve `dist/workshop.html`; ordinary Trunk builds
-also ship it. On Windows, `run-workshop.bat` builds the page and uses
+`workshop.html` is M6's offline browser Authoring surface. `trunk build` ships
+the page and its runtime WASM artifact; `npm run build:workshop` updates the
+HTML/JS and dependency snapshot alongside an existing runtime. On Windows,
+`run-workshop.bat` runs Trunk and uses
 `scripts/serve-workshop.mjs` to serve it on loopback port 8083, opening the browser
-only after the server is listening. Its JavaScript and TOML parser are local build artifacts. It opens
+only after the server is listening. Its JavaScript and runtime are local build artifacts. It opens
 one user-selected text mod ZIP without a project-directory grant or GM session.
 `WorkshopDocument` owns immutable imported bytes, the editable source documents,
 and one chronological `UndoStack` across the whole pack. The source editor
@@ -70,14 +71,33 @@ The thin `workshop-authoring.js` adapter uses shared private Accessibility,
 semantic Import/Validate/Export bindings, remapping and attributed local action
 feedback. Accepted action bindings take precedence over conventional history
 shortcuts outside editable fields. A failed replacement import or export keeps
-the prior draft and history. Export derives a temporary `ModPackWorkspace` and
-calls the existing `exportModPack` gate, preserving the exact edited manifest
-instead of regenerating it. The UI explicitly calls these **structural** checks:
-Rhai compilation and complete runtime admission remain the host's responsibility.
-The existing gate still refuses BOM-prefixed TOML, while the source remains
-available for repair. This slice has no Test simulation, project provider,
-structured inspector or model-asset editing; the existing editor/viewer remain
-until the M6 parity workflow is delivered.
+the prior draft and history. Export validates the exact candidate archive through
+`src/workshop`: the ordinary mod-pack gate, runtime source parsers, include and
+composition checks, and budgeted Rhai compiler. Static child worlds and scripts
+resolve against an explicit immutable base/other-pack source snapshot. Validation
+does not install content, start an App, or apply a content ledger. Missing runtime
+artifacts or dependencies refuse export. Findings link back to authored files and
+reported lines. `WorkshopDocument.check()` remains a structural helper for older
+consumers; the Workshop UI never treats it as runtime acceptance.
+
+The field inspector uses `toml_edit` source spans in the same Rust module. It
+patches exactly one scalar and refuses stale documents or incompatible types;
+comments, unknown fields, ordering and unchanged line endings remain byte-for-byte.
+World `[global]` descriptors derive expected types and defaults from the actual
+`GlobalConfig` fields. Other scalar paths, including arrays and inline tables,
+remain available as source fallback fields and pass the same final runtime gate.
+Every displayed field is Authoring-only; none provides an arbitrary live write.
+
+`workshop-recovery.js` stores one versioned data-only draft in its own IndexedDB
+database. The record carries immutable imported bytes, current documents, last
+exported documents, selected path and chronological history. Reload requires an
+explicit Restore or Discard before another import. Corrupt records and storage
+failure never silently replace the open source. This storage grants no filesystem
+authority and carries no private operator profile or live runtime state.
+
+Disposable Test simulation, project providers, specialised entity/definition/model
+panels and model assets remain later M6 work. The existing editor/viewer remain
+until the parity workflow is delivered.
 
 ## Validation boundary
 

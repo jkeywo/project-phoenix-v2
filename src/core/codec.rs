@@ -116,6 +116,31 @@ pub fn encode_audio_config(
     serde_json::to_string(p)
 }
 
+/// Decode the offline Workshop's explicit, data-only dependency snapshot.
+pub fn decode_workshop_dependencies(
+    s: &str,
+) -> Result<crate::workshop::WorkshopDependencies, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
+pub fn encode_workshop_validation(
+    value: &crate::workshop::WorkshopValidation,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(value)
+}
+
+pub fn encode_workshop_fields(
+    value: &[crate::workshop::document::Field],
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(value)
+}
+
+pub fn decode_workshop_patch(
+    value: &str,
+) -> Result<crate::workshop::document::Patch, serde_json::Error> {
+    serde_json::from_str(value)
+}
+
 /// Encode a one-shot positional audio cue for `__audioCue`. Coordinates are
 /// listener-relative — see `audio_config::listener_relative`.
 pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {

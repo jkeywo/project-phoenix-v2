@@ -2,6 +2,8 @@
  * no filesystem provider, GM connection, simulation or live-state capture.
  */
 import { WorkshopDocument } from '../editor/workshop-document.js';
+import { createWorkshopRuntime } from '../editor/workshop-runtime.js';
+import { createWorkshopRecovery } from '../editor/workshop-recovery.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -10,7 +12,11 @@ import { loadOperatorProfile, applyOperatorProfile, saveOperatorProfile } from '
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import { t } from './strings.js';
 
-export function mountWorkshopAuthoring({ root, win = window, download = downloadZip } = {}) {
+// wasm-bindgen may reject with a string JsValue rather than an Error object.
+const errorText = error => String(error?.message ?? error);
+
+export function mountWorkshopAuthoring({ root, win = window, download = downloadZip,
+  runtime = createWorkshopRuntime(), recovery = createWorkshopRecovery({ indexedDB: win.indexedDB }) } = {}) {
   const doc = root.ownerDocument;
   function el(tag, textId, attrs = {}) {
     const node = doc.createElement(tag);
@@ -41,6 +47,16 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const filesLabel = el('label', 'workshop.files', { for: 'workshop-files' });
   const files = el('select', null, { id: 'workshop-files' });
   filesPanel.append(filesLabel, files);
+  const inspector = el('details', null, { class: 'workshop-inspector' });
+  inspector.append(el('summary', 'workshop.inspector'));
+  const inspectButton = button('workshop.inspect', 'workshop-inspect', () => inspect());
+  const fieldSelect = el('select', null, { id: 'workshop-field' });
+  const fieldValue = el('textarea', null, { id: 'workshop-field-value', rows: '3', spellcheck: 'false' });
+  const fieldInfo = el('p', null, { id: 'workshop-field-info' });
+  const applyField = button('workshop.apply_field', 'workshop-apply-field', () => patchField());
+  inspector.append(inspectButton, el('label', 'workshop.field', { for: 'workshop-field' }), fieldSelect,
+    fieldInfo, el('label', 'workshop.field_value', { for: 'workshop-field-value' }), fieldValue, applyField);
+  filesPanel.append(inspector);
   const sourcePanel = el('div', null, { class: 'workshop-source' });
   const sourceLabel = el('label', 'workshop.source', { for: 'workshop-source' });
   const source = el('textarea', null, { id: 'workshop-source', spellcheck: 'false', 'aria-describedby': 'workshop-source-hint' });
@@ -52,11 +68,22 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   settings.append(el('summary', 'editor.mod.settings.heading'));
   const settingsBody = el('div');
   settings.append(settingsBody);
-  root.append(toolbar, layout, feedback, findings, settings);
+  const recoveryPanel = el('section', null, { class: 'workshop-recovery', 'aria-live': 'polite' });
+  const recoveryStatus = el('p', 'workshop.recovery_loading', { id: 'workshop-recovery-status' });
+  const restoreButton = button('workshop.recovery_restore', 'workshop-restore', () => restoreDraft());
+  const discardButton = button('workshop.recovery_discard', 'workshop-discard', () => discardRecovery());
+  restoreButton.hidden = discardButton.hidden = true;
+  recoveryPanel.append(recoveryStatus, restoreButton, discardButton);
+  root.append(toolbar, recoveryPanel, layout, feedback, findings, settings);
   let draft = null;
   let selected = null;
   let pendingImport = null;
+  let pendingValidation = false;
+  let inspected = null;
   let disposed = false;
+  let pendingRecovery = true;
+  let recoveredDraft = null;
+  let persistenceGeneration = 0;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -74,14 +101,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const actions = createModActionRegistry({
     actionFeedback: lifecycle,
     openImport(activation) {
-      if (pendingImport) return false;
+      if (pendingImport || pendingValidation || pendingRecovery) return false;
       if (draft?.isDirty() && !win.confirm(t('workshop.replace_confirm'))) return false;
       pendingImport = activation;
       fileInput.value = '';
       try { fileInput.click(); }
       catch (error) {
         pendingImport = null;
-        show('editor.mod.import.previous_workspace_preserved', [String(error.message)], true);
+        show('editor.mod.import.previous_workspace_preserved', [errorText(error)], true);
         activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
       }
       return true;
@@ -139,7 +166,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       source.value = draft?.read(selected) || '';
       sourceLabel.textContent = selected ? t('workshop.source_path', { path: selected }) : t('workshop.source');
     }
-    const busy = Boolean(pendingImport);
+    const busy = Boolean(pendingImport || pendingValidation || pendingRecovery);
     files.disabled = !draft || busy;
     source.disabled = !draft || busy;
     checkButton.disabled = !draft || busy;
@@ -147,38 +174,144 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     importButton.disabled = busy;
     undoButton.disabled = !draft?.canUndo() || busy;
     redoButton.disabled = !draft?.canRedo() || busy;
+    inspectButton.disabled = !draft || busy || !selected?.endsWith('.toml');
+    const currentInspector = inspected && inspected.path === selected && inspected.source === draft?.read(selected);
+    fieldSelect.disabled = !currentInspector || busy;
+    fieldValue.disabled = !currentInspector || busy;
+    applyField.disabled = !currentInspector || busy || !inspected.fields.length;
+    if (!currentInspector) {
+      inspected = null;
+      fieldSelect.replaceChildren();
+      fieldValue.value = '';
+      fieldInfo.textContent = t('workshop.inspector_stale');
+    }
     dirty.textContent = t(!draft ? 'workshop.empty' : draft.isDirty() ? 'workshop.dirty' : 'workshop.saved');
   }
   function travel(redo) {
-    if (pendingImport) return;
+    if (pendingImport || pendingValidation || pendingRecovery) return;
     const path = redo ? draft?.redo() : draft?.undo();
     if (!path) return;
     selected = path;
     refresh({ selection: true });
     show(redo ? 'workshop.redone' : 'workshop.undone', [path]);
+    persistDraft();
+  }
+  async function inspect() {
+    if (!draft || pendingImport || pendingValidation || pendingRecovery) return;
+    const candidate = draft;
+    const path = selected;
+    const text = candidate.read(path);
+    pendingValidation = true;
+    refresh();
+    try {
+      const fields = await runtime.inspect(text, path);
+      if (disposed || draft !== candidate || selected !== path || draft.read(path) !== text) return;
+      inspected = { path, source: text, fields };
+      fieldSelect.replaceChildren(...fields.map((field, index) => {
+        const label = field.path.map(part => typeof part === 'number' ? `[${part}]` : part).join('.');
+        const option = el('option', null, { value: String(index) });
+        option.textContent = label;
+        return option;
+      }));
+      renderField();
+    } catch (error) {
+      if (!disposed) show('workshop.inspector_refused', [errorText(error)], true);
+    } finally { pendingValidation = false; if (!disposed) refresh(); }
+  }
+  function renderField() {
+    const field = inspected?.fields[Number(fieldSelect.value)];
+    fieldValue.value = field?.source || '';
+    fieldInfo.textContent = field ? t(field.runtime_owned ? 'workshop.field_runtime' : 'workshop.field_fallback', {
+      type: field.kind, line: String(field.line),
+    }) : t('workshop.inspector_empty');
+    if (field?.default_source != null) fieldInfo.textContent += ` ${t('workshop.field_default', { value: field.default_source })}`;
+  }
+  fieldSelect.addEventListener('change', renderField);
+  async function patchField() {
+    if (!inspected || pendingValidation || pendingImport) return;
+    const snapshot = inspected;
+    const field = snapshot.fields[Number(fieldSelect.value)];
+    if (!field) return;
+    pendingValidation = true;
+    refresh();
+    try {
+      const patched = await runtime.patch(draft.read(snapshot.path), {
+        document_path: snapshot.path, path: field.path, expected_source: snapshot.source, value_source: fieldValue.value,
+      });
+      if (disposed) return;
+      if (draft.read(snapshot.path) !== snapshot.source) throw new Error(t('workshop.inspector_stale'));
+      if (draft.edit(snapshot.path, patched)) {
+        selected = snapshot.path;
+        refresh({ selection: true });
+        show('workshop.changed');
+        persistDraft();
+      }
+    } catch (error) {
+      if (!disposed) show('workshop.inspector_refused', [errorText(error)], true);
+    } finally { pendingValidation = false; if (!disposed) refresh(); }
   }
   function evaluate(exporting, activation) {
-    if (!draft || pendingImport) return false;
-    const result = draft.check();
-    if (!result.ok) {
-      show('workshop.check_refused', result.errors, true);
-      activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
-      return true;
-    }
-    if (exporting) {
-      try { download(result.zip, `${result.packId || 'mod-pack'}.zip`, doc, win); }
-      catch (error) {
-        show('editor.mod.export.download_refused', [String(error.message)], true);
-        activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
-        return true;
-      }
-      draft.markExported();
-    }
-    show(exporting ? 'workshop.exported' : 'workshop.checked', result.warnings);
-    activation.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
+    if (!draft || pendingImport || pendingValidation || pendingRecovery) return false;
+    pendingValidation = true;
+    const candidate = draft;
+    show('workshop.runtime_checking');
     refresh();
-    exportButton.focus();
+    void (async () => {
+      try {
+        const zip = candidate.archive();
+        const result = await runtime.validate(zip);
+        if (disposed) return;
+        if (!result.accepted) {
+          showRuntimeFindings('workshop.check_refused', result.findings, true);
+          activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
+          return;
+        }
+        if (exporting) {
+          try { download(zip, 'mod-pack.zip', doc, win); }
+          catch (error) {
+            show('editor.mod.export.download_refused', [errorText(error)], true);
+            activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
+            return;
+          }
+          candidate.markExported();
+          persistDraft();
+        }
+        showRuntimeFindings(exporting ? 'workshop.exported' : 'workshop.runtime_checked', result.findings);
+        activation.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
+      } catch (error) {
+        if (!disposed) {
+          show('workshop.runtime_unavailable', [errorText(error)], true);
+          activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
+        }
+      } finally {
+        pendingValidation = false;
+        if (!disposed) refresh();
+      }
+    })();
     return true;
+  }
+  function showRuntimeFindings(title, records, refused = false) {
+    show(title, [], refused);
+    for (const record of records) {
+      const row = el('p');
+      const location = `${record.file}${record.line ? `:${record.line}` : ''}`;
+      if (draft.paths().includes(record.file)) {
+        const target = button(null, '', () => {
+          selected = record.file;
+          refresh({ selection: true });
+          source.focus();
+          const text = source.value;
+          const lines = text.split('\n');
+          const line = Math.max(0, Math.min(lines.length - 1, (record.line || 1) - 1));
+          const start = lines.slice(0, line).reduce((total, part) => total + part.length + 1, 0);
+          source.setSelectionRange(start, start + lines[line].length);
+        });
+        target.textContent = location;
+        row.append(target);
+      } else row.append(doc.createTextNode(location));
+      row.append(doc.createTextNode(` — ${t(`workshop.severity.${record.severity}`)}: ${record.message}`));
+      findings.append(row);
+    }
   }
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files?.[0];
@@ -192,10 +325,11 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       draft = replacement;
       selected = draft.paths()[0];
       show('workshop.imported');
+      persistDraft();
       pending.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
     } catch (error) {
       show('editor.mod.import.previous_workspace_preserved', [
-        error.code === 'workshop-missing-manifest' ? t('workshop.missing_manifest') : String(error.message),
+        error?.code === 'workshop-missing-manifest' ? t('workshop.missing_manifest') : errorText(error),
       ], true);
       pending.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
     } finally {
@@ -214,13 +348,51 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   fileInput.addEventListener('cancel', cancelImport);
   files.addEventListener('change', () => { selected = files.value; refresh({ selection: true }); });
   source.addEventListener('input', () => {
+    if (pendingImport || pendingValidation || pendingRecovery) return;
     if (draft?.edit(selected, source.value)) {
       findings.textContent = t('workshop.changed');
       findings.setAttribute('role', 'status');
       delete findings.dataset.outcome;
       refresh();
+      persistDraft();
     }
   });
+  function persistDraft() {
+    if (!draft || pendingRecovery) return;
+    const generation = ++persistenceGeneration;
+    recoveryStatus.textContent = t('workshop.recovery_saving');
+    void recovery.save({ version: 1, selected, draft: draft.snapshot() }).then(() => {
+      if (!disposed && generation === persistenceGeneration) recoveryStatus.textContent = t('workshop.recovery_saved');
+    }, () => {
+      if (!disposed && generation === persistenceGeneration) recoveryStatus.textContent = t('workshop.recovery_failed');
+    });
+  }
+  function restoreDraft() {
+    if (!recoveredDraft) return;
+    draft = recoveredDraft.draft;
+    selected = recoveredDraft.selected;
+    recoveredDraft = null;
+    pendingRecovery = false;
+    restoreButton.hidden = discardButton.hidden = true;
+    recoveryStatus.textContent = t('workshop.recovery_restored');
+    refresh({ selection: true });
+    source.focus();
+  }
+  async function discardRecovery() {
+    discardButton.disabled = restoreButton.disabled = true;
+    try {
+      await recovery.clear();
+      if (disposed) return;
+      recoveredDraft = null;
+      pendingRecovery = false;
+      restoreButton.hidden = discardButton.hidden = true;
+      recoveryStatus.textContent = t('workshop.recovery_discarded');
+      refresh();
+      importButton.focus();
+    } catch {
+      if (!disposed) recoveryStatus.textContent = t('workshop.recovery_failed');
+    } finally { discardButton.disabled = restoreButton.disabled = false; }
+  }
   function keydown(event) {
     if (event.defaultPrevented || event.isComposing) return;
     const editable = event.target?.matches?.('input, textarea, select') || event.target?.isContentEditable;
@@ -229,7 +401,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (!editable && actions.dispatchKeyboardEvent(event, MOD_ACTION_CONTEXT).claimed) return;
     const historyKey = (event.ctrlKey || event.metaKey) && !event.altKey
       && (event.code === 'KeyZ' || event.code === 'KeyY');
-    if (historyKey && !settings.contains(event.target)) {
+    if (historyKey && !settings.contains(event.target) && (!editable || event.target === source)) {
       event.preventDefault();
       travel(event.code === 'KeyY' || event.shiftKey);
       return;
@@ -242,7 +414,34 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   win.addEventListener('beforeunload', beforeUnload);
   refresh({ selection: true });
   show('workshop.start');
-  return { dispose() {
+  const ready = (async () => {
+    let record;
+    try { record = await recovery.load(); }
+    catch {
+      if (!disposed) {
+        pendingRecovery = false;
+        recoveryStatus.textContent = t('workshop.recovery_failed');
+        refresh();
+      }
+      return;
+    }
+    if (disposed) return;
+    if (!record) {
+      pendingRecovery = false;
+      recoveryStatus.textContent = t('workshop.recovery_empty');
+      refresh();
+      return;
+    }
+    discardButton.hidden = false;
+    try {
+      if (record.version !== 1) throw new Error('Unsupported recovery version');
+      const restored = WorkshopDocument.restore(record.draft);
+      recoveredDraft = { draft: restored, selected: restored.paths().includes(record.selected) ? record.selected : restored.paths()[0] };
+      restoreButton.hidden = false;
+      recoveryStatus.textContent = t('workshop.recovery_available');
+    } catch { recoveryStatus.textContent = t('workshop.recovery_invalid'); }
+  })();
+  return { ready, dispose() {
     disposed = true;
     controls.destroy();
     doc.removeEventListener('keydown', keydown);

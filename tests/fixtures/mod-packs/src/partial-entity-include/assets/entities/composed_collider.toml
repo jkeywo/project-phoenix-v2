@@ -1,0 +1,5 @@
+includes = ["partial_collider.toml"]
+
+[collider]
+shape = "Ball"
+length = 2.0

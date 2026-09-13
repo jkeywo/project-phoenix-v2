@@ -1,0 +1,13 @@
+[pack]
+format = 1
+id = "partial-entity-include"
+version = "1.0.0"
+name = "Partial entity include regression"
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "partial_include"
+world = "assets/worlds/partial_include.toml"

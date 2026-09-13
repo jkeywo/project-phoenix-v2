@@ -1,0 +1,3 @@
+# Valid only when composed with a template supplying shape and length.
+[collider]
+radius = 3.0

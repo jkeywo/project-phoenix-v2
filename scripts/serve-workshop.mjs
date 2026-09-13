@@ -1,4 +1,4 @@
-// Local launcher for the built Workshop; no downloaded server or WASM required.
+// Local launcher for the built Workshop and its offline WASM validator.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -16,6 +16,7 @@ const types = {
   '.css': 'text/css; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
   '.json': 'application/json',
+  '.wasm': 'application/wasm',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.webp': 'image/webp',

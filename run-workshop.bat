@@ -9,9 +9,14 @@ if errorlevel 1 (
 )
 
 echo [run-workshop] Building Workshop Authoring...
-node scripts\build-workshop.mjs
+where trunk >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Workshop build failed. For missing dependencies, run npm ci first.
+    echo [ERROR] Trunk and the Rust WASM target are required for runtime validation.
+    goto :failed
+)
+trunk build
+if errorlevel 1 (
+    echo [ERROR] Workshop build failed. See the build diagnostics above.
     goto :failed
 )
 

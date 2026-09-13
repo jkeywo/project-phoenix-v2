@@ -351,6 +351,7 @@ rand = "0.9"
 # recorded in the nalgebra/parry3d/rapier3d determinism block above (#909 AC-5).
 noise = "0.9"
 toml = "1.0"
+toml_edit = "=0.25.11"
 strum = { version = "0.28.0", features = ["derive"] }
 # Pure-Rust libm backing `crate::simmath` (issue #908). Simulation code must
 # not call std's float transcendentals (`sin`, `cos`, `atan2`, …): std routes

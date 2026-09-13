@@ -4,7 +4,7 @@
  * semantic workspace from the current source and never writes it back.
  */
 import { ModPackWorkspace } from './mod-pack-workspace.js';
-import { exportModPack, MANIFEST_PATH, readStoreZipArchive } from './mod-pack-export.js';
+import { createStoreZip, exportModPack, MANIFEST_PATH, readStoreZipArchive } from './mod-pack-export.js';
 import { UndoStack } from './undo-stack.js';
 
 const encode = text => new TextEncoder().encode(text);
@@ -82,6 +82,18 @@ export class WorkshopDocument {
     return entry.path;
   }
 
+  /** Exact candidate for runtime validation/export, even while its text is
+   * invalid. No normalizing serializer and no second semantic validation. */
+  archive() {
+    if ([...this._files].every(([path, text]) => this._source.entries.findLast(entry => entry.path === path)?.text === text)) {
+      return this.sourceBytes();
+    }
+    return createStoreZip([...this._files].map(([path, text]) => {
+      const original = this._source.entries.findLast(entry => entry.path === path);
+      return { path, text, bytes: original?.text === text ? original.bytes : encode(text) };
+    }));
+  }
+
   /** Structural checks only; the ordinary host still compiles/gates Rhai. */
   check() {
     try {
@@ -102,4 +114,45 @@ export class WorkshopDocument {
 
   /** Called only after the consumer successfully offers the checked download. */
   markExported() { this._exported = new Map(this._files); }
+
+  /** Data only: no filesystem handles, credentials, runtime state or profile. */
+  snapshot() {
+    const history = this._history.snapshot();
+    return { version: 1, source: this.sourceBytes(), files: [...this._files],
+      exported: [...this._exported], history: {
+        undo: history.undo.map(entry => ({ ...entry })), redo: history.redo.map(entry => ({ ...entry })),
+      } };
+  }
+
+  static restore(snapshot) {
+    if (snapshot?.version !== 1 || !(snapshot.source instanceof Uint8Array)) throw new Error('Unsupported Workshop recovery record.');
+    const draft = new WorkshopDocument(snapshot.source);
+    const readFiles = entries => {
+      if (!Array.isArray(entries) || entries.length !== draft._files.size) throw new Error('Invalid recovery documents.');
+      const files = new Map();
+      for (const entry of entries) {
+        if (!Array.isArray(entry) || entry.length !== 2 || !draft._files.has(entry[0])
+          || files.has(entry[0]) || typeof entry[1] !== 'string') throw new Error('Invalid recovery document.');
+        files.set(entry[0], entry[1]);
+      }
+      return files;
+    };
+    const files = readFiles(snapshot.files);
+    const exported = readFiles(snapshot.exported);
+    const { undo, redo } = snapshot.history || {};
+    for (const entries of [undo, redo]) {
+      if (!Array.isArray(entries) || entries.length > 100) throw new Error('Invalid recovery history.');
+      const current = new Map(files);
+      for (const entry of entries.toReversed()) {
+        const direction = entries === undo;
+        if (!files.has(entry?.path) || typeof entry.before !== 'string' || typeof entry.after !== 'string'
+          || current.get(entry.path) !== (direction ? entry.after : entry.before)) throw new Error('Inconsistent recovery history.');
+        current.set(entry.path, direction ? entry.before : entry.after);
+      }
+    }
+    draft._files = files;
+    draft._exported = exported;
+    draft._history.restore({ undo: undo.map(entry => ({ ...entry })), redo: redo.map(entry => ({ ...entry })) });
+    return draft;
+  }
 }

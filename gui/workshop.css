@@ -18,6 +18,10 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-layout { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 4fr); gap: 1.25rem; }
 .workshop-files { display: grid; align-content: start; gap: .6rem; }
 .workshop-files select { width: 100%; }
+.workshop-inspector { min-width: 0; }
+.workshop-inspector label { display: block; margin-top: .6rem; }
+.workshop-inspector textarea { width: 100%; }
+.workshop-inspector p { overflow-wrap: anywhere; }
 .workshop-source { display: grid; gap: .6rem; min-width: 0; }
 .workshop-source textarea { width: 100%; min-height: 24rem; resize: vertical; padding: 1rem; tab-size: 2; font-family: ui-monospace, Consolas, monospace; }
 .workshop-source label, .workshop-files label { overflow-wrap: anywhere; }

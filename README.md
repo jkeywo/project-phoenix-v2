@@ -91,15 +91,18 @@ trunk serve --config client-trunk.toml --port 8081
 
 Then open `http://localhost:8080` as the view screen and `http://localhost:8081` on your phone (or a second tab).
 
-The first offline Workshop Authoring slice is at `/workshop.html` on the host.
-It imports one TOML/Rhai mod ZIP, edits source with pack-wide undo, and exports
-through the existing structural checks. `npm run build:workshop` also builds
-`dist/workshop.html` without compiling WASM; serve that directory over HTTP.
-On Windows, double-click `run-workshop.bat` to build it, start a local server
-and open the Workshop in your browser. Keep its window open while editing;
-Ctrl+C stops the server. It uses port 8083 and needs the installed npm dependencies.
-Runtime validation, disposable Test simulation and model tooling remain later
-M6 work. See [Editor and Workshop](wiki/entities/editor.md) for the current boundary.
+Offline Workshop Authoring is at `/workshop.html` on the host. It imports one
+TOML/Rhai mod ZIP, edits source and structured scalar fields with pack-wide undo,
+and validates the exact unsaved archive through the runtime before export.
+Comments and untouched formatting survive field edits. A browser-local recovery
+copy retains source, dirty state and history; reopening offers Restore or Discard.
+Run `trunk build` to build the page and its WASM validator. `npm run build:workshop`
+updates the HTML/JS and read-only dependency bundle alongside that artifact.
+On Windows, double-click `run-workshop.bat` to build it, start a local server on
+port 8083 and open the Workshop. It needs Trunk, the Rust WASM target and installed
+npm dependencies. Keep its window open while editing; Ctrl+C stops the server.
+Disposable Test simulation and model tooling remain later M6 work.
+See [Editor and Workshop](wiki/entities/editor.md) for the current boundary.
 
 ### Tests
 

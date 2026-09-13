@@ -75,6 +75,8 @@ pub mod console_bridge;
 /// target-independent for identical bytes.
 pub mod content_ledger;
 pub mod core;
+/// Offline document validation and authoring, shared by browser/native Workshop.
+pub mod workshop;
 /// The seeded cross-target determinism probe (issue #904): one minimal sim
 /// world both a native test and the browser drive, under deliberately
 /// different frame pacing, folding the canonical digest at shared ticks.

@@ -57,6 +57,17 @@ export class UndoStack {
     this._redoStack = [];
   }
 
+  /** In-memory history data for a document owner's versioned recovery record.
+   * The owner validates entry shape and source consistency before restoring. */
+  snapshot() {
+    return { undo: this._undoStack.slice(), redo: this._redoStack.slice() };
+  }
+
+  restore({ undo, redo }) {
+    this._undoStack = undo.slice(-this._maxOps);
+    this._redoStack = redo.slice(-this._maxOps);
+  }
+
   getUndoCount() {
     return this._undoStack.length;
   }

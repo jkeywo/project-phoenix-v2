@@ -4,6 +4,18 @@ import { readStoreZip, readStoreZipArchive, createStoreZip } from '../mod-pack-e
 import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT, WORKSHOP_MANIFEST } from '../../tests/fixtures/workshop-pack.js';
 
 describe('offline Workshop source documents', () => {
+  it('retains the complete original ZIP container when no member source changed', () => {
+    const base = workshopPack();
+    const original = new Uint8Array([...base, 7, 8]);
+    new DataView(original.buffer).setUint16(base.length - 2, 2, true); // two-byte ZIP comment
+    const draft = new WorkshopDocument(original);
+    expect(draft.archive()).toEqual(original);
+    draft.edit(WORKSHOP_WORLD, `${WORKSHOP_WORLD_TEXT}# Changed\n`);
+    expect(draft.archive()).not.toEqual(original);
+    draft.undo();
+    expect(draft.archive()).toEqual(original);
+  });
+
   it('exports an untouched pack byte-for-byte and retains immutable imported bytes after edits', () => {
     const bytes = workshopPack();
     const original = Uint8Array.from(bytes);
@@ -105,5 +117,37 @@ describe('offline Workshop source documents', () => {
     expect(draft.read(WORKSHOP_WORLD)).toBe('[global\r\n');
     draft.undo();
     expect(draft.check().ok).toBe(true);
+  });
+
+  it('recovers invalid source, immutable original bytes, export baseline and cross-file undo/redo', () => {
+    const draft = new WorkshopDocument(workshopPack());
+    draft.edit(WORKSHOP_WORLD, `${WORKSHOP_WORLD_TEXT}# Exported\n`);
+    draft.markExported();
+    draft.edit('scenarios.toml', '[pack\n');
+    draft.edit(WORKSHOP_WORLD, `${WORKSHOP_WORLD_TEXT}# Later\n`);
+    draft.undo();
+    const snapshot = draft.snapshot();
+    const restored = WorkshopDocument.restore(snapshot);
+    snapshot.files[0][1] = 'later mutation';
+    snapshot.history.undo[0].after = 'later mutation';
+    expect(restored.sourceBytes()).toEqual(workshopPack());
+    expect(restored.read('scenarios.toml')).toBe('[pack\r\n');
+    expect(restored.isDirty()).toBe(true);
+    expect(restored.redo()).toBe(WORKSHOP_WORLD);
+    expect(restored.read(WORKSHOP_WORLD)).toContain('# Later');
+    restored.undo();
+    expect(restored.undo()).toBe('scenarios.toml');
+    expect(restored.isDirty()).toBe(false);
+  });
+
+  it('refuses corrupt recovery paths or history before creating an editable draft', () => {
+    const draft = new WorkshopDocument(workshopPack());
+    draft.edit(WORKSHOP_WORLD, '[invalid\n');
+    const foreign = draft.snapshot();
+    foreign.files[0][0] = '../outside.toml';
+    expect(() => WorkshopDocument.restore(foreign)).toThrow('recovery document');
+    const inconsistent = draft.snapshot();
+    inconsistent.history.undo[0].after = 'different source';
+    expect(() => WorkshopDocument.restore(inconsistent)).toThrow('Inconsistent recovery history');
   });
 });

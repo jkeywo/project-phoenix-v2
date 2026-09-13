@@ -1,0 +1,6 @@
+[global]
+title = "Partial include regression"
+
+[[entity]]
+name = "composed"
+template_path = "assets/entities/composed_collider.toml"

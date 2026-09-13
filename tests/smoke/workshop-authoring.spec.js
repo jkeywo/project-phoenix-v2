@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { readStoreZip } from '../../editor/mod-pack-export.js';
 import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { ts } from './strings';
@@ -73,4 +74,46 @@ test('Workshop applies the shared 200% text profile without horizontal page over
   }))).toEqual({ scale: '2', overflow: false });
   await page.getByText(ts('editor.mod.settings.heading'), { exact: true }).click();
   await expect(page.getByRole('button').last()).toBeVisible();
+});
+
+test('Workshop uses the real runtime for Rhai, source-span fields and browser recovery', { tag: '@core' }, async ({ page }) => {
+  test.setTimeout(120_000);
+  page.on('dialog', dialog => dialog.accept());
+  await page.goto('/workshop.html');
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('#workshop-import').click();
+  await (await chooser).setFiles({ name: 'script.zip', mimeType: 'application/zip',
+    buffer: readFileSync(path.join(__dirname, '../fixtures/mod-packs/script-valid.zip')) });
+  const script = 'assets/worlds/script_valid.rhai';
+  const world = 'assets/worlds/script_valid.toml';
+  await page.locator('#workshop-files').selectOption(script);
+  await page.locator('#workshop-source').fill('import "network" as unsafe;');
+  await page.locator('#workshop-check').click();
+  await expect(page.getByRole('alert')).toContainText(ts('workshop.check_refused'), { timeout: 90_000 });
+  await expect(page.getByRole('alert')).toContainText(script);
+  await page.locator('#workshop-undo').click();
+  await page.locator('#workshop-files').selectOption(world);
+  const original = await page.locator('#workshop-source').inputValue();
+  await page.getByText(ts('workshop.inspector'), { exact: true }).click();
+  await page.locator('#workshop-inspect').click();
+  await page.locator('#workshop-field').selectOption({ label: 'global.title' });
+  await page.locator('#workshop-field-value').fill('"Edited with runtime fields"');
+  await page.locator('#workshop-apply-field').click();
+  await expect(page.locator('#workshop-source')).toHaveValue(original.replace('"Script Valid"', '"Edited with runtime fields"'));
+  await expect(page.locator('#workshop-recovery-status')).toHaveText(ts('workshop.recovery_saved'));
+  await page.reload();
+  await expect(page.locator('#workshop-restore')).toBeVisible();
+  await page.locator('#workshop-restore').click();
+  await expect(page.locator('#workshop-files')).toHaveValue(world);
+  await expect(page.locator('#workshop-dirty')).toHaveText(ts('workshop.dirty'));
+  await expect(page.locator('#workshop-source')).toHaveValue(original.replace('"Script Valid"', '"Edited with runtime fields"'));
+  await page.locator('#workshop-undo').click();
+  await expect(page.locator('#workshop-source')).toHaveValue(original);
+  await page.locator('#workshop-redo').click();
+  const downloaded = page.waitForEvent('download', { timeout: 90_000 });
+  await page.locator('#workshop-export').click();
+  const artifact = await downloaded;
+  const files = readStoreZip(new Uint8Array(readFileSync(await artifact.path())));
+  expect(files[world]).toBe(original.replace('"Script Valid"', '"Edited with runtime fields"'));
+  expect(files[script]).toContain('fn on_alarm(ctx)');
 });

@@ -34,7 +34,7 @@ stage = "post_build"
 command = "node"
 command_arguments = ["scripts/ship-cards.mjs", "dist/.stage"]
 
-# Offline Workshop Authoring is shipped beside the host and uses only local JS.
+# Offline Workshop Authoring shares the host artifact's pure runtime validators.
 [[hooks]]
 stage = "post_build"
 command = "node"

@@ -1,6 +1,6 @@
 // Build the standalone offline Authoring surface from the locked local deps.
-// Also a Trunk post_build hook: no simulation/WASM is required by this slice.
-import { cp, copyFile, mkdir } from 'node:fs/promises';
+// A Trunk post_build hook; offline validation uses its shared WASM artifact.
+import { cp, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const out = path.resolve(root, process.argv[2] || 'dist');
 const editorModules = [
-  'workshop-document', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
+  'workshop-document', 'workshop-runtime', 'workshop-recovery', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'undo-stack', 'validation', 'entity-includes', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
 ];
@@ -24,4 +24,17 @@ for (const name of editorModules) {
 const tomlDist = path.dirname(require.resolve('smol-toml'));
 await cp(tomlDist, path.join(out, 'vendor/smol-toml'), { recursive: true });
 await copyFile(path.resolve(tomlDist, '../LICENSE'), path.join(out, 'vendor/smol-toml/LICENSE'));
+// The browser gets immutable read-only dependencies, never filesystem access.
+// Snapshot the shipped textual content under its ordinary asset paths so the
+// same runtime parser/include/compiler can resolve an unsaved pack offline.
+const baseFiles = {};
+async function collect(directory) {
+  for (const entry of await readdir(path.join(root, directory), { withFileTypes: true })) {
+    const relative = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) await collect(relative);
+    else if (/\.(toml|rhai)$/.test(entry.name)) baseFiles[relative] = await readFile(path.join(root, relative), 'utf8');
+  }
+}
+await collect('assets');
+await writeFile(path.join(out, 'workshop-base.json'), JSON.stringify({ base_files: baseFiles, packs: [] }));
 console.log(`Workshop Authoring built → ${path.join(out, 'workshop.html')}`);

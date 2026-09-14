@@ -14,6 +14,7 @@ import { createGmCommsPanel } from './gm-comms-panel.js';
 import { createGmSpawnPanel } from './gm-spawn-panel.js';
 import { createGmSystemPanel } from './gm-system-panel.js';
 import { createGmContactPanel } from './gm-contact-panel.js';
+import { createGmPresentationPanel } from './gm-presentation-panel.js';
 import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
@@ -36,15 +37,40 @@ import {
 import { createHostActionRegistry } from './host-actions.js';
 import { t, has } from './strings.js';
 import { mountGmWorkspaceShell } from './gm-workspace-shell.js';
+import { mountWorkshopSourceLink } from './workshop-source-link.js';
+import { createPrivateAudio, attachPrivateAudioLifecycle, privateFeedbackReceiver } from './private-audio.js';
+import { mountSoundAudition } from './sound-audition-panel.js';
+import { createPrivateRequestFeedback } from './private-request-feedback.js';
+import { createPrivateAlerts, attachPrivateAlertLifecycle } from './private-alerts.js';
 
-export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
+export function mountGmWorkspace({ win = window, doc = win.document, requireNativeProvider = false } = {}) {
+  let privateAudio = null;
+  const privateAlerts = createPrivateAlerts({ audio: { actionable: () => privateAudio?.actionable() } });
+  const disposePrivateAlerts = attachPrivateAlertLifecycle(privateAlerts, win);
+  const alertScope = () => {
+    const operator = win.__hostLocalGm?.();
+    const session = win.__hostGmSessionId?.();
+    // Native local GM has no fleet join-code identity. This comparison owner
+    // is document-local; the runtime generation still marks every new round
+    // and restore, without inventing a persistent native session key.
+    return privateAudio && operator?.connected && operator.id
+      ? JSON.stringify([session || null, operator.id]) : null;
+  };
+  const requestFeedback = createPrivateRequestFeedback({
+    audio: { action: (...args) => privateAudio?.action(...args) },
+    getOperator: () => win.__hostLocalGm?.(),
+  });
+  const privateSubmit = (actionId, request, send) => privateAudio
+    ? requestFeedback.submit(actionId, request, send) : send();
   const shell = mountGmWorkspaceShell({ doc, win, t, has, selectEntity: id => gmProjection.select(id) });
+  const workshopSource = mountWorkshopSourceLink({ root: doc.getElementById('gm-console'), win, t });
   win.__hostGmShellMetadata = shell.metadata;
   // Late-bound because the panel needs the projection's selection and the
   // projection needs the panel's `select`; the closure resolves at call time,
   // after both exist.
   let gmDirectEffect = null;
   let gmContact = null;
+  let gmPresentation = null;
   let gmSystem = null;
   let gmDespawn = null;
   let gmNpc = null;
@@ -71,7 +97,11 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     selectEntity: (id) => gmProjection.select(id),
   });
   const hostActionFeedback = new ActionFeedbackLifecycle({
-    onTransition: (value) => emitActionFeedbackTransition(win, value),
+    onTransition: (value) => {
+      emitActionFeedbackTransition(win, value);
+      const definition = hostSemanticActions.action(value.actionId);
+      privateAudio?.action(value, { continuous: !!definition?.continuous, hold: !!definition?.hold });
+    },
   });
   const hostSemanticActions = createHostActionRegistry({
     actionFeedback: hostActionFeedback,
@@ -109,8 +139,8 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     getOperatorName: (id) => typeof win.__hostGmName === 'function'
       ? win.__hostGmName(id) : id,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
-    submitUndo: (request) => typeof win.__hostUndoGmAction === 'function'
-      && win.__hostUndoGmAction(request),
+    submitUndo: (request) => privateSubmit('gm.undo', request, () =>
+      typeof win.__hostUndoGmAction === 'function' && win.__hostUndoGmAction(request)),
     confirmAction: (request) => (gmConfirmationsRef
       ? gmConfirmationsRef.request(request)
       : request.accept()),
@@ -142,12 +172,27 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   });
   win.__hostGmCheckpointPanel = gmCheckpointPanel;
   win.__hostGmCheckpointState = gmCheckpointPanel.state;
-  win.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
+  win.__hostGmSessionRefresh = () => { gmSessionControls.refreshAdmission(); workshopSource.refresh(); };
   win.__hostGmSessionReset = gmSessionControls.reset;
   win.__hostGmSessionState = gmSessionControls.state;
   let operatorStorage = null;
-  try { operatorStorage = win.localStorage; } catch (_) { /* Settings reports unavailable storage. */ }
+  try { operatorStorage = win.PhoenixOperatorStorage || win.localStorage; } catch (_) { /* Settings reports unavailable storage. */ }
   const gmConfirmationProfile = createGmConfirmationProfile({ storage: operatorStorage, registry: hostSemanticActions });
+  const reloadNativeProfile = () => gmConfirmationProfile.reload();
+  win.addEventListener('phoenix-operator-profile-loaded', reloadNativeProfile);
+  let disposePrivateAudio = null, unsubscribePrivateProfile = null;
+  {
+    privateAudio = createPrivateAudio({ root: win,
+      requireNativeProvider,
+      allowAudition: true,
+      read: gmConfirmationProfile.audio, save: gmConfirmationProfile.setAudio,
+      isEnabled: () => win.__phoenixGmPage === true && gmConfirmationProfile.feedback().semanticCues !== false });
+    win.__privateAudio = privateAudio;
+    disposePrivateAudio = attachPrivateAudioLifecycle(privateAudio, win);
+    unsubscribePrivateProfile = gmConfirmationProfile.subscribe(privateAudio.reload);
+    win.__privateActionFeedback = privateFeedbackReceiver({ getAudio: () => privateAudio,
+      currentSource: () => doc.getElementById('gm-station-frame')?.contentWindow });
+  }
   const gmConfirmations = createGmConfirmationController({ doc: doc, t, profile: gmConfirmationProfile });
   gmConfirmationsRef = gmConfirmations;
   // The faction-relation control (issue #1442): the only GM surface that can
@@ -157,8 +202,8 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     doc: doc,
     t,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
-    submit: (request) => typeof win.__hostSetFactionHostility === 'function'
-      && win.__hostSetFactionHostility(request),
+    submit: (request) => privateSubmit('gm.faction', request, () =>
+      typeof win.__hostSetFactionHostility === 'function' && win.__hostSetFactionHostility(request)),
     confirmAction: gmConfirmations.request,
   });
   win.__hostGmFactionState = gmFactionPanel.state;
@@ -298,10 +343,10 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     t,
     getCandidate: () => gmCheckpointPanel.state().selected,
     getOperator: () => (typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null),
-    submitRestore: (request) => typeof win.__hostRequestLiveRestore === 'function'
-      && win.__hostRequestLiveRestore(request),
-    submitResume: (correlation) => typeof win.__hostSetSessionPaused === 'function'
-      && win.__hostSetSessionPaused(false, correlation),
+    submitRestore: (request) => privateSubmit('gm.restore', request, () =>
+      typeof win.__hostRequestLiveRestore === 'function' && win.__hostRequestLiveRestore(request)),
+    submitResume: (correlation) => privateSubmit('gm.restore.resume', { correlation }, () =>
+      typeof win.__hostSetSessionPaused === 'function' && win.__hostSetSessionPaused(false, correlation)),
     confirmAction: gmConfirmations.request,
   });
   win.__hostGmRestoreState = gmRestoreControl.state;
@@ -352,9 +397,8 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function'
       ? win.__hostLocalGm() : null,
-    submitStationPuppet: (request) =>
-      typeof win.__hostSetStationPuppet === 'function'
-        && win.__hostSetStationPuppet(request),
+    submitStationPuppet: (request) => privateSubmit('gm.station.takeover', request, () =>
+      typeof win.__hostSetStationPuppet === 'function' && win.__hostSetStationPuppet(request)),
     submitStationCommand: (request) =>
       typeof win.__hostIssueStationCommand === 'function'
         && win.__hostIssueStationCommand(request),
@@ -410,29 +454,38 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
   gmSystem = createGmSystemPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
-    submit: request => win.__hostSetSystemDisabled(request),
+    submit: request => privateSubmit('gm.system', request, () => win.__hostSetSystemDisabled(request)),
   });
   win.__hostGmSystemState = gmSystem.state;
   gmContact = createGmContactPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
-    submit: request => win.__hostSetContactOverride(request),
+    submit: request => privateSubmit('gm.contact', request, () => win.__hostSetContactOverride(request)),
+    submitClassification: request => privateSubmit('gm.classification', request, () => win.__hostSetContactClassification(request)),
+    submitInformation: request => privateSubmit('gm.information', request, () => win.__hostSetContactInformation(request)),
   });
   win.__hostGmContactState = gmContact.state;
+  gmPresentation = createGmPresentationPanel({ doc, t,
+    getOperator: () => win.__hostLocalGm?.() || null,
+    submit: request => privateSubmit('gm.presentation', request, () => win.__hostPresentation(request)),
+  });
+  win.__hostGmPresentationState = gmPresentation.state;
+  const soundAudition = doc.getElementById('gm-mission-panel')
+    ? mountSoundAudition({root:doc.getElementById('gm-mission-panel'),audio:privateAudio,win}) : null;
   gmDespawn = createGmDespawnPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
-    submit: (request) => win.__hostDespawnEntity(request),
+    submit: (request) => privateSubmit('gm.despawn', request, () => win.__hostDespawnEntity(request)),
   });
   win.__hostGmDespawnState = gmDespawn.state;
   gmNpc = createGmNpcPanel({ doc: doc, t, getOperator: () => win.__hostLocalGm?.() || null,
-    submit: request => win.__hostSetNpcDoctrine(request),
+    submit: request => privateSubmit('gm.npc', request, () => win.__hostSetNpcDoctrineChecked(request)),
     confirmAction: gmConfirmations.request,
   });
   win.__hostGmNpcState = gmNpc.state;
-  win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
+  win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmSystem.reset(); gmNpc.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -440,6 +493,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     gm_entity:    function(p) {
       gmDespawn.update(p);
       gmContact.update(p);
+      gmPresentation.update(p);
       gmSystem.update(p);
       gmNpc.update(p);
       if (gmProjection.update(p)) {
@@ -470,6 +524,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
         try { session = JSON.parse(session); } catch (_) { session = null; }
       }
       gmRestoreControl.settleJournal(session?.journal?.entries);
+      requestFeedback.settle(session?.journal?.entries);
     },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
@@ -477,15 +532,30 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     // the roster carries the workload word, so each of these three also
     // repaints the shell. Both paints are signature-guarded, so an unchanged
     // bar or roster is never rebuilt under an operator's pointer.
-    gm_attention: function(p) { gmAttentionPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
-    gm_health:    function(p) { gmHealthPanel.update(p); gmRestoreControl.update(p); shell.refresh(); },
+    gm_attention: function(p) {
+      if (gmAttentionPanel.update(p)) {
+        const state = gmAttentionPanel.state();
+        privateAlerts.attention({ key: alertScope(), generation: state.presentation_generation,
+          occurrences: state.occurrences, held: state.held, visible: gmAttentionFilters.visible });
+      }
+      gmWidgetsPanel.repaint(); shell.refresh();
+    },
+    gm_health: function(p) {
+      if (gmHealthPanel.update(p)) {
+        const state = gmHealthPanel.state().projection;
+        privateAlerts.health({ key: alertScope(), generation: state.presentation_generation, alerts: state.alerts });
+      }
+      gmRestoreControl.update(p); shell.refresh();
+    },
     gm_workload:  function(p) { gmWorkloadPanel.update(p); gmWidgetsPanel.repaint(); shell.refresh(); },
     gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
     handlers,
-    dispose() { gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
+      workshopSource.refresh();
+      if (!alertScope()) privateAlerts.reset();
       shell.refresh();
       gmSessionControls.refreshAdmission();
       win.__hostGmMissionRefresh();
@@ -501,6 +571,10 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       win.__hostGmEffectRefresh();
     },
     reset() {
+      privateAlerts.reset();
+      requestFeedback.reset();
+      privateAudio?.setActive(false);
+      privateAudio?.setActive(!doc.hidden);
       gmAttentionPanel.reset();
       gmHealthPanel.reset();
       gmWorkloadPanel.reset();

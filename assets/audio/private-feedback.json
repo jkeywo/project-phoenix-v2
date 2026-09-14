@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "coalesce_ms": 100,
+  "sounds": {
+    "clicks": { "file": "assets/sounds/ui_click.ogg", "category": "interface", "volume": 0.15 },
+    "pending": { "file": "assets/sounds/ui_click.ogg", "category": "interface", "volume": 0.08 },
+    "applied": { "file": "assets/sounds/ui_click.ogg", "category": "interface", "volume": 0.1 },
+    "refused": { "file": "assets/sounds/private_refused.wav", "category": "interface", "volume": 0.12 },
+    "timedOut": { "file": "assets/sounds/private_timeout.wav", "category": "interface", "volume": 0.12 },
+    "actionable": { "file": "assets/sounds/private_alert.wav", "category": "alerts", "volume": 0.16 },
+    "test": { "file": "assets/sounds/ui_click.ogg", "category": "interface", "volume": 0.15 }
+  }
+}

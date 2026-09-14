@@ -128,7 +128,8 @@ export function parseGmAttentionProjection(payload) {
       },
     });
   }
-  return { occurrences };
+  return { occurrences, ...(Number.isSafeInteger(value.presentation_generation) && value.presentation_generation >= 0
+    ? { presentation_generation: value.presentation_generation } : {}) };
 }
 
 /** `m:ss`, the shape a facilitator reads a wait in. */
@@ -193,6 +194,7 @@ export function createGmAttentionPanel({
 
   /** The live projection, exactly as Rust last published it. */
   let live = [];
+  let presentationGeneration;
   /** Wall-clock ms at which THIS browser decided each occurrence began. Taken
    * once, from the first payload that carried the id, so a row's age never
    * jitters as later payloads resample it. */
@@ -520,6 +522,9 @@ export function createGmAttentionPanel({
   function update(payload) {
     const parsed = parseGmAttentionProjection(payload);
     if (!parsed) return false;
+    if (parsed.presentation_generation != null && presentationGeneration != null
+        && parsed.presentation_generation < presentationGeneration) return false;
+    presentationGeneration = parsed.presentation_generation;
     const sample = now();
     for (const row of parsed.occurrences) {
       frozenAge.delete(row.id);
@@ -646,6 +651,7 @@ export function createGmAttentionPanel({
   }
 
   function reset() {
+    presentationGeneration = undefined;
     live = [];
     firstSeen.clear();
     frozenAge.clear();
@@ -692,6 +698,7 @@ export function createGmAttentionPanel({
     repaint: () => { if (!mutating) render(); },
     dispose() { cancelSchedule(timer); },
     state: () => ({
+      presentation_generation: presentationGeneration,
       held,
       selectedId,
       newCount: pendingIds.size,

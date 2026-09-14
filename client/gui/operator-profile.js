@@ -13,6 +13,7 @@ import {
   emptyAccessibilityProfile,
   normalizeAccessibilityProfile,
 } from './accessibility-profile.js';
+import { normalizePrivateAudio, legacyPrivateMaster, LEGACY_PRIVATE_MASTER_KEY } from './private-audio-preferences.js';
 
 export const OPERATOR_PROFILE_KIND = 'project-phoenix/operator-profile';
 export const OPERATOR_PROFILE_VERSION = 1;
@@ -37,7 +38,7 @@ const MAX_PROFILE_ENTRIES = 512;
 const MAX_GAMEPAD_SLOT = 15;
 const CURRENT_FIELDS = new Set([
   'kind', 'version', 'accessibility', 'bindings', 'gamepad', 'feedback',
-  'gmConfirmations',
+  'gmConfirmations', 'audio',
 ]);
 
 function ownRecord(value) {
@@ -184,6 +185,7 @@ export function createDefaultOperatorProfile(registry = null) {
       tuning: copyTuning(defaults.tuning),
     },
     feedback: { ...FEEDBACK_PREFERENCE_DEFAULTS },
+    audio: normalizePrivateAudio(),
     gmConfirmations: record(),
   };
 }
@@ -200,6 +202,7 @@ export function createOperatorProfileSnapshot({
   hideTouchControls = true,
   tuning,
   feedback,
+  audio,
   gmConfirmations,
 } = {}) {
   const diagnostics = [];
@@ -215,6 +218,7 @@ export function createOperatorProfileSnapshot({
       tuning: copyTuning(tuning),
     },
     feedback: normalizeFeedback(feedback, diagnostics),
+    audio: normalizePrivateAudio(audio),
     gmConfirmations: normalizeConfirmations(gmConfirmations, diagnostics),
   };
 }
@@ -316,6 +320,7 @@ export function prepareOperatorProfileImport(text, { registry } = {}) {
       tuning: copyTuning(controls.profile.tuning),
     },
     feedback: normalizeFeedback(legacy ? null : raw.feedback, diagnostics),
+    audio: normalizePrivateAudio(legacy ? null : raw.audio),
     gmConfirmations: normalizeConfirmations(
       legacy ? null : raw.gmConfirmations,
       diagnostics,
@@ -353,6 +358,7 @@ export function serializeOperatorProfile(profile) {
     hideTouchControls: profile?.gamepad?.hideTouchControls,
     tuning: profile && profile.gamepad && profile.gamepad.tuning,
     feedback: profile && profile.feedback,
+    audio: profile && profile.audio,
     gmConfirmations: profile && profile.gmConfirmations,
   });
   return JSON.stringify(safe, null, 2) + '\n';
@@ -389,7 +395,25 @@ export function loadOperatorProfile(storage, { registry } = {}) {
       diagnostics: [diagnostic('profile-storage-read')], profile: fallback,
     };
   }
-  if (current != null) return prepareOperatorProfileImport(current, { registry });
+  const migrateMaster = (result, persist = false) => {
+    if (result.status === 'rejected') return result;
+    const level = legacyPrivateMaster(storage);
+    if (level === null && !persist) return result;
+    if (level !== null) result.profile.audio.mix.master.level = level;
+    const saved = saveOperatorProfile(storage, result.profile);
+    if (saved.status === 'saved') {
+      if (level !== null) {
+        try { storage.removeItem?.(LEGACY_PRIVATE_MASTER_KEY); } catch (_) { /* replacement already persisted */ }
+      }
+    } else result.diagnostics.push(diagnostic(saved.code));
+    return result;
+  };
+  if (current != null) {
+    const result = prepareOperatorProfileImport(current, { registry });
+    let hasAudio = true;
+    try { hasAudio = own(JSON.parse(current), 'audio'); } catch (_) { /* rejected above */ }
+    return hasAudio ? result : migrateMaster(result);
+  }
 
   let legacy;
   try {
@@ -402,15 +426,11 @@ export function loadOperatorProfile(storage, { registry } = {}) {
     };
   }
   if (legacy == null) {
-    return { status: 'default', code: 'profile-default', diagnostics: [], profile: fallback };
+    return migrateMaster({ status: 'default', code: 'profile-default', diagnostics: [], profile: fallback });
   }
   const migrated = prepareOperatorProfileImport(legacy, { registry });
   if (migrated.status === 'migrated') {
-    const saved = saveOperatorProfile(storage, migrated.profile);
-    if (saved.status !== 'saved') {
-      migrated.diagnostics.push(diagnostic(saved.code));
-    }
-    return migrated;
+    return migrateMaster(migrated, true);
   }
   return {
     ...migrated,

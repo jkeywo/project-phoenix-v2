@@ -171,6 +171,8 @@ export function createGmHealthPanel({
     update(payload) {
       const next = parseGmHealthProjection(payload);
       if (!next) return false;
+      if (next.presentation_generation != null && projection.presentation_generation != null
+          && next.presentation_generation < projection.presentation_generation) return false;
       projection = next;
       paint();
       return true;

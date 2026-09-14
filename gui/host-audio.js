@@ -1,388 +1,299 @@
-/**
- * gui/host-audio.js — the host page's data-driven audio engine (issue #1228,
- * extracted from server.html's formerly-inline "Data-driven audio" block).
- *
- * Rust owns the config (ship `[audio]` + world `[audio.red_alert]`), the
- * forcefield envelope, and the blaster's listener-relative geometry. This
- * module only plays sounds. Nothing here hardcodes a filename or a volume —
- * see `tests/smoke/audio.spec.js`, which asserts the whole ship/world TOML →
- * host-channel → `<audio>`-graph chain end to end.
- *
- * Looping beds and the siren use `<audio>` elements (constructed via the
- * injected `AudioCtor`, never `document.querySelectorAll` — they are
- * deliberately detached elements that never enter the DOM). The blaster uses
- * Web Audio instead: one-shots overlap, and `<audio>` cannot pan. The ship's-
- * computer tone (issue #1342) is a third shape: a one-shot like the blaster,
- * but not positional, so it plays through a fresh, ungraphed `<audio>`
- * element the same way a looping bed does — see `playComputerMessageCue`.
- *
- * ## Master volume (issue #939)
- *
- * A SCALE FACTOR over the authored volumes, never a replacement for them.
- * Every per-sound level is designed data — ship `[audio]`, world
- * `[audio.red_alert]`, the blaster spec, the engine's idle/full-thrust
- * coefficients — and the host's slider must not overwrite the mix the
- * designer authored, only turn the whole thing up or down. So each channel
- * keeps its authored level in `_authoredVol` and what reaches the element is
- * always `authored × master`. 1 is the identity (unattenuated), which is why
- * it is the default rather than a tunable.
- *
- * ## The `applyHudAudio` seam
- *
- * Rust pushes `ViewscreenHudState` JSON over the "hud" host channel; that
- * message also carries the two audio state flags (`red_alert`,
- * `phaser_firing`) and `engine_thrust`. server.html's `__updateHud` still
- * owns the non-audio half of that payload (the vignette CSS class, the
- * status-strip text) but hands the whole parsed object to `applyHudAudio`
- * for the siren/music/engine/phaser side, rather than reaching into this
- * module's `_els`/`_audioCfg`/`setChannelVolume` internals directly.
- *
- * ## Node-import-safety
- *
- * Nothing here touches a free-standing `window`/`document`/`Audio`/
- * `localStorage` beyond what the caller passes in via `createHostAudio`'s
- * `{ doc, storage, AudioCtor }` — so it imports cleanly under vitest with
- * `@vitest-environment jsdom` and a stubbed `Audio` constructor (jsdom's own
- * `HTMLMediaElement.play()` is "Not implemented"). See
- * tests/client/host-audio.test.js.
- *
- * ## Classic-script boundary
- *
- * server.html's audio call sites (`startGameAudio`, `startMenuMusic`,
- * `stopMenuMusic` inside `__updateLobby`'s phase handling; `applyHudAudio`
- * inside `__updateHud`) live in a CLASSIC script and cannot `import` this
- * module directly. That script bridges to the module island through the
- * same queue/latch shape the #1224 host-channel and #1225/#1227 islands
- * use — see the "Host audio bridge (issue #1228)" block in server.html.
- * The three host-channel audio handlers (`audio_config`/`audio_cue`/
- * `audio_level`) delegate straight to this module's instance rather than to
- * inline functions — see the host-audio island near the #1225 dispatcher.
- */
+import { AUDIO_BUSES, normalizeAudioMix, defaultAudioMix, clampAudioLevel, audioSoundGain } from './audio-mix.js';
+import { createRoomAudioPreferences } from './audio-preferences.js';
+import { createBrowserAudioProvider } from './browser-audio-provider.js';
+import { validDuckingSpec } from './audio-ducking.js';
 
-/**
- * Build the host page's audio engine.
- *
- * @param {{
- *   doc?: Document,
- *   storage?: Storage|null,
- *   AudioCtor?: typeof Audio,
- * }} opts
- * @returns {{
- *   audioConfig: (json: string) => void,
- *   audioCue: (json: string) => void,
- *   audioLevel: (level: number) => void,
- *   applyHudAudio: (s: object) => void,
- *   startGameAudio: () => void,
- *   startMenuMusic: () => void,
- *   stopMenuMusic: () => void,
- *   getMasterVolume: () => number,
- *   setMasterVolume: (v: number) => void,
- *   debug: () => object,
- * }}
- */
+/** Viewscreen consumer of existing authored config, live cue and HUD channels.
+ * The host owns gameplay/envelopes/geometry; this module owns local presentation.
+ * It never submits commands, stores cues or replays a missed one-shot. */
 export function createHostAudio({
-  doc = (typeof document !== 'undefined' ? document : undefined),
-  storage = null,
-  AudioCtor = (typeof Audio !== 'undefined' ? Audio : undefined),
+  doc = globalThis.document, storage = null, providerFactory = createBrowserAudioProvider,
+  contextFactory, fetchAudio, onEquivalent = () => {}, isRoom = () => true,
+  duckingSpec = null, fetchDucking = () => globalThis.fetch('assets/audio/room-ducking.json').then(response => {
+    if (!response.ok) throw new Error('Audio settings unavailable');
+    return response.json();
+  }),
 } = {}) {
-  let _audioCfg = null;      // payload from the "audio_config" host channel
-  let _audioUnlocked = false; // user gesture / game start has happened
-  let _audioStarted = false;
-  const _els = {};            // key -> HTMLAudioElement
-  let _actx = null;           // AudioContext (blaster only)
-  let _blasterBuf = null;     // decoded AudioBuffer
-  let _prevRedAlert = false;
-  let _prevPhaser = false;
-  let _menuMusic = null;
+  const preferences = createRoomAudioPreferences(storage);
+  let mix = preferences.read().mix;
+  let mono = preferences.read().mono;
+  let cfg = null;
+  let cfgText = null;
+  let running = false;
+  let suspended = false;
+  let pageActive = true;
+  let generation = null;
+  let authoredSerial = 0;
+  let authoredPlaying = null;
+  const authored = new Map();
+  let menu = false;
+  let menuRegistered = false;
+  let previousHud = null;
+  let previousLevel = null;
+  let hud = null;
+  const listeners = new Set();
+  const roomIds = new Set();
+  const channelIds = ['ambient', 'engine', 'phaser', 'forcefield', 'music', 'siren'];
+  const provider = providerFactory({
+    contextFactory: contextFactory || (() => {
+      const view = doc?.defaultView || globalThis;
+      const Ctor = view.AudioContext || view.webkitAudioContext;
+      return Ctor ? new Ctor() : null;
+    }),
+    fetchAudio,
+    onChange: () => { for (const listener of listeners) listener(); },
+  });
+  provider.setMix(mix);
+  provider.setMono?.(mono);
+  provider.setReducedRange?.(preferences.read().reducedRange);
+  const duckingReady = Promise.resolve().then(() => duckingSpec || (isRoom() ? fetchDucking() : null))
+    .then(spec => { duckingSpec = spec; provider.setDucking?.(isRoom() && preferences.read().ducking, spec); })
+    .catch(() => {});
 
-  // HTMLMediaElement.volume throws IndexSizeError outside 0..1.
-  function clampVol(v) {
-    const n = Number(v);
-    if (!isFinite(n)) return 0;
-    return Math.min(1, Math.max(0, n));
-  }
-
-  const MASTER_VOLUME_KEY = 'phoenix-server-master-volume';
-  const MASTER_VOLUME_DEFAULT = 1;
-  // The menu bed predates the audio config and has no TOML entry to read;
-  // named here so it composes with master like every other channel.
-  const MENU_MUSIC_VOLUME = 0.5;
-  const _authoredVol = {};   // channel key -> authored (pre-master) volume
-  let _masterVolume = MASTER_VOLUME_DEFAULT;
-  try {
-    const stored = storage ? storage.getItem(MASTER_VOLUME_KEY) : null;
-    if (stored !== null && isFinite(Number(stored))) _masterVolume = clampVol(stored);
-  } catch (_) { /* private mode / storage disabled — stay at the default */ }
-
-  function applyMaster(authored) {
-    return clampVol(clampVol(authored) * _masterVolume);
-  }
-
-  /** Set an element's live volume from an authored level, remembering it. */
-  function setChannelVolume(key, authored) {
-    _authoredVol[key] = clampVol(authored);
-    if (_els[key]) _els[key].volume = applyMaster(authored);
-  }
-
-  function getMasterVolume() {
-    return _masterVolume;
-  }
-
-  // Live: re-derives every channel from its authored level, so dragging the
-  // slider is audible immediately rather than at the next config push.
-  function setMasterVolume(v) {
-    _masterVolume = clampVol(v);
-    try { if (storage) storage.setItem(MASTER_VOLUME_KEY, String(_masterVolume)); }
-    catch (_) { /* not worth failing the drag over */ }
-    Object.keys(_els).forEach(function(k) {
-      if (k in _authoredVol) _els[k].volume = applyMaster(_authoredVol[k]);
-    });
-    if (_menuMusic) _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
-  }
-
-  function startMenuMusic() {
-    if (_menuMusic) return;
-    _menuMusic = new AudioCtor('assets/sounds/exploration.mp3');
-    _menuMusic.loop = true;
-    _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
-    _menuMusic.play().catch(function() {});
-  }
-
-  function stopMenuMusic() {
-    if (_menuMusic) {
-      _menuMusic.pause();
-      _menuMusic.currentTime = 0;
-      _menuMusic = null;
+  function emit(cue) { if (isRoom()) onEquivalent(cue); }
+  function ensureMenu() {
+    if (!menuRegistered && isRoom()) {
+      // Existing menu asset and authored level; no redesign of the soundtrack.
+      provider.register('menu', { file: 'assets/sounds/exploration.mp3', category: 'music', volume: 0.5, loop: true });
+      menuRegistered = true;
     }
   }
+  // Available before a world is selected, including the deliberate output test.
+  ensureMenu();
 
-  function mkLoop(key, spec, volume) {
-    if (!spec || !spec.file) return;
-    const el = new AudioCtor(spec.file);
-    el.loop = true;
-    el.preload = 'auto';
-    _els[key] = el;
-    setChannelVolume(key, volume);
+  function state() { return { ...provider.snapshot(), ...preferences.read(), room: isRoom(),
+    monoAvailable: typeof provider.setMono === 'function', duckingAvailable: validDuckingSpec(duckingSpec) === true }; }
+  function notify() { for (const listener of listeners) listener(); }
+  function setBus(id, change) {
+    if (!AUDIO_BUSES.includes(id)) return;
+    mix = normalizeAudioMix({ ...mix, [id]: { ...mix[id], ...change } });
+    preferences.save(mix);
+    provider.setMix(mix);
+  }
+  function resetMix() {
+    mix = defaultAudioMix();
+    mono = false;
+    preferences.save(mix, mono, false, false);
+    provider.setMix(mix);
+    provider.setMono?.(mono);
+    provider.setDucking?.(false, duckingSpec);
+    provider.setReducedRange?.(false);
+  }
+  function setMono(value) {
+    if (!isRoom()) return;
+    mono = value === true;
+    preferences.save(mix, mono);
+    provider.setMono?.(mono);
+    notify();
+  }
+  function setDucking(value) {
+    if (!isRoom()) return;
+    preferences.save(mix, mono, value === true);
+    provider.setDucking?.(value === true, duckingSpec);
+    notify();
+  }
+  function setReducedRange(value) {
+    if (!isRoom()) return;
+    preferences.save(mix, mono, preferences.read().ducking, value === true);
+    provider.setReducedRange?.(value === true);
+    notify();
   }
 
   function audioConfig(json) {
-    let c;
-    try { c = JSON.parse(json); }
-    catch (e) { console.warn('[Phoenix] bad audio config', e); return; }
-    _audioCfg = c;
-
-    mkLoop('ambient', c.ambient, c.ambient && c.ambient.volume);
-    // Engine starts at idle and is ridden by thrust in applyHudAudio.
-    mkLoop('engine', c.engine, c.engine && c.engine.idle_volume);
-    // Phaser and forcefield start silent: the phaser is gated on the firing
-    // flag, and the forcefield's level is pushed from Rust each frame.
-    mkLoop('phaser', c.phaser_loop, 0);
-    mkLoop('forcefield', c.forcefield, 0);
-
-    if (c.red_alert && c.red_alert.music_file) {
-      const m = new AudioCtor(c.red_alert.music_file);
-      m.loop = true;
-      m.preload = 'auto';
-      _els.music = m;
-      setChannelVolume('music', c.red_alert.music_volume);
+    let next;
+    try { next = JSON.parse(json); } catch (_) { return; }
+    if (!next || typeof next !== 'object' || Array.isArray(next) || json === cfgText) return;
+    for (const id of roomIds) provider.remove(id);
+    roomIds.clear();
+    authored.clear();
+    authoredPlaying = null;
+    cfg = next;
+    cfgText = json;
+    previousHud = null;
+    previousLevel = null;
+    hud = null;
+    if (!isRoom()) { provider.stopAll(); notify(); return; }
+    function add(id, spec, category, volume, loop = true, spatial = null) {
+      if (!spec?.file) return;
+      provider.register(id, { file: spec.file, category, volume, loop, spatial,
+        important: id === 'siren' || id === 'computer_warning' || id === 'computer_critical' });
+      roomIds.add(id);
     }
-    if (c.red_alert && c.red_alert.siren_file) {
-      const s = new AudioCtor(c.red_alert.siren_file);
-      s.preload = 'auto';
-      _els.siren = s;
-      setChannelVolume('siren', c.red_alert.siren_volume);
+    add('ambient', next.ambient, 'ambience', next.ambient?.volume);
+    add('engine', next.engine, 'ambience', next.engine?.idle_volume);
+    add('phaser', next.phaser_loop, 'effects', 0);
+    add('forcefield', next.forcefield, 'effects', 0);
+    add('blaster', next.blaster, 'effects', next.blaster?.volume, false, next.blaster);
+    const alert = next.red_alert;
+    add('music', { file: alert?.music_file }, 'music', alert?.music_volume);
+    add('siren', { file: alert?.siren_file }, 'alerts', alert?.siren_volume, false);
+    for (const severity of ['info', 'advisory', 'warning', 'critical']) {
+      const spec = next.computer_message?.[severity];
+      add(`computer_${severity}`, spec, 'alerts', spec?.volume, false);
     }
-
-    initBlasterAudio(c.blaster);
-    maybeStartAudio();
+    // These are the host's already validated, world-captured Viewscreen cues.
+    // Preparation is current configuration, never a pending playback request.
+    for (const definition of (Array.isArray(next.authored_sounds) ? next.authored_sounds : [])) {
+      if (definition?.audience !== 'viewscreen' || typeof definition.id !== 'string') continue;
+      const id = `authored_${definition.id}`;
+      const spatial = definition.equivalent?.bearing == null ? null : {
+        panning_model: 'HRTF', distance_model: 'inverse', ref_distance: 1, max_distance: 1, rolloff_factor: 0,
+      };
+      provider.register(id, { ...definition, loop: false, spatial,
+        important: ['warning', 'critical'].includes(definition.equivalent?.urgency) });
+      roomIds.add(id);
+      authored.set(definition.id, definition);
+    }
+    reconcile();
+    notify();
   }
 
-  function initBlasterAudio(spec) {
-    if (!spec || !spec.file) return;
-    try {
-      const view = doc && doc.defaultView;
-      const Ctor = view && (view.AudioContext || view.webkitAudioContext);
-      if (!Ctor) return;
-      _actx = _actx || new Ctor();
-    } catch (e) {
-      console.warn('[Phoenix] no AudioContext; blaster audio disabled', e);
-      return;
-    }
-    // Must not reject: a bubbling rejection fails the smoke test's
-    // pageerror assertion. Headless Chromium may refuse to decode at all,
-    // and "no blaster SFX" is an acceptable degradation.
-    fetch(spec.file)
-      .then(function(r) { return r.arrayBuffer(); })
-      .then(function(b) { return _actx.decodeAudioData(b); })
-      .then(function(buf) { _blasterBuf = buf; })
-      .catch(function(e) { console.warn('[Phoenix] blaster decode failed', e); });
+  function reconcile() {
+    if (!isRoom()) { provider.stopAll(); return; }
+    provider.loop('menu', menu && !suspended && pageActive);
+    const live = running && !suspended && pageActive;
+    provider.loop('ambient', live, cfg?.ambient?.volume);
+    const engine = cfg?.engine;
+    if (engine) provider.loop('engine', live,
+      engine.idle_volume + (Number(hud?.engine_thrust) || 0) * engine.volume_at_full_thrust);
+    provider.loop('forcefield', live, previousLevel ?? 0);
+    provider.loop('phaser', live && !!hud?.phaser_firing, cfg?.phaser_loop?.volume);
+    provider.loop('music', live && !!hud?.red_alert);
   }
 
-  // Called on the Loading → InProgress edge, which is also the autoplay
-  // unlock. The config push and this edge can land in the same frame, and
-  // although a single flush (`flush_host_channels`, issue #818) now walks
-  // the host channels in a fixed order, cross-channel ordering remains an
-  // implementation detail JS must not rely on — whichever arrives second
-  // starts the audio.
+  function startMenuMusic() {
+    if (!isRoom()) { provider.stopAll(); return; }
+    if (menu) return;
+    ensureMenu();
+    menu = true;
+    reconcile();
+    void provider.enable();
+  }
+  function stopMenuMusic() { menu = false; provider.loop('menu', false); }
   function startGameAudio() {
-    _audioUnlocked = true;
-    maybeStartAudio();
+    running = true;
+    menu = false;
+    reconcile();
+    if (isRoom()) void provider.enable();
   }
 
-  function maybeStartAudio() {
-    if (_audioStarted || !_audioUnlocked || !_audioCfg) return;
-    _audioStarted = true;
-    ['ambient', 'engine', 'phaser', 'forcefield'].forEach(function(k) {
-      if (_els[k]) _els[k].play().catch(function() {});
-    });
-    if (_actx && _actx.state === 'suspended') {
-      _actx.resume().catch(function() {});
+  /** Current-state boundary, called on Lobby and restore/reconnect. Config and
+   * preferences survive; the next HUD seeds red-alert state without a siren. */
+  function resetSession() {
+    provider.stopAll();
+    authoredPlaying = null;
+    previousHud = null;
+    previousLevel = null;
+    hud = null;
+    running = false;
+    menu = false;
+    emit({ kind: 'clear' });
+  }
+
+  function audioLifecycle(json) {
+    let value;
+    try { value = JSON.parse(json); } catch (_) { return; }
+    if (!value || !Number.isSafeInteger(value.generation) || typeof value.running !== 'boolean'
+      || typeof value.suspended !== 'boolean' || (generation != null && value.generation <= generation)) return;
+    generation = value.generation;
+    authoredSerial = 0;
+    const currentMenu = menu;
+    resetSession();
+    running = value.running;
+    suspended = value.suspended;
+    menu = currentMenu && !running;
+    if (!running) {
+      for (const id of roomIds) provider.remove(id);
+      roomIds.clear(); cfg = null; cfgText = null;
+    }
+    reconcile();
+  }
+
+  // BFCache retains this facade and the runtime's current generation. Hide
+  // stops voices; returning reads only the current loop state, never old cues.
+  function setPageActive(active) {
+    pageActive = !!active;
+    previousHud = null;
+    if (!pageActive) {
+      provider.stopAll();
+      emit({ kind: 'clear' });
+    } else {
+      reconcile();
+      emit({ kind: 'beam', active: running && !suspended && !!hud?.phaser_firing });
     }
   }
 
-  // Ship's-computer tone (issue #1342). Not positional — no panner, no
-  // AudioContext graph — just a fresh one-shot `<audio>` element at the
-  // authored×master volume for the given severity. `_audioCfg.computer_message`
-  // is the ship's `[audio.computer_message]` section, pushed once on the
-  // "audio_config" channel; a severity with no configured cue (or no section
-  // at all) plays nothing (AC4: missing configuration is silent).
-  function playComputerMessageCue(severity) {
-    const section = _audioCfg && _audioCfg.computer_message;
-    const spec = section && section[severity];
-    if (!spec || !spec.file) return;
-    try {
-      const el = new AudioCtor(spec.file);
-      el.volume = applyMaster(spec.volume);
-      el.play().catch(function() {});
-    } catch (e) {
-      console.warn('[Phoenix] computer-message cue failed', e);
-    }
-  }
-
-  // One-shot cue dispatch. `"blaster"` is positional (coordinates are already
-  // listener-relative, so the Web Audio listener stays at the origin facing
-  // -Z); `"computer_message"` (issue #1342) is not.
   function audioCue(json) {
-    let c;
-    try { c = JSON.parse(json); } catch (e) { return; }
-    if (c.kind === 'computer_message') {
-      playComputerMessageCue(c.severity);
+    let cue;
+    try { cue = JSON.parse(json); } catch (_) { return; }
+    if (!cue) return;
+    if (cue.kind === 'authored') {
+      if (generation == null || cue.generation !== generation || !Number.isSafeInteger(cue.occurrence)
+        || cue.occurrence <= authoredSerial) return;
+      authoredSerial = cue.occurrence;
+      if (!running || suspended || !pageActive || !isRoom()) return;
+      const definition = authored.get(cue.definition?.id);
+      if (!definition || JSON.stringify(definition) !== JSON.stringify(cue.definition)) return;
+      provider.stop?.(authoredPlaying);
+      authoredPlaying = `authored_${definition.id}`;
+      emit({ kind: 'authored', equivalent: definition.equivalent || null });
+      const eq = definition.equivalent;
+      const angle = (eq?.bearing || 0) * Math.PI / 180, pitch = (eq?.elevation || 0) * Math.PI / 180;
+      provider.cue(authoredPlaying, eq?.bearing == null ? null : {
+        x: Math.sin(angle) * Math.cos(pitch), y: Math.sin(pitch), z: -Math.cos(angle) * Math.cos(pitch),
+      });
       return;
     }
-    if (c.kind !== 'blaster' || !_blasterBuf || !_actx) return;
-    const spec = _audioCfg && _audioCfg.blaster;
-    if (!spec) return;
-    try {
-      const src = _actx.createBufferSource();
-      src.buffer = _blasterBuf;
-      const pan = _actx.createPanner();
-      pan.panningModel  = spec.panning_model;
-      pan.distanceModel = spec.distance_model;
-      pan.refDistance   = spec.ref_distance;
-      pan.maxDistance   = spec.max_distance;
-      pan.rolloffFactor = spec.rolloff_factor;
-      if (pan.positionX) {
-        pan.positionX.value = c.x;
-        pan.positionY.value = c.y;
-        pan.positionZ.value = c.z;
-      } else {
-        pan.setPosition(c.x, c.y, c.z); // older Safari
-      }
-      const g = _actx.createGain();
-      // Web Audio, so this one is scaled at the cue rather than carried on
-      // an element — same authored × master composition.
-      g.gain.value = applyMaster(spec.volume);
-      src.connect(pan).connect(g).connect(_actx.destination);
-      src.start();
-    } catch (e) {
-      console.warn('[Phoenix] blaster cue failed', e);
+    if (!running || suspended || !pageActive || !isRoom()) return;
+    if (cue.kind === 'computer_message') {
+      // The existing computer banner is the equivalent: text, severity, Station.
+      provider.cue(`computer_${cue.severity}`);
+    } else if (cue.kind === 'blaster' && ['x', 'y', 'z'].every(key => Number.isFinite(cue[key]))) {
+      if (!cfg?.blaster?.file) return;
+      emit({ kind: 'blaster', x: cue.x, y: cue.y, z: cue.z });
+      provider.cue('blaster', cue);
     }
   }
-
-  // Forcefield SFX level, computed and clamped in Rust. Rust's number is the
-  // authored level; master scales it like every other channel.
-  function audioLevel(level) {
-    if (_els.forcefield) setChannelVolume('forcefield', level);
+  function audioLevel(value) {
+    const level = clampAudioLevel(value);
+    if (running && !suspended && pageActive && cfg?.forcefield && previousLevel != null && level > previousLevel) emit({ kind: 'impact' });
+    previousLevel = level;
+    provider.loop('forcefield', running && !suspended && pageActive && isRoom(), level);
+  }
+  function applyHudAudio(value) {
+    if (!value || !isRoom()) return;
+    hud = value;
+    if (running && !suspended && pageActive && previousHud && value.red_alert && !previousHud.red_alert) provider.cue('siren');
+    // Existing Red Alert frame/status and computer banner remain their equivalents.
+    emit({ kind: 'beam', active: running && !suspended && pageActive && !!value.phaser_firing });
+    previousHud = value;
+    reconcile();
   }
 
-  // The HUD-driven half of the audio module: red-alert siren/music, engine
-  // volume from thrust, and the phaser loop's firing edge. `s` is the
-  // already-parsed ViewscreenHudState the "hud" host channel pushed — the
-  // caller (server.html's __updateHud) owns the JSON.parse and the non-audio
-  // half of that payload (vignette CSS, status strip).
-  function applyHudAudio(s) {
-    // ── Red alert: siren one-shot on the edge, music loops underneath ───────
-    if (s.red_alert && !_prevRedAlert && _els.siren) {
-      _els.siren.currentTime = 0;
-      _els.siren.play().catch(() => {});
-    }
-    if (_els.music) {
-      if (s.red_alert && _els.music.paused) {
-        _els.music.play().catch(() => {});
-      } else if (!s.red_alert && !_els.music.paused) {
-        _els.music.pause();
-        _els.music.currentTime = 0;
-      }
-    }
-    _prevRedAlert = !!s.red_alert;
-    // ── Engine volume from thrust (coefficients from the ship's TOML) ───────
-    if (_els.engine && _audioCfg && _audioCfg.engine && typeof s.engine_thrust === 'number') {
-      const e = _audioCfg.engine;
-      // setChannelVolume, not a direct assignment: the ride is the authored
-      // level, and master scales whatever it lands on (issue #939).
-      setChannelVolume('engine', e.idle_volume + s.engine_thrust * e.volume_at_full_thrust);
-    }
-    // ── Phaser loop follows the change-detected firing flag ────────────────
-    if (_els.phaser && _audioCfg && _audioCfg.phaser_loop) {
-      if (s.phaser_firing && !_prevPhaser) {
-        setChannelVolume('phaser', _audioCfg.phaser_loop.volume);
-        _els.phaser.currentTime = 0;
-        _els.phaser.play().catch(() => {});
-      } else if (!s.phaser_firing && _prevPhaser) {
-        _els.phaser.pause();
-      }
-    }
-    _prevPhaser = !!s.phaser_firing;
-  }
-
-  // Smoke-test hook — lets Playwright assert on audio state without needing
-  // to hear anything.
-  //
-  // The elements are deliberately exposed here rather than looked up via
-  // document.querySelectorAll('audio'): `new Audio()` builds *detached*
-  // elements that never enter the DOM, so a querySelectorAll sweep finds
-  // nothing and any assertion over it passes vacuously.
   function debug() {
-    const vols = {};
-    Object.keys(_els).forEach(function(k) { vols[k] = _els[k].volume; });
-    const paused = {};
-    Object.keys(_els).forEach(function(k) { paused[k] = _els[k].paused; });
+    const output = provider.snapshot();
+    const active = new Set(output.active.map(voice => voice.id));
+    const els = channelIds.filter(id => roomIds.has(id));
+    const categories = { ambient: 'ambience', engine: 'ambience', phaser: 'effects', forcefield: 'effects', music: 'music', siren: 'alerts' };
     return {
-      cfg: _audioCfg,
-      els: Object.keys(_els),
-      started: _audioStarted,
-      volumes: vols,
-      // Authored (pre-master) levels and the scale factor over them, so a
-      // test can assert the composition rather than just the product.
-      authoredVolumes: Object.assign({}, _authoredVol),
-      master: _masterVolume,
-      paused: paused,
-      musicPlaying: !!(_els.music && !_els.music.paused),
-      phaserPlaying: !!(_els.phaser && !_els.phaser.paused),
-      blasterReady: !!_blasterBuf,
+      cfg, els, started: running && !!cfg,
+      master: mix.master.level, mix: normalizeAudioMix(mix),
+      authoredVolumes: Object.fromEntries(els.map(id => [id, output.levels[id]])),
+      volumes: Object.fromEntries(els.map(id => [id, audioSoundGain(mix, categories[id], output.levels[id])])),
+      paused: Object.fromEntries(els.map(id => [id, !active.has(id)])),
+      musicPlaying: active.has('music'), phaserPlaying: active.has('phaser'),
+      blasterReady: output.ready.includes('blaster'), output, outputPeak: provider.outputPeak(),
     };
   }
-
   return {
-    audioConfig,
-    audioCue,
-    audioLevel,
-    applyHudAudio,
-    startGameAudio,
-    startMenuMusic,
-    stopMenuMusic,
-    getMasterVolume,
-    setMasterVolume,
+    audioConfig, audioCue, audioLevel, audioLifecycle, applyHudAudio, startGameAudio, startMenuMusic, stopMenuMusic,
+    resetSession, setPageActive, state, setBus, setMono, resetMix, setDucking, duckingReady, setReducedRange,
+    enable: () => isRoom() ? provider.enable() : Promise.resolve(false),
+    testOutput: () => { ensureMenu(); return isRoom() ? provider.testOutput('menu') : Promise.resolve(false); },
+    getMasterVolume: () => mix.master.level,
+    setMasterVolume: value => setBus('master', { level: clampAudioLevel(value) }),
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    dispose: () => { provider.dispose(); listeners.clear(); emit({ kind: 'clear' }); },
     debug,
   };
 }

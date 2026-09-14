@@ -16,8 +16,12 @@ const ACTIONS = Object.freeze({
   __hostApplyDirectEffect: 'apply_direct_effect',
   __hostSetSystemDisabled: 'set_system_disabled',
   __hostSetContactOverride: 'set_contact_override',
+  __hostSetContactClassification: 'set_contact_classification',
+  __hostPresentation: 'presentation',
+  __hostSetContactInformation: 'set_contact_information',
   __hostDespawnEntity: 'despawn_entity',
   __hostSetNpcDoctrine: 'set_npc_doctrine',
+  __hostSetNpcDoctrineChecked: 'set_npc_doctrine_checked',
   __hostSetFactionHostility: 'set_faction_hostility',
   __hostUndoGmAction: 'undo_gm_action',
   __hostRequestLiveRestore: 'request_live_restore',
@@ -26,6 +30,7 @@ const ACTIONS = Object.freeze({
 });
 
 export function mountNativeGmWorkspace({ bridge, win = window, doc = win.document }) {
+  win.__phoenixGmPage = true;
   // The reused host markup includes launch overlays that its browser boot
   // normally dismisses. That boot never runs on this private native surface.
   // World selection belongs to the viewscreen, not the GM's Ready controls.
@@ -60,7 +65,7 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
     && submit('set_session_paused', { active, correlation });
 
   applyToDom(doc);
-  const workspace = mountGmWorkspace({ win, doc });
+  const workspace = mountGmWorkspace({ win, doc, requireNativeProvider: true });
   const dispatch = createHostChannel({
     handlers: workspace.handlers,
     strings: { t, has, localiseTree },

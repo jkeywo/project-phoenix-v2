@@ -73,6 +73,11 @@ export function latestLiveThreadPriority(messages, threadId = null) {
 
 /** True only for the latest, still-live Critical message in its thread. */
 export function isLatestLiveCriticalMessage(msg, messages) {
+  return isLatestLivePriorityMessage(msg, messages, COMMS_PRIORITY.CRITICAL);
+}
+
+/** Current urgency label; older superseded messages carry no live chip. */
+export function isLatestLivePriorityMessage(msg, messages, priority) {
   if (!msg) return false;
   const tid = effectiveThreadId(msg);
   const thread = (Array.isArray(messages) ? messages : [])
@@ -80,7 +85,7 @@ export function isLatestLiveCriticalMessage(msg, messages) {
   const latest = thread[thread.length - 1];
   return !!latest
     && latest.id === msg.id
-    && latestLiveThreadPriority(thread) === COMMS_PRIORITY.CRITICAL;
+    && latestLiveThreadPriority(thread) === priority;
 }
 
 /** Longest inbox/hail preview, in characters, before an ellipsis. */

@@ -1,0 +1,25 @@
+.audio-settings { display: grid; gap: 0.75em; min-width: 0; }
+.audio-settings p { margin: 0; }
+.audio-settings label { display: grid; gap: 0.5em; min-width: 0; }
+.audio-settings label:has([data-audio-cue], [data-audio-ducking]) { grid-template-columns: auto 1fr; align-items: center; min-height: 44px; }
+.audio-settings [data-audio-cue], .audio-settings [data-audio-ducking] { width: 1.25em; height: 1.25em; }
+.audio-settings .audio-mono, .audio-settings .audio-range { grid-template-columns: auto 1fr; align-items: center; min-height: 44px; }
+.audio-settings [data-audio-mono], .audio-settings [data-audio-range] { width: 1.25em; height: 1.25em; }
+.audio-settings select { max-width: 100%; min-width: 0; min-height: 44px; padding: 0.5em; font: inherit; color: inherit; background: var(--bg-panel, Canvas); border: 1px solid currentColor; }
+.audio-settings-bus { min-width: 0; padding: 0.5em; border: 1px solid currentColor; }
+.audio-settings-controls, .audio-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75em; }
+.audio-settings-controls input { min-width: 6em; width: 9em; flex: 1; }
+.sound-audition { min-width:0; overflow-wrap:anywhere; }
+.sound-audition select { max-width:100%; }
+.sound-audition button { min-height:44px; margin:.25rem; }
+.sound-audition :focus-visible { outline:3px solid currentColor; outline-offset:3px; }
+.sound-audition [data-sound-equivalent] { border-inline-start:.25rem solid currentColor; padding:.5rem; }
+.audio-settings button { min-height: 44px; padding: 0.5em 0.75em; font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; }
+.audio-settings button[aria-pressed="true"] { border-width: 3px; font-weight: bold; }
+.audio-settings :focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.audio-live-equivalents { position: fixed; z-index: 91; bottom: 5em; left: 1em; max-width: min(34em, 85vw); font: inherit; pointer-events: none; }
+.audio-live-equivalents > div { background: #08111f; color: #fff; padding: 0.35em 0.6em; border: 1px solid currentColor; }
+:root[data-contrast="more"] .audio-live-equivalents > div { background: var(--surface-base, #000); color: var(--ink, #fff); }
+@media (forced-colors: active) {
+  .audio-live-equivalents > div { background: Canvas; color: CanvasText; }
+}

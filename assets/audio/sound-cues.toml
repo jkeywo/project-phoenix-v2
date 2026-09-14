@@ -1,0 +1,93 @@
+# Approved non-speech packaged assets and authored cue definitions. [ai]
+# The inventory fixes each asset's category and minimum information contract.
+# A cue may add an equivalent; it cannot relabel an informative asset decorative.
+version = 1
+
+[[assets]]
+file = "assets/sounds/exploration.mp3"
+category = "music"
+informative = false
+[[assets]]
+file = "assets/sounds/Ambient.mp3"
+category = "ambience"
+informative = false
+[[assets]]
+file = "assets/sounds/Engine.mp3"
+category = "ambience"
+informative = false
+[[assets]]
+file = "assets/sounds/Blaster.mp3"
+category = "effects"
+informative = true
+[[assets]]
+file = "assets/sounds/ForcefieldHit.mp3"
+category = "effects"
+informative = true
+[[assets]]
+file = "assets/sounds/red_alert_siren.ogg"
+category = "alerts"
+informative = true
+[[assets]]
+file = "assets/sounds/private_alert.wav"
+category = "alerts"
+informative = true
+[[assets]]
+file = "assets/sounds/ui_click.ogg"
+category = "interface"
+informative = false
+
+[[cues]]
+id = "exploration"
+label = "[Exploration music]"
+file = "assets/sounds/exploration.mp3"
+category = "music"
+audience = "viewscreen"
+volume = 1.0
+[[cues]]
+id = "ambient"
+label = "[Ambient bed]"
+file = "assets/sounds/Ambient.mp3"
+category = "ambience"
+audience = "viewscreen"
+volume = 0.25
+[[cues]]
+id = "weapons"
+label = "[Weapon discharge]"
+file = "assets/sounds/Blaster.mp3"
+category = "effects"
+audience = "viewscreen"
+volume = 0.9
+[cues.equivalent]
+meaning = "[Weapon discharge]"
+source = "[Unknown source]"
+urgency = "warning"
+bearing = 45.0
+[[cues]]
+id = "red-alert"
+label = "[Red Alert]"
+file = "assets/sounds/red_alert_siren.ogg"
+category = "alerts"
+audience = "viewscreen"
+volume = 0.6
+[cues.equivalent]
+meaning = "[Red Alert]"
+source = "[Ship computer]"
+urgency = "critical"
+[[cues]]
+id = "private-alert"
+label = "[Private actionable alert]"
+file = "assets/sounds/private_alert.wav"
+category = "alerts"
+audience = "gm"
+volume = 0.16
+[cues.equivalent]
+meaning = "[Action required]"
+source = "[Local console]"
+urgency = "warning"
+[[cues]]
+id = "interface-click"
+label = "[Interface click]"
+file = "assets/sounds/ui_click.ogg"
+category = "interface"
+audience = "station"
+volume = 0.12

@@ -1,0 +1,52 @@
+:root {
+  color-scheme: dark;
+  font: calc(16px * var(--a11y-text-scale, 1))/1.5 system-ui, sans-serif;
+  background: #111923;
+  color: #e9eef4;
+}
+* { box-sizing: border-box; }
+#workshop [hidden] { display: none !important; }
+body { margin: 0; }
+#workshop { max-width: 90rem; margin: auto; padding: 1.5rem; }
+h1 { margin: 0; font-size: 1.75rem; }
+button, input, select, textarea { font: inherit; color: inherit; background: #182634; border: 1px solid #8195a8; border-radius: .2rem; min-width: 0; }
+button, select { min-height: 2.75rem; padding: .35rem .7rem; }
+button:disabled { opacity: .6; }
+button:not(:disabled) { cursor: pointer; }
+:focus-visible { outline: 3px solid #ffe49b; outline-offset: 3px; }
+.workshop-toolbar { display: flex; flex-wrap: wrap; gap: .65rem; margin: 1rem 0; align-items: center; }
+.workshop-mode { font-weight: 700; }
+.workshop-layout { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 4fr); gap: 1.25rem; }
+.workshop-files { display: grid; align-content: start; gap: .6rem; }
+.workshop-files select, .workshop-files input { width: 100%; }
+#workshop-dependency, #workshop-dependency-source { display: block; width: 100%; margin: .5rem 0; }
+.workshop-inspector { min-width: 0; }
+.workshop-inspector label { display: block; margin-top: .6rem; }
+.workshop-inspector textarea { width: 100%; }
+.workshop-inspector p { overflow-wrap: anywhere; }
+.workshop-source { display: grid; gap: .6rem; min-width: 0; }
+.workshop-source textarea { width: 100%; min-height: 24rem; resize: vertical; padding: 1rem; tab-size: 2; font-family: ui-monospace, Consolas, monospace; }
+.workshop-source label, .workshop-files label { overflow-wrap: anywhere; }
+.workshop-findings { white-space: pre-wrap; overflow-wrap: anywhere; border-left: .2rem solid currentColor; padding: .75rem; margin-top: 1rem; }
+.workshop-feedback { display: flex; flex-wrap: wrap; gap: .75rem; }
+.workshop-models > :is(label, select, input) { display: block; width: 100%; margin: .5rem 0; }
+.workshop-models :is(p, label, legend, small) { overflow-wrap: anywhere; }
+.workshop-model-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr)); gap: 1rem; }
+.workshop-model-fields fieldset { min-width: 0; }
+.workshop-model-field { display: grid; gap: .25rem; margin: .5rem 0; }
+.workshop-model-field input { width: 100%; min-height: 2.75rem; }
+.workshop-model-preview :is(input, select) { max-width: 100%; }
+.workshop-model-preview-viewport { width: 100%; }
+.workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }
+.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: 1.5rem; }
+.workshop-test h2, .workshop-test p { flex-basis: 100%; margin: .25rem 0; overflow-wrap: anywhere; }
+.workshop-test select, .workshop-test input { max-width: 100%; }
+.workshop-test label { overflow-wrap: anywhere; }
+.workshop-test-viewport { width: 100%; }
+.workshop-test-viewscreen { display: block; width: 100%; height: clamp(24rem, 65vh, 55rem); border: 1px solid #8195a8; }
+.workshop-test-viewscreen[data-pending] { position: fixed; inset: 0; width: 100vw; height: 100vh; opacity: 0; pointer-events: none; }
+details { margin-top: 1.5rem; }
+:root[data-contrast="more"] { background: #000; color: #fff; }
+:root[data-contrast="more"] :is(button, select, textarea) { background: #000; border-color: #fff; }
+@media (max-width: 55rem) { .workshop-layout { grid-template-columns: 1fr; } #workshop { padding: 1rem; } }
+@media (forced-colors: active) { button, select, textarea { border-color: ButtonText; } :focus-visible { outline-color: Highlight; } }

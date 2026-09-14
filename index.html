@@ -108,6 +108,7 @@
      save-import rules stayed inline below — they style host tooling the native
      surface strips rather than renders. -->
 <link rel="stylesheet" href="gui/host-scenarios.css" />
+<link rel="stylesheet" href="gui/audio-settings.css" />
 <!-- The landing screen's stylesheet (issue #1360, PRD #1355). Linked AFTER the
      picker's, because it holds the `#scenario-panel.landing-docked` block that
      unwinds the picker from a full-screen layer into the landing's middle
@@ -408,6 +409,9 @@
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
+    #gm-contact-panel fieldset { display: grid; gap: .5rem; min-width: 0; }
+    #gm-contact-ghosts { margin: 0; padding: 0; list-style: none; }
+    #gm-contact-ghosts button { width: 100%; white-space: normal; overflow-wrap: anywhere; }
     #gm-spawn-palette { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
     .gm-spawn-entry { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
     .gm-spawn-entry-label { flex: 1 1 12rem; }
@@ -803,22 +807,38 @@
     .save-slots-empty { color: var(--ink-faint); font-size: var(--text-sm); }
     /* The named manual-save affordance belongs to running-session chrome, not
        to the pre-scenario picker. Rust's lobby phase drives `[hidden]` below;
-       PhoenixReady is intentionally not a proxy for a capturable World. */
+       PhoenixReady is intentionally not a proxy for a capturable World.
+       It is no longer permanent viewscreen furniture either: naming a save is
+       something an operator does deliberately, so the settings cog's Gameplay
+       tab BORROWS this live node (`gui/server-settings.js`) the way the landing
+       borrows `#scenario-panel`, and hands it back to `#server-shell` when the
+       panel rebuilds or closes. Hence no positioning, no z-index and no box of
+       its own here — a docked panel is laid out by whichever surface is
+       holding it (the GM desk holds the same node in its roster, see
+       `gui/gm-workspace-shell.js`). */
     #manual-save-panel {
-      position: fixed;
-      top: 56px; right: 12px;
-      z-index: 170;
-      width: min(22rem, calc(100vw - 24px));
       box-sizing: border-box;
-      padding: 0.7rem;
-      border: 1px solid var(--edge);
-      border-radius: 4px;
-      background: rgba(var(--rgb-deep), 0.92);
       color: var(--ink);
       font-family: monospace;
     }
+    /* Parked at home it must not paint: a borrowable panel with no borrower is
+       not a floating overlay, it is off screen. Keyed on the PARENT rather than
+       a class so every borrower (cog, GM roster) is visible by the fact of
+       holding it, and no future one has to be told to add a class. */
+    #server-shell > #manual-save-panel { display: none; }
     #manual-save-panel[hidden] { display: none; }
     #manual-save-panel .save-slots-heading { margin-bottom: 0.55rem; }
+    /* Docked in the cog it must read as one of that panel's sections rather
+       than as a transplanted overlay: same spacing below, and the same small
+       upper-case heading `.server-settings-heading` gives every other section.
+       Scoped to the cog's body so the GM desk's copy keeps its own h2. */
+    .server-settings-body #manual-save-panel { margin-bottom: 14px; }
+    .server-settings-body #manual-save-panel:last-child { margin-bottom: 0; }
+    .server-settings-body #manual-save-panel .save-slots-heading {
+      font-size: var(--text-xs); letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--ink-dim);
+      margin-bottom: 6px;
+    }
     /* No portrait stacking here: this document always reads as landscape
        (see the orientation-lock block below and the `data-phx-force-landscape`
        doc comment at the top of the file) — a genuinely portrait phone screen
@@ -1053,47 +1073,6 @@
       margin-top: 2px; letter-spacing: 0.06em;
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
-
-    /* ── Ship's-computer message banner (issue #1342) ────────────────────
-       Top-centre, below the existing cap-top frame (56px tall) and clear of
-       the bottom status strip and #game-over-overlay. z-index 6: above the
-       border pieces (5), below the frame's own overlay (15). */
-    .vs-computer-message {
-      position: absolute;
-      top: 64px; left: 50%; transform: translateX(-50%);
-      z-index: 6;
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      gap: 3px;
-      max-width: min(560px, 70vw);
-      padding: 7px 20px;
-      background: rgba(var(--rgb-base), 0.78);
-      border: 1px solid var(--vs-signal);
-      border-radius: 2px;
-      pointer-events: none;
-      text-align: center;
-    }
-    .vs-computer-message.shown { display: flex; }
-    .vs-computer-message-source {
-      font-family: "Chakra Petch", system-ui, sans-serif;
-      font-size: var(--text-xs); font-weight: 600;
-      letter-spacing: 0.26em;
-      text-transform: uppercase;
-      color: var(--vs-text);
-    }
-    .vs-computer-message-text {
-      font-family: "JetBrains Mono", monospace;
-      font-size: var(--text-sm); line-height: 1.45;
-      color: var(--vs-signal);
-    }
-    /* Severity treatment — border + text tint, one word per severity. */
-    .vs-computer-message.sev-advisory { border-color: var(--gold); }
-    .vs-computer-message.sev-advisory .vs-computer-message-text { color: var(--gold); }
-    .vs-computer-message.sev-warning { border-color: var(--tactical); }
-    .vs-computer-message.sev-warning .vs-computer-message-text { color: var(--tactical); }
-    .vs-computer-message.sev-critical { border-color: var(--vs-alert); }
-    .vs-computer-message.sev-critical .vs-computer-message-text { color: var(--vs-alert); }
 
     /* ── AI chatter widget (bottom-left) ──────────────────────── */
     #chatter-container {
@@ -1577,7 +1556,7 @@
        reports. The attribute, the guards and the duplicated rotated-phone
        blocks in those four sheets are all gone with the rotation. */
   </style>
-<link rel="modulepreload" href="./project-phoenix-e4b810a8d6666a1e.js" crossorigin="anonymous" integrity="sha384-Wi2tF7OrH1kd/jpwoEYSzLTRa07HCSGpYUXNXKnjP2rkD+36qvWxccQXH01KTTac"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-e4b810a8d6666a1e_bg.wasm" crossorigin="anonymous" integrity="sha384-5aDGCcwTAOQdi9FQnBrpTeerHIfngPmehJtNQolGMKlH6OgO/Pz39uRxbQN+rVuh" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-d72120c384611826.js" crossorigin="anonymous" integrity="sha384-nkgmm5KTDVM0bdpi39PF1aBs23cp5Y+Sq64haHki21uvquefotD+OqVfhUEW7i/P"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-d72120c384611826_bg.wasm" crossorigin="anonymous" integrity="sha384-GcklbfgicrFMk2DuFnsthADps+lTebu1nTtpJR+zFkWj6DdIYGj4JnQfWa+fpbgy" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -2224,6 +2203,32 @@
           <button id="gm-contact-reveal" type="button" disabled data-i18n="server.gm.contact.reveal"></button>
           <button id="gm-contact-conceal" type="button" disabled data-i18n="server.gm.contact.conceal"></button>
           <button id="gm-contact-normal" type="button" disabled data-i18n="server.gm.contact.normal"></button>
+          <label for="gm-contact-classification" data-i18n="server.gm.contact.classification"></label>
+          <select id="gm-contact-classification"></select>
+          <p id="gm-contact-classification-current" role="status"></p>
+          <button id="gm-contact-misclassify" type="button" disabled data-i18n="server.gm.contact.misclassify"></button>
+          <button id="gm-contact-classification-normal" type="button" disabled data-i18n="server.gm.contact.classification-normal"></button>
+          <fieldset><legend data-i18n="server.gm.contact.report_heading"></legend>
+            <p data-i18n="server.gm.contact.report_explanation"></p>
+            <p id="gm-contact-report-current" role="status"></p>
+            <label for="gm-contact-report-delay" data-i18n="server.gm.contact.report_delay"></label><input id="gm-contact-report-delay" type="number" min="0" max="4294967295" step="1" value="0">
+            <label for="gm-contact-report-step" data-i18n="server.gm.contact.report_step"></label><input id="gm-contact-report-step" type="number" min="0" max="4294967295" step="1" value="0">
+            <label><input id="gm-contact-report-identity" type="checkbox"><span data-i18n="server.gm.contact.report_identity"></span></label>
+            <button id="gm-contact-report-set" type="button" disabled data-i18n="server.gm.contact.report_set"></button>
+            <button id="gm-contact-report-clear" type="button" disabled data-i18n="server.gm.contact.report_normal"></button>
+          </fieldset>
+          <fieldset><legend data-i18n="server.gm.contact.ghosts"></legend>
+            <p data-i18n="server.gm.contact.ghost-explanation"></p>
+            <label for="gm-contact-ghost-id" data-i18n="server.gm.contact.ghost-id"></label><input id="gm-contact-ghost-id" type="text" maxlength="128">
+            <label for="gm-contact-ghost-palette" data-i18n="server.gm.contact.classification"></label><select id="gm-contact-ghost-palette"></select>
+            <label for="gm-contact-ghost-x" data-i18n="server.gm.contact.ghost-x"></label><input id="gm-contact-ghost-x" type="number" step="1" min="-2147483648" max="2147483647" value="0">
+            <label for="gm-contact-ghost-y" data-i18n="server.gm.contact.ghost-y"></label><input id="gm-contact-ghost-y" type="number" step="1" min="-2147483648" max="2147483647" value="0">
+            <label for="gm-contact-ghost-z" data-i18n="server.gm.contact.ghost-z"></label><input id="gm-contact-ghost-z" type="number" step="1" min="-2147483648" max="2147483647" value="0">
+            <button id="gm-contact-ghost-set" type="button" disabled data-i18n="server.gm.contact.ghost-set"></button>
+            <button id="gm-contact-ghost-remove" type="button" disabled data-i18n="server.gm.contact.ghost-remove"></button>
+            <ul id="gm-contact-ghosts" aria-label="" data-i18n-aria-label="server.gm.contact.ghosts"></ul>
+          </fieldset>
+          <p data-i18n="server.gm.contact.classification-explanation"></p>
           <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
           <ol id="gm-contact-results"></ol>
         </section>
@@ -2232,6 +2237,9 @@
           <p id="gm-npc-target" role="status"></p>
           <dl><dt data-i18n="server.gm.npc.current"></dt><dd id="gm-npc-current"></dd>
             <dt data-i18n="server.gm.npc.intent"></dt><dd id="gm-npc-intent"></dd></dl>
+          <p id="gm-npc-field-info"></p>
+          <label data-i18n="inspector.authored_definition"></label>
+          <div id="gm-npc-definition"></div>
           <label for="gm-npc-choice" data-i18n="server.gm.npc.choice"></label>
           <select id="gm-npc-choice"></select>
           <p id="gm-npc-empty" data-i18n="server.gm.npc.empty"></p>
@@ -2682,12 +2690,6 @@
         <div class="vs-piece vs-cap bottom"></div>
         <!-- Ship designation (top-centre, above cap) -->
         <div class="vs-designation" id="hud-designation" data-i18n="server.hud_designation">PHOENIX</div>
-        <!-- Ship's-computer message banner (issue #1342): shown/hidden and
-             styled by severity from window.__updateHud's s.computer_message. -->
-        <div class="vs-computer-message" id="hud-computer-message">
-          <div class="vs-computer-message-source"><span data-i18n="server.computer_message.label">SHIP'S COMPUTER</span><span id="hud-computer-message-severity"></span><span id="hud-computer-message-station"></span></div>
-          <div class="vs-computer-message-text" id="hud-computer-message-text"></div>
-        </div>
         <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
         <div class="vs-status-strip">
           <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_nav">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
@@ -2803,8 +2805,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-e4b810a8d6666a1e.js';
-const wasm = await init({ module_or_path: './project-phoenix-e4b810a8d6666a1e_bg.wasm' });
+import init, * as bindings from './project-phoenix-d72120c384611826.js';
+const wasm = await init({ module_or_path: './project-phoenix-d72120c384611826_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -3129,6 +3131,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
        classic-script-can't-`import`-a-module bridge #1225/#1227 use. -->
   <script type="module">
     import { createHostAudio } from './gui/host-audio.js';
+    import { createAudioLiveEquivalents } from './gui/audio-live-equivalents.js';
     // window.localStorage access itself can throw in some private-mode /
     // sandboxed-iframe configurations — guarded here exactly like the old
     // inline code guarded window.localStorage.getItem, so a denial degrades
@@ -3136,14 +3139,21 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     let masterVolumeStorage = null;
     try { masterVolumeStorage = window.localStorage; }
     catch (_) { /* private mode / storage disabled — stay at the default */ }
+    const equivalents = createAudioLiveEquivalents(document);
     const hostAudio = createHostAudio({
       doc: document,
       storage: masterVolumeStorage,
-      AudioCtor: window.Audio,
+      isRoom: () => !window.__phoenixGmPage,
+      onEquivalent: equivalents.update,
     });
+    window.__roomAudio = hostAudio;
+    window.__resetHostAudio = hostAudio.resetSession;
+    window.addEventListener('pagehide', () => hostAudio.setPageActive(false));
+    window.addEventListener('pageshow', () => hostAudio.setPageActive(true));
     window.__audioConfig = hostAudio.audioConfig;
     window.__audioCue = hostAudio.audioCue;
     window.__audioLevel = hostAudio.audioLevel;
+    window.__audioLifecycle = hostAudio.audioLifecycle;
     window.__audioDebug = hostAudio.debug;
     window.__setMasterVolume = hostAudio.setMasterVolume;
     window.__getMasterVolume = hostAudio.getMasterVolume;
@@ -3162,6 +3172,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
     import { mountGmWorkspace } from './gui/gm-workspace.js';
+    import { mountSensorReport } from './gui/sensor-report.js';
+    window.__renderSensorReport = mountSensorReport(document);
+    window.__renderSensorReport(window.__sensorReport);
     import { t, has, localiseTree } from './gui/strings.js';
     const gmWorkspace = mountGmWorkspace({ win: window, doc: document });
     const hostChannelDispatch = createHostChannel({
@@ -3170,6 +3183,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         lobby:        function(p) { window.__updateLobby(p); },
         chatter:      function(p) { window.__updateChatter(p); },
         audio_config: function(p) { window.__audioConfig(p); },
+        audio_lifecycle: function(p) { window.__audioLifecycle(p); },
         audio_cue:    function(p) { window.__audioCue(p); },
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
@@ -3420,6 +3434,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   window.__updateHud = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
+    window.__latestPresentationCard = s.presentation_card || null;
+    window.__updatePresentationCard?.(window.__latestPresentationCard);
+    window.__sensorReport = s.sensor_report || null;
+    window.__renderSensorReport?.(window.__sensorReport);
     const overlay   = document.getElementById('hud-overlay');
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
     // Red-alert siren/music, engine volume from thrust, and the phaser loop's
@@ -3449,47 +3467,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const desig = document.getElementById('hud-designation');
       if (desig) desig.textContent = s.ship_name;
     }
-    // ── Ship's-computer message banner (issue #1342) ────────────────────────
-    // `s.computer_message.text` has already crossed localiseTree() in the
-    // host-channel dispatcher (issue #949) — it is the resolved display
-    // string here, exactly like `game_over_message` below, because both ride
-    // the same "hud" channel payload. `severity` and `station` are bare wire
-    // words (never string ids themselves) and are resolved with t() here.
-    //
-    // `severity` is a closed Rust enum (`info`/`advisory`/`warning`/
-    // `critical`) with a strings.csv row authored for every variant, so it is
-    // always safe to resolve directly with t(). `station`, by contrast, is a
-    // free-form Rhai-authored cue that `show_message` deliberately does NOT
-    // validate against the ship's roster (src/core/computer_message.rs) — an
-    // unrecognised or mistyped id must degrade to no badge rather than show
-    // t()'s ⟨station.xxx.name⟩ miss marker on the live Viewscreen (issue
-    // #949's stationLabel() in client.html sets the precedent), so that one
-    // goes through has() first.
-    const cmBanner   = document.getElementById('hud-computer-message');
-    const cmText     = document.getElementById('hud-computer-message-text');
-    const cmSeverity = document.getElementById('hud-computer-message-severity');
-    const cmStation  = document.getElementById('hud-computer-message-station');
-    if (cmBanner && cmText) {
-      const cm = s.computer_message;
-      if (cm) {
-        cmText.textContent = cm.text;
-        cmBanner.className = 'vs-computer-message shown sev-' + cm.severity;
-        if (cmSeverity) {
-          cmSeverity.textContent = ' · ' + t('server.computer_message.severity.' + cm.severity);
-        }
-        if (cmStation) {
-          const stationId = 'station.' + cm.station + '.name';
-          cmStation.textContent = cm.station && has(stationId)
-            ? (' · ' + t(stationId))
-            : '';
-        }
-      } else {
-        cmBanner.className = 'vs-computer-message';
-        cmText.textContent = '';
-        if (cmSeverity) cmSeverity.textContent = '';
-        if (cmStation) cmStation.textContent = '';
-      }
-    }
+    window.__latestComputerMessage = s.computer_message || null;
+    window.__updateComputerMessage?.(window.__latestComputerMessage);
     // ── Game-over overlay ───────────────────────────────────────────────────
     // `game_over_message` is on the payload only in GamePhase::GameOver, so it
     // both shows the ending and clears it on a new run. It is the scenario's
@@ -3565,6 +3544,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+    if (s.phase === 'Lobby' && _lobbyPrevPhase !== 'Lobby') window.__resetHostAudio?.();
     // Entering authoritative Lobby is the GM activity run boundary. It is the
     // only place local Pending rows are reset; a bounded absolute result window
     // becoming empty is not enough evidence to invent a new run.
@@ -4336,6 +4316,43 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     };
     window.__hostGmName = gmName;
 
+    // Browser M6 source handoff. These readers expose retained authored packs,
+    // never a reconstruction of the live World or its GM interventions.
+    const canOpenWorkshopSource = () => !!window.__phoenixGmPage && !!localGm();
+    window.__hostWorkshopPacks = function() {
+      if (!canOpenWorkshopSource()) return [];
+      return Array.from(wasmBindings.wasm_active_pack_manifest().packs || [])
+        .map(pack => ({ id: pack.id, name: pack.name }));
+    };
+    window.__hostWorkshopSource = async function(selectedId) {
+      if (!canOpenWorkshopSource()) throw Error('GM connection is unavailable');
+      const revision = wasmBindings.wasm_pack_revision();
+      const packs = window.__hostWorkshopPacks();
+      if (!packs.some(pack => pack.id === selectedId)) throw Error('Source pack is unavailable');
+      const archives = packs.map(pack => {
+        const bytes = wasmBindings.wasm_pack_source_archive(pack.id);
+        if (!(bytes instanceof Uint8Array) || !bytes.length) throw Error('Source pack was not retained');
+        return { id: pack.id, bytes };
+      });
+      const response = await fetch('workshop-base.json', { signal: AbortSignal.timeout(30000) });
+      if (!response.ok) throw Error('Read-only source dependencies are unavailable');
+      const base = await response.json();
+      if (!canOpenWorkshopSource() || revision !== wasmBindings.wasm_pack_revision()) throw Error('Loaded content changed');
+      return { selectedId, archives, base };
+    };
+    window.__hostWorkshopDisconnect = function() {
+      if (!canOpenWorkshopSource()) return false;
+      // This is a GM peer going away, like closing its tab. Do not invoke the
+      // lobby-only leave/rebase path or turn a running fleet into solo play.
+      if (fleetHandle) {
+        if (normaliseFleetRole(fleetHandle.role || fleetRole) !== 'gm') return false;
+        fleetHandle.close();
+        fleetHandle = null;
+      }
+      return true; // The caller immediately replaces this page with Authoring.
+    };
+    window.dispatchEvent(new Event('PhoenixWorkshopSourceReady'));
+
     /**
      * Submit one explicit, attributed GM session state command.
      *
@@ -4484,6 +4501,27 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_system_disabled', target: request.target, system: request.system, disabled: request.disabled }));
     };
+    window.__hostPresentation = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
+        correlation: request.correlation, action: 'presentation', ship: request.ship, cue: request.cue }));
+    };
+    window.__hostSetContactInformation = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
+          || !request.change || typeof request.change !== 'object' || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
+        action: 'set_contact_information', ship: request.ship, change: request.change }));
+    };
+    window.__hostSetContactClassification = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
+          || typeof request.target !== 'string' || !(request.palette === null || typeof request.palette === 'string')
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
+        action: 'set_contact_classification', ship: request.ship, target: request.target, palette: request.palette }));
+    };
     window.__hostSetContactOverride = function(request) {
       const operator = localGm();
       if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
@@ -4516,6 +4554,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine', operator_id: operator.id,
         correlation: request.correlation, target: request.target, doctrine: request.doctrine })) !== false;
+    };
+    window.__hostSetNpcDoctrineChecked = function(request) {
+      const operator = window.__hostLocalGm();
+      if (!operator || !request || request.operator_id !== operator.id
+          || !/^[0-9a-f]{16}$/.test(request.expected_revision)
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine_checked', operator_id: operator.id,
+        correlation: request.correlation, target: request.target, doctrine: request.doctrine,
+        expected_revision: request.expected_revision })) !== false;
     };
     window.__hostSetFactionHostility = function(request) {
       const operator = window.__hostLocalGm();
@@ -7701,7 +7748,25 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         // stack, so a duplicate pack id or a broken pack applies nothing.
         let findings;
         try {
-          findings = Array.from(wasmBindings.wasm_add_mod_pack(bytes) || []);
+          const revision = wasmBindings.wasm_pack_revision();
+          const required = Array.from(wasmBindings.wasm_workshop_asset_dependencies(bytes));
+          let baseAssets = {};
+          if (required.length) {
+            const response = await fetch('workshop-base.json');
+            if (!response.ok) throw new Error('Base asset catalogue is unavailable');
+            const base = await response.json();
+            const active = Object.create(null);
+            for (const path of required) {
+              const value = wasmBindings.wasm_pack_asset(path);
+              if (value instanceof Uint8Array) active[path] = Array.from(value);
+            }
+            const { createWorkshopAssetSnapshot } = await import('./editor/workshop-assets.js');
+            const asset_dependencies = JSON.parse(wasmBindings.wasm_pack_asset_dependencies());
+            const snapshot = createWorkshopAssetSnapshot({ ...base, packs: [{ assets: active, asset_dependencies }] });
+            baseAssets = (await snapshot.capture(required)).base_assets;
+          }
+          if (revision !== wasmBindings.wasm_pack_revision()) throw new Error('Loaded content changed during asset validation; retry the import');
+          findings = Array.from(wasmBindings.wasm_add_mod_pack_with_assets(bytes, JSON.stringify(baseAssets)) || []);
         } catch (e) {
           console.error('[Phoenix] mod pack validation threw:', e);
           setStatus('server.mod_pack_rejected');
@@ -7926,6 +7991,7 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {
     window.set_config_request_callback = wasmBindings.set_config_request_callback;
     set_config_request_callback(handleConfigRequest);
     window.registerContentFetch(wasmBindings, settleContentPreload);
+    await window.preloadSoundCatalog(wasmBindings);
 
     // Step 2: Fetch and load the unified world TOML (map + scenario in one file)
     let worldToml = wasmBindings.wasm_preload_world_source(scenarioPath);
@@ -8000,6 +8066,8 @@ function settleContentPreload() {
   let _finishInitCalled = false;
 function finishInit() {
   if (_finishInitCalled || !wasmBindings.wasm_is_preload_complete()) return;
+  try { wasmBindings.wasm_prepare_sound_catalog(); }
+  catch (error) { showFatalError(String(error)); return; }
   _finishInitCalled = true;
   // The world is now being loaded into the (one-shot) WASM/Bevy instance.
   // A later Game Over → return re-enters driveWorldLoad, which checks this to
@@ -8664,6 +8732,10 @@ window.addEventListener('PhoenixSaveSlotsModuleReady', mountSaveSlotsWhenReady);
 
 window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
+  // Pack imports and menu audio exist before a world or host App is started.
+  window.__hostReadPackAsset = window.wasmBindings.wasm_pack_asset;
+  window.__hostPackRevision = window.wasmBindings.wasm_pack_revision;
+  window.__hostPackSourceArchive = window.wasmBindings.wasm_pack_source_archive;
   mountSaveSlotsWhenReady();
   // The demo-build flag (issue #939) is bound here rather than in
   // finishInit()'s list: the settings cog can be opened long before a world is
@@ -8771,5 +8843,17 @@ window.addEventListener('TrunkApplicationStarted', () => {
       window.__republishViewscreenMotion();
     }
   </script>
+<link rel="stylesheet" href="gui/presentation-card.css">
+<link rel="stylesheet" href="gui/computer-message.css">
+<script type="module">
+  import { createPresentationCard } from './gui/presentation-card.js';
+  import { createComputerMessageBanner } from './gui/computer-message.js';
+  const computerMessage = createComputerMessageBanner();
+  window.__updateComputerMessage = computerMessage.update;
+  computerMessage.update(window.__latestComputerMessage || null);
+  const presentationCard = createPresentationCard();
+  window.__updatePresentationCard = presentationCard.update;
+  presentationCard.update(window.__latestPresentationCard || null);
+</script>
 </body>
 </html>

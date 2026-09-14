@@ -112,6 +112,9 @@ function normaliseAction(value) {
   // authored entry id — never a template path, which the browser is never
   // handed — and the feed renders it verbatim beside the operator who placed it.
   if (value.type === 'set_system_disabled' && typeof value.target === 'string' && value.target && typeof value.system === 'string' && value.system && typeof value.disabled === 'boolean') return { type: value.type, target: value.target, system: value.system, disabled: value.disabled };
+  if (value.type === 'presentation' && typeof value.ship === 'string' && value.ship) return { type: value.type, ship: value.ship };
+  if (value.type === 'set_contact_information' && typeof value.observer === 'string' && value.observer && typeof value.target === 'string' && value.target) return { type: value.type, observer: value.observer, target: value.target };
+  if (value.type === 'set_contact_classification' && typeof value.observer === 'string' && value.observer && typeof value.target === 'string' && value.target && typeof value.active === 'boolean') return { type: value.type, observer: value.observer, target: value.target, active: value.active };
   if (value.type === 'set_contact_override' && typeof value.observer === 'string' && value.observer && typeof value.target === 'string' && value.target && ['reveal', 'conceal', 'normal'].includes(value.mode)) return { type: value.type, observer: value.observer, target: value.target, mode: value.mode };
   if (value.type === 'transmit_comms' && typeof value.sender === 'string' && value.sender) return { type: value.type, sender: value.sender };
   if (value.type === 'despawn_entity' && typeof value.target === 'string' && value.target) {
@@ -475,6 +478,12 @@ export function createGmActivityFeed({
           }
         } else if (detail.action.type === 'set_system_disabled') {
           action = t('server.gm.activity.action.system_disabled', { target: detail.action.target, system: detail.action.system, verb: t(detail.action.disabled ? 'server.gm.system.disable' : 'server.gm.system.restore') });
+        } else if (detail.action.type === 'presentation') {
+          action = t('server.gm.presentation.activity', { ship: detail.action.ship });
+        } else if (detail.action.type === 'set_contact_information') {
+          action = t('server.gm.activity.action.contact_override', { observer: detail.action.observer, target: detail.action.target, mode: t('server.gm.contact.information') });
+        } else if (detail.action.type === 'set_contact_classification') {
+          action = t('server.gm.activity.action.contact_override', { observer: detail.action.observer, target: detail.action.target, mode: t(detail.action.active ? 'server.gm.contact.misclassify' : 'server.gm.contact.classification-normal') });
         } else if (detail.action.type === 'set_contact_override') {
           action = t('server.gm.activity.action.contact_override', { observer: detail.action.observer, target: detail.action.target, mode: t(`server.gm.contact.${detail.action.mode}`) });
         } else if (detail.action.type === 'transmit_comms') {

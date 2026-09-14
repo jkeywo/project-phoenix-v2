@@ -1,0 +1,30 @@
+/* Current informative text stays above both the frame and presentation cards. */
+.vs-computer-message {
+  position: fixed; top: 4rem; left: 50%; transform: translateX(-50%); z-index: 92;
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+  max-width: min(35rem, 70vw); padding: 0.45rem 1.25rem;
+  background: rgba(var(--rgb-base), 0.9); border: 1px solid var(--signal, #5fd8e8);
+  border-radius: 2px; pointer-events: none; text-align: center; overflow-wrap: anywhere;
+}
+.vs-computer-message[hidden] { display: none; }
+.vs-computer-message-source {
+  font-family: "Chakra Petch", system-ui, sans-serif;
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.26em;
+  text-transform: uppercase; color: var(--ink, #fff);
+}
+.vs-computer-message-text {
+  font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); line-height: 1.45;
+  color: var(--signal, #5fd8e8); white-space: pre-wrap;
+}
+.vs-computer-message.sev-advisory { border-color: var(--gold); }
+.vs-computer-message.sev-advisory .vs-computer-message-text { color: var(--gold); }
+.vs-computer-message.sev-warning { border-color: var(--tactical); }
+.vs-computer-message.sev-warning .vs-computer-message-text { color: var(--tactical); }
+.vs-computer-message.sev-critical { border-color: var(--alert, #ff3344); }
+.vs-computer-message.sev-critical .vs-computer-message-text { color: var(--alert, #ff3344); }
+:root[data-contrast="more"] .vs-computer-message { background: var(--surface-base, #000); border-color: var(--ink, #fff); }
+:root[data-contrast="more"] .vs-computer-message-text { color: var(--ink, #fff); }
+@media (forced-colors: active) {
+  .vs-computer-message { background: Canvas; border-color: CanvasText; }
+  .vs-computer-message-source, .vs-computer-message .vs-computer-message-text { color: CanvasText; }
+}

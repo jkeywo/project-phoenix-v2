@@ -185,6 +185,9 @@ export class ClientSimState {
      *  unwrapped payload so builders select semantic surfaces by kind even
      *  when the authored instance id is arbitrary. */
     this.blackboardKinds = {};
+    // Presentation continuation belongs to the received board, never the
+    // canonical board or a different, potentially reordered snapshot.
+    this.blackboardPresentation = {};
     this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
@@ -642,9 +645,14 @@ export class ClientSimState {
         for (const [systemId, bb] of (d.updates || [])) {
           // bb is { kind: "Helm", data: { yaw, forward_speed, ... } }
           if (bb && bb.kind && bb.data) {
+            const generation = Number.isSafeInteger(d.presentation_generation)
+              && d.presentation_generation >= 0 ? d.presentation_generation : null;
+            const previousGeneration = this.blackboardPresentation[systemId];
+            if (generation !== null && previousGeneration != null && generation < previousGeneration) continue;
             accepted = true;
             this.blackboards[systemId] = bb.data;
             this.blackboardKinds[systemId] = bb.kind;
+            this.blackboardPresentation[systemId] = generation;
             changes.changedBlackboards.add(systemId);
             if (bb.kind === 'Captain') captainChanged = true;
             // Human-seeking hosting is a ship-wide semantic change. Report it

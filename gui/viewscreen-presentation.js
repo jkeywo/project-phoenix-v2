@@ -191,8 +191,8 @@ export function presentationWithEffect(record, effect, value) {
  * unrelated bindings, identity or save data." Here that scope is structural
  * rather than careful: this record contains nothing else, and this module has
  * no path to the operator profile, to a scenario save, to the fleet code or to
- * the host's action bindings. The volume on the Audio tab beside it is a
- * different store again and is not touched.
+ * the host's action bindings. Audio is a separate section of this endpoint's
+ * stored record, preserved by the write boundary and not reset here.
  *
  * Returns the SAME input when everything is already at its default.
  *
@@ -241,8 +241,8 @@ export function loadViewscreenPresentation(storage, key = VIEWSCREEN_PRESENTATIO
 
 /**
  * Persist the record on THIS endpoint. Storage errors are swallowed for the
- * reason above. Writes exactly one key and reads none, so no other record on
- * this origin — the operator profile most of all — can be disturbed by it.
+ * reason above. Reads and merges this one endpoint key: its audio section is
+ * owned by the room mixer, and a visual reset must not reset that section.
  *
  * @param {{ setItem: function }|null} storage
  * @param {object} record
@@ -250,7 +250,13 @@ export function loadViewscreenPresentation(storage, key = VIEWSCREEN_PRESENTATIO
  */
 export function saveViewscreenPresentation(storage, record, key = VIEWSCREEN_PRESENTATION_KEY) {
   try {
-    if (storage) storage.setItem(key, serializeViewscreenPresentation(record));
+    if (storage) {
+      const next = JSON.parse(serializeViewscreenPresentation(record));
+      let current;
+      try { current = JSON.parse(storage.getItem(key)); } catch (_) { /* corrupt record */ }
+      if (current?.audio) next.audio = current.audio;
+      storage.setItem(key, JSON.stringify(next));
+    }
   } catch (_) {
     /* best-effort: the display forgets across restarts rather than failing */
   }

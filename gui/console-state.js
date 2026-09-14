@@ -1876,11 +1876,19 @@ function scanPayload(state) {
 export function buildSensorsConsoleState(state, systemIds = []) {
   const bb = blackboardOfKind(state, 'Sensors', systemIds)?.data;
   const overrides = bb?.contact_overrides || {};
+  const classifications = bb?.contact_classifications || {};
+  const reports = bb?.contact_reports || {};
+  const selectedReport = Object.hasOwn(reports, state.sensorsTarget);
+  const reportedEntities = Object.entries(reports).filter(([id, report]) => report && overrides[id] !== 'conceal').map(([uuid, report]) => ({ uuid, name: report.name, position: report.position_mm.map(value => value / 1000), report }));
+  const selectedGhost = (bb?.contact_ghosts || []).some(ghost => ghost.uuid === state.sensorsTarget);
   const originalEntities = state.asteroids || [];
-  const ordinary = originalEntities.filter(entity => overrides[entity.uuid] !== 'conceal');
+  const ordinary = originalEntities.filter(entity => overrides[entity.uuid] !== 'conceal' && !Object.hasOwn(reports, entity.uuid)).map(entity => {
+    const label = classifications[entity.uuid];
+    return typeof label === 'string' && label ? { ...entity, name: label, shipClass: label } : entity;
+  });
   const selectedMode = overrides[state.sensorsTarget] || 'normal';
-  state = { ...state, asteroids: ordinary,
-    sensorsTarget: selectedMode === 'conceal' ? null : state.sensorsTarget };
+  state = { ...state, asteroids: [...ordinary, ...reportedEntities],
+    sensorsTarget: selectedMode === 'conceal' || selectedGhost || (selectedReport && !reports[state.sensorsTarget]) ? null : state.sensorsTarget };
   const range = bb ? (bb.radar_range ?? SENSORS_RADAR_RANGE)
                    : (state.sensorsRadarRange ?? SENSORS_RADAR_RANGE);
   const radarShows   = bb ? (bb.radar_shows   ?? state.sensorsRadarShows)
@@ -1908,11 +1916,33 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   // The fixed neutral marker never copies authored icon, size, tags or identity.
   const basicContacts = new Set();
   for (const entity of originalEntities) {
-    if (overrides[entity.uuid] !== 'reveal' || blips.some(blip => blip.uuid === entity.uuid)) continue;
+    if (Object.hasOwn(reports, entity.uuid) || overrides[entity.uuid] !== 'reveal' || blips.some(blip => blip.uuid === entity.uuid)) continue;
     basicContacts.add(entity.uuid);
     const blip = buildTargetBlip(entity.uuid, [entity], state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
       range, { rotate: true, edgeClamp: true, kind: 'contact', icon: 'contact', label: t('console.sensors.basic_contact') });
     if (blip) { blip.icon = null; blip.basic_contact = true; blip.selectable = true; blips.push(blip); }
+  }
+
+  for (const entity of reportedEntities) {
+    const blip = buildTargetBlip(entity.uuid, [entity], state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+      range, { rotate: true, edgeClamp: true, kind: 'contact', icon: 'contact', label: entity.name });
+    if (blip) {
+      blip.icon = null; blip.basic_contact = true; blip.selectable = true;
+      blip.report = entity.report; basicContacts.add(entity.uuid); blips.push(blip);
+    }
+  }
+  // False reports are observer-scoped basic points with no physical target.
+  for (const ghost of bb?.contact_ghosts || []) {
+    const blip = buildTargetBlip(ghost.uuid, [ghost], state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+      range, { rotate: true, edgeClamp: true, kind: 'contact', icon: 'contact', label: ghost.name });
+    if (blip) { blip.icon = null; blip.basic_contact = true; blip.selectable = false; blips.push(blip); }
+  }
+
+  // Classification is applied after detection, including a deliberately revealed
+  // basic point. It supplies only the GM-authored label, never hidden raw facts.
+  for (const blip of blips) {
+    const label = classifications[blip.uuid];
+    if (!Object.hasOwn(reports, blip.uuid) && typeof label === 'string' && label) blip.name = label;
   }
 
   // Target identity/tactical facts (issue #1378): shared with the Weapons
@@ -1922,9 +1952,10 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   const selectedBasic = basicContacts.has(state.sensorsTarget);
   const facts = targetFactsFor(selectedBasic ? { ...state, asteroids: [] } : state, state.sensorsTarget, range);
   if (selectedBasic) {
-    const target = originalEntities.find(entity => entity.uuid === state.sensorsTarget);
+    const target = (selectedReport ? reportedEntities : originalEntities).find(entity => entity.uuid === state.sensorsTarget);
     if (target) {
-      facts.target_name = t('console.sensors.basic_contact');
+      facts.target_name = selectedReport ? target.name : classifications[target.uuid] || t('console.sensors.basic_contact');
+      facts.target_class = selectedReport ? null : classifications[target.uuid] || null;
       const dx = entityX(target) - (state.shipX || 0), dz = entityZ(target) - (state.shipZ || 0);
       facts.target_bearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
       facts.target_range = Math.hypot(dx, dz);
@@ -1948,7 +1979,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   // so the intelligence stays confined to the Sensors scan surface. The host
   // publishes `Some(bool)` only for a Red-Alert-capable ship it has selected;
   // absent field (non-ship/incapable/no selection) reads as `null` → no row.
-  const sensorRadarBb = selectedMode !== 'conceal' && !selectedBasic ? blackboardOfKind(state, 'SensorRadar', systemIds)?.data : null;
+  const sensorRadarBb = selectedMode !== 'conceal' && !selectedBasic && !selectedGhost && !selectedReport ? blackboardOfKind(state, 'SensorRadar', systemIds)?.data : null;
   const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
 
   // Selected-target weapons power (issue #1397). Same authoritative path and
@@ -1984,7 +2015,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   );
   if (tacMarker) blips.push(tacMarker);
   const waypoint = buildWaypointBlip(
-    overrides[state.navigationWaypoint?.source_uuid] === 'conceal' ? null : state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
+    (overrides[state.navigationWaypoint?.source_uuid] === 'conceal' || Object.hasOwn(reports, state.navigationWaypoint?.source_uuid)) ? null : state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
@@ -1998,7 +2029,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
-    regions:                 state.regions ? state.regions.filter(region => overrides[region.uuid] !== 'conceal') : projectRadarRegions(
+    regions:                 state.regions ? state.regions.filter(region => overrides[region.uuid] !== 'conceal' && !Object.hasOwn(reports, region.uuid)) : projectRadarRegions(
       buildRadarRegions(entities, state.objectives || []),
       shipX,
       shipZ,
@@ -2008,6 +2039,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     ),
     blips,
     target_uuid:        state.sensorsTarget || null,
+    target_report:      selectedReport ? reports[state.sensorsTarget] || null : null,
     target_name:        facts.target_name,
     target_kind:        facts.target_kind,
     target_stance:      facts.target_stance,
@@ -2030,7 +2062,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     target_projection:  targetProjection,
     // The last scan reading (issue #1032) — a blackboard of its own, so it is
     // read from its own channel key rather than off the sensors one.
-    scan:               (() => { const scan = scanPayload(state); return scan.reading && overrides[scan.reading.subject_uuid] === 'conceal' ? { ...scan, reading: null } : scan; })(),
+    scan:               (() => { const scan = scanPayload(state); return scan.reading && (overrides[scan.reading.subject_uuid] === 'conceal' || Object.hasOwn(reports, scan.reading.subject_uuid)) ? { ...scan, reading: null } : scan; })(),
     own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
     sensors_auto: systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')

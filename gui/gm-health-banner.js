@@ -184,6 +184,8 @@ export function parseGmHealthProjection(payload) {
 
   return {
     tick,
+    ...(Number.isSafeInteger(value.presentation_generation) && value.presentation_generation >= 0
+      ? { presentation_generation: value.presentation_generation } : {}),
     paused: value.paused === true,
     input_delay_ticks: Number.isSafeInteger(value.input_delay_ticks) ? value.input_delay_ticks : null,
     recovery,

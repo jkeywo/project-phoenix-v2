@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { renderSensorReport } from '../sensor-report.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 /**
@@ -82,6 +83,7 @@ export class PhSensorPanel extends PhElement {
     <div class="target-card" id="target-card" style="display:none">
       <div class="name" id="target-name"></div>
       <div class="badges" id="badges"></div>
+      <p id="sensor-report" style="overflow-wrap:anywhere;font-size:var(--text-sm)" hidden></p>
       <div class="pos-row">
         <div><span class="k">${t('component.sensor_panel.brg')}</span> <span class="v" id="brg-val">—</span><span class="u">°</span></div>
         <div><span class="k">${t('component.sensor_panel.rng')}</span> <span class="v" id="rng-val">—</span><span class="u">${t('component.sensor_panel.au')}</span></div>
@@ -111,6 +113,7 @@ export class PhSensorPanel extends PhElement {
     if (!this.#rngEl) this.#rngEl = root.getElementById('rng-val');
 
     const hasTarget = !!s.target_uuid;
+    renderSensorReport(root.getElementById("sensor-report"), hasTarget ? s.target_report : null);
     this.#noTargetEl.style.display = hasTarget ? 'none' : '';
     this.#targetCardEl.style.display = hasTarget ? '' : 'none';
     root.getElementById('target-area').dataset.hasTarget = String(hasTarget);

@@ -20,7 +20,11 @@ export const ACTION_FEEDBACK_STATE = Object.freeze({
 });
 
 export const MAX_ACTION_CORRELATION_BYTES = 64;
-export const DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS = 5000;
+// A real viewscreen can monopolise a software-rendered browser long enough for
+// an otherwise accepted authoritative action to miss a five-second UI-only
+// deadline. Keep the pending correlation alive through that transient load;
+// this is still bounded feedback, not a retry or a change to admission.
+export const DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS = 30_000;
 export const DEFAULT_ACTION_FEEDBACK_CAPACITY = 32;
 
 const FINAL_STATES = new Set([

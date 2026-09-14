@@ -72,6 +72,7 @@ import { normalizeConsolePayload } from './console-payload.js';
 // the bar pushes a known selection in, it does not ask the console to flip.
 import { openConsoleOverlayId, setConsoleOverlay } from './console-overlays.js';
 import { createSemanticActionRegistry } from './semantic-action-registry.js';
+import { forwardPrivateActionFeedback } from './private-audio.js';
 import {
   CAPTAIN_ACTION_CONTEXT,
   registerCaptainActions,
@@ -221,6 +222,7 @@ export function initConsole({
 
   function _presentActionFeedback(value) {
     emitActionFeedbackTransition(_root, value, _feedbackPreferences);
+    forwardPrivateActionFeedback(_root, value, _semanticActions?.action(value?.actionId));
     if (typeof document === 'undefined' || !value || value.isCurrent === false) return;
     if (value.cancelled || !value.statusId) {
       _semanticFeedbackByAction.delete(value.actionId);

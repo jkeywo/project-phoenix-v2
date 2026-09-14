@@ -60,7 +60,11 @@ export class PhCommsHailList extends PhElement {
     .count { flex-shrink: 0; font-size: var(--text-xs); color: var(--ink-faint); border: 1px solid var(--line-faint); border-radius: 2px; padding: 0.05rem 0.25rem; }
     .count[hidden] { display: none; }
     .priority-cue { display: none; align-items: center; gap: 0.2rem; flex-shrink: 0; border: 1px solid var(--fire-bright); color: var(--fire-bright); padding: 0.08rem 0.25rem; font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.08em; }
-    .priority-cue.critical { display: inline-flex; }
+    .priority-cue.critical, .priority-cue.urgent { display: inline-flex; }
+    .priority-cue.urgent { border-color: var(--gold-bright); color: var(--gold-bright); }
+    /* Keep the explicit urgency word readable on narrow, enlarged consoles. */
+    .row { flex-wrap: wrap; }
+    .priority-cue { max-width: 100%; overflow-wrap: anywhere; }
     .priority-shape { line-height: 1; }
     .timestamp { color: var(--edge); font-size: var(--text-xs); flex-shrink: 0; }
   </style>
@@ -132,6 +136,7 @@ export class PhCommsHailList extends PhElement {
       const preview = thread.subject || '';
       const unread = !!thread.any_unread;
       const critical = thread.latest_priority === COMMS_PRIORITY.CRITICAL;
+      const urgent = thread.latest_priority === COMMS_PRIORITY.URGENT;
       const count = Number.isFinite(thread.message_count) ? thread.message_count : 1;
       let row = this.#rowCache.get(id);
       if (!row) {
@@ -173,9 +178,10 @@ export class PhCommsHailList extends PhElement {
       countEl.textContent = count > 1 ? String(count) : '';
       countEl.hidden = count <= 1;
       countEl.title = t('component.comms_hails.thread_count', { n: count });
-      cue.className = critical ? 'priority-cue critical' : 'priority-cue';
+      cue.className = critical ? 'priority-cue critical' : urgent ? 'priority-cue urgent' : 'priority-cue';
+      cue.querySelector('.priority-shape').textContent = critical ? '◆' : '!';
       cue.querySelector('.priority-text').textContent = critical
-        ? t('component.comms.priority.critical') : '';
+        ? t('component.comms.priority.critical') : urgent ? t('component.comms.priority.urgent') : '';
     });
     // A genuine re-sort DID move the focused row; hand focus back to the same
     // node so the operator keeps their place in the list.

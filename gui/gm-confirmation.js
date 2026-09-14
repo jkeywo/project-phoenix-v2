@@ -1,5 +1,6 @@
 /** Private GM confirmation policy. This module never creates a game command. */
 import { createFocusTrap } from './focus-trap.js';
+import { normalizePrivateAudio } from './private-audio-preferences.js';
 import { createSemanticActionRegistry } from './semantic-action-registry.js';
 import { createClientSemanticActionRegistry } from './client-semantic-actions.js';
 import {
@@ -73,12 +74,16 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   DespawnEntity: ['world.despawn'],
   ObjectiveAction: ['objective.activate', 'objective.complete', 'objective.fail'],
   SetContactOverride: ['contact.override'],
+  SetContactInformation: ['contact.override'],
+  SetContactClassification: ['contact.override'],
   SetSystemDisabled: ['system.disable', 'system.restore'],
   TransmitComms: ['comms.send'],
   SetNpcDoctrine: ['npc.directive'],
+  SetNpcDoctrineChecked: ['npc.directive'],
   SetFactionHostility: ['faction.relation'],
   UndoGmAction: ['action.undo'],
   RequestLiveRestore: ['world.restore'],
+  Presentation: [],
 }).map(([action, ids]) => [action, Object.freeze(ids.map(gmConfirmationMetadata))])));
 
 /** Registration must name a real category, including its accepted default. */
@@ -98,6 +103,7 @@ export function createGmConfirmationProfile({ storage, registry = createSemantic
   }
   const loaded = loadOperatorProfile(storage, { registry: catalogue });
   let profile = loaded.profile;
+  const listeners = new Set();
   registry.replaceProfile({ bindings: profile.bindings, tuning: profile.gamepad.tuning });
   function snapshot() {
     return { ...profile, bindings: { ...profile.bindings, ...registry.bindingProfile() },
@@ -122,9 +128,20 @@ export function createGmConfirmationProfile({ storage, registry = createSemantic
     if (result.status !== 'saved') return result;
     profile = prepared.profile;
     registry.replaceProfile({ bindings: profile.bindings, tuning: profile.gamepad.tuning });
+    for (const listener of listeners) listener();
     return prepared;
   }
-  return { mode, setMode, importProfile,
+  function setAudio(value) {
+    profile = { ...snapshot(), audio: normalizePrivateAudio(value) };
+    return saveOperatorProfile(storage, profile);
+  }
+  function reload() {
+    profile = loadOperatorProfile(storage, {registry:catalogue}).profile;
+    registry.replaceProfile({bindings:profile.bindings,tuning:profile.gamepad.tuning});
+    for (const listener of listeners) listener();
+  }
+  return { mode, setMode, importProfile, setAudio, reload, audio: () => profile.audio, feedback: () => profile.feedback,
+    subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     exportProfile: () => serializeOperatorProfile(snapshot()),
     initialStatus: loaded.status,
   };

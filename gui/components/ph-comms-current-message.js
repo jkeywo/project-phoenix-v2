@@ -4,7 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { isLatestLiveCriticalMessage } from '../comms-state.js';
+import { isLatestLiveCriticalMessage, isLatestLivePriorityMessage, COMMS_PRIORITY } from '../comms-state.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { COMMS_RESPOND_ACTION_ID } from '../stations/comms-actions.js';
 
@@ -70,6 +70,7 @@ export class PhCommsCurrentMessage extends PhElement {
     .sender-label { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-shrink: 0; font-size: var(--text-xs); color: var(--edge); letter-spacing: 0.15em; text-transform: uppercase; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line-faint); }
     .priority-cue { display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0; border: 1px solid var(--fire-bright); background: var(--fire-deep); color: var(--fire-bright); padding: 0.12rem 0.35rem; font-weight: 700; letter-spacing: 0.1em; }
     .priority-cue[hidden] { display: none; }
+    .priority-cue[data-priority="urgent"] { border-color: var(--gold-bright); color: var(--gold-bright); background: var(--bg-card); }
     .priority-shape { line-height: 1; }
     /* The conversation scrolls in HERE and nowhere else (issue #1380): the
        history takes the panel's leftover height and the responses below it
@@ -143,19 +144,21 @@ export class PhCommsCurrentMessage extends PhElement {
     const sender = (typeof s.sender_name === 'string' && s.sender_name)
       || thread.sender_name || '';
     const critical = isLatestLiveCriticalMessage(thread, messages);
+    const urgent = isLatestLivePriorityMessage(thread, messages, COMMS_PRIORITY.URGENT);
     // Rejection targeting THIS thread (#761 AC3): the attempted control flashes.
     const rejection = s.rejection && s.rejection.message_id === tid ? s.rejection : null;
 
     this.#senderEl.textContent = sender;
-    this.#priorityEl.hidden = !critical;
+    this.#priorityEl.hidden = !critical && !urgent;
+    this.#priorityEl.dataset.priority = critical ? 'critical' : 'urgent';
     this.#priorityEl.replaceChildren();
-    if (critical) {
+    if (critical || urgent) {
       const shape = document.createElement('span');
       shape.className = 'priority-shape';
       shape.setAttribute('aria-hidden', 'true');
-      shape.textContent = '◆';
+      shape.textContent = critical ? '◆' : '!';
       const text = document.createElement('span');
-      text.textContent = t('component.comms.priority.critical');
+      text.textContent = critical ? t('component.comms.priority.critical') : t('component.comms.priority.urgent');
       this.#priorityEl.append(shape, text);
     }
 

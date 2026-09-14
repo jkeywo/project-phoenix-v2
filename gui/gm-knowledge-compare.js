@@ -212,13 +212,14 @@ export function crewContactRows(sensorsBlips, rawEntities) {
   return (sensorsBlips || [])
     .filter((blip) => blip && typeof blip.uuid === 'string'
       && !SYNTHETIC_CONTACT_KINDS.has(blip.kind) && !SYNTHETIC_CONTACT_IDS.has(blip.uuid))
-    .filter((blip) => truthModelsRawEntity(rawById.get(blip.uuid)))
+    .filter((blip) => (blip.basic_contact && blip.uuid.startsWith('__gm_ghost:')) || truthModelsRawEntity(rawById.get(blip.uuid)))
     .map((blip) => {
       const raw = rawById.get(blip.uuid);
       const hullFraction = !blip.basic_contact && raw && typeof raw.hull_fraction === 'number' ? raw.hull_fraction : null;
       return {
         id: blip.uuid,
         name: blip.name,
+        ...(blip.report ? { report: blip.report } : {}),
         // Mirror Rust's arithmetic exactly (src/gm_projection.rs `percent`):
         // `((current / maximum) * 100.0).clamp(...).round()` is computed
         // entirely in f32, while `hullFraction` here is an f32 value carried
@@ -334,6 +335,7 @@ export function buildKnowledgeCompare(truthEntities, projection, ship, { display
 
 function describeContact(entry, t) {
   if (!entry) return t('server.gm.knowledge.none');
+  if (entry.report) return t('console.sensors.report_label', { name: wireText(entry.name || entry.id), source: wireText(entry.report.source), age: entry.report.age_ticks, tick: entry.report.observed_tick });
   if (entry.destroyed) return `${entry.name || entry.id} — ${t('server.gm.entity.destroyed')}`;
   if (entry.hull_percent !== null && entry.hull_percent !== undefined) {
     return `${entry.name || entry.id} — ${t('server.gm.entity.hull', { percent: entry.hull_percent })}`;

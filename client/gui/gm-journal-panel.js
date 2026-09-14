@@ -54,6 +54,9 @@ export const GM_JOURNAL_ACTION_KIND_LABELS = Object.freeze({
   'world-spawn': 'server.gm.journal.kind.world_spawn',
   'world-despawn': 'server.gm.journal.kind.world_despawn',
   'objective-control': 'server.gm.journal.kind.objective_control',
+  'contact-information': 'server.gm.contact.information',
+  'contact-misclassify': 'server.gm.contact.misclassify',
+  'contact-classification-normal': 'server.gm.contact.classification-normal',
   'contact-reveal': 'server.gm.journal.kind.contact_reveal',
   'contact-conceal': 'server.gm.journal.kind.contact_conceal',
   'contact-normal': 'server.gm.journal.kind.contact_normal',
@@ -64,6 +67,7 @@ export const GM_JOURNAL_ACTION_KIND_LABELS = Object.freeze({
   'faction-relation': 'server.gm.journal.kind.faction_relation',
   'action-undo': 'server.gm.journal.kind.action_undo',
   'live-restore': 'server.gm.journal.kind.live_restore',
+  presentation: 'server.gm.presentation.title',
 });
 
 const text = (value) => typeof value === 'string' && value.length > 0;

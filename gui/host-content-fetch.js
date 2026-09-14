@@ -19,4 +19,17 @@ export function registerContentFetch(bindings, settled, fetcher = fetch) {
   });
 }
 
-if (typeof window !== 'undefined') window.registerContentFetch = registerContentFetch;
+/** Required immutable authoring input, completed before world preload can
+ * trigger finishInit. An admitted overlay is already resident and wins. */
+export async function preloadSoundCatalog(bindings, fetcher = fetch) {
+  const path = 'assets/audio/sound-cues.toml';
+  if (bindings.wasm_preload_world_source(path) != null) return;
+  const response = await fetcher(path, { signal: AbortSignal.timeout(30000) });
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  bindings.wasm_push_world_toml(path, await response.text());
+}
+
+if (typeof window !== 'undefined') {
+  window.registerContentFetch = registerContentFetch;
+  window.preloadSoundCatalog = preloadSoundCatalog;
+}

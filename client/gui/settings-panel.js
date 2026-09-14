@@ -1,3 +1,5 @@
+import { renderAudioSettingsPanel } from './audio-settings-panel.js';
+
 /**
  * gui/settings-panel.js — the phone client's settings cog (issue #940).
  *
@@ -484,6 +486,7 @@ export function mountSettings({
   getState,
   audioEl,
   audioEls,
+  audio,
   getManual,
   myToken,
   onAccessibility: _onAccessibility,
@@ -520,6 +523,7 @@ export function mountSettings({
   const isDemo = _isDemo || (() => isDemoBuild({ win, doc }));
 
   let activeTab = null;
+  let disposeAudioPanel = null;
   let operatorProfileStatus = null;
 
   // The documentation surface's own state, deliberately NOT `activeTab`.
@@ -700,6 +704,10 @@ export function mountSettings({
   }
 
   function buildAudioTab(body) {
+    if (audio) {
+      disposeAudioPanel = renderAudioSettingsPanel(doc, body, audio);
+      return;
+    }
     const el = section('settings.master_volume');
     const volRow = row('settings-vol-row');
 
@@ -1304,6 +1312,7 @@ export function mountSettings({
   }
 
   function buildContent() {
+    disposeAudioPanel?.(); disposeAudioPanel = null;
     const restoreTo = focusedControlId();
     const view = buildSettingsState({
       state: getState ? getState() : {},

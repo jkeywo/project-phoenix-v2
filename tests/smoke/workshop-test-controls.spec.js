@@ -51,7 +51,8 @@ test('built Workshop Test controls keep Authoring exclusive and fit 200% text', 
   await page.locator('#workshop-source').fill(`${WORKSHOP_WORLD_TEXT}# exact unsaved run\n`);
   await page.locator('#workshop-test-start').click();
   await expect(page.locator('.workshop-layout')).toBeHidden();
-  await expect(page.locator('.workshop-toolbar')).toBeHidden();
+  await expect(page.locator('#workshop > .workshop-toolbar')).toBeHidden();
+  await expect(page.locator('#workshop-models')).toBeHidden();
   await expect(page.locator('#workshop-test-authoring')).toBeVisible();
   await expect(page.locator('#workshop-test-world')).toBeDisabled();
   await page.locator('#workshop-test-pause').click();

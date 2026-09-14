@@ -72,7 +72,8 @@ describe('Workshop Authoring browser surface', () => {
     await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
     byId('test-start').click();
     await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(true));
-    expect(document.querySelector('.workshop-toolbar').hidden).toBe(true);
+    expect(document.querySelector('#root > .workshop-toolbar').hidden).toBe(true);
+    expect(byId('models').hidden).toBe(true);
     expect(document.querySelector('.sound-audition').hidden).toBe(true);
     expect(byId('test-world').disabled).toBe(true);
     const first = request.mock.calls.find(([value]) => value.op === 'test-start')[0];

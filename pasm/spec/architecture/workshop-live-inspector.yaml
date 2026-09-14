@@ -1,4 +1,24 @@
 entities:
+  - component: workshop-live-active-schema-inspector
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Broad Active-Content Live Inspection
+      summary: "Live Inspector exposes every known schema field for instantiated entities and definitions in loaded layers through five selection-scoped domain panels: world/scenario, entities/AI, hull/Stations/Systems, Regions, and authored presentation/audio. Each reading shows the effective authored baseline and winning provenance beside current runtime state and relevant derived context. Existing typed GM actions are linked through their established panels; checked NPC doctrine remains M6's sole additional field-replacement transaction. Every other authored field is explicitly Derived or Recreate required, and a schema-coverage ratchet rejects unclassified known active fields."
+      rationale:
+        - "Live writes affect only the selected runtime instance and apply canonically across every fleet peer. Each existing action keeps its own apply-time validation, attribution, result, replay and explicit per-family reversibility rather than gaining a duplicate Inspector action."
+        - "Scenario Flags and lower-level operational actions remain reachable only through authored GM-operable events and existing typed actions. Numeric gameplay tuning, transforms, Region shape/effects, source, Rhai, models, rigs and assets are not live-editable."
+        - "Unknown extension fields and unloaded or inactive definitions remain standalone Workshop concerns. A known field without an exact retained source span stays visible and reports its location unavailable rather than inferring one."
+        - "Current state names a canonical GM or gameplay cause only where retained evidence supports it; otherwise the Inspector reports that the divergence has no retained single cause."
+        - "Details are fetched for the selected object and domain at existing bounded projection cadences. A disappeared entity or unloaded layer retains its final reading marked gone and stale with every action disabled; related references use one bounded Back/Forward history and never follow a replacement by authored name."
+        - "Every equal GM receives the same complete information. Role presets may filter or arrange panels locally but never alter access. Presentation/audio inspection excludes private operator preferences and physical output assignments."
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      depends_on: [workshop-inspector-descriptors]
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+
   - component: workshop-inspector-descriptors
     core:
       status: implemented

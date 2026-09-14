@@ -1,10 +1,12 @@
-# T4 audio decisions: PRD #1454; implementation #1455-#1466; human acceptance #1467.
+# T4 audio decisions: PRD #1454; implemented by #1455-#1466; human acceptance #1467 remains.
 # Ratified 2026-09-13 after the user interview and independent issue-split review.
-# These decisions specify future playback work, not implementation evidence.
+# Runtime implementation evidence is mapped in architecture/presentation-loading.yaml
+# and architecture/authored-live-audio.yaml. Real-device listening and routing
+# acceptance remains tracked by #1467.
 entities:
   - decision: t4-game-audio-surface-scope
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Shared Viewscreen Sound and Optional Private Feedback
       summary: "T4 delivers game sounds and tones with their visual/text equivalents on applicable supported browser and native surfaces. Browser and native Viewscreens have full parity for the configured room soundtrack. Phones, native Station Consoles and the GM receive optional local own-action, refusal, timeout and important actionable-alert feedback; they do not duplicate shared music, engine or combat sound. No recorded dialogue playback, speech synthesis, TTS or voiced-scenario production is included. Live human voice/video remains separate roadmap work."
@@ -15,7 +17,7 @@ entities:
 
   - decision: t4-audio-authored-mix-and-settings
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Master and Five Audio Categories
       summary: "Master plus Music, Ambience/engines, Effects/weapons, Alerts and Interface feedback have independent volume and mute choices wherever the surface has a real consumer. Master zero or mute silences every active and future sound, including alarms, output tests and local audition. Each category scales its authored mix rather than replacing per-sound levels; unmuting retains the operator's selected level. Visual/text information remains when audio is muted or unavailable."
@@ -27,7 +29,7 @@ entities:
 
   - decision: t4-native-audio-output-assignment
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Explicit Private Outputs with No Room Fallback
       summary: "The native Viewscreen uses its selected room output, initially the system default. Native private Station/GM playback requires explicit output assignment using the existing bridge media surface/device vocabulary and assignment rules. Missing, lost, refused or ambiguous private output means silence and visible surface-specific status, never system-default or room-output fallback. A deliberate output test uses the selected route and respects its mute and volume."
@@ -43,7 +45,7 @@ entities:
 
   - decision: t4-informative-sound-live-equivalents
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Live Equivalents without Cue History or Replay
       summary: "Every informative sound has a visual/text equivalent containing its useful meaning and source, urgency or direction where conveyed. Existing readouts, current state and Comms text are reused when sufficient; a missing equivalent arrives with the sound feature. Music, background hum and routine clicks require no caption. Equivalents accompany the live cue or existing current state. Missed cues are missed: there is no recent-cue list, audio playback history, catch-up backlog, cue record for review or replay, and no insertion into existing records solely to preserve a cue."
@@ -57,7 +59,7 @@ entities:
 
   - decision: t4-quiet-private-audio-feedback
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Quiet Semantic Feedback for Stations and GM
       summary: "Private Station/GM defaults include optional clicks, refusal, timeout and important actionable-alert feedback. Successful-action and pending tones are opt-in. Continuous-control updates never produce per-update sound, and repeated alerts/state publications coalesce rather than multiplying playback. Feedback identifies only the originating operator's action result or an alert actionable on that surface; it does not create a private copy of the room soundtrack."
@@ -72,7 +74,7 @@ entities:
 
   - decision: t4-audio-comfort-processing
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Mono, Reduced Dynamic Range and Optional Alert Ducking
       summary: "Applicable playback surfaces offer mono, reduced dynamic range and optional ducking of Music and Ambience/engines under important alerts. Mono carries all allowed content to both output channels; reduced range brings loud peaks and quiet sounds closer together; ducking restores the beds smoothly after the alert. No comfort operation defeats Master/category mute or changes authoritative information, and directional equivalents remain available."
@@ -87,7 +89,7 @@ entities:
 
   - decision: t4-m8-authored-sound-cues
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Validated M8 Sounds through Typed Presentation Dispatch
       summary: "GM and scenario sound cues use the same typed presentation command route with validated allowed sound assets, category, audience and sufficient informative equivalent metadata. Each recipient's mixer, comfort and output policy applies without a GM bypass. A deliberate local audition previews sound and its equivalent without a live authoritative action or shared playback; native GM audition requires an explicitly assigned private output. Speech and arbitrary remote media are outside this contract."
@@ -102,7 +104,7 @@ entities:
 
   - decision: t4-audio-endpoint-provider-architecture
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       origin: ai
       title: One Playback Owner per Logical Endpoint

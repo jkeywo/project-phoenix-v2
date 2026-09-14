@@ -124,11 +124,14 @@ entities:
 
   - component: gm-milestone-integrated-workshop
     core:
-      status: proposed
+      status: partially-implemented
       confidence: confirmed
       title: GM Integrated Workshop and Live Inspector
       summary: "T4 M6, after Operations and Safety, is the first native GM integration. One native simulation instance may carry one fixed player-ship slot alongside local equal GM operator identities, advertise ship plus gm capabilities, and count once for deterministic NPC ownership; browser GM remains GM-only. Unify the GM console, HTML editor and model viewer around shared schema-backed inspectors while keeping two exclusive contexts. Live exists only while connected as a GM peer: it exposes M1-M5 actions plus separately tested safe reconciliation adapters as constrained, attributed, optimistic-concurrency transactions through Operations/Safety; Rhai source is fixed for the run and no arbitrary ECS escape hatch exists. Standalone Workshop switches between Authoring and Test with one chronological undo stack. Native Authoring edits an explicitly selected project root or one mod workspace; Browser Authoring edits exactly one in-memory new/imported/loaded mod pack over read-only base/other-pack dependencies and exports one ZIP. Test validates an unsaved draft, starts a fresh disposable deterministic simulation with every Station on Backfill, and switches between the omniscient GM view and the authentic Viewscreen of any simulated player ship. M6 reaches comment-preserving TOML/Rhai/entity/definition/mod-pack parity, integrates model/rig/marker/variant/LOD preview and native LOD/remesh capability, then deletes the old editor and standalone viewer interfaces while preserving redirecting developer shortcuts."
       rationale:
+        - "Implementation in progress: browser and native Authoring preserve source and history, validate through runtime-equivalent gates, recover crash drafts, and run disposable deterministic Tests from exact unsaved source. Model scalar authoring and captured preview are present, and the first shared-descriptor Live transaction safely edits NPC doctrine through optimistic concurrency. GM/ship Test views, traces, breakpoints, role preview, broader specialised panels, native LOD/remesh integration, the golden parity workflow and retirement of the old editor/viewer remain before M6 is complete."
+        - "The 2026-09-14 Live Inspector review defines broad parity as complete inspection of known schema fields for instantiated content in loaded layers, split across five domain panels and guarded by a schema-coverage ratchet. Existing typed GM/event actions are linked rather than duplicated; checked NPC doctrine is M6's only additional field-replacement transaction. Numeric tuning, transforms, Regions, source, Rhai, models, rigs and assets remain read-only or recreate-required."
+        - "That review also settled the remaining M6 boundaries: a combined native ship/GM advertises both capabilities but counts as one technical peer; old-schema migration is an explicit reviewable draft; viewer parity includes entity, star and planet previews; and accepted parity removes the old editor/viewer implementations immediately while preserving redirects and reusable modules."
         - "Live and Workshop never coexist. Leaving Live uses ordinary GM disconnect/reconnect; Workshop is offline and needs no GM credentials or running session. There is no capture-live-state-to-source workflow and no shared undo/draft state across the boundary."
         - "Authoring and Live reuse inspector presentation but not authority: Authoring patches a document-preserving syntax tree and writes only after runtime-equivalent parse/composition/Rhai/reference/mod-pack validation; Live submits named actions or schema-marked safe adapters at agreed ticks. Recreate-required and derived fields remain visible but disabled."
         - "Structured forms are hybrid: runtime-owned descriptors supply types, defaults, validation, source locations and Live mutability, while human-authored panels own grouping and specialised workflows. Unknown fields remain available through a structured/raw fallback without losing comments, ordering or formatting."
@@ -146,34 +149,36 @@ entities:
 
   - component: gm-milestone-information-control
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: GM Information Control
       summary: "False-information injection through the radar-projection seam: misclassification, ghost contacts, and degraded or delayed intel, extending the knowledge model (truth, sensed, interpreted, presented) that the directing milestone's reveal/conceal deliberately left simple."
       rationale:
         - "Deferred out of the MVP by explicit PRD #930 decision so the radar-projection seam is extended deliberately rather than under MVP pressure."
         - "Exit criteria: a GM can control what a crew believes, not just what it can detect."
+        - "Implemented through observer-specific reported classification, ghost contacts, and degraded/delayed sample-and-hold reports. The detailed contracts and implementation mappings are in design/t4-information-control.yaml."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       coordinates: [gm-milestone-integrated-workshop]
-      runs_in: [host-browser-runtime, headless-runtime]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
 
   - component: gm-milestone-presentation
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: GM In-Sim Presentation Control
       summary: "GM cue control of the shared host display: forcing viewscreen modes, incoming-communication takeover, title cards, and sound cues, all issued through the same dispatch path as mission actions so scenarios can author the same cues. Strictly in-sim; no external hardware."
       rationale:
         - "Settled 2026-08-02: in-sim presentation survives as its own milestone because the viewscreen is already the shared host display, so cue control is cheap drama with no hardware dependency."
         - "External show hardware (DMX, Hue, OBS, OSC) is explicitly not planned; the cue/event path should simply not preclude a future integration."
         - "Exit criteria: a GM can stage scene transitions and reveals on the viewscreen."
+        - "Implemented by #1468 for forced/released Viewscreen modes, title cards and eligible incoming-Comms takeover, with GM and scenario producers sharing one typed owner; audio #1466 extends that owner with validated authored Sound occurrences. The detailed implementation mapping is in design/t4-presentation.yaml."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       coordinates: [gm-milestone-information-control]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
 
   - component: gm-milestone-campaign-and-pacing
     core:

@@ -88,11 +88,15 @@ jobs:
         run: |
           if [ -n "$PR_BASE" ]; then
             base="$PR_BASE"
-          elif [ -n "$PUSH_BEFORE" ]; then
+          elif [[ -n "$PUSH_BEFORE" && ! "$PUSH_BEFORE" =~ ^0+$ ]]; then
             base="$PUSH_BEFORE"
           else
             # Scheduled/manual runs compare to the checked-out commit's parent.
             base="$(git rev-parse --verify HEAD^)"
+          fi
+          if ! git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1; then
+            # A force-updated ref can leave the trusted pre-push commit dangling.
+            git fetch --no-tags --depth=1 origin "$base"
           fi
           git rev-parse --verify "${base}^{commit}" >/dev/null
           echo "PHOENIX_AMBIGUITY_BASE_REF=$base" >> "$GITHUB_ENV"

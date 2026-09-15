@@ -42,6 +42,8 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-dock-canvas.is-narrow > .workshop-dock-panel { min-height: 32rem; }
 .workshop-files { display: grid; align-content: start; gap: .6rem; }
 .workshop-files select, .workshop-files input { width: 100%; }
+.workshop-add { display: grid; align-content: start; gap: .6rem; }
+.workshop-add input { width: 100%; }
 #workshop-dependency, #workshop-dependency-source { display: block; width: 100%; margin: .5rem 0; }
 .workshop-inspector { min-width: 0; }
 .workshop-inspector label { display: block; margin-top: .6rem; }

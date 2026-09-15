@@ -1,5 +1,12 @@
-export const WORKSHOP_LAYOUT_VERSION = 1;
-export const WORKSHOP_PANELS = Object.freeze(['files', 'source', 'inspector']);
+export const WORKSHOP_LAYOUT_VERSION = 2;
+export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
+  Object.freeze({ id: 'files' }),
+  Object.freeze({ id: 'source' }),
+  Object.freeze({ id: 'inspector' }),
+  Object.freeze({ id: 'add' }),
+  Object.freeze({ id: 'recovery' }),
+]);
+export const WORKSHOP_PANELS = Object.freeze(WORKSHOP_PANEL_REGISTRY.map(panel => panel.id));
 
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 
@@ -8,7 +15,7 @@ export function defaultWorkshopLayout() {
     version: WORKSHOP_LAYOUT_VERSION,
     root: {
       type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-      children: [group(['files']), group(['source']), group(['inspector'])],
+      children: [group(['files']), group(['source']), group(['inspector', 'add', 'recovery'], 'inspector')],
     },
     floats: [], closed: [], selected: 'source',
   };
@@ -66,7 +73,7 @@ function clampFloat(entry, bounds) {
 }
 
 export function normalizeWorkshopLayout(value, bounds) {
-  if (!value || value.version !== WORKSHOP_LAYOUT_VERSION) return defaultWorkshopLayout();
+  if (!value || ![1, WORKSHOP_LAYOUT_VERSION].includes(value.version)) return defaultWorkshopLayout();
   const seen = new Set();
   const root = normalizeNode(value.root, seen);
   if (root === INVALID_NODE) return defaultWorkshopLayout();
@@ -82,7 +89,15 @@ export function normalizeWorkshopLayout(value, bounds) {
   for (const panel of WORKSHOP_PANELS) if (!seen.has(panel)) closed.push(panel);
   const selected = isPanel(value.selected) && !closed.includes(value.selected)
     ? value.selected : firstVisible(root, floats) || WORKSHOP_PANELS[0];
-  return { version: WORKSHOP_LAYOUT_VERSION, root, floats, closed, selected };
+  const normalized = { version: WORKSHOP_LAYOUT_VERSION, root, floats, closed, selected };
+  if (value.version !== 1) return normalized;
+  const target = !normalized.closed.includes('inspector') ? 'inspector' : firstVisible(root, floats);
+  if (!target) return defaultWorkshopLayout();
+  const migrated = ['add', 'recovery'].reduce(
+    (state, panel) => dockWorkshopPanel(state, panel, target, 'tab'), normalized,
+  );
+  migrated.selected = selected;
+  return migrated;
 }
 
 function firstVisible(node, floats = []) {

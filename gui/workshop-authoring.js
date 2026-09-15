@@ -75,11 +75,12 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const filesLabel = el('label', 'workshop.files', { for: 'workshop-files' });
   const files = el('select', null, { id: 'workshop-files' });
   filesPanel.append(filesLabel, files);
+  const addPanel = el('div', null, { class: 'workshop-add' });
   const addPath = el('input', null, { id: 'workshop-add-path', type: 'text' });
   const assetInput = el('input', null, { type: 'file', hidden: '' });
   const addSource = button('workshop.add_source', 'workshop-add-source', () => addDocument());
   const addAsset = button('workshop.add_asset', 'workshop-add-asset', () => assetInput.click());
-  filesPanel.append(el('label', 'workshop.add_path', { for: 'workshop-add-path' }), addPath, addSource, addAsset, assetInput);
+  addPanel.append(el('label', 'workshop.add_path', { for: 'workshop-add-path' }), addPath, addSource, addAsset, assetInput);
   const inspector = el('details', null, { class: 'workshop-inspector' });
   inspector.append(el('summary', 'workshop.inspector'));
   const inspectButton = button('workshop.inspect', 'workshop-inspect', () => inspect());
@@ -106,7 +107,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const discardButton = button('workshop.recovery_discard', 'workshop-discard', () => discardRecovery());
   restoreButton.hidden = discardButton.hidden = true;
   recoveryPanel.append(recoveryStatus, restoreButton, discardButton);
-  root.append(toolbar, recoveryPanel, layout, feedback, findings, settings);
+  root.append(toolbar, layout, feedback, findings, settings);
   const dependencies = el('details');
   dependencies.append(el('summary', 'workshop.dependencies'));
   const dependencySelect = el('select', null, { id: 'workshop-dependency' });
@@ -169,7 +170,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   applyAccessibilityProfile(profile.accessibility, { doc, win });
   const layoutMount = mountWorkshopLayout({
     root, surface: layout,
-    panels: { files: filesPanel, source: sourcePanel, inspector },
+    panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -178,7 +179,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         top: translate('workshop.layout.dock_top'), bottom: translate('workshop.layout.dock_bottom'),
         tab: translate('workshop.layout.dock_tab'),
       },
-      panels: { files: translate('workshop.files'), source: translate('workshop.source'), inspector: translate('workshop.inspector') },
+      panels: {
+        files: translate('workshop.files'), source: translate('workshop.source'), inspector: translate('workshop.inspector'),
+        add: translate('workshop.add_files'), recovery: translate('workshop.recovery'),
+      },
     },
     initial: profile.authoringLayout, doc, win,
     onChange(authoringLayout) {
@@ -236,9 +240,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       sourceLabel.textContent = selected ? translate('workshop.source_path', { path: selected }) : translate('workshop.source');
     }
     const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
+    toolbar.setAttribute('aria-busy', String(busy));
     const testing = testPanel?.testing() || false;
     modelPanel?.refresh({ hidden: testing });
-    toolbar.hidden = recoveryPanel.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
+    toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     sourceScope.hidden = testing;
     dependencies.hidden = testing || !runtime.dependencies;
     root.querySelector('.workshop-mode').textContent = translate(testing ? 'workshop.test_mode' : 'workshop.authoring');

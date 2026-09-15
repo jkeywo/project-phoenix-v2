@@ -43,18 +43,22 @@ describe('Workshop Authoring browser surface', () => {
   it('mounts the docked workflow, persists keyboard moves, restores focus and repairs a reopened layout', async () => {
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'source', 'inspector']);
+      .toEqual(['files', 'source', 'inspector', 'add', 'recovery']);
     const sourceTab = document.querySelector('[data-panel="source"] .workshop-panel-tab');
     sourceTab.focus();
     sourceTab.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(document.activeElement.closest('[data-panel]')?.dataset.panel).toBe('source'));
-    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(1);
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(2);
     document.querySelector('[data-panel="inspector"] .workshop-panel-header button:last-child').click();
     expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
     [...document.querySelectorAll('.workshop-panel-switcher button')].find(node => node.textContent === t('workshop.inspector')).click();
     expect(document.querySelector('[data-panel="inspector"]')).not.toBeNull();
     document.querySelector('.workshop-layout-reset').click();
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(3);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(5);
+    expect(document.querySelectorAll('#workshop-add-source')).toHaveLength(1);
+    expect(document.querySelectorAll('#workshop-restore')).toHaveLength(1);
+    expect(byId('add-source').closest('[data-panel]')?.dataset.panel).toBe('add');
+    expect(byId('restore').closest('[data-panel]')?.dataset.panel).toBe('recovery');
   });
 
   it('projects one selected panel when narrow and restores the desktop tree', async () => {
@@ -66,7 +70,7 @@ describe('Workshop Authoring browser surface', () => {
     byId('source').value = 'retained';
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     window.dispatchEvent(new Event('resize'));
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(3);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(5);
     expect(byId('source').value).toBe('retained');
   });
 
@@ -188,6 +192,36 @@ describe('Workshop Authoring browser surface', () => {
     byId('dependencies-load').click();
     await vi.waitFor(() => expect(byId('dependency-source').value).toContain('phoenix-base'));
     expect(byId('dependency-source').readOnly).toBe(true);
+  });
+
+  it('adds source from its dock panel while fixed history commands target the active document', async () => {
+    await importBytes();
+    select(WORKSHOP_WORLD);
+    document.querySelector('[data-layout-panel="add"][role="tab"]').click();
+    byId('add-path').value = 'assets/worlds/added.rhai';
+    byId('add-source').click();
+    expect(byId('files').value).toBe('assets/worlds/added.rhai');
+    edit('fn tick() {}\n');
+    expect(byId('dirty').textContent).toBe(t('workshop.dirty'));
+    byId('undo').click();
+    expect(byId('source').value).toBe('');
+    byId('undo').click();
+    expect([...byId('files').options].map(option => option.value)).not.toContain('assets/worlds/added.rhai');
+    expect(document.querySelectorAll('#workshop-undo')).toHaveLength(1);
+  });
+
+  it('exposes fixed-command busy state while checking the active docked document', async () => {
+    let finish;
+    runtime.validate.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    await importBytes();
+    select(WORKSHOP_WORLD);
+    edit(`${WORKSHOP_WORLD_TEXT}# active candidate\n`);
+    byId('check').click();
+    expect(document.querySelector('.workshop-toolbar').getAttribute('aria-busy')).toBe('true');
+    expect(byId('dirty').textContent).toBe(t('workshop.dirty'));
+    expect(runtime.validate.mock.calls[0][1].read(WORKSHOP_WORLD)).toContain('# active candidate');
+    finish({ accepted: true, findings: [] });
+    await vi.waitFor(() => expect(document.querySelector('.workshop-toolbar').getAttribute('aria-busy')).toBe('false'));
   });
 
   it('loads the native project into the same controls and retains the draft after a refused save', async () => {

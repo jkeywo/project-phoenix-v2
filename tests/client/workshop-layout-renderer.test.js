@@ -9,7 +9,7 @@ import { mountWorkshopLayout } from '../../gui/workshop-layout-renderer.js';
 const labels = {
   switcher: 'Panels', reset: 'Reset', float: 'Float', close: 'Close',
   dock: { left: 'Dock left', right: 'Dock right', top: 'Dock above', bottom: 'Dock below', tab: 'Dock as tab' },
-  panels: { files: 'Files', source: 'Source', inspector: 'Inspector' },
+  panels: { files: 'Files', source: 'Source', inspector: 'Inspector', add: 'Add files', recovery: 'Recovery' },
 };
 
 function relation(node, first, second) {
@@ -28,7 +28,7 @@ function mount(initial = defaultWorkshopLayout()) {
   document.body.innerHTML = '<main id="root"><div id="surface"></div></main>';
   const root = document.getElementById('root');
   const surface = document.getElementById('surface');
-  const panels = Object.fromEntries(['files', 'source', 'inspector'].map(panel => {
+  const panels = Object.fromEntries(['files', 'source', 'inspector', 'add', 'recovery'].map(panel => {
     const node = document.createElement('div'); node.textContent = panel; return [panel, node];
   }));
   const changes = [];
@@ -117,7 +117,7 @@ describe('Workshop layout renderer', () => {
 
   it('keeps deterministic float order and raises the selected or focused float without persisting z-index', () => {
     const initial = {
-      version: 1, root: null, closed: [], selected: 'source',
+      version: 2, root: null, closed: [], selected: 'source',
       floats: [
         { panel: 'files', x: 12, y: 12, width: 300, height: 200 },
         { panel: 'source', x: 40, y: 40, width: 300, height: 200 },
@@ -150,12 +150,12 @@ describe('Workshop layout renderer', () => {
 
   it('returns focus to the switcher after closing the final panel', () => {
     ({ mounted } = mount());
-    for (const panel of ['files', 'source', 'inspector']) {
+    for (const panel of ['files', 'source', 'inspector', 'add', 'recovery']) {
       document.querySelector(`[data-panel="${panel}"] [data-layout-control="close"]`).click();
     }
     expect(document.querySelector('.workshop-dock-panel')).toBeNull();
     expect(document.activeElement).toBe(document.querySelector(
-      '[data-layout-panel="inspector"][data-layout-control="switcher"]',
+      '[data-layout-panel="recovery"][data-layout-control="switcher"]',
     ));
   });
 

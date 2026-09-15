@@ -219,7 +219,10 @@ fn fields(value: &Value, names: &[&str]) -> Value {
 }
 
 fn workshop_panel(value: &Value) -> bool {
-    matches!(value.as_str(), Some("files" | "source" | "inspector"))
+    matches!(
+        value.as_str(),
+        Some("files" | "source" | "inspector" | "add" | "recovery")
+    )
 }
 
 fn sanitize_workshop_node(
@@ -227,7 +230,7 @@ fn sanitize_workshop_node(
     seen: &mut BTreeSet<String>,
     depth: usize,
 ) -> Result<Option<Value>, ()> {
-    if depth > 3 {
+    if depth > 5 {
         return Err(());
     }
     let Some(node_type) = value["type"].as_str() else {
@@ -262,7 +265,7 @@ fn sanitize_workshop_node(
                 return Ok(None);
             };
             let mut children = Vec::new();
-            for child in raw_children.iter().take(3) {
+            for child in raw_children.iter().take(5) {
                 if let Some(child) = sanitize_workshop_node(child, seen, depth + 1)? {
                     children.push(child);
                 }
@@ -294,11 +297,11 @@ fn sanitize_workshop_node(
 
 fn default_authoring_layout() -> Value {
     json!({
-        "version": 1,
+        "version": 2,
         "root": {"type":"split", "axis":"horizontal", "sizes":[22,56,22], "children":[
             {"type":"tabs", "tabs":["files"], "active":"files"},
             {"type":"tabs", "tabs":["source"], "active":"source"},
-            {"type":"tabs", "tabs":["inspector"], "active":"inspector"}
+            {"type":"tabs", "tabs":["inspector","add","recovery"], "active":"inspector"}
         ]},
         "floats": [], "closed": [], "selected": "source"
     })
@@ -316,7 +319,7 @@ fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
 }
 
 fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
-    if value["version"] != 1 {
+    if value["version"] != 1 && value["version"] != 2 {
         return None;
     }
     let mut seen = BTreeSet::new();
@@ -347,7 +350,7 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
             "width": number("width", 420.0).max(240.0),
             "height": number("height", 360.0).max(180.0),
         }));
-        if floats.len() == 3 {
+        if floats.len() == 5 {
             break;
         }
     }
@@ -366,7 +369,7 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
             closed.push(json!(panel));
         }
     }
-    for panel in ["files", "source", "inspector"] {
+    for panel in ["files", "source", "inspector", "add", "recovery"] {
         if seen.insert(panel.to_owned()) {
             closed.push(json!(panel));
         }
@@ -377,9 +380,146 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
         .cloned()
         .or_else(|| first_visible(&root, &floats))
         .unwrap_or_else(|| json!("files"));
-    Some(
-        json!({"version": 1, "root": root, "floats": floats, "closed": closed, "selected": selected}),
-    )
+    let mut layout = json!({"version": 2, "root": root, "floats": floats, "closed": closed, "selected": selected});
+    if value["version"] == 1 {
+        layout = migrate_authoring_layout(layout);
+    }
+    Some(layout)
+}
+
+fn add_workshop_tab(node: &mut Value, target: &str, panel: &str) -> bool {
+    match node["type"].as_str() {
+        Some("tabs")
+            if node["tabs"].as_array().is_some_and(|tabs| {
+                tabs.iter()
+                    .any(|candidate| candidate.as_str() == Some(target))
+            }) =>
+        {
+            node["tabs"].as_array_mut().unwrap().push(json!(panel));
+            node["active"] = json!(panel);
+            true
+        }
+        Some("split") => node["children"].as_array_mut().is_some_and(|children| {
+            children
+                .iter_mut()
+                .any(|child| add_workshop_tab(child, target, panel))
+        }),
+        _ => false,
+    }
+}
+
+fn remove_workshop_panel(node: &Value, panel: &str) -> Value {
+    match node["type"].as_str() {
+        Some("tabs") => {
+            let tabs: Vec<_> = node["tabs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|tab| tab.as_str() != Some(panel))
+                .cloned()
+                .collect();
+            if tabs.is_empty() {
+                Value::Null
+            } else {
+                let active = node["active"]
+                    .as_str()
+                    .filter(|active| tabs.iter().any(|tab| tab.as_str() == Some(active)))
+                    .map_or_else(|| tabs[0].clone(), Value::from);
+                json!({"type":"tabs", "tabs":tabs, "active":active})
+            }
+        }
+        Some("split") => {
+            let sizes = node["sizes"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let survivors: Vec<_> = node["children"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .filter_map(|(index, child)| {
+                    let child = remove_workshop_panel(child, panel);
+                    (!child.is_null()).then(|| {
+                        (
+                            child,
+                            sizes.get(index).and_then(Value::as_f64).unwrap_or(1.0),
+                        )
+                    })
+                })
+                .collect();
+            match survivors.len() {
+                0 => Value::Null,
+                1 => survivors[0].0.clone(),
+                _ => {
+                    let previous_total: f64 = sizes.iter().filter_map(Value::as_f64).sum();
+                    let surviving_total: f64 = survivors.iter().map(|(_, size)| size).sum();
+                    json!({
+                        "type":"split",
+                        "axis":node["axis"],
+                        "sizes":survivors.iter().map(|(_, size)| size * previous_total / surviving_total).collect::<Vec<_>>(),
+                        "children":survivors.into_iter().map(|(child, _)| child).collect::<Vec<_>>()
+                    })
+                }
+            }
+        }
+        _ => Value::Null,
+    }
+}
+
+fn dock_workshop_tab(layout: &mut Value, panel: &str, target: &str) {
+    let original = layout.clone();
+    layout["root"] = remove_workshop_panel(&layout["root"], panel);
+    layout["floats"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|entry| entry["panel"].as_str() != Some(panel));
+    layout["closed"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|value| value.as_str() != Some(panel));
+    if add_workshop_tab(&mut layout["root"], target, panel) {
+        return;
+    }
+    let Some(index) = layout["floats"].as_array().and_then(|floats| {
+        floats
+            .iter()
+            .position(|entry| entry["panel"].as_str() == Some(target))
+    }) else {
+        *layout = original;
+        return;
+    };
+    layout["floats"].as_array_mut().unwrap().remove(index);
+    let joined = json!({"type":"tabs", "tabs":[target, panel], "active":panel});
+    layout["root"] = if layout["root"].is_null() {
+        joined
+    } else {
+        json!({"type":"split", "axis":"horizontal", "sizes":[3,1], "children":[layout["root"].take(), joined]})
+    };
+}
+
+fn migrate_authoring_layout(mut layout: Value) -> Value {
+    let selected = layout["selected"].clone();
+    let target = if !layout["closed"]
+        .as_array()
+        .is_some_and(|closed| closed.contains(&json!("inspector")))
+    {
+        Some("inspector".to_owned())
+    } else {
+        first_visible(
+            &layout["root"],
+            layout["floats"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+        )
+        .and_then(|panel| panel.as_str().map(str::to_owned))
+    };
+    let Some(target) = target else {
+        return default_authoring_layout();
+    };
+    for panel in ["add", "recovery"] {
+        dock_workshop_tab(&mut layout, panel, &target);
+    }
+    layout["selected"] = selected;
+    layout
 }
 
 /// Apply the same field boundary as operator-profile.js before any disk write.
@@ -606,14 +746,14 @@ mod tests {
     #[test]
     fn over_depth_authoring_layout_is_rejected_as_a_whole() {
         let mut root = json!({"type":"tabs","tabs":["source"],"active":"source"});
-        for _ in 0..4 {
+        for _ in 0..6 {
             root = json!({"type":"split","axis":"horizontal","sizes":[1],"children":[root]});
         }
         let profile = json!({
             "kind":"project-phoenix/operator-profile",
             "version":1,
             "authoringLayout":{
-                "version":1,
+                "version":2,
                 "root":{
                     "type":"split","axis":"horizontal","sizes":[1,1],
                     "children":[
@@ -649,7 +789,7 @@ mod tests {
             "kind":"project-phoenix/operator-profile",
             "version":1,
             "authoringLayout":{
-                "version":1,
+                "version":2,
                 "root":{"type":"unknown"},
                 "floats":[],"closed":[],"selected":"source"
             }
@@ -666,10 +806,10 @@ mod tests {
             "kind":"project-phoenix/operator-profile",
             "version":1,
             "authoringLayout":{
-                "version":1,
+                "version":2,
                 "root":null,
                 "floats":[],
-                "closed":["files","source","inspector"],
+                "closed":["files","source","inspector","add","recovery"],
                 "selected":"source"
             }
         });
@@ -682,7 +822,7 @@ mod tests {
     #[test]
     fn authoring_layout_normalization_matches_browser_global_deduplication() {
         let layout = json!({
-            "version":1,
+            "version":2,
             "root":null,
             "floats":[
                 {"panel":"source"}, {"panel":"source"}, {"panel":"source"},
@@ -694,14 +834,60 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":1,
+                "version":2,
                 "root":null,
                 "floats":[
                     {"panel":"source","x":12.0,"y":12.0,"width":420.0,"height":360.0},
                     {"panel":"inspector","x":30.0,"y":40.0,"width":420.0,"height":360.0},
                     {"panel":"files","x":12.0,"y":12.0,"width":420.0,"height":360.0}
                 ],
-                "closed":[], "selected":"inspector"
+                "closed":["add","recovery"], "selected":"inspector"
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_authoring_layout_adds_placement_only_for_lifecycle_panels() {
+        let layout = json!({
+            "version":1,
+            "root":{"type":"tabs","tabs":["files","inspector"],"active":"files"},
+            "floats":[],"closed":["source"],"selected":"files",
+            "recovery":{"draft":"must not persist"}
+        });
+
+        let migrated = sanitize_authoring_layout(&layout).unwrap();
+        assert_eq!(migrated["version"], 2);
+        assert_eq!(
+            migrated["root"]["tabs"],
+            json!(["files", "inspector", "add", "recovery"])
+        );
+        assert_eq!(migrated["selected"], "files");
+        assert!(migrated.get("recovery").is_none());
+    }
+
+    #[test]
+    fn legacy_authoring_layout_rehomes_crafted_lifecycle_panels_without_duplicates() {
+        let layout = json!({
+            "version":1,
+            "root":{"type":"split","axis":"horizontal","sizes":[10,30,60],"children":[
+                {"type":"tabs","tabs":["files","add"],"active":"add"},
+                {"type":"tabs","tabs":["source"],"active":"source"},
+                {"type":"tabs","tabs":["inspector"],"active":"inspector"}
+            ]},
+            "floats":[{"panel":"recovery","x":7,"y":9,"width":300,"height":200}],
+            "closed":[],"selected":"source"
+        });
+
+        assert_eq!(
+            sanitize_authoring_layout(&layout).unwrap(),
+            json!({
+                "version":2,
+                "root":{"type":"split","axis":"horizontal","sizes":[10.0,30.0,60.0],"children":[
+                    {"type":"tabs","tabs":["files"],"active":"files"},
+                    {"type":"tabs","tabs":["source"],"active":"source"},
+                    {"type":"tabs","tabs":["inspector","add","recovery"],"active":"recovery"}
+                ]},
+                "floats":[],"closed":[],"selected":"source"
             })
         );
     }

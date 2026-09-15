@@ -108,10 +108,12 @@ artifacts or dependencies refuse export. Findings link back to authored files an
 reported lines. `WorkshopDocument.check()` remains a structural helper for older
 consumers; the Workshop UI never treats it as runtime acceptance.
 
-`workshop-layout-model.js` and `workshop-layout-renderer.js` own the constrained
-three-panel Authoring arrangement independently of `WorkshopDocument`: file
-browser, source document and generic inspector can split, tab, float in-surface,
-close and reset while the menu/toolbar remains fixed. The versioned layout is a
+`workshop-layout-model.js` and `workshop-layout-renderer.js` own the registered
+Authoring panel arrangement independently of `WorkshopDocument`: file browser,
+source document, generic inspector, file addition and recovery can split, tab,
+float in-surface, close and reset while lifecycle commands remain in the fixed
+menu/toolbar. The renderer moves each registered panel's original node rather
+than cloning controls. The versioned layout is a
 presentation-only field in the private operator profile, repaired to defaults on
 obsolete or invalid data. Narrow surfaces project one selected panel through a
 switcher without replacing the retained desktop tree. Browser and native Workshop

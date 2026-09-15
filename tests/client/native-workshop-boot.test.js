@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountWorkshopAuthoring } from '../../gui/workshop-authoring.js';
+import { createNativeWorkshopProvider } from '../../editor/workshop-provider.js';
 import { t } from '../../gui/strings.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 
@@ -58,7 +59,7 @@ describe('native Workshop shared boot', () => {
     window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });
     await pending;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'source', 'inspector']);
+      .toEqual(['files', 'source', 'inspector', 'add', 'recovery']);
   });
 
   it('mounts with visible storage status when preference loading fails and bounds the private queue', async () => {
@@ -117,5 +118,133 @@ describe('native Workshop shared boot', () => {
     expect(window.__phoenixNativeWorkshopKey({ ...key, pressed: false })).toBe(false);
     expect(released.mock.calls[0][0].code).toBe('KeyZ');
     expect(released.mock.calls[0][0].ctrlKey).toBe(true);
+  });
+
+  it('runs the restricted native lifecycle through the real provider bridge and dock controls', async () => {
+    document.body.innerHTML = '<main id="workshop"></main>';
+    const worldPath = 'assets/worlds/test.toml';
+    const entityPath = 'assets/entities/test.toml';
+    const recoveredPath = 'assets/scripts/recovered.rhai';
+    const addedPath = 'assets/scripts/added.rhai';
+    const assetPath = 'assets/models/imported.glb';
+    const diskWorld = '[global]\ntitle="Disk"\n';
+    const recoveredWorld = '[global]\ntitle="Recovered"\n';
+    const entitySource = '[entity]\nname="Second document"\n';
+    const recoveredSource = 'fn recovered() {\n  print("yes");\n}\n';
+    const addedSource = 'fn added() {\n  print("new");\n}\n';
+    const recovered = WorkshopDocument.fromNativeFiles({
+      [worldPath]: diskWorld,
+      [entityPath]: entitySource,
+    }, { kind: 'project' });
+    recovered.edit(worldPath, recoveredWorld);
+    recovered.put(recoveredPath, recoveredSource);
+    const recoveredSnapshot = recovered.snapshot();
+    recoveredSnapshot.sourceFiles = recoveredSnapshot.sourceFiles.map(([path, text]) => [path, [...new TextEncoder().encode(text)]]);
+    const recoveryRecord = JSON.stringify({ version: 1, selected: entityPath, draft: recoveredSnapshot });
+    const requests = [];
+    const request = async request => {
+      requests.push(request);
+      if (request.op === 'load-sources') return {
+        status: 'sources', kind: 'project', revision: 'disk-r1', files: {
+          [worldPath]: diskWorld,
+          [entityPath]: entitySource,
+        },
+      };
+      if (request.op === 'recovery-load') return {
+        status: 'recovery', recovery: { revision: 'recovered-r1', record: recoveryRecord },
+      };
+      if (request.op === 'validate-sources') return {
+        status: 'validated', report: { accepted: true, findings: [] },
+      };
+      if (request.op === 'asset-begin') return { status: 'asset-upload', token: 'asset-1' };
+      if (request.op === 'asset-chunk') return { status: 'done' };
+      if (request.op === 'asset-finish') return {
+        status: 'asset-stored', reference: { asset: '0000000000000001-4', length: 4 },
+      };
+      if (request.op === 'save-sources') return { status: 'saved', revision: 'saved-r2' };
+      if (request.op === 'test-catalog') return {
+        status: 'test-catalog', catalog: { worlds: [], ships: [] },
+      };
+      return { status: 'done' };
+    };
+    const provider = createNativeWorkshopProvider({ request });
+    const mounted = mountWorkshopAuthoring({ root: document.getElementById('workshop'), provider });
+    try {
+      await mounted.ready;
+      expect(document.getElementById('workshop-new').hidden).toBe(true);
+      expect(document.getElementById('workshop-import').hidden).toBe(true);
+      expect(document.getElementById('workshop-export').hidden).toBe(true);
+
+      document.querySelector('[data-layout-panel="recovery"][role="tab"]').click();
+      expect(document.getElementById('workshop-recovery-status').textContent).toBe(t('workshop.native_recovery_available'));
+      document.getElementById('workshop-restore').click();
+      const files = document.getElementById('workshop-files');
+      const source = document.getElementById('workshop-source');
+      await vi.waitFor(() => expect(source.value).toBe(entitySource));
+      expect(files.value).toBe(entityPath);
+      expect([...files.options].map(option => option.value)).toEqual([worldPath, entityPath, recoveredPath]);
+
+      document.getElementById('workshop-undo').click();
+      expect(files.value).toBe(worldPath);
+      expect(source.value).toBe(recoveredWorld);
+      expect([...files.options].map(option => option.value)).toEqual([worldPath, entityPath]);
+      document.getElementById('workshop-redo').click();
+      expect(files.value).toBe(recoveredPath);
+      expect(source.value).toBe(recoveredSource);
+      document.getElementById('workshop-undo').click();
+      document.getElementById('workshop-undo').click();
+      expect(files.value).toBe(worldPath);
+      expect(source.value).toBe(diskWorld);
+      document.getElementById('workshop-redo').click();
+      expect(source.value).toBe(recoveredWorld);
+      document.getElementById('workshop-redo').click();
+      expect(files.value).toBe(recoveredPath);
+      expect(source.value).toBe(recoveredSource);
+
+      files.value = entityPath;
+      files.dispatchEvent(new Event('change'));
+      expect(source.value).toBe(entitySource);
+
+      document.querySelector('[data-layout-panel="add"][role="tab"]').click();
+      document.getElementById('workshop-add-path').value = addedPath;
+      document.getElementById('workshop-add-source').click();
+      expect(files.value).toBe(addedPath);
+      expect(source.value).toBe('');
+      source.value = addedSource;
+      source.dispatchEvent(new Event('input'));
+
+      document.getElementById('workshop-check').click();
+      await vi.waitFor(() => expect(requests.some(request => request.op === 'validate-sources')).toBe(true));
+      expect(requests.find(request => request.op === 'validate-sources').files).toEqual({
+        [worldPath]: recoveredWorld,
+        [entityPath]: entitySource,
+        [recoveredPath]: recoveredSource,
+        [addedPath]: addedSource,
+      });
+
+      document.getElementById('workshop-add-path').value = assetPath;
+      const assetInput = document.querySelector('.workshop-add input[type="file"]');
+      const bytes = Uint8Array.of(0, 255, 13, 10);
+      Object.defineProperty(assetInput, 'files', { configurable: true, value: [{
+        size: bytes.length,
+        slice(start, end) { return { arrayBuffer: async () => bytes.slice(start, end).buffer }; },
+      }] });
+      assetInput.dispatchEvent(new Event('change'));
+      await vi.waitFor(() => expect(requests.some(request => request.op === 'asset-finish')).toBe(true));
+      expect(requests.find(request => request.op === 'asset-chunk').bytes).toEqual([...bytes]);
+
+      document.getElementById('workshop-save').click();
+      await vi.waitFor(() => expect(requests.some(request => request.op === 'save-sources')).toBe(true));
+      const save = requests.find(request => request.op === 'save-sources');
+      expect(save.expected_revision).toBe('recovered-r1');
+      expect(save.files).toEqual({
+        [worldPath]: recoveredWorld,
+        [entityPath]: entitySource,
+        [recoveredPath]: recoveredSource,
+        [addedPath]: addedSource,
+        [assetPath]: { asset: '0000000000000001-4', length: 4 },
+      });
+      expect(document.querySelectorAll('#workshop-save')).toHaveLength(1);
+    } finally { mounted.dispose(); }
   });
 });

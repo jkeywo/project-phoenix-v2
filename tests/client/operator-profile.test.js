@@ -299,7 +299,7 @@ describe('private persistence and export boundary', () => {
       ...profile.authoringLayout,
       root: profile.authoringLayout.root.children[1],
       floats: [{ panel: 'files', x: 32, y: 48, width: 420, height: 360 }],
-      closed: ['inspector'],
+      closed: ['inspector', 'add', 'recovery'],
     };
     const storage = fakeStorage();
     expect(saveOperatorProfile(storage, profile).status).toBe('saved');

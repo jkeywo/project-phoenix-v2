@@ -31,7 +31,7 @@ test('Live dock persists separately and keeps the operator bar visible in narrow
   await expect(page.locator('[data-panel="roster"].is-floating')).toBeVisible();
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('phoenix-operator-profile-v1')));
   expect(stored.liveLayout.floats[0].panel).toBe('roster');
-  expect(stored.authoringLayout.version).toBe(2);
+  expect(stored.authoringLayout.version).toBe(3);
 
   await page.reload();
   await waitForWasmReady(page);

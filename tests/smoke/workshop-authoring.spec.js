@@ -24,7 +24,7 @@ test('offline Workshop imports, edits, undoes and exports one source-preserving 
   await page.goto('/workshop.html');
   await expect(page.getByRole('heading', { name: ts('workshop.title') })).toBeVisible();
   await expect(page.locator('#workshop-export')).toBeDisabled();
-  await expect(page.locator('.workshop-dock-panel')).toHaveCount(5);
+  await expect(page.locator('.workshop-dock-panel')).toHaveCount(9);
   const draggedTab = page.locator('[data-panel="files"] .workshop-panel-tab');
   const start = await draggedTab.boundingBox();
   expect(start).not.toBeNull();
@@ -95,7 +95,7 @@ test('Workshop applies the shared 200% text profile without horizontal page over
     scale: document.documentElement.style.getPropertyValue('--a11y-text-scale'),
     overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
   }))).toEqual({ scale: '2', overflow: false });
-  await page.getByText(ts('editor.mod.settings.heading'), { exact: true }).click();
+  await page.getByRole('tab', { name: ts('editor.mod.settings.heading') }).click();
   await expect(page.getByRole('button').last()).toBeVisible();
 });
 
@@ -148,7 +148,7 @@ test('Workshop creates a pack, previews read-only dependencies and preserves MP3
   await page.locator('#workshop-new').click();
   await expect(page.locator('#workshop-files option')).toHaveCount(2, { timeout: 90_000 });
   await page.getByRole('tab', { name: ts('workshop.add_files') }).click();
-  await page.getByText(ts('workshop.dependencies'), { exact: true }).click();
+  await page.getByRole('tab', { name: ts('workshop.dependencies') }).click();
   await page.locator('#workshop-dependencies-load').click();
   await expect(page.locator('#workshop-dependency-source')).toHaveAttribute('readonly', '');
   await expect(page.locator('#workshop-dependency option')).not.toHaveCount(0);

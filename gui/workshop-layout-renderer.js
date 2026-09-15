@@ -249,7 +249,25 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   const observer = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(resize) : null;
   observer?.observe(surface); win.addEventListener?.('resize', resize); doc.addEventListener('keydown', keydown);
   render();
-  return { state: () => cloneState(state), set: next => emit(next), reset: () => emit(model.defaultLayout()), dispose() {
+  function reveal(panel, { focus = null, notify = true } = {}) {
+    if (!panelIds.includes(panel)) return false;
+    if (narrow) {
+      projectedPanel = panel;
+      render();
+    } else {
+      state = model.normalize(state.closed.includes(panel) ? model.reopen(state, panel) : model.select(state, panel), canvasBounds());
+      projectedPanel = null;
+      render();
+      if (notify) onChange?.(state);
+    }
+    win.requestAnimationFrame?.(() => {
+      const panelNode = canvas.querySelector(`[data-panel="${panel}"]`);
+      (focus ? panelNode?.querySelector(focus) : panelNode?.querySelector('.workshop-panel-tab')
+        || switcher.querySelector(`[data-layout-panel="${panel}"]`))?.focus?.();
+    });
+    return true;
+  }
+  return { state: () => cloneState(state), set: next => emit(next), reset: () => emit(model.defaultLayout()), reveal, dispose() {
     observer?.disconnect(); win.removeEventListener?.('resize', resize); doc.removeEventListener('keydown', keydown);
     surface.classList.remove('workshop-dock-root');
   } };

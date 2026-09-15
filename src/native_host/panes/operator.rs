@@ -221,6 +221,23 @@ fn fields(value: &Value, names: &[&str]) -> Value {
 fn workshop_panel(value: &Value) -> bool {
     matches!(
         value.as_str(),
+        Some(
+            "files"
+                | "source"
+                | "inspector"
+                | "add"
+                | "recovery"
+                | "findings"
+                | "feedback"
+                | "dependencies"
+                | "settings"
+        )
+    )
+}
+
+fn legacy_workshop_panel(value: &Value) -> bool {
+    matches!(
+        value.as_str(),
         Some("files" | "source" | "inspector" | "add" | "recovery")
     )
 }
@@ -236,8 +253,9 @@ fn sanitize_workshop_node(
     value: &Value,
     seen: &mut BTreeSet<String>,
     depth: usize,
+    legacy: bool,
 ) -> Result<Option<Value>, ()> {
-    if depth > 5 {
+    if depth > if legacy { 5 } else { 9 } {
         return Err(());
     }
     let Some(node_type) = value["type"].as_str() else {
@@ -249,7 +267,13 @@ fn sanitize_workshop_node(
                 return Ok(None);
             };
             let mut tabs = Vec::new();
-            for panel in raw_tabs.iter().filter(|panel| workshop_panel(panel)) {
+            for panel in raw_tabs.iter().filter(|panel| {
+                if legacy {
+                    legacy_workshop_panel(panel)
+                } else {
+                    workshop_panel(panel)
+                }
+            }) {
                 let panel = panel.as_str().unwrap();
                 if seen.insert(panel.to_owned()) {
                     tabs.push(json!(panel));
@@ -272,8 +296,8 @@ fn sanitize_workshop_node(
                 return Ok(None);
             };
             let mut children = Vec::new();
-            for child in raw_children.iter().take(5) {
-                if let Some(child) = sanitize_workshop_node(child, seen, depth + 1)? {
+            for child in raw_children.iter().take(if legacy { 5 } else { 9 }) {
+                if let Some(child) = sanitize_workshop_node(child, seen, depth + 1, legacy)? {
                     children.push(child);
                 }
             }
@@ -304,11 +328,11 @@ fn sanitize_workshop_node(
 
 fn default_authoring_layout() -> Value {
     json!({
-        "version": 2,
+        "version": 3,
         "root": {"type":"split", "axis":"horizontal", "sizes":[22,56,22], "children":[
-            {"type":"tabs", "tabs":["files"], "active":"files"},
-            {"type":"tabs", "tabs":["source"], "active":"source"},
-            {"type":"tabs", "tabs":["inspector","add","recovery"], "active":"inspector"}
+            {"type":"tabs", "tabs":["files","dependencies"], "active":"files"},
+            {"type":"tabs", "tabs":["source","findings","feedback"], "active":"source"},
+            {"type":"tabs", "tabs":["inspector","add","recovery","settings"], "active":"inspector"}
         ]},
         "floats": [], "closed": [], "selected": "source"
     })
@@ -461,13 +485,14 @@ fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
 }
 
 fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
-    if value["version"] != 1 && value["version"] != 2 {
+    if value["version"] != 1 && value["version"] != 2 && value["version"] != 3 {
         return None;
     }
+    let legacy = value["version"] != 3;
     let mut seen = BTreeSet::new();
     let root = match value.get("root")? {
         Value::Null => Value::Null,
-        root => match sanitize_workshop_node(root, &mut seen, 0) {
+        root => match sanitize_workshop_node(root, &mut seen, 0, legacy) {
             Ok(Some(root)) => root,
             Ok(None) => Value::Null,
             Err(()) => return Some(default_authoring_layout()),
@@ -475,10 +500,13 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
     };
     let mut floats = Vec::new();
     for entry in value["floats"].as_array().into_iter().flatten() {
-        let Some(panel) = entry["panel"]
-            .as_str()
-            .filter(|_| workshop_panel(&entry["panel"]))
-        else {
+        let Some(panel) = entry["panel"].as_str().filter(|_| {
+            if legacy {
+                legacy_workshop_panel(&entry["panel"])
+            } else {
+                workshop_panel(&entry["panel"])
+            }
+        }) else {
             continue;
         };
         if !seen.insert(panel.to_owned()) {
@@ -492,7 +520,7 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
             "width": number("width", 420.0).max(240.0),
             "height": number("height", 360.0).max(180.0),
         }));
-        if floats.len() == 5 {
+        if floats.len() == if legacy { 5 } else { 9 } {
             break;
         }
     }
@@ -504,27 +532,53 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|panel| workshop_panel(panel))
+        .filter(|panel| {
+            if legacy {
+                legacy_workshop_panel(panel)
+            } else {
+                workshop_panel(panel)
+            }
+        })
     {
         let panel = panel.as_str().unwrap();
         if seen.insert(panel.to_owned()) {
             closed.push(json!(panel));
         }
     }
-    for panel in ["files", "source", "inspector", "add", "recovery"] {
-        if seen.insert(panel.to_owned()) {
+    for panel in if legacy {
+        &["files", "source", "inspector", "add", "recovery"][..]
+    } else {
+        &[
+            "files",
+            "source",
+            "inspector",
+            "add",
+            "recovery",
+            "findings",
+            "feedback",
+            "dependencies",
+            "settings",
+        ][..]
+    } {
+        if seen.insert((*panel).to_owned()) {
             closed.push(json!(panel));
         }
     }
     let selected = value
         .get("selected")
-        .filter(|panel| workshop_panel(panel) && !closed.contains(panel))
+        .filter(|panel| {
+            (if legacy {
+                legacy_workshop_panel(panel)
+            } else {
+                workshop_panel(panel)
+            }) && !closed.contains(panel)
+        })
         .cloned()
         .or_else(|| first_visible(&root, &floats))
         .unwrap_or_else(|| json!("files"));
-    let mut layout = json!({"version": 2, "root": root, "floats": floats, "closed": closed, "selected": selected});
-    if value["version"] == 1 {
-        layout = migrate_authoring_layout(layout);
+    let mut layout = json!({"version": if legacy { 2 } else { 3 }, "root": root, "floats": floats, "closed": closed, "selected": selected});
+    if legacy {
+        layout = migrate_authoring_layout(layout, value["version"] == 1, &value["closed"]);
     }
     Some(layout)
 }
@@ -637,31 +691,137 @@ fn dock_workshop_tab(layout: &mut Value, panel: &str, target: &str) {
     };
 }
 
-fn migrate_authoring_layout(mut layout: Value) -> Value {
-    let selected = layout["selected"].clone();
-    let target = if !layout["closed"]
-        .as_array()
-        .is_some_and(|closed| closed.contains(&json!("inspector")))
-    {
-        Some("inspector".to_owned())
-    } else {
-        first_visible(
-            &layout["root"],
-            layout["floats"]
-                .as_array()
-                .map(Vec::as_slice)
-                .unwrap_or(&[]),
-        )
-        .and_then(|panel| panel.as_str().map(str::to_owned))
-    };
-    let Some(target) = target else {
-        return default_authoring_layout();
-    };
-    for panel in ["add", "recovery"] {
-        dock_workshop_tab(&mut layout, panel, &target);
+fn workshop_node_contains(node: &Value, panel: &str) -> bool {
+    match node["type"].as_str() {
+        Some("tabs") => node["tabs"]
+            .as_array()
+            .is_some_and(|tabs| tabs.iter().any(|tab| tab.as_str() == Some(panel))),
+        Some("split") => node["children"].as_array().is_some_and(|children| {
+            children
+                .iter()
+                .any(|child| workshop_node_contains(child, panel))
+        }),
+        _ => false,
     }
+}
+
+fn add_migration_panel(layout: &mut Value, panel: &str, preferred: &str, preserved_closed: &Value) {
+    if preserved_closed
+        .as_array()
+        .is_some_and(|closed| closed.iter().any(|value| value.as_str() == Some(panel)))
+    {
+        return;
+    }
+    let Some(closed_index) = layout["closed"].as_array().and_then(|closed| {
+        closed
+            .iter()
+            .position(|value| value.as_str() == Some(panel))
+    }) else {
+        return;
+    };
+    if let Some(target) = preferred_workshop_target(layout, preferred) {
+        dock_workshop_tab(layout, panel, &target);
+        return;
+    }
+    if layout["floats"].as_array().is_none_or(Vec::is_empty) {
+        return;
+    }
+    layout["closed"]
+        .as_array_mut()
+        .unwrap()
+        .remove(closed_index);
+    layout["root"] = json!({"type":"tabs", "tabs":[panel], "active":panel});
+}
+
+fn collect_workshop_actives(node: &Value, out: &mut BTreeMap<String, String>) {
+    match node["type"].as_str() {
+        Some("tabs") => {
+            let Some(active) = node["active"].as_str() else {
+                return;
+            };
+            for panel in node["tabs"].as_array().into_iter().flatten() {
+                if let Some(panel) = panel.as_str() {
+                    out.insert(panel.to_owned(), active.to_owned());
+                }
+            }
+        }
+        Some("split") => {
+            for child in node["children"].as_array().into_iter().flatten() {
+                collect_workshop_actives(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn restore_workshop_actives(node: &mut Value, previous: &BTreeMap<String, String>) {
+    match node["type"].as_str() {
+        Some("tabs") => {
+            let active = node["tabs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find_map(|panel| {
+                    previous
+                        .get(panel.as_str()?)
+                        .filter(|active| {
+                            node["tabs"].as_array().is_some_and(|tabs| {
+                                tabs.iter()
+                                    .any(|candidate| candidate.as_str() == Some(active))
+                            })
+                        })
+                        .cloned()
+                });
+            if let Some(active) = active {
+                node["active"] = json!(active);
+            }
+        }
+        Some("split") => {
+            for child in node["children"].as_array_mut().into_iter().flatten() {
+                restore_workshop_actives(child, previous);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn migrate_authoring_layout(
+    mut layout: Value,
+    from_version_one: bool,
+    preserved_closed: &Value,
+) -> Value {
+    let selected = layout["selected"].clone();
+    let mut previous_actives = BTreeMap::new();
+    collect_workshop_actives(&layout["root"], &mut previous_actives);
+    layout["closed"]
+        .as_array_mut()
+        .unwrap()
+        .extend(["dependencies", "findings", "feedback", "settings"].map(|panel| json!(panel)));
+    if from_version_one {
+        for panel in ["add", "recovery"] {
+            add_migration_panel(&mut layout, panel, "inspector", preserved_closed);
+        }
+    }
+    layout["version"] = json!(3);
+    for (panel, preferred) in [
+        ("dependencies", "files"),
+        ("findings", "source"),
+        ("feedback", "source"),
+        ("settings", "inspector"),
+    ] {
+        add_migration_panel(&mut layout, panel, preferred, &Value::Null);
+    }
+    restore_workshop_actives(&mut layout["root"], &previous_actives);
     layout["selected"] = selected;
     layout
+}
+
+fn preferred_workshop_target(layout: &Value, preferred: &str) -> Option<String> {
+    if workshop_node_contains(&layout["root"], preferred) {
+        Some(preferred.to_owned())
+    } else {
+        first_visible(&layout["root"], &[]).and_then(|panel| panel.as_str().map(str::to_owned))
+    }
 }
 
 /// Apply the same field boundary as operator-profile.js before any disk write.
@@ -675,7 +835,9 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
     }
     let mut safe = fields(&raw, &["kind", "version"]);
     safe["accessibility"] = json!({
-        "presentation": fields(&raw["accessibility"]["presentation"], &["textScale", "contrast", "reducedMotion"]),
+        "presentation": fields(&raw["accessibility"]["presentation"], &[
+            "textScale", "contrast", "reducedMotion", "shake", "flash", "decorativeMotion"
+        ]),
         "assistance": fields(&raw["accessibility"]["assistance"], &["helm.course-keeping", "tactical.target-selection", "sensors.contact-triage", "comms.dialogue-timing"]),
     });
     safe["bindings"] = json!({});
@@ -849,6 +1011,8 @@ mod tests {
         };
         let profile = json!({"kind":"project-phoenix/operator-profile", "version":1,
             "token":"secret", "gamepad":{"preferredDevice":{"id":"pad", "mapping":"standard", "token":"secret"}, "hideTouchControls":false},
+            "accessibility":{"presentation":{"textScale":1.25,"contrast":"on","reducedMotion":"off","shake":0.2,"flash":0.4,"decorativeMotion":"default","unsafe":"secret"},
+                "assistance":{"helm.course-keeping":"request"}},
             "bindings":{"helm.thrust":[{"type":"gamepad", "input":"axis", "control":"left-stick-y", "token":"secret"}, null]},
             "audio":{"version":1,"mono":true,"reducedRange":true,"output":"secret","history":["secret"],
                 "mix":{"master":{"level":0.12,"muted":true},"music":{"level":0.5}},
@@ -874,6 +1038,17 @@ mod tests {
         assert_eq!(saved["audio"]["cues"]["applied"], true);
         assert_eq!(saved["audio"]["mono"], true);
         assert_eq!(saved["audio"]["reducedRange"], true);
+        assert_eq!(
+            saved["accessibility"]["presentation"],
+            json!({
+                "textScale":1.25,"contrast":"on","reducedMotion":"off",
+                "shake":0.2,"flash":0.4,"decorativeMotion":"default"
+            })
+        );
+        assert_eq!(
+            saved["accessibility"]["assistance"],
+            json!({"helm.course-keeping":"request"})
+        );
         assert_eq!(saved["authoringLayout"]["selected"], "source");
         assert!(saved["authoringLayout"].get("unsafe").is_none());
         state.handle(
@@ -991,7 +1166,23 @@ mod tests {
 
         let saved: Value =
             serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
-        assert_eq!(saved["authoringLayout"]["selected"], "files");
+        assert_eq!(saved["authoringLayout"]["version"], 3);
+        assert!(saved["authoringLayout"]["root"].is_null());
+        assert_eq!(saved["authoringLayout"]["floats"], json!([]));
+        assert_eq!(
+            saved["authoringLayout"]["closed"],
+            json!([
+                "files",
+                "source",
+                "inspector",
+                "add",
+                "recovery",
+                "dependencies",
+                "findings",
+                "feedback",
+                "settings"
+            ])
+        );
     }
 
     #[test]
@@ -1006,19 +1197,45 @@ mod tests {
             "closed":["source","inspector","files"], "selected":"inspector"
         });
 
-        assert_eq!(
-            sanitize_authoring_layout(&layout).unwrap(),
-            json!({
-                "version":2,
-                "root":null,
-                "floats":[
-                    {"panel":"source","x":12.0,"y":12.0,"width":420.0,"height":360.0},
-                    {"panel":"inspector","x":30.0,"y":40.0,"width":420.0,"height":360.0},
-                    {"panel":"files","x":12.0,"y":12.0,"width":420.0,"height":360.0}
-                ],
-                "closed":["add","recovery"], "selected":"inspector"
-            })
-        );
+        let repaired = sanitize_authoring_layout(&layout).unwrap();
+        assert_eq!(repaired["version"], 3);
+        assert_eq!(repaired["selected"], "inspector");
+        assert_eq!(repaired["closed"], json!(["add", "recovery"]));
+        fn placements(node: &Value, panel: &str) -> usize {
+            match node["type"].as_str() {
+                Some("tabs") => node["tabs"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|candidate| candidate.as_str() == Some(panel))
+                    .count(),
+                Some("split") => node["children"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|child| placements(child, panel))
+                    .sum(),
+                _ => 0,
+            }
+        }
+        for panel in [
+            "source",
+            "inspector",
+            "files",
+            "dependencies",
+            "findings",
+            "feedback",
+            "settings",
+        ] {
+            let count = placements(&repaired["root"], panel)
+                + repaired["floats"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|entry| entry["panel"].as_str() == Some(panel))
+                    .count();
+            assert_eq!(count, 1);
+        }
     }
 
     #[test]
@@ -1031,10 +1248,19 @@ mod tests {
         });
 
         let migrated = sanitize_authoring_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 2);
+        assert_eq!(migrated["version"], 3);
         assert_eq!(
             migrated["root"]["tabs"],
-            json!(["files", "inspector", "add", "recovery"])
+            json!([
+                "files",
+                "inspector",
+                "add",
+                "recovery",
+                "dependencies",
+                "findings",
+                "feedback",
+                "settings"
+            ])
         );
         assert_eq!(migrated["selected"], "files");
         assert!(migrated.get("recovery").is_none());
@@ -1056,13 +1282,92 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":2,
+                "version":3,
                 "root":{"type":"split","axis":"horizontal","sizes":[10.0,30.0,60.0],"children":[
-                    {"type":"tabs","tabs":["files"],"active":"files"},
-                    {"type":"tabs","tabs":["source"],"active":"source"},
-                    {"type":"tabs","tabs":["inspector","add","recovery"],"active":"recovery"}
+                    {"type":"tabs","tabs":["files","add","dependencies"],"active":"add"},
+                    {"type":"tabs","tabs":["source","findings","feedback"],"active":"source"},
+                    {"type":"tabs","tabs":["inspector","settings"],"active":"inspector"}
                 ]},
-                "floats":[],"closed":[],"selected":"source"
+                "floats":[{"panel":"recovery","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
+                "closed":[],"selected":"source"
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_authoring_layouts_preserve_floating_preferred_targets() {
+        for version in [1, 2] {
+            let floats = json!([
+                {"panel":"files","x":13.0,"y":17.0,"width":301.0,"height":211.0},
+                {"panel":"source","x":41.0,"y":47.0,"width":503.0,"height":307.0}
+            ]);
+            let layout = json!({
+                "version":version,
+                "root":{"type":"split","axis":"vertical","sizes":[17,83],"children":[
+                    {"type":"tabs","tabs":["inspector"],"active":"inspector"},
+                    {"type":"tabs","tabs":["recovery"],"active":"recovery"}
+                ]},
+                "floats":floats, "closed":["add"], "selected":"source"
+            });
+
+            assert_eq!(
+                sanitize_authoring_layout(&layout).unwrap(),
+                json!({
+                    "version":3,
+                    "root":{"type":"split","axis":"vertical","sizes":[17.0,83.0],"children":[
+                        {"type":"tabs","tabs":["inspector","dependencies","findings","feedback","settings"],"active":"inspector"},
+                        {"type":"tabs","tabs":["recovery"],"active":"recovery"}
+                    ]},
+                    "floats":floats, "closed":["add"], "selected":"source"
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn all_closed_legacy_authoring_layouts_remain_all_closed() {
+        for version in [1, 2] {
+            let layout = json!({
+                "version":version, "root":null, "floats":[],
+                "closed":["files","source","inspector","add","recovery"], "selected":"source"
+            });
+            let migrated = sanitize_authoring_layout(&layout).unwrap();
+            assert_eq!(migrated["version"], 3);
+            assert!(migrated["root"].is_null());
+            assert_eq!(migrated["floats"], json!([]));
+            assert_eq!(
+                migrated["closed"],
+                json!([
+                    "files",
+                    "source",
+                    "inspector",
+                    "add",
+                    "recovery",
+                    "dependencies",
+                    "findings",
+                    "feedback",
+                    "settings"
+                ])
+            );
+        }
+    }
+
+    #[test]
+    fn current_authoring_layout_preserves_registered_panels_and_drops_unknown_fields() {
+        let layout = json!({
+            "version":3,
+            "root":{"type":"tabs","tabs":["source","findings","feedback","dependencies","settings","unsafe"],"active":"feedback","unsafe":"secret"},
+            "floats":[{"panel":"files","x":7,"y":9,"width":300,"height":200,"unsafe":"secret"}],
+            "closed":["inspector","add","recovery"],"selected":"feedback","unsafe":"secret"
+        });
+
+        assert_eq!(
+            sanitize_authoring_layout(&layout).unwrap(),
+            json!({
+                "version":3,
+                "root":{"type":"tabs","tabs":["source","findings","feedback","dependencies","settings"],"active":"feedback"},
+                "floats":[{"panel":"files","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
+                "closed":["inspector","add","recovery"],"selected":"feedback"
             })
         );
     }

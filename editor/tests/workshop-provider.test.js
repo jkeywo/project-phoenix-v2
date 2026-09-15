@@ -9,14 +9,17 @@ describe('explicit Workshop capability providers', () => {
     expect(newWorkshopPack(dependencies).check().ok).toBe(true);
     const bytes = workshopPack();
     const original = Uint8Array.from(bytes);
-    const base = { ...dependencies, packs: [{ id: 'workshop-test', files: {} }, { id: 'other', files: { 'assets/worlds/dependency.toml': '[global]\n' } }] };
+    const manifest = '# exact dependency\r\n[pack]\r\nid="other"\r\n';
+    const base = { ...dependencies, packs: [{ id: 'workshop-test', manifest_toml: 'selected', files: {} },
+      { id: 'other', manifest_toml: manifest, files: { 'assets/worlds/dependency.toml': '[global]\n' } }] };
     const provider = createBrowserWorkshopProvider({ loadedPack: bytes, dependencies: base,
       load: async () => ({ wasm_workshop_validate_pack() {} }) });
     bytes.fill(0); base.packs[1].files['assets/worlds/dependency.toml'] = 'changed elsewhere';
     const draft = await provider.load();
     expect(draft.sourceBytes()).toEqual(original);
     const snapshot = await provider.runtime.dependencies();
-    expect(snapshot.packs).toEqual([{ id: 'other', files: { 'assets/worlds/dependency.toml': '[global]\n' } }]);
+    expect(snapshot.packs).toEqual([{ id: 'other', manifest_toml: manifest,
+      files: { 'assets/worlds/dependency.toml': '[global]\n' } }]);
     snapshot.packs.length = 0;
     expect((await provider.runtime.dependencies()).packs).toHaveLength(1);
     expect(provider.save).toBeUndefined();
@@ -54,6 +57,26 @@ describe('explicit Workshop capability providers', () => {
     expect(stored.expected_revision).toBe('saved');
     expect(JSON.parse(stored.record).draft.sourceFiles).toEqual(draft.snapshot().sourceFiles);
     expect(provider.canImport).toBe(false);
+  });
+
+  it('reports an invalid native dependency response with a presenter-localizable code', async () => {
+    for (const response of [{ status: 'done' },
+      { status: 'dependencies', base_files: {}, packs: [{ id: 'other', files: {} }] },
+      { status: 'dependencies', base_files: {}, packs: [{ id: 'other', manifest_toml: 'exact', files: { bad: 7 } }] }]) {
+      const provider = createNativeWorkshopProvider({ request: async () => response });
+      await expect(provider.runtime.dependencies()).rejects.toMatchObject({
+        code: 'native-workshop-dependencies-invalid',
+        message: '',
+      });
+    }
+  });
+
+  it('preserves the exact dependency manifest across the native provider boundary', async () => {
+    const manifest_toml = '# exact dependency\r\n[pack]\r\nid="other"\r\n';
+    const provider = createNativeWorkshopProvider({ request: async value => value.op === 'load-dependencies'
+      ? { status: 'dependencies', base_files: {}, packs: [{ id: 'other', manifest_toml, files: {} }] }
+      : { status: 'done' } });
+    expect((await provider.runtime.dependencies()).packs[0]).toEqual({ id: 'other', manifest_toml, files: {} });
   });
 
   it('retains recovered old revisions so stale draft saves reach the native conflict gate', async () => {

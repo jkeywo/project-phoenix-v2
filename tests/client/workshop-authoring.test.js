@@ -37,24 +37,28 @@ beforeEach(() => {
   }) };
   mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
 });
-afterEach(() => { mounted.dispose(); vi.restoreAllMocks(); });
+afterEach(() => {
+  mounted.dispose();
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+  vi.restoreAllMocks();
+});
 
 describe('Workshop Authoring browser surface', () => {
   it('mounts the docked workflow, persists keyboard moves, restores focus and repairs a reopened layout', async () => {
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'source', 'inspector', 'add', 'recovery']);
+      .toEqual(['files', 'dependencies', 'source', 'findings', 'feedback', 'inspector', 'add', 'recovery', 'settings']);
     const sourceTab = document.querySelector('[data-panel="source"] .workshop-panel-tab');
     sourceTab.focus();
     sourceTab.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(document.activeElement.closest('[data-panel]')?.dataset.panel).toBe('source'));
-    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(2);
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(3);
     document.querySelector('[data-panel="inspector"] .workshop-panel-header button:last-child').click();
     expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
     [...document.querySelectorAll('.workshop-panel-switcher button')].find(node => node.textContent === t('workshop.inspector')).click();
     expect(document.querySelector('[data-panel="inspector"]')).not.toBeNull();
     document.querySelector('.workshop-layout-reset').click();
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(5);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(9);
     expect(document.querySelectorAll('#workshop-add-source')).toHaveLength(1);
     expect(document.querySelectorAll('#workshop-restore')).toHaveLength(1);
     expect(byId('add-source').closest('[data-panel]')?.dataset.panel).toBe('add');
@@ -70,7 +74,7 @@ describe('Workshop Authoring browser surface', () => {
     byId('source').value = 'retained';
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     window.dispatchEvent(new Event('resize'));
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(5);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(9);
     expect(byId('source').value).toBe('retained');
   });
 
@@ -192,6 +196,28 @@ describe('Workshop Authoring browser surface', () => {
     byId('dependencies-load').click();
     await vi.waitFor(() => expect(byId('dependency-source').value).toContain('phoenix-base'));
     expect(byId('dependency-source').readOnly).toBe(true);
+  });
+
+  it('browses an exact dependency manifest with pack provenance without entering draft history', async () => {
+    const manifest = '# dependency manifest\n[pack]\nid="other"\n';
+    runtime.dependencies = async () => ({ base_files: { 'assets/base.toml': 'base = true\n' },
+      packs: [{ id: 'other', manifest_toml: manifest, files: { 'assets/worlds/other.toml': '[global]\n' } }] });
+    mounted.dispose();
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
+    await mounted.ready;
+    await importBytes();
+    select(WORKSHOP_WORLD);
+    const sourceBeforeEdit = byId('source').value;
+    edit(`${WORKSHOP_WORLD_TEXT}# retained edit\n`);
+    byId('dependencies-load').click();
+    await vi.waitFor(() => expect([...byId('dependency').options].map(option => option.textContent))
+      .toContain('other: scenarios.toml'));
+    byId('dependency').value = String([...byId('dependency').options]
+      .findIndex(option => option.textContent === 'other: scenarios.toml'));
+    byId('dependency').dispatchEvent(new Event('change'));
+    expect(byId('dependency-source').value).toBe(manifest);
+    byId('undo').click();
+    expect(byId('source').value).toBe(sourceBeforeEdit);
   });
 
   it('adds source from its dock panel while fixed history commands target the active document', async () => {
@@ -322,6 +348,28 @@ describe('Workshop Authoring browser surface', () => {
     expect(byId('dirty').textContent).toBe(t('workshop.saved'));
   });
 
+  it.each(['tabbed', 'closed', 'narrow'])('reveals focused correlated diagnostics after successful Import when %s', async mode => {
+    await mounted.ready;
+    document.querySelector('[data-layout-panel="feedback"]').click();
+    if (mode === 'closed') document.querySelector('[data-panel="findings"] [data-layout-control="close"]').click();
+    if (mode === 'narrow') {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
+      window.dispatchEvent(new Event('resize'));
+      document.querySelector('[data-layout-panel="feedback"]').click();
+    }
+
+    await importBytes();
+
+    const findings = document.querySelector('[data-panel="findings"] .workshop-findings');
+    await vi.waitFor(() => expect(document.activeElement).toBe(findings));
+    document.querySelector('[data-layout-panel="feedback"]').click();
+    const feedback = document.querySelector('[data-action-id="editor.mod.import"]');
+    expect(findings.textContent).toBe(t('workshop.imported'));
+    expect(findings.dataset.producingAction).toBe('editor.mod.import');
+    expect(findings.dataset.producingCorrelation).toBe(feedback.dataset.correlation);
+    expect(feedback.dataset.state).toBe('Applied');
+  });
+
   it('keeps dirty state when a validated ZIP cannot be downloaded', async () => {
     await importBytes();
     select(WORKSHOP_WORLD);
@@ -329,7 +377,11 @@ describe('Workshop Authoring browser surface', () => {
     download.mockImplementation(() => { throw new Error('download unavailable'); });
     await evaluated('export');
     expect(byId('dirty').textContent).toBe(t('workshop.dirty'));
-    expect(document.querySelector('[data-action-id="editor.mod.export"]').dataset.state).toBe('Refused');
+    const feedback = document.querySelector('[data-action-id="editor.mod.export"]');
+    const findings = document.querySelector('.workshop-findings');
+    expect(feedback.dataset.state).toBe('Refused');
+    expect(findings.dataset.producingAction).toBe('editor.mod.export');
+    expect(findings.dataset.producingCorrelation).toBe(feedback.dataset.correlation);
   });
 
   it('localises a missing-manifest refusal and preserves the previously imported pack', async () => {
@@ -338,6 +390,40 @@ describe('Workshop Authoring browser surface', () => {
     expect(document.querySelector('.workshop-findings').textContent).toContain(t('workshop.missing_manifest'));
     expect(byId('files').querySelectorAll('option')).toHaveLength(2);
     expect(document.querySelector('[data-action-id="editor.mod.import"]').dataset.state).toBe('Refused');
+    const findings = document.querySelector('.workshop-findings');
+    expect(findings.dataset.producingAction).toBe('editor.mod.import');
+    expect(findings.dataset.producingCorrelation)
+      .toBe(document.querySelector('[data-action-id="editor.mod.import"]').dataset.correlation);
+  });
+
+  it('reports repeated profile storage refusal without recursively persisting the reveal', async () => {
+    mounted.dispose();
+    const storage = { getItem: () => null, setItem: vi.fn(() => { throw new Error('quota'); }) };
+    window.PhoenixOperatorStorage = storage;
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
+    document.querySelector('[data-panel="findings"] [data-layout-control="close"]').click();
+    storage.setItem.mockClear();
+    expect(() => {
+      document.querySelector('[data-layout-panel="source"]').click();
+      document.querySelector('[data-layout-panel="source"]').click();
+    }).not.toThrow();
+    expect(storage.setItem).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('.workshop-findings').textContent)
+      .toBe(t('editor.mod.settings.storage_refused'));
+    expect(document.querySelector('[data-panel="findings"]')).not.toBeNull();
+    delete window.PhoenixOperatorStorage;
+  });
+
+  it('clears command attribution when editing replaces command findings', async () => {
+    await importBytes();
+    select(WORKSHOP_WORLD);
+    await evaluated('check');
+    const findings = document.querySelector('.workshop-findings');
+    expect(findings.dataset.producingAction).toBe('editor.mod.validate');
+    edit(`${WORKSHOP_WORLD_TEXT}# changed after check\n`);
+    expect(findings.textContent).toBe(t('workshop.changed'));
+    expect(findings.dataset.producingAction).toBeUndefined();
+    expect(findings.dataset.producingCorrelation).toBeUndefined();
   });
 
   it('uses the shared profile text scale and remapped structural-check action', async () => {
@@ -354,6 +440,54 @@ describe('Workshop Authoring browser surface', () => {
     byId('check').dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(byId('check').disabled).toBe(false));
     expect(document.querySelector('[data-action-id="editor.mod.validate"]').dataset.state).toBe('Applied');
+  });
+
+  it.each(['browser', 'native'])('persists private settings without replacing unrelated %s profile fields', async host => {
+    mounted.dispose();
+    const original = createOperatorProfileSnapshot({
+      feedback: { vibration: false, semanticCues: true },
+      gmConfirmations: { damage: 'confirm' },
+    });
+    const memory = new Map([[OPERATOR_PROFILE_KEY, JSON.stringify(original)]]);
+    const storage = { getItem: key => memory.get(key) || null, setItem: (key, value) => memory.set(key, value) };
+    window.PhoenixOperatorStorage = host === 'native' ? storage : undefined;
+    if (host === 'browser') localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(original));
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime,
+      ...(host === 'native' ? { win: window } : {}) });
+    document.querySelector('[data-layout-panel="settings"][role="tab"]').click();
+    byId('contrast').value = 'on';
+    byId('contrast').dispatchEvent(new Event('change'));
+    const stored = JSON.parse((host === 'native' ? storage : localStorage).getItem(OPERATOR_PROFILE_KEY));
+    expect(document.documentElement.getAttribute('data-contrast')).toBe('more');
+    expect(stored.accessibility.presentation.contrast).toBe('on');
+    expect(stored.feedback).toEqual(original.feedback);
+    expect(stored.gmConfirmations).toEqual(original.gmConfirmations);
+    delete window.PhoenixOperatorStorage;
+  });
+
+  it('reopens refused findings and correlates feedback while preserving dependency-free history', async () => {
+    mounted.dispose();
+    runtime.dependencies = async () => ({ base_files: { 'assets/base.toml': 'immutable = true\n' }, packs: [] });
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
+    await importBytes();
+    document.querySelector('[data-panel="findings"] [data-layout-control="close"]').click();
+    document.querySelector('[data-panel="feedback"] [data-layout-control="close"]').click();
+    select(WORKSHOP_WORLD); edit('[global\n');
+    const sourceBefore = byId('source').value;
+    await evaluated('check');
+    const finding = document.querySelector('[data-panel="findings"] .workshop-findings');
+    expect(finding).toBe(document.activeElement);
+    document.querySelector('[data-layout-panel="feedback"]').click();
+    const actionFeedback = document.querySelector('[data-action-id="editor.mod.validate"]');
+    expect(actionFeedback.dataset.state).toBe('Refused');
+    expect(finding.dataset.producingAction).toBe('editor.mod.validate');
+    expect(finding.dataset.producingCorrelation).toBe(actionFeedback.dataset.correlation);
+    document.querySelector('[data-layout-panel="dependencies"]').click();
+    byId('dependencies-load').click();
+    await vi.waitFor(() => expect(byId('dependency-source').value).toContain('immutable'));
+    expect(byId('dependency-source').readOnly).toBe(true);
+    byId('undo').click();
+    expect(byId('source').value).not.toBe(sourceBefore);
   });
 
   it('honours a saved Ctrl+Z action binding before conventional undo outside source fields', async () => {
@@ -381,7 +515,11 @@ describe('Workshop Authoring browser surface', () => {
     edit(`${WORKSHOP_WORLD_TEXT}# Keep after failed validation\n`);
     await evaluated('export');
     expect(download).not.toHaveBeenCalled();
-    expect(document.querySelector('.workshop-findings').textContent).toContain(t('workshop.runtime_unavailable'));
+    const findings = document.querySelector('.workshop-findings');
+    const feedback = document.querySelector('[data-action-id="editor.mod.export"]');
+    expect(findings.textContent).toContain(t('workshop.runtime_unavailable'));
+    expect(findings.dataset.producingAction).toBe('editor.mod.export');
+    expect(findings.dataset.producingCorrelation).toBe(feedback.dataset.correlation);
     expect(byId('dirty').textContent).toBe(t('workshop.dirty'));
     byId('undo').click();
     expect(byId('dirty').textContent).toBe(t('workshop.saved'));

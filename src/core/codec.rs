@@ -1984,6 +1984,7 @@ pub fn decode_workshop_request(
         operation,
         Operation::Load
             | Operation::LoadSources
+            | Operation::LoadDependencies
             | Operation::RecoveryLoad
             | Operation::RecoveryClear
             | Operation::TestStatus

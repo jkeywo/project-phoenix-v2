@@ -63,6 +63,19 @@ export function createNativeWorkshopProvider({ request }) {
       return WorkshopDocument.fromNativeFiles(value.files, { kind });
     },
     runtime: {
+      async dependencies() {
+        const value = await call({ op: 'load-dependencies' });
+        const textFiles = files => files && typeof files === 'object' && !Array.isArray(files)
+          && Object.values(files).every(text => typeof text === 'string');
+        if (value?.status !== 'dependencies' || !textFiles(value.base_files) || !Array.isArray(value.packs)
+            || value.packs.some(pack => typeof pack?.id !== 'string' || typeof pack.manifest_toml !== 'string'
+              || !textFiles(pack.files))) {
+          const error = new Error();
+          error.code = 'native-workshop-dependencies-invalid';
+          throw error;
+        }
+        return { base_files: value.base_files, packs: value.packs };
+      },
       async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
       async inspect(source, document_path) { return (await call({ op: 'inspect', source, document_path })).fields; },
       async patch(source, patch) { return (await call({ op: 'patch', source, patch })).source; },

@@ -11,7 +11,8 @@ import { mountWorkshopModels } from './workshop-models-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
-import { applyAccessibilityProfile } from './accessibility-profile.js';
+import { applyAccessibilityProfile, EXPLICIT_OFF, EXPLICIT_ON, FOLLOW_OS,
+  profileWithPresentation, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP } from './accessibility-profile.js';
 import { loadOperatorProfile, applyOperatorProfile, saveOperatorProfile } from './operator-profile.js';
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import { t } from './strings.js';
@@ -19,7 +20,9 @@ import { renderInspectorMetadata, validInspectorDescriptor } from './inspector-f
 import { mountWorkshopLayout } from './workshop-layout-renderer.js';
 
 // wasm-bindgen may reject with a string JsValue rather than an Error object.
-const errorText = error => String(error?.message ?? error);
+const ERROR_STRING_IDS = Object.freeze({
+  'native-workshop-dependencies-invalid': 'workshop.native_dependencies_invalid',
+});
 const NATIVE_COPY = {
   'workshop.authoring': 'workshop.native_authoring', 'workshop.files': 'workshop.native_files',
   'workshop.empty': 'workshop.native_empty', 'workshop.dirty': 'workshop.native_dirty',
@@ -40,6 +43,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   runtime = provider?.runtime || createWorkshopRuntime(), recovery = provider?.recovery || createWorkshopRecovery({ indexedDB: win.indexedDB }) } = {}) {
   const doc = root.ownerDocument;
   const translate = (id, params) => t(provider?.save ? (NATIVE_COPY[id] || id) : id, params);
+  const errorText = error => ERROR_STRING_IDS[error?.code]
+    ? translate(ERROR_STRING_IDS[error.code]) : String(error?.message ?? error);
   function el(tag, textId, attrs = {}) {
     const node = doc.createElement(tag);
     if (textId) node.textContent = translate(textId);
@@ -95,10 +100,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const source = el('textarea', null, { id: 'workshop-source', spellcheck: 'false', 'aria-describedby': 'workshop-source-hint' });
   sourcePanel.append(sourceLabel, source, el('p', 'workshop.source_hint', { id: 'workshop-source-hint' }));
   layout.append(filesPanel, sourcePanel, inspector);
-  const feedback = el('div', null, { class: 'workshop-feedback', 'aria-live': 'polite' });
+  const feedback = el('div', null, { class: 'workshop-feedback', 'aria-live': 'polite', tabindex: '-1' });
   const findings = el('div', null, { class: 'workshop-findings', role: 'status', tabindex: '-1' });
-  const settings = el('details');
-  settings.append(el('summary', 'editor.mod.settings.heading'));
+  const settings = el('div', null, { class: 'workshop-settings' });
   const settingsBody = el('div');
   settings.append(settingsBody);
   const recoveryPanel = el('section', null, { class: 'workshop-recovery', 'aria-live': 'polite' });
@@ -107,16 +111,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const discardButton = button('workshop.recovery_discard', 'workshop-discard', () => discardRecovery());
   restoreButton.hidden = discardButton.hidden = true;
   recoveryPanel.append(recoveryStatus, restoreButton, discardButton);
-  root.append(toolbar, layout, feedback, findings, settings);
-  const dependencies = el('details');
-  dependencies.append(el('summary', 'workshop.dependencies'));
+  const dependencies = el('div', null, { class: 'workshop-dependencies' });
   const dependencySelect = el('select', null, { id: 'workshop-dependency' });
   const dependencySource = el('textarea', null, { id: 'workshop-dependency-source', readonly: '', rows: '8' });
   const dependencyButton = button('workshop.dependencies_load', 'workshop-dependencies-load', () => loadDependencies());
   dependencies.append(dependencyButton, el('label', 'workshop.files', { for: 'workshop-dependency' }), dependencySelect,
     el('label', 'workshop.dependency_source', { for: 'workshop-dependency-source' }), dependencySource);
-  dependencies.hidden = !runtime.dependencies;
-  root.append(dependencies);
+  dependencyButton.disabled = !runtime.dependencies;
+  root.append(toolbar, layout);
   let dependencyFiles = [];
   let draft = null;
   let selected = null;
@@ -130,6 +132,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let testPanel = null;
   let soundAudition = null;
   let modelPanel = null;
+  let layoutMount = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -137,12 +140,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (value.cancelled || !value.state) feedbackRows.delete(value.actionId);
     else feedbackRows.set(value.actionId, value);
     feedback.replaceChildren(...[...feedbackRows.values()].map(entry => {
-      const row = el('span', null, { 'data-action-id': entry.actionId, 'data-state': entry.state });
+      const row = el('span', null, { 'data-action-id': entry.actionId, 'data-correlation': entry.correlation,
+        'data-state': entry.state });
       row.textContent = translate('action_feedback.summary', {
         action: translate(actions.action(entry.actionId).labelId), status: translate(entry.statusId),
       });
       return row;
     }));
+    if (value.state === ACTION_FEEDBACK_STATE.PRESSED) layoutMount?.reveal('feedback');
   } });
   const actions = createModActionRegistry({
     actionFeedback: lifecycle,
@@ -154,7 +159,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       try { fileInput.click(); }
       catch (error) {
         pendingImport = null;
-        show('editor.mod.import.previous_workspace_preserved', [errorText(error)], true);
+        show('editor.mod.import.previous_workspace_preserved', [errorText(error)], true,
+          MOD_IMPORT_ACTION_ID, activation.correlation);
         activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
       }
       return true;
@@ -168,9 +174,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let profile = loaded.profile;
   applyOperatorProfile(profile, actions);
   applyAccessibilityProfile(profile.accessibility, { doc, win });
-  const layoutMount = mountWorkshopLayout({
+  layoutMount = mountWorkshopLayout({
     root, surface: layout,
-    panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel },
+    panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
+      findings, feedback, dependencies, settings },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -182,20 +189,30 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       panels: {
         files: translate('workshop.files'), source: translate('workshop.source'), inspector: translate('workshop.inspector'),
         add: translate('workshop.add_files'), recovery: translate('workshop.recovery'),
+        findings: translate('workshop.findings'), feedback: translate('workshop.feedback'),
+        dependencies: translate('workshop.dependencies'), settings: translate('editor.mod.settings.heading'),
       },
     },
     initial: profile.authoringLayout, doc, win,
     onChange(authoringLayout) {
       profile = { ...profile, authoringLayout };
-      if (saveOperatorProfile(storage, profile).status !== 'saved') show('editor.mod.settings.storage_refused', [], true);
+      if (saveOperatorProfile(storage, profile).status !== 'saved') reportPersistenceFailure();
     },
   });
+
+  function reportPersistenceFailure() {
+    const message = translate('editor.mod.settings.storage_refused');
+    if (findings.textContent === message && findings.dataset.outcome === 'refused'
+        && !findings.dataset.producingAction && !findings.dataset.producingCorrelation) return;
+    show('editor.mod.settings.storage_refused', [], true, null, null, { reveal: false });
+    layoutMount.reveal('findings', { focus: '.workshop-findings', notify: false });
+  }
 
   function persistBindings(result) {
     if (result.status !== 'applied') return result;
     profile = { ...profile, bindings: actions.bindingProfile() };
     const saved = saveOperatorProfile(storage, profile);
-    if (saved.status !== 'saved') show('editor.mod.settings.storage_refused', [], true);
+    if (saved.status !== 'saved') reportPersistenceFailure();
     return result;
   }
   const controls = createSemanticControlsRemapper({
@@ -207,6 +224,34 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   });
   function renderSettings() {
     settingsBody.replaceChildren();
+    const accessibility = el('section');
+    accessibility.append(el('h2', 'settings.tab.accessibility'), el('p', 'settings.accessibility.local_hint'));
+    const presentation = profile.accessibility.presentation;
+    const textScale = el('input', null, { id: 'workshop-text-scale', type: 'range', min: String(TEXT_SCALE_MIN),
+      max: String(TEXT_SCALE_MAX), step: String(TEXT_SCALE_STEP),
+      value: String(presentation.textScale === FOLLOW_OS ? 1 : presentation.textScale) });
+    const contrast = el('select', null, { id: 'workshop-contrast' });
+    const motion = el('select', null, { id: 'workshop-motion' });
+    const fillOptions = (node, values) => node.replaceChildren(...values.map(([value, id]) => el('option', id, { value })));
+    fillOptions(contrast, [[FOLLOW_OS, 'settings.accessibility.follow_system'],
+      [EXPLICIT_ON, 'settings.accessibility.contrast_more'], [EXPLICIT_OFF, 'settings.accessibility.contrast_standard']]);
+    fillOptions(motion, [[FOLLOW_OS, 'settings.accessibility.follow_system'],
+      [EXPLICIT_ON, 'settings.accessibility.motion_reduce'], [EXPLICIT_OFF, 'settings.accessibility.motion_allow']]);
+    contrast.value = presentation.contrast;
+    motion.value = presentation.reducedMotion;
+    const updateAccessibility = (effect, value) => {
+      const accessibilityProfile = profileWithPresentation(profile.accessibility, effect, value);
+      profile = { ...profile, accessibility: accessibilityProfile };
+      applyAccessibilityProfile(accessibilityProfile, { doc, win });
+      if (saveOperatorProfile(storage, profile).status !== 'saved') reportPersistenceFailure();
+    };
+    textScale.addEventListener('input', () => updateAccessibility('textScale', Number(textScale.value)));
+    contrast.addEventListener('change', () => updateAccessibility('contrast', contrast.value));
+    motion.addEventListener('change', () => updateAccessibility('reducedMotion', motion.value));
+    accessibility.append(el('label', 'settings.accessibility.text_scale', { for: textScale.id }), textScale,
+      el('label', 'settings.accessibility.contrast', { for: contrast.id }), contrast,
+      el('label', 'settings.accessibility.reduced_motion', { for: motion.id }), motion);
+    settingsBody.append(accessibility);
     controls.render(settingsBody, {
       actions: actions.list(MOD_ACTION_CONTEXT),
       section(id) { const section = el('section'); section.append(el('h2', id)); return section; },
@@ -219,15 +264,19 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   }
   renderSettings();
   function nativeStorageStatus() {
-    if (win.PhoenixOperatorStorageStatus?.status === 'error') show('editor.mod.settings.storage_refused', [], true);
+    if (win.PhoenixOperatorStorageStatus?.status === 'error') reportPersistenceFailure();
   }
   win.addEventListener('phoenix-operator-storage-status', nativeStorageStatus);
 
-  function show(id, details = [], refused = false) {
+  function show(id, details = [], refused = false, actionId = null, correlation = null, { reveal = refused } = {}) {
     findings.textContent = [translate(id), ...details].join('\n');
     findings.setAttribute('role', refused ? 'alert' : 'status');
     findings.dataset.outcome = refused ? 'refused' : 'applied';
-    if (refused) findings.focus();
+    if (actionId) findings.dataset.producingAction = actionId;
+    else delete findings.dataset.producingAction;
+    if (correlation) findings.dataset.producingCorrelation = correlation;
+    else delete findings.dataset.producingCorrelation;
+    if (reveal) layoutMount.reveal('findings', { focus: '.workshop-findings' });
   }
   function refresh({ selection = false } = {}) {
     soundAudition?.refresh({held:!!(pendingImport || pendingValidation || pendingRecovery || testPanel?.held())});
@@ -245,7 +294,6 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     modelPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     sourceScope.hidden = testing;
-    dependencies.hidden = testing || !runtime.dependencies;
     root.querySelector('.workshop-mode').textContent = translate(testing ? 'workshop.test_mode' : 'workshop.authoring');
     files.disabled = !draft || busy;
     source.disabled = !draft || busy || draft.isBinary(selected);
@@ -348,25 +396,31 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         const result = await runtime.validate(zip, candidate);
         if (disposed) return;
         if (!result.accepted) {
-          showRuntimeFindings('workshop.check_refused', result.findings, true);
+          showRuntimeFindings('workshop.check_refused', result.findings, true,
+            exporting ? MOD_EXPORT_ACTION_ID : MOD_VALIDATE_ACTION_ID, activation.correlation);
           activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
           return;
         }
         if (exporting) {
           try { download(zip, 'mod-pack.zip', doc, win); }
           catch (error) {
-            show('editor.mod.export.download_refused', [errorText(error)], true);
+            show('editor.mod.export.download_refused', [errorText(error)], true,
+              MOD_EXPORT_ACTION_ID, activation.correlation);
             activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
             return;
           }
           candidate.markExported();
           persistDraft();
         }
-        showRuntimeFindings(exporting ? 'workshop.exported' : 'workshop.runtime_checked', result.findings);
+        showRuntimeFindings(exporting ? 'workshop.exported' : 'workshop.runtime_checked', result.findings,
+          false, exporting ? MOD_EXPORT_ACTION_ID : MOD_VALIDATE_ACTION_ID, activation.correlation);
         activation.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
       } catch (error) {
         if (!disposed) {
-          show('workshop.runtime_unavailable', [errorText(error)], true);
+          if (error.report) showRuntimeFindings('workshop.check_refused', error.report.findings, true,
+            exporting ? MOD_EXPORT_ACTION_ID : MOD_VALIDATE_ACTION_ID, activation.correlation);
+          else show('workshop.runtime_unavailable', [errorText(error)], true,
+            exporting ? MOD_EXPORT_ACTION_ID : MOD_VALIDATE_ACTION_ID, activation.correlation);
           activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
         }
       } finally {
@@ -376,13 +430,15 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     })();
     return true;
   }
-  function showRuntimeFindings(title, records, refused = false) {
-    show(title, [], refused);
+  function showRuntimeFindings(title, records, refused = false, actionId = null, correlation = null) {
+    show(title, [], refused, actionId, correlation);
+    if (!refused) layoutMount.reveal('findings', { focus: '.workshop-findings' });
     for (const record of records) {
       const row = el('p');
       const location = `${record.file}${record.line ? `:${record.line}` : ''}`;
       if (draft.paths().includes(record.file)) {
         const target = button(null, '', () => {
+          layoutMount.reveal('source', { focus: '#workshop-source' });
           selected = record.file;
           refresh({ selection: true });
           source.focus();
@@ -452,11 +508,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     finally { pendingValidation = false; assetInput.value = ''; if (!disposed) refresh(); }
   });
   async function loadDependencies() {
+    if (!runtime.dependencies) return;
     dependencyButton.disabled = true;
     try {
       const snapshot = await runtime.dependencies();
       if (disposed) return;
-      dependencyFiles = [['base', snapshot.base_files], ...snapshot.packs.map(pack => [pack.id, pack.files])]
+      dependencyFiles = [['base', snapshot.base_files], ...snapshot.packs.map(pack => [pack.id,
+        { ...pack.files, 'scenarios.toml': pack.manifest_toml }])]
         .flatMap(([label, files]) => Object.entries(files).map(([path, text]) => ({ label: `${label}: ${path}`, text })));
       dependencySelect.replaceChildren(...dependencyFiles.map((entry, index) => {
         const option = el('option', null, { value: index }); option.textContent = entry.label; return option;
@@ -477,13 +535,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       const replacement = new WorkshopDocument(bytes);
       draft = replacement;
       selected = draft.paths()[0];
-      show('workshop.imported');
+      show('workshop.imported', [], false, MOD_IMPORT_ACTION_ID, pending.correlation, { reveal: true });
       persistDraft();
       pending.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
     } catch (error) {
       show('editor.mod.import.previous_workspace_preserved', [
         error?.code === 'workshop-missing-manifest' ? translate('workshop.missing_manifest') : errorText(error),
-      ], true);
+      ], true, MOD_IMPORT_ACTION_ID, pending.correlation);
       pending.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
     } finally {
       pendingImport = null;
@@ -507,9 +565,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (testPanel?.held()) { refresh({ selection: true }); return; }
     if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
     if (draft?.edit(selected, source.value)) {
-      findings.textContent = translate('workshop.changed');
-      findings.setAttribute('role', 'status');
-      delete findings.dataset.outcome;
+      show('workshop.changed');
       refresh();
       persistDraft();
     }

@@ -9,7 +9,8 @@ import { mountWorkshopLayout } from '../../gui/workshop-layout-renderer.js';
 const labels = {
   switcher: 'Panels', reset: 'Reset', float: 'Float', close: 'Close',
   dock: { left: 'Dock left', right: 'Dock right', top: 'Dock above', bottom: 'Dock below', tab: 'Dock as tab' },
-  panels: { files: 'Files', source: 'Source', inspector: 'Inspector', add: 'Add files', recovery: 'Recovery' },
+  panels: { files: 'Files', source: 'Source', inspector: 'Inspector', add: 'Add files', recovery: 'Recovery',
+    findings: 'Findings', feedback: 'Feedback', dependencies: 'Dependencies', settings: 'Settings' },
 };
 
 function relation(node, first, second) {
@@ -28,7 +29,8 @@ function mount(initial = defaultWorkshopLayout()) {
   document.body.innerHTML = '<main id="root"><div id="surface"></div></main>';
   const root = document.getElementById('root');
   const surface = document.getElementById('surface');
-  const panels = Object.fromEntries(['files', 'source', 'inspector', 'add', 'recovery'].map(panel => {
+  const panels = Object.fromEntries(['files', 'source', 'inspector', 'add', 'recovery',
+    'findings', 'feedback', 'dependencies', 'settings'].map(panel => {
     const node = document.createElement('div'); node.textContent = panel; return [panel, node];
   }));
   const changes = [];
@@ -87,7 +89,7 @@ describe('Workshop layout renderer', () => {
   });
 
   it.each([
-    ['ArrowRight', 'inspector'], ['ArrowLeft', 'inspector'], ['Home', 'source'], ['End', 'inspector'],
+    ['ArrowRight', 'findings'], ['ArrowLeft', 'inspector'], ['Home', 'source'], ['End', 'inspector'],
   ])('uses roving tab focus and activates tabs with %s', (key, expected) => {
     const initial = selectWorkshopPanel(
       dockWorkshopPanel(defaultWorkshopLayout(), 'inspector', 'source', 'tab'), 'source',
@@ -117,7 +119,7 @@ describe('Workshop layout renderer', () => {
 
   it('keeps deterministic float order and raises the selected or focused float without persisting z-index', () => {
     const initial = {
-      version: 2, root: null, closed: [], selected: 'source',
+      version: 3, root: null, closed: ['findings', 'feedback', 'dependencies', 'settings'], selected: 'source',
       floats: [
         { panel: 'files', x: 12, y: 12, width: 300, height: 200 },
         { panel: 'source', x: 40, y: 40, width: 300, height: 200 },
@@ -150,12 +152,12 @@ describe('Workshop layout renderer', () => {
 
   it('returns focus to the switcher after closing the final panel', () => {
     ({ mounted } = mount());
-    for (const panel of ['files', 'source', 'inspector', 'add', 'recovery']) {
+    for (const panel of ['files', 'source', 'inspector', 'add', 'recovery', 'findings', 'feedback', 'dependencies', 'settings']) {
       document.querySelector(`[data-panel="${panel}"] [data-layout-control="close"]`).click();
     }
     expect(document.querySelector('.workshop-dock-panel')).toBeNull();
     expect(document.activeElement).toBe(document.querySelector(
-      '[data-layout-panel="recovery"][data-layout-control="switcher"]',
+      '[data-layout-panel="settings"][data-layout-control="switcher"]',
     ));
   });
 
@@ -193,5 +195,29 @@ describe('Workshop layout renderer', () => {
     expect(mounted.state()).toEqual(desktop);
     expect(document.querySelector('[data-panel="files"].is-floating').style.left).toBe('624px');
     expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
+  });
+
+  it('reveals and focuses a closed panel without mutating retained layout in narrow mode', () => {
+    let initial = defaultWorkshopLayout();
+    initial = { ...initial, closed: [...initial.closed, 'findings'] };
+    initial.root.children[1].tabs = initial.root.children[1].tabs.filter(panel => panel !== 'findings');
+    const focus = document.createElement('button');
+    focus.className = 'finding-target';
+    ({ mounted, changes } = mount(initial));
+    document.querySelector('[data-panel="source"]').append(focus);
+    expect(mounted.reveal('findings')).toBe(true);
+    expect(mounted.state().closed).not.toContain('findings');
+    expect(changes).toHaveLength(1);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
+    window.dispatchEvent(new Event('resize'));
+    const retained = mounted.state();
+    const findings = document.querySelector('[data-panel="findings"]');
+    const target = document.createElement('button'); target.className = 'finding-target';
+    findings.lastElementChild.append(target);
+    expect(mounted.reveal('findings', { focus: '.finding-target' })).toBe(true);
+    expect(document.activeElement).toBe(target);
+    expect(mounted.state()).toEqual(retained);
+    expect(changes).toHaveLength(1);
   });
 });

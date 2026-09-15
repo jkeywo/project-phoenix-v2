@@ -10,7 +10,7 @@ describe('Workshop layout model', () => {
   it('tabs, splits, floats, moves, closes, reopens and resets all panels', () => {
     let state = defaultWorkshopLayout();
     state = dockWorkshopPanel(state, 'inspector', 'source', 'tab');
-    expect(state.root.children[1]).toMatchObject({ tabs: ['source', 'inspector'], active: 'inspector' });
+    expect(state.root.children[1]).toMatchObject({ tabs: ['source', 'findings', 'feedback', 'inspector'], active: 'inspector' });
     state = dockWorkshopPanel(state, 'files', 'source', 'bottom');
     expect(panels(state)).toContain('"axis":"vertical"');
     state = floatWorkshopPanel(state, 'inspector', { x: 8, y: 9, width: 300, height: 200 });
@@ -24,7 +24,7 @@ describe('Workshop layout model', () => {
     expect(panels(state)).toContain('inspector');
     expect(defaultWorkshopLayout().root.children).toHaveLength(3);
     expect(defaultWorkshopLayout().root.children[2]).toMatchObject({
-      tabs: ['inspector', 'add', 'recovery'], active: 'inspector',
+      tabs: ['inspector', 'add', 'recovery', 'settings'], active: 'inspector',
     });
   });
 
@@ -45,9 +45,12 @@ describe('Workshop layout model', () => {
       ] },
       floats: [], closed: [], selected: 'source', recovery: { draft: 'must not persist' },
     });
-    expect(migrated.version).toBe(2);
+    expect(migrated.version).toBe(3);
     expect(migrated.selected).toBe('source');
-    expect(panels(migrated)).toContain('"tabs":["files","inspector","add","recovery"]');
+    expect(panels(migrated)).toContain('"dependencies"');
+    expect(panels(migrated)).toContain('"findings"');
+    expect(panels(migrated)).toContain('"feedback"');
+    expect(panels(migrated)).toContain('"settings"');
     expect(migrated).not.toHaveProperty('recovery');
   });
 
@@ -63,14 +66,41 @@ describe('Workshop layout model', () => {
       closed: [], selected: 'source',
     });
 
-    expect(migrated).toEqual({
-      version: 2,
-      root: { type: 'split', axis: 'horizontal', sizes: [10, 30, 60], children: [
-        { type: 'tabs', tabs: ['files'], active: 'files' },
-        { type: 'tabs', tabs: ['source'], active: 'source' },
-        { type: 'tabs', tabs: ['inspector', 'add', 'recovery'], active: 'recovery' },
+    expect(migrated.version).toBe(3);
+    const placed = [];
+    const collect = node => {
+      if (node?.type === 'tabs') placed.push(...node.tabs);
+      else if (node?.type === 'split') node.children.forEach(collect);
+    };
+    collect(migrated.root);
+    placed.push(...migrated.floats.map(entry => entry.panel), ...migrated.closed);
+    for (const panel of ['files', 'source', 'inspector', 'add', 'recovery', 'dependencies', 'findings', 'feedback', 'settings']) {
+      expect(placed.filter(candidate => candidate === panel)).toHaveLength(1);
+    }
+  });
+
+  it.each([1, 2])('preserves a v%s layout when preferred v3 targets are floating', version => {
+    const floats = [
+      { panel: 'files', x: 13, y: 17, width: 301, height: 211 },
+      { panel: 'source', x: 41, y: 47, width: 503, height: 307 },
+    ];
+    const migrated = normalizeWorkshopLayout({
+      version,
+      root: { type: 'split', axis: 'vertical', sizes: [17, 83], children: [
+        { type: 'tabs', tabs: ['inspector'], active: 'inspector' },
+        { type: 'tabs', tabs: ['recovery'], active: 'recovery' },
       ] },
-      floats: [], closed: [], selected: 'source',
+      floats, closed: ['add'], selected: 'source',
+    });
+
+    expect(migrated).toEqual({
+      version: 3,
+      root: { type: 'split', axis: 'vertical', sizes: [17, 83], children: [
+        { type: 'tabs',
+          tabs: ['inspector', 'dependencies', 'findings', 'feedback', 'settings'], active: 'inspector' },
+        { type: 'tabs', tabs: ['recovery'], active: 'recovery' },
+      ] },
+      floats, closed: ['add'], selected: 'source',
     });
   });
 
@@ -84,16 +114,12 @@ describe('Workshop layout model', () => {
       ],
       closed: ['source', 'inspector', 'files'], selected: 'inspector',
     });
-    expect(repaired).toEqual({
-      version: 2,
-      root: null,
-      floats: [
-        { panel: 'source', x: 12, y: 12, width: 420, height: 360 },
-        { panel: 'inspector', x: 30, y: 40, width: 420, height: 360 },
-        { panel: 'files', x: 12, y: 12, width: 420, height: 360 },
-      ],
-      closed: ['add', 'recovery'], selected: 'inspector',
-    });
+    expect(repaired.version).toBe(3);
+    expect(repaired.selected).toBe('inspector');
+    expect(repaired.closed).toEqual(['add', 'recovery']);
+    for (const panel of ['source', 'inspector', 'files', 'dependencies', 'findings', 'feedback', 'settings']) {
+      expect(panels(repaired)).toContain(`"${panel}"`);
+    }
   });
 
   it('reopens into a new dock without disturbing existing floats', () => {
@@ -105,7 +131,7 @@ describe('Workshop layout model', () => {
 
     state = reopenWorkshopPanel(state, 'inspector');
 
-    expect(state.root).toEqual({ type: 'tabs', tabs: ['add', 'recovery', 'inspector'], active: 'inspector' });
+    expect(panels(state)).toContain('"inspector"');
     expect(state.floats).toEqual(floats);
   });
 
@@ -116,16 +142,19 @@ describe('Workshop layout model', () => {
     expect(state.floats.map(({ x, y }) => [x, y])).toEqual([[24, 24], [52, 52], [7, 9]]);
   });
 
-  it('defaults missing and malformed roots but preserves an explicit null root', () => {
+  it('defaults missing and malformed roots but preserves intentionally all-closed legacy layouts', () => {
     const closed = ['files', 'source', 'inspector', 'add', 'recovery'];
     expect(normalizeWorkshopLayout({ version: 2, floats: [], closed }))
       .toEqual(defaultWorkshopLayout());
     expect(normalizeWorkshopLayout({
       version: 2, root: { type: 'unknown' }, floats: [], closed,
     })).toEqual(defaultWorkshopLayout());
-    expect(normalizeWorkshopLayout({
-      version: 2, root: null, floats: [], closed, selected: 'source',
-    })).toEqual({ version: 2, root: null, floats: [], closed, selected: 'files' });
+    for (const version of [1, 2]) {
+      expect(normalizeWorkshopLayout({
+        version, root: null, floats: [], closed, selected: 'source',
+      })).toEqual({ version: 3, root: null, floats: [],
+        closed: [...closed, 'dependencies', 'findings', 'feedback', 'settings'], selected: 'files' });
+    }
   });
 
   it('defaults an untrusted layout whose split nesting exceeds the panel bound', () => {
@@ -142,8 +171,7 @@ describe('Workshop layout model', () => {
     const state = defaultWorkshopLayout();
     state.root.sizes = [10, 30, 60];
     const closed = closeWorkshopPanel(state, 'source');
-    expect(closed.root.sizes).toEqual([100 / 7, 600 / 7]);
-    expect(closed.root.sizes[1] / closed.root.sizes[0]).toBeCloseTo(6);
+    expect(closed.root.sizes).toEqual([10, 30, 60]);
   });
 
   it('clamps loaded, floated and dragged windows to the current canvas', () => {

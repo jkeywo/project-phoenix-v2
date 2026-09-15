@@ -33,6 +33,7 @@ pub struct WorkshopRequest {
 pub enum Operation {
     Load,
     LoadSources,
+    LoadDependencies,
     ValidateSources {
         files: assets::Sources,
     },
@@ -108,6 +109,10 @@ pub enum Response {
         revision: String,
         files: assets::Sources,
     },
+    Dependencies {
+        base_files: BTreeMap<String, String>,
+        packs: Vec<DependencySources>,
+    },
     AssetChunk {
         bytes: Vec<u8>,
     },
@@ -148,6 +153,13 @@ pub enum Response {
         message: String,
         report: Option<WorkshopValidation>,
     },
+}
+
+#[derive(Debug, Serialize)]
+pub struct DependencySources {
+    id: String,
+    manifest_toml: String,
+    files: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -268,6 +280,19 @@ impl NativeWorkshopProvider {
                 kind: self.kind,
                 revision: self.revision.clone(),
                 files: self.assets.compact(&self.baseline)?,
+            },
+            Operation::LoadDependencies => Response::Dependencies {
+                base_files: self.dependencies.base_files.clone(),
+                packs: self
+                    .dependencies
+                    .packs
+                    .iter()
+                    .map(|pack| DependencySources {
+                        id: pack.id.clone(),
+                        manifest_toml: pack.manifest_toml.clone(),
+                        files: pack.files.clone(),
+                    })
+                    .collect(),
             },
             Operation::ValidateSources { files } => {
                 let files = self.assets.materialize(files)?;

@@ -59,7 +59,7 @@ describe('native Workshop shared boot', () => {
     window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });
     await pending;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'source', 'inspector', 'add', 'recovery']);
+      .toEqual(['files', 'dependencies', 'source', 'findings', 'feedback', 'inspector', 'add', 'recovery', 'settings']);
   });
 
   it('mounts with visible storage status when preference loading fails and bounds the private queue', async () => {
@@ -154,7 +154,12 @@ describe('native Workshop shared boot', () => {
         status: 'recovery', recovery: { revision: 'recovered-r1', record: recoveryRecord },
       };
       if (request.op === 'validate-sources') return {
-        status: 'validated', report: { accepted: true, findings: [] },
+        status: 'validated', report: { accepted: true, findings: [
+          { file: addedPath, line: 1, severity: 'warning', message: 'accepted native source' },
+        ] },
+      };
+      if (request.op === 'load-dependencies') return {
+        status: 'dependencies', base_files: { 'assets/base.toml': 'immutable = true\n' }, packs: [],
       };
       if (request.op === 'asset-begin') return { status: 'asset-upload', token: 'asset-1' };
       if (request.op === 'asset-chunk') return { status: 'done' };
@@ -183,6 +188,11 @@ describe('native Workshop shared boot', () => {
       await vi.waitFor(() => expect(source.value).toBe(entitySource));
       expect(files.value).toBe(entityPath);
       expect([...files.options].map(option => option.value)).toEqual([worldPath, entityPath, recoveredPath]);
+
+      document.querySelector('[data-layout-panel="dependencies"][role="tab"]').click();
+      document.getElementById('workshop-dependencies-load').click();
+      await vi.waitFor(() => expect(document.getElementById('workshop-dependency-source').value).toContain('immutable'));
+      expect(document.getElementById('workshop-dependency-source').readOnly).toBe(true);
 
       document.getElementById('workshop-undo').click();
       expect(files.value).toBe(worldPath);
@@ -221,6 +231,14 @@ describe('native Workshop shared boot', () => {
         [recoveredPath]: recoveredSource,
         [addedPath]: addedSource,
       });
+      await vi.waitFor(() => expect(document.activeElement).toBe(document.querySelector('.workshop-findings')));
+      const acceptedFindings = document.querySelector('.workshop-findings');
+      const acceptedFeedback = document.querySelector('[data-action-id="editor.mod.validate"]');
+      expect(acceptedFindings.textContent).toContain('accepted native source');
+      expect(acceptedFindings.dataset.outcome).toBe('applied');
+      expect(acceptedFeedback.dataset.state).toBe('Applied');
+      expect(acceptedFindings.dataset.producingAction).toBe('editor.mod.validate');
+      expect(acceptedFindings.dataset.producingCorrelation).toBe(acceptedFeedback.dataset.correlation);
 
       document.getElementById('workshop-add-path').value = assetPath;
       const assetInput = document.querySelector('.workshop-add input[type="file"]');
@@ -245,6 +263,44 @@ describe('native Workshop shared boot', () => {
         [assetPath]: { asset: '0000000000000001-4', length: 4 },
       });
       expect(document.querySelectorAll('#workshop-save')).toHaveLength(1);
+    } finally { mounted.dispose(); }
+  });
+
+  it('keeps refused native validation correlated, focused, and on the initiating draft', async () => {
+    document.body.innerHTML = '<main id="workshop"></main>';
+    const path = 'assets/worlds/test.toml';
+    const original = '[global]\ntitle="Original"\n';
+    const edited = '[global\ntitle="Retained"\n';
+    const request = vi.fn(async request => {
+      if (request.op === 'load-sources') return {
+        status: 'sources', kind: 'project', revision: 'r1', files: { [path]: original },
+      };
+      if (request.op === 'recovery-load') return { status: 'recovery', recovery: null };
+      if (request.op === 'validate-sources') return {
+        status: 'refused', message: 'validation refused', report: { accepted: false, findings: [
+          { file: path, line: 1, severity: 'error', message: 'invalid table' },
+        ] },
+      };
+      return { status: 'done' };
+    });
+    const mounted = mountWorkshopAuthoring({ root: document.getElementById('workshop'),
+      provider: createNativeWorkshopProvider({ request }) });
+    try {
+      await mounted.ready;
+      const source = document.getElementById('workshop-source');
+      source.value = edited;
+      source.dispatchEvent(new Event('input'));
+      document.querySelector('[data-panel="findings"] [data-layout-control="close"]').click();
+      document.getElementById('workshop-check').click();
+      await vi.waitFor(() => expect(document.querySelector('.workshop-findings')?.dataset.outcome).toBe('refused'));
+      const findings = document.querySelector('.workshop-findings');
+      expect(document.activeElement).toBe(findings);
+      expect(source.value).toBe(edited);
+      expect(findings.textContent).toContain('invalid table');
+      expect(findings.dataset.producingAction).toBe('editor.mod.validate');
+      const feedback = document.querySelector('[data-action-id="editor.mod.validate"]');
+      expect(feedback.dataset.state).toBe('Refused');
+      expect(findings.dataset.producingCorrelation).toBe(feedback.dataset.correlation);
     } finally { mounted.dispose(); }
   });
 });

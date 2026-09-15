@@ -41,6 +41,36 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn dependencies_are_exposed_as_read_only_text_without_editable_assets() {
+    let fixture = Fixture::new();
+    let dependencies = WorkshopDependencies {
+        base_files: BTreeMap::from([("assets/base.toml".into(), "immutable = true\n".into())]),
+        base_assets: BTreeMap::from([("assets/base.glb".into(), vec![1, 2, 3])]),
+        packs: vec![super::super::WorkshopDependencyPack {
+            id: "other".into(),
+            manifest_toml: "# exact\r\n[pack]\r\nid='other'\r\n".into(),
+            files: BTreeMap::from([("assets/other.toml".into(), "value = 1\n".into())]),
+            assets: BTreeMap::from([("assets/other.glb".into(), vec![4, 5, 6])]),
+        }],
+    };
+    let mut provider = NativeWorkshopProvider::open(
+        WorkspaceKind::Project,
+        &fixture.root,
+        &fixture.recovery,
+        dependencies,
+    )
+    .unwrap();
+
+    let json = provider.handle_json(r#"{"id":1,"op":"load-dependencies"}"#);
+    assert!(json.contains(r#""status":"dependencies""#), "{json}");
+    assert!(json.contains("assets/base.toml"));
+    assert!(json.contains("assets/other.toml"));
+    assert!(json.contains("\"manifest_toml\":\"# exact\\r\\n[pack]\\r\\nid='other'\\r\\n\""));
+    assert!(!json.contains("base.glb"));
+    assert!(!json.contains("other.glb"));
+}
+
+#[test]
 fn private_json_bridge_loads_exact_source_and_roundtrips_a_runtime_validated_save() {
     let fixture = Fixture::new();
     let mut provider = fixture.open();

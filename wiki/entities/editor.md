@@ -3,7 +3,7 @@ title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
 sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml]
-updated: 2026-09-14
+updated: 2026-09-15
 ---
 
 # Editor
@@ -110,14 +110,22 @@ consumers; the Workshop UI never treats it as runtime acceptance.
 
 `workshop-layout-model.js` and `workshop-layout-renderer.js` own the registered
 Authoring panel arrangement independently of `WorkshopDocument`: file browser,
-source document, generic inspector, file addition and recovery can split, tab,
+source document, generic inspector, file addition, recovery, validation findings,
+correlated action feedback, immutable dependencies and private operator settings can split, tab,
 float in-surface, close and reset while lifecycle commands remain in the fixed
 menu/toolbar. The renderer moves each registered panel's original node rather
 than cloning controls. The versioned layout is a
 presentation-only field in the private operator profile, repaired to defaults on
 obsolete or invalid data. Narrow surfaces project one selected panel through a
 switcher without replacing the retained desktop tree. Browser and native Workshop
-mount this same renderer through `mountWorkshopAuthoring`.
+mount this same renderer through `mountWorkshopAuthoring`. Presenter-driven reveal
+reopens and activates findings or source in desktop and narrow projection without
+changing validation authority or entering dependency reads into document history.
+Settings replace only the relevant Accessibility or binding field in the existing
+private operator profile and apply Accessibility effects immediately. The native
+profile sanitizer mirrors the browser's version-3 panel registry and migration;
+its private Workshop bridge publishes only the already-captured textual dependency
+snapshot, never binary dependency assets or filesystem authority.
 
 The field inspector uses `toml_edit` source spans in the same Rust module. It
 patches exactly one scalar and refuses stale documents or incompatible types;

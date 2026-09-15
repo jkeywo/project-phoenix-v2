@@ -15,6 +15,7 @@ import {
 } from './accessibility-profile.js';
 import { normalizePrivateAudio, legacyPrivateMaster, LEGACY_PRIVATE_MASTER_KEY } from './private-audio-preferences.js';
 import { defaultWorkshopLayout, normalizeWorkshopLayout } from './workshop-layout-model.js';
+import { defaultLiveLayout, normalizeLiveLayout } from './live-layout-model.js';
 
 export const OPERATOR_PROFILE_KIND = 'project-phoenix/operator-profile';
 export const OPERATOR_PROFILE_VERSION = 1;
@@ -39,7 +40,7 @@ const MAX_PROFILE_ENTRIES = 512;
 const MAX_GAMEPAD_SLOT = 15;
 const CURRENT_FIELDS = new Set([
   'kind', 'version', 'accessibility', 'bindings', 'gamepad', 'feedback',
-  'gmConfirmations', 'audio', 'authoringLayout',
+  'gmConfirmations', 'audio', 'authoringLayout', 'liveLayout',
 ]);
 
 function ownRecord(value) {
@@ -189,6 +190,7 @@ export function createDefaultOperatorProfile(registry = null) {
     audio: normalizePrivateAudio(),
     gmConfirmations: record(),
     authoringLayout: defaultWorkshopLayout(),
+    liveLayout: defaultLiveLayout(),
   };
 }
 
@@ -207,6 +209,7 @@ export function createOperatorProfileSnapshot({
   audio,
   gmConfirmations,
   authoringLayout,
+  liveLayout,
 } = {}) {
   const diagnostics = [];
   return {
@@ -224,6 +227,7 @@ export function createOperatorProfileSnapshot({
     audio: normalizePrivateAudio(audio),
     gmConfirmations: normalizeConfirmations(gmConfirmations, diagnostics),
     authoringLayout: normalizeWorkshopLayout(authoringLayout),
+    liveLayout: normalizeLiveLayout(liveLayout),
   };
 }
 
@@ -330,6 +334,7 @@ export function prepareOperatorProfileImport(text, { registry } = {}) {
       diagnostics,
     ),
     authoringLayout: normalizeWorkshopLayout(legacy ? null : raw.authoringLayout),
+    liveLayout: normalizeLiveLayout(legacy ? null : raw.liveLayout),
   };
   return {
     status: legacy ? 'migrated' : 'imported',
@@ -366,6 +371,7 @@ export function serializeOperatorProfile(profile) {
     audio: profile && profile.audio,
     gmConfirmations: profile && profile.gmConfirmations,
     authoringLayout: profile && profile.authoringLayout,
+    liveLayout: profile && profile.liveLayout,
   });
   return JSON.stringify(safe, null, 2) + '\n';
 }

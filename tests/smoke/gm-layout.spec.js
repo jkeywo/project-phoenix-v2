@@ -21,6 +21,28 @@ async function joinAsReadyGm(page, world) {
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 }
 
+test('Live dock persists separately and keeps the operator bar visible in narrow mode', async ({ page }) => {
+  test.setTimeout(90000);
+  const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
+  await joinAsReadyGm(page, world);
+  await expect(page.locator('#gm-console > header')).toBeVisible();
+  await expect(page.locator('[data-panel="roster"] #gm-roster')).toBeVisible();
+  await page.locator('[data-panel="roster"] [data-layout-control="float"]').click();
+  await expect(page.locator('[data-panel="roster"].is-floating')).toBeVisible();
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('phoenix-operator-profile-v1')));
+  expect(stored.liveLayout.floats[0].panel).toBe('roster');
+  expect(stored.authoringLayout.version).toBe(2);
+
+  await page.reload();
+  await waitForWasmReady(page);
+  await expect(page.locator('[data-panel="roster"].is-floating')).toBeVisible();
+  await page.setViewportSize({ width: 800, height: 720 });
+  await expect(page.locator('#gm-console > header')).toBeVisible();
+  await expect(page.locator('#gm-live-layout .workshop-dock-panel')).toHaveCount(1);
+  await page.locator('#gm-live-layout [data-layout-panel="readiness"]').click();
+  await expect(page.locator('[data-panel="readiness"] #gm-start-controls')).toBeVisible();
+});
+
 test('GM desktop layout is usable at both host viewport sizes', async ({ context }, testInfo) => {
   test.setTimeout(90000);
   const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');

@@ -142,9 +142,9 @@ describe('Workshop layout renderer', () => {
     const nested = document.querySelector('.workshop-split .workshop-split.is-vertical');
     expect(nested.style.gridTemplateRows).toMatch(/^minmax\(0, .+fr\) minmax\(0, .+fr\)$/);
 
-    const css = readFileSync('gui/workshop.css', 'utf8');
-    expect(css).toMatch(/\.workshop-dock-canvas\s*\{[^}]*min-height:\s*32rem/);
-    expect(css).toMatch(/\.workshop-split\s*\{[^}]*min-height:\s*0/);
+    const css = readFileSync('gui/dock-layout.css', 'utf8');
+    expect(css).toMatch(/\.workshop-dock-root \.workshop-dock-canvas\s*\{[^}]*min-height:\s*32rem/);
+    expect(css).toMatch(/\.workshop-dock-root \.workshop-split\s*\{[^}]*min-height:\s*0/);
     expect(css).not.toMatch(/\.workshop-split\s*\{[^}]*min-height:\s*32rem/);
   });
 

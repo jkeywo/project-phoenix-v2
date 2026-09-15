@@ -225,6 +225,13 @@ fn workshop_panel(value: &Value) -> bool {
     )
 }
 
+fn live_panel(value: &Value) -> bool {
+    matches!(
+        value.as_str(),
+        Some("roster" | "readiness" | "join" | "manual-save")
+    )
+}
+
 fn sanitize_workshop_node(
     value: &Value,
     seen: &mut BTreeSet<String>,
@@ -305,6 +312,141 @@ fn default_authoring_layout() -> Value {
         ]},
         "floats": [], "closed": [], "selected": "source"
     })
+}
+
+fn default_live_layout() -> Value {
+    json!({
+        "version": 1,
+        "root": {"type":"tabs", "tabs":["roster","readiness","join","manual-save"], "active":"roster"},
+        "floats": [], "closed": [], "selected": "roster"
+    })
+}
+
+fn sanitize_live_layout(value: &Value) -> Option<Value> {
+    if value["version"] != 1 {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    let root = match value.get("root")? {
+        Value::Null => Value::Null,
+        root => match sanitize_live_node(root, &mut seen, 0) {
+            Ok(Some(root)) => root,
+            Ok(None) => Value::Null,
+            Err(()) => return Some(default_live_layout()),
+        },
+    };
+    let mut floats = Vec::new();
+    for entry in value["floats"].as_array().into_iter().flatten() {
+        let Some(panel) = entry["panel"]
+            .as_str()
+            .filter(|_| live_panel(&entry["panel"]))
+        else {
+            continue;
+        };
+        if !seen.insert(panel.to_owned()) {
+            continue;
+        }
+        let number = |name: &str, fallback: f64| entry[name].as_f64().unwrap_or(fallback);
+        floats.push(
+            json!({"panel":panel, "x":number("x",12.0).max(0.0), "y":number("y",12.0).max(0.0),
+            "width":number("width",420.0).max(240.0), "height":number("height",360.0).max(180.0)}),
+        );
+        if floats.len() == 4 {
+            break;
+        }
+    }
+    if !value["root"].is_null() && root.is_null() && floats.is_empty() {
+        return Some(default_live_layout());
+    }
+    let mut closed = Vec::new();
+    for panel in value["closed"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|panel| live_panel(panel))
+    {
+        let id = panel.as_str().unwrap();
+        if seen.insert(id.to_owned()) {
+            closed.push(json!(id));
+        }
+    }
+    for panel in ["roster", "readiness", "join", "manual-save"] {
+        if seen.insert(panel.to_owned()) {
+            closed.push(json!(panel));
+        }
+    }
+    let selected = value
+        .get("selected")
+        .filter(|panel| live_panel(panel) && !closed.contains(panel))
+        .cloned()
+        .or_else(|| first_visible(&root, &floats))
+        .unwrap_or_else(|| json!("roster"));
+    Some(json!({"version":1, "root":root, "floats":floats, "closed":closed, "selected":selected}))
+}
+
+fn sanitize_live_node(
+    value: &Value,
+    seen: &mut BTreeSet<String>,
+    depth: usize,
+) -> Result<Option<Value>, ()> {
+    if depth > 4 {
+        return Err(());
+    }
+    match value["type"].as_str() {
+        Some("tabs") => {
+            let Some(raw) = value["tabs"].as_array() else {
+                return Ok(None);
+            };
+            let tabs: Vec<_> = raw
+                .iter()
+                .filter(|panel| live_panel(panel))
+                .filter_map(|panel| {
+                    let id = panel.as_str()?;
+                    seen.insert(id.to_owned()).then(|| json!(id))
+                })
+                .collect();
+            if tabs.is_empty() {
+                return Ok(None);
+            }
+            let active = value
+                .get("active")
+                .filter(|active| tabs.contains(active))
+                .cloned()
+                .unwrap_or_else(|| tabs[0].clone());
+            Ok(Some(json!({"type":"tabs", "tabs":tabs, "active":active})))
+        }
+        Some("split") if matches!(value["axis"].as_str(), Some("horizontal" | "vertical")) => {
+            let Some(raw) = value["children"].as_array() else {
+                return Ok(None);
+            };
+            let mut children = Vec::new();
+            for child in raw.iter().take(4) {
+                if let Some(child) = sanitize_live_node(child, seen, depth + 1)? {
+                    children.push(child);
+                }
+            }
+            if children.is_empty() {
+                return Ok(None);
+            }
+            if children.len() == 1 {
+                return Ok(children.pop());
+            }
+            let supplied = value["sizes"].as_array();
+            let sizes: Vec<_> = (0..children.len())
+                .map(|index| {
+                    supplied
+                        .and_then(|v| v.get(index))
+                        .and_then(Value::as_f64)
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .unwrap_or(1.0)
+                })
+                .collect();
+            Ok(Some(
+                json!({"type":"split", "axis":value["axis"], "sizes":sizes, "children":children}),
+            ))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
@@ -628,6 +770,9 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
     if let Some(layout) = sanitize_authoring_layout(&raw["authoringLayout"]) {
         safe["authoringLayout"] = layout;
     }
+    if let Some(layout) = sanitize_live_layout(&raw["liveLayout"]) {
+        safe["liveLayout"] = layout;
+    }
     serde_json::to_string_pretty(&safe).map_err(|e| e.to_string())
 }
 
@@ -741,6 +886,36 @@ mod tests {
         assert_ne!(state.path("../helm"), state.path("helm"));
         state.scope = Some("destroyer".into());
         assert!(!state.path("helm").unwrap().exists());
+    }
+
+    #[test]
+    fn live_layout_is_sanitized_separately_from_authoring_layout() {
+        let profile = json!({
+            "kind":"project-phoenix/operator-profile", "version":1,
+            "authoringLayout":default_authoring_layout(),
+            "liveLayout":{
+                "version":1,
+                "root":{"type":"tabs","tabs":["roster","roster","unsafe"],"active":"unsafe"},
+                "floats":[{"panel":"join","x":30,"unsafe":"secret"}],
+                "closed":["manual-save"], "selected":"unsafe", "unsafe":"secret"
+            },
+            "reconnectCredential":"secret"
+        });
+        let saved: Value =
+            serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
+        assert_eq!(saved["authoringLayout"]["selected"], "source");
+        assert_eq!(
+            saved["authoringLayout"]["root"]["children"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(saved["liveLayout"]["root"]["tabs"], json!(["roster"]));
+        assert_eq!(saved["liveLayout"]["floats"][0]["panel"], "join");
+        assert_eq!(saved["liveLayout"]["selected"], "roster");
+        assert!(saved.get("reconnectCredential").is_none());
+        assert!(!saved.to_string().contains("secret"));
     }
 
     #[test]

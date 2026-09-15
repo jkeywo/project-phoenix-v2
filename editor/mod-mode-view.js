@@ -412,6 +412,7 @@ export function mountModMode({
       audio: operatorProfile?.audio,
       gmConfirmations: operatorProfile?.gmConfirmations,
       authoringLayout: operatorProfile?.authoringLayout,
+      liveLayout: operatorProfile?.liveLayout,
     });
     const saved = saveOperatorProfile(profileStorage, operatorProfile);
     profileStatus = saved.status === 'saved'

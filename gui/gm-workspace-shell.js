@@ -9,6 +9,8 @@
 import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 import { healthStateLabelId } from './gm-health-banner.js';
 import { formatAttentionAge } from './gm-attention-panel.js';
+import { liveLayoutModel } from './live-layout-model.js';
+import { mountDockLayout } from './workshop-layout-renderer.js';
 
 /** Workload levels that are a claim about a PERSON, worst last. A hull's word
  * is the worst of these across its Stations; a hull whose Stations are all
@@ -23,14 +25,23 @@ export const GM_DESK_LOG_VIEWS = Object.freeze([
   ['journal', 'gm-journal'],
 ]);
 
-export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
+export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
   const root = doc.getElementById('gm-console');
-  if (!root) return { refresh() {}, metadata() {}, selection() {}, dispose() {} };
+  if (!root) return { refresh() {}, metadata() {}, selection() {}, dispose() {},
+    mountLiveLayout() {}, setLiveLayout() {}, showLog() { return false; } };
   phAdoptConsoleStyles(doc);
   const css = doc.createElement('link');
   css.rel = 'stylesheet';
   css.href = new URL('./gm-workspace.css', import.meta.url).href;
   doc.head.append(css);
+  const liveWorkspace = native || win.__phoenixGmPage === true
+    || doc.documentElement.classList.contains('phoenix-gm-page');
+  const dockCss = liveWorkspace ? doc.createElement('link') : null;
+  if (dockCss) {
+    dockCss.rel = 'stylesheet';
+    dockCss.href = new URL('./dock-layout.css', import.meta.url).href;
+    doc.head.append(dockCss);
+  }
   root.classList.add('gm-desk');
   const get = id => doc.getElementById(id);
   const move = (parent, ...ids) => ids.forEach(id => { if (get(id)) parent.append(get(id)); });
@@ -81,21 +92,10 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   const roster = element('section', 'gm-roster');
   roster.setAttribute('aria-labelledby', 'gm-roster-heading');
   roster.append(element('h2', 'gm-roster-heading', 'server.gm.shell.roster'));
-  if (win.__phoenixGmPage || doc.documentElement.classList.contains('phoenix-gm-page')) {
-    // Readiness must remain above a growing roster and the spawn palette.
-    // The ordinary viewscreen keeps these controls in its own lobby.
-    move(roster, 'gm-start-controls');
-    move(roster, 'gm-join-controls');
-    roster.querySelector('#gm-join-controls')?.removeAttribute('style');
-  }
   const ships = element('div', 'gm-roster-ships');
   const operators = element('div', 'gm-roster-operators');
   roster.append(ships, element('h3', null, 'server.gm.shell.operators'), operators);
   move(roster, 'gm-spawn-panel');
-  // The viewscreen still needs its lobby controls. Move them only on a GM page.
-  if (win.__phoenixGmPage || doc.documentElement.classList.contains('phoenix-gm-page')) {
-    move(roster, 'manual-save-panel');
-  }
   const region = (id, stacked) => {
     const el = element('div', id);
     el.className = stacked ? 'gm-desk-region gm-desk-stack' : 'gm-desk-region';
@@ -121,7 +121,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   // a second writer there would race it, exactly as it would for the Station
   // puppet's controls.
   move(brief, 'gm-attention-panel');
-  brief.append(roster);
+  const liveSurface = element('div', 'gm-live-layout');
+  liveSurface.className = 'gm-live-layout';
+  brief.append(liveSurface);
   move(brief, 'gm-workload-panel', 'gm-widgets');
   // Right: the selected hull, then the checkpoints a live event is recovered
   // from (issues #1445/#1446) at the bottom of the column, as the artboard
@@ -477,8 +479,71 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   get('gm-station-toggle')?.addEventListener('click', () => {
     if (!get('gm-station-frame').hidden) stationSurface.scrollIntoView?.({ block: 'start' });
   });
+  let liveLayout = null;
+  const dockOrigins = new Map();
+  function preserveForDock(node, attributes = []) {
+    if (!node) return;
+    if (!dockOrigins.has(node)) {
+      const marker = doc.createComment(`gm-live-dock:${node.id}`);
+      node.before(marker);
+      dockOrigins.set(node, { marker, attributes: new Map() });
+    }
+    const origin = dockOrigins.get(node);
+    for (const name of attributes) {
+      if (!origin.attributes.has(name)) origin.attributes.set(name, node.getAttribute(name));
+    }
+  }
+  function restoreDockedNodes() {
+    for (const [node, origin] of dockOrigins) {
+      origin.marker.replaceWith(node);
+      for (const [name, value] of origin.attributes) {
+        if (value === null) node.removeAttribute(name); else node.setAttribute(name, value);
+      }
+    }
+    dockOrigins.clear();
+  }
+  function mountLiveLayout(initial, onChange) {
+    if (!liveWorkspace) return null;
+    liveLayout?.dispose();
+    const readiness = element('section', 'gm-readiness-dock');
+    const startControls = get('gm-start-controls');
+    preserveForDock(startControls);
+    if (startControls) readiness.append(startControls);
+    const join = get('gm-join-controls');
+    preserveForDock(join, ['style']);
+    join?.removeAttribute('style');
+    const manual = element('section', 'gm-manual-save-dock');
+    const manualPanel = get('manual-save-panel');
+    preserveForDock(manualPanel, native ? ['hidden'] : []);
+    if (manualPanel) manual.append(manualPanel);
+    if (native && typeof win.__hostGmCheckpointCreate !== 'function') {
+      manualPanel?.setAttribute('hidden', '');
+      manual.append(element('p', 'gm-native-manual-save-unavailable', 'server.gm.shell.manual_save_unavailable'));
+    }
+    liveLayout = mountDockLayout({ root, surface: liveSurface,
+      panels: { roster, readiness, join: join || element('section'), 'manual-save': manual },
+      labels: {
+        switcher: t('server.gm.shell.layout.switcher'), reset: t('server.gm.shell.layout.reset'),
+        float: t('server.gm.shell.layout.float'), close: t('server.gm.shell.layout.close'),
+        dock: Object.fromEntries(['left', 'right', 'top', 'bottom', 'tab'].map(place =>
+          [place, t(`server.gm.shell.layout.dock_${place}`)])),
+        panels: Object.fromEntries(['roster', 'readiness', 'join', 'manual-save'].map(panel =>
+          [panel, t(`server.gm.shell.layout.panel.${panel.replace('-', '_')}`)])),
+      }, initial, onChange, model: liveLayoutModel, viewportNarrow: true, doc, win });
+    styleButtons();
+    return liveLayout;
+  }
+  if (liveWorkspace) mountLiveLayout(liveLayoutModel.defaultLayout());
   return {
-    dispose() { observer.disconnect(); css.remove(); },
+    dispose() {
+      liveLayout?.dispose();
+      restoreDockedNodes();
+      observer.disconnect();
+      dockCss?.remove();
+      css.remove();
+    },
+    mountLiveLayout,
+    setLiveLayout(value) { liveLayout?.set(value); },
     /** Bring one of the centre region's three views to the front.
      *
      * A view that is not current is `display: none`, so anything inside it is

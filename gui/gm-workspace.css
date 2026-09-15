@@ -26,6 +26,7 @@
 #gm-console.gm-desk p:empty, #gm-console.gm-desk ol:empty { display: none; }
 #gm-console .gm-station-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5);
+  position: sticky; top: 0; z-index: 20;
   min-height: 76px; padding: var(--space-4) var(--space-5); padding-right: var(--settings-cog-keepout, var(--space-5));
   border-bottom: 1px solid var(--edge); background: var(--surface-panel);
 }
@@ -199,6 +200,13 @@
 #gm-console.gm-desk #gm-station-surface { flex: 0 0 auto; width: 100%; overflow: auto; }
 #gm-console.gm-desk #gm-station-frame { width: 1280px; height: 720px; max-width: none; }
 #gm-console.gm-desk #gm-start-controls { position: static; padding: var(--space-4) 0; }
+#gm-console.gm-desk #gm-live-layout { min-width: 0; }
+#gm-console.gm-desk #gm-live-layout .workshop-panel-switcher { overflow-x: auto; }
+#gm-console.gm-desk #gm-live-layout .workshop-dock-canvas { min-height: 24rem; }
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > section,
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > aside { width: 100%; max-width: none; }
+#gm-console.gm-desk #gm-live-layout #gm-join-controls { position: static; inset: auto; }
+#gm-console.gm-desk #gm-native-manual-save-unavailable { color: var(--ink-dim); }
 @media (max-width: 1300px) {
   #gm-console.gm-desk #gm-workspace { grid-template-columns: 260px minmax(0, 1fr) 320px; }
 }

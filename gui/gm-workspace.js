@@ -62,7 +62,8 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   });
   const privateSubmit = (actionId, request, send) => privateAudio
     ? requestFeedback.submit(actionId, request, send) : send();
-  const shell = mountGmWorkspaceShell({ doc, win, t, has, selectEntity: id => gmProjection.select(id) });
+  const shell = mountGmWorkspaceShell({ doc, win, t, has, native: requireNativeProvider,
+    selectEntity: id => gmProjection.select(id) });
   const workshopSource = mountWorkshopSourceLink({ root: doc.getElementById('gm-console'), win, t });
   win.__hostGmShellMetadata = shell.metadata;
   // Late-bound because the panel needs the projection's selection and the
@@ -178,7 +179,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let operatorStorage = null;
   try { operatorStorage = win.PhoenixOperatorStorage || win.localStorage; } catch (_) { /* Settings reports unavailable storage. */ }
   const gmConfirmationProfile = createGmConfirmationProfile({ storage: operatorStorage, registry: hostSemanticActions });
-  const reloadNativeProfile = () => gmConfirmationProfile.reload();
+  const reloadNativeProfile = () => { gmConfirmationProfile.reload(); shell.setLiveLayout(gmConfirmationProfile.liveLayout()); };
   win.addEventListener('phoenix-operator-profile-loaded', reloadNativeProfile);
   let disposePrivateAudio = null, unsubscribePrivateProfile = null;
   {
@@ -208,6 +209,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   });
   win.__hostGmFactionState = gmFactionPanel.state;
   win.__hostGmConfirmationProfile = gmConfirmationProfile;
+  shell.mountLiveLayout(gmConfirmationProfile.liveLayout(), layout => gmConfirmationProfile.setLiveLayout(layout));
   win.__hostGmConfirmations = gmConfirmations;
   hostSemanticActions.setConfirmationHandler(({ definition, accept }) => gmConfirmations.request({
     category: definition.confirmationCategory,

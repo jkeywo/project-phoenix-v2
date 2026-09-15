@@ -3,7 +3,7 @@ title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
 sources: [src/gm_information/reports.rs, gui/sensor-report.js, gui/components/ph-sensor-panel.js, src/server/viewscreen_border.rs, src/gm_information.rs, src/gm_presentation.rs, gui/gm-presentation-panel.js, gui/presentation-card.js, pasm/spec/design/t4-presentation.yaml, tests/gm_presentation.rs, src/gm_contact.rs, gui/gm-contact-panel.js, pasm/spec/design/t4-information-control.yaml, src/gm_solo.rs, src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html, src/gm_presentation/sound.rs, gui/host-content-fetch.js, tests/client/live-authored-audio.test.js]
-updated: 2026-09-13
+updated: 2026-09-15
 ---
 
 # GM Operator
@@ -30,6 +30,21 @@ retaining their ids, listeners and live-region wiring. Roster rows select throug
 `gm-local-projection`; action shortcuts bring the existing forms into view.
 The role and lethal-confirmation segments drive the existing private selectors
 and confirmation profile. Scenario-authored role presets still filter panels.
+
+Live's roster, readiness, join-request and manual-save nodes are moved into the
+shared constrained dock renderer. Their versioned `liveLayout` is a separate
+private operator-profile field from Workshop's `authoringLayout` and from GM
+reconnect identity. Pointer and keyboard docking, reset, repair and narrow
+single-panel projection therefore behave the same in browser and native GM
+documents. The fixed Station/status bar remains outside the dock and role
+presets remain the sole owner of their panels' `hidden` state. Native surfaces
+without a real save provider report manual save unavailable instead of exposing
+a browser-only API. Docking activates only in an explicit browser/native GM
+workspace; the globally mounted ordinary browser host leaves the original lobby,
+join-request and manual-save nodes in place. Closing the workspace restores each
+moved node and its authored attributes without cloning listeners. Reusable dock
+structure is scoped beneath `.workshop-dock-root` in `gui/dock-layout.css`, while
+Workshop's page-global appearance remains isolated in `gui/workshop.css`.
 
 The browser lobby's Ready, Force Start, GM admission prompt and manual save
 controls move into the roster on the GM route, with readiness above the roster

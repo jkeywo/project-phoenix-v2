@@ -148,6 +148,18 @@ describe('private operator profile schema', () => {
     expect(result.profile.authoringLayout).toEqual(createDefaultOperatorProfile(registry).authoringLayout);
   });
 
+  it('repairs Live independently without changing Authoring or reconnect fields', () => {
+    const registry = createClientSemanticActionRegistry();
+    const profile = createDefaultOperatorProfile(registry);
+    const authoring = profile.authoringLayout;
+    profile.liveLayout = { version: 99, root: { unsafe: true } };
+    profile.reconnectCredential = 'must-not-enter-profile';
+    const result = prepareOperatorProfileImport(JSON.stringify(profile), { registry });
+    expect(result.profile.liveLayout).toEqual(createDefaultOperatorProfile(registry).liveLayout);
+    expect(result.profile.authoringLayout).toEqual(authoring);
+    expect(result.profile).not.toHaveProperty('reconnectCredential');
+  });
+
   it('never coerces malformed preferred gamepad slots into device ownership', () => {
     const registry = createClientSemanticActionRegistry();
     for (const malformed of [false, true, '0', '3', 1.5, -1, 999]) {
@@ -324,7 +336,7 @@ describe('private persistence and export boundary', () => {
     const exported = JSON.parse(serializeOperatorProfile(profile));
     expect(Object.keys(exported).sort()).toEqual([
       'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback', 'gamepad',
-      'gmConfirmations', 'kind', 'version',
+      'gmConfirmations', 'kind', 'liveLayout', 'version',
     ]);
     expect(JSON.stringify(exported)).not.toMatch(
       /secret|"player"|"station"|"session"|saveCatalogue|hardware|generation|pendingFeedback/i,

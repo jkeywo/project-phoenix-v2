@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs';
 import { mountGmWorkspaceShell } from '../../gui/gm-workspace-shell.js';
 const source = readFileSync('server.html', 'utf8');
 const observers = [];
-afterEach(() => { observers.forEach(observer => observer.disconnect()); document.body.replaceChildren(); });
+afterEach(() => {
+  observers.forEach(observer => observer.disconnect());
+  document.documentElement.classList.remove('phoenix-gm-page');
+  document.head.querySelectorAll('link').forEach(link => link.remove());
+  document.body.replaceChildren();
+});
 function mount(extra = {}, translate = id => id) {
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   document.body.innerHTML = parsed.body.innerHTML;
@@ -18,8 +23,7 @@ function mount(extra = {}, translate = id => id) {
 }
 it('lays the desk out as the post-M5 screen and keeps the authentic iframe outside it', () => {
   mount();
-  expect(document.querySelector('#gm-roster #gm-force-start-btn')).not.toBeNull();
-  expect(document.getElementById('gm-roster-heading').nextElementSibling.id).toBe('gm-start-controls');
+  expect(document.querySelector('[data-panel="readiness"] #gm-force-start-btn')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-toggle')).not.toBeNull();
   expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
@@ -34,7 +38,7 @@ it('lays the desk out as the post-M5 screen and keeps the authentic iframe outsi
   }
   // Left: what is waiting, who is flying it, and whatever the world authored.
   expect([...document.getElementById('gm-desk-brief').children].map(child => child.id))
-    .toEqual(['gm-attention-panel', 'gm-roster', 'gm-workload-panel', 'gm-widgets']);
+    .toEqual(['gm-attention-panel', 'gm-live-layout', 'gm-workload-panel', 'gm-widgets']);
   // Right: the selected hull, then the checkpoints a live event is recovered
   // from — the restore control travels inside #gm-checkpoint.
   expect([...document.getElementById('gm-desk-detail').children].map(child => child.id))
@@ -54,8 +58,106 @@ it('lays the desk out as the post-M5 screen and keeps the authentic iframe outsi
   // which is the surface it exists to be un-hideable from.
   expect(document.querySelector('#gm-attention-panel #gm-attention-banners')).not.toBeNull();
   expect(document.querySelector('#gm-health-panel #gm-attention-banners')).toBeNull();
-  expect(document.querySelector('#gm-roster #manual-save-panel')).not.toBeNull();
-  expect(document.querySelector('#gm-roster #gm-join-controls').style.position).toBe('');
+  expect(document.querySelector('[data-panel="manual-save"] #manual-save-panel')).not.toBeNull();
+  expect(document.querySelector('[data-panel="join"] #gm-join-controls').style.position).toBe('');
+});
+it('keeps every operator and session status control in the fixed bar outside Live docking', () => {
+  mount();
+  const bar = document.querySelector('#gm-console > header');
+  for (const id of ['gm-session-controls', 'gm-role-preset-label', 'gm-lethal-label',
+    'gm-operator-identity', 'gm-scenario-title', 'gm-session-clock', 'gm-peer-summary', 'gm-health-pills']) {
+    expect(bar.contains(document.getElementById(id)), id).toBe(true);
+  }
+  expect(document.getElementById('gm-live-layout').contains(bar)).toBe(false);
+  expect(readFileSync('gui/gm-workspace.css', 'utf8'))
+    .toMatch(/#gm-console \.gm-station-bar\s*\{[^}]*position:\s*sticky/);
+});
+
+it('moves original Live workflow nodes into one shared dock rather than cloning them', () => {
+  mount();
+  for (const [panel, id] of [['readiness', 'gm-start-controls'], ['join', 'gm-join-controls'],
+    ['manual-save', 'manual-save-panel']]) {
+    expect(document.querySelectorAll(`#${id}`)).toHaveLength(1);
+    expect(document.querySelector(`[data-panel="${panel}"] #${id}`)).not.toBeNull();
+  }
+  expect(document.querySelector('[data-panel="roster"] #gm-roster')).not.toBeNull();
+});
+it('leaves ordinary host lobby and save controls in their authored surfaces', () => {
+  const parsed = new DOMParser().parseFromString(source, 'text/html');
+  document.body.innerHTML = parsed.body.innerHTML;
+  const start = document.getElementById('gm-start-controls');
+  const join = document.getElementById('gm-join-controls');
+  const manual = document.getElementById('manual-save-panel');
+  const parents = [start.parentNode, join.parentNode, manual.parentNode];
+  const clicked = vi.fn();
+  document.getElementById('gm-force-start-btn').addEventListener('click', clicked);
+
+  const shell = mountGmWorkspaceShell({ doc: document,
+    win: { document, Event, MutationObserver }, t: id => id, has: () => false,
+    selectEntity: vi.fn() });
+
+  expect([start.parentNode, join.parentNode, manual.parentNode]).toEqual(parents);
+  expect(document.querySelector('#gm-live-layout .workshop-dock-canvas')).toBeNull();
+  expect(join.style.position).toBe('absolute');
+  expect([...document.head.querySelectorAll('link')].map(link => link.href).join('\n'))
+    .not.toMatch(/(?:workshop|dock-layout)\.css/);
+  document.getElementById('gm-force-start-btn').click();
+  expect(clicked).toHaveBeenCalledOnce();
+  shell.dispose();
+});
+
+it('restores original host controls and attributes when the GM workspace closes', () => {
+  const parsed = new DOMParser().parseFromString(source, 'text/html');
+  document.body.innerHTML = parsed.body.innerHTML;
+  document.documentElement.classList.add('phoenix-gm-page');
+  const controls = ['gm-start-controls', 'gm-join-controls', 'manual-save-panel']
+    .map(id => document.getElementById(id));
+  const origins = controls.map(node => ({ parent: node.parentNode, next: node.nextSibling,
+    style: node.getAttribute('style'), hidden: node.getAttribute('hidden') }));
+  const clicked = vi.fn();
+  document.getElementById('gm-force-start-btn').addEventListener('click', clicked);
+  const shell = mountGmWorkspaceShell({ doc: document,
+    win: { document, Event, MutationObserver, __phoenixGmPage: true },
+    t: id => id, has: () => false, selectEntity: vi.fn() });
+  expect(document.querySelector('[data-panel="readiness"] #gm-start-controls')).not.toBeNull();
+
+  shell.dispose();
+
+  controls.forEach((node, index) => {
+    expect(node.parentNode).toBe(origins[index].parent);
+    expect(node.nextSibling).toBe(origins[index].next);
+    expect(node.getAttribute('style')).toBe(origins[index].style);
+    expect(node.getAttribute('hidden')).toBe(origins[index].hidden);
+    expect(document.querySelectorAll(`#${node.id}`)).toHaveLength(1);
+  });
+  document.getElementById('gm-force-start-btn').click();
+  expect(clicked).toHaveBeenCalledOnce();
+});
+
+it('loads only a globally neutral dock stylesheet into the host document', () => {
+  const dockCss = readFileSync('gui/dock-layout.css', 'utf8');
+  const shellSource = readFileSync('gui/gm-workspace-shell.js', 'utf8');
+  expect(dockCss).not.toMatch(/(^|[},]\s*)(:root|html|body|\*)\s*[{,]/m);
+  for (const rule of dockCss.split('\n').filter(line => line.includes('{') && !line.trim().startsWith('@'))) {
+    expect(rule.trim()).toMatch(/^\.workshop-dock-root/);
+  }
+  expect(shellSource).toContain("new URL('./dock-layout.css', import.meta.url)");
+  expect(shellSource).not.toContain("new URL('./workshop.css', import.meta.url)");
+  expect(readFileSync('workshop.html', 'utf8')).toContain('gui/dock-layout.css');
+});
+it('uses the same Live mount for native and reports missing save capability instead of inventing one', () => {
+  const parsed = new DOMParser().parseFromString(source, 'text/html');
+  document.body.innerHTML = parsed.body.innerHTML;
+  document.documentElement.classList.add('phoenix-gm-page');
+  const win = { document, Event, MutationObserver, __phoenixGmPage: true,
+    addEventListener: window.addEventListener.bind(window), removeEventListener: window.removeEventListener.bind(window) };
+  const shell = mountGmWorkspaceShell({ doc: document, win, t: id => id, has: () => false,
+    selectEntity: vi.fn(), native: true });
+  expect(document.querySelector('[data-panel="readiness"] #gm-start-controls')).not.toBeNull();
+  expect(document.getElementById('gm-native-manual-save-unavailable')?.textContent)
+    .toBe('server.gm.shell.manual_save_unavailable');
+  expect(win.__hostGmCheckpointCreate).toBeUndefined();
+  shell.dispose();
 });
 it('selects roster entities through the map seam and shows authored Station ratings', () => {
   const {shell,selectEntity} = mount();

@@ -49,6 +49,18 @@ describe('native Workshop shared boot', () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it('mounts the same docked panel hierarchy after native profile startup', async () => {
+    document.body.innerHTML = '<main id="workshop"></main>';
+    window.eval(queue);
+    const provider = { load: async () => null, runtime: {}, recovery: { load: async () => null } };
+    const pending = runBoot(window, document, ({ root }) => ({ ...mountWorkshopAuthoring({ root, provider }), receive: vi.fn() }), vi.fn());
+    drain();
+    window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });
+    await pending;
+    expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
+      .toEqual(['files', 'source', 'inspector']);
+  });
+
   it('mounts with visible storage status when preference loading fails and bounds the private queue', async () => {
     window.eval(queue);
     const mount = vi.fn(() => ({ ready: Promise.resolve(), receive: vi.fn(), dispose: vi.fn() }));

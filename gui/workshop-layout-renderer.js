@@ -1,0 +1,255 @@
+import {
+  WORKSHOP_PANELS, closeWorkshopPanel, defaultWorkshopLayout, dockWorkshopPanel,
+  floatWorkshopPanel, moveWorkshopFloat, normalizeWorkshopLayout, reopenWorkshopPanel,
+  selectWorkshopPanel,
+} from './workshop-layout-model.js';
+
+const NARROW_WIDTH = 880;
+let nextLayoutInstance = 0;
+
+export function mountWorkshopLayout({ root, surface, panels, labels, initial, onChange, doc = root.ownerDocument, win = doc.defaultView }) {
+  const layoutId = `workshop-layout-${nextLayoutInstance += 1}`;
+  const switcher = doc.createElement('div'); switcher.className = 'workshop-panel-switcher';
+  switcher.setAttribute('role', 'toolbar'); switcher.setAttribute('aria-label', labels.switcher);
+  const canvas = doc.createElement('div'); canvas.className = 'workshop-dock-canvas';
+  surface.replaceChildren(switcher, canvas);
+  const canvasBounds = () => ({
+    width: canvas.clientWidth || surface.clientWidth || win.innerWidth,
+    height: canvas.clientHeight || surface.clientHeight || win.innerHeight,
+  });
+  let narrow = (surface.clientWidth || win.innerWidth) <= NARROW_WIDTH;
+  let state = normalizeWorkshopLayout(initial, narrow ? undefined : canvasBounds());
+  let projectedPanel = null;
+  let drag = null;
+
+  const orderedPanels = node => {
+    if (!node) return [];
+    if (node.type === 'tabs') return [...node.tabs];
+    return node.children.flatMap(orderedPanels);
+  };
+
+  const emit = (next, focusPanel = next.selected) => {
+    state = normalizeWorkshopLayout(next, narrow ? undefined : canvasBounds()); projectedPanel = null;
+    render(); onChange?.(state);
+    win.requestAnimationFrame?.(() => {
+      const panelTab = canvas.querySelector(`[role="tab"][data-layout-panel="${focusPanel}"]`)
+        || canvas.querySelector(`[data-panel="${focusPanel}"] .workshop-panel-tab`);
+      const switcherButton = switcher.querySelector(`[data-layout-panel="${focusPanel}"]`);
+      (panelTab || switcherButton)?.focus();
+    });
+  };
+  const updateFloatStacking = () => {
+    const active = doc.activeElement;
+    state.floats.forEach((entry, index) => {
+      const node = canvas.querySelector(`[data-panel="${entry.panel}"].is-floating`);
+      if (node) node.style.zIndex = String(10 + index
+        + (entry.panel === state.selected ? state.floats.length : 0)
+        + (node.contains(active) ? state.floats.length * 2 : 0));
+    });
+  };
+  const makeButton = (text, action, attrs = {}) => {
+    const button = doc.createElement('button'); button.type = 'button'; button.textContent = text;
+    for (const [key, value] of Object.entries(attrs)) button.setAttribute(key, value);
+    button.addEventListener('click', action); return button;
+  };
+  const pointerTarget = event => doc.elementFromPoint?.(event.clientX, event.clientY)
+    ?.closest?.('.workshop-dock-target');
+  const showPointerTarget = event => {
+    const target = pointerTarget(event);
+    canvas.querySelectorAll('.workshop-dock-target.is-pointer-target')
+      .forEach(node => node.classList.remove('is-pointer-target'));
+    target?.classList.add('is-pointer-target');
+    return target;
+  };
+  const beginPointer = (event, panel, floating, node) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    drag = { panel, x: event.clientX, y: event.clientY, floating, moved: false, node };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    canvas.classList.add('is-dragging');
+  };
+  const movePointer = event => {
+    if (!drag) return;
+    showPointerTarget(event);
+    if (!drag.floating) return;
+    const entry = state.floats.find(value => value.panel === drag.panel);
+    if (!entry) return;
+    const x = entry.x + event.clientX - drag.x, y = entry.y + event.clientY - drag.y;
+    drag.x = event.clientX; drag.y = event.clientY; drag.moved = true;
+    state = moveWorkshopFloat(state, drag.panel, x, y, canvasBounds());
+    const moved = state.floats.find(value => value.panel === drag.panel);
+    drag.node.style.left = `${moved.x}px`; drag.node.style.top = `${moved.y}px`;
+  };
+  const endPointer = (event, cancelled = false) => {
+    if (!drag) return;
+    const gesture = drag;
+    const target = cancelled ? null : pointerTarget(event);
+    drag = null; canvas.classList.remove('is-dragging');
+    canvas.querySelectorAll('.workshop-dock-target.is-pointer-target')
+      .forEach(node => node.classList.remove('is-pointer-target'));
+    const targetPanel = target?.closest('[data-panel]')?.dataset.panel;
+    const placement = target?.dataset.placement;
+    if (targetPanel && placement && targetPanel !== gesture.panel) {
+      emit(dockWorkshopPanel(state, gesture.panel, targetPanel, placement), gesture.panel);
+    } else if (gesture.moved) {
+      onChange?.(state);
+    }
+  };
+  const attachPointerDocking = (tab, panel, floating = false, node = null) => {
+    tab.addEventListener('pointerdown', event => beginPointer(event, panel, floating, node));
+    tab.addEventListener('pointermove', movePointer);
+    tab.addEventListener('pointerup', endPointer);
+    tab.addEventListener('pointercancel', event => endPointer(event, true));
+  };
+  function frame(panel, floating = false, projection = false, tabId = null) {
+    const node = doc.createElement('section'); node.className = `workshop-dock-panel${floating ? ' is-floating' : ''}`;
+    node.dataset.panel = panel;
+    if (tabId) {
+      node.id = `${layoutId}-panel-${panel}`;
+      node.setAttribute('role', 'tabpanel');
+      node.setAttribute('aria-labelledby', tabId);
+    }
+    const header = doc.createElement('header'); header.className = 'workshop-panel-header';
+    const tab = makeButton(labels.panels[panel], () => {
+      if (!projection) emit(selectWorkshopPanel(state, panel), panel);
+    }, {
+      class: 'workshop-panel-tab', 'aria-pressed': String((projection ? projectedPanel : state.selected) === panel),
+      'data-layout-control': 'tab',
+    });
+    if (!projection) attachPointerDocking(tab, panel, floating, node);
+    header.append(tab);
+    if (!projection) header.append(
+      makeButton(labels.float, () => emit(floatWorkshopPanel(state, panel, {}, canvasBounds()), panel), {
+        'aria-label': `${labels.float}: ${labels.panels[panel]}`, 'data-layout-control': 'float',
+      }),
+      makeButton(labels.close, () => emit(closeWorkshopPanel(state, panel), panel), {
+        'aria-label': `${labels.close}: ${labels.panels[panel]}`, 'data-layout-control': 'close',
+      }));
+    const targets = doc.createElement('div'); targets.className = 'workshop-dock-targets';
+    if (!projection) {
+      for (const [placement, symbol] of [['left', '<'], ['top', '^'], ['tab', '+'], ['bottom', 'v'], ['right', '>']]) {
+        const target = makeButton(symbol, event => event.preventDefault(), {
+          class: `workshop-dock-target is-${placement}`, 'data-placement': placement,
+          'aria-label': `${labels.dock[placement]}: ${labels.panels[panel]}`,
+        });
+        targets.append(target);
+      }
+    }
+    node.append(header, targets, panels[panel]);
+    if (floating) {
+      node.addEventListener('focusin', updateFloatStacking);
+      node.addEventListener('focusout', () => win.requestAnimationFrame?.(updateFloatStacking));
+    }
+    return node;
+  }
+  function renderNode(node) {
+    if (node.type === 'tabs') {
+      const stack = doc.createElement('div'); stack.className = 'workshop-tab-stack';
+      if (node.tabs.length > 1) {
+        const tabs = doc.createElement('div'); tabs.className = 'workshop-tab-list'; tabs.setAttribute('role', 'tablist');
+        for (const panel of node.tabs) {
+          const tabId = `${layoutId}-tab-${panel}`;
+          const tab = makeButton(labels.panels[panel], () => emit(selectWorkshopPanel(state, panel), panel), {
+            id: tabId,
+            role: 'tab', 'aria-selected': String(node.active === panel),
+            'aria-controls': `${layoutId}-panel-${panel}`,
+            tabindex: node.active === panel ? '0' : '-1',
+            'data-layout-panel': panel, 'data-layout-control': 'stack-tab',
+          });
+          tab.addEventListener('keydown', event => {
+            if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
+            const current = node.tabs.indexOf(panel);
+            const index = event.key === 'Home' ? 0 : event.key === 'End' ? node.tabs.length - 1
+              : event.key === 'ArrowLeft' ? (current - 1 + node.tabs.length) % node.tabs.length
+                : event.key === 'ArrowRight' ? (current + 1) % node.tabs.length : -1;
+            if (index < 0) return;
+            event.preventDefault(); emit(selectWorkshopPanel(state, node.tabs[index]), node.tabs[index]);
+          });
+          attachPointerDocking(tab, panel);
+          tabs.append(tab);
+        }
+        stack.append(tabs);
+      }
+      for (const panel of node.tabs) {
+        const tabId = node.tabs.length > 1 ? `${layoutId}-tab-${panel}` : null;
+        const child = frame(panel, false, false, tabId);
+        child.hidden = panel !== node.active; stack.append(child);
+      }
+      return stack;
+    }
+    const split = doc.createElement('div'); split.className = `workshop-split is-${node.axis}`;
+    split.style.setProperty('--workshop-sizes', node.sizes.join('fr '));
+    const tracks = node.sizes.map(size => `minmax(0, ${size}fr)`).join(' ');
+    split.style.gridTemplateColumns = node.axis === 'horizontal' ? tracks : '';
+    split.style.gridTemplateRows = node.axis === 'vertical' ? tracks : '';
+    split.append(...node.children.map(renderNode)); return split;
+  }
+  function render() {
+    switcher.replaceChildren(...WORKSHOP_PANELS.map(panel => makeButton(labels.panels[panel], () => {
+      if (narrow) {
+        projectedPanel = panel; render();
+        switcher.querySelector(`[data-layout-panel="${panel}"]`)?.focus();
+      } else {
+        const next = state.closed.includes(panel) ? reopenWorkshopPanel(state, panel) : selectWorkshopPanel(state, panel);
+        emit(next, panel);
+      }
+    }, { 'aria-pressed': String((narrow ? projectedPanel || state.selected : state.selected) === panel), 'data-layout-panel': panel, 'data-layout-control': 'switcher' })),
+    makeButton(labels.reset, () => emit(defaultWorkshopLayout()), { class: 'workshop-layout-reset', 'data-layout-control': 'reset' }));
+    canvas.replaceChildren(); canvas.classList.toggle('is-narrow', narrow);
+    if (narrow) {
+      const selected = projectedPanel || state.selected;
+      if (selected) canvas.append(frame(selected, false, true));
+      return;
+    }
+    if (state.root) canvas.append(renderNode(state.root));
+    for (const entry of state.floats) {
+      const node = frame(entry.panel, true); node.style.left = `${entry.x}px`; node.style.top = `${entry.y}px`;
+      node.style.width = `${entry.width}px`; node.style.height = `${entry.height}px`; canvas.append(node);
+    }
+    updateFloatStacking();
+  }
+  function keydown(event) {
+    if (event.defaultPrevented || event.isComposing || !(event.ctrlKey && event.shiftKey)) return;
+    if (!event.target?.closest?.('.workshop-panel-header, .workshop-panel-switcher, .workshop-tab-list')) return;
+    const panelNode = event.target?.closest?.('[data-panel], [data-layout-panel]');
+    const panel = panelNode?.dataset.panel || panelNode?.dataset.layoutPanel;
+    const direction = ['ArrowLeft', 'ArrowUp'].includes(event.code) ? -1
+      : ['ArrowRight', 'ArrowDown'].includes(event.code) ? 1 : 0;
+    const order = [...orderedPanels(state.root), ...state.floats.map(entry => entry.panel)];
+    const index = order.indexOf(panel);
+    if (!direction || index < 0 || order.length < 2 || narrow) return;
+    const target = order[(index + direction + order.length) % order.length];
+    const placement = event.altKey ? 'tab' : event.code === 'ArrowLeft' ? 'left'
+      : event.code === 'ArrowRight' ? 'right' : event.code === 'ArrowUp' ? 'top' : 'bottom';
+    event.preventDefault(); emit(dockWorkshopPanel(state, panel, target, placement), panel);
+  }
+  function resize() {
+    const nextNarrow = (surface.clientWidth || win.innerWidth) <= NARROW_WIDTH;
+    const active = doc.activeElement;
+    const focus = active && (canvas.contains(active) || switcher.contains(active)) ? {
+      element: active,
+      panel: active.closest?.('[data-panel]')?.dataset.panel || active.dataset?.layoutPanel,
+      control: active.dataset?.layoutControl,
+    } : null;
+    const repaired = nextNarrow ? state : normalizeWorkshopLayout(state, canvasBounds());
+    const changed = JSON.stringify(repaired) !== JSON.stringify(state);
+    if (nextNarrow === narrow && !changed) return;
+    narrow = nextNarrow;
+    state = repaired;
+    projectedPanel = narrow && focus?.panel ? focus.panel : null;
+    render();
+    const replacement = focus?.element?.isConnected ? focus.element
+      : focus?.panel && focus?.control
+        ? surface.querySelector(`[data-layout-panel="${focus.panel}"][data-layout-control="${focus.control}"], [data-panel="${focus.panel}"] [data-layout-control="${focus.control}"]`)
+        : null;
+    (replacement || (focus?.panel ? switcher.querySelector(`[data-layout-panel="${focus.panel}"]`) : null))?.focus();
+    if (changed) onChange?.(state);
+  }
+  const observer = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(resize) : null;
+  observer?.observe(surface); win.addEventListener('resize', resize); doc.addEventListener('keydown', keydown);
+  render();
+  return { state: () => cloneState(state), reset: () => emit(defaultWorkshopLayout()), dispose() {
+    observer?.disconnect(); win.removeEventListener('resize', resize); doc.removeEventListener('keydown', keydown);
+  } };
+}
+
+const cloneState = state => JSON.parse(JSON.stringify(state));

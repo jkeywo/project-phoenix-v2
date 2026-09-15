@@ -1,5 +1,5 @@
 //! Private operator preferences and controller leases. Never simulation messages.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
@@ -218,6 +218,170 @@ fn fields(value: &Value, names: &[&str]) -> Value {
     )
 }
 
+fn workshop_panel(value: &Value) -> bool {
+    matches!(value.as_str(), Some("files" | "source" | "inspector"))
+}
+
+fn sanitize_workshop_node(
+    value: &Value,
+    seen: &mut BTreeSet<String>,
+    depth: usize,
+) -> Result<Option<Value>, ()> {
+    if depth > 3 {
+        return Err(());
+    }
+    let Some(node_type) = value["type"].as_str() else {
+        return Ok(None);
+    };
+    match node_type {
+        "tabs" => {
+            let Some(raw_tabs) = value["tabs"].as_array() else {
+                return Ok(None);
+            };
+            let mut tabs = Vec::new();
+            for panel in raw_tabs.iter().filter(|panel| workshop_panel(panel)) {
+                let panel = panel.as_str().unwrap();
+                if seen.insert(panel.to_owned()) {
+                    tabs.push(json!(panel));
+                }
+            }
+            if tabs.is_empty() {
+                return Ok(None);
+            }
+            let active = value
+                .get("active")
+                .filter(|active| tabs.contains(active))
+                .cloned()
+                .unwrap_or_else(|| tabs[0].clone());
+            Ok(Some(
+                json!({"type": "tabs", "tabs": tabs, "active": active}),
+            ))
+        }
+        "split" if matches!(value["axis"].as_str(), Some("horizontal" | "vertical")) => {
+            let Some(raw_children) = value["children"].as_array() else {
+                return Ok(None);
+            };
+            let mut children = Vec::new();
+            for child in raw_children.iter().take(3) {
+                if let Some(child) = sanitize_workshop_node(child, seen, depth + 1)? {
+                    children.push(child);
+                }
+            }
+            if children.is_empty() {
+                return Ok(None);
+            }
+            if children.len() == 1 {
+                return Ok(children.pop());
+            }
+            let supplied = value["sizes"].as_array();
+            let sizes: Vec<_> = (0..children.len())
+                .map(|index| {
+                    supplied
+                        .and_then(|sizes| sizes.get(index))
+                        .and_then(Value::as_f64)
+                        .filter(|size| size.is_finite() && *size > 0.0)
+                        .unwrap_or(1.0)
+                })
+                .map(|size| json!(size))
+                .collect();
+            Ok(Some(
+                json!({"type": "split", "axis": value["axis"], "sizes": sizes, "children": children}),
+            ))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn default_authoring_layout() -> Value {
+    json!({
+        "version": 1,
+        "root": {"type":"split", "axis":"horizontal", "sizes":[22,56,22], "children":[
+            {"type":"tabs", "tabs":["files"], "active":"files"},
+            {"type":"tabs", "tabs":["source"], "active":"source"},
+            {"type":"tabs", "tabs":["inspector"], "active":"inspector"}
+        ]},
+        "floats": [], "closed": [], "selected": "source"
+    })
+}
+
+fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
+    match node["type"].as_str() {
+        Some("tabs") => node.get("active").cloned(),
+        Some("split") => node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| first_visible(child, &[])),
+        _ => floats.first().and_then(|entry| entry.get("panel")).cloned(),
+    }
+}
+
+fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
+    if value["version"] != 1 {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    let root = match value.get("root")? {
+        Value::Null => Value::Null,
+        root => match sanitize_workshop_node(root, &mut seen, 0) {
+            Ok(Some(root)) => root,
+            Ok(None) => Value::Null,
+            Err(()) => return Some(default_authoring_layout()),
+        },
+    };
+    let mut floats = Vec::new();
+    for entry in value["floats"].as_array().into_iter().flatten() {
+        let Some(panel) = entry["panel"]
+            .as_str()
+            .filter(|_| workshop_panel(&entry["panel"]))
+        else {
+            continue;
+        };
+        if !seen.insert(panel.to_owned()) {
+            continue;
+        }
+        let number = |name: &str, fallback: f64| entry[name].as_f64().unwrap_or(fallback);
+        floats.push(json!({
+            "panel": panel,
+            "x": number("x", 12.0).max(0.0),
+            "y": number("y", 12.0).max(0.0),
+            "width": number("width", 420.0).max(240.0),
+            "height": number("height", 360.0).max(180.0),
+        }));
+        if floats.len() == 3 {
+            break;
+        }
+    }
+    if !value["root"].is_null() && root.is_null() && floats.is_empty() {
+        return Some(default_authoring_layout());
+    }
+    let mut closed = Vec::new();
+    for panel in value["closed"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|panel| workshop_panel(panel))
+    {
+        let panel = panel.as_str().unwrap();
+        if seen.insert(panel.to_owned()) {
+            closed.push(json!(panel));
+        }
+    }
+    for panel in ["files", "source", "inspector"] {
+        if seen.insert(panel.to_owned()) {
+            closed.push(json!(panel));
+        }
+    }
+    let selected = value
+        .get("selected")
+        .filter(|panel| workshop_panel(panel) && !closed.contains(panel))
+        .cloned()
+        .or_else(|| first_visible(&root, &floats))
+        .unwrap_or_else(|| json!("files"));
+    Some(
+        json!({"version": 1, "root": root, "floats": floats, "closed": closed, "selected": selected}),
+    )
+}
+
 /// Apply the same field boundary as operator-profile.js before any disk write.
 fn sanitize_profile(text: &str) -> Result<String, String> {
     if text.len() > PROFILE_LIMIT {
@@ -321,6 +485,9 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
             }
         }
     }
+    if let Some(layout) = sanitize_authoring_layout(&raw["authoringLayout"]) {
+        safe["authoringLayout"] = layout;
+    }
     serde_json::to_string_pretty(&safe).map_err(|e| e.to_string())
 }
 
@@ -400,7 +567,8 @@ mod tests {
             "bindings":{"helm.thrust":[{"type":"gamepad", "input":"axis", "control":"left-stick-y", "token":"secret"}, null]},
             "audio":{"version":1,"mono":true,"reducedRange":true,"output":"secret","history":["secret"],
                 "mix":{"master":{"level":0.12,"muted":true},"music":{"level":0.5}},
-                "cues":{"applied":true,"unknown":"secret"}}});
+                "cues":{"applied":true,"unknown":"secret"}},
+            "authoringLayout":{"version":1,"root":{"type":"tabs","tabs":["source"],"active":"source","unsafe":"secret"},"floats":[],"closed":["files","inspector"],"selected":"source","unsafe":"secret"}});
         state.handle(
             PaneId(1),
             "helm",
@@ -421,6 +589,8 @@ mod tests {
         assert_eq!(saved["audio"]["cues"]["applied"], true);
         assert_eq!(saved["audio"]["mono"], true);
         assert_eq!(saved["audio"]["reducedRange"], true);
+        assert_eq!(saved["authoringLayout"]["selected"], "source");
+        assert!(saved["authoringLayout"].get("unsafe").is_none());
         state.handle(
             PaneId(2),
             "helm",
@@ -431,6 +601,109 @@ mod tests {
         assert_ne!(state.path("../helm"), state.path("helm"));
         state.scope = Some("destroyer".into());
         assert!(!state.path("helm").unwrap().exists());
+    }
+
+    #[test]
+    fn over_depth_authoring_layout_is_rejected_as_a_whole() {
+        let mut root = json!({"type":"tabs","tabs":["source"],"active":"source"});
+        for _ in 0..4 {
+            root = json!({"type":"split","axis":"horizontal","sizes":[1],"children":[root]});
+        }
+        let profile = json!({
+            "kind":"project-phoenix/operator-profile",
+            "version":1,
+            "authoringLayout":{
+                "version":1,
+                "root":{
+                    "type":"split","axis":"horizontal","sizes":[1,1],
+                    "children":[
+                        {"type":"tabs","tabs":["files"],"active":"files"},
+                        root
+                    ]
+                },
+                "floats":[],"closed":[],"selected":"files"
+            }
+        });
+
+        let saved: Value =
+            serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
+        assert_eq!(saved["authoringLayout"], default_authoring_layout());
+    }
+
+    #[test]
+    fn missing_authoring_root_is_rejected_for_default_recovery() {
+        let profile = json!({
+            "kind":"project-phoenix/operator-profile",
+            "version":1,
+            "authoringLayout":{"version":1,"floats":[],"closed":[],"selected":"source"}
+        });
+
+        let saved: Value =
+            serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
+        assert!(saved.get("authoringLayout").is_none());
+    }
+
+    #[test]
+    fn malformed_authoring_root_is_rejected_for_default_recovery() {
+        let profile = json!({
+            "kind":"project-phoenix/operator-profile",
+            "version":1,
+            "authoringLayout":{
+                "version":1,
+                "root":{"type":"unknown"},
+                "floats":[],"closed":[],"selected":"source"
+            }
+        });
+
+        let saved: Value =
+            serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
+        assert_eq!(saved["authoringLayout"], default_authoring_layout());
+    }
+
+    #[test]
+    fn explicit_null_authoring_root_preserves_all_panels_closed_state() {
+        let profile = json!({
+            "kind":"project-phoenix/operator-profile",
+            "version":1,
+            "authoringLayout":{
+                "version":1,
+                "root":null,
+                "floats":[],
+                "closed":["files","source","inspector"],
+                "selected":"source"
+            }
+        });
+
+        let saved: Value =
+            serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
+        assert_eq!(saved["authoringLayout"]["selected"], "files");
+    }
+
+    #[test]
+    fn authoring_layout_normalization_matches_browser_global_deduplication() {
+        let layout = json!({
+            "version":1,
+            "root":null,
+            "floats":[
+                {"panel":"source"}, {"panel":"source"}, {"panel":"source"},
+                {"panel":"inspector","x":30,"y":40}, {"panel":"files"}
+            ],
+            "closed":["source","inspector","files"], "selected":"inspector"
+        });
+
+        assert_eq!(
+            sanitize_authoring_layout(&layout).unwrap(),
+            json!({
+                "version":1,
+                "root":null,
+                "floats":[
+                    {"panel":"source","x":12.0,"y":12.0,"width":420.0,"height":360.0},
+                    {"panel":"inspector","x":30.0,"y":40.0,"width":420.0,"height":360.0},
+                    {"panel":"files","x":12.0,"y":12.0,"width":420.0,"height":360.0}
+                ],
+                "closed":[], "selected":"inspector"
+            })
+        );
     }
 
     #[test]

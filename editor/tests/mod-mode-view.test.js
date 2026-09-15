@@ -19,7 +19,10 @@ import {
   MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID,
 } from '../mod-actions.js';
-import { OPERATOR_PROFILE_KEY } from '../../gui/operator-profile.js';
+import {
+  createDefaultOperatorProfile,
+  OPERATOR_PROFILE_KEY,
+} from '../../gui/operator-profile.js';
 
 // Issue #989 — the MOD-mode DOM view over the pure workspace. jsdom: the view
 // owns the DOM; IO (base-file reads for classification/stale, fragment
@@ -623,6 +626,15 @@ describe('#1321 semantic import lifecycle and validation focus', () => {
     );
     const bytes = archiveWithManifest(manifestText, [], worldText);
     const ioBundle = makeIo({ [WORLD_PATH]: worldText });
+    const existingProfile = createDefaultOperatorProfile();
+    existingProfile.authoringLayout = {
+      version: 1,
+      root: { type: 'tabs', tabs: ['source'], active: 'source' },
+      floats: [],
+      closed: ['files', 'inspector'],
+      selected: 'source',
+    };
+    window.localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(existingProfile));
     const { host, view, modeShell, download } = mount({ ioBundle });
     view.semanticActions.activate(MOD_IMPORT_ACTION_ID, { context: MOD_ACTION_CONTEXT });
     await chooseBytes(view, bytes);
@@ -664,6 +676,7 @@ describe('#1321 semantic import lifecycle and validation focus', () => {
     const privateProfile = JSON.parse(window.localStorage.getItem(OPERATOR_PROFILE_KEY));
     expect(privateProfile.bindings[MOD_EXPORT_ACTION_ID][0].code).toBe('KeyX');
     expect(privateProfile.bindings['captain.red-alert']).toBeTruthy();
+    expect(privateProfile.authoringLayout).toEqual(existingProfile.authoringLayout);
     expect(privateProfile).not.toHaveProperty('identity');
     expect(privateProfile).not.toHaveProperty('station');
     expect(privateProfile).not.toHaveProperty('saves');

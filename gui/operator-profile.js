@@ -14,6 +14,7 @@ import {
   normalizeAccessibilityProfile,
 } from './accessibility-profile.js';
 import { normalizePrivateAudio, legacyPrivateMaster, LEGACY_PRIVATE_MASTER_KEY } from './private-audio-preferences.js';
+import { defaultWorkshopLayout, normalizeWorkshopLayout } from './workshop-layout-model.js';
 
 export const OPERATOR_PROFILE_KIND = 'project-phoenix/operator-profile';
 export const OPERATOR_PROFILE_VERSION = 1;
@@ -38,7 +39,7 @@ const MAX_PROFILE_ENTRIES = 512;
 const MAX_GAMEPAD_SLOT = 15;
 const CURRENT_FIELDS = new Set([
   'kind', 'version', 'accessibility', 'bindings', 'gamepad', 'feedback',
-  'gmConfirmations', 'audio',
+  'gmConfirmations', 'audio', 'authoringLayout',
 ]);
 
 function ownRecord(value) {
@@ -187,6 +188,7 @@ export function createDefaultOperatorProfile(registry = null) {
     feedback: { ...FEEDBACK_PREFERENCE_DEFAULTS },
     audio: normalizePrivateAudio(),
     gmConfirmations: record(),
+    authoringLayout: defaultWorkshopLayout(),
   };
 }
 
@@ -204,6 +206,7 @@ export function createOperatorProfileSnapshot({
   feedback,
   audio,
   gmConfirmations,
+  authoringLayout,
 } = {}) {
   const diagnostics = [];
   return {
@@ -220,6 +223,7 @@ export function createOperatorProfileSnapshot({
     feedback: normalizeFeedback(feedback, diagnostics),
     audio: normalizePrivateAudio(audio),
     gmConfirmations: normalizeConfirmations(gmConfirmations, diagnostics),
+    authoringLayout: normalizeWorkshopLayout(authoringLayout),
   };
 }
 
@@ -325,6 +329,7 @@ export function prepareOperatorProfileImport(text, { registry } = {}) {
       legacy ? null : raw.gmConfirmations,
       diagnostics,
     ),
+    authoringLayout: normalizeWorkshopLayout(legacy ? null : raw.authoringLayout),
   };
   return {
     status: legacy ? 'migrated' : 'imported',
@@ -360,6 +365,7 @@ export function serializeOperatorProfile(profile) {
     feedback: profile && profile.feedback,
     audio: profile && profile.audio,
     gmConfirmations: profile && profile.gmConfirmations,
+    authoringLayout: profile && profile.authoringLayout,
   });
   return JSON.stringify(safe, null, 2) + '\n';
 }

@@ -7,16 +7,39 @@
 * { box-sizing: border-box; }
 #workshop [hidden] { display: none !important; }
 body { margin: 0; }
-#workshop { max-width: 90rem; margin: auto; padding: 1.5rem; }
+#workshop { max-width: 100rem; margin: auto; padding: 1.5rem; }
 h1 { margin: 0; font-size: 1.75rem; }
 button, input, select, textarea { font: inherit; color: inherit; background: #182634; border: 1px solid #8195a8; border-radius: .2rem; min-width: 0; }
 button, select { min-height: 2.75rem; padding: .35rem .7rem; }
 button:disabled { opacity: .6; }
 button:not(:disabled) { cursor: pointer; }
 :focus-visible { outline: 3px solid #ffe49b; outline-offset: 3px; }
-.workshop-toolbar { display: flex; flex-wrap: wrap; gap: .65rem; margin: 1rem 0; align-items: center; }
+.workshop-toolbar { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: .65rem; margin: 1rem 0; padding: .6rem; align-items: center; background: #111923; border-bottom: 1px solid #8195a8; }
 .workshop-mode { font-weight: 700; }
-.workshop-layout { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 4fr); gap: 1.25rem; }
+.workshop-layout { min-height: 32rem; }
+.workshop-panel-switcher { display: flex; gap: .35rem; align-items: center; margin-bottom: .5rem; }
+.workshop-layout-reset { margin-left: auto; }
+.workshop-dock-canvas { position: relative; display: grid; min-height: 32rem; overflow: hidden; border: 1px solid #52687a; background: #0c141d; }
+.workshop-split { display: grid; gap: .25rem; min-width: 0; min-height: 0; height: 100%; }
+.workshop-tab-stack { display: flex; flex-direction: column; }
+.workshop-tab-stack, .workshop-dock-panel { min-width: 0; min-height: 0; height: 100%; }
+.workshop-tab-list { display: flex; gap: .25rem; padding: .25rem; background: #0c141d; border-bottom: 1px solid #52687a; }
+.workshop-tab-list button[aria-selected="true"] { border-color: #ffe49b; background: #22384b; }
+.workshop-dock-panel { position: relative; display: flex; flex: 1 1 0; flex-direction: column; overflow: auto; padding: .65rem; background: #111923; }
+.workshop-dock-targets { display: none; position: absolute; inset: 50% auto auto 50%; z-index: 30; grid-template: repeat(3, 2.5rem) / repeat(3, 2.5rem); transform: translate(-50%, -50%); }
+.workshop-dock-canvas.is-dragging .workshop-dock-targets { display: grid; }
+.workshop-dock-target { padding: 0; background: #22384b; }
+.workshop-dock-target.is-pointer-target { border-color: #ffe49b; background: #365774; }
+.workshop-dock-target.is-left { grid-area: 2 / 1; }
+.workshop-dock-target.is-top { grid-area: 1 / 2; }
+.workshop-dock-target.is-tab { grid-area: 2 / 2; }
+.workshop-dock-target.is-bottom { grid-area: 3 / 2; }
+.workshop-dock-target.is-right { grid-area: 2 / 3; }
+.workshop-panel-header { display: flex; align-items: center; gap: .3rem; margin: -.65rem -.65rem .65rem; padding: .25rem; background: #182634; border-bottom: 1px solid #52687a; }
+.workshop-panel-tab { flex: 1; text-align: left; font-weight: 700; touch-action: none; }
+.workshop-panel-header button { min-height: 2.25rem; }
+.workshop-dock-panel.is-floating { position: absolute; z-index: 10; max-width: calc(100% - 1rem); max-height: calc(100% - 1rem); border: 1px solid #ffe49b; box-shadow: 0 .7rem 2rem #000a; }
+.workshop-dock-canvas.is-narrow > .workshop-dock-panel { min-height: 32rem; }
 .workshop-files { display: grid; align-content: start; gap: .6rem; }
 .workshop-files select, .workshop-files input { width: 100%; }
 #workshop-dependency, #workshop-dependency-source { display: block; width: 100%; margin: .5rem 0; }
@@ -48,5 +71,5 @@ button:not(:disabled) { cursor: pointer; }
 details { margin-top: 1.5rem; }
 :root[data-contrast="more"] { background: #000; color: #fff; }
 :root[data-contrast="more"] :is(button, select, textarea) { background: #000; border-color: #fff; }
-@media (max-width: 55rem) { .workshop-layout { grid-template-columns: 1fr; } #workshop { padding: 1rem; } }
+@media (max-width: 55rem) { #workshop { padding: 1rem; } .workshop-toolbar { top: 0; } .workshop-panel-switcher { overflow-x: auto; } }
 @media (forced-colors: active) { button, select, textarea { border-color: ButtonText; } :focus-visible { outline-color: Highlight; } }

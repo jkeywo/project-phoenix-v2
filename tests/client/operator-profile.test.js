@@ -139,6 +139,15 @@ describe('private operator profile schema', () => {
     ]));
   });
 
+  it('repairs obsolete Authoring layouts inside an otherwise current profile', () => {
+    const registry = createClientSemanticActionRegistry();
+    const profile = createDefaultOperatorProfile(registry);
+    profile.authoringLayout = { version: 99, root: { unsafe: true } };
+    const result = prepareOperatorProfileImport(JSON.stringify(profile), { registry });
+    expect(result.status).toBe('imported');
+    expect(result.profile.authoringLayout).toEqual(createDefaultOperatorProfile(registry).authoringLayout);
+  });
+
   it('never coerces malformed preferred gamepad slots into device ownership', () => {
     const registry = createClientSemanticActionRegistry();
     for (const malformed of [false, true, '0', '3', 1.5, -1, 999]) {
@@ -286,6 +295,12 @@ describe('private persistence and export boundary', () => {
   it('round-trips storage and reports read/write denial', () => {
     const registry = createClientSemanticActionRegistry();
     const profile = currentProfile(registry);
+    profile.authoringLayout = {
+      ...profile.authoringLayout,
+      root: profile.authoringLayout.root.children[1],
+      floats: [{ panel: 'files', x: 32, y: 48, width: 420, height: 360 }],
+      closed: ['inspector'],
+    };
     const storage = fakeStorage();
     expect(saveOperatorProfile(storage, profile).status).toBe('saved');
     expect(loadOperatorProfile(storage, { registry }).profile).toEqual(profile);
@@ -308,8 +323,8 @@ describe('private persistence and export boundary', () => {
     profile.pendingFeedback = { correlation: 'secret-pending' };
     const exported = JSON.parse(serializeOperatorProfile(profile));
     expect(Object.keys(exported).sort()).toEqual([
-      'accessibility', 'audio', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
-      'kind', 'version',
+      'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback', 'gamepad',
+      'gmConfirmations', 'kind', 'version',
     ]);
     expect(JSON.stringify(exported)).not.toMatch(
       /secret|"player"|"station"|"session"|saveCatalogue|hardware|generation|pendingFeedback/i,

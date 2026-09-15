@@ -40,6 +40,36 @@ beforeEach(() => {
 afterEach(() => { mounted.dispose(); vi.restoreAllMocks(); });
 
 describe('Workshop Authoring browser surface', () => {
+  it('mounts the docked workflow, persists keyboard moves, restores focus and repairs a reopened layout', async () => {
+    await mounted.ready;
+    expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
+      .toEqual(['files', 'source', 'inspector']);
+    const sourceTab = document.querySelector('[data-panel="source"] .workshop-panel-tab');
+    sourceTab.focus();
+    sourceTab.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(document.activeElement.closest('[data-panel]')?.dataset.panel).toBe('source'));
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(1);
+    document.querySelector('[data-panel="inspector"] .workshop-panel-header button:last-child').click();
+    expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
+    [...document.querySelectorAll('.workshop-panel-switcher button')].find(node => node.textContent === t('workshop.inspector')).click();
+    expect(document.querySelector('[data-panel="inspector"]')).not.toBeNull();
+    document.querySelector('.workshop-layout-reset').click();
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(3);
+  });
+
+  it('projects one selected panel when narrow and restores the desktop tree', async () => {
+    await mounted.ready;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
+    window.dispatchEvent(new Event('resize'));
+    expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-narrow')).toBe(true);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(1);
+    byId('source').value = 'retained';
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    window.dispatchEvent(new Event('resize'));
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(3);
+    expect(byId('source').value).toBe('retained');
+  });
+
   it('tests unsaved mod source with a read-only base hull and keeps Authoring and Test exclusive', async () => {
     mounted.dispose();
     vi.spyOn(window, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ version: 1, assets: [], cues: [] }) });

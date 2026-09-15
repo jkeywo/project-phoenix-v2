@@ -16,6 +16,7 @@ import { loadOperatorProfile, applyOperatorProfile, saveOperatorProfile } from '
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import { t } from './strings.js';
 import { renderInspectorMetadata, validInspectorDescriptor } from './inspector-field.js';
+import { mountWorkshopLayout } from './workshop-layout-renderer.js';
 
 // wasm-bindgen may reject with a string JsValue rather than an Error object.
 const errorText = error => String(error?.message ?? error);
@@ -88,12 +89,11 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const applyField = button('workshop.apply_field', 'workshop-apply-field', () => patchField());
   inspector.append(inspectButton, el('label', 'workshop.field', { for: 'workshop-field' }), fieldSelect,
     fieldInfo, el('label', 'workshop.field_value', { for: 'workshop-field-value' }), fieldValue, applyField);
-  filesPanel.append(inspector);
   const sourcePanel = el('div', null, { class: 'workshop-source' });
   const sourceLabel = el('label', 'workshop.source', { for: 'workshop-source' });
   const source = el('textarea', null, { id: 'workshop-source', spellcheck: 'false', 'aria-describedby': 'workshop-source-hint' });
   sourcePanel.append(sourceLabel, source, el('p', 'workshop.source_hint', { id: 'workshop-source-hint' }));
-  layout.append(filesPanel, sourcePanel);
+  layout.append(filesPanel, sourcePanel, inspector);
   const feedback = el('div', null, { class: 'workshop-feedback', 'aria-live': 'polite' });
   const findings = el('div', null, { class: 'workshop-findings', role: 'status', tabindex: '-1' });
   const settings = el('details');
@@ -167,6 +167,25 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let profile = loaded.profile;
   applyOperatorProfile(profile, actions);
   applyAccessibilityProfile(profile.accessibility, { doc, win });
+  const layoutMount = mountWorkshopLayout({
+    root, surface: layout,
+    panels: { files: filesPanel, source: sourcePanel, inspector },
+    labels: {
+      switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
+      float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
+      dock: {
+        left: translate('workshop.layout.dock_left'), right: translate('workshop.layout.dock_right'),
+        top: translate('workshop.layout.dock_top'), bottom: translate('workshop.layout.dock_bottom'),
+        tab: translate('workshop.layout.dock_tab'),
+      },
+      panels: { files: translate('workshop.files'), source: translate('workshop.source'), inspector: translate('workshop.inspector') },
+    },
+    initial: profile.authoringLayout, doc, win,
+    onChange(authoringLayout) {
+      profile = { ...profile, authoringLayout };
+      if (saveOperatorProfile(storage, profile).status !== 'saved') show('editor.mod.settings.storage_refused', [], true);
+    },
+  });
 
   function persistBindings(result) {
     if (result.status !== 'applied') return result;
@@ -601,6 +620,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     testPanel.dispose();
     soundAudition?.dispose();
     modelPanel?.dispose();
+    layoutMount.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);
     win.removeEventListener('beforeunload', beforeUnload);

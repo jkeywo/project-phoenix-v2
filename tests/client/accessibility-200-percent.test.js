@@ -291,8 +291,8 @@ describe('migration and reconnect preserve the operator choice', () => {
     // The privacy boundary: no transport identity, no station ownership, no
     // save catalogue can reach the record a reconnect reloads.
     expect(Object.keys(snapshot).sort()).toEqual([
-      'accessibility', 'audio', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
-      'kind', 'version',
+      'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback', 'gamepad',
+      'gmConfirmations', 'kind', 'version',
     ]);
   });
 });
@@ -333,6 +333,13 @@ describe('resets are scoped (PRD #1418 story 17)', () => {
     // enclosing operator profile re-snapshots everything else from its own
     // owners. Prove it on the record that actually gets persisted.
     const bindings = { 'helm.throttle-up': [{ type: 'keyboard', code: 'KeyW', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false }, null] };
+    const authoringLayout = {
+      version: 1,
+      root: { type: 'tabs', tabs: ['source'], active: 'source' },
+      floats: [],
+      closed: ['files', 'inspector'],
+      selected: 'source',
+    };
     const before = createOperatorProfileSnapshot({
       accessibility: loaded(),
       bindings,
@@ -340,6 +347,7 @@ describe('resets are scoped (PRD #1418 story 17)', () => {
       tuning: { 'helm.throttle-up': { deadzone: 0.2, inverted: true } },
       feedback: { vibration: false, semanticCues: false },
       gmConfirmations: { 'gm.skip-event': 'confirm-preview' },
+      authoringLayout,
     });
     const after = createOperatorProfileSnapshot({
       accessibility: profileWithPresentationDefaults(loaded()),
@@ -348,11 +356,13 @@ describe('resets are scoped (PRD #1418 story 17)', () => {
       tuning: { 'helm.throttle-up': { deadzone: 0.2, inverted: true } },
       feedback: { vibration: false, semanticCues: false },
       gmConfirmations: { 'gm.skip-event': 'confirm-preview' },
+      authoringLayout: before.authoringLayout,
     });
     expect(after.bindings).toEqual(before.bindings);
     expect(after.gamepad).toEqual(before.gamepad);
     expect(after.feedback).toEqual(before.feedback);
     expect(after.gmConfirmations).toEqual(before.gmConfirmations);
+    expect(after.authoringLayout).toEqual(before.authoringLayout);
     expect(after.accessibility.presentation.textScale).toBe(FOLLOW_OS);
   });
 

@@ -692,7 +692,7 @@ entities:
         - "The M6 Live Inspector builds on T1's roadmap-debug-observability substrate — the structured state-inspection payloads — adding GM authorization and presentation rather than a second inspection pipeline."
         - "PRD #930's T2 delivery was published as thin tracer issues #1289-#1320 on 2026-08-29: M1 #1289-#1300, M2 #1301-#1316, and M3 #1317-#1320. Exit evidence is #1300/#1316 AFK and #1320 HITL."
         - "[ai] #1400 (multithreaded-sim determinism PRD) and #1405 (Station console Ultralight raster floor) joined T2 on 2026-09-06, found while validating M1-M3 on the native four-screen rig; see gm-console-milestones.yaml."
-        - "[ai] T4 implementation status reconciled 2026-09-14: M6 has browser/native Authoring, disposable Test, model preview and its first constrained Live Inspector transaction but not its full parity/retirement exit; M7's three information-control paths and M8's typed visual and sound presentation paths are implemented."
+        - "[ai] T4 implementation status reconciled 2026-09-15: M6 has browser/native Authoring, disposable Test, model preview, its first constrained Live Inspector transaction, and the shared dock substrate with separate placement-only Authoring and Live profile layouts. Authoring's source, lifecycle, diagnostics, settings and dependency surfaces are docked; Live has the roster tracer, while fixed bars and existing authority owners remain outside layout persistence. M6 has not reached broader Live/Test parity, native LOD/remesh or the editor/viewer retirement exit; M7's three information-control paths and M8's typed visual and sound presentation paths are implemented."
     architecture:
       kind: roadmap-milestone
       authority: authoritative

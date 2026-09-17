@@ -1,0 +1,34 @@
+# Trunk config for the Workshop's disposable model preview (workshop-preview.html).
+#
+# A THIRD target, deliberately. The preview renders through the shared
+# `ViewerPlugin`, which lives behind the `viewer` cargo feature, and the
+# Workshop's own page loads the SERVER artifact — built with default features,
+# where that plugin is not compiled in. The alternatives were both worse: adding
+# `viewer` to the server build ships viewer code to every player's host page for
+# a surface only an author opens, and re-implementing the subject dispatch,
+# ladder, lighting and statistics inside the Workshop would make a previewed
+# model a Workshop-only approximation of the model the game draws, which is the
+# one thing a preview may not be.
+#
+# Unlike viewer.html this page has NO asset proxy and NO copy-dir, because it
+# must not be able to read the project at all: it renders exactly the bytes the
+# Workshop captured and handed it, through `register_snapshot`, whose reader
+# answers NotFound for everything else (see src/viewer/preview.rs).
+
+[build]
+target = "workshop-preview.html"
+# Its own directory, copied into dist/preview by scripts/copy-workshop-preview.mjs.
+# Not built straight into dist/ because Trunk cleans its own dist directory, and
+# that directory is the server page's.
+dist = "dist-workshop-preview"
+# ABSOLUTE, not "./". The page is loaded in an iframe as `preview/index.html`,
+# and a static server that serves clean URLs hands it back as `/preview` — at
+# which point a relative "./project-phoenix-<hash>.js" resolves against the site
+# ROOT and 404s, so the frame loads a blank page and the panel waits out its
+# start timeout. An absolute public_url makes the injected script independent of
+# how the server spells the directory.
+public_url = "/preview/"
+
+[watch]
+watch_path = ["workshop-preview.html", "gui/", "editor/", "src/"]
+include = ["*.toml"]

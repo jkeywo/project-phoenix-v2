@@ -1,4 +1,4 @@
-import { modelDocuments, modelFieldGroup, createModelVariant, patchModelFields } from '../editor/workshop-models.js';
+import { modelDocuments, entityDocuments, modelFieldGroup, createModelVariant, patchModelFields } from '../editor/workshop-models.js';
 import { t } from './strings.js';
 import { validInspectorDescriptor, renderInspectorMetadata } from './inspector-field.js';
 import { mountWorkshopModelPreview } from './workshop-model-preview-panel.js';
@@ -20,12 +20,19 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   const inspect = node('button', 'workshop.inspect', { type: 'button', id: 'workshop-model-inspect' });
   const newName = node('input', null, { type: 'text', maxlength: '64', id: 'workshop-model-new-variant' });
   const clone = node('button', 'workshop.models.clone', { type: 'button', id: 'workshop-model-clone' });
+  // What the preview shows. A model is its GLB and rig; an entity template is
+  // its composed visual, which is how a star and a planet become previewable —
+  // the shared viewer dispatches [star], [planet] and [mesh] itself, so there is
+  // no separate list of either to keep in step with authored content.
+  const subject = node('select', null, { id: 'workshop-preview-subject' });
   const status = node('p', null, { role: 'status', tabindex: '-1', id: 'workshop-model-status' });
   const form = node('div', null, { class: 'workshop-model-fields' });
   const apply = node('button', 'workshop.models.apply', { type: 'button', id: 'workshop-model-apply' });
   section.append(node('p', 'workshop.models.source_scope'), node('label', 'workshop.models.model', { for: model.id }), model,
     node('label', 'workshop.models.variant', { for: variant.id }), variant, inspect,
-    node('label', 'workshop.models.new_variant', { for: newName.id }), newName, clone, status, form, apply);
+    node('label', 'workshop.models.new_variant', { for: newName.id }), newName, clone,
+    node('label', 'workshop.models.preview_subject', { for: subject.id }), subject,
+    status, form, apply);
   // A docked panel is placed by the renderer, which moves the node into its frame.
   // Attaching here as well would strand the node in `root` whenever the stored
   // layout has the panel closed, because a closed panel is never framed.
@@ -53,6 +60,10 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       const entries = modelDocuments(current?.paths() || []);
       model.replaceChildren(...entries.map(entry => option(entry.model, entry.model)));
       if (entries.some(entry => entry.model === old)) model.value = old;
+      const chosen = subject.value;
+      subject.replaceChildren(option('', t('workshop.models.preview_subject_model')),
+        ...entityDocuments(current?.paths() || []).map(path => option(path, path)));
+      if ([...subject.options].some(item => item.value === chosen)) subject.value = chosen;
       previousDraft = current; previousPaths = paths; refreshVariants();
     }
     const held = busy();
@@ -136,12 +147,19 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     }
   });
   model.addEventListener('change', () => { refreshVariants(); refresh(); });
+  subject.addEventListener('change', () => refresh());
   variant.addEventListener('change', () => refresh());
   refresh();
   preview = mountWorkshopModelPreview({ root: section, attach, provider, draft, busy,
-    selection: () => ({ model: model.value,
-      variant: modelDocuments(draft()?.paths() || []).find(entry => entry.model === model.value)?.variants
-        .find(entry => entry.path === variant.value)?.name || null }) });
+    selection: () => {
+      // An entity subject is previewed as a composed template; anything else
+      // falls back to the model form's own selection, which is what the panel
+      // was doing before entity subjects existed.
+      if (subject.value.startsWith('assets/entities/')) return { entity: subject.value };
+      return { model: model.value,
+        variant: modelDocuments(draft()?.paths() || []).find(entry => entry.model === model.value)?.variants
+          .find(entry => entry.path === variant.value)?.name || null };
+    } });
   return { refresh, node: section, previewNode: preview.node,
     setPreviewVisible(value) {
       if (previewVisible === value) return;

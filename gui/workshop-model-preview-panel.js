@@ -73,7 +73,10 @@ export function mountWorkshopModelPreview({ root, provider, draft, selection, bu
     if (!session || disposed) return;
     const state = session.snapshot(), measured = state.status?.stats;
     const held = hidden || busy() || state.loading;
-    refreshButton.disabled = held || !state.available || !draft() || !selection().model;
+    // Either subject kind is a subject: a GLB model, or an entity template
+    // whose composed visual the shared viewer dispatches (issue #1470).
+    const chosen = selection();
+    refreshButton.disabled = held || !state.available || !draft() || !(chosen.model || chosen.entity);
     stop.disabled = !state.running && !state.loading;
     for (const value of [lod, lighting, gizmos, distance]) value.disabled = held || !state.running || !measured?.settled;
     for (const value of cameraButtons) value.disabled = held || !state.running || !measured?.camera;

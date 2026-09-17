@@ -78,8 +78,18 @@ pub struct PreviewSelection {
     pub variant: Option<String>,
     #[serde(default)]
     pub entity: Option<String>,
-    #[serde(default)]
+    /// Rig markers and gizmos, ON unless the caller says otherwise.
+    ///
+    /// Defaulting to false would boot the renderer with them hidden while the
+    /// panel's own checkbox starts checked, so the first frame would contradict
+    /// its own control. Previewing a model is mostly about where its markers
+    /// are, so on is also the useful default.
+    #[serde(default = "gizmos_on")]
     pub gizmos: bool,
+}
+
+fn gizmos_on() -> bool {
+    true
 }
 
 impl PreviewSelection {

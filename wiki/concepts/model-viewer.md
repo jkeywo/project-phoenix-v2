@@ -2,7 +2,7 @@
 title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
-sources: [src/entities/planet_texture.rs, assets/texture-codecs/README.md, viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
+sources: [src/entities/planet_texture.rs, assets/texture-codecs/README.md, viewer.html, viewer-trunk.toml, workshop-preview.html, workshop-preview-trunk.toml, src/viewer/preview.rs, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
 updated: 2026-09-10
 ---
 
@@ -208,3 +208,45 @@ format checks and research references are documented in `scripts/planets/NATURAL
 - `start-viewer.bat` waits for port 8081 to accept a connection before opening
   the browser. Trunk does not bind it until the first wasm build finishes,
   which is minutes from cold.
+
+## The Workshop's model preview is this same viewer (issue #1470)
+
+`workshop-preview.html` is a THIRD Trunk target, built
+`--no-default-features --features viewer` exactly as `viewer.html` is. It boots
+the same `ViewerPlugin`: the same subject dispatch for GLB, star, planet and
+mesh, the same LOD ladder, the same lighting, and the same `src/viewer/stats.rs`
+measurements. That sameness is the point — a Workshop-only approximation would
+make a previewed model something other than the model the game draws.
+
+It differs in exactly one respect: where its bytes come from. The standalone
+viewer fetches assets from the dev server through
+`viewer_set_world_fetch_callback`. A preview may read nothing but the draft it
+was handed, so `viewer_workshop_preview_init` calls `register_snapshot` before
+`DefaultPlugins` adds `AssetPlugin`, and that reader answers `NotFound` for
+every path outside the capture. An uncaptured project file is not a slower path;
+it is absent. The page therefore declares no `copy-dir` and no proxy.
+
+Why a third target rather than adding `viewer` to the server build: the Workshop
+page loads the SERVER artifact, built with default features, where the plugin is
+not compiled in. Enabling `viewer` there would ship viewer code to every
+player's host page for a surface only an author ever opens.
+
+Trunk names the built page `index.html` whatever the source page was called, so
+the artifact lands at `dist/preview/index.html` (placed by
+`scripts/copy-workshop-preview.mjs`) and the Workshop frame opens that
+directory, not the authored filename.
+
+The preview reuses the disposable Test's iframe, private `MessagePort`,
+transferable-snapshot guards and dependency merger, and captures a draft by the
+identical path/byte rule — a second capture path would be a second, quietly
+different definition of "captured". Its child accepts only local renderer
+commands (lod, lighting, gizmos, distance, camera) over its own
+`phoenix-workshop-preview-connect` type, so a Test port cannot drive a preview
+or the reverse.
+
+The NATIVE preview is not built. Native Test keeps merged dependencies
+in-process and spawns a separate process, so nothing large crosses its JSON
+bridge; a native preview renders inside the embedded webview and so needs a
+host-served route for one captured snapshot. That is native-host work in its own
+right and was left unbuilt rather than approximated with a bridge op that would
+serialise a merged asset tree.

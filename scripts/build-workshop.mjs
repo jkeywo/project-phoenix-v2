@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const out = path.resolve(root, process.argv[2] || 'dist');
 const editorModules = [
   'asset-dependencies', 'crc32', 'workshop-assets', 'workshop-handoff', 'workshop-source-provider',
-  'workshop-models', 'workshop-model-preview',
+  'workshop-models', 'workshop-model-preview', 'workshop-preview', 'workshop-preview-runtime',
   'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'undo-stack', 'validation', 'entity-includes', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',

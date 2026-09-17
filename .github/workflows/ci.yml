@@ -381,6 +381,18 @@ jobs:
       - name: Build client page (pure JS — copies client.html + gui/assets, no WASM)
         run: node scripts/build-client.mjs
 
+      # The Workshop's model preview is a THIRD Trunk target (issue #1470). It
+      # is built with `--features viewer` and no default features, because it
+      # renders through the shared ViewerPlugin while every other page is built
+      # without it — adding `viewer` to the server bundle would ship viewer code
+      # to every player for a surface only an author opens. Trunk cleans its own
+      # dist directory, so it builds beside dist/ and is copied in.
+      - name: Build Workshop model preview (WASM, viewer feature only)
+        run: trunk build --release --config workshop-preview-trunk.toml
+
+      - name: Place the Workshop model preview in dist
+        run: node scripts/copy-workshop-preview.mjs dist
+
       - name: Verify dist contents
         run: find dist/ -type f | sort
 

@@ -153,6 +153,38 @@ describe('GM authentic Station projection', () => {
     }
   });
 
+  it('treats a reload nobody asked for as a remount', () => {
+    // Docking the console reparents its iframe (issue #1504), and moving a node
+    // between parents re-creates its document. Feedback belongs to the interface
+    // that sent the command, so the commands the previous document sent must not
+    // be delivered into the new one.
+    const controller = createGmStationPuppet({
+      doc: document, win: window, getOperator: () => ({ id: 'gm-1' }),
+      submitStationCommand: () => true,
+    });
+    controller.update(projection({ operators: ['gm-1'] }));
+    const frame = document.getElementById('gm-station-frame');
+    // The mount we asked for: its load does NOT invalidate anything.
+    frame.dispatchEvent(new Event('load'));
+    controller.issueConsoleAction({
+      action: 'set_red_alert', console: 'captain', active: true, correlation: 'before-move' });
+    expect(controller.state().pendingCommands.size).toBe(1);
+
+    // The dock moves the panel; the browser loads the document again.
+    const destination = document.createElement('div');
+    document.body.append(destination);
+    destination.append(frame);
+    frame.dispatchEvent(new Event('load'));
+
+    expect(controller.state().pendingCommands.size).toBe(0);
+    const feedback = vi.fn(() => true);
+    frame.contentWindow.__updateActionFeedback = feedback;
+    expect(controller.settleCommandResults([{
+      action_kind: 'station-command', operator_id: 'gm-1', correlation: 'before-move', outcome: 'applied',
+    }])).toBe(0);
+    expect(feedback).not.toHaveBeenCalled();
+  });
+
   it('retires disappeared-target feedback and unloads the final removed interface', () => {
     const controller = createGmStationPuppet({
       doc: document, win: window, getOperator: () => ({ id: 'gm-1' }),

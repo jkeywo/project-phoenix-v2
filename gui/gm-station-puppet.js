@@ -228,6 +228,11 @@ export function createGmStationPuppet({
   let loadedUrl = null;
   let mountedKey = null;
   let mountGeneration = 0;
+  // Whether the document currently in the frame is the one this puppet asked
+  // for. A frame that loads again after that — because the dock moved the
+  // panel, and moving a node between parents re-creates its document — is a
+  // REMOUNT, not the mount we were waiting for.
+  let mountSettled = false;
   const pendingCommands = new Map();
   const boundedPendingCapacity = Math.max(1, Math.min(
     GM_STATION_PENDING_CAPACITY,
@@ -381,6 +386,7 @@ export function createGmStationPuppet({
       // document to masquerade as commands for the newly selected Ship.
       replaceFrame(selectedKey);
       loadedUrl = selectedRow.station.console;
+      mountSettled = false;
       frame.dataset.station = selectedRow.station.station_id;
       frame.dataset.ship = selectedRow.ship.ship_id;
       frame.setAttribute('title', `${selectedRow.ship.name} — ${selectedRow.station.name}`);
@@ -401,14 +407,29 @@ export function createGmStationPuppet({
     frame = replacement;
     mountedKey = key;
     loadedUrl = null;
+    invalidateMount();
+    frame.addEventListener('load', onFrameLoad);
+  }
+
+  /** Feedback belongs to its originating interface; a later mount cannot
+   * inherit its timers or correlation, even if it uses the same URL. */
+  function invalidateMount() {
     mountGeneration += 1;
-    // Feedback belongs to its originating interface; a later mount cannot
-    // inherit its timers or correlation, even if it uses the same URL.
+    mountSettled = false;
     for (const command of pendingCommands.values()) {
       if (command.timer != null) cancelSchedule(command.timer);
     }
     pendingCommands.clear();
-    frame.addEventListener('load', pushState);
+  }
+
+  function onFrameLoad() {
+    // The first load after we set `src` is the mount we asked for. Any load
+    // after that is a document we did not ask for — the dock reparented the
+    // panel — and the commands the previous document sent must not have their
+    // feedback delivered into it.
+    if (mountSettled) invalidateMount();
+    mountSettled = true;
+    pushState();
   }
 
   function rebuildOptions() {
@@ -539,7 +560,7 @@ export function createGmStationPuppet({
     renderSelected();
   });
   if (button) button.addEventListener('click', toggle);
-  if (frame) frame.addEventListener('load', pushState);
+  if (frame) frame.addEventListener('load', onFrameLoad);
   win.addEventListener('message', event => {
     if (!frame || event.source !== frame.contentWindow
         || !event.data || event.data.type !== 'console_action') return;

@@ -338,8 +338,24 @@ describe('private persistence and export boundary', () => {
       'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback', 'gamepad',
       'gmConfirmations', 'kind', 'liveLayout', 'version',
     ]);
-    expect(JSON.stringify(exported)).not.toMatch(
+    // The two layout fields are placement vocabulary — `station` and
+    // `station-console` are PANEL IDS since issue #1504, not a Station identity —
+    // so they are checked for what they may contain rather than by keyword.
+    const { authoringLayout, liveLayout, ...rest } = exported;
+    expect(JSON.stringify(rest)).not.toMatch(
       /secret|"player"|"station"|"session"|saveCatalogue|hardware|generation|pendingFeedback/i,
     );
+    const ALLOWED_LAYOUT_KEYS = ['active', 'axis', 'children', 'closed', 'floats', 'height',
+      'panel', 'root', 'selected', 'sizes', 'tabs', 'type', 'version', 'width', 'x', 'y'];
+    const layoutKeys = (node, out = new Set()) => {
+      if (Array.isArray(node)) node.forEach(child => layoutKeys(child, out));
+      else if (node && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) { out.add(key); layoutKeys(value, out); }
+      }
+      return out;
+    };
+    for (const layout of [authoringLayout, liveLayout]) {
+      for (const key of layoutKeys(layout)) expect(ALLOWED_LAYOUT_KEYS, key).toContain(key);
+    }
   });
 });

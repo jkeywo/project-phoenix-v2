@@ -25,9 +25,20 @@ function mount(extra = {}, translate = id => id) {
 it('lays the desk out as the post-M5 screen and keeps the authentic iframe outside it', () => {
   mount();
   expect(document.querySelector('[data-panel="readiness"] #gm-force-start-btn')).not.toBeNull();
-  expect(document.querySelector('#gm-inspector #gm-station-toggle')).not.toBeNull();
+  // Authentic Station operation is two dock panels (issue #1504): the takeover
+  // controls are a tool and the console is a document. The iframe stays out of
+  // the inspector, exactly as it always has.
+  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
+  expect(document.querySelector('#gm-station-tools #gm-station-pending')).not.toBeNull();
   expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
+  expect(document.querySelector('#gm-inspector #gm-station-toggle')).toBeNull();
+  // With no Station taken over the console has nothing to show, so it has no
+  // panel — the same rule the surface's own `hidden` always carried. Its node
+  // is parked rather than detached, because the shell is the only writer of
+  // that attribute and the only thing that can bring it back.
+  expect(document.getElementById('gm-station-surface').closest('.workshop-dock-parked')).not.toBeNull();
+  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
   // Since issue #1503 the desk is TWO regions: the dock workspace across the
   // left and centre, and the detail column.
   expect([...document.getElementById('gm-workspace').children].map(child => child.id))
@@ -183,6 +194,79 @@ it('selects roster entities through the map seam and shows authored Station rati
   expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
   expect(document.querySelector('.gm-station-pills').textContent).toContain('Helm · Backfill');
 });
+it('opens, focuses, docks and floats the authentic Station console', () => {
+  const { shell } = mount();
+  const surface = document.getElementById('gm-station-surface');
+  const controls = document.getElementById('gm-station-controls');
+  // A Station row in the projection is what gives the console something to show;
+  // the puppet shows the takeover controls then, taken over or not. The shell is
+  // the only writer of the surface's `hidden` and the dock reads it.
+  controls.hidden = false;
+  shell.refresh();
+  const framed = document.querySelector('[data-panel="station-console"]');
+  expect(framed).not.toBeNull();
+  expect(framed.dataset.panelKind).toBe('document');
+  expect(surface.closest('[data-panel]')).toBe(framed);
+  // The iframe travelled with it rather than being rebuilt beside it.
+  expect(document.querySelectorAll('#gm-station-frame')).toHaveLength(1);
+  expect(document.getElementById('gm-station-frame').closest('[data-panel]').dataset.panel)
+    .toBe('station-console');
+
+  // Float it, then dock it beside the roster: the same node each time.
+  shell.setLiveLayout(liveLayoutModel.float(shell.liveLayoutState(), 'station-console',
+    { x: 20, y: 30, width: 500, height: 400 }));
+  expect(document.querySelector('[data-panel="station-console"].is-floating')
+    .contains(document.getElementById('gm-station-frame'))).toBe(true);
+  shell.setLiveLayout(liveLayoutModel.dock(shell.liveLayoutState(), 'station-console', 'roster', 'tab'));
+  expect(document.getElementById('gm-station-frame').closest('[data-panel]').dataset.panel)
+    .toBe('station-console');
+
+  // Closing it is an arrangement choice, not a release: the node stays in the
+  // surface and the takeover controls are untouched.
+  shell.setLiveLayout(liveLayoutModel.close(shell.liveLayoutState(), 'station-console'));
+  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
+  expect(document.getElementById('gm-station-frame')).not.toBeNull();
+  expect(document.getElementById('gm-station-controls').hidden).toBe(false);
+  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
+
+  // Losing the Station row takes the console's panel away again.
+  controls.hidden = true;
+  shell.refresh();
+  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
+  expect(surface.closest('.workshop-dock-parked')).not.toBeNull();
+});
+it('keeps the Station takeover controls out of the role preset reach', () => {
+  const { shell } = mount();
+  // The takeover controls are their own dock panel now, not a block inside the
+  // inspector, so a preset that puts the inspector away no longer takes them
+  // with it — which is what docs/toml-authoring-guide.md already promised.
+  expect(document.querySelector('#gm-inspector #gm-station-controls')).toBeNull();
+  document.getElementById('gm-inspector').hidden = true;
+  shell.refresh();
+  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
+  document.getElementById('gm-inspector').hidden = false;
+  shell.refresh();
+  // The console follows its own surface, which the shell alone writes.
+  document.getElementById('gm-station-controls').hidden = false;
+  shell.refresh();
+  expect(document.querySelector('[data-panel="station-console"]')).not.toBeNull();
+  document.getElementById('gm-station-controls').hidden = true;
+  shell.refresh();
+  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
+  expect(document.getElementById('gm-station-frame')).not.toBeNull();
+});
+it('carries no takeover draft or console runtime state in the stored layout', () => {
+  const { shell } = mount();
+  document.getElementById('gm-station-controls').hidden = false;
+  shell.refresh();
+  const stored = JSON.stringify(shell.liveLayoutState());
+  // Placement only: the panel id is the only Station word in it.
+  for (const key of ['src', 'ship', 'operator', 'pending', 'correlation', 'captain']) {
+    expect(stored, key).not.toContain(key);
+  }
+  expect(stored).toContain('"station-console"');
+  expect(stored.match(/console/g)).toHaveLength(1);
+});
 it('keeps the selected entity and the map alive across a rearrangement', () => {
   const { shell, selectEntity } = mount();
   shell.refresh({ entities: [{ entity_id: 'ship', name: 'Courier', kind: 'player_ship', faction: null }] },
@@ -280,7 +364,11 @@ it('keeps every migrated record reachable by id whatever the arrangement', () =>
   const { shell } = mount();
   // Their contents are owned by modules that resolve them by id after the dock
   // mounts, so no arrangement may take one out of the document.
-  const ids = ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history'];
+  const ids = ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history',
+    // gui/gm-station-puppet.js resolves every one of these by id at ITS mount,
+    // which happens after the dock's.
+    'gm-station-tools', 'gm-station-pending', 'gm-station-controls', 'gm-station-select',
+    'gm-station-toggle', 'gm-station-surface', 'gm-station-frame', 'gm-station-activity'];
   for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
   expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
   // Closed in a restored arrangement.
@@ -297,9 +385,17 @@ it('keeps every migrated record reachable by id in the narrow projection', () =>
   // frames exactly one panel and leaves every other node without one.
   mount({ innerWidth: 600 });
   expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(1);
-  for (const id of ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history']) {
+  for (const id of ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history',
+    'gm-station-tools', 'gm-station-controls', 'gm-station-select', 'gm-station-toggle',
+    'gm-station-surface', 'gm-station-frame', 'gm-station-activity']) {
     expect(document.getElementById(id), `${id} while narrow`).not.toBeNull();
   }
+  // The narrow switcher offers the Station tool like any other, and the console
+  // once the projection carries a Station row.
+  expect(document.querySelector('[data-layout-panel="station"][data-layout-control="switcher"]'))
+    .not.toBeNull();
+  expect(document.querySelector('[data-layout-panel="station-console"][data-layout-control="switcher"]'))
+    .toBeNull();
 });
 it('keeps the record workflows working after the panels are rearranged', () => {
   const { shell } = mount();

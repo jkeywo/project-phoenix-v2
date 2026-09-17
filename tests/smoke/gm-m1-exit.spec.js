@@ -18,6 +18,7 @@ import {
   test,
   waitForWasmReady,
 } from './fixtures';
+import { revealGmPanel } from './dock-helpers.js';
 
 const GM_IDENTITY_KEY = 'phoenix.fleet.gm-identity.v1';
 const REPORT_PATH = path.resolve(__dirname, '../../target/gm-m1-exit/report.json');
@@ -1189,6 +1190,9 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     await expect(gmOne.locator('#gm-station-frame'))
       .toHaveAttribute('src', 'gui/cruiser/helm.html');
     expect(gmOne.viewportSize()).toEqual({ width: 1280, height: 720 });
+    // Station operation is two dock panels since issue #1504, so the controls
+    // have to be the shown tab before a pointer can reach them.
+    await revealGmPanel(gmOne, 'station');
     const takeover = gmOne.locator('#gm-station-toggle');
     await takeover.scrollIntoViewIfNeeded();
     const takeoverBox = await takeover.boundingBox();
@@ -1205,6 +1209,7 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       operatorId,
       { timeout: 30_000 },
     );
+    await revealGmPanel(gmOne, 'station-console');
     const stationFrame = gmOne.locator('#gm-station-frame');
     await stationFrame.scrollIntoViewIfNeeded();
     const helmFrame = gmOne.frameLocator('#gm-station-frame');

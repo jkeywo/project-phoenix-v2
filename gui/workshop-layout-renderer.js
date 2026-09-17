@@ -222,7 +222,63 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     split.style.gridTemplateRows = node.axis === 'vertical' ? tracks : '';
     split.append(...rendered.map(([child]) => child)); return split;
   }
-  const render = (...args) => { paint(...args); park(); reportVisible(); };
+  /** What a paint would BUILD, as opposed to what it would merely set.
+   *
+   * Choosing a tab, revealing a panel and moving a float all leave the frames
+   * exactly where they were and change only attributes — and rebuilding anyway
+   * would reparent every panel node. That is not free: moving a node between
+   * parents re-creates an iframe's document, which on this surface means the
+   * authentic Station console reloading, and its pending commands being
+   * dropped, every time the operator clicks an unrelated tab. So a render whose
+   * structure is unchanged restyles instead of rebuilding. */
+  function shapeOf(node) {
+    if (!node) return null;
+    if (node.type === 'tabs') {
+      const shown = availableTabs(node);
+      return shown.length ? { tabs: shown } : null;
+    }
+    const children = node.children.map(shapeOf).filter(Boolean);
+    return children.length ? (children.length === 1 ? children[0] : { axis: node.axis, children }) : null;
+  }
+  const signature = () => JSON.stringify(narrow
+    ? { narrow: true, panel: narrowProjection() }
+    : { root: shapeOf(state.root), floats: state.floats.map(entry => entry.panel) });
+  let painted = null;
+  const render = (...args) => {
+    const next = signature();
+    if (painted === next) restyle();
+    else { paint(...args); painted = next; }
+    park(); reportVisible();
+  };
+  /** Bring an unchanged arrangement up to date without touching the tree. */
+  function restyle() {
+    const chosen = narrow ? narrowProjection() : state.selected;
+    for (const button of switcher.querySelectorAll('[data-layout-control="switcher"]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.layoutPanel === chosen));
+    }
+    for (const stack of canvas.querySelectorAll('.workshop-tab-stack')) {
+      const list = stack.querySelector(':scope > .workshop-tab-list');
+      const frames = [...stack.querySelectorAll(':scope > [data-panel]')];
+      const tabs = frames.map(node => node.dataset.panel);
+      const active = tabs.includes(state.selected) ? state.selected
+        : tabs.find(panel => !frames[tabs.indexOf(panel)].hidden) || tabs[0];
+      for (const node of frames) node.hidden = node.dataset.panel !== active;
+      for (const tab of list?.querySelectorAll('[role="tab"]') || []) {
+        tab.setAttribute('aria-selected', String(tab.dataset.layoutPanel === active));
+        tab.tabIndex = tab.dataset.layoutPanel === active ? 0 : -1;
+      }
+    }
+    for (const node of canvas.querySelectorAll('[data-panel] > .workshop-panel-header > .workshop-panel-tab')) {
+      node.setAttribute('aria-pressed', String(node.closest('[data-panel]').dataset.panel === chosen));
+    }
+    for (const entry of state.floats) {
+      const node = canvas.querySelector(`[data-panel="${entry.panel}"].is-floating`);
+      if (!node) continue;
+      node.style.left = `${entry.x}px`; node.style.top = `${entry.y}px`;
+      node.style.width = `${entry.width}px`; node.style.height = `${entry.height}px`;
+    }
+    updateFloatStacking();
+  }
   function paint() {
     switcher.replaceChildren(...panelIds.filter(usable).map(panel => makeButton(labels.panels[panel], () => {
       if (narrow) {
@@ -236,11 +292,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     makeButton(labels.reset, () => emit(model.defaultLayout()), { class: 'workshop-layout-reset', 'data-layout-control': 'reset' }));
     canvas.replaceChildren(); canvas.classList.toggle('is-narrow', narrow);
     if (narrow) {
-      const preferred = projectedPanel || state.selected;
-      // An operator standing on a panel its owner just put away lands on one
-      // that is still there rather than on an empty projection.
-      const selected = usable(preferred) ? preferred
-        : orderedPanels(state.root).find(usable) || state.floats.map(entry => entry.panel).find(usable);
+      const selected = narrowProjection();
       if (selected) canvas.append(frame(selected, false, true));
       return;
     }
@@ -260,6 +312,13 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   /** Panels with a frame the operator can actually see. A closed panel, an
    * inactive tab and a panel the narrow projection left out are all absent, so a
    * panel holding an expensive live resource can release it. */
+  /** An operator standing on a panel its owner just put away lands on one that
+   * is still there rather than on an empty projection. */
+  function narrowProjection() {
+    const preferred = projectedPanel || state.selected;
+    return usable(preferred) ? preferred
+      : orderedPanels(state.root).find(usable) || state.floats.map(entry => entry.panel).find(usable) || null;
+  }
   function reportVisible() {
     onVisible?.(new Set([...canvas.querySelectorAll('[data-panel]')]
       .filter(node => !node.hidden).map(node => node.dataset.panel)));
@@ -304,8 +363,11 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   const observer = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(resize) : null;
   observer?.observe(surface); win.addEventListener?.('resize', resize); doc.addEventListener('keydown', keydown);
   render();
-  function reveal(panel, { focus = null, notify = true } = {}) {
+  function reveal(panel, { focus = null, notify = true, reopen = true } = {}) {
     if (!panelIds.includes(panel) || !usable(panel)) return false;
+    // Closing a panel is a decision; a caller may bring one FORWARD without
+    // undoing it. `reopen: false` says so.
+    if (!reopen && state.closed.includes(panel)) return false;
     if (narrow) {
       projectedPanel = panel;
       render();
@@ -346,6 +408,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   }
   return { state: () => cloneState(state), set: next => emit(next), reset: () => emit(model.defaultLayout()),
     reveal, syncAvailability, dispose() {
+      painted = null;
     observer?.disconnect(); win.removeEventListener?.('resize', resize); doc.removeEventListener('keydown', keydown);
     parked.remove();
     surface.classList.remove('workshop-dock-root');

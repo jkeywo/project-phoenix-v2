@@ -201,10 +201,19 @@
 #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > div {
   flex: 0 0 auto; min-width: 0; overflow: visible; border: 0; background: none; padding: 0;
 }
-/* The map is a document panel: it takes the room its frame gives it rather
-   than shrinking to its content, and it never opens a scroll box. */
-#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-map-panel {
+/* The map and the authentic Station console are document panels: each takes the
+   room its frame gives it rather than shrinking to its content, and neither
+   opens a scroll box of its own. The console's iframe follows its panel instead
+   of the fixed 720px block it was when it sat at the root of the page. */
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-map-panel,
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-station-surface {
   flex: 1 1 auto; min-height: 16rem; overflow: hidden;
+}
+#gm-console.gm-desk #gm-live-layout #gm-station-surface {
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+#gm-console.gm-desk #gm-live-layout #gm-station-frame {
+  flex: 1 1 auto; width: 100%; height: auto; min-height: 20rem;
 }
 #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-comms-panel { display: grid; }
 #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > section,

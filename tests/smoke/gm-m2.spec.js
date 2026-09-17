@@ -10,7 +10,7 @@ import { test, expect, createTestClient, captureServerPageErrors,
 import { observeGm, observeCrew, readGmEvidence, assertGmOnlyCrewWitness,
   retainEvidence } from './gm-m2-evidence.js';
 import { ts } from './strings';
-import { clickGmControl } from './dock-helpers.js';
+import { clickGmControl, revealGmPanel } from './dock-helpers.js';
 
 const execute = promisify(execFile);
 const WORLD = 'assets/worlds/combat_test.toml';
@@ -220,13 +220,17 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
         return [...document.getElementById('gm-station-select').options]
           .find(option => option.textContent === `${row.name} — ${station.name}`)?.value;
       }, { shipId, stationId });
-      expect(choice).toBeTruthy(); await page.locator('#gm-station-select').selectOption(choice);
+      expect(choice).toBeTruthy();
+      // The takeover controls are a dock panel since issue #1504.
+      await revealGmPanel(page, 'station');
+      await page.locator('#gm-station-select').selectOption(choice);
       await settleControl(page, () => page.locator('#gm-station-toggle').click());
     };
     await puppet(gm, player, 'captain'); await puppet(second, player, 'captain');
     await pulse();
     await gm.waitForFunction(ids => window.__hostGmStationState().selectedRow.station.operators
       .filter(id => ids.includes(id)).length === 2, operators);
+    await revealGmPanel(gm, 'station-console');
     const alertBefore = await gm.frameLocator('#gm-station-frame').locator('ph-red-alert #alert-btn')
       .evaluate(button => button.classList.contains('active'));
     await settleControl(gm, () => gm.frameLocator('#gm-station-frame').locator('ph-red-alert #alert-btn').click(),
@@ -234,6 +238,8 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
     await gm.waitForFunction(before => window.__hostGmStationState().selectedRow.ship.blackboards
       .some(([, board]) => board.kind === 'Captain' && board.data.red_alert === !before), alertBefore);
     await session(second, 'pause');
+    await revealGmPanel(gm, 'station');
+    await revealGmPanel(second, 'station');
     await settleControl(gm, () => gm.locator('#gm-station-toggle').click());
     await settleControl(second, () => second.locator('#gm-station-toggle').click());
     await checkpoint('System isolation and two equal puppets of a human-held Captain');
@@ -262,6 +268,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
     await session(second, 'resume');
     const poseBefore = await gm.evaluate(id => window.__hostGmStationState().projection.ships
       .find(row => row.ship_id === id).ship_pose, npc);
+    await revealGmPanel(gm, 'station-console');
     const joystick = gm.frameLocator('#gm-station-frame').locator('ph-helm-joystick');
     await joystick.focus(); await gm.keyboard.down('ArrowUp');
     try {
@@ -271,6 +278,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
     await gm.waitForFunction(({ id, before }) => JSON.stringify(window.__hostGmStationState().projection.ships
       .find(row => row.ship_id === id).ship_pose) !== JSON.stringify(before), { id: npc, before: poseBefore });
     await session(second, 'pause');
+    await revealGmPanel(gm, 'station');
     await settleControl(gm, () => gm.locator('#gm-station-toggle').click());
     await checkpoint('authored NPC doctrine and compatible Helm input');
 

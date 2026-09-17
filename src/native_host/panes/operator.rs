@@ -333,6 +333,31 @@ const LIVE_ADDED_IN_V3: &[(&str, &str, &str)] = &[
     ("health", "comms", "tab"),
 ];
 
+const LIVE_PANELS_V4: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+];
+/// Panels registered after version 3. The authentic Station console is a
+/// document and joins the map; its controls are an ordinary tool.
+const LIVE_ADDED_IN_V4: &[(&str, &str, &str)] = &[
+    ("station", "roster", "tab"),
+    ("station-console", "map", "tab"),
+];
+
 /// Panels the operator may not close. The attention region renders connection
 /// and recovery banners verbatim and health is the table behind them: a Game
 /// Master must not be able to hide a failure from themselves, whichever
@@ -362,7 +387,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
     match version {
         1 => LIVE_PANELS_V1,
         2 => LIVE_PANELS_V2,
-        _ => LIVE_PANELS_V3,
+        3 => LIVE_PANELS_V3,
+        _ => LIVE_PANELS_V4,
     }
 }
 
@@ -373,6 +399,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 3 {
         added.extend_from_slice(LIVE_ADDED_IN_V3);
+    }
+    if version < 4 {
+        added.extend_from_slice(LIVE_ADDED_IN_V4);
     }
     added
 }
@@ -462,12 +491,12 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 3,
+        "version": 4,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission",
-                    "attention","workload","widgets"], "active":"roster"},
-                {"type":"tabs", "tabs":["map"], "active":"map"}
+                    "attention","workload","widgets","station"], "active":"roster"},
+                {"type":"tabs", "tabs":["map","station-console"], "active":"map"}
             ]},
             {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
         ]},
@@ -476,7 +505,7 @@ fn default_live_layout() -> Value {
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=3).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=4).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -568,7 +597,7 @@ fn migrate_live_layout(mut layout: Value, added: &[(&str, &str, &str)]) -> Value
         .as_array_mut()
         .unwrap()
         .extend(added.iter().map(|(panel, _, _)| json!(panel)));
-    layout["version"] = json!(3);
+    layout["version"] = json!(4);
     for (panel, preferred, placement) in added {
         add_migration_panel_at(&mut layout, panel, preferred, &Value::Null, placement);
     }
@@ -1332,11 +1361,11 @@ mod tests {
         assert_eq!(
             saved["liveLayout"],
             json!({
-                "version":3,
+                "version":4,
                 "root":{"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
                     {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
-                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets"], "active":"roster"},
-                        {"type":"tabs", "tabs":["map"], "active":"map"}
+                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets","station"], "active":"roster"},
+                        {"type":"tabs", "tabs":["map","station-console"], "active":"map"}
                     ]},
                     {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
                 ]},
@@ -1359,7 +1388,7 @@ mod tests {
         });
 
         let migrated = sanitize_live_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 3);
+        assert_eq!(migrated["version"], 4);
         assert_eq!(migrated["floats"], json!([]));
         assert_eq!(migrated["selected"], "roster");
         assert_eq!(
@@ -1368,11 +1397,11 @@ mod tests {
         );
         assert_eq!(
             migrated["root"]["children"][0]["children"][0],
-            json!({"type":"tabs", "tabs":["roster","mission","attention","workload","widgets"], "active":"roster"})
+            json!({"type":"tabs", "tabs":["roster","mission","attention","workload","widgets","station"], "active":"roster"})
         );
         assert_eq!(
             migrated["root"]["children"][0]["children"][1],
-            json!({"type":"tabs", "tabs":["map"], "active":"map"})
+            json!({"type":"tabs", "tabs":["map","station-console"], "active":"map"})
         );
         assert_eq!(
             migrated["root"]["children"][1],
@@ -1396,11 +1425,11 @@ mod tests {
         assert_eq!(
             sanitize_live_layout(&layout).unwrap(),
             json!({
-                "version":3,
+                "version":4,
                 "root":{"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
                     {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
-                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets"], "active":"roster"},
-                        {"type":"tabs", "tabs":["map"], "active":"map"}
+                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets","station"], "active":"roster"},
+                        {"type":"tabs", "tabs":["map","station-console"], "active":"map"}
                     ]},
                     {"type":"tabs", "tabs":["comms","journal","health"], "active":"journal"}
                 ]},
@@ -1414,11 +1443,11 @@ mod tests {
     #[test]
     fn a_current_live_layout_keeps_its_arrangement_and_drops_unknown_fields() {
         let layout = json!({
-            "version":3,
+            "version":4,
             "root":{"type":"tabs","tabs":["comms","journal","unsafe"],"active":"journal","unsafe":"secret"},
             "floats":[{"panel":"roster","x":7,"y":9,"width":300,"height":200,"unsafe":"secret"}],
             "closed":["readiness","join","manual-save","mission","activity","session-history","map",
-                "attention","workload","widgets","health"],
+                "attention","workload","widgets","health","station","station-console"],
             "selected":"journal", "unsafe":"secret"
         });
 
@@ -1428,13 +1457,41 @@ mod tests {
         assert_eq!(
             sanitize_live_layout(&layout).unwrap(),
             json!({
-                "version":3,
+                "version":4,
                 "root":{"type":"tabs", "tabs":["comms","journal","attention","health"], "active":"journal"},
                 "floats":[{"panel":"roster","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
                 "closed":["readiness","join","manual-save","mission","activity","session-history","map",
-                    "workload","widgets"],
+                    "workload","widgets","station","station-console"],
                 "selected":"journal"
             })
+        );
+    }
+
+    #[test]
+    fn a_stored_v3_layout_repairs_a_closed_pinned_panel_after_the_new_ones() {
+        // The browser runs the pinned repair once, at the end of migration, so
+        // both sanitizers put the repaired panel in the same tab position.
+        let layout = json!({
+            "version":3,
+            "root":{"type":"split","axis":"horizontal","sizes":[1,1],"children":[
+                {"type":"tabs","tabs":["roster","attention"],"active":"roster"},
+                {"type":"tabs","tabs":["map"],"active":"map"}
+            ]},
+            "floats":[],
+            "closed":["readiness","join","manual-save","mission","comms","activity","journal",
+                "session-history","workload","widgets","health"],
+            "selected":"roster"
+        });
+
+        let migrated = sanitize_live_layout(&layout).unwrap();
+        assert_eq!(migrated["version"], 4);
+        assert_eq!(
+            migrated["root"]["children"][0]["tabs"],
+            json!(["roster", "attention", "station", "health"])
+        );
+        assert_eq!(
+            migrated["root"]["children"][1],
+            json!({"type":"tabs", "tabs":["map","station-console"], "active":"map"})
         );
     }
 
@@ -1443,11 +1500,12 @@ mod tests {
         // A Game Master must not be able to hide a connection or recovery
         // failure from themselves, by role preset OR by arrangement.
         let layout = json!({
-            "version":3,
+            "version":4,
             "root":{"type":"tabs","tabs":["roster"],"active":"roster"},
             "floats":[],
             "closed":["readiness","join","manual-save","mission","comms","activity","journal",
-                "session-history","map","attention","workload","widgets","health"],
+                "session-history","map","attention","workload","widgets","health","station",
+                "station-console"],
             "selected":"roster"
         });
 
@@ -1474,8 +1532,12 @@ mod tests {
         assert_eq!(
             migrated["root"]["children"][0]["children"][0],
             json!({"type":"tabs",
-                "tabs":["roster","readiness","mission","attention","workload","widgets"],
+                "tabs":["roster","readiness","mission","attention","workload","widgets","station"],
                 "active":"readiness"})
+        );
+        assert_eq!(
+            migrated["root"]["children"][0]["children"][1],
+            json!({"type":"tabs", "tabs":["map","station-console"], "active":"map"})
         );
     }
 

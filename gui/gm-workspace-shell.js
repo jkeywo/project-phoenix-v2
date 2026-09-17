@@ -35,6 +35,8 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   ['workload', 'gm-workload-panel'],
   ['widgets', 'gm-widgets'],
   ['health', 'gm-health-panel'],
+  ['station', 'gm-station-tools'],
+  ['station-console', 'gm-station-surface'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -150,18 +152,33 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // #gm-session-log by id, and on the ordinary browser host there is no dock to
   // place it. The dock moves it out into its own frame when it mounts.
   get('gm-activity')?.append(sessionHistory);
-  const liveDockNodes = new Map(GM_LIVE_DOCK_PANEL_IDS.map(([panel, id]) =>
-    [panel, id === 'gm-session-history' ? sessionHistory : get(id)]));
   const inspector = get('gm-inspector');
   // The saved action history (issue #1441) joins the inspector column: it is
   // the desk's detail/reading column, it already stacks and scrolls its own
   // sections, and that is what keeps the journal legible at 200% text rather
   // than competing for one of the fixed grid cells.
-  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-station-pending', 'gm-station-controls', 'gm-despawn-panel', 'gm-faction-panel');
+  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-despawn-panel', 'gm-faction-panel');
+  // Authentic Station operation is two dock panels (issue #1504): the pending
+  // state and the takeover controls are an ordinary tool, and the console
+  // itself is a document. Neither is a new command route — the puppet still
+  // owns the iframe, its typed bridge and the capability gate — and neither is
+  // another simulation participant.
+  const stationTools = element('section', 'gm-station-tools');
   const stationSurface = element('section', 'gm-station-surface');
   stationSurface.hidden = true;
+  // Both wrappers join the document BEFORE anything moves into them. The
+  // console iframe starts inside #gm-station-controls, so moving the controls
+  // into a detached wrapper would take the iframe out of the document with them
+  // and `getElementById` would stop finding it for the move that follows.
+  root.append(stationTools, stationSurface);
+  move(stationTools, 'gm-station-pending', 'gm-station-controls');
   move(stationSurface, 'gm-station-frame', 'gm-station-activity-heading', 'gm-station-activity');
-  root.append(stationSurface);
+  // Built here, once every wrapper this shell composes exists: the dock is
+  // handed NODES rather than ids, which also survives a re-mount when the
+  // migrated panels already live in the previous canvas.
+  const liveDockNodes = new Map(GM_LIVE_DOCK_PANEL_IDS.map(([panel, id]) => [panel,
+    { 'gm-session-history': sessionHistory, 'gm-station-tools': stationTools,
+      'gm-station-surface': stationSurface }[id] || get(id)]));
   const tabs = element('div', 'gm-inspector-tabs');
   tabs.setAttribute('role', 'tablist');
   const knowledge = get('gm-knowledge-panel');
@@ -429,7 +446,14 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
   styleButtons();
   get('gm-station-toggle')?.addEventListener('click', () => {
-    if (!get('gm-station-frame').hidden) stationSurface.scrollIntoView?.({ block: 'start' });
+    // Taking a Station over brings its console to hand. In the dock that is a
+    // reveal; without one it is still the scroll it always was. A console the
+    // operator CLOSED stays closed — closing it is a decision, and this is a
+    // convenience — and a console with nothing to show has nothing to bring.
+    if (stationSurface.hidden) return;
+    if (liveLayout?.reveal('station-console', { reopen: false })) return;
+    if (liveLayout) return;
+    stationSurface.scrollIntoView?.({ block: 'start' });
   });
   let liveLayout = null;
   const dockOrigins = new Map();

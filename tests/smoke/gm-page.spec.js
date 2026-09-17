@@ -12,7 +12,7 @@ import {
   waitForJoinCode,
 } from './fixtures';
 import { ts } from './strings';
-import { clickGmControl } from './dock-helpers.js';
+import { clickGmControl, revealGmPanel } from './dock-helpers.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -2473,6 +2473,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   // shadow root, which has its own unrelated private #overlay.
   await expect(gm.locator('#overlay:has(> #qr-panel)')).toBeHidden();
   const takeover = gm.locator('#gm-station-toggle');
+  await revealGmPanel(gm, 'station');
   await takeover.scrollIntoViewIfNeeded();
   await expect(takeover).toBeVisible();
   const takeoverBox = await takeover.boundingBox();
@@ -2499,10 +2500,15 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   );
 
   const frameElement = gm.locator('#gm-station-frame');
+  await revealGmPanel(gm, 'station-console');
   await frameElement.scrollIntoViewIfNeeded();
   const frameBox = await frameElement.boundingBox();
+  // The console is a dock panel since issue #1504, so its iframe follows the
+  // panel rather than being a fixed 720px block at the root of the page: what
+  // it still owes is to be scrolled into the viewport, not to fill it exactly.
   expect(frameBox.y).toBeGreaterThanOrEqual(0);
-  expect(frameBox.y + frameBox.height).toBeLessThanOrEqual(720);
+  expect(frameBox.y).toBeLessThan(720);
+  expect(frameBox.height).toBeGreaterThan(0);
   const helmFrame = gm.frameLocator('#gm-station-frame');
   const radar = helmFrame.locator('ph-helm-radar');
   const joystick = helmFrame.locator('#helm-joystick');
@@ -2597,6 +2603,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   expect(helmOption).toBeTruthy();
   expect(tacticalOption).toBeTruthy();
 
+  await revealGmPanel(gm, 'station');
   await stationSelect.scrollIntoViewIfNeeded();
   await stationSelect.selectOption(tacticalOption.value);
   await gm.waitForFunction(
@@ -2610,6 +2617,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     { timeout: 30_000 },
   );
   await expect(frameElement).toHaveAttribute('src', 'gui/cruiser/tactical.html');
+  await revealGmPanel(gm, 'station-console');
   await frameElement.scrollIntoViewIfNeeded();
   const tacticalFrame = gm.frameLocator('#gm-station-frame');
   const torpedoControls = tacticalFrame.locator('#torpedo-controls');
@@ -2617,6 +2625,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   await expect(torpedoControls).toBeVisible({ timeout: 20_000 });
   await expect(loadedTorpedoFire).toBeEnabled({ timeout: 30_000 });
 
+  await revealGmPanel(gm, 'station');
   await takeover.scrollIntoViewIfNeeded();
   await takeover.click();
   await gm.waitForFunction(
@@ -2682,6 +2691,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
 
   // Release only Tactical, then return to the still-active Helm takeover for
   // the existing spatial input, crew visibility and ordered release proof.
+  await revealGmPanel(gm, 'station');
   await takeover.scrollIntoViewIfNeeded();
   await takeover.click();
   await gm.waitForFunction(
@@ -2694,6 +2704,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     operatorId,
     { timeout: 30_000 },
   );
+  await revealGmPanel(gm, 'station');
   await stationSelect.scrollIntoViewIfNeeded();
   await stationSelect.selectOption(helmOption.value);
   await gm.waitForFunction(
@@ -2707,6 +2718,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     { timeout: 30_000 },
   );
   await expect(frameElement).toHaveAttribute('src', 'gui/cruiser/helm.html');
+  await revealGmPanel(gm, 'station-console');
   await frameElement.scrollIntoViewIfNeeded();
   await expect(joystick).toBeVisible({ timeout: 20_000 });
 
@@ -2807,8 +2819,10 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     { timeout: 30_000 },
   );
   await gm.evaluate(() => { window.__gmStationCorrelatedActions = []; });
+  await revealGmPanel(gm, 'station');
   await takeover.scrollIntoViewIfNeeded();
   await takeover.click();
+  await revealGmPanel(gm, 'station-console');
   await frameElement.scrollIntoViewIfNeeded();
   await expect(impulse).toBeEnabled({ timeout: 20_000 });
   await impulse.click();

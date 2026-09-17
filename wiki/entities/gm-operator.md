@@ -42,6 +42,22 @@ in the omniscient map, the attention queue, Station workload, the authored
 widget region and peer health, leaving the desk as TWO grid regions: the dock
 workspace across the left and centre, and the detail column.
 
+Issue #1504 then brought authentic Station operation in: the takeover controls
+and pending state are an ordinary tool panel, and the console is a second
+*document* beside the map. Neither is a new command route — the puppet still
+owns the iframe, its typed bridge and the capability gate — and neither is
+another simulation participant. The console panel exists exactly while the takeover controls do — that is, while
+the projection carries a Station row, taken over or not — which is the same rule
+its surface's own `hidden` always carried. Closing it is an arrangement choice
+that releases nothing, and taking a Station over brings an OPEN console forward
+without reopening one the operator closed.
+
+Reparenting an `<iframe>` re-creates its document, so a dock move reloads the
+console. `gui/gm-station-puppet.js` treats any load after the one it asked for as
+a REMOUNT: the generation advances and pending commands are dropped, because
+feedback belongs to the interface that sent the command and that document is
+gone.
+
 The map is a *document* panel — the surface this workspace is arranged around —
 and it is reparented now, which it never was before. There is no way to move a
 node between parents without disconnecting it, so `<ph-navigation-map>` restores

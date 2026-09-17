@@ -53,7 +53,7 @@ function pointerDock(panel, target) {
 }
 
 describe('Workshop layout renderer', () => {
-  let mounted, changes;
+  let mounted, changes, panels;
   beforeEach(() => { window.requestAnimationFrame = callback => callback(); });
   afterEach(() => { mounted?.dispose(); vi.restoreAllMocks(); });
 
@@ -200,6 +200,42 @@ describe('Workshop layout renderer', () => {
     // Reopening moves it out of the parking container into its own frame.
     document.querySelector('[data-layout-panel="recovery"][data-layout-control="switcher"]').click();
     expect(panels.recovery.closest('[data-panel]').dataset.panel).toBe('recovery');
+  });
+
+  it('does not rebuild the tree when only the shown tab changes', () => {
+    // Reparenting a panel node re-creates an iframe's document, so a render
+    // whose structure is unchanged must restyle rather than rebuild.
+    ({ mounted, panels } = mount());
+    const sourceFrame = document.querySelector('[data-panel="source"]');
+    const findingsFrame = document.querySelector('[data-panel="findings"]');
+    expect(findingsFrame.hidden).toBe(true);
+    document.querySelector('[role="tab"][data-layout-panel="findings"]').click();
+    expect(document.querySelector('[data-panel="findings"]')).toBe(findingsFrame);
+    expect(document.querySelector('[data-panel="source"]')).toBe(sourceFrame);
+    expect(panels.findings.parentElement).toBe(findingsFrame);
+    expect(findingsFrame.hidden).toBe(false);
+    expect(sourceFrame.hidden).toBe(true);
+    expect(document.querySelector('[role="tab"][data-layout-panel="findings"]').getAttribute('aria-selected'))
+      .toBe('true');
+    expect(document.querySelector('[role="tab"][data-layout-panel="source"]').tabIndex).toBe(-1);
+    // Revealing one is the same: it changes which tab is shown, nothing else.
+    mounted.reveal('source');
+    expect(document.querySelector('[data-panel="source"]')).toBe(sourceFrame);
+    expect(sourceFrame.hidden).toBe(false);
+    // A move IS structural, so that one rebuilds.
+    document.querySelector('[data-panel="findings"] [data-layout-control="float"]').click();
+    expect(document.querySelector('[data-panel="findings"]')).not.toBe(findingsFrame);
+    expect(panels.findings.closest('[data-panel]').classList.contains('is-floating')).toBe(true);
+  });
+
+  it('brings a panel forward without undoing a close when asked not to reopen', () => {
+    ({ mounted } = mount());
+    document.querySelector('[data-panel="findings"] [data-layout-control="close"]').click();
+    expect(mounted.state().closed).toContain('findings');
+    expect(mounted.reveal('findings', { reopen: false })).toBe(false);
+    expect(mounted.state().closed).toContain('findings');
+    expect(mounted.reveal('findings')).toBe(true);
+    expect(mounted.state().closed).not.toContain('findings');
   });
 
   it('returns focus to the switcher after closing the final panel', () => {

@@ -23,6 +23,8 @@ use crate::world::validate::{
 };
 
 pub mod archive;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod captured_source;
 pub mod document;
 mod model_fields;
 #[cfg(not(target_arch = "wasm32"))]

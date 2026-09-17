@@ -63,3 +63,33 @@ pub struct ControlRecord {
     pub id: u64,
     pub control: TestControl,
 }
+
+/// What a Workshop model preview was asked to show.
+///
+/// Exactly one of `model` or `entity`: a GLB by its captured path, or an
+/// entity template whose `[star]`, `[planet]` or `[mesh]` visual the shared
+/// subject renderer dispatches the way the game does.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewSelection {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub entity: Option<String>,
+    #[serde(default)]
+    pub gizmos: bool,
+}
+
+impl PreviewSelection {
+    /// A preview shows one subject. Neither is nothing to draw and both is two
+    /// pictures in one frame, so both are refused rather than ordered.
+    pub fn subject(&self) -> Option<&str> {
+        match (self.model.as_deref(), self.entity.as_deref()) {
+            (Some(model), None) => Some(model),
+            (None, Some(entity)) => Some(entity),
+            _ => None,
+        }
+    }
+}

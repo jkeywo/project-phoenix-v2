@@ -22,6 +22,11 @@ pub fn decode_workshop_test_launch(
 ) -> Result<crate::workshop::test_protocol::Launch, String> {
     serde_json::from_slice(value).map_err(|e| e.to_string())
 }
+pub fn decode_workshop_preview_selection(
+    value: &[u8],
+) -> Result<crate::workshop::test_protocol::PreviewSelection, String> {
+    serde_json::from_slice(value).map_err(|e| e.to_string())
+}
 pub fn encode_workshop_test_status(
     value: &crate::workshop::test_protocol::TestStatus,
 ) -> Result<String, String> {

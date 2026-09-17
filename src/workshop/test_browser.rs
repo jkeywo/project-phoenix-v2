@@ -7,7 +7,7 @@ use super::{
 use bevy::prelude::*;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     sync::Arc,
 };
 use wasm_bindgen::prelude::*;
@@ -25,54 +25,9 @@ impl BrowserTest {
         }
         let launch = crate::core::codec::decode_workshop_test_launch(launch.as_bytes())
             .map_err(|e| fail(&e))?;
-        if !source.is_object() || js_sys::Array::is_array(&source) {
-            return Err(fail("Invalid Workshop Test source"));
-        }
-        let entries = js_sys::Object::entries(&source.unchecked_into());
-        if entries.length() > 16384 {
-            return Err(fail("Workshop Test source is too large"));
-        }
-        let mut assets = BTreeMap::new();
-        let mut text = BTreeMap::new();
-        let mut folded = BTreeSet::new();
-        let mut length = 0usize;
-        for entry in entries.iter() {
-            let pair = js_sys::Array::from(&entry);
-            let path = pair
-                .get(0)
-                .as_string()
-                .ok_or_else(|| fail("Invalid Test source path"))?;
-            if !(path == "scenarios.toml" || path.starts_with("assets/"))
-                || path.contains(['\\', ':'])
-                || path.chars().any(char::is_control)
-                || path
-                    .split('/')
-                    .any(|part| part.is_empty() || part == "." || part == "..")
-                || !folded.insert(path.to_ascii_lowercase())
-            {
-                return Err(fail("Invalid Test source path"));
-            }
-            let value = pair.get(1);
-            let bytes = if let Some(source) = value.as_string() {
-                if path.ends_with(".toml") || path.ends_with(".rhai") {
-                    text.insert(path.clone(), source.clone());
-                }
-                source.into_bytes()
-            } else if value.is_instance_of::<js_sys::Uint8Array>() {
-                let bytes = value.unchecked_into::<js_sys::Uint8Array>();
-                if bytes.length() as usize > (512 * 1024 * 1024usize).saturating_sub(length) {
-                    return Err(fail("Workshop Test source is too large"));
-                }
-                bytes.to_vec()
-            } else {
-                return Err(fail("Invalid Test source bytes"));
-            };
-            length = length.saturating_add(bytes.len());
-            if length > 512 * 1024 * 1024 {
-                return Err(fail("Workshop Test source is too large"));
-            }
-            assets.insert(path, Arc::from(bytes));
-        }
+        let captured = super::captured_source::capture(source, "Workshop Test", "Test")
+            .map_err(|message| fail(&message))?;
+        let (assets, text) = (captured.assets, captured.text);
         let report = super::test_source::validate_selection(text, &launch.selection);
         if !report.accepted {
             return Err(fail(

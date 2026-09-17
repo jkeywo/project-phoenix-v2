@@ -36,6 +36,8 @@ mod capture;
 mod gizmos;
 mod lighting;
 mod lod;
+/// The Workshop's disposable preview: this same plugin over captured bytes.
+pub mod preview;
 mod stats;
 mod subject;
 

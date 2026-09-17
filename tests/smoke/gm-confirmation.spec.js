@@ -4,7 +4,7 @@ import {
   readHostPeerId, test, waitForJoinCode, waitForWasmReady,
 } from './fixtures';
 import { ts } from './strings';
-import { clickGmControl } from './dock-helpers.js';
+import { clickGmControl, openGmDraft } from './dock-helpers.js';
 
 const WORLD = `
 [global]
@@ -94,6 +94,9 @@ test('two equal GMs keep private confirmation policies and resolve stale lethal 
   await Promise.all([host, ...gms].map(page => page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')));
   expectFixtureWorld(await crew.waitForMessage('WorldSetup'), WORLD);
   for (const page of gms) await selectCourier(page);
+  // Direct effect is a draft since issue #1511, and both desks send several
+  // presses here, so both keep theirs open.
+  for (const page of gms) await openGmDraft(page, 'effect', 'gm-effect-keep-open');
   const target = await one.locator('#gm-entity-card').getAttribute('data-entity-id');
   const ownRows = (page, id) => page.locator(`#gm-effect-log [data-operator-id="${id}"]`);
   const dialog = page => page.locator('#gm-action-confirmation');

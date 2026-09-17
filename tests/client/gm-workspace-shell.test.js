@@ -875,6 +875,59 @@ it('brings a quick action its own panel forward before it focuses a control in i
     .find(button => button.getAttribute('aria-controls') === 'gm-contact-observer').click();
   expect(document.querySelector('[data-panel="contact"]')).toBeNull();
 });
+it('docks System control as a tool and direct effect as a draft of its own', () => {
+  const { shell } = mount();
+  // Disabling one authored System is a target-relative choice and a verb, so
+  // it is an ordinary tool in the column that reads the same selection.
+  expect(document.getElementById('gm-system-panel').closest('[data-panel]').dataset.panel)
+    .toBe('system');
+  expect(document.querySelector('#gm-inspector #gm-system-panel')).toBeNull();
+  expect(document.querySelector('[data-panel="system"] #gm-system-select')).not.toBeNull();
+
+  // Direct damage and repair composes a kind, an amount, a scope and a
+  // clamp/lethality preview, so it is a draft: not in the arrangement, in the
+  // document, and floating when it is opened.
+  expect(document.querySelector('[data-panel="effect"]')).toBeNull();
+  expect(shell.liveLayoutState().closed).toContain('effect');
+  expect(document.querySelector('#gm-inspector #gm-effect-panel')).toBeNull();
+  document.querySelector('[data-layout-panel="effect"][data-layout-control="switcher"]').click();
+  const framed = document.querySelector('[data-panel="effect"]');
+  expect(framed.classList.contains('is-floating')).toBe(true);
+  expect(framed.contains(document.getElementById('gm-effect-amount'))).toBe(true);
+  expect(framed.contains(document.getElementById('gm-effect-log'))).toBe(true);
+  // A floating draft is a form, not an arrangement, so it is not restored.
+  expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed).toContain('effect');
+  // Docked, it is a tool kept to hand and does survive.
+  shell.setLiveLayout(liveLayoutModel.dock(shell.liveLayoutState(), 'effect', 'roster', 'tab'));
+  expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed).not.toContain('effect');
+  // Placement only: no amount, scope, kind or correlation rides along.
+  const stored = JSON.stringify(liveLayoutModel.normalize(shell.liveLayoutState()));
+  for (const key of ['amount', 'scope', 'milli_hp', 'correlation']) {
+    expect(stored, key).not.toContain(key);
+  }
+});
+
+it('opens the draft a quick action points into rather than pointing at nothing', () => {
+  const { shell } = mount();
+  const opened = [];
+  shell.temporaryActions.register('effect', {
+    isDirty: () => false, reset: options => opened.push(options),
+    keepOpen: () => false, focus: () => {},
+  });
+  // A draft that is closed is not a panel the operator put away: a draft
+  // nobody opened is simply not there, so the shortcut opens it.
+  expect(document.querySelector('[data-panel="effect"]')).toBeNull();
+  [...document.querySelectorAll('#gm-action-grid button')]
+    .find(button => button.getAttribute('aria-controls') === 'gm-effect-amount').click();
+  expect(document.querySelector('[data-panel="effect"]')).not.toBeNull();
+  expect(opened).toEqual([{ keepReusable: false }]);
+  // An ordinary tool is only brought forward; one the operator CLOSED stays so.
+  shell.setLiveLayout(liveLayoutModel.select(shell.liveLayoutState(), 'contact'));
+  expect(document.getElementById('gm-system-select').closest('[data-panel]').hidden).toBe(true);
+  [...document.querySelectorAll('#gm-action-grid button')]
+    .find(button => button.getAttribute('aria-controls') === 'gm-system-select').click();
+  expect(document.getElementById('gm-system-select').closest('[data-panel]').hidden).toBe(false);
+});
 it('draws a bar pill only for a session fact a live payload carries', () => {
   const { shell } = mount();
   // Nothing has published yet: an empty health seed, no quiet advisory and no

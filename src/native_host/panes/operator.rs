@@ -501,11 +501,55 @@ const LIVE_PANELS_V9: &[&str] = &[
 const LIVE_ADDED_IN_V9: &[(&str, &str, &str)] =
     &[("contact", "inspector", "tab"), ("npc", "inspector", "tab")];
 
+const LIVE_PANELS_V10: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+    "checkpoint",
+    "restore",
+    "contact",
+    "npc",
+    "misclassify",
+    "report-policy",
+    "ghost",
+    "system",
+    "effect",
+];
+/// Panels registered after version 9. Disabling and restoring one authored
+/// System is a target-relative choice and a verb, so it is an ordinary tool
+/// beside the selection it reads; direct damage and repair is a draft and is
+/// never placed.
+const LIVE_ADDED_IN_V10: &[(&str, &str, &str)] = &[("system", "inspector", "tab")];
+
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
-const LIVE_TEMPORARY_PANELS: &[&str] =
-    &["spawn", "restore", "misclassify", "report-policy", "ghost"];
+const LIVE_TEMPORARY_PANELS: &[&str] = &[
+    "spawn",
+    "restore",
+    "misclassify",
+    "report-policy",
+    "ghost",
+    "effect",
+];
 
 /// Panels the operator may not close. The attention region renders connection
 /// and recovery banners verbatim and health is the table behind them: a Game
@@ -542,7 +586,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         6 => LIVE_PANELS_V6,
         7 => LIVE_PANELS_V7,
         8 => LIVE_PANELS_V8,
-        _ => LIVE_PANELS_V9,
+        9 => LIVE_PANELS_V9,
+        _ => LIVE_PANELS_V10,
     }
 }
 
@@ -570,6 +615,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 9 {
         added.extend_from_slice(LIVE_ADDED_IN_V9);
+    }
+    if version < 10 {
+        added.extend_from_slice(LIVE_ADDED_IN_V10);
     }
     added
 }
@@ -659,7 +707,7 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 9,
+        "version": 10,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
@@ -669,18 +717,19 @@ fn default_live_layout() -> Value {
                 ]},
                 {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                     {"type":"tabs", "tabs":["map","station-console"], "active":"map"},
-                    {"type":"tabs", "tabs":["inspector","contact","npc"], "active":"inspector"}
+                    {"type":"tabs", "tabs":["inspector","contact","npc","system"], "active":"inspector"}
                 ]}
             ]},
             {"type":"tabs", "tabs":["comms","activity","journal","session-history","health","checkpoint"], "active":"comms"}
         ]},
-        "floats": [], "closed": ["spawn","restore","misclassify","report-policy","ghost"],
+        "floats": [],
+        "closed": ["spawn","restore","misclassify","report-policy","ghost","effect"],
         "selected": "roster"
     })
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=9).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=10).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();

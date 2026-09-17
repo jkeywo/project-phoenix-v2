@@ -12,7 +12,7 @@ import {
   waitForJoinCode,
 } from './fixtures';
 import { ts } from './strings';
-import { clickGmControl, revealGmPanel } from './dock-helpers.js';
+import { clickGmControl, openGmDraft, revealGmPanel } from './dock-helpers.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -1179,6 +1179,7 @@ test('a GM disables and restores a real System without changing its hull', { tag
   await gm.waitForFunction(() => Object.values(window.__hostGmSystemState().controls).some(rows => rows.some(row => row.system_id === 'red-alert')));
   const target = await gm.evaluate(() => Object.entries(window.__hostGmSystemState().controls).find(([, rows]) => rows.some(row => row.system_id === 'red-alert'))[0]);
   await gm.evaluate(target => document.querySelector('#gm-entity-map').navigationSelect({ uuid: target }), target);
+  await revealGmPanel(gm, 'system');
   await gm.locator('#gm-system-select').selectOption('red-alert');
   const hullBefore = await gm.locator('#gm-entity-hull').getAttribute('value');
   for (const [verb, disabled] of [['disable', true], ['restore', false]]) {
@@ -1556,6 +1557,9 @@ test('a GM damages and repairs one Entity through the typed action path', { tag:
     return !map?.hidden && (map.state?.blips?.length ?? 0) > 0;
   }, undefined, { timeout: 30_000 });
 
+  // Direct damage and repair is a complex action since issue #1511: it opens
+  // as a draft, and stays open across presses because Keep open says so.
+  await openGmDraft(page, 'effect', 'gm-effect-keep-open');
   // Nothing is aimable until an entity is selected, and the panel says so.
   const panel = page.locator('#gm-effect-panel');
   await expect(panel).toHaveAttribute('data-damageable', 'false');
@@ -1664,6 +1668,7 @@ test('a GM damages and repairs one Station and one System without touching their
     return !map?.hidden && (map.state?.blips?.length ?? 0) > 0;
   }, undefined, { timeout: 30_000 });
 
+  await openGmDraft(page, 'effect', 'gm-effect-keep-open');
   const map = page.locator('#gm-entity-map');
   await map.focus();
   await map.press('ArrowRight');

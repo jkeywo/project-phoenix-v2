@@ -10,7 +10,7 @@ import { test, expect, createTestClient, captureServerPageErrors,
 import { observeGm, observeCrew, readGmEvidence, assertGmOnlyCrewWitness,
   retainEvidence } from './gm-m2-evidence.js';
 import { ts } from './strings';
-import { clickGmControl, revealGmPanel } from './dock-helpers.js';
+import { clickGmControl, openGmDraft, revealGmPanel } from './dock-helpers.js';
 
 const execute = promisify(execFile);
 const WORLD = 'assets/worlds/combat_test.toml';
@@ -201,6 +201,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
       .find(row => row.stations.some(station => station.station_id === 'captain' && station.rating === 'Std'))?.ship_id);
     expect(player, 'frozen lobby ratings arrive without a corrective crew command').toBeTruthy();
     await selectEntity(gm, player);
+    await revealGmPanel(gm, 'system');
     await gm.locator('#gm-system-select').selectOption('red-alert');
     const hullBefore = await gm.locator('#gm-entity-hull').getAttribute('value');
     await settleControl(gm, () => gm.locator('#gm-system-disable').click());
@@ -307,7 +308,10 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
         await gm.locator('#gm-entity-name').textContent());
       await checkpoint(`Truth and Crew Knowledge: ${mode}`);
     }
+    // Back to the inspector for the selection controls it still carries, with
+    // the direct-effect draft open beside it and kept open across presses.
     await revealGmPanel(gm, 'inspector');
+    await openGmDraft(gm, 'effect', 'gm-effect-keep-open');
     const effect = async (page, target, scope, verb, amount) => {
       await selectEntity(page, target); await page.locator('#gm-effect-scope').selectOption(scope);
       await page.locator('#gm-effect-amount').fill(String(amount));

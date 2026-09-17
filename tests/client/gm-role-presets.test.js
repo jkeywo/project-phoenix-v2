@@ -164,6 +164,8 @@ function mount() {
     <section id="gm-contact-report-panel"></section>
     <section id="gm-contact-ghost-panel"></section>
     <section id="gm-npc-panel"></section>
+    <section id="gm-system-panel"></section>
+    <section id="gm-effect-panel"></section>
     <section id="gm-activity"></section>
     <section id="gm-station-controls"></section>
     <section id="gm-comms-panel"></section>

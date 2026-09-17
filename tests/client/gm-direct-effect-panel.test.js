@@ -31,6 +31,7 @@ function mount({
   cancelSchedule = vi.fn(),
   confirmAction,
   getEntity,
+  onSucceeded = vi.fn(),
 } = {}) {
   const queue = [...correlations];
   const panel = createGmDirectEffectPanel({
@@ -44,12 +45,13 @@ function mount({
     now: () => 7,
     schedule,
     cancelSchedule,
+    onSucceeded,
     ...(confirmAction ? { confirmAction } : {}),
     ...(getEntity ? { getEntity } : {}),
     ...(capacity == null ? {} : { capacity }),
     ...(timeoutMs == null ? {} : { timeoutMs }),
   });
-  return { panel, submitDirectEffect, schedule, cancelSchedule };
+  return { panel, submitDirectEffect, schedule, cancelSchedule, onSucceeded };
 }
 
 /**
@@ -181,6 +183,9 @@ describe('GM direct effect panel', () => {
           </div>
           <p id="gm-effect-warning"></p>
         </div>
+        <label for="gm-effect-keep-open">
+          <input type="checkbox" id="gm-effect-keep-open">
+        </label>
         <p id="gm-effect-feedback"></p>
         <h4 id="gm-effect-log-heading"></h4>
         <ol id="gm-effect-log"></ol>
@@ -793,4 +798,121 @@ describe('GM direct effect panel', () => {
         .toBeUndefined();
     });
   });
+  // ===== the shared complex-action contract (issue #1511) =================
+  describe('as a temporary draft panel', () => {
+    it('finishes only on a press the world took, and stays open for a refusal', () => {
+      const { panel, onSucceeded } = mount();
+      panel.select(entity());
+      typeAmount(25);
+      damageButton().click();
+      expect(onSucceeded).not.toHaveBeenCalled();
+      panel.update({ results: [result({ outcome: 'refused', reason: 'unknown-entity', effect: undefined })] });
+      // A refusal leaves the operator with something to answer — the numbers
+      // and the reason are on the panel that composed them, and the panel is
+      // actionable again rather than stuck behind a press nobody answered.
+      expect(onSucceeded).not.toHaveBeenCalled();
+      expect(document.getElementById('gm-effect-feedback').dataset.state).toBe('Refused');
+      expect(logRows()[0].dataset.outcome).toBe('refused');
+      expect(panel.state().pending).toBe(0);
+      expect(damageButton().disabled).toBe(false);
+      expect(amountInput().value).toBe('25');
+      damageButton().click();
+      panel.update({ results: [result({ correlation: 'gm-effect-2' })] });
+      expect(onSucceeded).toHaveBeenCalledOnce();
+    });
+
+    it('reports what it holds unsent, and keeps a landed press composable again', () => {
+      const { panel } = mount();
+      panel.select(entity({ status: { systems: stationedSystems() } }));
+      expect(panel.draftDirty()).toBe(false);
+      typeAmount(25);
+      expect(panel.draftDirty()).toBe(true);
+      pickScope('station:helm');
+      expect(panel.state().scope).toBe('station:helm');
+
+      // Everything this draft holds describes the PRESS — how much, and
+      // whether it lands on the hull, one Station or one System — so a press
+      // the world took leaves all of it, and the scoped hull reading stays
+      // pointed where the operator pointed it.
+      panel.resetDraft({ keepReusable: true });
+      expect(amountInput().value).toBe('25');
+      expect(panel.state().scope).toBe('station:helm');
+      expect(document.getElementById('gm-effect-hull').textContent)
+        .toContain(t('station.helm.name'));
+
+      // A fresh open starts at the whole hull and the amount the authored
+      // markup carries.
+      panel.resetDraft({ keepReusable: false });
+      expect(amountInput().value).toBe('10');
+      expect(panel.state().scope).toBe('entity');
+      expect(panel.draftDirty()).toBe(false);
+    });
+
+    it('finishes the draft for a press the world took after this desk gave up', () => {
+      // The local timeout is this desk's patience, not the world's answer. A
+      // press it TOOK is a press that finished, however late — leaving the
+      // draft open waiting for it is how the same damage gets sent twice.
+      const { panel, onSucceeded, schedule } = mount();
+      panel.select(entity());
+      typeAmount(25);
+      damageButton().click();
+      expect(panel.state().pending).toBe(1);
+      schedule.mock.calls.at(-1)[0]();
+      expect(panel.state().pending).toBe(0);
+      expect(document.getElementById('gm-effect-feedback').dataset.state).toBe('TimedOut');
+      // The projection pushes continuously, and the answer can be many pushes
+      // away: the memory of a press this desk gave up on cannot live only
+      // until the next one.
+      for (let push = 0; push < 3; push += 1) panel.update({ results: [] });
+      panel.update({ results: [result()] });
+      expect(onSucceeded).toHaveBeenCalledOnce();
+      // A refusal that arrives just as late finishes nothing.
+      damageButton().click();
+      schedule.mock.calls.at(-1)[0]();
+      panel.update({ results: [result({ correlation: 'gm-effect-2', outcome: 'refused',
+        reason: 'unknown-entity', effect: undefined })] });
+      expect(onSucceeded).toHaveBeenCalledOnce();
+    });
+
+    it('holds nothing unsent once the world has taken the press', () => {
+      // Dirty means work the operator would LOSE. After a press that landed,
+      // the amount and the scope stay so the next one is a button away — but
+      // nothing on the panel is unsent, so closing it asks about nothing.
+      const { panel } = mount();
+      panel.select(entity({ status: { systems: stationedSystems() } }));
+      typeAmount(25);
+      pickScope('station:helm');
+      damageButton().click();
+      expect(panel.draftDirty()).toBe(true);
+      panel.update({ results: [result()] });
+      expect(panel.draftDirty()).toBe(false);
+      expect(amountInput().value).toBe('25');
+      expect(panel.state().scope).toBe('station:helm');
+      // Touching either makes it work again.
+      typeAmount(30);
+      expect(panel.draftDirty()).toBe(true);
+    });
+
+    it('reads its own Keep open and focuses the amount it is about to send', () => {
+      const { panel } = mount();
+      panel.select(entity());
+      expect(panel.keepOpen()).toBe(false);
+      document.getElementById('gm-effect-keep-open').checked = true;
+      expect(panel.keepOpen()).toBe(true);
+      panel.focusDraft();
+      expect(document.activeElement).toBe(amountInput());
+    });
+
+    it('counts a press in flight as unsent work, whatever the fields say', () => {
+      const { panel } = mount();
+      panel.select(entity());
+      damageButton().click();
+      expect(panel.state().pending).toBe(1);
+      // The amount is untouched and the scope is the whole hull, but a press
+      // nobody has answered yet is still this panel's own unfinished business.
+      expect(amountInput().value).toBe('10');
+      expect(panel.draftDirty()).toBe(true);
+    });
+  });
 });
+

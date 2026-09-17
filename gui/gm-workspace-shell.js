@@ -66,6 +66,12 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   ['misclassify', 'gm-contact-misclassify-panel'],
   ['report-policy', 'gm-contact-report-panel'],
   ['ghost', 'gm-contact-ghost-panel'],
+  // One authored System, disabled or restored: a target-relative choice and a
+  // verb, so an ordinary tool beside the selection it reads (issue #1511).
+  ['system', 'gm-system-panel'],
+  // Direct damage and repair is a complex action: a kind, an amount, a scope
+  // over the hull or one Station or one System, and a clamp/lethality preview.
+  ['effect', 'gm-effect-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -180,6 +186,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // panels of their own (issue #1510) and wait at the root for the dock.
   move(root, 'gm-contact-panel', 'gm-contact-misclassify-panel', 'gm-contact-report-panel',
     'gm-contact-ghost-panel', 'gm-npc-panel');
+  // System control and direct effect follow them out (issue #1511): the last
+  // two selected-entity actions the inspector was still carrying.
+  move(root, 'gm-system-panel', 'gm-effect-panel');
   // Restore leaves the checkpoint record to become a draft of its own: it
   // combines a selection, a preflight, a consequence preview and a
   // confirmation. The candidate it acts on is still whatever the record has
@@ -199,7 +208,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // the desk's detail/reading column, it already stacks and scrolls its own
   // sections, and that is what keeps the journal legible at 200% text rather
   // than competing for one of the fixed grid cells.
-  move(inspector, 'gm-system-panel', 'gm-objective-panel', 'gm-despawn-panel', 'gm-faction-panel');
+  move(inspector, 'gm-objective-panel', 'gm-despawn-panel', 'gm-faction-panel');
   // Authentic Station operation is two dock panels (issue #1504): the pending
   // state and the takeover controls are an ordinary tool, and the console
   // itself is a document. Neither is a new command route — the puppet still
@@ -527,7 +536,13 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   function revealHost(node) {
     for (let candidate = node; candidate; candidate = candidate.parentElement) {
       const entry = GM_LIVE_DOCK_PANEL_IDS.find(([panel]) => liveDockNodes.get(panel) === candidate);
-      if (entry) return liveLayout?.reveal(entry[0], { reopen: false }) === true;
+      if (!entry) continue;
+      // A DRAFT that is closed is not a panel the operator put away — a draft
+      // nobody opened is simply not there — so a shortcut that points into one
+      // opens it, through the lifecycle that owns what opening means. Every
+      // other panel is only brought forward: closing one is a decision.
+      if (liveLayoutModel.isTemporary(entry[0])) return temporaryActions.open(entry[0]) === true;
+      return liveLayout?.reveal(entry[0], { reopen: false }) === true;
     }
     return false;
   }

@@ -61,6 +61,9 @@ export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
   'gm-contact-report-panel': 'gm-inspector',
   'gm-contact-ghost-panel': 'gm-inspector',
   'gm-npc-panel': 'gm-inspector',
+  // System control and direct effect followed them out in issue #1511.
+  'gm-system-panel': 'gm-inspector',
+  'gm-effect-panel': 'gm-inspector',
 });
 
 /** Quick-action DOM ids this build actually draws. */

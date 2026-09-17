@@ -493,6 +493,14 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       ? win.__hostLocalGm() : null,
     getOperatorName: (id) => typeof win.__hostGmName === 'function'
       ? win.__hostGmName(id) : id,
+    // A press the world took finishes the draft (issue #1511).
+    onSucceeded: () => shell.temporaryActions?.succeeded('effect'),
+  });
+  shell.temporaryActions?.register('effect', {
+    isDirty: () => gmDirectEffect.draftDirty(),
+    reset: options => gmDirectEffect.resetDraft(options),
+    keepOpen: () => gmDirectEffect.keepOpen(),
+    focus: () => gmDirectEffect.focusDraft(),
   });
   gmSystem = createGmSystemPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
@@ -653,7 +661,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmSpawnPanel.reset();
   // The run the draft was for has gone, so there is nothing left to confirm
   // away: the panel closes rather than staying open and empty.
-  for (const draft of ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost']) {
+  for (const draft of ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect']) {
     shell.temporaryActions?.discard(draft);
     shell.temporaryActions?.closeSilently(draft);
   }

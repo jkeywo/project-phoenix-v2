@@ -88,6 +88,20 @@ integer millimetres, so the picked place is converted into the same fields, with
 the same bounds, checked by the same validation. A place beyond those bounds is
 written verbatim and refused, not quietly clamped.
 
+Issue #1511 took the last two selected-entity actions out of the inspector.
+Disabling and restoring one authored System is a target-relative choice and a
+verb, so it stays an ordinary tool beside the selection it reads. Direct damage
+and repair became a draft: it combines an effect kind, an amount, a scope over
+the whole hull or one Station or one System, and a clamp and lethality preview,
+and it finishes only on a press the world TOOK — a refusal leaves it open with
+its numbers and its reason on screen, which is the whole point of composing them
+somewhere of their own. After a press that landed, HOW MUCH stays and WHERE it
+was aimed goes back to the whole hull. A press still in flight counts as unsent
+work even when the fields read as untouched, so closing the panel asks first;
+the SELECTION never does, because it belongs to the map and the inspector rather
+than to this draft. A quick action pointing into a draft opens it, because a
+draft nobody opened is not a panel put away — it is simply not there.
+
 Issue #1508 gave Spawn directed spatial picking through that docked map. Pick
 mode names the control capturing the chart and previews what committing would
 place — position, degrees AND a compass word, because a preview that only draws

@@ -1,5 +1,15 @@
+/** `panels` accepts bare ids or `{ id, kind }` descriptors. `kind` is the panel's
+ * class: 'document' for the large content surfaces a context is arranged around
+ * (source, model preview, map, Station console) and 'tool' for everything else.
+ * It carries no authority — it only tells a renderer and a default layout which
+ * panels belong in the central group. */
+export const PANEL_KIND = Object.freeze({ DOCUMENT: 'document', TOOL: 'tool' });
+
 export function createDockLayoutModel({ version, panels, defaultLayout, compatibleVersions = [version] }) {
-  const panelIds = Object.freeze([...panels]);
+  const descriptors = panels.map(panel => typeof panel === 'string' ? { id: panel, kind: PANEL_KIND.TOOL }
+    : { id: panel.id, kind: panel.kind === PANEL_KIND.DOCUMENT ? PANEL_KIND.DOCUMENT : PANEL_KIND.TOOL });
+  const panelIds = Object.freeze(descriptors.map(panel => panel.id));
+  const kinds = Object.freeze(Object.fromEntries(descriptors.map(panel => [panel.id, panel.kind])));
   const isPanel = value => panelIds.includes(value);
   const clone = value => JSON.parse(JSON.stringify(value));
   const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
@@ -134,5 +144,7 @@ export function createDockLayoutModel({ version, panels, defaultLayout, compatib
     if (!target) { const next = detached(state, panel); next.root = group([panel]); next.selected = panel; return normalize(next); }
     return dock(state, panel, target, 'tab');
   }
-  return Object.freeze({ panels: panelIds, defaultLayout, normalize, select, dock, float, moveFloat, close, reopen });
+  const kind = panel => kinds[panel] || null;
+  return Object.freeze({ panels: panelIds, kind,
+    defaultLayout, normalize, select, dock, float, moveFloat, close, reopen });
 }

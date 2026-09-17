@@ -2,15 +2,14 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  defaultWorkshopLayout, dockWorkshopPanel, selectWorkshopPanel,
+  defaultWorkshopLayout, dockWorkshopPanel, selectWorkshopPanel, WORKSHOP_PANELS,
 } from '../../gui/workshop-layout-model.js';
 import { mountWorkshopLayout } from '../../gui/workshop-layout-renderer.js';
 
 const labels = {
   switcher: 'Panels', reset: 'Reset', float: 'Float', close: 'Close',
   dock: { left: 'Dock left', right: 'Dock right', top: 'Dock above', bottom: 'Dock below', tab: 'Dock as tab' },
-  panels: { files: 'Files', source: 'Source', inspector: 'Inspector', add: 'Add files', recovery: 'Recovery',
-    findings: 'Findings', feedback: 'Feedback', dependencies: 'Dependencies', settings: 'Settings' },
+  panels: Object.fromEntries(WORKSHOP_PANELS.map(panel => [panel, panel])),
 };
 
 function relation(node, first, second) {
@@ -29,8 +28,7 @@ function mount(initial = defaultWorkshopLayout()) {
   document.body.innerHTML = '<main id="root"><div id="surface"></div></main>';
   const root = document.getElementById('root');
   const surface = document.getElementById('surface');
-  const panels = Object.fromEntries(['files', 'source', 'inspector', 'add', 'recovery',
-    'findings', 'feedback', 'dependencies', 'settings'].map(panel => {
+  const panels = Object.fromEntries(WORKSHOP_PANELS.map(panel => {
     const node = document.createElement('div'); node.textContent = panel; return [panel, node];
   }));
   const changes = [];
@@ -150,14 +148,24 @@ describe('Workshop layout renderer', () => {
     expect(css).not.toMatch(/\.workshop-split\s*\{[^}]*min-height:\s*32rem/);
   });
 
+  it('marks document panels so a renderer can arrange a context around them', () => {
+    ({ mounted } = mount());
+    expect(document.querySelector('[data-panel="source"]').dataset.panelKind).toBe('document');
+    expect(document.querySelector('[data-panel="model-preview"]').dataset.panelKind).toBe('document');
+    document.querySelector('[data-panel="model-preview"] [data-layout-control="float"]').click();
+    expect(document.querySelector('[data-panel="model-preview"].is-floating').dataset.panelKind).toBe('document');
+    expect(document.querySelector('[data-panel="files"]').dataset.panelKind).toBe('tool');
+    expect(document.querySelector('[data-panel="models"]').dataset.panelKind).toBe('tool');
+  });
+
   it('returns focus to the switcher after closing the final panel', () => {
     ({ mounted } = mount());
-    for (const panel of ['files', 'source', 'inspector', 'add', 'recovery', 'findings', 'feedback', 'dependencies', 'settings']) {
+    for (const panel of WORKSHOP_PANELS) {
       document.querySelector(`[data-panel="${panel}"] [data-layout-control="close"]`).click();
     }
     expect(document.querySelector('.workshop-dock-panel')).toBeNull();
     expect(document.activeElement).toBe(document.querySelector(
-      '[data-layout-panel="settings"][data-layout-control="switcher"]',
+      `[data-layout-panel="${WORKSHOP_PANELS.at(-1)}"][data-layout-control="switcher"]`,
     ));
   });
 

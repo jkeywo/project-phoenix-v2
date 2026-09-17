@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   closeWorkshopPanel, defaultWorkshopLayout, dockWorkshopPanel, floatWorkshopPanel,
-  moveWorkshopFloat, normalizeWorkshopLayout, reopenWorkshopPanel,
+  moveWorkshopFloat, normalizeWorkshopLayout, reopenWorkshopPanel, workshopLayoutModel,
 } from '../../gui/workshop-layout-model.js';
 
 const panels = state => JSON.stringify(state.root) + JSON.stringify(state.floats);
@@ -10,7 +10,8 @@ describe('Workshop layout model', () => {
   it('tabs, splits, floats, moves, closes, reopens and resets all panels', () => {
     let state = defaultWorkshopLayout();
     state = dockWorkshopPanel(state, 'inspector', 'source', 'tab');
-    expect(state.root.children[1]).toMatchObject({ tabs: ['source', 'findings', 'feedback', 'inspector'], active: 'inspector' });
+    expect(state.root.children[1]).toMatchObject({
+      tabs: ['source', 'findings', 'feedback', 'model-preview', 'inspector'], active: 'inspector' });
     state = dockWorkshopPanel(state, 'files', 'source', 'bottom');
     expect(panels(state)).toContain('"axis":"vertical"');
     state = floatWorkshopPanel(state, 'inspector', { x: 8, y: 9, width: 300, height: 200 });
@@ -24,7 +25,10 @@ describe('Workshop layout model', () => {
     expect(panels(state)).toContain('inspector');
     expect(defaultWorkshopLayout().root.children).toHaveLength(3);
     expect(defaultWorkshopLayout().root.children[2]).toMatchObject({
-      tabs: ['inspector', 'add', 'recovery', 'settings'], active: 'inspector',
+      tabs: ['inspector', 'add', 'recovery', 'settings', 'models', 'sound'], active: 'inspector',
+    });
+    expect(defaultWorkshopLayout().root.children[1]).toMatchObject({
+      tabs: ['source', 'findings', 'feedback', 'model-preview'], active: 'source',
     });
   });
 
@@ -45,12 +49,11 @@ describe('Workshop layout model', () => {
       ] },
       floats: [], closed: [], selected: 'source', recovery: { draft: 'must not persist' },
     });
-    expect(migrated.version).toBe(3);
+    expect(migrated.version).toBe(4);
     expect(migrated.selected).toBe('source');
-    expect(panels(migrated)).toContain('"dependencies"');
-    expect(panels(migrated)).toContain('"findings"');
-    expect(panels(migrated)).toContain('"feedback"');
-    expect(panels(migrated)).toContain('"settings"');
+    for (const panel of ['dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound']) {
+      expect(panels(migrated)).toContain(`"${panel}"`);
+    }
     expect(migrated).not.toHaveProperty('recovery');
   });
 
@@ -66,7 +69,7 @@ describe('Workshop layout model', () => {
       closed: [], selected: 'source',
     });
 
-    expect(migrated.version).toBe(3);
+    expect(migrated.version).toBe(4);
     const placed = [];
     const collect = node => {
       if (node?.type === 'tabs') placed.push(...node.tabs);
@@ -74,12 +77,13 @@ describe('Workshop layout model', () => {
     };
     collect(migrated.root);
     placed.push(...migrated.floats.map(entry => entry.panel), ...migrated.closed);
-    for (const panel of ['files', 'source', 'inspector', 'add', 'recovery', 'dependencies', 'findings', 'feedback', 'settings']) {
+    for (const panel of ['files', 'source', 'inspector', 'add', 'recovery', 'dependencies', 'findings', 'feedback',
+      'settings', 'models', 'model-preview', 'sound']) {
       expect(placed.filter(candidate => candidate === panel)).toHaveLength(1);
     }
   });
 
-  it.each([1, 2])('preserves a v%s layout when preferred v3 targets are floating', version => {
+  it.each([1, 2])('preserves a v%s layout when preferred later targets are floating', version => {
     const floats = [
       { panel: 'files', x: 13, y: 17, width: 301, height: 211 },
       { panel: 'source', x: 41, y: 47, width: 503, height: 307 },
@@ -94,10 +98,11 @@ describe('Workshop layout model', () => {
     });
 
     expect(migrated).toEqual({
-      version: 3,
+      version: 4,
       root: { type: 'split', axis: 'vertical', sizes: [17, 83], children: [
         { type: 'tabs',
-          tabs: ['inspector', 'dependencies', 'findings', 'feedback', 'settings'], active: 'inspector' },
+          tabs: ['inspector', 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound'],
+          active: 'inspector' },
         { type: 'tabs', tabs: ['recovery'], active: 'recovery' },
       ] },
       floats, closed: ['add'], selected: 'source',
@@ -114,10 +119,11 @@ describe('Workshop layout model', () => {
       ],
       closed: ['source', 'inspector', 'files'], selected: 'inspector',
     });
-    expect(repaired.version).toBe(3);
+    expect(repaired.version).toBe(4);
     expect(repaired.selected).toBe('inspector');
     expect(repaired.closed).toEqual(['add', 'recovery']);
-    for (const panel of ['source', 'inspector', 'files', 'dependencies', 'findings', 'feedback', 'settings']) {
+    for (const panel of ['source', 'inspector', 'files', 'dependencies', 'findings', 'feedback', 'settings',
+      'models', 'model-preview', 'sound']) {
       expect(panels(repaired)).toContain(`"${panel}"`);
     }
   });
@@ -152,8 +158,9 @@ describe('Workshop layout model', () => {
     for (const version of [1, 2]) {
       expect(normalizeWorkshopLayout({
         version, root: null, floats: [], closed, selected: 'source',
-      })).toEqual({ version: 3, root: null, floats: [],
-        closed: [...closed, 'dependencies', 'findings', 'feedback', 'settings'], selected: 'files' });
+      })).toEqual({ version: 4, root: null, floats: [],
+        closed: [...closed, 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound'],
+        selected: 'files' });
     }
   });
 
@@ -165,6 +172,48 @@ describe('Workshop layout model', () => {
     expect(normalizeWorkshopLayout({
       version: 2, root, floats: [], closed: ['files', 'inspector', 'add', 'recovery'], selected: 'source',
     })).toEqual(defaultWorkshopLayout());
+  });
+
+  it('registers the media panels on a stored v3 layout without reopening a closed v3 panel', () => {
+    const migrated = normalizeWorkshopLayout({
+      version: 3,
+      root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22], children: [
+        { type: 'tabs', tabs: ['files', 'dependencies'], active: 'files' },
+        { type: 'tabs', tabs: ['source', 'findings'], active: 'source' },
+        { type: 'tabs', tabs: ['inspector', 'add', 'recovery'], active: 'inspector' },
+      ] },
+      floats: [], closed: ['feedback', 'settings'], selected: 'source',
+    });
+
+    expect(migrated.version).toBe(4);
+    expect(migrated.selected).toBe('source');
+    // The operator closed feedback and settings under v3; migration must not undo that.
+    expect(migrated.closed).toEqual(['feedback', 'settings']);
+    expect(migrated.root.children[1]).toMatchObject({
+      tabs: ['source', 'findings', 'model-preview'], active: 'source' });
+    expect(migrated.root.children[2]).toMatchObject({
+      tabs: ['inspector', 'add', 'recovery', 'models', 'sound'], active: 'inspector' });
+  });
+
+  it('refuses a panel a stored v3 layout could not have named', () => {
+    const migrated = normalizeWorkshopLayout({
+      version: 3, floats: [], closed: [], selected: 'source',
+      root: { type: 'tabs', tabs: ['source', 'model-preview', 'sound'], active: 'model-preview' },
+    });
+    const placed = JSON.stringify(migrated.root);
+    expect(placed).toContain('"source"');
+    // v3 had no media vocabulary: these enter through migration, never out of the stored tree.
+    expect(migrated.selected).toBe('source');
+    expect(migrated.root.active).toBe('source');
+  });
+
+  it('classifies the source and model preview as document panels', () => {
+    expect(workshopLayoutModel.kind('source')).toBe('document');
+    expect(workshopLayoutModel.kind('model-preview')).toBe('document');
+    for (const panel of ['files', 'inspector', 'models', 'sound', 'settings']) {
+      expect(workshopLayoutModel.kind(panel)).toBe('tool');
+    }
+    expect(workshopLayoutModel.kind('nonexistent')).toBeNull();
   });
 
   it('preserves and renormalizes sibling proportions when removing a panel', () => {

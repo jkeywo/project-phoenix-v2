@@ -111,9 +111,13 @@ consumers; the Workshop UI never treats it as runtime acceptance.
 `workshop-layout-model.js` and `workshop-layout-renderer.js` own the registered
 Authoring panel arrangement independently of `WorkshopDocument`: file browser,
 source document, generic inspector, file addition, recovery, validation findings,
-correlated action feedback, immutable dependencies and private operator settings can split, tab,
+correlated action feedback, immutable dependencies, private operator settings, the
+model/rig field form, the captured model preview and the sound audition can split, tab,
 float in-surface, close and reset while lifecycle commands remain in the fixed
-menu/toolbar. The renderer moves each registered panel's original node rather
+menu/toolbar. Each registered panel carries a class: `source` and the model preview
+are *documents* — the surfaces the context is arranged around, stamped
+`data-panel-kind="document"` — and every other panel is a *tool*. The class is
+presentation only and confers no authority. The renderer moves each registered panel's original node rather
 than cloning controls. The versioned layout is a
 presentation-only field in the private operator profile, repaired to defaults on
 obsolete or invalid data. Narrow surfaces project one selected panel through a
@@ -123,7 +127,9 @@ reopens and activates findings or source in desktop and narrow projection withou
 changing validation authority or entering dependency reads into document history.
 Settings replace only the relevant Accessibility or binding field in the existing
 private operator profile and apply Accessibility effects immediately. The native
-profile sanitizer mirrors the browser's version-3 panel registry and migration;
+profile sanitizer mirrors the browser's version-4 panel registry and migration.
+Each stored version is sanitized against the vocabulary that version had, so a panel
+registered later can only enter through migration, never out of an older tree;
 its private Workshop bridge publishes only the already-captured textual dependency
 snapshot, never binary dependency assets or filesystem authority.
 

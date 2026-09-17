@@ -47,22 +47,121 @@ describe('Workshop Authoring browser surface', () => {
   it('mounts the docked workflow, persists keyboard moves, restores focus and repairs a reopened layout', async () => {
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'dependencies', 'source', 'findings', 'feedback', 'inspector', 'add', 'recovery', 'settings']);
+      .toEqual(['files', 'dependencies', 'source', 'findings', 'feedback', 'model-preview',
+        'inspector', 'add', 'recovery', 'settings', 'models', 'sound']);
     const sourceTab = document.querySelector('[data-panel="source"] .workshop-panel-tab');
     sourceTab.focus();
     sourceTab.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(document.activeElement.closest('[data-panel]')?.dataset.panel).toBe('source'));
-    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(3);
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(4);
     document.querySelector('[data-panel="inspector"] .workshop-panel-header button:last-child').click();
     expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
     [...document.querySelectorAll('.workshop-panel-switcher button')].find(node => node.textContent === t('workshop.inspector')).click();
     expect(document.querySelector('[data-panel="inspector"]')).not.toBeNull();
     document.querySelector('.workshop-layout-reset').click();
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(9);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(12);
     expect(document.querySelectorAll('#workshop-add-source')).toHaveLength(1);
     expect(document.querySelectorAll('#workshop-restore')).toHaveLength(1);
     expect(byId('add-source').closest('[data-panel]')?.dataset.panel).toBe('add');
     expect(byId('restore').closest('[data-panel]')?.dataset.panel).toBe('recovery');
+  });
+
+  it('docks the model form, captured preview and sound audition as Authoring panels', async () => {
+    await mounted.ready;
+    const framed = id => document.getElementById(id)?.closest('[data-panel]')?.dataset.panel;
+    expect(framed('workshop-models')).toBe('models');
+    expect(framed('workshop-model-preview-panel')).toBe('model-preview');
+    expect(framed('workshop-sound')).toBe('sound');
+    // The captured picture is a document, not a tool beside one.
+    expect(document.querySelector('[data-panel="model-preview"]').dataset.panelKind).toBe('document');
+    expect(document.querySelector('[data-panel="models"]').dataset.panelKind).toBe('tool');
+    expect(document.querySelector('[data-panel="sound"]').dataset.panelKind).toBe('tool');
+    // Each keeps exactly one node: docking moves the original, it never clones it.
+    for (const id of ['workshop-models', 'workshop-model-preview-panel', 'workshop-sound']) {
+      expect(document.querySelectorAll(`#${id}`)).toHaveLength(1);
+    }
+  });
+
+  it('persists media placement without persisting preview or audition state', async () => {
+    await mounted.ready;
+    document.querySelector('[data-panel="model-preview"] [data-layout-control="float"]').click();
+    document.querySelector('[data-panel="sound"] [data-layout-control="close"]').click();
+    const stored = JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout;
+    expect(stored.version).toBe(4);
+    expect(stored.floats.map(entry => entry.panel)).toContain('model-preview');
+    expect(stored.closed).toContain('sound');
+    // Placement only: no captured picture, cue selection or audition state may travel with it.
+    const text = JSON.stringify(stored);
+    for (const key of ['session', 'cue', 'audition', 'stats', 'triangles', 'status']) {
+      expect(text).not.toContain(key);
+    }
+    // The floated preview keeps the one live node rather than being rebuilt empty.
+    expect(document.querySelector('[data-panel="model-preview"].is-floating')
+      .contains(document.getElementById('workshop-model-preview-panel'))).toBe(true);
+  });
+
+  it('restores a stored v3 Authoring layout with the media panels registered', async () => {
+    mounted.dispose();
+    const profile = createOperatorProfileSnapshot();
+    profile.authoringLayout = {
+      version: 3,
+      root: { type: 'tabs', tabs: ['source', 'inspector'], active: 'source' },
+      floats: [], closed: ['files', 'add', 'recovery', 'findings', 'feedback', 'dependencies', 'settings'],
+      selected: 'source',
+    };
+    localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(profile));
+    document.body.innerHTML = '<main id="root"></main>';
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
+    await mounted.ready;
+    expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
+      .toEqual(['source', 'inspector', 'models', 'model-preview', 'sound']);
+    // Panels the operator closed under v3 stay closed.
+    expect(document.querySelector('[data-panel="findings"]')).toBeNull();
+  });
+
+  it('leaves no stranded media node when the stored layout has the panel closed', async () => {
+    mounted.dispose();
+    const profile = createOperatorProfileSnapshot();
+    profile.authoringLayout = {
+      version: 4,
+      root: { type: 'tabs', tabs: ['source'], active: 'source' },
+      floats: [],
+      closed: ['files', 'inspector', 'add', 'recovery', 'findings', 'feedback', 'dependencies',
+        'settings', 'models', 'model-preview', 'sound'],
+      selected: 'source',
+    };
+    localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(profile));
+    document.body.innerHTML = '<main id="root"></main>';
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
+    await mounted.ready;
+    // A closed panel is never framed, so its node must not be in the surface at
+    // all — an attached one would show up under the dock with no header or tab.
+    for (const id of ['workshop-models', 'workshop-model-preview-panel', 'workshop-sound']) {
+      expect(document.getElementById(id)).toBeNull();
+    }
+    document.querySelector('[data-layout-panel="sound"][data-layout-control="switcher"]').click();
+    expect(document.getElementById('workshop-sound').closest('[data-panel]').dataset.panel).toBe('sound');
+  });
+
+  it('stops the captured preview and audition when their panels stop being shown', async () => {
+    await mounted.ready;
+    // The media panels are inactive tabs in the default arrangement.
+    expect(document.querySelector('[data-panel="model-preview"]').hidden).toBe(true);
+    expect(document.getElementById('workshop-model-preview-panel').hidden).toBe(true);
+    expect(document.querySelector('.sound-audition').hidden).toBe(true);
+    document.querySelector('[data-layout-panel="model-preview"][data-layout-control="switcher"]').click();
+    expect(document.getElementById('workshop-model-preview-panel').hidden).toBe(false);
+    document.querySelector('[data-panel="model-preview"] [data-layout-control="close"]').click();
+    expect(document.getElementById('workshop-model-preview-panel')).toBeNull();
+  });
+
+  it('disposes the docked media panels with the surface', async () => {
+    await mounted.ready;
+    mounted.dispose();
+    for (const id of ['workshop-models', 'workshop-model-preview-panel', 'workshop-sound']) {
+      expect(document.getElementById(id)).toBeNull();
+    }
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
   });
 
   it('projects one selected panel when narrow and restores the desktop tree', async () => {
@@ -74,7 +173,7 @@ describe('Workshop Authoring browser surface', () => {
     byId('source').value = 'retained';
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     window.dispatchEvent(new Event('resize'));
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(9);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(12);
     expect(byId('source').value).toBe('retained');
   });
 
@@ -120,6 +219,9 @@ describe('Workshop Authoring browser surface', () => {
     edit('must not enter the running draft'); // Even synthetic input is held.
     byId('test-authoring').click();
     await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(false));
+    // Audition is a dock panel now, so leaving Test mode returns it to the
+    // arrangement rather than to the surface: revealing it makes it usable again.
+    document.querySelector('[data-layout-panel="sound"][data-layout-control="switcher"]').click();
     expect(document.querySelector('.sound-audition').hidden).toBe(false);
     expect(byId('source').value).toContain('# unsaved first');
     expect(request.mock.calls.filter(([value]) => value.op === 'test-control').map(([value]) => value.control)).toEqual([

@@ -26,3 +26,7 @@
 @media (max-width: 55rem) {
   .workshop-dock-root .workshop-panel-switcher { overflow-x: auto; }
 }
+
+/* Document panels are the surfaces a context is arranged around: they take the
+   room a split gives them rather than shrinking to their content. */
+.workshop-dock-root .workshop-dock-panel[data-panel-kind="document"] > :last-child { flex: 1 1 auto; min-height: 0; }

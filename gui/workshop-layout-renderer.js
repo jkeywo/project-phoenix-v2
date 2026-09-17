@@ -5,7 +5,7 @@ import {
 const NARROW_WIDTH = 880;
 let nextLayoutInstance = 0;
 
-export function mountDockLayout({ root, surface, panels, labels, initial, onChange,
+export function mountDockLayout({ root, surface, panels, labels, initial, onChange, onVisible,
   model = workshopLayoutModel, viewportNarrow = false, doc = root.ownerDocument, win = doc.defaultView }) {
   surface.classList.add('workshop-dock-root');
   const panelIds = model.panels;
@@ -105,6 +105,9 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   function frame(panel, floating = false, projection = false, tabId = null) {
     const node = doc.createElement('section'); node.className = `workshop-dock-panel${floating ? ' is-floating' : ''}`;
     node.dataset.panel = panel;
+    // Document panels are the surfaces a context is arranged around; tools sit beside them.
+    const kind = model.kind?.(panel);
+    if (kind) node.dataset.panelKind = kind;
     if (tabId) {
       node.id = `${layoutId}-panel-${panel}`;
       node.setAttribute('role', 'tabpanel');
@@ -185,7 +188,8 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     split.style.gridTemplateRows = node.axis === 'vertical' ? tracks : '';
     split.append(...node.children.map(renderNode)); return split;
   }
-  function render() {
+  const render = (...args) => { paint(...args); reportVisible(); };
+  function paint() {
     switcher.replaceChildren(...panelIds.map(panel => makeButton(labels.panels[panel], () => {
       if (narrow) {
         projectedPanel = panel; render();
@@ -208,6 +212,13 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       node.style.width = `${entry.width}px`; node.style.height = `${entry.height}px`; canvas.append(node);
     }
     updateFloatStacking();
+  }
+  /** Panels with a frame the operator can actually see. A closed panel, an
+   * inactive tab and a panel the narrow projection left out are all absent, so a
+   * panel holding an expensive live resource can release it. */
+  function reportVisible() {
+    onVisible?.(new Set([...canvas.querySelectorAll('[data-panel]')]
+      .filter(node => !node.hidden).map(node => node.dataset.panel)));
   }
   function keydown(event) {
     if (event.defaultPrevented || event.isComposing || !(event.ctrlKey && event.shiftKey)) return;

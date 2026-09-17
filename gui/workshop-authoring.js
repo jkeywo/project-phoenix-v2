@@ -174,10 +174,18 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let profile = loaded.profile;
   applyOperatorProfile(profile, actions);
   applyAccessibilityProfile(profile.accessibility, { doc, win });
+  soundAudition = mountWorkshopSoundCues({root,win,attach:false,draft:()=>draft,native:!!provider?.save,
+    resolveAsset:path=>runtime.readAsset?.(path)??null,
+    readAudio:()=>profile.audio,saveAudio:audio=>{profile={...profile,audio};return saveOperatorProfile(win.PhoenixOperatorStorage||win.localStorage,profile);}});
+  modelPanel = mountWorkshopModels({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
-      findings, feedback, dependencies, settings },
+      findings, feedback, dependencies, settings,
+      models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -191,9 +199,15 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         add: translate('workshop.add_files'), recovery: translate('workshop.recovery'),
         findings: translate('workshop.findings'), feedback: translate('workshop.feedback'),
         dependencies: translate('workshop.dependencies'), settings: translate('editor.mod.settings.heading'),
+        models: translate('workshop.models.title'), 'model-preview': translate('workshop.models.preview.title'),
+        sound: translate('sound_cues.title'),
       },
     },
     initial: profile.authoringLayout, doc, win,
+    onVisible(visible) {
+      modelPanel?.setPreviewVisible(visible.has('model-preview'));
+      soundAudition?.setVisible(visible.has('sound'));
+    },
     onChange(authoringLayout) {
       profile = { ...profile, authoringLayout };
       if (saveOperatorProfile(storage, profile).status !== 'saved') reportPersistenceFailure();
@@ -626,13 +640,6 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (draft?.isDirty()) { event.preventDefault(); event.returnValue = ''; }
   }
   doc.addEventListener('keydown', keydown);
-  soundAudition = mountWorkshopSoundCues({root,win,draft:()=>draft,native:!!provider?.save,
-    resolveAsset:path=>runtime.readAsset?.(path)??null,
-    readAudio:()=>profile.audio,saveAudio:audio=>{profile={...profile,audio};return saveOperatorProfile(win.PhoenixOperatorStorage||win.localStorage,profile);}});
-  modelPanel = mountWorkshopModels({ root, provider, runtime, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
-    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   win.addEventListener('beforeunload', beforeUnload);
   testPanel = mountWorkshopTestPanel({ root, provider, draft: () => draft,
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed: () => refresh(), win });

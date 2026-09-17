@@ -70,3 +70,15 @@ it('does not display an inspector response that belongs to an older draft', asyn
   await vi.waitFor(() => expect(held).toBe(false));
   expect(byId('field-0')).toBeNull(); expect(byId('apply').disabled).toBe(true);
 });
+
+it('stops showing the captured preview when its own panel stops being shown', () => {
+  const preview = () => document.getElementById('workshop-model-preview-panel');
+  expect(preview().hidden).toBe(false);
+  panel.setPreviewVisible(false);
+  expect(preview().hidden).toBe(true);
+  panel.setPreviewVisible(true);
+  expect(preview().hidden).toBe(false);
+  // Test mode still hides it regardless of the panel's own visibility.
+  held = true; panel.refresh({ hidden: true });
+  expect(preview().hidden).toBe(true);
+});

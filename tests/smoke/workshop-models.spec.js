@@ -70,7 +70,7 @@ test('Workshop model fields use real runtime types and one exact-source history 
   await (await importing).setFiles({ name: 'model-rig.zip', mimeType: 'application/zip', buffer: Buffer.from(archive) });
   await page.locator('#workshop-files').selectOption(RIG);
   await expect(page.locator('#workshop-source')).toHaveValue(normaliseTextarea(RIG_SOURCE));
-  await page.locator('#workshop-models > summary').click();
+  await revealWorkshopPanel(page, 'models');
   await page.locator('#workshop-model').selectOption(MODEL);
   await page.locator('#workshop-model-variant').selectOption(RIG);
   await page.locator('#workshop-model-inspect').click();

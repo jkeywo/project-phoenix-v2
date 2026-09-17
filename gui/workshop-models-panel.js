@@ -5,7 +5,7 @@ import { mountWorkshopModelPreview } from './workshop-model-preview-panel.js';
 
 /** Specialised source form over the ordinary Workshop inspector and history.
  * The model/variant selections are local presentation, never simulation inputs. */
-export function mountWorkshopModels({ root, provider, runtime, draft, busy, setBusy, changed }) {
+export function mountWorkshopModels({ root, provider, runtime, draft, busy, setBusy, changed, attach = true }) {
   const doc = root.ownerDocument;
   const node = (tag, id, attrs = {}) => {
     const value = doc.createElement(tag);
@@ -13,8 +13,8 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     for (const [key, item] of Object.entries(attrs)) value.setAttribute(key, item);
     return value;
   };
-  const section = node('details', null, { class: 'workshop-models', id: 'workshop-models' });
-  section.append(node('summary', 'workshop.models.title'));
+  // A dock panel carries its own header, so this is a plain grouping element.
+  const section = node('section', null, { class: 'workshop-models', id: 'workshop-models' });
   const model = node('select', null, { id: 'workshop-model' });
   const variant = node('select', null, { id: 'workshop-model-variant' });
   const inspect = node('button', 'workshop.inspect', { type: 'button', id: 'workshop-model-inspect' });
@@ -26,8 +26,12 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   section.append(node('p', 'workshop.models.source_scope'), node('label', 'workshop.models.model', { for: model.id }), model,
     node('label', 'workshop.models.variant', { for: variant.id }), variant, inspect,
     node('label', 'workshop.models.new_variant', { for: newName.id }), newName, clone, status, form, apply);
-  root.append(section);
+  // A docked panel is placed by the renderer, which moves the node into its frame.
+  // Attaching here as well would strand the node in `root` whenever the stored
+  // layout has the panel closed, because a closed panel is never framed.
+  if (attach) root.append(section);
   let disposed = false, snapshot = null, rows = [], previousDraft = null, previousPaths = '', preview = null;
+  let previewVisible = true, testHidden = false;
   const option = (value, label) => { const item = node('option', null, { value }); item.textContent = label; return item; };
   const show = (id, error = false) => {
     status.textContent = t(id);
@@ -40,7 +44,8 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     variant.replaceChildren(...(entry?.variants || []).map(entry => option(entry.path, entry.name)));
     if (entry?.variants.some(entry => entry.path === old)) variant.value = old;
   }
-  function refresh({ hidden = false } = {}) {
+  function refresh({ hidden = testHidden } = {}) {
+    testHidden = hidden;
     section.hidden = hidden;
     const current = draft(), paths = current?.paths().join('\n') || '';
     if (current !== previousDraft || paths !== previousPaths) {
@@ -60,7 +65,11 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     for (const row of rows) row.input.disabled = held || !fresh;
     if (snapshot && !fresh) show('workshop.inspector_stale');
     if (!current || !model.value) show('workshop.models.empty');
-    preview?.refresh({ hidden });
+    // The captured picture stops whenever its own panel stops being shown, not
+    // only in Test mode: a closed, unselected or narrow-projected-away panel is
+    // as invisible as a hidden one, and holding a render session open then keeps
+    // an asset capture the operator can no longer see.
+    preview?.refresh({ hidden: hidden || !previewVisible });
   }
   function render(fields) {
     form.replaceChildren(); rows = [];
@@ -129,9 +138,14 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   model.addEventListener('change', () => { refreshVariants(); refresh(); });
   variant.addEventListener('change', () => refresh());
   refresh();
-  preview = mountWorkshopModelPreview({ root: section, provider, draft, busy,
+  preview = mountWorkshopModelPreview({ root: section, attach, provider, draft, busy,
     selection: () => ({ model: model.value,
       variant: modelDocuments(draft()?.paths() || []).find(entry => entry.model === model.value)?.variants
         .find(entry => entry.path === variant.value)?.name || null }) });
-  return { refresh, dispose() { disposed = true; preview.dispose(); section.remove(); } };
+  return { refresh, node: section, previewNode: preview.node,
+    setPreviewVisible(value) {
+      if (previewVisible === value) return;
+      previewVisible = value; refresh();
+    },
+    dispose() { disposed = true; preview.dispose(); section.remove(); } };
 }

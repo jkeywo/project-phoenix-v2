@@ -676,7 +676,7 @@ describe('#1321 semantic import lifecycle and validation focus', () => {
     const privateProfile = JSON.parse(window.localStorage.getItem(OPERATOR_PROFILE_KEY));
     expect(privateProfile.bindings[MOD_EXPORT_ACTION_ID][0].code).toBe('KeyX');
     expect(privateProfile.bindings['captain.red-alert']).toBeTruthy();
-    expect(privateProfile.authoringLayout.version).toBe(3);
+    expect(privateProfile.authoringLayout.version).toBe(4);
     expect(privateProfile.liveLayout).toEqual(existingProfile.liveLayout);
     expect(privateProfile).not.toHaveProperty('identity');
     expect(privateProfile).not.toHaveProperty('station');

@@ -113,6 +113,7 @@ test('equal GMs apply authored NPC doctrine through real AI and reject stale or 
     }
     throw new Error(`NPC map did not select ${name}`);
   }
+  for (const page of [first, second]) await revealGmPanel(page, 'npc');
   await select(first, 'Incompatible station'); await expect(first.locator('#gm-npc-apply')).toBeDisabled();
   for (const page of [first, second]) {
     await select(page, 'Directive courier');
@@ -1211,6 +1212,7 @@ test('a GM changes Reveal Conceal Normal for one real observing fleet ship', { t
   await waitForWasmReady(gm); await joinFleetAsGm(gm, code);
   await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all([ship.waitForFunction(() => window.__saveSlotsPhase === 'InProgress'), gm.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')]);
+  await revealGmPanel(gm, 'contact');
   await gm.waitForFunction(() => document.querySelectorAll('#gm-contact-observer option').length > 1);
   const observer = await gm.locator('#gm-contact-observer option').nth(1).getAttribute('value');
   await gm.locator('#gm-contact-observer').selectOption(observer);

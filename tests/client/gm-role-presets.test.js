@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   GM_ALL_ROLE_PRESET,
   GM_ALL_ROLE_PRESET_ID,
+  GM_ROLE_PRESET_PANEL_FOLLOWERS,
   GM_ROLE_PRESET_PANEL_IDS,
   GM_ROLE_PRESET_QUICK_ACTION_IDS,
   createGmRolePresets,
@@ -158,6 +159,11 @@ function mount() {
     </select>
     <section id="gm-map-panel"></section>
     <section id="gm-inspector"></section>
+    <section id="gm-contact-panel"></section>
+    <section id="gm-contact-misclassify-panel"></section>
+    <section id="gm-contact-report-panel"></section>
+    <section id="gm-contact-ghost-panel"></section>
+    <section id="gm-npc-panel"></section>
     <section id="gm-activity"></section>
     <section id="gm-station-controls"></section>
     <section id="gm-comms-panel"></section>
@@ -178,6 +184,26 @@ describe('createGmRolePresets (DOM controller)', () => {
       expect(document.getElementById(id).hidden).toBe(false);
     }
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('puts away the panels that left the inspector for panels of their own', () => {
+    // Contact control, NPC doctrine and the three contact drafts were children
+    // of the inspector until issue #1510. A preset that puts the inspector away
+    // must still put them away — otherwise a restricted desk keeps exactly the
+    // controls the preset was written to remove — and no scenario has to learn
+    // a new name for them.
+    mount();
+    const controller = createGmRolePresets({ doc: document });
+    controller.setAvailablePresets([TACTICAL]);
+    controller.select('tactical');
+    expect(document.getElementById('gm-inspector').hidden).toBe(true);
+    for (const id of Object.keys(GM_ROLE_PRESET_PANEL_FOLLOWERS)) {
+      expect(document.getElementById(id).hidden, id).toBe(true);
+    }
+    controller.select('all');
+    for (const id of Object.keys(GM_ROLE_PRESET_PANEL_FOLLOWERS)) {
+      expect(document.getElementById(id).hidden, id).toBe(false);
+    }
   });
 
   it('never touches gm-station-controls, which gm-station-puppet.js already owns', () => {

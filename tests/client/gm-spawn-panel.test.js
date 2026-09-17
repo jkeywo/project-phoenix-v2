@@ -491,3 +491,18 @@ describe('GM placement panel', () => {
     });
   });
 });
+
+it('keeps the chart it just claimed when the other picker lets go inside the handover', () => {
+  // The ghost picker lets go SYNCHRONOUSLY when this panel says it is arming
+  // (issue #1510), and a chart let go of dispatches `navplacecancel`. Reaching
+  // this panel after it had claimed the gesture, that would disarm it again
+  // and leave the chart armed with no owner.
+  const map = makeMap();
+  const { panel } = mount({ map, onPickModeChange: picking => { if (picking) map.emitCancel(); } });
+  panel.update({ palette: [entry()], results: [] });
+  expect(panel.arm('raider')).toBe(true);
+  expect(panel.state().arming).toBe('raider');
+  expect(map.armCalls).toBe(1);
+  map.emitPlacement({ x: 10, z: 20, heading: 90 });
+  expect(panel.state().arming).toBeNull();
+});

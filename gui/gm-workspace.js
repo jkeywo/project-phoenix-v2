@@ -405,7 +405,12 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     // Picking covers the map with a gesture, and an in-surface floating panel
     // sits on exactly that, so the surface puts its floats away for the
     // duration and brings the same ones back afterwards (issue #1508).
-    onPickModeChange: picking => shell.setPicking?.(picking, 'spawn'),
+    onPickModeChange: picking => {
+      // One chart cannot capture two gestures at once, and both panels can be
+      // docked and enabled at the same time. Whoever arms disarms the other.
+      if (picking) gmContact?.setGhostPicking(false);
+      return shell.setPicking?.(picking, 'spawn');
+    },
     actionFeedback: hostActionFeedback,
     confirmAction: gmConfirmations.request,
     getMap: () => doc.getElementById('gm-entity-map'),
@@ -501,8 +506,26 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submit: request => privateSubmit('gm.contact', request, () => win.__hostSetContactOverride(request)),
     submitClassification: request => privateSubmit('gm.classification', request, () => win.__hostSetContactClassification(request)),
     submitInformation: request => privateSubmit('gm.information', request, () => win.__hostSetContactInformation(request)),
+    // The three drafts this tool composes are complex actions of their own
+    // (issue #1510); the shared lifecycle decides what a landed one does to
+    // the panel that carried it.
+    onSucceeded: draft => shell.temporaryActions?.succeeded(draft),
+    // Placing a ghost is a chart gesture, so the surface puts its other
+    // floating panels away while it runs (issue #1508).
+    onPickModeChange: picking => {
+      if (picking) gmSpawnPanel.cancelPick();
+      return shell.setPicking?.(picking, 'ghost');
+    },
+    getMap: () => doc.getElementById('gm-entity-map'),
+    onOpenDraft: panel => shell.temporaryActions?.open(panel),
   });
   win.__hostGmContactState = gmContact.state;
+  for (const [panel, draft] of Object.entries(gmContact.drafts)) {
+    shell.temporaryActions?.register(panel, {
+      isDirty: draft.isDirty, reset: draft.reset,
+      keepOpen: draft.keepOpen, focus: draft.focus,
+    });
+  }
   gmPresentation = createGmPresentationPanel({ doc, t,
     getOperator: () => win.__hostLocalGm?.() || null,
     submit: request => privateSubmit('gm.presentation', request, () => win.__hostPresentation(request)),
@@ -593,7 +616,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
-    dispose() { workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { gmContact?.dispose(); workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       workshopSource.refresh();
       if (!alertScope()) privateAlerts.reset();
@@ -630,7 +653,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmSpawnPanel.reset();
   // The run the draft was for has gone, so there is nothing left to confirm
   // away: the panel closes rather than staying open and empty.
-  for (const draft of ['spawn', 'restore']) {
+  for (const draft of ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost']) {
     shell.temporaryActions?.discard(draft);
     shell.temporaryActions?.closeSilently(draft);
   }

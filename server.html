@@ -405,11 +405,13 @@
     #gm-comms-log { max-height: 18rem; overflow: auto; }
     #gm-comms-log pre { white-space: pre-wrap; overflow-wrap: anywhere; }
     #gm-comms-feedback[data-state="Refused"] { color: var(--fire-bright); }
-    #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel, #gm-system-panel, #gm-npc-panel {
+    #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel, #gm-system-panel, #gm-npc-panel,
+    #gm-contact-misclassify-panel, #gm-contact-report-panel, #gm-contact-ghost-panel {
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
-    #gm-contact-panel fieldset { display: grid; gap: .5rem; min-width: 0; }
+    #gm-contact-report-panel .gm-contact-fields,
+    #gm-contact-ghost-panel .gm-contact-fields { display: grid; gap: .5rem; min-width: 0; }
     #gm-contact-ghosts { margin: 0; padding: 0; list-style: none; }
     #gm-contact-ghosts button { width: 100%; white-space: normal; overflow-wrap: anywhere; }
     #gm-spawn-palette { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
@@ -2203,34 +2205,65 @@
           <button id="gm-contact-reveal" type="button" disabled data-i18n="server.gm.contact.reveal"></button>
           <button id="gm-contact-conceal" type="button" disabled data-i18n="server.gm.contact.conceal"></button>
           <button id="gm-contact-normal" type="button" disabled data-i18n="server.gm.contact.normal"></button>
+          <p id="gm-contact-classification-current" role="status"></p>
+          <button id="gm-contact-classification-normal" type="button" disabled data-i18n="server.gm.contact.classification-normal"></button>
+          <p id="gm-contact-report-current" role="status"></p>
+          <button id="gm-contact-report-clear" type="button" disabled data-i18n="server.gm.contact.report_normal"></button>
+          <ul id="gm-contact-ghosts" aria-label="" data-i18n-aria-label="server.gm.contact.ghosts"></ul>
+          <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-contact-results"></ol>
+        </section>
+        <section id="gm-contact-misclassify-panel" role="region"
+          aria-labelledby="gm-contact-misclassify-heading">
+          <h2 id="gm-contact-misclassify-heading" data-i18n="server.gm.contact.misclassify"></h2>
+          <p id="gm-contact-misclassify-scope" role="status"></p>
           <label for="gm-contact-classification" data-i18n="server.gm.contact.classification"></label>
           <select id="gm-contact-classification"></select>
-          <p id="gm-contact-classification-current" role="status"></p>
           <button id="gm-contact-misclassify" type="button" disabled data-i18n="server.gm.contact.misclassify"></button>
-          <button id="gm-contact-classification-normal" type="button" disabled data-i18n="server.gm.contact.classification-normal"></button>
-          <fieldset><legend data-i18n="server.gm.contact.report_heading"></legend>
+          <label for="gm-contact-misclassify-keep-open">
+            <input type="checkbox" id="gm-contact-misclassify-keep-open">
+            <span data-i18n="server.gm.action.keep_open"></span></label>
+          <p id="gm-contact-misclassify-feedback" role="status" aria-live="polite"></p>
+          <p data-i18n="server.gm.contact.classification-explanation"></p>
+        </section>
+        <section id="gm-contact-report-panel" role="region"
+          aria-labelledby="gm-contact-report-heading">
+          <h2 id="gm-contact-report-heading" data-i18n="server.gm.contact.report_heading"></h2>
+          <p id="gm-contact-report-scope" role="status"></p>
+          <div class="gm-contact-fields">
             <p data-i18n="server.gm.contact.report_explanation"></p>
-            <p id="gm-contact-report-current" role="status"></p>
             <label for="gm-contact-report-delay" data-i18n="server.gm.contact.report_delay"></label><input id="gm-contact-report-delay" type="number" min="0" max="4294967295" step="1" value="0">
             <label for="gm-contact-report-step" data-i18n="server.gm.contact.report_step"></label><input id="gm-contact-report-step" type="number" min="0" max="4294967295" step="1" value="0">
             <label><input id="gm-contact-report-identity" type="checkbox"><span data-i18n="server.gm.contact.report_identity"></span></label>
             <button id="gm-contact-report-set" type="button" disabled data-i18n="server.gm.contact.report_set"></button>
-            <button id="gm-contact-report-clear" type="button" disabled data-i18n="server.gm.contact.report_normal"></button>
-          </fieldset>
-          <fieldset><legend data-i18n="server.gm.contact.ghosts"></legend>
+          </div>
+          <label for="gm-contact-report-keep-open">
+            <input type="checkbox" id="gm-contact-report-keep-open">
+            <span data-i18n="server.gm.action.keep_open"></span></label>
+          <p id="gm-contact-report-feedback" role="status" aria-live="polite"></p>
+        </section>
+        <section id="gm-contact-ghost-panel" role="region"
+          aria-labelledby="gm-contact-ghost-heading">
+          <h2 id="gm-contact-ghost-heading" data-i18n="server.gm.contact.ghosts"></h2>
+          <p id="gm-contact-ghost-scope" role="status"></p>
+          <div class="gm-contact-fields">
             <p data-i18n="server.gm.contact.ghost-explanation"></p>
             <label for="gm-contact-ghost-id" data-i18n="server.gm.contact.ghost-id"></label><input id="gm-contact-ghost-id" type="text" maxlength="128">
             <label for="gm-contact-ghost-palette" data-i18n="server.gm.contact.classification"></label><select id="gm-contact-ghost-palette"></select>
             <label for="gm-contact-ghost-x" data-i18n="server.gm.contact.ghost-x"></label><input id="gm-contact-ghost-x" type="number" step="1" min="-2147483648" max="2147483647" value="0">
             <label for="gm-contact-ghost-y" data-i18n="server.gm.contact.ghost-y"></label><input id="gm-contact-ghost-y" type="number" step="1" min="-2147483648" max="2147483647" value="0">
             <label for="gm-contact-ghost-z" data-i18n="server.gm.contact.ghost-z"></label><input id="gm-contact-ghost-z" type="number" step="1" min="-2147483648" max="2147483647" value="0">
+            <button id="gm-contact-ghost-pick" type="button" disabled
+              data-i18n="server.gm.contact.ghost_pick"></button>
+            <p id="gm-contact-ghost-pick-status" role="status" aria-live="polite"
+              aria-atomic="true"></p>
             <button id="gm-contact-ghost-set" type="button" disabled data-i18n="server.gm.contact.ghost-set"></button>
             <button id="gm-contact-ghost-remove" type="button" disabled data-i18n="server.gm.contact.ghost-remove"></button>
-            <ul id="gm-contact-ghosts" aria-label="" data-i18n-aria-label="server.gm.contact.ghosts"></ul>
-          </fieldset>
-          <p data-i18n="server.gm.contact.classification-explanation"></p>
-          <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
-          <ol id="gm-contact-results"></ol>
+          </div>
+          <label for="gm-contact-ghost-keep-open">
+            <input type="checkbox" id="gm-contact-ghost-keep-open">
+            <span data-i18n="server.gm.action.keep_open"></span></label>
+          <p id="gm-contact-ghost-feedback" role="status" aria-live="polite"></p>
         </section>
         <section id="gm-npc-panel" role="region" aria-labelledby="gm-npc-heading">
           <h2 id="gm-npc-heading" data-i18n="server.gm.npc.heading"></h2>

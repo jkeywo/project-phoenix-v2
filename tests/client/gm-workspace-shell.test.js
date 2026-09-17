@@ -812,6 +812,69 @@ it('offers a sticky way back to the selection card after a quick action jumps th
   frame.dispatchEvent(new Event('scroll'));
   expect(back.hidden).toBe(true);
 });
+it('gives contact control, NPC doctrine and their three drafts panels of their own', () => {
+  const { shell } = mount();
+  // The tools join the inspector's column: they read the selection it reads.
+  for (const [panel, id] of [['contact', 'gm-contact-panel'], ['npc', 'gm-npc-panel']]) {
+    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
+    expect(document.querySelector(`#gm-inspector #${id}`), id).toBeNull();
+  }
+  // The three drafts split out of the contact tool are complex actions: absent
+  // from the arrangement, present in the document, ready to be opened.
+  for (const [panel, id] of [['misclassify', 'gm-contact-misclassify-panel'],
+    ['report-policy', 'gm-contact-report-panel'], ['ghost', 'gm-contact-ghost-panel']]) {
+    expect(document.querySelector(`[data-panel="${panel}"]`), panel).toBeNull();
+    expect(shell.liveLayoutState().closed, panel).toContain(panel);
+    expect(document.getElementById(id), id).not.toBeNull();
+    document.querySelector(`[data-layout-panel="${panel}"][data-layout-control="switcher"]`).click();
+    const framed = document.querySelector(`[data-panel="${panel}"]`);
+    expect(framed.classList.contains('is-floating'), panel).toBe(true);
+    expect(framed.contains(document.getElementById(id)), panel).toBe(true);
+    // A floating draft is a form, not an arrangement, so it is not restored.
+    expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed, panel).toContain(panel);
+  }
+  // Nothing about the contact tool's own controls moved into a draft panel.
+  expect(document.querySelector('#gm-contact-panel #gm-contact-observer')).not.toBeNull();
+  expect(document.querySelector('#gm-contact-ghost-panel #gm-contact-ghost-x')).not.toBeNull();
+  expect(document.querySelector('#gm-contact-misclassify-panel #gm-contact-classification'))
+    .not.toBeNull();
+  expect(document.querySelector('#gm-contact-report-panel #gm-contact-report-delay')).not.toBeNull();
+  // Each draft says how it went WHERE IT WAS COMPOSED: a panel behind another
+  // tab is `hidden`, so a refusal written only into the contact tool is one the
+  // operator never sees.
+  for (const [id, feedback] of [['gm-contact-misclassify-panel', 'gm-contact-misclassify-feedback'],
+    ['gm-contact-report-panel', 'gm-contact-report-feedback'],
+    ['gm-contact-ghost-panel', 'gm-contact-ghost-feedback']]) {
+    expect(document.querySelector(`#${id} #${feedback}`), feedback).not.toBeNull();
+  }
+  // What is in FORCE is a record, not a draft, and so is the simple action
+  // that clears it: neither is behind opening a temporary panel.
+  for (const id of ['gm-contact-classification-current', 'gm-contact-classification-normal',
+    'gm-contact-report-current', 'gm-contact-report-clear', 'gm-contact-ghosts',
+    'gm-contact-results']) {
+    expect(document.querySelector(`#gm-contact-panel #${id}`), id).not.toBeNull();
+  }
+});
+
+it('brings a quick action its own panel forward before it focuses a control in it', () => {
+  const { shell } = mount();
+  // Since issue #1510 the contact controls are a panel of their own, and a
+  // panel behind another tab is `hidden`: focusing into it would do nothing.
+  shell.setLiveLayout(liveLayoutModel.select(shell.liveLayoutState(), 'npc'));
+  expect(document.getElementById('gm-contact-observer').closest('[data-panel]').hidden).toBe(true);
+  [...document.querySelectorAll('#gm-action-grid button')]
+    .find(button => button.getAttribute('aria-controls') === 'gm-contact-observer').click();
+  expect(document.getElementById('gm-contact-observer').closest('[data-panel]').hidden).toBe(false);
+  expect(document.activeElement).toBe(document.getElementById('gm-contact-observer'));
+  // The way back up only leads anywhere from inside the inspector itself.
+  expect(document.getElementById('gm-inspector-back').hidden).toBe(true);
+  // A panel the operator CLOSED stays closed: closing is a decision.
+  shell.setLiveLayout(liveLayoutModel.close(shell.liveLayoutState(), 'contact'));
+  expect(document.querySelector('[data-panel="contact"]')).toBeNull();
+  [...document.querySelectorAll('#gm-action-grid button')]
+    .find(button => button.getAttribute('aria-controls') === 'gm-contact-observer').click();
+  expect(document.querySelector('[data-panel="contact"]')).toBeNull();
+});
 it('draws a bar pill only for a session fact a live payload carries', () => {
   const { shell } = mount();
   // Nothing has published yet: an empty health seed, no quiet advisory and no

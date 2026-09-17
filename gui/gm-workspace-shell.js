@@ -55,6 +55,17 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // Checkpoint browsing is a record; restore is a complex action (issue #1509).
   ['checkpoint', 'gm-checkpoint'],
   ['restore', 'gm-restore'],
+  // Contact control and NPC doctrine are ordinary tools about the selected
+  // entity (issue #1510): they read a selection the inspector also reads, so
+  // they join it rather than living inside it.
+  ['contact', 'gm-contact-panel'],
+  ['npc', 'gm-npc-panel'],
+  // The three complex actions the contact tool used to carry inline. Each
+  // composes several choices before anything can be sent, so each is a draft
+  // of its own with the shared temporary lifecycle.
+  ['misclassify', 'gm-contact-misclassify-panel'],
+  ['report-policy', 'gm-contact-report-panel'],
+  ['ghost', 'gm-contact-ghost-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -165,6 +176,10 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // #1507 and #1509), so the dock workspace IS the desk. They wait at the root
   // like every other migrated panel until the dock takes them.
   move(root, 'gm-inspector', 'gm-checkpoint');
+  // Contact, its three drafts and NPC doctrine leave the inspector column for
+  // panels of their own (issue #1510) and wait at the root for the dock.
+  move(root, 'gm-contact-panel', 'gm-contact-misclassify-panel', 'gm-contact-report-panel',
+    'gm-contact-ghost-panel', 'gm-npc-panel');
   // Restore leaves the checkpoint record to become a draft of its own: it
   // combines a selection, a preflight, a consequence preview and a
   // confirmation. The candidate it acts on is still whatever the record has
@@ -184,7 +199,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // the desk's detail/reading column, it already stacks and scrolls its own
   // sections, and that is what keeps the journal legible at 200% text rather
   // than competing for one of the fixed grid cells.
-  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-despawn-panel', 'gm-faction-panel');
+  move(inspector, 'gm-system-panel', 'gm-objective-panel', 'gm-despawn-panel', 'gm-faction-panel');
   // Authentic Station operation is two dock panels (issue #1504): the pending
   // state and the takeover controls are an ordinary tool, and the console
   // itself is a document. Neither is a new command route — the puppet still
@@ -278,9 +293,16 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     button.setAttribute('aria-controls', target);
     button.addEventListener('click', () => {
       const control = get(target);
+      // Since issue #1510 some of these controls live in panels of their own,
+      // and a panel behind another tab is `hidden` — scrolling to it and
+      // focusing it would do nothing at all. Bring its panel forward first. A
+      // panel the operator CLOSED stays closed: closing is a decision, and a
+      // shortcut is a convenience.
+      revealHost(control);
       control?.scrollIntoView?.({ block: 'nearest' });
       (control?.matches('input,select,button') ? control : control?.querySelector('button'))?.focus({ preventScroll: true });
-      back.hidden = false;
+      // The way back only leads anywhere from inside the inspector itself.
+      if (control && inspector.contains(control)) back.hidden = false;
     });
     shortcuts.append(button);
   }
@@ -501,6 +523,14 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     stationSurface.scrollIntoView?.({ block: 'start' });
   });
   let liveLayout = null;
+  /** Bring forward the registered panel a control sits in, if it is in one. */
+  function revealHost(node) {
+    for (let candidate = node; candidate; candidate = candidate.parentElement) {
+      const entry = GM_LIVE_DOCK_PANEL_IDS.find(([panel]) => liveDockNodes.get(panel) === candidate);
+      if (entry) return liveLayout?.reveal(entry[0], { reopen: false }) === true;
+    }
+    return false;
+  }
   /** The shared complex-action lifecycle. It owns when a draft is on screen and
    * whether it may be discarded; each action still owns its own typed request,
    * feedback and confirmation category. */

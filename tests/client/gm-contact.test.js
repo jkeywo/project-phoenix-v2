@@ -270,3 +270,296 @@ it('holds independently earned scans off the manipulated Sensors lane and restor
   input.blackboards.sensors.contact_reports = {};
   expect(JSON.parse(buildSensorsConsoleState(input)).scan.reading).toEqual(reading);
 });
+
+// ===== the three complex actions this tool composes (issue #1510) ==========
+/** The whole surface: the contact tool and the three draft panels split out of
+ * it, plus a stand-in for the chart the ghost picker arms. */
+function mountDrafts(options = {}) {
+  document.body.innerHTML = '<select id="gm-contact-observer"></select><p id="gm-contact-target"></p><p id="gm-contact-mode"></p>'
+    + ['reveal', 'conceal', 'normal'].map(mode => `<button id="gm-contact-${mode}"></button>`).join('')
+    + '<select id="gm-contact-classification"></select><p id="gm-contact-classification-current"></p>'
+    + '<button id="gm-contact-misclassify"></button><button id="gm-contact-classification-normal"></button>'
+    + '<input type="checkbox" id="gm-contact-misclassify-keep-open">'
+    + '<p id="gm-contact-misclassify-scope"></p><p id="gm-contact-misclassify-feedback"></p>'
+    + '<input id="gm-contact-report-delay" type="number" value="0"><input id="gm-contact-report-step" type="number" value="0">'
+    + '<input id="gm-contact-report-identity" type="checkbox"><p id="gm-contact-report-current"></p>'
+    + '<button id="gm-contact-report-set"></button><button id="gm-contact-report-clear"></button>'
+    + '<input type="checkbox" id="gm-contact-report-keep-open">'
+    + '<p id="gm-contact-report-scope"></p><p id="gm-contact-report-feedback"></p>'
+    + '<input id="gm-contact-ghost-id"><select id="gm-contact-ghost-palette"></select>'
+    + '<input id="gm-contact-ghost-x" type="number" min="-2147483648" max="2147483647" value="0">'
+    + '<input id="gm-contact-ghost-y" type="number" min="-2147483648" max="2147483647" value="0">'
+    + '<input id="gm-contact-ghost-z" type="number" min="-2147483648" max="2147483647" value="0">'
+    + '<button id="gm-contact-ghost-pick"></button><p id="gm-contact-ghost-pick-status"></p>'
+    + '<button id="gm-contact-ghost-set"></button><button id="gm-contact-ghost-remove"></button>'
+    + '<ul id="gm-contact-ghosts"></ul><input type="checkbox" id="gm-contact-ghost-keep-open">'
+    + '<p id="gm-contact-ghost-scope"></p><p id="gm-contact-ghost-feedback"></p>'
+    + '<p id="gm-contact-feedback"></p><ol id="gm-contact-results"></ol><div id="gm-entity-map"></div>';
+  const map = document.getElementById('gm-entity-map');
+  map.navigationBeginPlacement = vi.fn();
+  map.navigationCancelPlacement = vi.fn();
+  const submitClassification = vi.fn(() => true), submitInformation = vi.fn(() => true);
+  const onSucceeded = vi.fn(), onPickModeChange = vi.fn();
+  const panel = createGmContactPanel({ submitClassification, submitInformation, onSucceeded,
+    onPickModeChange, getOperator: () => ({ id: 'gm' }), schedule: vi.fn(),
+    correlation: () => 'request', ...options });
+  const entities = [{ entity_id: 'observer', kind: 'player_ship', name: 'Observer' },
+    { entity_id: 'target', kind: 'npc_ship', name: 'Target' }];
+  const palette = [{ palette: 'freighter', label: 'Reported freighter' }];
+  panel.update({ entities, contact_classification_palette: palette });
+  panel.select(entities[1]);
+  const select = document.getElementById('gm-contact-observer');
+  select.value = 'observer'; select.dispatchEvent(new Event('change'));
+  const settle = (action_kind, target, outcome = 'applied') => panel.update({ entities,
+    contact_classification_palette: palette,
+    contact_results: [{ action_kind, observer: 'observer', target, operator_id: 'gm',
+      correlation: 'request', tick: 42, outcome }] });
+  return { panel, entities, palette, map, onSucceeded, onPickModeChange, settle,
+    submitClassification, submitInformation };
+}
+
+it('finishes each draft only on its own applied outcome, and never on a plain verb', () => {
+  const { panel, palette, onSucceeded, settle } = mountDrafts();
+  expect(panel.chooseClassification('freighter')).toBe(true);
+  settle('contact-misclassify', 'target');
+  expect(onSucceeded).toHaveBeenCalledExactlyOnceWith('misclassify');
+  // A refusal leaves the draft standing: there is something to answer.
+  expect(panel.chooseClassification('freighter')).toBe(true);
+  settle('contact-misclassify', 'target', 'refused');
+  expect(onSucceeded).toHaveBeenCalledOnce();
+  // Normal classification, clearing a policy and removing a ghost each undo
+  // something rather than compose it, so they finish no draft.
+  expect(panel.chooseClassification(null)).toBe(true);
+  settle('contact-classification-normal', 'target');
+  expect(onSucceeded).toHaveBeenCalledOnce();
+  expect(panel.chooseInformation({ set_report_policy: { target: 'target',
+    policy: { delay_ticks: 12, position_step_mm: 0, hide_identity: false } } })).toBe(true);
+  settle('contact-information', 'target');
+  expect(onSucceeded).toHaveBeenLastCalledWith('report-policy');
+  expect(panel.chooseInformation({ clear_report_policy: { target: 'target' } })).toBe(true);
+  settle('contact-information', 'target');
+  expect(onSucceeded).toHaveBeenCalledTimes(2);
+  expect(panel.chooseInformation({ set_ghost: { id: 'echo', palette: 'freighter',
+    position_mm: [1000, 0, -2000] } })).toBe(true);
+  settle('contact-information', 'echo');
+  expect(onSucceeded).toHaveBeenLastCalledWith('ghost');
+  expect(panel.chooseInformation({ remove_ghost: { id: 'echo' } })).toBe(true);
+  settle('contact-information', 'echo');
+  expect(onSucceeded).toHaveBeenCalledTimes(3);
+});
+
+it('reports what each draft holds unsent, clears only that, and reads its own Keep open', () => {
+  const { panel } = mountDrafts();
+  const drafts = panel.drafts;
+  for (const name of ['misclassify', 'report-policy', 'ghost']) {
+    expect(drafts[name].isDirty()).toBe(false);
+    expect(drafts[name].keepOpen()).toBe(false);
+  }
+  document.getElementById('gm-contact-classification').value = 'freighter';
+  document.getElementById('gm-contact-report-delay').value = '12';
+  document.getElementById('gm-contact-ghost-id').value = 'echo';
+  expect(drafts.misclassify.isDirty()).toBe(true);
+  expect(drafts['report-policy'].isDirty()).toBe(true);
+  expect(drafts.ghost.isDirty()).toBe(true);
+  // Each clears its own fields and nothing else: three panels, three drafts.
+  drafts['report-policy'].reset();
+  expect(document.getElementById('gm-contact-report-delay').value).toBe('0');
+  expect(document.getElementById('gm-contact-classification').value).toBe('freighter');
+  expect(document.getElementById('gm-contact-ghost-id').value).toBe('echo');
+  drafts.misclassify.reset(); drafts.ghost.reset();
+  expect(document.getElementById('gm-contact-classification').value).toBe('');
+  expect(document.getElementById('gm-contact-ghost-id').value).toBe('');
+  expect(document.getElementById('gm-contact-ghost-x').value).toBe('0');
+  document.getElementById('gm-contact-ghost-keep-open').checked = true;
+  expect(drafts.ghost.keepOpen()).toBe(true);
+  expect(drafts.misclassify.keepOpen()).toBe(false);
+  drafts.misclassify.focus();
+  expect(document.activeElement).toBe(document.getElementById('gm-contact-classification'));
+});
+
+it('picks a ghost position on the chart without moving the canonical integer bounds', () => {
+  const { panel, map, onPickModeChange } = mountDrafts();
+  const x = document.getElementById('gm-contact-ghost-x');
+  const y = document.getElementById('gm-contact-ghost-y');
+  const status = document.getElementById('gm-contact-ghost-pick-status');
+  document.getElementById('gm-contact-ghost-pick').click();
+  expect(panel.isPicking()).toBe(true);
+  expect(map.navigationBeginPlacement).toHaveBeenCalledOnce();
+  expect(onPickModeChange).toHaveBeenLastCalledWith(true);
+  expect(status.textContent).toBe('server.gm.contact.ghost_pick_armed');
+  map.dispatchEvent(new CustomEvent('navplacepreview', { detail: { x: 1.2, z: -2 } }));
+  expect(status.textContent).toBe('server.gm.contact.ghost_pick_preview');
+  // Metres in, canonical integer millimetres out — into the same fields, with
+  // the same bounds, checked by the same validation. Height is not something a
+  // chart can say, so the operator's own y stands.
+  y.value = '500';
+  map.dispatchEvent(new CustomEvent('navplace', { detail: { x: 1.2345, z: -2 } }));
+  expect(x.value).toBe('1235');
+  expect(document.getElementById('gm-contact-ghost-z').value).toBe('-2000');
+  expect(y.value).toBe('500');
+  expect(x.min).toBe('-2147483648'); expect(x.max).toBe('2147483647');
+  expect(panel.isPicking()).toBe(false);
+  expect(onPickModeChange).toHaveBeenLastCalledWith(false);
+  expect(status.textContent).toBe('');
+  // A place beyond the canonical bounds is written verbatim and refused by the
+  // same check every other path uses, rather than being quietly clamped.
+  document.getElementById('gm-contact-ghost-id').value = 'echo';
+  document.getElementById('gm-contact-ghost-palette').value = 'freighter';
+  document.getElementById('gm-contact-ghost-pick').click();
+  map.dispatchEvent(new CustomEvent('navplace', { detail: { x: 3e6, z: 0 } }));
+  expect(x.value).toBe('3000000000');
+  expect(document.getElementById('gm-contact-ghost-set').disabled).toBe(true);
+  expect(panel.chooseInformation({ set_ghost: { id: 'echo', palette: 'freighter',
+    position_mm: [3000000000, 0, 0] } })).toBe(false);
+});
+
+it('ends the ghost pick on the chart cancel and when the draft is cleared', () => {
+  const { panel, map, onPickModeChange } = mountDrafts();
+  document.getElementById('gm-contact-ghost-pick').click();
+  map.dispatchEvent(new CustomEvent('navplacecancel'));
+  expect(panel.isPicking()).toBe(false);
+  expect(map.navigationCancelPlacement).not.toHaveBeenCalled();
+  expect(onPickModeChange).toHaveBeenLastCalledWith(false);
+  expect(document.getElementById('gm-contact-ghost-x').value).toBe('0');
+  // An armed chart is unsent state of its own, so clearing the draft ends it —
+  // and tells the chart, which was never asked to stop.
+  document.getElementById('gm-contact-ghost-pick').click();
+  expect(panel.drafts.ghost.isDirty()).toBe(true);
+  panel.drafts.ghost.reset();
+  expect(panel.isPicking()).toBe(false);
+  expect(map.navigationCancelPlacement).toHaveBeenCalledOnce();
+});
+
+it('says how each draft went on the draft panel, not only on the contact tool', () => {
+  // The three drafts are panels of their own, and a panel behind another tab
+  // is `hidden`: a refusal written only into the contact tool is a refusal the
+  // operator never sees.
+  const { panel, settle } = mountDrafts({ submitInformation: () => false, submit: () => true });
+  const feedback = draft => document.getElementById(`gm-contact-${draft}-feedback`);
+  expect(panel.chooseClassification('freighter')).toBe(true);
+  expect(feedback('misclassify').dataset.state).toBe('pending');
+  settle('contact-misclassify', 'target', 'refused');
+  expect(feedback('misclassify').dataset.state).toBe('refused');
+  expect(document.getElementById('gm-contact-feedback').dataset.state).toBe('refused');
+  // A request the host would not even accept is the same news in the same place.
+  expect(panel.chooseInformation({ set_ghost: { id: 'echo', palette: 'freighter',
+    position_mm: [0, 0, 0] } })).toBe(false);
+  expect(feedback('ghost').dataset.state).toBe('refused');
+  expect(feedback('report').textContent).toBe('');
+  // A request the host would not even take is still news, and it makes the
+  // last draft's news just as stale.
+  expect(feedback('misclassify').textContent).toBe('');
+  // A verb belongs to the tool that carries it — and starting anything new
+  // takes the last draft's news off the panel it was left on.
+  expect(panel.choose('reveal')).toBe(true);
+  expect(document.getElementById('gm-contact-feedback').dataset.state).toBe('pending');
+  expect(feedback('misclassify').dataset.state).toBeUndefined();
+  expect(feedback('misclassify').textContent).toBe('');
+});
+
+it('keeps what a landed draft described and drops which one it was about', () => {
+  const { panel } = mountDrafts();
+  const classification = document.getElementById('gm-contact-classification');
+  const palette = document.getElementById('gm-contact-ghost-palette');
+  const id = document.getElementById('gm-contact-ghost-id');
+  classification.value = 'freighter'; palette.value = 'freighter';
+  id.value = 'echo'; document.getElementById('gm-contact-ghost-x').value = '1000';
+  // The shared rule: after a success the choices that describe WHAT stay, and
+  // the ones that describe WHICH ONE and WHERE go.
+  panel.drafts.ghost.reset({ keepReusable: true });
+  expect(palette.value).toBe('freighter');
+  expect(id.value).toBe('');
+  expect(document.getElementById('gm-contact-ghost-x').value).toBe('0');
+  panel.drafts.misclassify.reset({ keepReusable: true });
+  expect(classification.value).toBe('freighter');
+  // A fresh open starts empty, classification included.
+  panel.drafts.ghost.reset({ keepReusable: false });
+  panel.drafts.misclassify.reset({ keepReusable: false });
+  expect(palette.value).toBe('');
+  expect(classification.value).toBe('');
+  // A chosen classification is a real choice, so closing the panel asks first.
+  palette.value = 'freighter';
+  expect(panel.drafts.ghost.isDirty()).toBe(true);
+});
+
+it('takes every draft with the run it was for, open or closed', () => {
+  const { panel } = mountDrafts();
+  document.getElementById('gm-contact-classification').value = 'freighter';
+  document.getElementById('gm-contact-ghost-id').value = 'echo';
+  document.getElementById('gm-contact-report-delay').value = '12';
+  document.getElementById('gm-contact-ghost-pick').click();
+  expect(panel.isPicking()).toBe(true);
+  // The run boundary reaches a draft nobody had OPEN, which no lifecycle
+  // discard would ever touch: what was typed for a run that has gone goes.
+  panel.reset();
+  expect(document.getElementById('gm-contact-classification').value).toBe('');
+  expect(document.getElementById('gm-contact-ghost-id').value).toBe('');
+  expect(document.getElementById('gm-contact-report-delay').value).toBe('0');
+  expect(panel.isPicking()).toBe(false);
+  expect(document.getElementById('gm-contact-ghost-feedback').textContent).toBe('');
+});
+
+it('unbinds the chart and disarms when the panel goes, leaving no hidden surface', () => {
+  const { panel, map, onPickModeChange } = mountDrafts();
+  document.getElementById('gm-contact-ghost-pick').click();
+  panel.dispose();
+  expect(panel.isPicking()).toBe(false);
+  expect(map.navigationCancelPlacement).toHaveBeenCalledOnce();
+  expect(onPickModeChange).toHaveBeenLastCalledWith(false);
+  map.dispatchEvent(new CustomEvent('navplace', { detail: { x: 5, z: 5 } }));
+  expect(document.getElementById('gm-contact-ghost-x').value).toBe('0');
+});
+
+it('takes the chart from the other picker without the handover eating itself', () => {
+  // One chart serves one gesture. The surface is what makes the other picker
+  // let go — and a chart let go of dispatches `navplacecancel` SYNCHRONOUSLY,
+  // inside the very notification that asked for it.
+  let map = null;
+  const onPickModeChange = vi.fn(picking => {
+    if (picking) map.dispatchEvent(new CustomEvent('navplacecancel'));
+  });
+  const mounted = mountDrafts({ onPickModeChange });
+  map = mounted.map;
+  document.getElementById('gm-contact-ghost-pick').click();
+  // The panel that just claimed the gesture still has it, and the chart is
+  // armed for it rather than for nobody.
+  expect(mounted.panel.isPicking()).toBe(true);
+  expect(map.navigationBeginPlacement).toHaveBeenCalledOnce();
+  expect(document.getElementById('gm-contact-ghost-pick-status').textContent)
+    .toBe('server.gm.contact.ghost_pick_armed');
+  // And the place it picks lands in the draft, which a dead gesture would not.
+  map.dispatchEvent(new CustomEvent('navplace', { detail: { x: 2, z: 3 } }));
+  expect(document.getElementById('gm-contact-ghost-x').value).toBe('2000');
+});
+
+it('opens the ghost draft before it loads a ghost into it', () => {
+  // The list is a record on the always-present tool; the fields are in a panel
+  // that is closed by default, and opening one CLEARS it.
+  const opened = [];
+  const { panel, entities, palette } = mountDrafts({
+    onOpenDraft: panel => opened.push([panel, document.getElementById('gm-contact-ghost-id').value]),
+  });
+  const ghost = { id: 'echo', palette: 'freighter', label: 'Reported freighter', position_mm: [1000, 0, -2000] };
+  panel.update({ entities, contact_classification_palette: palette,
+    contact_information: { ghosts: { observer: { echo: ghost } } } });
+  document.querySelector('#gm-contact-ghosts button').click();
+  // Asked for first, with the fields still empty — filling before opening
+  // would be wiped by the open.
+  expect(opened).toEqual([['ghost', '']]);
+  expect(document.getElementById('gm-contact-ghost-id').value).toBe('echo');
+  expect(document.getElementById('gm-contact-ghost-x').value).toBe('1000');
+});
+
+it('ends a pick in progress when a place is loaded from the record instead', () => {
+  const { panel, entities, palette } = mountDrafts();
+  const ghost = { id: 'echo', palette: 'freighter', label: 'Reported freighter', position_mm: [1000, 0, -2000] };
+  panel.update({ entities, contact_classification_palette: palette,
+    contact_information: { ghosts: { observer: { echo: ghost } } } });
+  document.getElementById('gm-contact-ghost-pick').click();
+  expect(panel.isPicking()).toBe(true);
+  document.querySelector('#gm-contact-ghosts button').click();
+  // An armed chart and a place loaded from the record are two answers to one
+  // question: the next click would overwrite what was just loaded.
+  expect(panel.isPicking()).toBe(false);
+  expect(document.getElementById('gm-contact-ghost-x').value).toBe('1000');
+});

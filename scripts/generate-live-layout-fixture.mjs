@@ -97,6 +97,14 @@ const CASES = [
       'station-console', 'presentation', 'audition', 'source-link', 'spawn', 'inspector'],
     selected: 'journal',
   }],
+  ['a version 8 layout', {
+    version: 8, root: group(['roster', 'inspector'], 'inspector'), floats: [],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal',
+      'session-history', 'map', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'presentation', 'audition', 'source-link', 'spawn', 'checkpoint',
+      'restore'],
+    selected: 'inspector',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

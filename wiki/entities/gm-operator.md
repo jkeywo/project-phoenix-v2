@@ -63,6 +63,31 @@ and a local refusal all leave it standing with its phase on screen. With that,
 every panel the desk ever held is a dock panel, so the dock workspace IS the
 desk: one grid child across the whole screen, and the detail column is gone.
 
+Issue #1510 separated what the contact tool had been carrying. Deciding what one
+observing ship may see of one target is a verb — reveal, conceal, normal — and
+stays on the contact panel beside the observer it applies to. Misclassifying a
+contact, setting a reported-information policy and creating a ghost contact each
+compose several choices before anything can be sent, so each became a draft of
+its own with the shared temporary lifecycle: absent from the default
+arrangement, opened floating, cleared or kept by its own Keep open, and finished
+only by its own applied outcome. Clearing a policy, clearing a false classification and removing a
+ghost undo something rather than compose it, so they remain simple actions and
+finish no draft — and what is IN FORCE is a record rather than a draft, so the
+classification, the policy and the ghosts an observing crew is being told about
+are all read on the contact tool that is always there, and the first two are
+cleared there too. A ghost is removed through the draft, because removing one
+means saying WHICH: choosing it from that record opens the draft and loads it,
+which also ends any pick in progress — an armed chart and a loaded place are
+two answers to the same question. Contact control and NPC doctrine read the same selection the inspector
+does, so they join its column as tabs rather than living inside it — and a quick
+action that jumps to a control in one of them brings its panel forward first,
+because a panel behind another tab is `hidden` and a control in it is
+unfocusable. Placing a ghost may be done on the chart, through the same picking
+gesture Spawn uses: the chart speaks metres and the position is canonical
+integer millimetres, so the picked place is converted into the same fields, with
+the same bounds, checked by the same validation. A place beyond those bounds is
+written verbatim and refused, not quietly clamped.
+
 Issue #1508 gave Spawn directed spatial picking through that docked map. Pick
 mode names the control capturing the chart and previews what committing would
 place — position, degrees AND a compass word, because a preview that only draws

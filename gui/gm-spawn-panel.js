@@ -466,10 +466,16 @@ export function createGmSpawnPanel({
 
   function setArmed(paletteId) {
     const wasArmed = !!armedPaletteId;
+    // ARMING tells the surface first, and only then takes the chart. The
+    // surface is what makes another panel let go of the same chart, and a
+    // chart let go of dispatches `navplacecancel` SYNCHRONOUSLY — arriving
+    // here while this panel already claimed the gesture would disarm it again
+    // and leave the chart armed with no owner (issue #1510).
+    if (paletteId && !wasArmed) onPickModeChange(true);
     armedPaletteId = paletteId;
     pickOrigin = paletteId || null;
     if (region) region.dataset.arming = paletteId || '';
-    if (!!paletteId !== wasArmed) onPickModeChange(!!paletteId);
+    if (!paletteId && wasArmed) onPickModeChange(false);
     paintPick(null);
     const chart = map();
     if (chart) {
@@ -843,6 +849,13 @@ export function createGmSpawnPanel({
   return {
     actionFeedback,
     arm,
+    /** End an armed pick from outside. One chart cannot serve two gestures at
+     * once: whoever arms next says so, and this is how (issue #1510). */
+    cancelPick() {
+      if (!armedPaletteId) return false;
+      setArmed(null);
+      return true;
+    },
     place,
     placeExact,
     update,

@@ -246,6 +246,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
 
     const npc = await gm.evaluate(() => Object.keys(window.__hostGmNpcState().profiles)[0]);
     expect(npc).toBeTruthy(); await selectEntity(gm, npc);
+    await revealGmPanel(gm, 'npc');
     await gm.locator('#gm-npc-choice').selectOption('raider-regroup');
     await settleControl(gm, () => gm.locator('#gm-npc-apply').click());
     await session(second, 'resume');
@@ -283,9 +284,12 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
     await checkpoint('authored NPC doctrine and compatible Helm input');
 
     await selectEntity(gm, npc);
+    await revealGmPanel(gm, 'contact');
     await gm.locator('#gm-contact-observer').selectOption(player);
+    await revealGmPanel(gm, 'inspector');
     await gm.locator('#gm-knowledge-select').selectOption(player);
     for (const mode of ['reveal', 'conceal', 'normal']) {
+      await revealGmPanel(gm, 'contact');
       await settleControl(gm, () => gm.locator(`#gm-contact-${mode}`).click());
       await pulse();
       await gm.waitForFunction(({ player, npc, mode }) =>
@@ -303,6 +307,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
         await gm.locator('#gm-entity-name').textContent());
       await checkpoint(`Truth and Crew Knowledge: ${mode}`);
     }
+    await revealGmPanel(gm, 'inspector');
     const effect = async (page, target, scope, verb, amount) => {
       await selectEntity(page, target); await page.locator('#gm-effect-scope').selectOption(scope);
       await page.locator('#gm-effect-amount').fill(String(amount));

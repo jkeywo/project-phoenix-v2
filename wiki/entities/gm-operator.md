@@ -32,12 +32,23 @@ The role and lethal-confirmation segments drive the existing private selectors
 and confirmation profile. Scenario-authored role presets still filter panels.
 
 Live's roster, readiness, join-request and manual-save nodes are moved into the
-shared constrained dock renderer. Their versioned `liveLayout` is a separate
-private operator-profile field from Workshop's `authoringLayout` and from GM
-reconnect identity. Pointer and keyboard docking, reset, repair and narrow
+shared constrained dock renderer, and since issue #1502 the mission events, the
+Comms studio, the activity feed, the saved action journal and the session
+history join them. Those five were the desk's centre-bottom region behind a
+bespoke tab strip; they are now the dock's own default tab group, with its
+roving tablist semantics, and docking may pull any of them out. The strip,
+`#gm-desk-log` and its `data-log-view` switch are gone, and the grid is four
+regions: the left column and the map each span both rows. Their versioned
+`liveLayout` is a separate private operator-profile field from Workshop's
+`authoringLayout` and from GM reconnect identity. Pointer and keyboard docking, reset, repair and narrow
 single-panel projection therefore behave the same in browser and native GM
 documents. The fixed Station/status bar remains outside the dock and role
-presets remain the sole owner of their panels' `hidden` state. Native surfaces
+presets remain the sole owner of their panels' `hidden` state: the dock READS
+that attribute through its `available` predicate and drops the panel's frame,
+tab and switcher button without ever writing it, so the two cannot race. Such a
+panel keeps its placement — reinstating it restores the arrangement unchanged —
+and its node is parked in the surface rather than detached, because the preset
+finds it by id and is the only thing that can bring it back. Native surfaces
 without a real save provider report manual save unavailable instead of exposing
 a browser-only API. Docking activates only in an explicit browser/native GM
 workspace; the globally mounted ordinary browser host leaves the original lobby,

@@ -78,11 +78,10 @@ rather than in a cell of their own.
 
 | Region | Holds | Was |
 | --- | --- | --- |
-| Row 1 left `#gm-desk-brief` | Attention (M4), Roster, Station workload, authored widgets (#1439) | four separate cells down the left column |
-| Row 1 centre `#gm-map-panel` | omniscient map | unchanged (never reparented — that would cancel `<ph-navigation-map>`'s render loop) |
+| Region | Holds | Was |
+| Rows 1–2 left `#gm-desk-brief` | Attention (M4), the Live dock workspace (Roster, readiness, join, manual save, Mission events, and the Comms · Activity · Action log · Session history tab group), Station workload, authored widgets (#1439) | four separate cells down the left column; since issue #1502 the mission and record cells are dock panels here |
+| Rows 1–2 centre `#gm-map-panel` | omniscient map | unchanged (never reparented — that would cancel `<ph-navigation-map>`'s render loop) |
 | Row 1 right `#gm-desk-detail` | Inspector, then Checkpoints + live restore | Checkpoints were a section inside the Inspector |
-| Row 2 left `#gm-mission-panel` | Mission events | unchanged |
-| Row 2 centre `#gm-desk-log` | tab strip Comms · Activity · Action log | Comms had the cell; Activity had another; the journal was in the Inspector |
 | Row 2 right `#gm-health-panel` | Peer health (M5) | left column, row 3 |
 
 The bar gains the artboard's health pills, and each roster row gains the
@@ -138,17 +137,18 @@ illustrative artboard.
   including the paused-transfer wording on Restore. Nothing about the control
   changed; only where the section sits.
 - **Native.** The native GM monitor loads this same markup, CSS and shell, so it
-  gets the same six regions. It still has no clock or scenario-title field, and
+  gets the same regions. It still has no clock or scenario-title field, and
   those degrade rather than being fabricated — unchanged from the After-M3 note.
 
 ### Three decisions worth reading
 
-- **The tab strip never writes `hidden`.** `hidden` on `#gm-comms-panel` and
-  `#gm-activity` belongs to the role preset (`GM_ROLE_PRESET_PANEL_IDS`), so the
-  view is switched with `data-log-view` on the region and a preset that hides a
-  panel hides its TAB instead. The shell also exposes `showLog(panelId)`, which
+- **The dock never writes `hidden`.** `hidden` on `#gm-comms-panel` and
+  `#gm-activity` belongs to the role preset (`GM_ROLE_PRESET_PANEL_IDS`). The
+  dock READS it and drops that panel's frame, tab and switcher button, keeping
+  its placement and parking its node in the surface so the preset can still find
+  it by id and bring it back. The shell also exposes `showLog(panelId)`, which
   the attention queue's "open this Comms route" navigation calls before focusing
-  the route: a `display: none` panel has nothing to focus.
+  the route: a `hidden` panel has nothing to focus.
 - **One scroll box per region.** The sections inside a region do not open their
   own. Four nested scroll boxes between a bounded list and the page let a row be
   scrolled into view at every level and still not be where a click lands;

@@ -6,6 +6,7 @@ const NARROW_WIDTH = 880;
 let nextLayoutInstance = 0;
 
 export function mountDockLayout({ root, surface, panels, labels, initial, onChange, onVisible,
+  available = () => true, retain = false,
   model = workshopLayoutModel, viewportNarrow = false, doc = root.ownerDocument, win = doc.defaultView }) {
   surface.classList.add('workshop-dock-root');
   const panelIds = model.panels;
@@ -13,7 +14,16 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   const switcher = doc.createElement('div'); switcher.className = 'workshop-panel-switcher';
   switcher.setAttribute('role', 'toolbar'); switcher.setAttribute('aria-label', labels.switcher);
   const canvas = doc.createElement('div'); canvas.className = 'workshop-dock-canvas';
-  surface.replaceChildren(switcher, canvas);
+  // A panel with no frame this paint still has to stay in the document when its
+  // content is owned elsewhere: that owner resolves it by id — sometimes only
+  // after the dock has mounted — and for a panel its own owner put away it is
+  // the only thing that can bring it back. Parking keeps `getElementById`
+  // working without giving the panel a frame, a tab or a switcher button.
+  // `retain` extends that to closed and narrow-projected-away panels; a surface
+  // whose panels are held by reference (Workshop) leaves it off and a closed
+  // panel is detached as usual.
+  const parked = doc.createElement('div'); parked.className = 'workshop-dock-parked'; parked.hidden = true;
+  surface.replaceChildren(switcher, canvas, parked);
   const canvasBounds = () => ({
     width: canvas.clientWidth || surface.clientWidth || win.innerWidth,
     height: canvas.clientHeight || surface.clientHeight || win.innerHeight,
@@ -23,6 +33,18 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   let state = model.normalize(initial, narrow ? undefined : canvasBounds());
   let projectedPanel = null;
   let drag = null;
+  /** A panel another owner has put away keeps its PLACEMENT and loses its
+   * frame, tab and switcher button. Availability is read, never written: one
+   * writer owns the panel's own visibility (on the Live desk that is the role
+   * preset) and the dock derives from it, so the two can never race. */
+  const usable = panel => {
+    try { return available(panel) !== false; } catch { return true; }
+  };
+  const availableTabs = node => node.tabs.filter(usable);
+  const activeTab = node => {
+    const tabs = availableTabs(node);
+    return tabs.includes(node.active) ? node.active : tabs[0] || null;
+  };
 
   const orderedPanels = node => {
     if (!node) return [];
@@ -148,49 +170,57 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   }
   function renderNode(node) {
     if (node.type === 'tabs') {
+      const shown = availableTabs(node);
+      if (!shown.length) return null;
+      const active = activeTab(node);
       const stack = doc.createElement('div'); stack.className = 'workshop-tab-stack';
-      if (node.tabs.length > 1) {
+      if (shown.length > 1) {
         const tabs = doc.createElement('div'); tabs.className = 'workshop-tab-list'; tabs.setAttribute('role', 'tablist');
-        for (const panel of node.tabs) {
+        if (labels.tabs) tabs.setAttribute('aria-label', labels.tabs);
+        for (const panel of shown) {
           const tabId = `${layoutId}-tab-${panel}`;
           const tab = makeButton(labels.panels[panel], () => emit(model.select(state, panel), panel), {
             id: tabId,
-            role: 'tab', 'aria-selected': String(node.active === panel),
+            role: 'tab', 'aria-selected': String(active === panel),
             'aria-controls': `${layoutId}-panel-${panel}`,
-            tabindex: node.active === panel ? '0' : '-1',
+            tabindex: active === panel ? '0' : '-1',
             'data-layout-panel': panel, 'data-layout-control': 'stack-tab',
           });
           tab.addEventListener('keydown', event => {
             if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
-            const current = node.tabs.indexOf(panel);
-            const index = event.key === 'Home' ? 0 : event.key === 'End' ? node.tabs.length - 1
-              : event.key === 'ArrowLeft' ? (current - 1 + node.tabs.length) % node.tabs.length
-                : event.key === 'ArrowRight' ? (current + 1) % node.tabs.length : -1;
+            const current = shown.indexOf(panel);
+            const index = event.key === 'Home' ? 0 : event.key === 'End' ? shown.length - 1
+              : event.key === 'ArrowLeft' ? (current - 1 + shown.length) % shown.length
+                : event.key === 'ArrowRight' ? (current + 1) % shown.length : -1;
             if (index < 0) return;
-            event.preventDefault(); emit(model.select(state, node.tabs[index]), node.tabs[index]);
+            event.preventDefault(); emit(model.select(state, shown[index]), shown[index]);
           });
           attachPointerDocking(tab, panel);
           tabs.append(tab);
         }
         stack.append(tabs);
       }
-      for (const panel of node.tabs) {
-        const tabId = node.tabs.length > 1 ? `${layoutId}-tab-${panel}` : null;
+      for (const panel of shown) {
+        const tabId = shown.length > 1 ? `${layoutId}-tab-${panel}` : null;
         const child = frame(panel, false, false, tabId);
-        child.hidden = panel !== node.active; stack.append(child);
+        child.hidden = panel !== active; stack.append(child);
       }
       return stack;
     }
+    const rendered = node.children.map((child, index) => [renderNode(child), node.sizes[index]])
+      .filter(([child]) => child);
+    if (!rendered.length) return null;
+    if (rendered.length === 1) return rendered[0][0];
     const split = doc.createElement('div'); split.className = `workshop-split is-${node.axis}`;
-    split.style.setProperty('--workshop-sizes', node.sizes.join('fr '));
-    const tracks = node.sizes.map(size => `minmax(0, ${size}fr)`).join(' ');
+    split.style.setProperty('--workshop-sizes', rendered.map(([, size]) => size).join('fr '));
+    const tracks = rendered.map(([, size]) => `minmax(0, ${size}fr)`).join(' ');
     split.style.gridTemplateColumns = node.axis === 'horizontal' ? tracks : '';
     split.style.gridTemplateRows = node.axis === 'vertical' ? tracks : '';
-    split.append(...node.children.map(renderNode)); return split;
+    split.append(...rendered.map(([child]) => child)); return split;
   }
-  const render = (...args) => { paint(...args); reportVisible(); };
+  const render = (...args) => { paint(...args); park(); reportVisible(); };
   function paint() {
-    switcher.replaceChildren(...panelIds.map(panel => makeButton(labels.panels[panel], () => {
+    switcher.replaceChildren(...panelIds.filter(usable).map(panel => makeButton(labels.panels[panel], () => {
       if (narrow) {
         projectedPanel = panel; render();
         switcher.querySelector(`[data-layout-panel="${panel}"]`)?.focus();
@@ -202,16 +232,26 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     makeButton(labels.reset, () => emit(model.defaultLayout()), { class: 'workshop-layout-reset', 'data-layout-control': 'reset' }));
     canvas.replaceChildren(); canvas.classList.toggle('is-narrow', narrow);
     if (narrow) {
-      const selected = projectedPanel || state.selected;
+      const preferred = projectedPanel || state.selected;
+      // An operator standing on a panel its owner just put away lands on one
+      // that is still there rather than on an empty projection.
+      const selected = usable(preferred) ? preferred
+        : orderedPanels(state.root).find(usable) || state.floats.map(entry => entry.panel).find(usable);
       if (selected) canvas.append(frame(selected, false, true));
       return;
     }
-    if (state.root) canvas.append(renderNode(state.root));
-    for (const entry of state.floats) {
+    const tree = state.root && renderNode(state.root);
+    if (tree) canvas.append(tree);
+    for (const entry of state.floats.filter(entry => usable(entry.panel))) {
       const node = frame(entry.panel, true); node.style.left = `${entry.x}px`; node.style.top = `${entry.y}px`;
       node.style.width = `${entry.width}px`; node.style.height = `${entry.height}px`; canvas.append(node);
     }
     updateFloatStacking();
+  }
+  function park() {
+    const homeless = panelIds.filter(panel => panels[panel]
+      && (!usable(panel) || (retain && !canvas.querySelector(`[data-panel="${panel}"]`))));
+    parked.replaceChildren(...homeless.map(panel => panels[panel]));
   }
   /** Panels with a frame the operator can actually see. A closed panel, an
    * inactive tab and a panel the narrow projection left out are all absent, so a
@@ -227,7 +267,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     const panel = panelNode?.dataset.panel || panelNode?.dataset.layoutPanel;
     const direction = ['ArrowLeft', 'ArrowUp'].includes(event.code) ? -1
       : ['ArrowRight', 'ArrowDown'].includes(event.code) ? 1 : 0;
-    const order = [...orderedPanels(state.root), ...state.floats.map(entry => entry.panel)];
+    const order = [...orderedPanels(state.root), ...state.floats.map(entry => entry.panel)].filter(usable);
     const index = order.indexOf(panel);
     if (!direction || index < 0 || order.length < 2 || narrow) return;
     const target = order[(index + direction + order.length) % order.length];
@@ -261,7 +301,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   observer?.observe(surface); win.addEventListener?.('resize', resize); doc.addEventListener('keydown', keydown);
   render();
   function reveal(panel, { focus = null, notify = true } = {}) {
-    if (!panelIds.includes(panel)) return false;
+    if (!panelIds.includes(panel) || !usable(panel)) return false;
     if (narrow) {
       projectedPanel = panel;
       render();
@@ -278,8 +318,32 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     });
     return true;
   }
-  return { state: () => cloneState(state), set: next => emit(next), reset: () => emit(model.defaultLayout()), reveal, dispose() {
+  /** Re-read availability after its owner changed a panel's own visibility.
+   * Nothing in the arrangement changes, so this neither persists nor notifies. */
+  let lastAvailable = panelIds.filter(usable).join('\u0000');
+  function syncAvailability() {
+    const current = panelIds.filter(usable).join('\u0000');
+    if (current === lastAvailable) return false;
+    lastAvailable = current;
+    const active = doc.activeElement;
+    // A tab button and a switcher button name their panel directly and live
+    // OUTSIDE the frame, so the frame lookup alone would miss the commonest
+    // case: the operator standing on the tab of the panel that just went away.
+    const focused = active?.dataset?.layoutPanel
+      || active?.closest?.('[data-panel]')?.dataset.panel || null;
+    const stranded = !!focused && (canvas.contains(active) || switcher.contains(active))
+      && !usable(focused);
+    render();
+    if (stranded) win.requestAnimationFrame?.(() => {
+      (canvas.querySelector('[role="tab"]') || canvas.querySelector('.workshop-panel-tab')
+        || switcher.querySelector('[data-layout-panel]'))?.focus?.();
+    });
+    return true;
+  }
+  return { state: () => cloneState(state), set: next => emit(next), reset: () => emit(model.defaultLayout()),
+    reveal, syncAvailability, dispose() {
     observer?.disconnect(); win.removeEventListener?.('resize', resize); doc.removeEventListener('keydown', keydown);
+    parked.remove();
     surface.classList.remove('workshop-dock-root');
   } };
 }

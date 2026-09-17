@@ -156,7 +156,7 @@ test('two equal GMs keep private confirmation policies and resolve stale lethal 
   await expect(two.locator('#gm-effect-feedback')).toHaveAttribute('data-state', 'Refused');
   // The activity feed shares the desk's centre region behind one tab strip
   // (the post-M5 screen), so it is selected before it is read.
-  await two.locator('#gm-log-tab-activity').click();
+  await two.locator('[role="tab"][data-layout-panel="activity"]').click();
   await expect(two.locator('#gm-activity-list [data-category="gm_action"]').filter({ hasText: target }).last()).toBeVisible();
   for (const captured of errors) expect(captured).toEqual([]);
   await crew.close();

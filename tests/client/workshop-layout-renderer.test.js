@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  defaultWorkshopLayout, dockWorkshopPanel, selectWorkshopPanel, WORKSHOP_PANELS,
+  closeWorkshopPanel, defaultWorkshopLayout, dockWorkshopPanel, selectWorkshopPanel, WORKSHOP_PANELS,
 } from '../../gui/workshop-layout-model.js';
 import { mountWorkshopLayout } from '../../gui/workshop-layout-renderer.js';
 
@@ -24,7 +24,7 @@ function relation(node, first, second) {
   return node.children.map(child => relation(child, first, second)).find(Boolean) || null;
 }
 
-function mount(initial = defaultWorkshopLayout()) {
+function mount(initial = defaultWorkshopLayout(), options = {}) {
   document.body.innerHTML = '<main id="root"><div id="surface"></div></main>';
   const root = document.getElementById('root');
   const surface = document.getElementById('surface');
@@ -32,8 +32,9 @@ function mount(initial = defaultWorkshopLayout()) {
     const node = document.createElement('div'); node.textContent = panel; return [panel, node];
   }));
   const changes = [];
-  const mounted = mountWorkshopLayout({ root, surface, panels, labels, initial, onChange: state => changes.push(state) });
-  return { mounted, surface, changes };
+  const mounted = mountWorkshopLayout({ root, surface, panels, labels, initial,
+    onChange: state => changes.push(state), ...options });
+  return { mounted, surface, changes, panels };
 }
 
 function pointer(type, x, y, pointerType = 'touch') {
@@ -156,6 +157,49 @@ describe('Workshop layout renderer', () => {
     expect(document.querySelector('[data-panel="model-preview"].is-floating').dataset.panelKind).toBe('document');
     expect(document.querySelector('[data-panel="files"]').dataset.panelKind).toBe('tool');
     expect(document.querySelector('[data-panel="models"]').dataset.panelKind).toBe('tool');
+  });
+
+  it('drops the frame, tab and button of an unavailable panel without changing its placement', () => {
+    const hidden = new Set(['findings']);
+    ({ mounted } = mount(defaultWorkshopLayout(), { available: panel => !hidden.has(panel) }));
+    expect(document.querySelector('[data-panel="findings"]')).toBeNull();
+    expect(document.querySelector('[role="tab"][data-layout-panel="findings"]')).toBeNull();
+    expect(document.querySelector('[data-layout-panel="findings"][data-layout-control="switcher"]')).toBeNull();
+    // Unavailability is read, never written: the arrangement still holds it.
+    expect(JSON.stringify(mounted.state())).toContain('"findings"');
+    expect(mounted.state().closed).not.toContain('findings');
+    // And the node is parked rather than detached, so its owner can find it.
+    expect(document.querySelector('.workshop-dock-parked').children.length).toBe(1);
+    expect(mounted.reveal('findings')).toBe(false);
+    hidden.delete('findings');
+    expect(mounted.syncAvailability()).toBe(true);
+    expect(document.querySelector('[data-panel="findings"]')).not.toBeNull();
+    expect(mounted.syncAvailability()).toBe(false);
+  });
+
+  it('moves focus off a tab whose panel its owner just put away', async () => {
+    const hidden = new Set();
+    ({ mounted } = mount(defaultWorkshopLayout(), { available: panel => !hidden.has(panel) }));
+    const tab = document.querySelector('[role="tab"][data-layout-panel="findings"]');
+    tab.focus();
+    expect(document.activeElement).toBe(tab);
+    hidden.add('findings');
+    mounted.syncAvailability();
+    // The tab is gone; focus must not be left on the body.
+    expect(document.querySelector('[role="tab"][data-layout-panel="findings"]')).toBeNull();
+    await vi.waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  });
+
+  it('keeps every registered panel node in the document when the surface asks it to', () => {
+    const initial = closeWorkshopPanel(defaultWorkshopLayout(), 'recovery');
+    const { mounted: retained, panels } = mount(initial, { retain: true });
+    mounted = retained;
+    expect(document.querySelector('[data-panel="recovery"]')).toBeNull();
+    expect(panels.recovery.isConnected).toBe(true);
+    expect(panels.recovery.closest('.workshop-dock-parked')).not.toBeNull();
+    // Reopening moves it out of the parking container into its own frame.
+    document.querySelector('[data-layout-panel="recovery"][data-layout-control="switcher"]').click();
+    expect(panels.recovery.closest('[data-panel]').dataset.panel).toBe('recovery');
   });
 
   it('returns focus to the switcher after closing the final panel', () => {

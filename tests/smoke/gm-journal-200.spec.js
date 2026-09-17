@@ -45,7 +45,7 @@ test('GM saved action history stays readable and operable at 200% text on 1280x7
     // activity feed behind one tab strip (the post-M5 screen), so it is
     // brought to the front the way an operator brings it: by its own tab,
     // which is itself part of the 200% contract this spec is about.
-    const logTab = page.locator('#gm-log-tab-journal');
+    const logTab = page.locator('[role="tab"][data-layout-panel="journal"]');
     await expect(logTab).toBeVisible();
     expect((await logTab.boundingBox()).height).toBeGreaterThanOrEqual(44);
     await logTab.click();

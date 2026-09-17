@@ -1,13 +1,14 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
+import { addMigrationPanel, createDockLayoutMigration } from './dock-layout-migration.js';
 
 export const WORKSHOP_LAYOUT_VERSION = 4;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
-const document_ = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
+const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
-  tool('files'), document_('source'), tool('inspector'),
+  tool('files'), documentPanel('source'), tool('inspector'),
   tool('add'), tool('recovery'), tool('findings'),
   tool('feedback'), tool('dependencies'), tool('settings'),
-  tool('models'), document_('model-preview'), tool('sound'),
+  tool('models'), documentPanel('model-preview'), tool('sound'),
 ]);
 export const WORKSHOP_PANELS = Object.freeze(WORKSHOP_PANEL_REGISTRY.map(panel => panel.id));
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
@@ -35,68 +36,34 @@ export function defaultWorkshopLayout() {
     floats: [], closed: [], selected: 'source' };
 }
 const base = createDockLayoutModel({ version: WORKSHOP_LAYOUT_VERSION, panels: WORKSHOP_PANEL_REGISTRY,
-  defaultLayout: defaultWorkshopLayout, compatibleVersions: [1, 2, 3, WORKSHOP_LAYOUT_VERSION] });
+  defaultLayout: defaultWorkshopLayout, compatibleVersions: [WORKSHOP_LAYOUT_VERSION] });
 const legacy = createDockLayoutModel({ version: 2, panels: LEGACY_PANELS,
   defaultLayout: legacyDefault, compatibleVersions: [1, 2] });
 const v3 = createDockLayoutModel({ version: 3, panels: V3_PANELS,
   defaultLayout: v3Default, compatibleVersions: [3] });
 
-function firstVisible(node, floats = []) {
-  if (node?.type === 'tabs') return node.active;
-  if (node?.type === 'split') return node.children.map(child => firstVisible(child)).find(Boolean);
-  return floats[0]?.panel || null;
+// Version 1 held `add` and `recovery` as fixed chrome rather than as placements.
+// They are rehomed first, so a v1 tree ends up where a v2 tree of the same shape
+// would have — and a panel that tree explicitly closed is left closed.
+function rehomeVersionOne(state, from, value) {
+  if (from !== 1) return state;
+  const preservedClosed = Array.isArray(value.closed)
+    ? value.closed.filter(panel => LEGACY_PANELS.includes(panel)) : [];
+  const rehomed = ['add', 'recovery'].reduce(
+    (current, panel) => addMigrationPanel(current, panel, 'inspector', legacy, preservedClosed),
+    { ...state, version: 2 });
+  return { ...rehomed, version: WORKSHOP_LAYOUT_VERSION };
 }
 
-function containsPanel(node, panel) {
-  if (node?.type === 'tabs') return node.tabs.includes(panel);
-  return node?.type === 'split' && node.children.some(child => containsPanel(child, panel));
-}
-
-function addMigrationPanel(state, panel, preferred, model, preservedClosed = []) {
-  if (!state.closed.includes(panel) || preservedClosed.includes(panel)) return state;
-  const target = containsPanel(state.root, preferred) ? preferred : firstVisible(state.root);
-  if (target) return model.dock(state, panel, target, 'tab');
-  return state.floats.length ? model.reopen(state, panel) : state;
-}
-
-function activePanels(node, out = new Map()) {
-  if (node?.type === 'tabs') node.tabs.forEach(panel => out.set(panel, node.active));
-  else if (node?.type === 'split') node.children.forEach(child => activePanels(child, out));
-  return out;
-}
-
-function restoreActives(node, previous) {
-  if (node?.type === 'tabs') {
-    const active = node.tabs.map(panel => previous.get(panel)).find(panel => node.tabs.includes(panel));
-    if (active) node.active = active;
-  } else if (node?.type === 'split') node.children.forEach(child => restoreActives(child, previous));
-}
-
-function migrate(value, bounds) {
-  const stored = value?.version;
-  if (![1, 2, 3].includes(stored)) return base.normalize(value, bounds);
-  // Sanitize against the vocabulary the stored version actually had, so a panel
-  // registered later can never be read back out of an older tree.
-  const priorModel = stored === 3 ? v3 : legacy;
-  const priorPanels = stored === 3 ? V3_PANELS : LEGACY_PANELS;
-  const normalized = priorModel.normalize(value, bounds);
-  const added = stored === 3 ? [...ADDED_IN_V4] : [...ADDED_IN_V3, ...ADDED_IN_V4];
-  let migrated = { ...normalized, version: WORKSHOP_LAYOUT_VERSION,
-    closed: [...normalized.closed, ...added.map(([panel]) => panel)] };
-  const previousActives = activePanels(normalized.root);
-  if (stored === 1) {
-    const preservedClosed = Array.isArray(value.closed) ? value.closed.filter(panel => priorPanels.includes(panel)) : [];
-    const versionTwo = { ...migrated, version: 2 };
-    migrated = ['add', 'recovery'].reduce(
-      (state, panel) => addMigrationPanel(state, panel, 'inspector', legacy, preservedClosed), versionTwo);
-    migrated.version = WORKSHOP_LAYOUT_VERSION;
-  }
-  migrated = base.normalize(migrated, bounds);
-  for (const [panel, preferred] of added) migrated = addMigrationPanel(migrated, panel, preferred, base);
-  restoreActives(migrated.root, previousActives);
-  migrated.selected = normalized.selected;
-  return migrated;
-}
+const migrate = createDockLayoutMigration({
+  version: WORKSHOP_LAYOUT_VERSION, current: base, rehome: rehomeVersionOne,
+  generations: [
+    { version: 1, model: legacy, added: [] },
+    { version: 2, model: legacy, added: [] },
+    { version: 3, model: v3, added: ADDED_IN_V3 },
+    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V4 },
+  ],
+});
 export const workshopLayoutModel = Object.freeze({ ...base, normalize: migrate });
 export const normalizeWorkshopLayout = migrate;
 export const selectWorkshopPanel = base.select;

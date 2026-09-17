@@ -18,17 +18,23 @@ import { mountDockLayout } from './workshop-layout-renderer.js';
  * published rows for says nothing at all. */
 export const GM_ROSTER_WORKLOAD_RANK = Object.freeze(['underused', 'engaged', 'overloaded']);
 
-/** The three views that share the desk's centre-bottom region, in tab order. */
-export const GM_DESK_LOG_VIEWS = Object.freeze([
+/** The desk panels that are registered dock panels rather than grid regions,
+ * as `[dock panel id, DOM id]`. The three log views kept their tab
+ * relationship: the dock's own default arrangement puts them in one group,
+ * with the dock's roving tablist semantics, and docking may pull them apart. */
+export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
+  ['mission', 'gm-mission-panel'],
   ['comms', 'gm-comms-panel'],
   ['activity', 'gm-activity'],
   ['journal', 'gm-journal'],
+  ['session-history', 'gm-session-history'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
   const root = doc.getElementById('gm-console');
   if (!root) return { refresh() {}, metadata() {}, selection() {}, dispose() {},
-    mountLiveLayout() {}, setLiveLayout() {}, showLog() { return false; } };
+    mountLiveLayout() {}, setLiveLayout() {}, liveLayoutState() { return null; },
+    showLog() { return false; } };
   phAdoptConsoleStyles(doc);
   const css = doc.createElement('link');
   css.rel = 'stylesheet';
@@ -103,18 +109,17 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   };
   const brief = region('gm-desk-brief', true);
   const detail = region('gm-desk-detail', true);
-  const logRegion = region('gm-desk-log', false);
   // The map is NEVER reparented: moving it would disconnect
   // <ph-navigation-map> and cancel its render loop. The regions are placed
   // around the cell it already occupies, and the panels move into regions that
   // are already in the document so `getElementById` keeps finding them.
   const mapPanel = get('gm-map-panel');
-  for (const id of ['gm-map-panel', 'gm-mission-panel', 'gm-health-panel']) {
+  for (const id of ['gm-map-panel', 'gm-health-panel']) {
     get(id)?.classList.add('gm-desk-region');
   }
   desk.insertBefore(brief, mapPanel);
   mapPanel.after(detail);
-  detail.after(get('gm-mission-panel'), logRegion, get('gm-health-panel'));
+  detail.after(get('gm-health-panel'));
   // Left: what is waiting, who is flying it, and whatever the world authored.
   // `gm-widgets` is last on purpose — gui/gm-widgets-panel.js owns its
   // `hidden` state, which is why it is absent from GM_ROLE_PRESET_PANEL_IDS:
@@ -129,14 +134,17 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // from (issues #1445/#1446) at the bottom of the column, as the artboard
   // draws them. The restore control travels inside #gm-checkpoint.
   move(detail, 'gm-inspector', 'gm-checkpoint');
-  // Centre-bottom: Comms, the activity feed and the saved action journal share
-  // ONE region behind a tab strip.
-  move(logRegion, 'gm-comms-panel', 'gm-activity', 'gm-journal');
   get('gm-comms-text')?.parentElement.classList.add('gm-comms-draft');
-  const sessionHistory = element('details', 'gm-session-history');
-  sessionHistory.append(element('summary', null, 'server.gm.session.log_heading'));
+  // The session history is its own record now: it was a disclosure inside the
+  // activity feed, and a dock panel carries its own header.
+  const sessionHistory = element('section', 'gm-session-history');
   move(sessionHistory, 'gm-session-log-heading', 'gm-session-log');
-  get('gm-activity').append(sessionHistory);
+  // It has to be IN the document from here on: gui/gm-session-controls.js finds
+  // #gm-session-log by id, and on the ordinary browser host there is no dock to
+  // place it. The dock moves it out into its own frame when it mounts.
+  get('gm-activity')?.append(sessionHistory);
+  const liveDockNodes = new Map(GM_LIVE_DOCK_PANEL_IDS.map(([panel, id]) =>
+    [panel, id === 'gm-session-history' ? sessionHistory : get(id)]));
   const inspector = get('gm-inspector');
   // The saved action history (issue #1441) joins the inspector column: it is
   // the desk's detail/reading column, it already stacks and scrolls its own
@@ -147,68 +155,6 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   stationSurface.hidden = true;
   move(stationSurface, 'gm-station-frame', 'gm-station-activity-heading', 'gm-station-activity');
   root.append(stationSurface);
-  // The centre-bottom tab strip. It switches views with `data-log-view` on the
-  // region and NEVER with `hidden` on the panels: `hidden` on Comms and
-  // Activity belongs to the role preset (gui/gm-role-presets.js,
-  // GM_ROLE_PRESET_PANEL_IDS), and two writers on one attribute is the race
-  // the authored widget region is deliberately kept out of. A preset that
-  // hides a panel hides its TAB, which this shell owns.
-  const logTabs = element('div', 'gm-desk-log-tabs');
-  logTabs.setAttribute('role', 'tablist');
-  logTabs.setAttribute('aria-label', t('server.gm.shell.log_tabs'));
-  logRegion.prepend(logTabs);
-  let logView = GM_DESK_LOG_VIEWS[0][0];
-  function setLogView(view) {
-    logView = view;
-    logRegion.dataset.logView = view;
-    for (const [name] of GM_DESK_LOG_VIEWS) {
-      const button = get(`gm-log-tab-${name}`);
-      if (!button) continue;
-      button.setAttribute('aria-selected', String(name === view));
-      button.tabIndex = name === view ? 0 : -1;
-    }
-  }
-  for (const [view, panelId] of GM_DESK_LOG_VIEWS) {
-    const panel = get(panelId);
-    const button = element('button', `gm-log-tab-${view}`, `server.gm.shell.log.${view}`);
-    button.type = 'button';
-    button.setAttribute('role', 'tab');
-    button.dataset.logView = view;
-    if (panel) {
-      button.setAttribute('aria-controls', panelId);
-      panel.setAttribute('role', 'tabpanel');
-      panel.setAttribute('aria-labelledby', button.id);
-    }
-    button.addEventListener('keydown', event => {
-      const buttons = [...logTabs.children].filter(node => !node.hidden);
-      const index = buttons.indexOf(button);
-      if (index < 0) return;
-      const next = event.key === 'ArrowRight' ? (index + 1) % buttons.length
-        : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length
-        : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : null;
-      if (next !== null) { event.preventDefault(); buttons[next].click(); buttons[next].focus(); }
-    });
-    button.addEventListener('click', () => setLogView(view));
-    logTabs.append(button);
-  }
-  setLogView(logView);
-  /** Keep the strip honest about what the effective role preset is showing. A
-   * hidden panel has no tab, and an operator standing on a tab that just went
-   * away lands on the first view that is still there. */
-  function reconcileLogTabs() {
-    let fallback = null;
-    let visible = false;
-    for (const [view, panelId] of GM_DESK_LOG_VIEWS) {
-      const panel = get(panelId);
-      const button = get(`gm-log-tab-${view}`);
-      if (!button) continue;
-      const available = !!panel && !panel.hidden;
-      if (button.hidden !== !available) button.hidden = !available;
-      if (available && fallback === null) fallback = view;
-      if (available && view === logView) visible = true;
-    }
-    if (!visible && fallback !== null) setLogView(fallback);
-  }
   const tabs = element('div', 'gm-inspector-tabs');
   tabs.setAttribute('role', 'tablist');
   const knowledge = get('gm-knowledge-panel');
@@ -469,13 +415,12 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       button.append(background, label);
     });
   }
-  const observer = new win.MutationObserver(() => { styleButtons(); reconcileLogTabs(); });
+  const observer = new win.MutationObserver(() => { styleButtons(); liveLayout?.syncAvailability(); });
   // `hidden` is watched as well as the tree: the role preset toggles Comms and
   // Activity without any other signal reaching this shell, and a tab for a
   // panel the preset has put away is a control that leads nowhere.
   observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
   styleButtons();
-  reconcileLogTabs();
   get('gm-station-toggle')?.addEventListener('click', () => {
     if (!get('gm-station-frame').hidden) stationSurface.scrollIntoView?.({ block: 'start' });
   });
@@ -520,16 +465,31 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       manualPanel?.setAttribute('hidden', '');
       manual.append(element('p', 'gm-native-manual-save-unavailable', 'server.gm.shell.manual_save_unavailable'));
     }
+    const migrated = {};
+    for (const [panel] of GM_LIVE_DOCK_PANEL_IDS) {
+      const node = liveDockNodes.get(panel);
+      // The role preset owns `hidden` on these panels (gui/gm-role-presets.js).
+      // It stays the only writer: the dock READS that attribute through
+      // `available` below, so a preset and the arrangement can never race.
+      preserveForDock(node);
+      migrated[panel] = node || element('section');
+    }
     liveLayout = mountDockLayout({ root, surface: liveSurface,
-      panels: { roster, readiness, join: join || element('section'), 'manual-save': manual },
+      panels: { roster, readiness, join: join || element('section'), 'manual-save': manual, ...migrated },
+      available: panel => !liveDockNodes.get(panel)?.hidden,
       labels: {
         switcher: t('server.gm.shell.layout.switcher'), reset: t('server.gm.shell.layout.reset'),
         float: t('server.gm.shell.layout.float'), close: t('server.gm.shell.layout.close'),
         dock: Object.fromEntries(['left', 'right', 'top', 'bottom', 'tab'].map(place =>
           [place, t(`server.gm.shell.layout.dock_${place}`)])),
-        panels: Object.fromEntries(['roster', 'readiness', 'join', 'manual-save'].map(panel =>
-          [panel, t(`server.gm.shell.layout.panel.${panel.replace('-', '_')}`)])),
-      }, initial, onChange, model: liveLayoutModel, viewportNarrow: true, doc, win });
+        panels: Object.fromEntries(liveLayoutModel.panels.map(panel =>
+          [panel, t(`server.gm.shell.layout.panel.${panel.replace(/-/g, '_')}`)])),
+        tabs: t('server.gm.shell.log_tabs'),
+      },
+      // The migrated panels' contents are owned by modules that resolve them by
+      // id AFTER this mounts, so no registered panel may leave the document.
+      retain: true,
+      initial, onChange, model: liveLayoutModel, viewportNarrow: true, doc, win });
     styleButtons();
     return liveLayout;
   }
@@ -544,21 +504,21 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     },
     mountLiveLayout,
     setLiveLayout(value) { liveLayout?.set(value); },
-    /** Bring one of the centre region's three views to the front.
+    liveLayoutState() { return liveLayout?.state() || null; },
+    /** Bring one of the migrated record panels to the front.
      *
-     * A view that is not current is `display: none`, so anything inside it is
+     * A panel that is not the active tab is `hidden`, so anything inside it is
      * unfocusable and unclickable — which would silently break the navigations
      * the desk already has: the attention queue opening an authored Comms
      * route, or any later surface pointing at the action log. Callers ask for
-     * the PANEL they are about to touch and this resolves the view; a panel the
+     * the PANEL they are about to touch and the dock reveals it; a panel the
      * effective role preset has put away is left alone, because a preset
      * hiding a panel is a decision, not an accident. */
     showLog(panelId) {
-      const entry = GM_DESK_LOG_VIEWS.find(([, id]) => id === panelId);
-      const panel = entry && get(panelId);
+      const entry = GM_LIVE_DOCK_PANEL_IDS.find(([, id]) => id === panelId);
+      const panel = entry && liveDockNodes.get(entry[0]);
       if (!entry || !panel || panel.hidden) return false;
-      setLogView(entry[0]);
-      return true;
+      return liveLayout?.reveal(entry[0]) === true;
     },
     metadata(value) { gms = value.gms || []; paintRoster(); },
     selection(entity) {
@@ -593,7 +553,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       armedChip.hidden = !armed;
       armedChip.textContent = armed ? t('server.gm.shell.armed', { palette: armed }) : '';
       paintHealthPills();
-      reconcileLogTabs();
+      // The role preset may have just put a record panel away or brought it
+      // back; the dock re-reads that rather than being told twice.
+      liveLayout?.syncAvailability();
       paintRoster();
     },
   };

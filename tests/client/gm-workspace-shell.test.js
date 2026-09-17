@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { mountGmWorkspaceShell } from '../../gui/gm-workspace-shell.js';
+import { defaultLiveLayout, liveLayoutModel } from '../../gui/live-layout-model.js';
 const source = readFileSync('server.html', 'utf8');
 const observers = [];
 afterEach(() => {
@@ -31,8 +32,7 @@ it('lays the desk out as the post-M5 screen and keeps the authentic iframe outsi
   // three columns over two rows, in reading order. Three of them are panel
   // sections in their own right; three are frames holding a stack of panels.
   expect([...document.getElementById('gm-workspace').children].map(child => child.id))
-    .toEqual(['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail',
-      'gm-mission-panel', 'gm-desk-log', 'gm-health-panel']);
+    .toEqual(['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail', 'gm-health-panel']);
   for (const child of document.getElementById('gm-workspace').children) {
     expect(child.classList.contains('gm-desk-region')).toBe(true);
   }
@@ -44,9 +44,13 @@ it('lays the desk out as the post-M5 screen and keeps the authentic iframe outsi
   expect([...document.getElementById('gm-desk-detail').children].map(child => child.id))
     .toEqual(['gm-inspector', 'gm-checkpoint']);
   expect(document.querySelector('#gm-checkpoint #gm-restore-apply')).not.toBeNull();
-  // Centre-bottom: one region, three views behind a tab strip.
-  expect([...document.getElementById('gm-desk-log').children].map(child => child.id))
-    .toEqual(['gm-desk-log-tabs', 'gm-comms-panel', 'gm-activity', 'gm-journal']);
+  // Mission events and the four record surfaces are dock panels now.
+  expect(document.getElementById('gm-desk-log')).toBeNull();
+  for (const [panel, id] of [['mission', 'gm-mission-panel'], ['comms', 'gm-comms-panel'],
+    ['activity', 'gm-activity'], ['journal', 'gm-journal'], ['session-history', 'gm-session-history']]) {
+    expect(document.getElementById(id).closest('[data-panel]').dataset.panel).toBe(panel);
+  }
+  expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
   // The map is never reparented: moving it would cancel <ph-navigation-map>'s
   // render loop, so it keeps the grid cell it was authored into.
   expect(document.getElementById('gm-map-panel').parentElement.id).toBe('gm-workspace');
@@ -202,57 +206,114 @@ it('gives the selected roster row a real border rule, not only the pressed butto
   expect(matched).toHaveLength(1);
   expect(matched[0].querySelector('button').dataset.entityId).toBe('ship-a');
 });
-it('shares one centre region between Comms, Activity and the action log', () => {
+const recordTab = panel => document.querySelector(`[role="tab"][data-layout-panel="${panel}"]`);
+const recordFrame = panel => document.querySelector(`[data-panel="${panel}"]`);
+it('keeps Comms, Activity, the action log and the session history as one default tab group', () => {
   mount();
-  const region = document.getElementById('gm-desk-log');
-  expect(region.dataset.logView).toBe('comms');
-  expect(document.getElementById('gm-log-tab-comms').getAttribute('aria-selected')).toBe('true');
-  expect(document.getElementById('gm-log-tab-comms').getAttribute('aria-controls')).toBe('gm-comms-panel');
-  expect(document.getElementById('gm-journal').getAttribute('role')).toBe('tabpanel');
-  // Arrow keys walk the strip, exactly as the inspector's tabs do.
-  document.getElementById('gm-log-tab-comms')
-    .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
-  expect(region.dataset.logView).toBe('activity');
-  document.getElementById('gm-log-tab-journal').click();
-  expect(region.dataset.logView).toBe('journal');
-  expect(document.getElementById('gm-log-tab-activity').getAttribute('aria-selected')).toBe('false');
-  expect(document.getElementById('gm-log-tab-activity').tabIndex).toBe(-1);
-  // Switching views must never write `hidden` on the panels themselves: that
+  expect(recordTab('comms').getAttribute('aria-selected')).toBe('true');
+  expect(recordTab('comms').getAttribute('aria-controls')).toBe(recordFrame('comms').id);
+  expect(recordFrame('journal').getAttribute('role')).toBe('tabpanel');
+  expect(recordFrame('journal').getAttribute('aria-labelledby')).toBe(recordTab('journal').id);
+  // Arrow keys walk the group, exactly as the inspector's tabs do.
+  recordTab('comms').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+  expect(recordFrame('activity').hidden).toBe(false);
+  recordTab('journal').click();
+  expect(recordFrame('journal').hidden).toBe(false);
+  expect(recordTab('activity').getAttribute('aria-selected')).toBe('false');
+  expect(recordTab('activity').tabIndex).toBe(-1);
+  // Choosing a tab must never write `hidden` on the panels themselves: that
   // attribute belongs to the role preset (GM_ROLE_PRESET_PANEL_IDS).
   expect(document.getElementById('gm-comms-panel').hidden).toBe(false);
   expect(document.getElementById('gm-activity').hidden).toBe(false);
 });
+it('keeps every migrated record reachable by id whatever the arrangement', () => {
+  const { shell } = mount();
+  // Their contents are owned by modules that resolve them by id after the dock
+  // mounts, so no arrangement may take one out of the document.
+  const ids = ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history'];
+  for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
+  expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
+  // Closed in a restored arrangement.
+  shell.setLiveLayout({ ...defaultLiveLayout(), root: { type: 'tabs', tabs: ['roster'], active: 'roster' },
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal', 'session-history'],
+    selected: 'roster' });
+  for (const id of ids) {
+    expect(document.getElementById(id), `${id} while closed`).not.toBeNull();
+    expect(document.getElementById(id).closest('.workshop-dock-parked'), `${id} parked`).not.toBeNull();
+  }
+});
+it('keeps every migrated record reachable by id in the narrow projection', () => {
+  // The Live dock measures the viewport, not the surface, so a narrow GM window
+  // frames exactly one panel and leaves every other node without one.
+  mount({ innerWidth: 600 });
+  expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(1);
+  for (const id of ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history']) {
+    expect(document.getElementById(id), `${id} while narrow`).not.toBeNull();
+  }
+});
+it('keeps the record workflows working after the panels are rearranged', () => {
+  const { shell } = mount();
+  // Pull the journal out of its default group and float the Comms studio.
+  let layout = liveLayoutModel.dock(defaultLiveLayout(), 'journal', 'roster', 'tab');
+  layout = liveLayoutModel.float(layout, 'comms', { x: 40, y: 50, width: 400, height: 300 });
+  shell.setLiveLayout(layout);
+  // The draft field, its wrapper class and the bounded lists all travelled with
+  // the original nodes rather than being rebuilt.
+  expect(document.getElementById('gm-comms-text').closest('.gm-comms-draft')).not.toBeNull();
+  expect(document.getElementById('gm-comms-text').closest('[data-panel]').dataset.panel).toBe('comms');
+  expect(document.querySelector('[data-panel="comms"]').classList.contains('is-floating')).toBe(true);
+  expect(document.getElementById('gm-journal-list')).not.toBeNull();
+  expect(document.getElementById('gm-mission-events')).not.toBeNull();
+  // A caller navigating to a record still reaches it in the new arrangement.
+  expect(shell.showLog('gm-journal')).toBe(true);
+  expect(document.getElementById('gm-journal').closest('[data-panel]').hidden).toBe(false);
+  expect(shell.showLog('gm-comms-panel')).toBe(true);
+  expect(document.getElementById('gm-comms-text').isConnected).toBe(true);
+});
+it('separates a record panel from its default group through docking', () => {
+  const { shell } = mount();
+  shell.setLiveLayout(liveLayoutModel.dock(defaultLiveLayout(), 'journal', 'roster', 'tab'));
+  expect(document.getElementById('gm-journal').closest('[data-panel]').dataset.panel).toBe('journal');
+  expect(recordTab('journal').closest('.workshop-tab-list')
+    .contains(recordTab('roster'))).toBe(true);
+  expect(recordTab('comms').closest('.workshop-tab-list')
+    .contains(recordTab('journal'))).toBe(false);
+});
 it('drops the tab for a panel the role preset has put away and moves the operator off it', () => {
   const { shell } = mount();
-  document.getElementById('gm-log-tab-activity').click();
-  expect(document.getElementById('gm-desk-log').dataset.logView).toBe('activity');
+  recordTab('activity').click();
+  expect(recordFrame('activity').hidden).toBe(false);
   // What gui/gm-role-presets.js does to a panel the effective preset omits.
   document.getElementById('gm-activity').hidden = true;
   shell.refresh();
-  expect(document.getElementById('gm-log-tab-activity').hidden).toBe(true);
-  expect(document.getElementById('gm-desk-log').dataset.logView).toBe('comms');
+  expect(recordTab('activity')).toBeNull();
+  expect(recordFrame('activity')).toBeNull();
+  // The operator is left on a record that is still there, not on nothing.
+  expect(recordFrame('comms').hidden).toBe(false);
+  // The arrangement is unchanged: availability is read, never written.
+  expect(shell.liveLayoutState().closed).not.toContain('activity');
   document.getElementById('gm-activity').hidden = false;
   shell.refresh();
-  expect(document.getElementById('gm-log-tab-activity').hidden).toBe(false);
+  expect(recordTab('activity')).not.toBeNull();
 });
-it('brings a shared-region panel to the front for a caller about to focus it', () => {
+it('brings a record panel to the front for a caller about to focus it', () => {
   const { shell } = mount();
   // The attention queue opens an authored Comms route (gui/gm-workspace.js).
-  // A `display: none` panel has nothing to focus, so the shell resolves the
-  // view first — for the PANEL the caller names, not a view id it has to know.
-  expect(document.getElementById('gm-desk-log').dataset.logView).toBe('comms');
+  // A `hidden` panel has nothing to focus, so the shell reveals it first — for
+  // the PANEL the caller names, not a dock id it has to know.
+  expect(recordFrame('comms').hidden).toBe(false);
   expect(shell.showLog('gm-journal')).toBe(true);
-  expect(document.getElementById('gm-desk-log').dataset.logView).toBe('journal');
+  expect(recordFrame('journal').hidden).toBe(false);
   expect(shell.showLog('gm-comms-panel')).toBe(true);
-  expect(document.getElementById('gm-desk-log').dataset.logView).toBe('comms');
+  expect(recordFrame('comms').hidden).toBe(false);
   // A panel the role preset has put away is left alone: a preset hiding a
   // panel is a decision, not something a navigation may override.
   shell.showLog('gm-journal');
   document.getElementById('gm-comms-panel').hidden = true;
   expect(shell.showLog('gm-comms-panel')).toBe(false);
-  expect(document.getElementById('gm-desk-log').dataset.logView).toBe('journal');
+  expect(recordFrame('journal').hidden).toBe(false);
   document.getElementById('gm-comms-panel').hidden = false;
-  // And a panel that does not live in this region is not this seam's business.
+  // And a panel that is not a registered record is not this seam's business.
   expect(shell.showLog('gm-inspector')).toBe(false);
   // The desk really does wire it to the queue's own Comms navigation.
   const workspace = readFileSync('gui/gm-workspace.js', 'utf8');

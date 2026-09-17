@@ -59,10 +59,12 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   await expect(page.locator('#gm-roster-ships button').first()).toBeVisible();
   await page.locator('#gm-roster-ships button').first().click();
   // The post-M5 screen (PRD #930, canvas artboard "After M5 - facilitation +
-  // operations"): six regions in reading order, three columns over two rows.
+  // operations"). Since issue #1502 the mission events and the four record
+  // surfaces are dock panels inside the left column's workspace rather than
+  // grid regions of their own, so the grid is four regions: the left column and
+  // the map each span both rows, and the right column keeps its two.
   expect(await page.locator('#gm-workspace > *').evaluateAll(nodes => nodes.map(node => node.id)))
-    .toEqual(['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail',
-      'gm-mission-panel', 'gm-desk-log', 'gm-health-panel']);
+    .toEqual(['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail', 'gm-health-panel']);
   for (const [width,height] of [[1440,900],[1280,720]]) {
     await page.setViewportSize({width,height});
     await page.locator('#gm-console').evaluate(el=>el.scrollTop=0);
@@ -70,21 +72,20 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     // Three columns over two rows, measured rather than declared: each column
     // shares a left edge and each row shares a top edge, at BOTH viewports.
     const boxes = {};
-    for (const id of ['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail',
-      'gm-mission-panel', 'gm-desk-log', 'gm-health-panel']) {
+    for (const id of ['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail', 'gm-health-panel']) {
       await expect(page.locator(`#${id}`)).toBeVisible();
       boxes[id] = await page.locator(`#${id}`).boundingBox();
     }
-    expect(Math.round(boxes['gm-desk-brief'].x), `${width}: left column`)
-      .toBe(Math.round(boxes['gm-mission-panel'].x));
-    expect(Math.round(boxes['gm-map-panel'].x), `${width}: centre column`)
-      .toBe(Math.round(boxes['gm-desk-log'].x));
     expect(Math.round(boxes['gm-desk-detail'].x), `${width}: right column`)
       .toBe(Math.round(boxes['gm-health-panel'].x));
+    expect(boxes['gm-desk-brief'].x, `${width}: left column is leftmost`)
+      .toBeLessThan(boxes['gm-map-panel'].x);
+    expect(boxes['gm-map-panel'].x, `${width}: centre column`)
+      .toBeLessThan(boxes['gm-desk-detail'].x);
     expect(Math.round(boxes['gm-desk-brief'].y), `${width}: top row`)
       .toBe(Math.round(boxes['gm-desk-detail'].y));
-    expect(boxes['gm-mission-panel'].y, `${width}: second row is below the first`)
-      .toBeGreaterThan(boxes['gm-desk-brief'].y);
+    expect(boxes['gm-health-panel'].y, `${width}: second row is below the first`)
+      .toBeGreaterThan(boxes['gm-desk-detail'].y);
     const geometry = await page.locator('#gm-workspace').evaluate(el=>({
       width:el.clientWidth, scroll:el.scrollWidth,
       height:el.clientHeight, scrollHeight:el.scrollHeight,
@@ -98,18 +99,18 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     // above the fold while the horizontal contract above still passes.
     expect(geometry.height).toBeLessThanOrEqual(height);
     expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.height + 1);
-    // Comms, the activity feed and the saved action journal share the centre
-    // region behind one tab strip, at both viewports.
+    // Comms, the activity feed, the saved action journal and the session
+    // history are one dock tab group, at both viewports.
     await expect(page.locator('#gm-comms-panel')).toBeVisible();
     await expect(page.locator('#gm-journal')).toBeHidden();
-    await page.locator('#gm-log-tab-journal').click();
+    await page.locator('[role="tab"][data-layout-panel="journal"]').click();
     await expect(page.locator('#gm-journal')).toBeVisible();
     await expect(page.locator('#gm-comms-panel')).toBeHidden();
-    // The switch is `data-log-view` on the region, never `hidden` on a panel:
-    // that attribute belongs to the role preset (GM_ROLE_PRESET_PANEL_IDS), and
-    // two writers on one attribute is exactly the race this avoids.
+    // Choosing a tab hides the dock's FRAME, never the panel itself: `hidden`
+    // on Comms belongs to the role preset (GM_ROLE_PRESET_PANEL_IDS), and two
+    // writers on one attribute is exactly the race this avoids.
     expect(await page.locator('#gm-comms-panel').evaluate(el => el.hasAttribute('hidden'))).toBe(false);
-    await page.locator('#gm-log-tab-comms').click();
+    await page.locator('[role="tab"][data-layout-panel="comms"]').click();
     await expect(page.locator('#gm-comms-panel')).toBeVisible();
     const screenshot = testInfo.outputPath(`gm-screen-${width}.png`);
     await page.screenshot({path:screenshot});
@@ -370,20 +371,20 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   await expect(page.locator('#gm-checkpoint-bookmark')).toBeVisible();
   expect(await page.locator('#gm-checkpoint-bookmark').evaluate(el =>
     el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
-  // Every tab in the centre strip stays pressable at 200%, and each view
-  // scrolls inside its own region rather than widening the desk.
-  for (const view of ['comms', 'activity', 'journal']) {
-    const tab = page.locator(`#gm-log-tab-${view}`);
+  // Every record tab stays pressable at 200%, and each panel scrolls inside
+  // its own frame rather than widening the desk.
+  for (const view of ['comms', 'activity', 'journal', 'session-history']) {
+    const tab = page.locator(`[role="tab"][data-layout-panel="${view}"]`);
     await expect(tab).toBeVisible();
     expect(await tab.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
     await tab.click();
-    const region = await page.locator('#gm-desk-log').evaluate(el => ({
+    const region = await page.locator(`[data-panel="${view}"]`).evaluate(el => ({
       scroll: el.scrollWidth, width: el.clientWidth,
     }));
-    expect(region.scroll, `${view}: centre region width at 200%`)
+    expect(region.scroll, `${view}: record panel width at 200%`)
       .toBeLessThanOrEqual(region.width + 1);
   }
-  await page.locator('#gm-log-tab-comms').click();
+  await page.locator('[role="tab"][data-layout-panel="comms"]').click();
   const doubled = testInfo.outputPath('gm-screen-1280-200pc.png');
   await page.screenshot({path:doubled});
   await testInfo.attach('GM 1280×720 at 200% text', {path:doubled,contentType:'image/png'});

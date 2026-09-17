@@ -98,37 +98,18 @@
   border: 0; background: none; padding: 0;
   display: flex; flex-direction: column; gap: var(--space-4);
 }
-#gm-console.gm-desk #gm-desk-brief { grid-area: 1 / 1; }
-#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2; overflow: hidden; }
+/* Mission events and the four record surfaces became dock panels (issue
+   #1502), so the left column keeps both of its rows and the map keeps both of
+   its. Comms, Activity, the action journal and the session history are the
+   dock's own default tab group: the dock owns the tab strip, its roving focus
+   and which panel is shown, and `hidden` on Comms and Activity stays the ROLE
+   PRESET's alone (gui/gm-role-presets.js, GM_ROLE_PRESET_PANEL_IDS). The dock
+   reads that attribute and drops the tab; it never writes it, so the two can
+   never race. */
+#gm-console.gm-desk #gm-desk-brief { grid-area: 1 / 1 / 3 / 2; }
+#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 3 / 3; overflow: hidden; }
 #gm-console.gm-desk #gm-desk-detail { grid-area: 1 / 3; }
-#gm-console.gm-desk #gm-mission-panel { grid-area: 2 / 1; }
-#gm-console.gm-desk #gm-desk-log { grid-area: 2 / 2; }
 #gm-console.gm-desk #gm-health-panel { grid-area: 2 / 3; }
-/* Comms, Activity and the saved action journal share the centre region behind
-   one tab strip. The strip switches views with `data-log-view` and never with
-   `hidden`, because `hidden` on Comms and Activity belongs to the role preset
-   (gui/gm-role-presets.js, GM_ROLE_PRESET_PANEL_IDS) - two writers on one
-   attribute is exactly the race the widget region is kept out of. A preset
-   that hides a panel hides its TAB instead, which the shell owns. */
-/* Like the stacked regions above, the log region is the ONE scroll box: the
-   strip stays put while the view under it scrolls, and the view itself opens
-   no second scroller. */
-#gm-console.gm-desk #gm-desk-log-tabs {
-  display: flex; flex-wrap: wrap; gap: var(--space-2);
-  position: sticky; top: 0; z-index: 2; background: var(--surface-raised);
-}
-#gm-console.gm-desk #gm-desk-log-tabs button {
-  flex: 1 1 8ch; letter-spacing: var(--tracking-tight); text-transform: none; overflow-wrap: normal;
-}
-#gm-console.gm-desk #gm-desk-log > section {
-  display: none; flex: 0 0 auto; min-width: 0; overflow: visible;
-  border: 0; background: none; padding: 0;
-}
-#gm-console.gm-desk #gm-desk-log[data-log-view="comms"] > #gm-comms-panel { display: grid; }
-#gm-console.gm-desk #gm-desk-log[data-log-view="activity"] > #gm-activity,
-#gm-console.gm-desk #gm-desk-log[data-log-view="journal"] > #gm-journal {
-  display: flex; flex-direction: column; gap: var(--space-4);
-}
 /* The bar's health pills (artboard: Tick / Quiet / Checkpoint). Each is drawn
    only when the live payload behind it exists, so a missing pill is a missing
    fact rather than an invented one. Every pill states its condition as a WORD;
@@ -202,9 +183,15 @@
 #gm-console.gm-desk #gm-station-surface { flex: 0 0 auto; width: 100%; overflow: auto; }
 #gm-console.gm-desk #gm-station-frame { width: 1280px; height: 720px; max-width: none; }
 #gm-console.gm-desk #gm-start-controls { position: static; padding: var(--space-4) 0; }
-#gm-console.gm-desk #gm-live-layout { min-width: 0; }
+#gm-console.gm-desk #gm-live-layout { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
 #gm-console.gm-desk #gm-live-layout .workshop-panel-switcher { overflow-x: auto; }
-#gm-console.gm-desk #gm-live-layout .workshop-dock-canvas { min-height: 24rem; }
+#gm-console.gm-desk #gm-live-layout .workshop-dock-canvas { min-height: 24rem; flex: 1 1 auto; }
+/* Each record panel scrolls inside its own frame; the frame is the scroll box,
+   exactly as the retired centre region was. */
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > section {
+  flex: 0 0 auto; min-width: 0; overflow: visible; border: 0; background: none; padding: 0;
+}
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-comms-panel { display: grid; }
 #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > section,
 #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > aside { width: 100%; max-width: none; }
 #gm-console.gm-desk #gm-live-layout #gm-join-controls { position: static; inset: auto; }
@@ -244,7 +231,6 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-system-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 #gm-console.gm-desk #gm-system-pills span { padding: var(--space-2); border: 1px solid var(--edge); color: var(--cyan); font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-session-history #gm-session-log { display: block; }
-#gm-console.gm-desk #gm-session-history summary { cursor: pointer; }
 #gm-console.gm-desk #gm-armed-chip { color: var(--gold); }
 #gm-console.gm-desk .gm-segment { display: flex; gap: var(--space-1); flex-wrap: wrap; }
 #gm-console.gm-desk .gm-segment-source { position: absolute; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); overflow: hidden; }
@@ -312,7 +298,6 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
    end in the same thin, always-visible thumb. */
 #gm-console.gm-desk #gm-workspace > .gm-desk-region,
 #gm-console.gm-desk .gm-desk-stack > section,
-#gm-console.gm-desk #gm-desk-log > section,
 #gm-console.gm-desk #gm-station-surface,
 #gm-console.gm-desk .gm-knowledge-category,
 #gm-console.gm-desk #gm-objective-results {

@@ -284,11 +284,35 @@ fn known_panel(value: &Value, allowed: &[&str]) -> bool {
     value.as_str().is_some_and(|panel| allowed.contains(&panel))
 }
 
-fn live_panel(value: &Value) -> bool {
-    matches!(
-        value.as_str(),
-        Some("roster" | "readiness" | "join" | "manual-save")
-    )
+const LIVE_PANELS_V1: &[&str] = &["roster", "readiness", "join", "manual-save"];
+const LIVE_PANELS_V2: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+];
+/// Panels registered after version 1, with the group each joins and how.
+/// Comms opens a group BELOW the readiness panels: the record surfaces are one
+/// reading surface on this desk and always were.
+const LIVE_ADDED_IN_V2: &[(&str, &str, &str)] = &[
+    ("mission", "roster", "tab"),
+    ("comms", "roster", "bottom"),
+    ("activity", "comms", "tab"),
+    ("journal", "comms", "tab"),
+    ("session-history", "comms", "tab"),
+];
+
+fn live_panels_for(version: u64) -> &'static [&'static str] {
+    if version < 2 {
+        LIVE_PANELS_V1
+    } else {
+        LIVE_PANELS_V2
+    }
 }
 
 fn sanitize_workshop_node(
@@ -376,20 +400,22 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 1,
-        "root": {"type":"tabs", "tabs":["roster","readiness","join","manual-save"], "active":"roster"},
+        "version": 2,
+        "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
+            {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission"], "active":"roster"},
+            {"type":"tabs", "tabs":["comms","activity","journal","session-history"], "active":"comms"}
+        ]},
         "floats": [], "closed": [], "selected": "roster"
     })
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    if value["version"] != 1 {
-        return None;
-    }
+    let stored = value["version"].as_u64().filter(|v| (1..=2).contains(v))?;
+    let allowed = live_panels_for(stored);
     let mut seen = BTreeSet::new();
     let root = match value.get("root")? {
         Value::Null => Value::Null,
-        root => match sanitize_live_node(root, &mut seen, 0) {
+        root => match sanitize_live_node(root, &mut seen, 0, allowed) {
             Ok(Some(root)) => root,
             Ok(None) => Value::Null,
             Err(()) => return Some(default_live_layout()),
@@ -399,7 +425,7 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
     for entry in value["floats"].as_array().into_iter().flatten() {
         let Some(panel) = entry["panel"]
             .as_str()
-            .filter(|_| live_panel(&entry["panel"]))
+            .filter(|_| known_panel(&entry["panel"], allowed))
         else {
             continue;
         };
@@ -411,7 +437,7 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
             json!({"panel":panel, "x":number("x",12.0).max(0.0), "y":number("y",12.0).max(0.0),
             "width":number("width",420.0).max(240.0), "height":number("height",360.0).max(180.0)}),
         );
-        if floats.len() == 4 {
+        if floats.len() == allowed.len() {
             break;
         }
     }
@@ -423,33 +449,92 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|panel| live_panel(panel))
+        .filter(|panel| known_panel(panel, allowed))
     {
         let id = panel.as_str().unwrap();
         if seen.insert(id.to_owned()) {
             closed.push(json!(id));
         }
     }
-    for panel in ["roster", "readiness", "join", "manual-save"] {
-        if seen.insert(panel.to_owned()) {
+    for panel in allowed {
+        if seen.insert((*panel).to_owned()) {
             closed.push(json!(panel));
         }
     }
     let selected = value
         .get("selected")
-        .filter(|panel| live_panel(panel) && !closed.contains(panel))
+        .filter(|panel| known_panel(panel, allowed) && !closed.contains(panel))
         .cloned()
         .or_else(|| first_visible(&root, &floats))
         .unwrap_or_else(|| json!("roster"));
-    Some(json!({"version":1, "root":root, "floats":floats, "closed":closed, "selected":selected}))
+    let mut layout = json!({"version":stored, "root":root, "floats":floats, "closed":closed, "selected":selected});
+    if stored < 2 {
+        layout = migrate_live_layout(layout);
+    }
+    Some(layout)
+}
+
+/// Place the panels registered after the stored version, exactly as
+/// `gui/dock-layout-migration.js` does.
+fn migrate_live_layout(mut layout: Value) -> Value {
+    let selected = layout["selected"].clone();
+    let mut previous_actives = BTreeMap::new();
+    collect_workshop_actives(&layout["root"], &mut previous_actives);
+    layout["closed"]
+        .as_array_mut()
+        .unwrap()
+        .extend(LIVE_ADDED_IN_V2.iter().map(|(panel, _, _)| json!(panel)));
+    layout["version"] = json!(2);
+    for (panel, preferred, placement) in LIVE_ADDED_IN_V2 {
+        add_migration_panel_at(&mut layout, panel, preferred, &Value::Null, placement);
+    }
+    let added: Vec<&str> = LIVE_ADDED_IN_V2
+        .iter()
+        .map(|(panel, _, _)| *panel)
+        .collect();
+    settle_new_groups(&mut layout["root"], &added);
+    restore_workshop_actives(&mut layout["root"], &previous_actives);
+    layout["selected"] = selected;
+    layout
+}
+
+/// A group made entirely of panels this migration introduced shows its FIRST
+/// panel, not whichever one happened to be docked last.
+fn settle_new_groups(node: &mut Value, added: &[&str]) {
+    match node["type"].as_str() {
+        Some("tabs") => {
+            let all_new = node["tabs"].as_array().is_some_and(|tabs| {
+                tabs.iter()
+                    .all(|tab| tab.as_str().is_some_and(|tab| added.contains(&tab)))
+            });
+            if all_new {
+                if let Some(first) = node["tabs"]
+                    .as_array()
+                    .and_then(|tabs| tabs.first())
+                    .cloned()
+                {
+                    node["active"] = first;
+                }
+            }
+        }
+        Some("split") => {
+            if let Some(children) = node["children"].as_array_mut() {
+                for child in children {
+                    settle_new_groups(child, added);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn sanitize_live_node(
     value: &Value,
     seen: &mut BTreeSet<String>,
     depth: usize,
+    allowed: &[&str],
 ) -> Result<Option<Value>, ()> {
-    if depth > 4 {
+    if depth > allowed.len() {
         return Err(());
     }
     match value["type"].as_str() {
@@ -459,7 +544,7 @@ fn sanitize_live_node(
             };
             let tabs: Vec<_> = raw
                 .iter()
-                .filter(|panel| live_panel(panel))
+                .filter(|panel| known_panel(panel, allowed))
                 .filter_map(|panel| {
                     let id = panel.as_str()?;
                     seen.insert(id.to_owned()).then(|| json!(id))
@@ -480,8 +565,8 @@ fn sanitize_live_node(
                 return Ok(None);
             };
             let mut children = Vec::new();
-            for child in raw.iter().take(4) {
-                if let Some(child) = sanitize_live_node(child, seen, depth + 1)? {
+            for child in raw.iter().take(allowed.len()) {
+                if let Some(child) = sanitize_live_node(child, seen, depth + 1, allowed)? {
                     children.push(child);
                 }
             }
@@ -667,6 +752,67 @@ fn remove_workshop_panel(node: &Value, panel: &str) -> Value {
     }
 }
 
+/// Split the group holding `target` so `panel` becomes its neighbour, mirroring
+/// the `dock` transition in gui/dock-layout-model.js.
+fn split_workshop_group(
+    node: &mut Value,
+    target: &str,
+    panel: &str,
+    axis: &str,
+    before: bool,
+) -> bool {
+    match node["type"].as_str() {
+        Some("tabs")
+            if node["tabs"].as_array().is_some_and(|tabs| {
+                tabs.iter()
+                    .any(|candidate| candidate.as_str() == Some(target))
+            }) =>
+        {
+            let existing = node.take();
+            let added = json!({"type":"tabs", "tabs":[panel], "active":panel});
+            let children = if before {
+                json!([added, existing])
+            } else {
+                json!([existing, added])
+            };
+            *node = json!({"type":"split", "axis":axis, "sizes":[1.0,1.0], "children":children});
+            true
+        }
+        Some("split") => node["children"].as_array_mut().is_some_and(|children| {
+            children
+                .iter_mut()
+                .any(|child| split_workshop_group(child, target, panel, axis, before))
+        }),
+        _ => false,
+    }
+}
+
+fn dock_workshop_panel(layout: &mut Value, panel: &str, target: &str, placement: &str) {
+    if placement == "tab" {
+        dock_workshop_tab(layout, panel, target);
+        return;
+    }
+    let axis = if matches!(placement, "left" | "right") {
+        "horizontal"
+    } else {
+        "vertical"
+    };
+    let before = matches!(placement, "left" | "top");
+    let original = layout.clone();
+    layout["root"] = remove_workshop_panel(&layout["root"], panel);
+    layout["floats"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|entry| entry["panel"].as_str() != Some(panel));
+    layout["closed"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|value| value.as_str() != Some(panel));
+    if !split_workshop_group(&mut layout["root"], target, panel, axis, before) {
+        *layout = original;
+    }
+}
+
 fn dock_workshop_tab(layout: &mut Value, panel: &str, target: &str) {
     let original = layout.clone();
     layout["root"] = remove_workshop_panel(&layout["root"], panel);
@@ -713,6 +859,16 @@ fn workshop_node_contains(node: &Value, panel: &str) -> bool {
 }
 
 fn add_migration_panel(layout: &mut Value, panel: &str, preferred: &str, preserved_closed: &Value) {
+    add_migration_panel_at(layout, panel, preferred, preserved_closed, "tab");
+}
+
+fn add_migration_panel_at(
+    layout: &mut Value,
+    panel: &str,
+    preferred: &str,
+    preserved_closed: &Value,
+    placement: &str,
+) {
     if preserved_closed
         .as_array()
         .is_some_and(|closed| closed.iter().any(|value| value.as_str() == Some(panel)))
@@ -727,7 +883,7 @@ fn add_migration_panel(layout: &mut Value, panel: &str, preferred: &str, preserv
         return;
     };
     if let Some(target) = preferred_workshop_target(layout, preferred) {
-        dock_workshop_tab(layout, panel, &target);
+        dock_workshop_panel(layout, panel, &target, placement);
         return;
     }
     if layout["floats"].as_array().is_none_or(Vec::is_empty) {
@@ -1089,11 +1245,89 @@ mod tests {
                 .len(),
             3
         );
-        assert_eq!(saved["liveLayout"]["root"]["tabs"], json!(["roster"]));
-        assert_eq!(saved["liveLayout"]["floats"][0]["panel"], "join");
-        assert_eq!(saved["liveLayout"]["selected"], "roster");
+        // The stored layout is version 1, so it arrives migrated: the record
+        // panels open their own group below the readiness panels, exactly as
+        // gui/live-layout-model.js places them.
+        assert_eq!(
+            saved["liveLayout"],
+            json!({
+                "version":2,
+                "root":{"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
+                    {"type":"tabs", "tabs":["roster","mission"], "active":"roster"},
+                    {"type":"tabs", "tabs":["comms","activity","journal","session-history"], "active":"comms"}
+                ]},
+                "floats":[{"panel":"join","x":30.0,"y":12.0,"width":420.0,"height":360.0}],
+                "closed":["manual-save","readiness"], "selected":"roster"
+            })
+        );
         assert!(saved.get("reconnectCredential").is_none());
         assert!(!saved.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn a_stored_live_layout_cannot_name_a_panel_version_one_never_registered() {
+        // v1 had no record vocabulary: these must enter through migration only.
+        let layout = json!({
+            "version":1,
+            "root":{"type":"tabs","tabs":["roster","comms","journal"],"active":"journal"},
+            "floats":[{"panel":"activity","x":7,"y":9,"width":300,"height":200}],
+            "closed":["readiness"], "selected":"journal"
+        });
+
+        let migrated = sanitize_live_layout(&layout).unwrap();
+        assert_eq!(migrated["version"], 2);
+        assert_eq!(migrated["floats"], json!([]));
+        assert_eq!(migrated["selected"], "roster");
+        assert_eq!(
+            migrated["closed"],
+            json!(["readiness", "join", "manual-save"])
+        );
+        assert_eq!(
+            migrated["root"]["children"][0]["tabs"],
+            json!(["roster", "mission"])
+        );
+        assert_eq!(
+            migrated["root"]["children"][1],
+            json!({"type":"tabs", "tabs":["comms","activity","journal","session-history"], "active":"comms"})
+        );
+    }
+
+    #[test]
+    fn a_current_live_layout_keeps_its_arrangement_and_drops_unknown_fields() {
+        let layout = json!({
+            "version":2,
+            "root":{"type":"tabs","tabs":["comms","journal","unsafe"],"active":"journal","unsafe":"secret"},
+            "floats":[{"panel":"roster","x":7,"y":9,"width":300,"height":200,"unsafe":"secret"}],
+            "closed":["readiness","join","manual-save","mission","activity","session-history"],
+            "selected":"journal", "unsafe":"secret"
+        });
+
+        assert_eq!(
+            sanitize_live_layout(&layout).unwrap(),
+            json!({
+                "version":2,
+                "root":{"type":"tabs", "tabs":["comms","journal"], "active":"journal"},
+                "floats":[{"panel":"roster","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
+                "closed":["readiness","join","manual-save","mission","activity","session-history"],
+                "selected":"journal"
+            })
+        );
+    }
+
+    #[test]
+    fn a_v1_live_layout_that_closed_a_panel_keeps_it_closed() {
+        let layout = json!({
+            "version":1,
+            "root":{"type":"tabs","tabs":["roster","readiness"],"active":"readiness"},
+            "floats":[], "closed":["join","manual-save"], "selected":"readiness"
+        });
+
+        let migrated = sanitize_live_layout(&layout).unwrap();
+        assert_eq!(migrated["closed"], json!(["join", "manual-save"]));
+        assert_eq!(
+            migrated["root"]["children"][0],
+            json!({"type":"tabs", "tabs":["roster","readiness","mission"], "active":"readiness"})
+        );
     }
 
     #[test]

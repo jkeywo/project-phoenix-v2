@@ -2269,6 +2269,24 @@
             <span data-i18n="server.gm.action.keep_open"></span></label>
           <p id="gm-contact-ghost-feedback" role="status" aria-live="polite"></p>
         </section>
+        <!-- The entities/AI domain of the Live Inspector (issue #1489). Every
+             row is a reading rendered through the shared disabled control; the
+             one authored field with a named action links to the panel that
+             owns that transaction rather than repeating its form. -->
+        <section id="gm-entity-fields-panel" role="region" aria-labelledby="gm-entity-fields-heading">
+          <h2 id="gm-entity-fields-heading" data-i18n="inspector.entity.heading"></h2>
+          <div id="gm-entity-fields-nav" role="group" aria-labelledby="gm-entity-fields-heading">
+            <button id="gm-entity-fields-back" type="button" disabled
+              data-i18n="inspector.entity.back"></button>
+            <button id="gm-entity-fields-forward" type="button" disabled
+              data-i18n="inspector.entity.forward"></button>
+          </div>
+          <p id="gm-entity-fields-empty" data-i18n="inspector.entity.empty"></p>
+          <article id="gm-entity-fields-card" hidden>
+            <p id="gm-entity-fields-status" role="status" aria-live="polite" tabindex="-1"></p>
+            <div id="gm-entity-fields-list"></div>
+          </article>
+        </section>
         <section id="gm-npc-panel" role="region" aria-labelledby="gm-npc-heading">
           <h2 id="gm-npc-heading" data-i18n="server.gm.npc.heading"></h2>
           <p id="gm-npc-target" role="status"></p>

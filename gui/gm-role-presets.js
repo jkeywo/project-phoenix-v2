@@ -72,6 +72,9 @@ export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
   // child when this vocabulary was written, so they keep following it: a preset
   // that puts the inspector away still puts them away.
   'gm-objective-panel': 'gm-inspector',
+  // The entities/AI Live Inspector reads the inspector's own selection, so a
+  // preset that puts the inspector away puts its readings away too (#1489).
+  'gm-entity-fields-panel': 'gm-inspector',
 });
 
 /** Quick-action DOM ids this build actually draws. */

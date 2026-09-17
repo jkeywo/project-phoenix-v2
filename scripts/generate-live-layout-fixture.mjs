@@ -130,6 +130,15 @@ const CASES = [
       'system', 'effect', 'despawn'],
     selected: 'mission',
   }],
+  ['a version 12 layout', {
+    version: 12, root: group(['roster', 'inspector', 'objective'], 'inspector'), floats: [],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal',
+      'session-history', 'map', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'presentation', 'audition', 'source-link', 'spawn', 'checkpoint',
+      'restore', 'contact', 'npc', 'misclassify', 'report-policy', 'ghost', 'system', 'effect',
+      'despawn', 'faction'],
+    selected: 'inspector',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

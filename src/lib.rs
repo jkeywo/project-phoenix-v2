@@ -129,6 +129,9 @@ pub mod gm_despawn_undo;
 /// Direct/internal GM damage and healing, applied through the ordinary damage
 /// lifecycle (issue #1310).
 pub mod gm_effect;
+/// Live inspection of instantiated entities and their AI configuration: the
+/// entities/AI domain panel of the M6 Live Inspector (issue #1489).
+pub mod gm_entity_inspector;
 pub mod gm_event;
 /// The typed, attributed GM adapter over faction hostility (issue #1442).
 pub mod gm_exposure;

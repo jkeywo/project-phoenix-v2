@@ -80,6 +80,9 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // controls in the mission workflow, because the authored target and its
   // recipients already define the operation (issue #1513).
   ['objective', 'gm-objective-panel'],
+  // The entities/AI domain of the Live Inspector (issue #1489): a reading
+  // surface beside the selection it reads, never a second action route.
+  ['entity-fields', 'gm-entity-fields-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -200,7 +203,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // Removal and faction hostility followed them out in issue #1512, and the
   // authored Objective controls in issue #1513 — the last panel the inspector
   // carried. It is its own reading surface now and nothing else.
-  move(root, 'gm-despawn-panel', 'gm-faction-panel', 'gm-objective-panel');
+  move(root, 'gm-despawn-panel', 'gm-faction-panel', 'gm-objective-panel',
+    'gm-entity-fields-panel');
   // Restore leaves the checkpoint record to become a draft of its own: it
   // combines a selection, a preflight, a consequence preview and a
   // confirmation. The candidate it acts on is still whatever the record has

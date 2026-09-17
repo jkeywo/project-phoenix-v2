@@ -43,6 +43,11 @@ mod tests {
             "gm-session-controls",
             "gm-station-controls",
             "gm-activity",
+            // The Live Inspector's entities/AI domain (issue #1489). A native
+            // GM is an equal GM: the same reading surface, from the same
+            // markup, not a browser-only panel.
+            "gm-entity-fields-panel",
+            "gm-entity-fields-list",
         ] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }

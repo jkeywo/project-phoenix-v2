@@ -40,7 +40,7 @@ entities:
 
   - component: workshop-live-active-schema-inspector
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: Broad Active-Content Live Inspection
       summary: "Live Inspector exposes every known schema field for instantiated entities and definitions in loaded layers through five selection-scoped domain panels: world/scenario, entities/AI, hull/Stations/Systems, Regions, and authored presentation/audio. Each reading shows the effective authored baseline and winning provenance beside current runtime state and relevant derived context. Existing typed GM actions are linked through their established panels; checked NPC doctrine remains M6's sole additional field-replacement transaction. Every other authored field is explicitly Derived or Recreate required, and a schema-coverage ratchet rejects unclassified known active fields."
@@ -51,12 +51,23 @@ entities:
         - "Current state names a canonical GM or gameplay cause only where retained evidence supports it; otherwise the Inspector reports that the divergence has no retained single cause."
         - "Details are fetched for the selected object and domain at existing bounded projection cadences. A disappeared entity or unloaded layer retains its final reading marked gone and stale with every action disabled; related references use one bounded Back/Forward history and never follow a replacement by authored name."
         - "Every equal GM receives the same complete information. Role presets may filter or arrange panels locally but never alter access. Presentation/audio inspection excludes private operator preferences and physical output assignments."
+        - "[ai] Composition provenance is resolved during Authoring and dropped before spawn: config_cache retains the parsed EntityConfig, not the Provenance that produced it. A Live reading therefore cannot name the include layer a field won in and reports its location unavailable, which is the rule above applied rather than an exception to it. Retaining resolution provenance per spawned entity is deliberately not scheduled here."
+        - "[ai] 'Layer' in a Live descriptor means the authored sub-world layer the runtime does retain, which is what NpcDoctrinePaletteEntry.origin_layer already means. It never means the include chain; that remains an Authoring concern."
+        - "[ai] Issue #1489 delivers the entities/AI domain. Its descriptor table is published once for the whole domain and readings are keyed by entity id, so the per-entity payload carries values rather than a repeated schema. Derived intent and current target are taken from the decisions the surrounding projection has already made rather than recomputed, because two derivations of one fact from the same components are two chances for the Inspector to disagree with the desk beside it. Effective modifiers are read from the existing structured debug payload rather than a second inspection path."
     architecture:
       kind: presentation-adapter
       authority: local
       depends_on: [workshop-inspector-descriptors]
       coordinates: [gm-milestone-integrated-workshop]
       runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_entity_inspector.rs, src/gm_projection.rs, gui/gm-entity-inspector-panel.js, gui/live-layout-model.js, src/native_host/panes/operator.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, server.html]
+      symbols: [EntityInspectorProjection, EntityInspectorField, EntityFieldGroup, EntityInspection, EntityReadingInputs, fields, reading, createGmEntityInspectorPanel, parseGmEntityInspectorPayload]
+      tests:
+        - cargo test --lib gm_entity_inspector
+        - npx vitest run tests/client/gm-entity-inspector-panel.test.js tests/client/live-layout-model.test.js
+        - npm run live-layout:check
 
   - component: workshop-inspector-descriptors
     core:

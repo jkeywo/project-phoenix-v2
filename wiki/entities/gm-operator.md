@@ -113,6 +113,32 @@ the tools are aimed at and never an open confirmation, because a desk restored
 aimed at something the operator never chose is a desk that removes the wrong
 hull.
 
+Issue #1489 opened the Live Inspector's first domain: entities and AI. It is a
+READING surface. The runtime publishes one descriptor table for the whole
+entity/AI schema — identity, placement, faction, tags, every `[behaviour]`
+tuning scalar, every `[[behaviour.doctrine]]` element field, `[ai_profile]`,
+`lod_bubble` and `[target]` — plus one reading per live entity keyed by entity
+id. Exactly one field carries a named action, authored NPC doctrine, and the
+panel LINKS to the control that already owns that checked transaction rather
+than growing a second form for it. Everything else is Derived or Recreate
+required, and there is no generic field setter anywhere in the panel; a cargo
+test asserts that the named-action set has exactly one member, because the
+classification is only worth publishing if nothing bypasses it.
+
+Two limits on what a reading may claim. Composition provenance is resolved
+during Authoring and dropped before spawn — `config_cache` keeps the parsed
+`EntityConfig`, not the `Provenance` that produced it — so a Live reading cannot
+name the include layer a field won in and reports its location unavailable
+instead of inferring one. And "layer" in a Live descriptor means the authored
+sub-world layer the runtime does retain, never the include chain.
+
+A field the entity never authored is absent rather than blank: "not authored"
+and "authored empty" are different facts. A despawned entity keeps its final
+reading, marked gone, with every action disabled — and the panel never follows a
+replacement that reuses the authored name, because a hull that left and a new
+hull authored with the same name are different entities. Reference hops are
+retraced through one bounded Back/Forward history.
+
 Issue #1513 moved the last panel out. Activating, completing and failing an
 authored Objective is the mission workflow's own vocabulary — the authored
 target and its recipients already define the operation — so the controls are a

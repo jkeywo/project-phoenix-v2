@@ -17,6 +17,7 @@ import { createGmContactPanel } from './gm-contact-panel.js';
 import { createGmPresentationPanel } from './gm-presentation-panel.js';
 import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
+import { createGmEntityInspectorPanel } from './gm-entity-inspector-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
 import { createGmAttentionPanel } from './gm-attention-panel.js';
@@ -75,6 +76,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let gmSystem = null;
   let gmDespawn = null;
   let gmNpc = null;
+  let gmEntityFields = null;
   let gmObjectivePanel = null;
   const gmProjection = createGmLocalProjection({
     doc: doc,
@@ -89,6 +91,8 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       // Objectives narrow to the selected ship; the mission panel's events
       // stay scenario-wide.
       if (gmObjectivePanel) gmObjectivePanel.select(entity);
+      // The entities/AI Live Inspector reads the same selection (issue #1489).
+      if (gmEntityFields) gmEntityFields.select(entity);
     },
   });
   const gmActivity = createGmActivityFeed({
@@ -555,9 +559,25 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     confirmAction: gmConfirmations.request,
   });
   win.__hostGmNpcState = gmNpc.state;
+  gmEntityFields = createGmEntityInspectorPanel({ doc: doc, t,
+    // The named action is REACHED, not repeated: this brings the panel that
+    // owns the checked doctrine transaction forward, aims it at the same
+    // entity, and leaves the transaction, its confirmation and its attribution
+    // exactly where they already are.
+    focusDoctrine: entityId => {
+      const entity = gmProjection.state().entities
+        .find(row => row.entity_id === entityId);
+      if (entity) gmNpc.select(entity);
+      return shell.showLog('gm-npc-panel');
+    },
+    // A reference hop goes through the desk's own selection owner, so the map,
+    // the entity card and every selection-scoped panel move together.
+    selectEntity: entityId => gmProjection.select(entityId),
+  });
+  win.__hostGmEntityFieldsState = gmEntityFields.state;
   win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -568,6 +588,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmPresentation.update(p);
       gmSystem.update(p);
       gmNpc.update(p);
+      gmEntityFields.update(p);
       if (gmProjection.update(p)) {
         gmActivity.reconcileAvailability();
         gmKnowledgeCompare.updateTruth(gmProjection.state().entities);

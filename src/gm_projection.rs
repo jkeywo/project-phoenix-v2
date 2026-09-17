@@ -197,6 +197,15 @@ pub struct GmEntityProjectionPayload {
     pub npc_doctrines: BTreeMap<String, crate::gm_npc::NpcDoctrineStatus>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub npc_doctrine_results: Vec<crate::gm_action::LoggedGmAction>,
+    /// The entities/AI domain of the M6 Live Inspector (issue #1489): one
+    /// descriptor table for the known schema plus one reading per live entity.
+    ///
+    /// It rides this payload rather than opening a channel of its own because
+    /// it is about the same entities the rest of the payload describes, and
+    /// `publish_local_projection` already republishes the whole thing whenever
+    /// any of it changes — which is exactly the bounded cadence a reading wants.
+    #[serde(default)]
+    pub entity_inspector: crate::gm_entity_inspector::EntityInspectorProjection,
     pub entities: Vec<GmEntityProjection>,
     /// Bounded attributed results of the directed world-effect family (issue
     /// #1310), carried on the entity surface rather than a channel of its own.
@@ -402,6 +411,143 @@ type GmWorldProjectionQuery<'w, 's> = Query<
     Without<Ship>,
 >;
 
+/// Everything the entities/AI Live Inspector reads, on any entity that has it.
+///
+/// Separate from `GmShipProjectionQuery` and `GmWorldProjectionQuery` because
+/// it spans both: a Region and a hull are equally inspectable here for their
+/// identity, placement, faction and tags, and only some of them carry the AI
+/// sections. Optional everywhere, because absence is the reading.
+pub type GmInspectorSourceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static EntityUuid,
+        Option<&'static EntityName>,
+        Option<&'static EntityId>,
+        Option<&'static crate::entities::spawner::EntityMass>,
+        &'static Transform,
+        Option<&'static EntityTagsSection>,
+        Option<&'static FactionComponent>,
+        Option<&'static crate::entities::spawner::BehaviourSection>,
+        Option<&'static crate::ai::server::AiProfile>,
+        Option<&'static crate::ai::server::LodBubble>,
+        Option<&'static crate::entities::spawner::EntityTarget>,
+        Option<&'static crate::ship::components::ShipSystemControlSources>,
+        Option<&'static crate::modifiers::ShipModifiers>,
+        // `power_rating` is an AI ranking input read by authored selectors as
+        // `self_fact(power_rating)`. The runtime keeps it on whichever selector
+        // components the hull authored rather than on a component of its own,
+        // so the reading takes it from the first one present. Nested so the
+        // whole query stays inside Bevy's tuple arity.
+        (
+            Option<&'static crate::ship::sensors::SensorsTargetSelector>,
+            Option<&'static crate::console::weapons::beam::TacticalTargetSelector>,
+            Option<&'static crate::console::navigation::server::NavigationTargetSelector>,
+            Option<&'static crate::console::repair::server::RepairTargetSelector>,
+        ),
+    ),
+>;
+
+/// Build the entities/AI inspector domain from the live world.
+///
+/// Derived context is passed in rather than re-derived: `intents` and `targets`
+/// are already resolved for the projection this rides on, so the Inspector
+/// reports the same values the rest of the desk shows instead of a second
+/// opinion computed from the same components a tick later.
+fn entity_inspector_projection(
+    sources: &GmInspectorSourceQuery,
+    factions: Option<&FactionRegistryResource>,
+    intents: &BTreeMap<String, String>,
+    targets: &BTreeMap<String, (String, String)>,
+) -> crate::gm_entity_inspector::EntityInspectorProjection {
+    use crate::gm_entity_inspector::{reading, EntityReadingInputs};
+    let mut readings = BTreeMap::new();
+    for (
+        uuid,
+        name,
+        id,
+        mass,
+        transform,
+        tags,
+        faction,
+        behaviour,
+        ai_profile,
+        lod_bubble,
+        target,
+        control_sources,
+        modifiers,
+        (sensors_selector, tactical_selector, navigation_selector, repair_selector),
+    ) in sources.iter()
+    {
+        let faction_name = faction
+            .and_then(|faction| faction_reference(Some(faction), factions))
+            .map(|reference| reference.name);
+        let control_source = control_sources.map(|sources| control_source_summary(&sources.0));
+        let power_rating = sensors_selector
+            .and_then(|selector| selector.power_rating)
+            .or_else(|| tactical_selector.and_then(|selector| selector.power_rating))
+            .or_else(|| navigation_selector.and_then(|selector| selector.power_rating))
+            .or_else(|| repair_selector.and_then(|selector| selector.power_rating));
+        let inputs = EntityReadingInputs {
+            name: name.map(|name| name.0.as_str()),
+            id: id.map(|id| id.0.as_str()),
+            mass: mass.map(|mass| mass.0),
+            power_rating,
+            translation: Some(transform.translation.to_array()),
+            rotation: Some(transform.rotation.to_array()),
+            scale: Some(transform.scale.to_array()),
+            faction: faction_name.as_deref(),
+            tags: tags.map(|tags| tags.0.as_slice()),
+            behaviour: behaviour.map(|behaviour| &behaviour.0),
+            ai_profile,
+            lod_bubble_radius: lod_bubble.map(|bubble| bubble.radius),
+            target: target.map(|target| &target.0),
+            intent: intents.get(&uuid.0).map(String::as_str),
+            current_target: targets.get(&uuid.0).map(|(name, _)| name.as_str()),
+            current_target_id: targets.get(&uuid.0).map(|(_, id)| id.as_str()),
+            control_source: control_source.as_deref(),
+            modifiers: modifiers.map(modifier_summary),
+        };
+        readings.insert(uuid.0.clone(), reading(&inputs));
+    }
+    crate::gm_entity_inspector::EntityInspectorProjection {
+        fields: crate::gm_entity_inspector::fields(),
+        readings,
+    }
+}
+
+/// How many Systems each control source is holding, in a stable order.
+///
+/// A count rather than a per-System table: this reading exists to explain the
+/// authored behaviour beside it — whether anyone is actually flying to it —
+/// and the per-System breakdown already has its own projection.
+fn control_source_summary(resolver: &crate::ship::control_source::ControlSourceResolver) -> String {
+    use crate::ship::control_source::ControlSource;
+    let mut human = 0usize;
+    let mut ai = 0usize;
+    let mut offline = 0usize;
+    for (_, source) in resolver.entries() {
+        match source {
+            ControlSource::Human => human += 1,
+            ControlSource::Ai => ai += 1,
+            ControlSource::Offline => offline += 1,
+        }
+    }
+    format!("human {human}, ai {ai}, offline {offline}")
+}
+
+/// A count of what is actually modifying this hull, from the same structured
+/// debug payload the T1 observability work already publishes.
+fn modifier_summary(modifiers: &crate::modifiers::ShipModifiers) -> String {
+    let payload = modifiers.debug_payload();
+    format!(
+        "{} float, {} int, {} flags",
+        payload.float_modifiers.len(),
+        payload.int_modifiers.len(),
+        payload.flags.len()
+    )
+}
+
 fn percent(current: f32, maximum: f32) -> u8 {
     if maximum > 0.0 {
         ((current / maximum) * 100.0).clamp(0.0, 100.0).round() as u8
@@ -578,6 +724,7 @@ fn publish_local_projection(
     local_refusals: Res<LocalGmActionRefusals>,
     mut previous: Local<Option<GmEntityProjectionPayload>>,
     mut changed: MessageWriter<GmEntityProjectionChanged>,
+    inspector_sources: GmInspectorSourceQuery,
     removal_targets: crate::gm_despawn::RemovalQuery,
     presentation_control: crate::gm_presentation::PresentationControl,
 ) {
@@ -739,6 +886,34 @@ fn publish_local_projection(
             b.correlation.as_str(),
         ))
     });
+    // Derived context for the Inspector, taken from what this projection has
+    // already decided rather than recomputed: the Inspector must agree with the
+    // desk around it, and two derivations of the same fact from the same
+    // components are two chances to disagree.
+    let inspector_targets: BTreeMap<String, (String, String)> = projected
+        .iter()
+        .filter_map(|entity| {
+            let target = entity.current_target.as_ref()?;
+            Some((
+                entity.entity_id.clone(),
+                (target.name.clone(), target.entity_id.clone()),
+            ))
+        })
+        .collect();
+    let npc_doctrines = world_content
+        .as_deref()
+        .map(|runtime| npc_control.projection(runtime))
+        .unwrap_or_default();
+    let inspector_intents: BTreeMap<String, String> = npc_doctrines
+        .iter()
+        .filter_map(|(uuid, status)| Some((uuid.clone(), status.intent.clone()?)))
+        .collect();
+    let entity_inspector = entity_inspector_projection(
+        &inspector_sources,
+        factions.as_deref(),
+        &inspector_intents,
+        &inspector_targets,
+    );
     let next = GmEntityProjectionPayload {
         system_controls: system_sources
             .iter()
@@ -814,10 +989,7 @@ fn publish_local_projection(
             })
             .unwrap_or_default(),
         contact_results,
-        npc_doctrines: world_content
-            .as_deref()
-            .map(|runtime| npc_control.projection(runtime))
-            .unwrap_or_default(),
+        npc_doctrines,
         npc_doctrine_results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::NpcDoctrine,
             &action_log,
@@ -828,6 +1000,7 @@ fn publish_local_projection(
             &action_log,
             &local_refusals,
         ),
+        entity_inspector,
         entities: projected,
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::DirectEffect,

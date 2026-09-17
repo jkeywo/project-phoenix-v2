@@ -623,6 +623,46 @@ const LIVE_PANELS_V12: &[&str] = &[
 /// mission events rather than the selected-entity column.
 const LIVE_ADDED_IN_V12: &[(&str, &str, &str)] = &[("objective", "mission", "tab")];
 
+const LIVE_PANELS_V13: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+    "checkpoint",
+    "restore",
+    "contact",
+    "npc",
+    "misclassify",
+    "report-policy",
+    "ghost",
+    "system",
+    "effect",
+    "despawn",
+    "faction",
+    "objective",
+    "entity-fields",
+];
+/// Panels registered after version 12. The entities/AI Live Inspector reads the
+/// same selection the entity inspector does, so it joins that column as a tab.
+const LIVE_ADDED_IN_V13: &[(&str, &str, &str)] = &[("entity-fields", "inspector", "tab")];
+
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
@@ -673,7 +713,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         9 => LIVE_PANELS_V9,
         10 => LIVE_PANELS_V10,
         11 => LIVE_PANELS_V11,
-        _ => LIVE_PANELS_V12,
+        12 => LIVE_PANELS_V12,
+        _ => LIVE_PANELS_V13,
     }
 }
 
@@ -710,6 +751,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 12 {
         added.extend_from_slice(LIVE_ADDED_IN_V12);
+    }
+    if version < 13 {
+        added.extend_from_slice(LIVE_ADDED_IN_V13);
     }
     added
 }
@@ -799,7 +843,7 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 12,
+        "version": 13,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
@@ -810,7 +854,7 @@ fn default_live_layout() -> Value {
                 {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                     {"type":"tabs", "tabs":["map","station-console"], "active":"map"},
                     {"type":"tabs",
-                        "tabs":["inspector","contact","npc","system","despawn","faction"],
+                        "tabs":["inspector","contact","npc","system","despawn","faction","entity-fields"],
                         "active":"inspector"}
                 ]}
             ]},
@@ -823,7 +867,7 @@ fn default_live_layout() -> Value {
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=12).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=13).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();

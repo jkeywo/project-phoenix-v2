@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 12;
+export const LIVE_LAYOUT_VERSION = 13;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -17,6 +17,7 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   tool('system'), tool('effect'),
   tool('despawn'), tool('faction'),
   tool('objective'),
+  tool('entity-fields'),
 ]);
 export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
@@ -32,6 +33,7 @@ const V9_PANELS = Object.freeze([...V8_PANELS,
   'contact', 'npc', 'misclassify', 'report-policy', 'ghost']);
 const V10_PANELS = Object.freeze([...V9_PANELS, 'system', 'effect']);
 const V11_PANELS = Object.freeze([...V10_PANELS, 'despawn', 'faction']);
+const V12_PANELS = Object.freeze([...V11_PANELS, 'objective']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -131,6 +133,10 @@ const ADDED_IN_V11 = Object.freeze([
  * narrows to the selected ship where there is one, which is why the inspector's
  * shortcut still points at it; pointing is not a second copy (issue #1513). */
 const ADDED_IN_V12 = Object.freeze([['objective', 'mission', 'tab']]);
+/** Panels registered after version 12. The entities/AI Live Inspector reads the
+ * same selection the entity inspector does, so it joins that column as a tab
+ * rather than opening a surface of its own (issue #1489). */
+const ADDED_IN_V13 = Object.freeze([['entity-fields', 'inspector', 'tab']]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -173,16 +179,25 @@ const liveArrangement = () => ({
       ] },
       { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
         group(['map', 'station-console'], 'map'),
-        group(['inspector', 'contact', 'npc', 'system', 'despawn', 'faction'], 'inspector'),
+        group(['inspector', 'contact', 'npc', 'system', 'despawn', 'faction', 'entity-fields'],
+          'inspector'),
       ] },
     ] },
     group(['comms', 'activity', 'journal', 'session-history', 'health', 'checkpoint'], 'comms'),
   ] },
 });
+/** The arrangement before the entities/AI Live Inspector joined the inspector
+ * column (version 13). */
+const arrangementBeforeV13 = () => {
+  const arrangement = liveArrangement();
+  const documents = arrangement.root.children[0].children[1].children[1];
+  documents.tabs = documents.tabs.filter(panel => panel !== 'entity-fields');
+  return arrangement;
+};
 /** The arrangement before the authored Objective controls joined the mission
  * workflow (version 12). */
 const arrangementBeforeV12 = () => {
-  const arrangement = liveArrangement();
+  const arrangement = arrangementBeforeV13();
   const workflow = arrangement.root.children[0].children[0].children[0];
   workflow.tabs = workflow.tabs.filter(panel => panel !== 'objective');
   return arrangement;
@@ -243,6 +258,10 @@ const v11Default = () => ({ version: 11, ...arrangementBeforeV12(),
   floats: [],
   closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
   selected: 'roster' });
+const v12Default = () => ({ version: 12, ...arrangementBeforeV13(),
+  floats: [],
+  closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
+  selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
     floats: [],
@@ -279,6 +298,8 @@ const v10 = createDockLayoutModel({ version: 10, panels: V10_PANELS, defaultLayo
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [10] });
 const v11 = createDockLayoutModel({ version: 11, panels: V11_PANELS, defaultLayout: v11Default,
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [11] });
+const v12 = createDockLayoutModel({ version: 12, panels: V12_PANELS, defaultLayout: v12Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [12] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -295,7 +316,8 @@ const migrate = createDockLayoutMigration({
     { version: 9, model: v9, added: ADDED_IN_V9 },
     { version: 10, model: v10, added: ADDED_IN_V10 },
     { version: 11, model: v11, added: ADDED_IN_V11 },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V12 },
+    { version: 12, model: v12, added: ADDED_IN_V12 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V13 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

@@ -963,6 +963,23 @@ it('docks the authored Objective controls in the mission workflow', () => {
     .filter(b => b.getAttribute('aria-controls') === 'gm-objective-panel')).toHaveLength(1);
 });
 
+it('docks the entities/AI Live Inspector as a reading beside the selection', () => {
+  const { shell } = mount();
+  // A reading surface, not an action route: it joins the inspector's own column
+  // because it reads the selection the inspector reads (issue #1489).
+  const frame = document.getElementById('gm-entity-fields-panel').closest('[data-panel]');
+  expect(frame.dataset.panel).toBe('entity-fields');
+  expect(frame.dataset.panelKind).toBe('tool');
+  expect(liveLayoutModel.isTemporary('entity-fields')).toBe(false);
+  expect(shell.liveLayoutState().closed).not.toContain('entity-fields');
+  expect(frame.closest('.workshop-tab-stack').querySelector('[data-panel="inspector"]'))
+    .not.toBeNull();
+  // It carries no control that submits anything. The one authored field with a
+  // named action reaches the panel that owns it instead.
+  expect(frame.querySelector('#gm-entity-fields-list')).not.toBeNull();
+  expect(frame.querySelectorAll('select')).toHaveLength(0);
+});
+
 it('brings the authored Objective panel back where it was, asking nothing', () => {
   const first = mount();
   first.shell.setLiveLayout(

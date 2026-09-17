@@ -595,6 +595,10 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     },
     mountLiveLayout,
     temporaryActions,
+    /** Put the in-surface floating panels away while a gesture owns the map,
+     * and bring the same ones back when it ends (issue #1508). */
+    setPicking(value, forPanel = null) { return liveLayout?.setPicking(value, forPanel) === true; },
+    isPicking() { return liveLayout?.isPicking() === true; },
     /** Applying a stored arrangement takes an open draft away with it — a
      * restored layout has no floating draft in it — so the drafts get the same
      * say they get before a reset. */

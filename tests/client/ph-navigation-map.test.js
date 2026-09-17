@@ -1639,6 +1639,82 @@ describe('PhNavigationMap', () => {
       return { ...h, placements };
     }
 
+    it('keeps a deliberate due-north aim rather than calling it no aim at all', () => {
+      // Whether the operator aimed is a FACT, not something to infer from the
+      // value: a drag that genuinely points north is an aim, and 0 is its
+      // answer — not a signal that they did not aim.
+      const h = setup();
+      h.el.state = { ...PLACEMENT_STATE, ship_pos: { x: 0, z: 0 } };
+      h.tickRaf();
+      const placements = [];
+      h.el.addEventListener('navplace', e => placements.push(e.detail));
+      h.el.navigationBeginPlacement();
+      // Pick east of the ship, then drag well past the threshold to bearing 0.
+      h.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 150, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mouseup', { clientX: 200, clientY: 200, bubbles: true }));
+      expect(placements[0].heading).toBeCloseTo(0, 6);
+      expect(placements[0].contextual).toBe(false);
+    });
+
+    it('previews from the moment the keyboard path arms, and as the cursor moves', () => {
+      const h = setup();
+      h.el.state = { ...PLACEMENT_STATE, ship_pos: { x: 0, z: 0 } };
+      h.tickRaf();
+      const previews = [];
+      h.el.addEventListener('navplacepreview', e => previews.push(e.detail));
+      h.el.navigationBeginPlacement();
+      // The keyboard path has a position from the moment it arms, so the
+      // contextual default is previewable from that moment too.
+      expect(previews).toHaveLength(1);
+      expect(previews[0].contextual).toBe(true);
+      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+      expect(previews.length).toBeGreaterThan(1);
+      expect(previews.at(-1).contextual).toBe(true);
+      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true, cancelable: true }));
+      expect(previews.at(-1).contextual).toBe(false);
+      expect(previews.at(-1).heading).toBeCloseTo(15, 6);
+    });
+
+    it('a click without a meaningful drag faces the fleet, and says so first', () => {
+      // 0 — "north" — is an arbitrary answer that happens to be right once in
+      // 360 times. The contextual answer is the bearing from the picked point
+      // toward the ship this chart is drawn around.
+      const h = setup();
+      h.el.state = { ...PLACEMENT_STATE, ship_pos: { x: 0, z: 0 } };
+      h.tickRaf();
+      const placements = [];
+      const previews = [];
+      h.el.addEventListener('navplace', e => placements.push(e.detail));
+      h.el.addEventListener('navplacepreview', e => previews.push(e.detail));
+      h.el.navigationBeginPlacement();
+
+      // Pick 333 m east of the ship: facing the ship is due west, bearing 270.
+      h.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 150, bubbles: true }));
+      // The preview says what committing would place BEFORE it happens.
+      expect(previews.at(-1)).toMatchObject({ contextual: true });
+      expect(previews.at(-1).heading).toBeCloseTo(270, 6);
+      h.canvas.dispatchEvent(new MouseEvent('mouseup', { clientX: 200, clientY: 150, bubbles: true }));
+
+      expect(placements).toHaveLength(1);
+      expect(placements[0].heading).toBeCloseTo(270, 6);
+      expect(placements[0].contextual).toBe(true);
+    });
+
+    it('a drag chooses the direction, and the preview stops calling it the default', () => {
+      const h = armed();
+      h.el.state = { ...PLACEMENT_STATE, ship_pos: { x: 0, z: 0 } };
+      const previews = [];
+      h.el.addEventListener('navplacepreview', e => previews.push(e.detail));
+      h.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 150, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 100, bubbles: true }));
+      expect(previews.at(-1)).toMatchObject({ contextual: false });
+      expect(previews.at(-1).heading).toBeCloseTo(180, 6);
+      h.canvas.dispatchEvent(new MouseEvent('mouseup', { clientX: 200, clientY: 100, bubbles: true }));
+      expect(h.placements[0]).toMatchObject({ contextual: false });
+      expect(h.placements[0].heading).toBeCloseTo(180, 6);
+    });
+
     it('a mouse press picks the world position and the drag picks the heading', () => {
       const h = armed();
       // CSS (200, 150) → buffer (400, 300): +100 buffer px east of centre, and
@@ -1743,7 +1819,7 @@ describe('PhNavigationMap', () => {
       expect(finger.placements[0].heading).toBeCloseTo(90, 6);
     });
 
-    it('a plain click places without a heading rather than snapping to jitter', () => {
+    it('a plain click takes the default rather than snapping to jitter', () => {
       const h = armed();
       click(h.canvas, 200, 150);
       expect(h.placements).toHaveLength(1);

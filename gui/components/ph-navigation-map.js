@@ -44,6 +44,10 @@ export class PhNavigationMap extends PhElement {
   #placementArmed = false;
   #placementAnchor = null;
   #placementHeadingDeg = 0;
+  // Whether the operator aimed, as opposed to what they aimed at. Inferring it
+  // from `#placementHeadingDeg !== 0` throws away a deliberate due-north aim and
+  // then reports the contextual default as if it had been chosen.
+  #placementHeadingChosen = false;
   #placementPointer = false;
   #keyboardCursorX = Number.NaN;
   #keyboardCursorY = Number.NaN;
@@ -351,6 +355,7 @@ export class PhNavigationMap extends PhElement {
     this.#placementPointer = false;
     this.#placementAnchor = null;
     this.#placementHeadingDeg = 0;
+    this.#placementHeadingChosen = false;
     this.#ensureKeyboardCursor();
     this.#keyboardCursorVisible = true;
     this.canvas.classList.add('picking');
@@ -358,6 +363,9 @@ export class PhNavigationMap extends PhElement {
     this.needsRender = true;
     this.#revealForGesture();
     this.#showToast(t('component.navigation_map.place_prompt'), 4000);
+    // The keyboard path has a position from the moment it arms, so it has a
+    // preview from that moment too.
+    this.#emitPlacementPreview();
     return true;
   }
 
@@ -406,6 +414,7 @@ export class PhNavigationMap extends PhElement {
     this.#placementPointer = false;
     this.#placementAnchor = null;
     this.#placementHeadingDeg = 0;
+    this.#placementHeadingChosen = false;
     if (this.canvas) this.canvas.classList.remove('picking');
     this.toggleAttribute('data-placement-armed', false);
     this.needsRender = true;
@@ -431,6 +440,55 @@ export class PhNavigationMap extends PhElement {
     return ((degrees % 360) + 360) % 360;
   }
 
+  /**
+   * The direction a placement takes when the operator did not choose one.
+   *
+   * A click without a meaningful drag still has to face somewhere, and 0 —
+   * "north" — is an arbitrary answer that happens to be right once in 360
+   * times. The contextual answer is the bearing from the picked point toward
+   * the ship this chart is drawn around: a thing put on the chart faces the
+   * fleet. With no ship to face, north is all there is.
+   */
+  #placementContextualHeading(anchor) {
+    const ship = (this.#state || {}).ship_pos;
+    if (!anchor || !ship) return 0;
+    const dx = ship.x - anchor.x;
+    const dz = ship.z - anchor.z;
+    if (dx === 0 && dz === 0) return 0;
+    const degrees = Math.atan2(dx, -dz) * 180 / Math.PI;
+    return ((degrees % 360) + 360) % 360;
+  }
+
+  /**
+   * What committing right now would place, for a caller to SHOW before it
+   * happens. `contextual` says the direction is the default rather than one the
+   * operator chose, which is the difference a preview has to make plain.
+   */
+  navigationPlacementPreview() {
+    if (!this.#placementArmed) return null;
+    const anchor = this.#placementAnchor || this.navigationPlacement();
+    if (!anchor) return null;
+    return {
+      x: anchor.x,
+      z: anchor.z,
+      heading: this.#placementResolvedHeading(anchor),
+      contextual: !this.#placementHeadingChosen,
+    };
+  }
+
+  #emitPlacementPreview() {
+    const preview = this.navigationPlacementPreview();
+    if (preview) this.#dispatch('navplacepreview', preview);
+  }
+
+  /** The heading a commit would send: the aimed one, or the contextual default. */
+  #placementResolvedHeading(anchor) {
+    if (this.#placementHeadingChosen) {
+      return ((this.#placementHeadingDeg % 360) + 360) % 360;
+    }
+    return this.#placementContextualHeading(anchor);
+  }
+
   #commitPlacement(anchor, headingDeg) {
     if (!anchor) {
       // A gesture that resolved no world point still has to say so. Disarming
@@ -442,10 +500,13 @@ export class PhNavigationMap extends PhElement {
       this.#dispatch('navplacecancel', null);
       return false;
     }
+    // A gesture that aimed at nothing takes the contextual default, which is
+    // what the preview has been showing all along.
     const detail = {
       x: anchor.x,
       z: anchor.z,
-      heading: ((headingDeg % 360) + 360) % 360,
+      heading: this.#placementResolvedHeading(anchor),
+      contextual: !this.#placementHeadingChosen,
     };
     this.#disarmPlacement();
     this.#dispatch('navplace', detail);
@@ -891,7 +952,10 @@ export class PhNavigationMap extends PhElement {
     if (!anchor) return;
     const [sx, sy] = this.#worldToScreen(anchor.x, anchor.z, 0, 0, 0, scale, cx, cy);
     const radius = 12 * px;
-    const rad = this.#placementHeadingDeg * Math.PI / 180;
+    // The heading a commit would send, so the arm and the payload cannot
+    // disagree: a click-only placement draws the contextual default it will
+    // actually use rather than north.
+    const rad = this.#placementResolvedHeading(anchor) * Math.PI / 180;
     octx.save();
     octx.strokeStyle = phColor(this, 'var(--tactical)');
     octx.lineWidth = Math.max(1, 2 * px);
@@ -1380,6 +1444,7 @@ export class PhNavigationMap extends PhElement {
     if (cursorDelta && (this.#picking || this.#placementArmed || event.shiftKey)) {
       event.preventDefault();
       this.#moveKeyboardCursor(cursorDelta[0], cursorDelta[1]);
+      if (this.#placementArmed) this.#emitPlacementPreview();
       return;
     }
     // The accessible placement path (issue #1305), and deliberately the SAME
@@ -1396,7 +1461,9 @@ export class PhNavigationMap extends PhElement {
       if (turn !== 0) {
         event.preventDefault();
         this.#placementHeadingDeg = ((this.#placementHeadingDeg + turn) % 360 + 360) % 360;
+        this.#placementHeadingChosen = true;
         this.needsRender = true;
+        this.#emitPlacementPreview();
         return;
       }
       if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
@@ -1506,6 +1573,8 @@ export class PhNavigationMap extends PhElement {
       this.#placementPointer = true;
       this.#placementAnchor = this.#placementWorldAt(cpos.x, cpos.y);
       this.#placementHeadingDeg = 0;
+      this.#placementHeadingChosen = false;
+      this.#emitPlacementPreview();
       this.#dragStartX = cpos.x;
       this.#dragStartY = cpos.y;
       this.needsRender = true;
@@ -1524,6 +1593,9 @@ export class PhNavigationMap extends PhElement {
       const cpos = this.#eventBufPos(e);
       const moved = Math.hypot(cpos.x - this.#dragStartX, cpos.y - this.#dragStartY);
       this.#placementHeadingDeg = this.#placementHeadingTo(cpos.x, cpos.y, moved);
+      // Past the tap threshold the operator is aiming, whatever the answer is.
+      if (moved > 5) this.#placementHeadingChosen = true;
+      this.#emitPlacementPreview();
       this.needsRender = true;
       return;
     }
@@ -1566,6 +1638,8 @@ export class PhNavigationMap extends PhElement {
       this.#placementPointer = true;
       this.#placementAnchor = this.#placementWorldAt(cpos.x, cpos.y);
       this.#placementHeadingDeg = 0;
+      this.#placementHeadingChosen = false;
+      this.#emitPlacementPreview();
       this.#dragStartX = cpos.x;
       this.#dragStartY = cpos.y;
       this.needsRender = true;
@@ -1604,6 +1678,9 @@ export class PhNavigationMap extends PhElement {
       const cpos = this.#eventBufPos(e);
       const moved = Math.hypot(cpos.x - this.#dragStartX, cpos.y - this.#dragStartY);
       this.#placementHeadingDeg = this.#placementHeadingTo(cpos.x, cpos.y, moved);
+      // Past the tap threshold the operator is aiming, whatever the answer is.
+      if (moved > 5) this.#placementHeadingChosen = true;
+      this.#emitPlacementPreview();
       this.needsRender = true;
       return;
     }

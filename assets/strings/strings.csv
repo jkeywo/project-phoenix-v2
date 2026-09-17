@@ -104,6 +104,17 @@ server.gm.shell.layout.panel.presentation,Live dock presentation controls panel,
 server.gm.shell.layout.panel.audition,Live dock private sound audition panel,[Sound audition]
 server.gm.shell.layout.panel.source_link,Live dock Workshop source handoff panel,[Workshop source]
 server.gm.action.keep_open,Checkbox keeping a complex GM action draft open after it succeeds,[Keep open]
+server.gm.spawn.pick_armed,Spawn says which palette entry is capturing map input,"[Picking a place for {name}. Click the chart, or drag to aim it.]"
+server.gm.spawn.pick_preview_chosen,Spawn preview of a picked place and a chosen direction,"[{name} at {x}, {z} facing {heading}° — {bearing}.]"
+server.gm.spawn.pick_preview_default,Spawn preview of a picked place taking the default direction,"[{name} at {x}, {z} facing {heading}° — {bearing}, the default. Drag to aim it.]"
+server.gm.spawn.bearing_north,Eight-point compass word for an absolute world heading,[north]
+server.gm.spawn.bearing_north_east,Eight-point compass word for an absolute world heading,[north-east]
+server.gm.spawn.bearing_east,Eight-point compass word for an absolute world heading,[east]
+server.gm.spawn.bearing_south_east,Eight-point compass word for an absolute world heading,[south-east]
+server.gm.spawn.bearing_south,Eight-point compass word for an absolute world heading,[south]
+server.gm.spawn.bearing_south_west,Eight-point compass word for an absolute world heading,[south-west]
+server.gm.spawn.bearing_west,Eight-point compass word for an absolute world heading,[west]
+server.gm.spawn.bearing_north_west,Eight-point compass word for an absolute world heading,[north-west]
 server.gm.action.discard,Confirmation asked before losing an unsent GM action draft,[Discard this unsent draft?]
 server.gm.shell.layout.panel.spawn,Live dock Spawn draft panel,[Spawn]
 server.gm.shell.layout.panel.inspector,Live dock entity inspector panel,[Inspector]

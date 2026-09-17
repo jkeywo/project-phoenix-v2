@@ -180,6 +180,9 @@ function entryKey(operatorId, correlation) {
 /** Mount the GM placement panel over injected page/transport/map seams. */
 export function createGmSpawnPanel({
   onSucceeded = () => {},
+  // Picking covers the map with a gesture, so the surface hides its in-surface
+  // floating panels for the duration and puts them back afterwards.
+  onPickModeChange = () => {},
   doc = globalThis.document,
   win = doc && doc.defaultView,
   t = (id) => id,
@@ -207,6 +210,7 @@ export function createGmSpawnPanel({
   const exactHeading = doc && doc.getElementById('gm-spawn-facing');
   const exactButton = doc && doc.getElementById('gm-spawn-exact');
   const keepOpenBox = doc && doc.getElementById('gm-spawn-keep-open');
+  const pickStatus = doc && doc.getElementById('gm-spawn-pick');
   const boundedCapacity = Math.max(
     1,
     Number.isInteger(capacity) ? capacity : GM_SPAWN_FEED_CAPACITY,
@@ -219,6 +223,8 @@ export function createGmSpawnPanel({
   let palette = [];
   let authoritativeResults = [];
   let armedPaletteId = null;
+  // The control that started the current pick, so Escape gives the focus back.
+  let pickOrigin = null;
   const selectedVariants = new Map();
   const pending = new Map();
   const localTerminals = new Map();
@@ -459,8 +465,12 @@ export function createGmSpawnPanel({
   }
 
   function setArmed(paletteId) {
+    const wasArmed = !!armedPaletteId;
     armedPaletteId = paletteId;
+    pickOrigin = paletteId || null;
     if (region) region.dataset.arming = paletteId || '';
+    if (!!paletteId !== wasArmed) onPickModeChange(!!paletteId);
+    paintPick(null);
     const chart = map();
     if (chart) {
       if (paletteId && typeof chart.navigationBeginPlacement === 'function') {
@@ -480,20 +490,86 @@ export function createGmSpawnPanel({
     return true;
   }
 
+  /** Where the focus goes when the OPERATOR ends a pick: the control that
+   * started it, resolved now because the palette is rebuilt as the pick ends.
+   * A projection that dropped the row, or a run boundary, is owed nothing — a
+   * run boundary pulling focus into Spawn is focus-stealing however tidy. */
+  function returnFocus(origin) {
+    const button = origin && buttons.get(origin);
+    if (button && typeof button.focus === 'function') button.focus();
+  }
+
+  /**
+   * Say which control is capturing the map, and what committing would place.
+   *
+   * The direction is stated in WORDS as well as degrees, and whether it is the
+   * operator's choice or the contextual default is part of the sentence: a
+   * preview that only draws an arrow tells a forced-colours browser, and a
+   * screen reader, nothing at all.
+   */
+  function paintPick(preview) {
+    if (!pickStatus) return;
+    if (!armedPaletteId) {
+      pickStatus.textContent = '';
+      delete pickStatus.dataset.picking;
+      delete pickStatus.dataset.contextual;
+      return;
+    }
+    pickStatus.dataset.picking = armedPaletteId;
+    const name = entryLabel(armedPaletteId);
+    if (!preview) {
+      pickStatus.textContent = t('server.gm.spawn.pick_armed', { name });
+      delete pickStatus.dataset.contextual;
+      return;
+    }
+    const heading = Math.round(preview.heading);
+    pickStatus.dataset.contextual = String(preview.contextual === true);
+    pickStatus.textContent = t(preview.contextual
+      ? 'server.gm.spawn.pick_preview_default' : 'server.gm.spawn.pick_preview_chosen', {
+      name,
+      x: String(Math.round(preview.x)),
+      z: String(Math.round(preview.z)),
+      heading: String(heading),
+      bearing: t(`server.gm.spawn.bearing_${bearingWord(heading)}`),
+    });
+  }
+
+  /** The eight-point COMPASS word, so the preview reads without a chart.
+   *
+   * Compass, not relative: this chart is world-absolute — a heading of 90 is
+   * east whatever the fleet is doing — and "to the right" would be wrong for
+   * any ship not itself heading north. */
+  function bearingWord(heading) {
+    const points = ['north', 'north_east', 'east', 'south_east',
+      'south', 'south_west', 'west', 'north_west'];
+    return points[Math.round((((heading % 360) + 360) % 360) / 45) % 8];
+  }
+
+  function onPreview(event) {
+    if (armedPaletteId) paintPick(event.detail || null);
+  }
+
   function onPlaced(event) {
     const detail = event && event.detail;
     if (!armedPaletteId || !detail) return;
     const paletteId = armedPaletteId;
-    armedPaletteId = null;
-    if (region) region.dataset.arming = '';
+    // Through setArmed, so the surface gets its floating panels back.
+    const origin = pickOrigin;
+    setArmed(null);
     place(paletteId, detail);
     refreshAdmission();
+    // Last, because the palette buttons are rebuilt above: focusing before that
+    // lands on a node replaced microseconds later.
+    returnFocus(origin);
   }
 
   function onPlaceCancelled() {
-    armedPaletteId = null;
-    if (region) region.dataset.arming = '';
+    if (!armedPaletteId) return;
+    // Escape on the chart ends the pick and changes nothing about the draft.
+    const origin = pickOrigin;
+    setArmed(null);
     refreshAdmission();
+    returnFocus(origin);
   }
 
   function bindMap() {
@@ -502,10 +578,12 @@ export function createGmSpawnPanel({
     if (boundMap) {
       boundMap.removeEventListener('navplace', onPlaced);
       boundMap.removeEventListener('navplacecancel', onPlaceCancelled);
+      boundMap.removeEventListener('navplacepreview', onPreview);
     }
     boundMap = chart;
     if (boundMap) {
       boundMap.addEventListener('navplace', onPlaced);
+    boundMap.addEventListener('navplacepreview', onPreview);
       boundMap.addEventListener('navplacecancel', onPlaceCancelled);
     }
   }
@@ -744,6 +822,9 @@ export function createGmSpawnPanel({
   refreshAdmission();
 
   function destroy() {
+    // Destroying while armed must not leave the surface with its floating
+    // panels hidden and nothing left to bring them back.
+    if (armedPaletteId) setArmed(null);
     for (const button of buttons.values()) button.removeEventListener('click', onPlaceClick);
     for (const select of selects.values()) select.removeEventListener('change', onVariantChange);
     buttons.clear();
@@ -752,6 +833,7 @@ export function createGmSpawnPanel({
     if (boundMap) {
       boundMap.removeEventListener('navplace', onPlaced);
       boundMap.removeEventListener('navplacecancel', onPlaceCancelled);
+      boundMap.removeEventListener('navplacepreview', onPreview);
       boundMap = null;
     }
     for (const meta of pending.values()) clearPendingTimer(meta);

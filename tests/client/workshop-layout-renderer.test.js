@@ -271,6 +271,39 @@ describe('Workshop layout renderer', () => {
     expect(model.normalize(mounted.state()).closed).toContain('draft');
   });
 
+  it('puts the floating panels away while a gesture owns the surface', () => {
+    ({ mounted } = mount());
+    document.querySelector('[data-panel="findings"] [data-layout-control="float"]').click();
+    document.querySelector('[data-panel="feedback"] [data-layout-control="float"]').click();
+    const floats = () => [...document.querySelectorAll('.workshop-dock-panel.is-floating')];
+    expect(floats()).toHaveLength(2);
+    const before = floats().map(node => node.dataset.panel);
+    const stacking = floats().map(node => node.style.zIndex);
+
+    // The panel the gesture is FOR stays: it names the capturing control and
+    // previews what committing would place, and a hidden subtree is out of the
+    // accessibility tree as well as off the screen.
+    expect(mounted.setPicking(true, 'feedback')).toBe(true);
+    expect(mounted.isPicking()).toBe(true);
+    expect(document.querySelector('[data-panel="feedback"].is-floating').hidden).toBe(false);
+    expect(document.querySelector('[data-panel="findings"].is-floating').hidden).toBe(true);
+    // The arrangement is not up for rearranging while a gesture owns it: a
+    // panel opened now would be framed where the operator cannot see it.
+    expect([...document.querySelectorAll('.workshop-panel-switcher button')]
+      .every(button => button.disabled)).toBe(true);
+    // A docked panel is untouched, and nothing was closed, moved or persisted.
+    expect(document.querySelector('[data-panel="source"]').hidden).toBe(false);
+    expect(mounted.state().floats.map(entry => entry.panel)).toEqual(before);
+
+    expect(mounted.setPicking(false)).toBe(true);
+    expect(floats().every(node => node.hidden)).toBe(false);
+    expect(floats().map(node => node.dataset.panel)).toEqual(before);
+    expect(floats().map(node => node.style.zIndex)).toEqual(stacking);
+    expect([...document.querySelectorAll('.workshop-panel-switcher button')]
+      .some(button => button.disabled)).toBe(false);
+    expect(mounted.setPicking(false)).toBe(false);
+  });
+
   it('returns focus to the switcher after closing the final panel', () => {
     ({ mounted } = mount());
     for (const panel of WORKSHOP_PANELS) {

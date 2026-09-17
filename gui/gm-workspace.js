@@ -392,6 +392,10 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     // does to the draft: a docked or kept-open one stays, an undocked unchecked
     // one closes (issue #1506).
     onSucceeded: () => shell.temporaryActions?.succeeded('spawn'),
+    // Picking covers the map with a gesture, and an in-surface floating panel
+    // sits on exactly that, so the surface puts its floats away for the
+    // duration and brings the same ones back afterwards (issue #1508).
+    onPickModeChange: picking => shell.setPicking?.(picking, 'spawn'),
     actionFeedback: hostActionFeedback,
     confirmAction: gmConfirmations.request,
     getMap: () => doc.getElementById('gm-entity-map'),

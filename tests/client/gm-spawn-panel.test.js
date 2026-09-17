@@ -37,6 +37,7 @@ function mount({
   cancelSchedule = vi.fn(),
   map = null,
   onSucceeded = vi.fn(),
+  onPickModeChange = vi.fn(),
 } = {}) {
   const queue = [...correlations];
   const panel = createGmSpawnPanel({
@@ -48,6 +49,7 @@ function mount({
     getOperatorName: (id) => ({ 'gm-a': 'Alex', 'gm-b': 'Blair' }[id] || id),
     getMap: () => map,
     onSucceeded,
+    onPickModeChange,
     correlation: () => queue.shift(),
     now: () => 101,
     schedule,
@@ -55,7 +57,7 @@ function mount({
     ...(capacity == null ? {} : { capacity }),
     ...(timeoutMs == null ? {} : { timeoutMs }),
   });
-  return { panel, submitPlacement, schedule, cancelSchedule, map, onSucceeded };
+  return { panel, submitPlacement, schedule, cancelSchedule, map, onSucceeded, onPickModeChange };
 }
 
 function entry(overrides = {}) {
@@ -96,6 +98,7 @@ describe('GM placement panel', () => {
           <button type="button" id="gm-spawn-exact"></button>
           <input type="checkbox" id="gm-spawn-keep-open">
         </div>
+        <p id="gm-spawn-pick"></p>
         <p id="gm-spawn-feedback"></p>
         <ol id="gm-spawn-log"></ol>
       </section>`;
@@ -361,6 +364,62 @@ describe('GM placement panel', () => {
       });
       expect(logRows()).toHaveLength(0);
       expect(rows()).toHaveLength(0);
+    });
+  });
+
+  describe('spatial picking', () => {
+    const pick = () => document.getElementById('gm-spawn-pick');
+
+    it('names the control capturing the map, and puts the floats away for it', () => {
+      const changes = [];
+      const { panel } = mount({ map: makeMap(), onPickModeChange: value => changes.push(value) });
+      panel.update({ palette: [entry()], results: [] });
+
+      panel.arm('raider');
+      expect(changes).toEqual([true]);
+      expect(pick().dataset.picking).toBe('raider');
+      expect(pick().textContent).toContain(t('server.gm.spawn.heading'));
+
+      panel.arm('raider');
+      expect(changes).toEqual([true, false]);
+      expect(pick().textContent).toBe('');
+      expect(pick().dataset.picking).toBeUndefined();
+    });
+
+    it('previews the place and says whether the direction is chosen or the default', () => {
+      const map = makeMap();
+      const { panel } = mount({ map });
+      panel.update({ palette: [entry()], results: [] });
+      panel.arm('raider');
+
+      map.dispatchEvent(new CustomEvent('navplacepreview', {
+        detail: { x: 1200, z: -800, heading: 90, contextual: true } }));
+      expect(pick().dataset.contextual).toBe('true');
+      // Degrees AND a word: a preview that only draws an arrow tells a
+      // forced-colours browser, and a screen reader, nothing at all.
+      expect(pick().textContent).toContain('90');
+      expect(pick().textContent).toContain(t('server.gm.spawn.bearing_east'));
+      expect(pick().textContent).toContain('1200');
+
+      map.dispatchEvent(new CustomEvent('navplacepreview', {
+        detail: { x: 0, z: 0, heading: 180, contextual: false } }));
+      expect(pick().dataset.contextual).toBe('false');
+      expect(pick().textContent).toContain(t('server.gm.spawn.bearing_south'));
+    });
+
+    it('gives the focus back to the control that started the pick when it ends', () => {
+      const map = makeMap();
+      const { panel } = mount({ map });
+      panel.update({ palette: [entry()], results: [] });
+      panel.arm('raider');
+      document.body.focus();
+
+      // Escape on the chart cancels: the panel disarms and the focus comes back
+      // to the control the operator pressed, not to the document.
+      map.dispatchEvent(new CustomEvent('navplacecancel'));
+      expect(document.activeElement).toBe(placeButton('raider'));
+      expect(panel.state().arming).toBeNull();
+      expect(pick().textContent).toBe('');
     });
   });
 

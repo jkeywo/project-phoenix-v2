@@ -52,6 +52,20 @@ its surface's own `hidden` always carried. Closing it is an arrangement choice
 that releases nothing, and taking a Station over brings an OPEN console forward
 without reopening one the operator closed.
 
+Issue #1508 gave Spawn directed spatial picking through that docked map. Pick
+mode names the control capturing the chart and previews what committing would
+place — position, degrees AND a compass word, because a preview that only draws
+an arrow tells a forced-colours browser and a screen reader nothing. A click
+without a meaningful drag takes a CONTEXTUAL default direction: the bearing from
+the picked point toward the ship the chart is drawn around, because north is an
+arbitrary answer that happens to be right once in 360 times. Whether the operator
+aimed is tracked as a fact rather than inferred from the value, so a deliberate
+due-north aim is kept. For the duration the surface puts its other in-surface
+floating panels away and disables the switcher — the gesture owns the surface —
+and the panel doing the picking stays, because it is the only thing showing the
+preview. Completion and Escape bring the same floats back in the same z-order
+and hand the focus to the control that started it.
+
 Issue #1507 brought the entity inspector in as the desk's other *document*: the
 entity card, the Truth/Crew Knowledge/Difference tabs with their independent
 observing-ship scope, the bounded Back/Forward history and the quick-action

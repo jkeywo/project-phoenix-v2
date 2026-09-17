@@ -34,6 +34,17 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   let state = model.normalize(initial, narrow ? undefined : canvasBounds());
   let projectedPanel = null;
   let drag = null;
+  /** Picking on a document covers the surface with a gesture, and an in-surface
+   * floating panel sits on top of exactly that. Hiding the floats for the
+   * duration is a presentation state, not a layout change: nothing is closed,
+   * moved or persisted, and turning it off puts back the same frames in the
+   * same z-order the stacking rule already derives. */
+  let picking = false;
+  // The panel the gesture is FOR stays: it names the control capturing the map
+  // and previews what committing would place, and a hidden subtree is out of
+  // the accessibility tree as well as off the screen. Hiding it would leave the
+  // preview with no channel at all.
+  let pickingFor = null;
   /** A panel another owner has put away keeps its PLACEMENT and loses its
    * frame, tab and switcher button. Availability is read, never written: one
    * writer owns the panel's own visibility (on the Live desk that is the role
@@ -284,6 +295,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       if (!node) continue;
       node.style.left = `${entry.x}px`; node.style.top = `${entry.y}px`;
       node.style.width = `${entry.width}px`; node.style.height = `${entry.height}px`;
+      node.hidden = picking && entry.panel !== pickingFor;
     }
     updateFloatStacking();
   }
@@ -321,7 +333,8 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     if (tree) canvas.append(tree);
     for (const entry of state.floats.filter(entry => usable(entry.panel))) {
       const node = frame(entry.panel, true); node.style.left = `${entry.x}px`; node.style.top = `${entry.y}px`;
-      node.style.width = `${entry.width}px`; node.style.height = `${entry.height}px`; canvas.append(node);
+      node.style.width = `${entry.width}px`; node.style.height = `${entry.height}px`;
+      node.hidden = picking && entry.panel !== pickingFor; canvas.append(node);
     }
     updateFloatStacking();
   }
@@ -450,7 +463,26 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     });
     return true;
   }
-  return { model,
+  /** Hide every in-surface floating panel while a gesture owns the surface, and
+   * put them all back when it ends. Docked panels are untouched. */
+  function setPicking(value, forPanel = null) {
+    const next = value === true;
+    if (picking === next && pickingFor === (next ? forPanel : null)) return false;
+    picking = next;
+    pickingFor = next ? forPanel : null;
+    canvas.classList.toggle('is-picking', picking);
+    for (const node of canvas.querySelectorAll('.workshop-dock-panel.is-floating')) {
+      node.hidden = picking && node.dataset.panel !== pickingFor;
+    }
+    // Opening or resetting a panel mid-gesture would put a frame on screen the
+    // operator cannot see, and persist it. The arrangement is not up for
+    // rearranging while a gesture owns the surface.
+    for (const control of switcher.querySelectorAll('button')) control.disabled = picking;
+    updateFloatStacking();
+    reportVisible();
+    return true;
+  }
+  return { model, setPicking, isPicking: () => picking,
     state: () => cloneState(state),
     // `set` takes an arrangement from a CALLER — a stored profile, a reset —
     // so it is guarded like any other stored state rather than merely settled.

@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { WORKSHOP_MANIFEST } from '../fixtures/workshop-pack.js';
 import { ts } from './strings';
+import { revealWorkshopPanel } from './dock-helpers.js';
 
 const WORLD = 'assets/worlds/workshop.toml';
 const SHIP = 'assets/entities/alliance_cruiser.toml';
@@ -78,6 +79,7 @@ test('a real disposable browser Test boots unsaved captured source, steps, retur
   await page.locator('#workshop-import').click();
   await (await chooser).setFiles({ name: 'captured-test.zip', mimeType: 'application/zip', buffer: Buffer.from(sourcePack()) });
   await page.locator('#workshop-files').selectOption(WORLD);
+  await revealWorkshopPanel(page, 'source');
   await page.locator('#workshop-source').fill(SOURCE.replace('Captured Workshop Test', 'Unsaved source reaches the runtime'));
   await page.locator('#workshop-test-world').selectOption(WORLD);
   await page.locator('#workshop-test-ship').selectOption(SHIP);

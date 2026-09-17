@@ -13,6 +13,7 @@ import {
   waitForJoinCode,
   JOIN_CODE_PATTERN_SOURCE,
 } from './fixtures';
+import { revealGmPanel } from './dock-helpers.js';
 
 async function bootRunningHost(context) {
   const page = await context.newPage();
@@ -185,6 +186,7 @@ const clickGmControl = async (page, controlId) => {
     await page.keyboard.press('Escape');
     await expect(page.locator('#server-settings-overlay')).toBeHidden();
   }
+  await revealGmPanel(page, 'readiness');
   await page.evaluate((id) => {
     const control = document.getElementById(id);
     if (!control) throw new Error(`missing GM control: ${id}`);
@@ -270,6 +272,7 @@ test.describe('fleet lobby start policy', () => {
     // Both admitted operators have the same controls; neither page is a fleet
     // leader surface. Public text states not-ready rather than relying on colour.
     for (const page of [gmA, gmB]) {
+      await revealGmPanel(page, 'readiness');
       await expect(page.locator('#gm-ready-btn')).toBeVisible();
       await expect(page.locator('#gm-force-start-btn')).toBeVisible();
       await expect(page.locator('#lobby-gm-list')).toContainText(/not ready/i);

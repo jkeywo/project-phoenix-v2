@@ -73,19 +73,19 @@
     /* A phone landscape rail also carries the contextual Dock control.
        Use the mockup's compact frame spacing so it stays above the fold. */
     @media (orientation: landscape) and (max-height: 500px) {
-      .panel-inner { padding: 8px; gap: 8px; }
+      .panel-inner { padding: 8px; gap: 6px; }
       .console-body .ctrl-col { padding: 8px; gap: 8px; }
-      .console-body .movement-col { padding-block: 2px; gap: 2px; }
+      .console-body .movement-col { padding-block: 0; gap: 2px; }
       /* Dock and tow can coexist; leave room for fallback-font line metrics
          without shrinking the controls or hiding either status. */
-      .dock-panel { padding-top: 4px; margin-top: 0; }
+      .dock-panel { padding-top: 2px; margin-top: 0; }
       .btn-row { gap: 4px; }
     }
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }
       .console-body { overflow-y: auto; }
       .console-body .ctrl-col { padding: 8px; }
-      .console-body .movement-col { gap: 4px; }
+      .console-body .movement-col { gap: 2px; }
     }
   </style>
 </head>

@@ -1,6 +1,7 @@
 import { test, expect, createTestClient, expectFixtureWorld, readHostPeerId,
   waitForJoinCode, waitForWasmReady } from './fixtures';
 import { ts } from './strings';
+import { clickGmControl } from './dock-helpers.js';
 
 const WORLD = `
 [global]
@@ -39,12 +40,12 @@ test('real GM presentation admission reaches the host card and crew view while r
     return state?.admitted && state.presentationReady && state.localValidation;
   });
   await gm.locator('#server-settings-btn').click();
-  await crew.send('SetReady', { ready: true }); await gm.locator('#gm-ready-btn').click();
+  await crew.send('SetReady', { ready: true }); await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all([host, gm].map(page => page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')));
   expectFixtureWorld(await crew.waitForMessage('WorldSetup'), WORLD);
   const panel = gm.locator('#gm-presentation-panel');
   await expect(panel.locator('#gm-presentation-ship option')).toHaveCount(1);
-  await gm.locator('#gm-session-pause').click();
+  await clickGmControl(gm, 'gm-session-pause');
   await gm.waitForFunction(() => window.__hostGmSessionState().paused);
   const heldTick = await gm.evaluate(() => window.wasm_sim_tick());
   await panel.locator('#gm-presentation-duration').fill('12000');
@@ -56,7 +57,7 @@ test('real GM presentation admission reaches the host card and crew view while r
   const card = host.locator('.vs-presentation-card');
   await expect(card).toBeVisible(); await expect(card).toContainText('Arrival at Lyra');
   expect(await gm.evaluate(() => window.wasm_sim_tick())).toBe(heldTick);
-  await gm.locator('#gm-session-resume').click();
+  await clickGmControl(gm, 'gm-session-resume');
   await gm.waitForFunction(() => !window.__hostGmSessionState().paused);
   // A12: keep the actual remote GM admission and host channel in this proof.
   // Silence unrelated background buses through the recipient's real mixer;

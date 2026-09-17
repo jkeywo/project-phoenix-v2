@@ -5,6 +5,7 @@ import { readStoreZip } from '../../editor/mod-pack-export.js';
 import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { ts } from './strings';
 import { OPERATOR_PROFILE_KEY, createOperatorProfileSnapshot } from '../../gui/operator-profile.js';
+import { revealWorkshopPanel } from './dock-helpers.js';
 
 test('offline Workshop imports, edits, undoes and exports one source-preserving pack', { tag: '@core' }, async ({ page }, testInfo) => {
   const pageErrors = [];
@@ -52,6 +53,7 @@ test('offline Workshop imports, edits, undoes and exports one source-preserving 
   await (await chooser).setFiles({ name: 'workshop.zip', mimeType: 'application/zip', buffer: Buffer.from(workshopPack()) });
   await expect(page.locator('#workshop-files')).toBeEnabled();
   await page.locator('#workshop-files').selectOption(WORKSHOP_WORLD);
+  await revealWorkshopPanel(page, 'source');
   await page.locator('#workshop-source').fill(`${WORKSHOP_WORLD_TEXT}# Browser edit\n`);
   await page.locator('#workshop-files').selectOption('scenarios.toml');
   const manifest = await page.locator('#workshop-source').inputValue();
@@ -110,6 +112,7 @@ test('Workshop uses the real runtime for Rhai, source-span fields and browser re
   const script = 'assets/worlds/script_valid.rhai';
   const world = 'assets/worlds/script_valid.toml';
   await page.locator('#workshop-files').selectOption(script);
+  await revealWorkshopPanel(page, 'source');
   await page.locator('#workshop-source').fill('import "network" as unsafe;');
   await page.locator('#workshop-check').click();
   await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(ts('workshop.check_refused'), { timeout: 90_000 });
@@ -152,6 +155,7 @@ test('Workshop creates a pack, previews read-only dependencies and preserves MP3
   await page.locator('#workshop-dependencies-load').click();
   await expect(page.locator('#workshop-dependency-source')).toHaveAttribute('readonly', '');
   await expect(page.locator('#workshop-dependency option')).not.toHaveCount(0);
+  await revealWorkshopPanel(page, 'add');
   await page.locator('#workshop-add-path').fill('assets/sounds/music.mp3');
   const chooser = page.waitForEvent('filechooser');
   await page.locator('#workshop-add-asset').click();

@@ -4,6 +4,7 @@ import {
   readHostPeerId, test, waitForJoinCode, waitForWasmReady,
 } from './fixtures';
 import { ts } from './strings';
+import { clickGmControl } from './dock-helpers.js';
 
 const WORLD = `
 [global]
@@ -89,7 +90,7 @@ test('two equal GMs keep private confirmation policies and resolve stale lethal 
   const [oneId, twoId] = await Promise.all(gms.map(page => page.evaluate(() => window.__hostGmStartState().operatorId)));
   expect(oneId).not.toBe(twoId);
   await crew.send('SetReady', { ready: true });
-  for (const page of gms) await page.locator('#gm-ready-btn').click();
+  for (const page of gms) await clickGmControl(page, 'gm-ready-btn');
   await Promise.all([host, ...gms].map(page => page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')));
   expectFixtureWorld(await crew.waitForMessage('WorldSetup'), WORLD);
   for (const page of gms) await selectCourier(page);

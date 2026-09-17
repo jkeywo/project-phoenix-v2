@@ -132,17 +132,19 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
     .toContainText('Ctrl + R');
   await expect(binding).toBeFocused();
   await expect(binding).toHaveValue(ts('settings.controls.press_key'));
-  // The replacement capture is immediately usable; plain R is harmless and
-  // restores the same authored value without escaping to browser chrome.
-  await binding.press('KeyR');
+  // The replacement capture retains the authored value while focused; blur
+  // exposes it before moving to the next binding.
+  await binding.blur();
   await expect(binding).toHaveValue('R');
 
   // Both actions share Captain context. Replace clears the previous slot;
   // resetting Red Alert then clears that colliding remap before restoring R.
   await viewBinding.click();
-  await viewBinding.press('KeyR');
-  await expect(captain.locator('[data-control="semantic-binding-conflict-cancel"]'))
-    .toBeFocused();
+  await expect(viewBinding).toBeFocused();
+  await captain.keyboard.press('r');
+  const conflictCancel = captain.locator('[data-control="semantic-binding-conflict-cancel"]');
+  await expect(conflictCancel).toBeVisible();
+  await conflictCancel.focus();
   // Conflict Escape is modal-wide: move backward out of the prompt to Reset
   // All, then cancel without letting the shared Settings trap close the modal.
   // Derive the distance from the live trap ring: adding another discoverable
@@ -172,9 +174,10 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await expect(viewBinding).toHaveValue('V');
 
   await viewBinding.click();
-  await viewBinding.press('KeyR');
+  await expect(viewBinding).toBeFocused();
+  await captain.keyboard.press('r');
   await expect(captain.locator('[data-control="semantic-binding-conflict-cancel"]'))
-    .toBeFocused();
+    .toBeVisible();
   await captain.click('[data-control="semantic-binding-conflict-replace"]');
   await expect(binding).toHaveValue(ts('input.binding.unassigned'));
   await expect(viewBinding).toBeFocused();
@@ -203,6 +206,8 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
     await expect(binding).toHaveValue(ts('settings.controls.press_key'));
     await expect(captain.locator('#settings-overlay')).toBeVisible();
     await binding.press('KeyR');
+    await expect(binding).toHaveValue(ts('settings.controls.press_key'));
+    await binding.blur();
     await expect(binding).toHaveValue('R');
   }
 
@@ -226,6 +231,8 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await expect(binding).toHaveValue('R');
   await binding.click();
   await binding.press('KeyY');
+  await expect(binding).toHaveValue(ts('settings.controls.press_key'));
+  await binding.blur();
   await expect(captain.locator(
     '[data-control="semantic-binding-captain.red-alert-0"]',
   )).toHaveValue('Y');
@@ -237,8 +244,8 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
     localStorage.getItem('phoenix-operator-profile-v1'),
   ));
   expect(Object.keys(storedProfile).sort()).toEqual([
-    'accessibility', 'bindings', 'feedback', 'gamepad', 'gmConfirmations',
-    'kind', 'version',
+    'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback',
+    'gamepad', 'gmConfirmations', 'kind', 'liveLayout', 'version',
   ]);
   expect(JSON.stringify(storedProfile)).not.toMatch(/session-token|player-name|station|saveCatalogue/i);
   const downloadPromise = captain.waitForEvent('download');

@@ -10,6 +10,7 @@ import { test, expect, createTestClient, captureServerPageErrors,
 import { observeGm, observeCrew, readGmEvidence, assertGmOnlyCrewWitness,
   retainEvidence } from './gm-m2-evidence.js';
 import { ts } from './strings';
+import { clickGmControl } from './dock-helpers.js';
 
 const execute = promisify(execFile);
 const WORLD = 'assets/worlds/combat_test.toml';
@@ -151,7 +152,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
       await observeGm(page, `GM ${i + 1}`); gms.push(page);
     }
     for (const client of crew) await client.send('SetReady', { ready: true });
-    for (const page of gms) await page.locator('#gm-ready-btn').click();
+    for (const page of gms) await clickGmControl(page, 'gm-ready-btn');
     await Promise.all([ship, ...gms].map(page => page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')));
     const [gm, second] = gms;
     const operators = await Promise.all(gms.map(page => page.evaluate(() => window.__hostLocalGm().id)));

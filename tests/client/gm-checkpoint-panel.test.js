@@ -66,10 +66,12 @@ let api;
 let panel;
 let listed;
 let created;
+let onSelect;
 
 function mount({ rows = [], capture = true, now = () => new Date('2026-09-10T14:05:00Z') } = {}) {
   listed = rows;
   created = [];
+  onSelect = vi.fn();
   api = {
     list: vi.fn(() => listed),
     create: vi.fn((name) => {
@@ -83,6 +85,7 @@ function mount({ rows = [], capture = true, now = () => new Date('2026-09-10T14:
     api,
     canCapture: () => capture,
     now,
+    onSelect,
   });
   return panel.ready;
 }
@@ -126,6 +129,7 @@ it('shows a capture tick and time only after the checkpoint really reaches the c
   }));
   // ...and it is the row now selected, so the GM can inspect what they made.
   expect(panel.state().selected.slotId).toBe('slot-new');
+  expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ slotId: 'slot-new' }));
   // The name field is cleared, so the next bookmark is not silently a retype.
   expect(nameField().value).toBe('');
 });

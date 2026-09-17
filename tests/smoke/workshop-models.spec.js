@@ -4,6 +4,7 @@ import { createStoreZip, readStoreZipArchive } from '../../editor/mod-pack-expor
 import { isWorkshopBinary } from '../../editor/workshop-document.js';
 import { WORKSHOP_MANIFEST, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { ts } from './strings';
+import { revealWorkshopPanel } from './dock-helpers.js';
 
 const MODEL = 'assets/models/workshop-rig.glb';
 const RIG = 'assets/models/workshop-rig.model.toml';
@@ -127,6 +128,7 @@ test('Workshop model fields use real runtime types and one exact-source history 
   // A source edit outside the form invalidates its captured spans immediately.
   await page.locator('#workshop-model-inspect').click();
   await expect(offsetX).toBeEnabled();
+  await revealWorkshopPanel(page, 'source');
   await page.locator('#workshop-source').fill(`${normaliseTextarea(RIG_SOURCE)}# newer source\n`);
   await expect(page.locator('#workshop-model-apply')).toBeDisabled();
   await expect(offsetX).toBeDisabled();

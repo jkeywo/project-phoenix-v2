@@ -12,6 +12,7 @@ import {
   waitForJoinCode,
 } from './fixtures';
 import { ts } from './strings';
+import { clickGmControl } from './dock-helpers.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -51,7 +52,7 @@ test('prepared GM event admits crew and delivers Comms to both live Fleet hulls'
   const gm = await boot();
   await joinFleetAsGm(gm, code);
   for (const crew of crews) await crew.send('SetReady', { ready: true });
-  await gm.locator('#gm-ready-btn').click();
+  await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all(pages.map(page => page.waitForFunction(
     () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 })));
   for (const crew of crews) expectFixtureWorld(await crew.waitForMessage('WorldSetup', 10_000), preparedWorld);
@@ -234,7 +235,7 @@ test('GM Comms preserves exact text and recipient dialogue through ordinary crew
   for (const { comms, tactical } of crews) {
     await comms.send('SetReady', { ready: true }); await tactical.send('SetReady', { ready: true });
   }
-  for (const gm of gms) await gm.locator('#gm-ready-btn').click();
+  for (const gm of gms) await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all([owner, member, ...gms].map(page => page.waitForFunction(
     () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 })));
   const gm = gms[0], otherGm = gms[1];
@@ -1170,7 +1171,7 @@ test('a GM disables and restores a real System without changing its hull', { tag
   const code = await ship.locator('#fleet-code').textContent();
   const gm = await context.newPage(); const gmErrors = captureServerPageErrors(gm);
   await gm.goto('/?scenario=assets/worlds/default.toml'); await waitForWasmReady(gm); await joinFleetAsGm(gm, code);
-  await gm.locator('#gm-ready-btn').click();
+  await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all([ship.waitForFunction(() => window.__saveSlotsPhase === 'InProgress'), gm.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')]);
   await gm.waitForFunction(() => Object.values(window.__hostGmSystemState().controls).some(rows => rows.some(row => row.system_id === 'red-alert')));
   const target = await gm.evaluate(() => Object.entries(window.__hostGmSystemState().controls).find(([, rows]) => rows.some(row => row.system_id === 'red-alert'))[0]);
@@ -1206,7 +1207,7 @@ test('a GM changes Reveal Conceal Normal for one real observing fleet ship', { t
   const gmErrors = captureServerPageErrors(gm);
   await gm.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(gm); await joinFleetAsGm(gm, code);
-  await gm.locator('#gm-ready-btn').click();
+  await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all([ship.waitForFunction(() => window.__saveSlotsPhase === 'InProgress'), gm.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')]);
   await gm.waitForFunction(() => document.querySelectorAll('#gm-contact-observer option').length > 1);
   const observer = await gm.locator('#gm-contact-observer option').nth(1).getAttribute('value');
@@ -3052,7 +3053,7 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
     gms.push(gm);
   }
   for (const client of crew) await client.send('SetReady', { ready: true });
-  for (const gm of gms) await gm.locator('#gm-ready-btn').click();
+  for (const gm of gms) await clickGmControl(gm, 'gm-ready-btn');
   await captain.waitForMessage('GameStarted', 30_000);
   const expectHeldCaptain = async () => {
     const assigned = await captain.page.evaluate(token => window.__messages
@@ -3192,7 +3193,7 @@ test('two equal GMs operate a compatible NPC Helm and recover without stale targ
     await joinFleetAsGm(page, code);
     gms.push(page);
   }
-  for (const page of gms) await page.locator('#gm-ready-btn').click();
+  for (const page of gms) await clickGmControl(page, 'gm-ready-btn');
   await Promise.all([owner, ...gms].map(page => page.waitForFunction(
     () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 },
   )));

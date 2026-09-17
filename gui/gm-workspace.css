@@ -30,6 +30,8 @@
   min-height: 76px; padding: var(--space-4) var(--space-5); padding-right: var(--settings-cog-keepout, var(--space-5));
   border-bottom: 1px solid var(--edge); background: var(--surface-panel);
 }
+#gm-console .gm-station-bar > * { min-width: 0; max-width: 100%; }
+#gm-console .gm-station-bar * { min-width: 0; max-width: 100%; }
 #gm-console #gm-peer-summary { margin-right: auto; font-family: var(--font-mono); }
 #gm-console #gm-lethal-label, #gm-console #gm-role-preset-label { display: grid; gap: var(--space-2); }
 #gm-console.gm-desk #gm-session-controls { display: flex; align-items: center; flex-wrap: wrap; border: 0; padding: 0; gap: var(--space-2); max-width: 260px; }
@@ -255,6 +257,15 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-session-state { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
 #gm-console.gm-desk #gm-inspector-tabs button { letter-spacing: var(--tracking-tight); text-transform: none; overflow-wrap: normal; }
 #gm-console.gm-desk #gm-operator-identity { max-width: 100px; font-size: var(--text-xs); color: var(--gold); }
+#gm-console.gm-desk #gm-scenario-title,
+#gm-console.gm-desk #gm-peer-summary,
+#gm-console.gm-desk #gm-operator-identity {
+  overflow-wrap: anywhere;
+}
+#gm-console.gm-desk #gm-role-preset-label,
+#gm-console.gm-desk #gm-lethal-label {
+  min-width: 0;
+}
 #gm-console.gm-desk #gm-workspace > .gm-desk-region {
   background: linear-gradient(180deg, var(--surface-raised), var(--surface-base));
   clip-path: polygon(var(--cham-panel) 0, calc(100% - var(--cham-panel)) 0, 100% var(--cham-panel), 100% calc(100% - var(--cham-panel)), calc(100% - var(--cham-panel)) 100%, var(--cham-panel) 100%, 0 calc(100% - var(--cham-panel)), 0 var(--cham-panel));
@@ -273,8 +284,9 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-map-chips { grid-area: 3 / 1; align-self: end; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-5); pointer-events: none; }
 #gm-console.gm-desk #gm-map-legend { grid-area: 4 / 1; }
 
-#gm-console.gm-desk #gm-session-controls { flex: 0 0 190px; }
+#gm-console.gm-desk #gm-session-controls { flex: 0 1 190px; min-width: 0; }
 #gm-console.gm-desk #gm-session-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+#gm-console.gm-desk #gm-session-actions button { min-width: 0; overflow-wrap: anywhere; }
 #gm-console.gm-desk #gm-knowledge-scope { display: grid; gap: var(--space-2); }
 
 /* ── Legibility (GM console feedback, 2026-09-10) ──────────────────────

@@ -5,6 +5,7 @@ import { createStoreZip, readStoreZipArchive } from '../../editor/mod-pack-expor
 import { isWorkshopBinary } from '../../editor/workshop-document.js';
 import { WORKSHOP_MANIFEST, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { ts } from './strings';
+import { revealWorkshopPanel } from './dock-helpers.js';
 
 const MODEL = 'assets/models/workshop-triangle.glb';
 const BUFFER = 'assets/models/workshop-vertices.bin';
@@ -54,6 +55,7 @@ test('Workshop validates real model, image and audio bytes, recovers a refused b
   await expect(page.locator('#workshop-source')).toBeDisabled();
   // A real external buffer passes through the same authoring history as text.
   // Its broken replacement is retained for repair, but runtime export refuses it.
+  await revealWorkshopPanel(page, 'add');
   await page.locator('#workshop-add-path').fill(BUFFER);
   const replacing = page.waitForEvent('filechooser');
   await page.locator('#workshop-add-asset').click();
@@ -63,6 +65,7 @@ test('Workshop validates real model, image and audio bytes, recovers a refused b
   await expect(page.locator('.workshop-findings[role="alert"]')).toContainText(MODEL);
   await expect(page.locator('#workshop-recovery-status')).toHaveText(ts('workshop.recovery_saved'));
   await page.reload();
+  await revealWorkshopPanel(page, 'recovery');
   await page.locator('#workshop-restore').click();
   await page.locator('#workshop-undo').click();
   const downloading = page.waitForEvent('download', { timeout: 90_000 });

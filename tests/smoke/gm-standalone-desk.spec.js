@@ -78,11 +78,12 @@ test('the Host as GM route reaches a live desk, not a disabled one',
     // ── The reported symptom, measured ───────────────────────────────────
     //
     // Every GM panel gates its controls on one question — is there a local
-    // operator — and records the answer on its own region. All four must say
-    // yes; that is the defect, stated as the page states it.
+    // operator — and records the answer on its own independently refreshed region.
     const admitted = await page.locator('#gm-console [data-admitted]')
       .evaluateAll((els) => els.map((el) => [el.id, el.dataset.admitted]));
-    expect(admitted.length).toBeGreaterThanOrEqual(4);
+    expect(admitted.map(([id]) => id).sort()).toEqual([
+      'gm-effect-panel', 'gm-mission-panel', 'gm-session-controls',
+    ]);
     expect(admitted.filter(([, value]) => value !== 'true')).toEqual([]);
 
     // The verbs named in the report, individually, so a regression says which.
@@ -104,9 +105,9 @@ test('the Host as GM route reaches a live desk, not a disabled one',
     expect(tally.visible).toBeGreaterThan(40);
     expect(tally.disabled).toBeLessThan(tally.visible / 3);
 
-    // The operator strip a fleet GM gets from its roster publish. A session
-    // with no fleet has an honest equivalent rather than an empty column.
-    await expect(page.locator('#gm-roster-operators'))
+    // A standalone session names its operator in the persistent station bar;
+    // the mission roster dock is intentionally retired after launch.
+    await expect(page.locator('#gm-operator-identity'))
       .toContainText(ts('server.gm.operator.standalone'));
 
     // ── And a verb that really runs ──────────────────────────────────────
@@ -138,20 +139,20 @@ test('the Host as GM route reaches a live desk, not a disabled one',
       await expect(button).toBeEnabled();
       expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
     }
-    const operators = page.locator('#gm-roster-operators');
+    const operators = page.locator('#gm-operator-identity');
     await expect(operators).toContainText(ts('server.gm.operator.standalone'));
     // Scoped to this slice's own two surfaces. The console shell's overall
     // enlargement is #1430's contract and is asserted by its own specs; what
     // is new here is the session controls the binding switched on and the
     // operator strip a standalone session now fills.
-    for (const id of ['gm-session-controls', 'gm-roster-operators']) {
+    for (const [id, baseSize] of [['gm-session-controls', 14], ['gm-operator-identity', 12]]) {
       const geometry = await page.locator(`#${id}`).evaluate((el) => ({
         clientWidth: el.clientWidth,
         scrollWidth: el.scrollWidth,
         fontSize: parseFloat(getComputedStyle(el).fontSize),
       }));
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-      expect(geometry.fontSize).toBeGreaterThanOrEqual(14 * MAX_TEXT_SCALE);
+      expect(geometry.fontSize).toBeGreaterThanOrEqual(baseSize * MAX_TEXT_SCALE);
     }
 
     expect(errors).toEqual([]);

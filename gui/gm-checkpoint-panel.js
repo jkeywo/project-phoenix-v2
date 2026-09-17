@@ -410,6 +410,7 @@ export function createGmCheckpointPanel({
     }
     state.selectedId = confirmed.slotId;
     render();
+    try { onSelect(selected()); } catch (_) { /* a listener must not break selection. */ }
     setStatus('ok', t('server.gm.checkpoint.confirmed', {
       name: confirmed.displayName,
       tick: confirmed.captureTick,

@@ -3,13 +3,14 @@ import { defaultLiveLayout, liveLayoutModel, normalizeLiveLayout } from '../../g
 
 describe('Live dock layout model', () => {
   it('registers the workflow and record panels in a versioned layout separate from Workshop', () => {
-    expect(defaultLiveLayout()).toMatchObject({ version: 10, selected: 'roster' });
+    expect(defaultLiveLayout()).toMatchObject({ version: 11, selected: 'roster' });
     // Every registered panel, in the order the narrow switcher offers them.
     expect(liveLayoutModel.panels).toEqual(['roster', 'readiness', 'join', 'manual-save',
       'mission', 'comms', 'activity', 'journal', 'session-history',
       'map', 'attention', 'workload', 'widgets', 'health', 'station', 'station-console',
       'presentation', 'audition', 'source-link', 'spawn', 'inspector', 'checkpoint', 'restore',
-      'contact', 'npc', 'misclassify', 'report-policy', 'ghost', 'system', 'effect']);
+      'contact', 'npc', 'misclassify', 'report-policy', 'ghost', 'system', 'effect',
+      'despawn', 'faction']);
     // Spawn is a DRAFT, not a place: absent from the default arrangement.
     expect(liveLayoutModel.temporary)
       .toEqual(['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect']);
@@ -29,9 +30,10 @@ describe('Live dock layout model', () => {
     // because it holds every selected-entity control.
     expect(defaultLiveLayout().root.children[0].children[1]).toEqual({ type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
       { type: 'tabs', tabs: ['map', 'station-console'], active: 'map' },
-      // Contact control and NPC doctrine read the same selection the inspector
-      // does, so they share its column as tabs (issue #1510).
-      { type: 'tabs', tabs: ['inspector', 'contact', 'npc', 'system'], active: 'inspector' },
+      // Every selected-entity tool reads the same selection the inspector does,
+      // so they share its column as tabs (issues #1510, #1511 and #1512).
+      { type: 'tabs', tabs: ['inspector', 'contact', 'npc', 'system', 'despawn', 'faction'],
+        active: 'inspector' },
     ] });
     // The operator's own instruments open a group of their own.
     expect(defaultLiveLayout().root.children[0].children[0].children[1]).toEqual({ type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' });
@@ -39,14 +41,15 @@ describe('Live dock layout model', () => {
 
   it('repairs obsolete, malformed and duplicate layouts', () => {
     expect(normalizeLiveLayout({ version: 99 })).toEqual(defaultLiveLayout());
-    expect(normalizeLiveLayout({ version: 10, root: { type: 'tabs', tabs: ['roster', 'roster', 'unsafe'] },
+    expect(normalizeLiveLayout({ version: 11, root: { type: 'tabs', tabs: ['roster', 'roster', 'unsafe'] },
       floats: [{ panel: 'join' }], closed: ['readiness'], selected: 'unsafe' })).toEqual({
-      version: 10, root: { type: 'tabs', tabs: ['roster', 'attention', 'health'], active: 'roster' },
+      version: 11, root: { type: 'tabs', tabs: ['roster', 'attention', 'health'], active: 'roster' },
       floats: [{ panel: 'join', x: 12, y: 12, width: 420, height: 360 }],
       closed: ['readiness', 'manual-save', 'mission', 'comms', 'activity', 'journal', 'session-history',
         'map', 'workload', 'widgets', 'station', 'station-console',
         'presentation', 'audition', 'source-link', 'spawn', 'inspector', 'checkpoint', 'restore',
-        'contact', 'npc', 'misclassify', 'report-policy', 'ghost', 'system', 'effect'],
+        'contact', 'npc', 'misclassify', 'report-policy', 'ghost', 'system', 'effect',
+        'despawn', 'faction'],
       selected: 'roster',
     });
   });
@@ -66,7 +69,7 @@ describe('Live dock layout model', () => {
       floats: [{ panel: 'comms', x: 5, y: 6, width: 300, height: 200 }],
       closed: ['join', 'manual-save'], selected: 'readiness',
     });
-    expect(migrated.version).toBe(10);
+    expect(migrated.version).toBe(11);
     expect(migrated.floats).toEqual([]);
     // A draft nobody opened is closed, which is what "not open" means for one.
     expect(migrated.closed).toEqual(['join', 'manual-save', 'spawn', 'restore',
@@ -77,7 +80,8 @@ describe('Live dock layout model', () => {
     expect(migrated.root.children[0].children[0].children[1]).toEqual({ type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' });
     expect(migrated.root.children[0].children[1]).toEqual({ type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
       { type: 'tabs', tabs: ['map', 'station-console'], active: 'map' },
-      { type: 'tabs', tabs: ['inspector', 'contact', 'npc', 'system'], active: 'inspector' },
+      { type: 'tabs', tabs: ['inspector', 'contact', 'npc', 'system', 'despawn', 'faction'],
+        active: 'inspector' },
     ] });
     expect(migrated.root.children[1]).toEqual({
       type: 'tabs', tabs: ['comms', 'activity', 'journal', 'session-history', 'health', 'checkpoint'], active: 'comms' });
@@ -99,7 +103,7 @@ describe('Live dock layout model', () => {
     });
 
     expect(migrated).toEqual({
-      version: 10,
+      version: 11,
       root: { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
         { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
           { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
@@ -109,7 +113,9 @@ describe('Live dock layout model', () => {
           ] },
           { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
             { type: 'tabs', tabs: ['map', 'station-console'], active: 'map' },
-            { type: 'tabs', tabs: ['inspector', 'contact', 'npc', 'system'], active: 'inspector' },
+            { type: 'tabs',
+              tabs: ['inspector', 'contact', 'npc', 'system', 'despawn', 'faction'],
+              active: 'inspector' },
           ] },
         ] },
         { type: 'tabs', tabs: ['comms', 'journal', 'health', 'checkpoint'], active: 'journal' },
@@ -136,13 +142,14 @@ describe('Live dock layout model', () => {
       selected: 'roster',
     });
 
-    expect(migrated.version).toBe(10);
+    expect(migrated.version).toBe(11);
     // The console joins the map; its controls join the workflow group; the
     // inspector takes a column of its own beside them.
     expect(migrated.root.children[1]).toEqual({
       type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
         { type: 'tabs', tabs: ['map', 'station-console'], active: 'map' },
-        { type: 'tabs', tabs: ['inspector', 'contact', 'npc', 'system'], active: 'inspector' },
+        { type: 'tabs', tabs: ['inspector', 'contact', 'npc', 'system', 'despawn', 'faction'],
+          active: 'inspector' },
       ] });
     // `health` was closed and is pinned, so it is repaired back — after the
     // panels this migration registers, which is the order the native profile
@@ -170,7 +177,7 @@ describe('Live dock layout model', () => {
       selected: 'mission',
     });
 
-    expect(migrated.version).toBe(10);
+    expect(migrated.version).toBe(11);
     // They open a group of their own under the panels they were beside.
     expect(migrated.root.children[1]).toEqual({ type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' });
     // v4 had no utility vocabulary, so a stored tree cannot name one.
@@ -197,10 +204,11 @@ describe('Live dock layout model', () => {
         'presentation', 'audition', 'source-link', 'spawn', 'checkpoint', 'restore', 'npc'],
       selected: 'contact',
     });
-    expect(migrated.version).toBe(10);
-    // It joins the group the inspector is in, keeping the operator's own tab.
+    expect(migrated.version).toBe(11);
+    // It joins the group the inspector is in, keeping the operator's own tab —
+    // and so do the panels the version after it registered (issue #1512).
     expect(migrated.root.children[1]).toMatchObject({
-      tabs: ['inspector', 'contact', 'system'], active: 'contact' });
+      tabs: ['inspector', 'contact', 'system', 'despawn', 'faction'], active: 'contact' });
     // A draft is never PLACED by migration: not open is what closed means.
     expect(migrated.closed).toContain('effect');
     expect(JSON.stringify(migrated.root)).not.toContain('"effect"');
@@ -218,7 +226,7 @@ describe('Live dock layout model', () => {
     // failure from themselves, so neither closes — by control or by profile.
     expect(liveLayoutModel.pinned).toEqual(['attention', 'health']);
     const closedEverything = normalizeLiveLayout({
-      version: 10, root: { type: 'tabs', tabs: ['roster'], active: 'roster' }, floats: [],
+      version: 11, root: { type: 'tabs', tabs: ['roster'], active: 'roster' }, floats: [],
       closed: liveLayoutModel.panels.filter(panel => panel !== 'roster'), selected: 'roster',
     });
     expect(closedEverything.closed).not.toContain('attention');

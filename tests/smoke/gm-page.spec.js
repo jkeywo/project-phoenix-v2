@@ -194,6 +194,7 @@ test('equal GMs apply authored NPC doctrine through real AI and reject stale or 
   }
   await first.evaluate(() => window.__hostSetNpcDoctrineChecked({ ...window.__npcRequests[0], doctrine: 'withdrawn-choice', correlation: 'unknown-npc-doctrine' }));
   await expect(first.locator('#gm-npc-results [data-correlation="unknown-npc-doctrine"]')).toHaveAttribute('data-outcome', 'refused');
+  await revealGmPanel(first, 'despawn');
   await first.locator('#gm-despawn-preview').click();
   await expect(first.locator('#gm-action-confirmation')).toBeVisible();
   await first.locator('[data-confirmation-accept]').click();
@@ -455,6 +456,7 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
     }));
     throw new Error(`Map keyboard selection did not reach ${name}: ${JSON.stringify(state)}`);
   };
+  await revealGmPanel(page, 'despawn');
   for (const name of ['Protected courier', 'Foundational hazard']) {
     await select(name);
     await expect(page.locator('#gm-despawn-preview')).toBeDisabled();
@@ -474,7 +476,13 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
     await page.locator('[data-confirmation-accept]').click();
     await expect(page.locator('#gm-despawn-results li[data-outcome="applied"]')).toHaveCount(++count);
     await page.waitForFunction(uuid => !document.getElementById('gm-entity-map').state.blips.some(b => b.uuid === uuid), id);
+    // The selection card clears when its entity goes. Since issue #1512
+    // removal is a tab of its own in the inspector's group, so the card has to
+    // be brought back to be looked at — asserting it is hidden while its whole
+    // panel is hidden would pass whatever the card did.
+    await revealGmPanel(page, 'inspector');
     await expect(page.locator('#gm-entity-card')).toBeHidden();
+    await revealGmPanel(page, 'despawn');
   }
   // A runtime hazard receives normal spawn provenance through the real palette.
   // Spawn is a temporary action panel since issue #1506, so it is opened first.

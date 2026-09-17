@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 10;
+export const LIVE_LAYOUT_VERSION = 11;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -15,6 +15,7 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   tool('contact'), tool('npc'),
   tool('misclassify'), tool('report-policy'), tool('ghost'),
   tool('system'), tool('effect'),
+  tool('despawn'), tool('faction'),
 ]);
 export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
@@ -28,6 +29,7 @@ const V7_PANELS = Object.freeze([...V6_PANELS, 'inspector']);
 const V8_PANELS = Object.freeze([...V7_PANELS, 'checkpoint', 'restore']);
 const V9_PANELS = Object.freeze([...V8_PANELS,
   'contact', 'npc', 'misclassify', 'report-policy', 'ghost']);
+const V10_PANELS = Object.freeze([...V9_PANELS, 'system', 'effect']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -112,6 +114,14 @@ const ADDED_IN_V9 = Object.freeze([
  * System is a target-relative choice and a verb, so it is an ordinary tool
  * beside the selection it reads. */
 const ADDED_IN_V10 = Object.freeze([['system', 'inspector', 'tab']]);
+/** Panels registered after version 10. Removing one selected entity, and
+ * setting an ordered faction pair's absolute hostility, are both one choice and
+ * a verb — neither composes a draft — so both are ordinary tools beside the
+ * selection and the projection they read (issue #1512). */
+const ADDED_IN_V11 = Object.freeze([
+  ['despawn', 'inspector', 'tab'],
+  ['faction', 'inspector', 'tab'],
+]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -154,7 +164,7 @@ const liveArrangement = () => ({
       ] },
       { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
         group(['map', 'station-console'], 'map'),
-        group(['inspector', 'contact', 'npc', 'system'], 'inspector'),
+        group(['inspector', 'contact', 'npc', 'system', 'despawn', 'faction'], 'inspector'),
       ] },
     ] },
     group(['comms', 'activity', 'journal', 'session-history', 'health', 'checkpoint'], 'comms'),
@@ -167,9 +177,17 @@ const arrangementBeforeV7 = () => {
   documents.children[1] = documents.children[1].children[0];
   return arrangement;
 };
+/** The arrangement before removal and faction hostility joined the inspector
+ * (version 11). */
+const arrangementBeforeV11 = () => {
+  const arrangement = liveArrangement();
+  const documents = arrangement.root.children[0].children[1].children[1];
+  documents.tabs = documents.tabs.filter(panel => panel !== 'despawn' && panel !== 'faction');
+  return arrangement;
+};
 /** The arrangement before System control joined the inspector (version 10). */
 const arrangementBeforeV10 = () => {
-  const arrangement = liveArrangement();
+  const arrangement = arrangementBeforeV11();
   const documents = arrangement.root.children[0].children[1].children[1];
   documents.tabs = documents.tabs.filter(panel => panel !== 'system');
   return arrangement;
@@ -199,6 +217,10 @@ const v8Default = () => ({ version: 8, ...arrangementBeforeV9(),
 const v9Default = () => ({ version: 9, ...arrangementBeforeV10(),
   floats: [],
   closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost'],
+  selected: 'roster' });
+const v10Default = () => ({ version: 10, ...arrangementBeforeV11(),
+  floats: [],
+  closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
   selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
@@ -232,6 +254,8 @@ const v8 = createDockLayoutModel({ version: 8, panels: V8_PANELS, defaultLayout:
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [8] });
 const v9 = createDockLayoutModel({ version: 9, panels: V9_PANELS, defaultLayout: v9Default,
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [9] });
+const v10 = createDockLayoutModel({ version: 10, panels: V10_PANELS, defaultLayout: v10Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [10] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -246,7 +270,8 @@ const migrate = createDockLayoutMigration({
     { version: 7, model: v7, added: ADDED_IN_V7 },
     { version: 8, model: v8, added: ADDED_IN_V8 },
     { version: 9, model: v9, added: ADDED_IN_V9 },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V10 },
+    { version: 10, model: v10, added: ADDED_IN_V10 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V11 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

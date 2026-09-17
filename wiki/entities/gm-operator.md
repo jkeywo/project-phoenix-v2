@@ -102,6 +102,18 @@ the SELECTION never does, because it belongs to the map and the inspector rather
 than to this draft. A quick action pointing into a draft opens it, because a
 draft nobody opened is not a panel put away — it is simply not there.
 
+Issue #1512 finished the desk. Removing one selected entity, and setting an
+ordered faction pair's absolute hostility, are each one choice and a verb: a
+removable target plus its consequence confirmation, and a directional pair plus
+a hostile/neutral state. Neither composes anything, so neither is forced through
+the draft lifecycle — both are ordinary tools in the column that reads the same
+selection and projection they do. Rearranging them is a layout decision and
+nothing else: a stored arrangement carries placement only, never the selection
+the tools are aimed at and never an open confirmation, because a desk restored
+aimed at something the operator never chose is a desk that removes the wrong
+hull. With that, every panel the Live desk holds is a dock panel, and the
+inspector is its own reading surface and the authored objective region.
+
 Issue #1508 gave Spawn directed spatial picking through that docked map. Pick
 mode names the control capturing the chart and previews what committing would
 place — position, degrees AND a compass word, because a preview that only draws

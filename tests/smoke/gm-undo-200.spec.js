@@ -2,6 +2,7 @@ import { test, expect, waitForWasmReady } from './fixtures';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
+import { revealGmPanel } from './dock-helpers.js';
 
 // The GM console's smallest supported landscape surface and the top of the
 // enlargement range, both from #1421's shared matrix (PRD #1418).
@@ -36,6 +37,8 @@ test('GM faction change and its undo stay readable and operable at 200% text on 
     await page.evaluate((scale) => document.documentElement.style
       .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
 
+    // Faction hostility is a dock panel of its own since issue #1512.
+    await revealGmPanel(page, 'faction');
     // The control names only authored factions the world actually loaded.
     const panel = page.locator('#gm-faction-panel');
     await expect(panel).toBeVisible();

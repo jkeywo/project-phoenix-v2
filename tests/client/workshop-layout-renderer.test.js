@@ -148,6 +148,11 @@ describe('Workshop layout renderer', () => {
     expect(css).toMatch(/\.workshop-dock-root \.workshop-dock-canvas\s*\{[^}]*min-height:\s*32rem/);
     expect(css).toMatch(/\.workshop-dock-root \.workshop-split\s*\{[^}]*min-height:\s*0/);
     expect(css).not.toMatch(/\.workshop-split\s*\{[^}]*min-height:\s*32rem/);
+    // A tab strip is a set of destinations, and one group can hold six of them
+    // in a quarter-width column (the Live inspector's, since issue #1512). A
+    // strip that overflowed sideways would put a panel behind a horizontal
+    // scroll nobody looks for, so it wraps and the panel body takes the room.
+    expect(css).toMatch(/\.workshop-tab-list\s*\{[^}]*flex-wrap:\s*wrap/);
   });
 
   it('marks document panels so a renderer can arrange a context around them', () => {

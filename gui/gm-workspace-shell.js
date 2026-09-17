@@ -72,6 +72,10 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // Direct damage and repair is a complex action: a kind, an amount, a scope
   // over the hull or one Station or one System, and a clamp/lethality preview.
   ['effect', 'gm-effect-panel'],
+  // Removing one selected entity, and an ordered faction pair's absolute
+  // hostility, are each one choice and a verb — not drafts (issue #1512).
+  ['despawn', 'gm-despawn-panel'],
+  ['faction', 'gm-faction-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -189,6 +193,10 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // System control and direct effect follow them out (issue #1511): the last
   // two selected-entity actions the inspector was still carrying.
   move(root, 'gm-system-panel', 'gm-effect-panel');
+  // Removal and faction hostility are the last of them (issue #1512), and with
+  // that the inspector holds its own reading surfaces and the authored
+  // objective region — every action panel it carried is a dock panel now.
+  move(root, 'gm-despawn-panel', 'gm-faction-panel');
   // Restore leaves the checkpoint record to become a draft of its own: it
   // combines a selection, a preflight, a consequence preview and a
   // confirmation. The candidate it acts on is still whatever the record has
@@ -204,11 +212,10 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // place it. The dock moves it out into its own frame when it mounts.
   get('gm-activity')?.append(sessionHistory);
   const inspector = get('gm-inspector');
-  // The saved action history (issue #1441) joins the inspector column: it is
-  // the desk's detail/reading column, it already stacks and scrolls its own
-  // sections, and that is what keeps the journal legible at 200% text rather
-  // than competing for one of the fixed grid cells.
-  move(inspector, 'gm-objective-panel', 'gm-despawn-panel', 'gm-faction-panel');
+  // What is left inside the inspector: the authored objective region, which is
+  // a reading surface about the same selection rather than an action tool, and
+  // which stacks and scrolls with the entity card it annotates.
+  move(inspector, 'gm-objective-panel');
   // Authentic Station operation is two dock panels (issue #1504): the pending
   // state and the takeover controls are an ordinary tool, and the console
   // itself is a document. Neither is a new command route — the puppet still

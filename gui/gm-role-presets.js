@@ -64,6 +64,9 @@ export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
   // System control and direct effect followed them out in issue #1511.
   'gm-system-panel': 'gm-inspector',
   'gm-effect-panel': 'gm-inspector',
+  // Removal and faction hostility in issue #1512.
+  'gm-despawn-panel': 'gm-inspector',
+  'gm-faction-panel': 'gm-inspector',
 });
 
 /** Quick-action DOM ids this build actually draws. */

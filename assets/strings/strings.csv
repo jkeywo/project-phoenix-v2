@@ -127,6 +127,8 @@ server.gm.shell.layout.panel.report_policy,Live dock reported information draft 
 server.gm.shell.layout.panel.ghost,Live dock ghost contact draft panel,[Ghost contacts]
 server.gm.shell.layout.panel.system,Live dock System control panel,[Systems]
 server.gm.shell.layout.panel.effect,Live dock direct damage and repair draft panel,[Direct effect]
+server.gm.shell.layout.panel.despawn,Live dock entity removal panel,[Removal]
+server.gm.shell.layout.panel.faction,Live dock faction hostility panel,[Faction relations]
 server.gm.shell.manual_save_unavailable,Native GM manual save capability status,[Manual save is unavailable on this native surface.]
 workshop.new,New pack action,[New pack]
 workshop.save,Native project save action,[Save source]

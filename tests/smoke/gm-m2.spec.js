@@ -346,6 +346,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
     const spawned = await gm.evaluate(before => document.getElementById('gm-entity-map').state.blips
       .find(row => row.kind === 'npc_ship' && !before.includes(row.uuid)).uuid, existing);
     await selectEntity(gm, spawned); await selectEntity(second, spawned);
+    for (const page of [gm, second]) await revealGmPanel(page, 'despawn');
     await settleControl(gm, () => gm.locator('#gm-despawn-preview').click(), { cancel: true });
     // One operator holds a captured lethal intent while the equally privileged
     // peer removes its target. Acceptance must return canonical Refused.

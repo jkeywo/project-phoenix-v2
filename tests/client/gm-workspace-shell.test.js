@@ -928,6 +928,62 @@ it('opens the draft a quick action points into rather than pointing at nothing',
     .find(button => button.getAttribute('aria-controls') === 'gm-system-select').click();
   expect(document.getElementById('gm-system-select').closest('[data-panel]').hidden).toBe(false);
 });
+it('docks removal and faction hostility as ordinary tools, not drafts', () => {
+  const { shell } = mount();
+  // Each is one choice and a verb, so neither goes through the draft
+  // lifecycle: both are in the arrangement from the start, in the column that
+  // reads the same selection and projection they do.
+  for (const [panel, id] of [['despawn', 'gm-despawn-panel'], ['faction', 'gm-faction-panel']]) {
+    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
+    expect(document.querySelector(`#gm-inspector #${id}`), id).toBeNull();
+    expect(shell.liveLayoutState().closed, panel).not.toContain(panel);
+    expect(liveLayoutModel.isTemporary(panel), panel).toBe(false);
+    expect(document.querySelector(`[data-panel="${panel}"]`).dataset.panelKind, panel).toBe('tool');
+  }
+  expect(document.querySelector('[data-panel="despawn"] #gm-despawn-preview')).not.toBeNull();
+  expect(document.querySelector('[data-panel="faction"] #gm-faction-apply')).not.toBeNull();
+  // With that, the inspector holds its own reading surfaces and the authored
+  // objective region — every action panel it used to carry is a dock panel.
+  expect([...document.getElementById('gm-inspector').querySelectorAll('section[id]')]
+    .map(section => section.id)).toEqual(['gm-knowledge-panel', 'gm-objective-panel']);
+});
+
+it('restores where a tool was, aimed at nothing and asking nothing', () => {
+  // Rearranging is a layout decision and nothing else. A desk restored aimed at
+  // an entity the operator never chose is a desk that removes the wrong hull,
+  // and one restored mid-confirmation is a press nobody made.
+  const first = mount();
+  first.shell.selection({ entity_id: 'npc-7', name: 'Raider', status: { systems: [] } });
+  document.getElementById('gm-despawn-preview').disabled = false;
+  first.shell.setLiveLayout(
+    liveLayoutModel.dock(first.shell.liveLayoutState(), 'despawn', 'roster', 'tab'));
+  const stored = liveLayoutModel.normalize(first.shell.liveLayoutState());
+  expect(JSON.stringify(stored.root.children[0].children[0].children[0].tabs))
+    .toContain('despawn');
+  // The chip the desk drew for that selection is on screen right now, so a
+  // restored desk that did the same would be indistinguishable from this one.
+  expect(document.getElementById('gm-selection-chip').textContent).toBe('Raider');
+  mountedShells.splice(mountedShells.indexOf(first.shell), 1);
+  first.shell.dispose();
+
+  // A fresh desk, given nothing but that arrangement.
+  const { shell } = mount();
+  shell.mountLiveLayout(stored);
+  // It comes back where it was: sharing the roster's stack, which is a place
+  // only the stored arrangement puts it — by default it is a tab of the
+  // inspector's group, at the other end of the desk.
+  const stack = document.getElementById('gm-despawn-panel').closest('.workshop-tab-stack');
+  expect(stack.querySelector('[data-panel="roster"]')).not.toBeNull();
+  expect(stack.querySelector('[data-panel="inspector"]')).toBeNull();
+  expect(shell.liveLayoutState()).toEqual(stored);
+  // And it restores PLACEMENT only. The desk it was stored from had a live
+  // selection drawn on it; this one has never selected anything, and an
+  // arrangement cannot say otherwise.
+  expect(document.getElementById('gm-selection-chip').textContent).toBe('');
+  // What each tool is aimed at is the panel module's own state, and clearing
+  // it is tested where those modules run: tests/client/gm-despawn-panel.test.js
+  // and tests/client/gm-faction-panel.test.js.
+});
 it('draws a bar pill only for a session fact a live payload carries', () => {
   const { shell } = mount();
   // Nothing has published yet: an empty health seed, no quiet advisory and no

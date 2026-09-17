@@ -113,6 +113,14 @@ const CASES = [
       'checkpoint', 'restore', 'npc', 'misclassify', 'report-policy', 'ghost'],
     selected: 'contact',
   }],
+  ['a version 10 layout', {
+    version: 10, root: group(['roster', 'inspector', 'system'], 'system'), floats: [],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal',
+      'session-history', 'map', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'presentation', 'audition', 'source-link', 'spawn', 'checkpoint',
+      'restore', 'contact', 'npc', 'misclassify', 'report-policy', 'ghost', 'effect'],
+    selected: 'system',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

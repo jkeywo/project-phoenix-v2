@@ -186,6 +186,29 @@ function setup(opts) {
   return { el, canvas, fakeCtx, tickRaf };
 }
 
+it('restores its render loop and size observer when it is moved between parents', () => {
+  // Docking reparents the map (issue #1503), and there is no way to move a node
+  // between parents without disconnecting it. A frozen picture afterwards would
+  // be the whole panel broken, so connectedCallback restores what
+  // disconnectedCallback cancelled.
+  const { el, tickRaf } = setup();
+  expect(el.rafId).not.toBeNull();
+  expect(el.resizeObserver).not.toBeNull();
+
+  const destination = document.createElement('div');
+  document.body.append(destination);
+  destination.append(el);
+
+  expect(el.rafId).not.toBeNull();
+  expect(el.resizeObserver).not.toBeNull();
+  // The move invalidated the picture, and the loop is still there to repaint it.
+  expect(el.needsRender).toBe(true);
+  const painted = fakeCtx._ops.length;
+  tickRaf();
+  expect(fakeCtx._ops.length).toBeGreaterThan(painted);
+  expect(el.rafId).not.toBeNull();
+});
+
 function click(el, x, y) {
   el.dispatchEvent(new MouseEvent('mousedown', { clientX: x, clientY: y, bubbles: true }));
   el.dispatchEvent(new MouseEvent('mouseup', { clientX: x, clientY: y, bubbles: true }));

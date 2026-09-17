@@ -198,6 +198,16 @@ export class PhNavigationMap extends PhElement {
 
   connectedCallback() {
     super.connectedCallback();
+    // A dock move disconnects and reconnects this element (issue #1503): there
+    // is no way to move a node between parents without that. `disconnectedCallback`
+    // cancelled the render loop and the size observer, so both are restored here
+    // rather than only in `onTemplate`. Without this the map comes back as a
+    // frozen picture the moment an operator rearranges the Live workspace.
+    if (this.canvas) {
+      if (!this.resizeObserver) this.initResize();
+      this.needsRender = true;
+      if (this.rafId == null) this.rafId = requestAnimationFrame(() => this.#rafLoop());
+    }
     // Focusable, named group + keyboard operation (issue #1176). The chart was
     // a bare <canvas> the keyboard could not land on: pan/zoom/tap lived only
     // on the pointer, and the coarse structural floor let it pass because the
@@ -219,6 +229,24 @@ export class PhNavigationMap extends PhElement {
     this.canvas.addEventListener('touchmove', this.#boundTouchMove, { passive: false });
     this.canvas.addEventListener('touchend', this.#boundTouchEnd);
     this.canvas.addEventListener('touchcancel', this.#boundTouchEnd);
+  }
+
+  /** Stop or resume the render loop without disconnecting.
+   *
+   * A docked map can sit behind another tab, or with no frame at all, and a
+   * hidden map redrawing every frame is pure cost: `#rafLoop` reads the live
+   * text scale through getComputedStyle and every projection marks the picture
+   * dirty again. Resuming always repaints, because whatever arrived while it
+   * was stopped never reached the canvas. */
+  setRendering(enabled) {
+    if (!this.canvas) return;
+    if (enabled === false) {
+      if (this.rafId != null) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+      return;
+    }
+    if (!this.isConnected) return;
+    this.needsRender = true;
+    if (this.rafId == null) this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
 
   disconnectedCallback() {

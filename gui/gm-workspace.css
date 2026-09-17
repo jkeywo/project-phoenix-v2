@@ -43,11 +43,13 @@
    than nine grid cells. A region is the panel frame; the sections inside it
    are blocks that stack and scroll within it, which is how the artboard draws
    Attention/Roster/authored widgets as one left-hand panel and
-   Comms/Activity/Action log as one tabbed centre panel. Nothing changed
-   column: every later milestone adds panels to the column that already held
-   its kind, which is the canvas note "each later screen adds panels rather
-   than moving them". Every one of them scrolls in place, which is what keeps
-   the desk usable at --a11y-text-scale: 2 (PRD #1418). */
+   Comms/Activity/Action log as one tabbed centre panel. Issues #1502 and #1503
+   then migrated most of those panels into the Live dock workspace, leaving two
+   grid children. Nothing changed column: every later milestone adds panels to
+   the column that already held its kind, which is the canvas note "each later
+   screen adds panels rather than moving them". Every one of them scrolls in
+   place, which is what keeps the desk usable at --a11y-text-scale: 2
+   (PRD #1418). */
 #gm-console.gm-desk #gm-workspace {
   display: grid; grid-template-columns: 320px minmax(0, 1fr) 340px;
   /* Every row keeps a FLOOR that scales with the operator’s text size (PRD
@@ -106,10 +108,17 @@
    PRESET's alone (gui/gm-role-presets.js, GM_ROLE_PRESET_PANEL_IDS). The dock
    reads that attribute and drops the tab; it never writes it, so the two can
    never race. */
-#gm-console.gm-desk #gm-desk-brief { grid-area: 1 / 1 / 3 / 2; }
-#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2 / 3 / 3; overflow: hidden; }
-#gm-console.gm-desk #gm-desk-detail { grid-area: 1 / 3; }
-#gm-console.gm-desk #gm-health-panel { grid-area: 2 / 3; }
+/* Since issue #1503 the map, the attention queue, Station workload, the
+   authored widget region and peer health are dock panels too, so the desk is
+   TWO regions: the dock workspace across the left and centre, and the detail
+   column. The dock region does not open a scroll box of its own — each dock
+   panel scrolls inside its own frame, which keeps the chain the same depth the
+   region-per-column desk had. */
+#gm-console.gm-desk #gm-workspace > .gm-desk-dock {
+  grid-area: 1 / 1 / 3 / 3; min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+#gm-console.gm-desk #gm-desk-detail { grid-area: 1 / 3 / 3 / 4; }
 /* The bar's health pills (artboard: Tick / Quiet / Checkpoint). Each is drawn
    only when the live payload behind it exists, so a missing pill is a missing
    fact rather than an invented one. Every pill states its condition as a WORD;
@@ -188,8 +197,14 @@
 #gm-console.gm-desk #gm-live-layout .workshop-dock-canvas { min-height: 24rem; flex: 1 1 auto; }
 /* Each record panel scrolls inside its own frame; the frame is the scroll box,
    exactly as the retired centre region was. */
-#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > section {
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > section,
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > div {
   flex: 0 0 auto; min-width: 0; overflow: visible; border: 0; background: none; padding: 0;
+}
+/* The map is a document panel: it takes the room its frame gives it rather
+   than shrinking to its content, and it never opens a scroll box. */
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-map-panel {
+  flex: 1 1 auto; min-height: 16rem; overflow: hidden;
 }
 #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-comms-panel { display: grid; }
 #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > section,
@@ -201,8 +216,8 @@
 }
 @media (max-width: 1000px) {
   #gm-console.gm-desk #gm-workspace { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
-  #gm-console.gm-desk #gm-workspace > .gm-desk-region { grid-area: auto; max-height: 600px; }
-  #gm-console.gm-desk #gm-map-panel { height: 480px; }
+  #gm-console.gm-desk #gm-workspace > :is(.gm-desk-region, .gm-desk-dock) { grid-area: auto; max-height: 600px; }
+  #gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-map-panel { height: 480px; }
 }
 #gm-console.gm-desk .gm-station-bar { padding-left: var(--settings-cog-keepout, var(--space-5)); padding-right: var(--space-5); }
 #gm-console.gm-desk #gm-role-preset-label { flex: 0 1 auto; max-width: 200px; }
@@ -263,7 +278,7 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-join-controls { background: var(--surface-panel); border: 1px solid var(--edge-bright); color: var(--ink); font: inherit; }
 #gm-console.gm-desk #gm-map-chips p { background: var(--surface-panel); border: 1px solid var(--edge); padding: var(--space-2) var(--space-3); }
 
-#gm-console.gm-desk #gm-workspace > #gm-map-panel { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+#gm-console.gm-desk #gm-map-panel { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
 #gm-console.gm-desk #gm-map-heading { grid-area: 1 / 1; }
 #gm-console.gm-desk #gm-entity-pending { grid-area: 2 / 1; }
 #gm-console.gm-desk #gm-entity-map { grid-area: 3 / 1; height: 100%; }
@@ -555,13 +570,13 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-workload-status:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
 
 /* ── The typed world-authored widget region (issue #1439) ────────────────
-   The post-M5 screen puts it where the artboard does: the last block of the
+   The post-M5 screen put it where the artboard does — the last block of the
    LEFT region, under Attention and the Roster, which is where a world's own
-   mission panel belongs (the artboard's illustrative "Skyhook claimants").
+   mission panel belongs (the artboard's illustrative "Skyhook claimants") —
+   and issue #1503 made it a Live dock panel in that same group.
    `gui/gm-widgets-panel.js` still owns the `hidden` attribute, so a scenario
-   that authors no widget leaves the left column exactly as it was and the
-   vertical fit the smoke spec pins at both default-text viewports is
-   untouched. It never scrolls sideways: every card is a min-width: 0 auto-fit
+   that authors no widget has no widget TAB: the dock reads that attribute and
+   drops the panel, parking its node so the owner can bring it back. It never scrolls sideways: every card is a min-width: 0 auto-fit
    track that wraps at 200% instead of squeezing. */
 #gm-console.gm-desk #gm-widgets-list {
   list-style: none; margin: 0; padding: 0; min-width: 0;
@@ -608,6 +623,3 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-widget-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); min-width: 0; }
 #gm-console.gm-desk .gm-widget-actions button { flex: 1 1 12ch; min-height: var(--control-hit-min); min-width: 0; }
 #gm-console.gm-desk .gm-widget-actions button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
-@media (max-width: 1000px) {
-  #gm-console.gm-desk #gm-widgets { grid-area: auto; }
-}

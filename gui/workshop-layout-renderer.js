@@ -144,13 +144,17 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     });
     if (!projection) attachPointerDocking(tab, panel, floating, node);
     header.append(tab);
-    if (!projection) header.append(
-      makeButton(labels.float, () => emit(model.float(state, panel, {}, canvasBounds()), panel), {
+    if (!projection) {
+      header.append(makeButton(labels.float, () => emit(model.float(state, panel, {}, canvasBounds()), panel), {
         'aria-label': `${labels.float}: ${labels.panels[panel]}`, 'data-layout-control': 'float',
-      }),
-      makeButton(labels.close, () => emit(model.close(state, panel), panel), {
-        'aria-label': `${labels.close}: ${labels.panels[panel]}`, 'data-layout-control': 'close',
       }));
+      // A pinned panel offers no way to close it, because there is none.
+      if (!model.isPinned?.(panel)) {
+        header.append(makeButton(labels.close, () => emit(model.close(state, panel), panel), {
+          'aria-label': `${labels.close}: ${labels.panels[panel]}`, 'data-layout-control': 'close',
+        }));
+      }
+    }
     const targets = doc.createElement('div'); targets.className = 'workshop-dock-targets';
     if (!projection) {
       for (const [placement, symbol] of [['left', '<'], ['top', '^'], ['tab', '+'], ['bottom', 'v'], ['right', '>']]) {

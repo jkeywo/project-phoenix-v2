@@ -1,11 +1,13 @@
 /** Presentation only: both hosts compose their existing presenters into one desk.
  *
  * The composition is the design canvas's "After M5 - facilitation + operations"
- * artboard (PRD #930): one bar, three columns, two rows, six REGIONS. A region
- * is the artboard's panel frame; the sections inside it are the blocks that
- * frame holds. Nothing changed column against the After-M3 screen this file
- * already drew - each milestone adds panels to the column that already held
- * its kind. */
+ * artboard (PRD #930): one bar, three columns, two rows. The artboard's nine
+ * grid cells first became six REGIONS - a region is the artboard's panel frame
+ * and the sections inside it are the blocks that frame holds - and issues #1502
+ * and #1503 then migrated most of those panels into the Live dock workspace,
+ * leaving TWO grid children: the dock across the left and centre, and the
+ * detail column. Nothing changed column on the way: each panel became a dock
+ * panel in the place its region already held. */
 import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 import { healthStateLabelId } from './gm-health-banner.js';
 import { formatAttentionAge } from './gm-attention-panel.js';
@@ -28,6 +30,11 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   ['activity', 'gm-activity'],
   ['journal', 'gm-journal'],
   ['session-history', 'gm-session-history'],
+  ['map', 'gm-map-panel'],
+  ['attention', 'gm-attention-panel'],
+  ['workload', 'gm-workload-panel'],
+  ['widgets', 'gm-widgets'],
+  ['health', 'gm-health-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -107,29 +114,29 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     el.className = stacked ? 'gm-desk-region gm-desk-stack' : 'gm-desk-region';
     return el;
   };
-  const brief = region('gm-desk-brief', true);
+  // The dock workspace is the desk's left and centre: since issue #1503 the
+  // map, the attention queue, Station workload, the authored widget region and
+  // peer health are registered panels in it rather than grid regions.
+  //
+  // The map IS reparented now, which it never was before. There is no way to
+  // move a node between parents without disconnecting it, so
+  // <ph-navigation-map> restores its render loop and size observer in
+  // `connectedCallback` instead of only in `onTemplate`. Every other migrated
+  // panel moves node-and-listeners intact, exactly as the roster panels do.
+  // The dock workspace is NOT a panel frame: it carries no padding, border or
+  // chrome and opens no scroll box of its own, because each dock panel scrolls
+  // inside its own frame. Giving it `.gm-desk-region` would put a second
+  // scroller in the chain — the nested-scroll fault the region layout exists to
+  // avoid — and clip floating panels at the region's chamfered corners.
+  const brief = element('div', 'gm-desk-brief');
+  brief.className = 'gm-desk-dock';
   const detail = region('gm-desk-detail', true);
-  // The map is NEVER reparented: moving it would disconnect
-  // <ph-navigation-map> and cancel its render loop. The regions are placed
-  // around the cell it already occupies, and the panels move into regions that
-  // are already in the document so `getElementById` keeps finding them.
   const mapPanel = get('gm-map-panel');
-  for (const id of ['gm-map-panel', 'gm-health-panel']) {
-    get(id)?.classList.add('gm-desk-region');
-  }
   desk.insertBefore(brief, mapPanel);
   mapPanel.after(detail);
-  detail.after(get('gm-health-panel'));
-  // Left: what is waiting, who is flying it, and whatever the world authored.
-  // `gm-widgets` is last on purpose — gui/gm-widgets-panel.js owns its
-  // `hidden` state, which is why it is absent from GM_ROLE_PRESET_PANEL_IDS:
-  // a second writer there would race it, exactly as it would for the Station
-  // puppet's controls.
-  move(brief, 'gm-attention-panel');
   const liveSurface = element('div', 'gm-live-layout');
   liveSurface.className = 'gm-live-layout';
   brief.append(liveSurface);
-  move(brief, 'gm-workload-panel', 'gm-widgets');
   // Right: the selected hull, then the checkpoints a live event is recovered
   // from (issues #1445/#1446) at the bottom of the column, as the artboard
   // draws them. The restore control travels inside #gm-checkpoint.
@@ -198,8 +205,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   get('gm-map-panel').insertBefore(chip, get('gm-map-legend'));
   const armedChip = element('p', 'gm-armed-chip');
   get('gm-map-panel').insertBefore(armedChip, get('gm-map-legend'));
-  // Keep the upgraded map connected: moving it would cancel its render loop.
-  // CSS shares its grid cell with the chip overlay instead of reparenting it.
+  // The chips are laid over the map's own grid rather than inserted into its
+  // canvas, so they travel with it when it is docked.
   const mapChips = element('div', 'gm-map-chips');
   mapChips.append(chip, armedChip);
   get('gm-map-panel').insertBefore(mapChips, get('gm-map-legend'));
@@ -477,6 +484,11 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     liveLayout = mountDockLayout({ root, surface: liveSurface,
       panels: { roster, readiness, join: join || element('section'), 'manual-save': manual, ...migrated },
       available: panel => !liveDockNodes.get(panel)?.hidden,
+      onVisible(visible) {
+        // A map with no frame draws 60 times a second into a canvas of no size.
+        liveDockNodes.get('map')?.querySelector('ph-navigation-map')
+          ?.setRendering?.(visible.has('map'));
+      },
       labels: {
         switcher: t('server.gm.shell.layout.switcher'), reset: t('server.gm.shell.layout.reset'),
         float: t('server.gm.shell.layout.float'), close: t('server.gm.shell.layout.close'),
@@ -505,6 +517,12 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     mountLiveLayout,
     setLiveLayout(value) { liveLayout?.set(value); },
     liveLayoutState() { return liveLayout?.state() || null; },
+    /** Bring the attention region to the front for a banner that has just been
+     * drawn into it. A technical banner is rendered verbatim so a Game Master
+     * cannot hide a connection or recovery failure from themselves; a panel
+     * sitting behind another tab would hide it just as effectively as a role
+     * preset would, so the arrangement yields to it. */
+    revealBanners() { return liveLayout?.reveal('attention') === true; },
     /** Bring one of the migrated record panels to the front.
      *
      * A panel that is not the active tab is `hidden`, so anything inside it is

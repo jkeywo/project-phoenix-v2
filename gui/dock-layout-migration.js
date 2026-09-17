@@ -80,12 +80,16 @@ export function createDockLayoutMigration({ version, generations, current, rehom
     let migrated = { ...normalized, version, closed: [...normalized.closed, ...added.map(([panel]) => panel)] };
     const previousActives = activePanels(normalized.root);
     migrated = rehome?.(migrated, from, value, generation) ?? migrated;
-    migrated = current.normalize(migrated, bounds);
+    // The panels this migration is about to place are still listed as closed, so
+    // the pinned repair has to wait until they have been placed properly.
+    migrated = current.normalize(migrated, bounds, { repairPinned: false });
     for (const [panel, preferred, placement = 'tab'] of added) {
       migrated = addMigrationPanel(migrated, panel, preferred, current, [], placement);
     }
     settleNewGroups(migrated.root, new Set(added.map(([panel]) => panel)));
     restoreActives(migrated.root, previousActives);
+    // Backstop for a pinned panel that found no target to join.
+    migrated = current.normalize(migrated, bounds);
     migrated.selected = normalized.selected;
     return migrated;
   };

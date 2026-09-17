@@ -5,10 +5,17 @@
  * panels belong in the central group. */
 export const PANEL_KIND = Object.freeze({ DOCUMENT: 'document', TOOL: 'tool' });
 
-export function createDockLayoutModel({ version, panels, defaultLayout, compatibleVersions = [version] }) {
+/** `pinned` names panels the operator may not close. It exists for a panel that
+ * carries something the desk guarantees will be seen — the GM attention region
+ * renders connection and recovery banners verbatim so a Game Master cannot hide
+ * a failure from themselves — and a panel with no frame is as hidden as one a
+ * role preset put away. A pinned panel may still be tabbed, split or floated. */
+export function createDockLayoutModel({ version, panels, defaultLayout, pinned = [],
+  compatibleVersions = [version] }) {
   const descriptors = panels.map(panel => typeof panel === 'string' ? { id: panel, kind: PANEL_KIND.TOOL }
     : { id: panel.id, kind: panel.kind === PANEL_KIND.DOCUMENT ? PANEL_KIND.DOCUMENT : PANEL_KIND.TOOL });
   const panelIds = Object.freeze(descriptors.map(panel => panel.id));
+  const pinnedIds = Object.freeze(pinned.filter(panel => panelIds.includes(panel)));
   const kinds = Object.freeze(Object.fromEntries(descriptors.map(panel => [panel.id, panel.kind])));
   const isPanel = value => panelIds.includes(value);
   const clone = value => JSON.parse(JSON.stringify(value));
@@ -55,7 +62,8 @@ export function createDockLayoutModel({ version, panels, defaultLayout, compatib
     if (node?.type === 'split') return node.children.map(child => firstVisible(child)).find(Boolean);
     return floats[0]?.panel || null;
   }
-  function normalize(value, bounds) {
+  const settle = (value, bounds) => normalize(value, bounds, { repairPinned: false });
+  function normalize(value, bounds, { repairPinned = true } = {}) {
     if (!value || !compatibleVersions.includes(value.version)) return clone(defaultLayout());
     const seen = new Set();
     const root = normalizeNode(value.root, seen);
@@ -68,9 +76,24 @@ export function createDockLayoutModel({ version, panels, defaultLayout, compatib
     const closed = Array.isArray(value.closed)
       ? value.closed.filter(panel => isPanel(panel) && !seen.has(panel) && seen.add(panel)) : [];
     for (const panel of panelIds) if (!seen.has(panel)) closed.push(panel);
+    // A pinned panel that arrived closed — from a hand-edited or older profile —
+    // is put back rather than honoured: closing it is not a choice this surface
+    // offers, so a stored tree claiming it was closed is not one to trust.
+    let repaired = root;
+    for (const panel of repairPinned ? pinnedIds : []) {
+      const index = closed.indexOf(panel);
+      if (index < 0) continue;
+      closed.splice(index, 1);
+      repaired = placeInFirstGroup(repaired, panel);
+    }
     const selected = isPanel(value.selected) && !closed.includes(value.selected)
-      ? value.selected : firstVisible(root, floats) || panelIds[0];
-    return { version, root, floats, closed, selected };
+      ? value.selected : firstVisible(repaired, floats) || panelIds[0];
+    return { version, root: repaired, floats, closed, selected };
+  }
+  function placeInFirstGroup(node, panel) {
+    if (!node) return group([panel]);
+    if (node.type === 'tabs') return group([...node.tabs, panel], node.active);
+    return { ...node, children: [placeInFirstGroup(node.children[0], panel), ...node.children.slice(1)] };
   }
   function removeFromNode(node, panel) {
     if (!node) return null;
@@ -120,31 +143,32 @@ export function createDockLayoutModel({ version, panels, defaultLayout, compatib
     } else {
       const result = updateNode(next.root, target, joined); if (!result.found) return state; next.root = result.node;
     }
-    next.selected = panel; return normalize(next);
+    next.selected = panel; return settle(next);
   }
   function float(state, panel, rect = {}, bounds) {
     if (!isPanel(panel)) return state;
     const next = detached(state, panel); const offset = 24 + next.floats.length * 28;
     next.floats.push({ panel, x: rect.x ?? offset, y: rect.y ?? offset, width: rect.width ?? 420, height: rect.height ?? 360 });
-    next.selected = panel; return normalize(next, bounds);
+    next.selected = panel; return settle(next, bounds);
   }
   function moveFloat(state, panel, x, y, bounds) {
     const next = clone(state); const entry = next.floats.find(value => value.panel === panel);
     if (!entry || !Number.isFinite(x) || !Number.isFinite(y)) return state;
-    entry.x = x; entry.y = y; next.selected = panel; return normalize(next, bounds);
+    entry.x = x; entry.y = y; next.selected = panel; return settle(next, bounds);
   }
   function close(state, panel) {
-    if (!isPanel(panel)) return state;
+    if (!isPanel(panel) || pinnedIds.includes(panel)) return state;
     const next = detached(state, panel); next.closed.push(panel); next.selected = firstVisible(next.root, next.floats) || panel;
-    return normalize(next);
+    return settle(next);
   }
   function reopen(state, panel) {
     if (!isPanel(panel) || !state.closed.includes(panel)) return state;
     const target = firstVisible(state.root);
-    if (!target) { const next = detached(state, panel); next.root = group([panel]); next.selected = panel; return normalize(next); }
+    if (!target) { const next = detached(state, panel); next.root = group([panel]); next.selected = panel; return settle(next); }
     return dock(state, panel, target, 'tab');
   }
   const kind = panel => kinds[panel] || null;
-  return Object.freeze({ panels: panelIds, kind,
+  const isPinned = panel => pinnedIds.includes(panel);
+  return Object.freeze({ panels: panelIds, kind, pinned: pinnedIds, isPinned,
     defaultLayout, normalize, select, dock, float, moveFloat, close, reopen });
 }

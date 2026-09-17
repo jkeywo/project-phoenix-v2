@@ -28,32 +28,42 @@ it('lays the desk out as the post-M5 screen and keeps the authentic iframe outsi
   expect(document.querySelector('#gm-inspector #gm-station-toggle')).not.toBeNull();
   expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
-  // The canvas artboard "After M5 - facilitation + operations": six regions in
-  // three columns over two rows, in reading order. Three of them are panel
-  // sections in their own right; three are frames holding a stack of panels.
+  // Since issue #1503 the desk is TWO regions: the dock workspace across the
+  // left and centre, and the detail column.
   expect([...document.getElementById('gm-workspace').children].map(child => child.id))
-    .toEqual(['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail', 'gm-health-panel']);
-  for (const child of document.getElementById('gm-workspace').children) {
-    expect(child.classList.contains('gm-desk-region')).toBe(true);
-  }
-  // Left: what is waiting, who is flying it, and whatever the world authored.
+    .toEqual(['gm-desk-brief', 'gm-desk-detail']);
+  // The detail column is a panel frame; the dock workspace deliberately is not,
+  // so it adds no padding, border, chrome or second scroll box around the dock.
+  expect(document.getElementById('gm-desk-detail').classList.contains('gm-desk-region')).toBe(true);
+  expect(document.getElementById('gm-desk-brief').classList.contains('gm-desk-region')).toBe(false);
+  expect(document.getElementById('gm-desk-brief').classList.contains('gm-desk-dock')).toBe(true);
   expect([...document.getElementById('gm-desk-brief').children].map(child => child.id))
-    .toEqual(['gm-attention-panel', 'gm-live-layout', 'gm-workload-panel', 'gm-widgets']);
+    .toEqual(['gm-live-layout']);
   // Right: the selected hull, then the checkpoints a live event is recovered
   // from — the restore control travels inside #gm-checkpoint.
   expect([...document.getElementById('gm-desk-detail').children].map(child => child.id))
     .toEqual(['gm-inspector', 'gm-checkpoint']);
   expect(document.querySelector('#gm-checkpoint #gm-restore-apply')).not.toBeNull();
-  // Mission events and the four record surfaces are dock panels now.
+  // Mission events, the four record surfaces, the map and the awareness panels
+  // are all dock panels now.
   expect(document.getElementById('gm-desk-log')).toBeNull();
   for (const [panel, id] of [['mission', 'gm-mission-panel'], ['comms', 'gm-comms-panel'],
-    ['activity', 'gm-activity'], ['journal', 'gm-journal'], ['session-history', 'gm-session-history']]) {
-    expect(document.getElementById(id).closest('[data-panel]').dataset.panel).toBe(panel);
+    ['activity', 'gm-activity'], ['journal', 'gm-journal'], ['session-history', 'gm-session-history'],
+    ['map', 'gm-map-panel'], ['attention', 'gm-attention-panel'], ['workload', 'gm-workload-panel'],
+    ['health', 'gm-health-panel']]) {
+    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
   }
+  // gui/gm-widgets-panel.js owns `hidden` on the authored widget region, so a
+  // scenario that authors no widget has no widget tab — and the node is parked
+  // in the surface, because that owner is the only thing that can bring it back.
+  expect(document.getElementById('gm-widgets').hidden).toBe(true);
+  expect(document.getElementById('gm-widgets').closest('.workshop-dock-parked')).not.toBeNull();
   expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
-  // The map is never reparented: moving it would cancel <ph-navigation-map>'s
-  // render loop, so it keeps the grid cell it was authored into.
-  expect(document.getElementById('gm-map-panel').parentElement.id).toBe('gm-workspace');
+  // The map is the surface this workspace is arranged around.
+  expect(document.querySelector('[data-panel="map"]').dataset.panelKind).toBe('document');
+  // The map now lives in the dock. <ph-navigation-map> restores its render loop
+  // and size observer on reconnect, which is what makes that survivable.
+  expect(document.getElementById('gm-map-panel').closest('#gm-live-layout')).not.toBeNull();
   // And the widget region starts hidden, so a scenario that authors no widget
   // leaves the left column exactly as it was.
   expect(document.getElementById('gm-widgets').hidden).toBe(true);
@@ -172,6 +182,46 @@ it('selects roster entities through the map seam and shows authored Station rati
   shell.selection({entity_id:'ship',name:'Courier',status:{systems:[]}});
   expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
   expect(document.querySelector('.gm-station-pills').textContent).toContain('Helm · Backfill');
+});
+it('keeps the selected entity and the map alive across a rearrangement', () => {
+  const { shell, selectEntity } = mount();
+  shell.refresh({ entities: [{ entity_id: 'ship', name: 'Courier', kind: 'player_ship', faction: null }] },
+    { ships: [{ ship_id: 'ship', stations: [{ name: 'Helm', rating: 'Backfill' }] }] });
+  document.querySelector('#gm-roster-ships button').click();
+  expect(selectEntity).toHaveBeenCalledWith('ship');
+  shell.selection({ entity_id: 'ship', name: 'Courier', status: { systems: [] } });
+  const map = document.getElementById('gm-entity-map');
+  expect(map.closest('[data-panel]').dataset.panel).toBe('map');
+
+  // Pull the map out of its column and float the roster; the selection seam is
+  // the same nodes moved, not rebuilt, so it survives.
+  let layout = liveLayoutModel.dock(defaultLiveLayout(), 'map', 'comms', 'tab');
+  layout = liveLayoutModel.float(layout, 'roster', { x: 30, y: 40, width: 400, height: 300 });
+  shell.setLiveLayout(layout);
+
+  expect(document.getElementById('gm-entity-map')).toBe(map);
+  expect(map.closest('[data-panel]').dataset.panel).toBe('map');
+  expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
+  document.querySelector('#gm-roster-ships button').click();
+  expect(selectEntity).toHaveBeenCalledTimes(2);
+  expect(selectEntity).toHaveBeenLastCalledWith('ship');
+  // And a reload restores placement without restoring a selection.
+  const stored = shell.liveLayoutState();
+  expect(JSON.stringify(stored)).not.toContain('ship');
+});
+it('drops the map tab when the role preset puts the map away', () => {
+  const { shell } = mount();
+  expect(document.querySelector('[data-panel="map"]')).not.toBeNull();
+  // gui/gm-role-presets.js lists gm-map-panel in GM_ROLE_PRESET_PANEL_IDS.
+  document.getElementById('gm-map-panel').hidden = true;
+  shell.refresh();
+  expect(document.querySelector('[data-panel="map"]')).toBeNull();
+  // The node stays in the surface so the preset can bring it back.
+  expect(document.getElementById('gm-map-panel').closest('.workshop-dock-parked')).not.toBeNull();
+  expect(shell.liveLayoutState().closed).not.toContain('map');
+  document.getElementById('gm-map-panel').hidden = false;
+  shell.refresh();
+  expect(document.querySelector('[data-panel="map"]')).not.toBeNull();
 });
 // Issue #1430, PRD #1418 story 6: the selected roster entity must read as
 // more than the button's own `background: var(--gold)`, which a forced-

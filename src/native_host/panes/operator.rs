@@ -307,12 +307,74 @@ const LIVE_ADDED_IN_V2: &[(&str, &str, &str)] = &[
     ("session-history", "comms", "tab"),
 ];
 
-fn live_panels_for(version: u64) -> &'static [&'static str] {
-    if version < 2 {
-        LIVE_PANELS_V1
-    } else {
-        LIVE_PANELS_V2
+const LIVE_PANELS_V3: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+];
+/// Panels registered after version 2. The map opens a column beside the
+/// workflow panels; the awareness panels join the groups that hold their kind.
+const LIVE_ADDED_IN_V3: &[(&str, &str, &str)] = &[
+    ("map", "roster", "right"),
+    ("attention", "roster", "tab"),
+    ("workload", "roster", "tab"),
+    ("widgets", "roster", "tab"),
+    ("health", "comms", "tab"),
+];
+
+/// Panels the operator may not close. The attention region renders connection
+/// and recovery banners verbatim and health is the table behind them: a Game
+/// Master must not be able to hide a failure from themselves, whichever
+/// mechanism does the hiding. Mirrors LIVE_PINNED_PANELS in
+/// gui/live-layout-model.js.
+const LIVE_PINNED_PANELS: &[&str] = &["attention", "health"];
+
+/// Put a pinned panel back into the first group of a stored tree that claimed
+/// it was closed. Mirrors `placeInFirstGroup` in gui/dock-layout-model.js.
+fn place_in_first_group(node: &mut Value, panel: &str) {
+    match node["type"].as_str() {
+        Some("tabs") => {
+            if let Some(tabs) = node["tabs"].as_array_mut() {
+                tabs.push(json!(panel));
+            }
+        }
+        Some("split") => {
+            if let Some(first) = node["children"].as_array_mut().and_then(|c| c.first_mut()) {
+                place_in_first_group(first, panel);
+            }
+        }
+        _ => *node = json!({"type":"tabs", "tabs":[panel], "active":panel}),
     }
+}
+
+fn live_panels_for(version: u64) -> &'static [&'static str] {
+    match version {
+        1 => LIVE_PANELS_V1,
+        2 => LIVE_PANELS_V2,
+        _ => LIVE_PANELS_V3,
+    }
+}
+
+fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'static str)> {
+    let mut added = Vec::new();
+    if version < 2 {
+        added.extend_from_slice(LIVE_ADDED_IN_V2);
+    }
+    if version < 3 {
+        added.extend_from_slice(LIVE_ADDED_IN_V3);
+    }
+    added
 }
 
 fn sanitize_workshop_node(
@@ -400,18 +462,23 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 2,
+        "version": 3,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
-            {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission"], "active":"roster"},
-            {"type":"tabs", "tabs":["comms","activity","journal","session-history"], "active":"comms"}
+            {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
+                {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission",
+                    "attention","workload","widgets"], "active":"roster"},
+                {"type":"tabs", "tabs":["map"], "active":"map"}
+            ]},
+            {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
         ]},
         "floats": [], "closed": [], "selected": "roster"
     })
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=2).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=3).contains(v))?;
     let allowed = live_panels_for(stored);
+    let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();
     let root = match value.get("root")? {
         Value::Null => Value::Null,
@@ -468,31 +535,45 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
         .or_else(|| first_visible(&root, &floats))
         .unwrap_or_else(|| json!("roster"));
     let mut layout = json!({"version":stored, "root":root, "floats":floats, "closed":closed, "selected":selected});
-    if stored < 2 {
-        layout = migrate_live_layout(layout);
+    if !added.is_empty() {
+        layout = migrate_live_layout(layout, &added);
     }
+    repair_pinned_live_panels(&mut layout);
     Some(layout)
+}
+
+/// A pinned panel that arrived closed - from a hand-edited or older profile -
+/// is put back rather than honoured: closing it is not a choice this surface
+/// offers, so a stored tree claiming it was closed is not one to trust.
+fn repair_pinned_live_panels(layout: &mut Value) {
+    for panel in LIVE_PINNED_PANELS {
+        let Some(index) = layout["closed"]
+            .as_array()
+            .and_then(|closed| closed.iter().position(|v| v.as_str() == Some(*panel)))
+        else {
+            continue;
+        };
+        layout["closed"].as_array_mut().unwrap().remove(index);
+        place_in_first_group(&mut layout["root"], panel);
+    }
 }
 
 /// Place the panels registered after the stored version, exactly as
 /// `gui/dock-layout-migration.js` does.
-fn migrate_live_layout(mut layout: Value) -> Value {
+fn migrate_live_layout(mut layout: Value, added: &[(&str, &str, &str)]) -> Value {
     let selected = layout["selected"].clone();
     let mut previous_actives = BTreeMap::new();
     collect_workshop_actives(&layout["root"], &mut previous_actives);
     layout["closed"]
         .as_array_mut()
         .unwrap()
-        .extend(LIVE_ADDED_IN_V2.iter().map(|(panel, _, _)| json!(panel)));
-    layout["version"] = json!(2);
-    for (panel, preferred, placement) in LIVE_ADDED_IN_V2 {
+        .extend(added.iter().map(|(panel, _, _)| json!(panel)));
+    layout["version"] = json!(3);
+    for (panel, preferred, placement) in added {
         add_migration_panel_at(&mut layout, panel, preferred, &Value::Null, placement);
     }
-    let added: Vec<&str> = LIVE_ADDED_IN_V2
-        .iter()
-        .map(|(panel, _, _)| *panel)
-        .collect();
-    settle_new_groups(&mut layout["root"], &added);
+    let names: Vec<&str> = added.iter().map(|(panel, _, _)| *panel).collect();
+    settle_new_groups(&mut layout["root"], &names);
     restore_workshop_actives(&mut layout["root"], &previous_actives);
     layout["selected"] = selected;
     layout
@@ -1251,10 +1332,13 @@ mod tests {
         assert_eq!(
             saved["liveLayout"],
             json!({
-                "version":2,
+                "version":3,
                 "root":{"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
-                    {"type":"tabs", "tabs":["roster","mission"], "active":"roster"},
-                    {"type":"tabs", "tabs":["comms","activity","journal","session-history"], "active":"comms"}
+                    {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
+                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets"], "active":"roster"},
+                        {"type":"tabs", "tabs":["map"], "active":"map"}
+                    ]},
+                    {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
                 ]},
                 "floats":[{"panel":"join","x":30.0,"y":12.0,"width":420.0,"height":360.0}],
                 "closed":["manual-save","readiness"], "selected":"roster"
@@ -1275,7 +1359,7 @@ mod tests {
         });
 
         let migrated = sanitize_live_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 2);
+        assert_eq!(migrated["version"], 3);
         assert_eq!(migrated["floats"], json!([]));
         assert_eq!(migrated["selected"], "roster");
         assert_eq!(
@@ -1283,35 +1367,98 @@ mod tests {
             json!(["readiness", "join", "manual-save"])
         );
         assert_eq!(
-            migrated["root"]["children"][0]["tabs"],
-            json!(["roster", "mission"])
+            migrated["root"]["children"][0]["children"][0],
+            json!({"type":"tabs", "tabs":["roster","mission","attention","workload","widgets"], "active":"roster"})
+        );
+        assert_eq!(
+            migrated["root"]["children"][0]["children"][1],
+            json!({"type":"tabs", "tabs":["map"], "active":"map"})
         );
         assert_eq!(
             migrated["root"]["children"][1],
-            json!({"type":"tabs", "tabs":["comms","activity","journal","session-history"], "active":"comms"})
+            json!({"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"})
+        );
+    }
+
+    #[test]
+    fn a_stored_v2_live_layout_registers_the_map_and_awareness_panels() {
+        let layout = json!({
+            "version":2,
+            "root":{"type":"split","axis":"vertical","sizes":[1,1],"children":[
+                {"type":"tabs","tabs":["roster","mission"],"active":"roster"},
+                {"type":"tabs","tabs":["comms","journal"],"active":"journal"}
+            ]},
+            "floats":[],
+            "closed":["readiness","join","manual-save","activity","session-history"],
+            "selected":"journal"
+        });
+
+        assert_eq!(
+            sanitize_live_layout(&layout).unwrap(),
+            json!({
+                "version":3,
+                "root":{"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
+                    {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
+                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets"], "active":"roster"},
+                        {"type":"tabs", "tabs":["map"], "active":"map"}
+                    ]},
+                    {"type":"tabs", "tabs":["comms","journal","health"], "active":"journal"}
+                ]},
+                "floats":[],
+                "closed":["readiness","join","manual-save","activity","session-history"],
+                "selected":"journal"
+            })
         );
     }
 
     #[test]
     fn a_current_live_layout_keeps_its_arrangement_and_drops_unknown_fields() {
         let layout = json!({
-            "version":2,
+            "version":3,
             "root":{"type":"tabs","tabs":["comms","journal","unsafe"],"active":"journal","unsafe":"secret"},
             "floats":[{"panel":"roster","x":7,"y":9,"width":300,"height":200,"unsafe":"secret"}],
-            "closed":["readiness","join","manual-save","mission","activity","session-history"],
+            "closed":["readiness","join","manual-save","mission","activity","session-history","map",
+                "attention","workload","widgets","health"],
             "selected":"journal", "unsafe":"secret"
         });
 
+        // `attention` and `health` are PINNED: a stored tree claiming they were
+        // closed is repaired rather than honoured, because closing them is not
+        // a choice this surface offers.
         assert_eq!(
             sanitize_live_layout(&layout).unwrap(),
             json!({
-                "version":2,
-                "root":{"type":"tabs", "tabs":["comms","journal"], "active":"journal"},
+                "version":3,
+                "root":{"type":"tabs", "tabs":["comms","journal","attention","health"], "active":"journal"},
                 "floats":[{"panel":"roster","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
-                "closed":["readiness","join","manual-save","mission","activity","session-history"],
+                "closed":["readiness","join","manual-save","mission","activity","session-history","map",
+                    "workload","widgets"],
                 "selected":"journal"
             })
         );
+    }
+
+    #[test]
+    fn the_attention_and_health_panels_cannot_be_stored_closed() {
+        // A Game Master must not be able to hide a connection or recovery
+        // failure from themselves, by role preset OR by arrangement.
+        let layout = json!({
+            "version":3,
+            "root":{"type":"tabs","tabs":["roster"],"active":"roster"},
+            "floats":[],
+            "closed":["readiness","join","manual-save","mission","comms","activity","journal",
+                "session-history","map","attention","workload","widgets","health"],
+            "selected":"roster"
+        });
+
+        let repaired = sanitize_live_layout(&layout).unwrap();
+        assert_eq!(
+            repaired["root"],
+            json!({"type":"tabs", "tabs":["roster","attention","health"], "active":"roster"})
+        );
+        let closed = repaired["closed"].as_array().unwrap();
+        assert!(!closed.iter().any(|panel| panel == "attention"));
+        assert!(!closed.iter().any(|panel| panel == "health"));
     }
 
     #[test]
@@ -1325,8 +1472,10 @@ mod tests {
         let migrated = sanitize_live_layout(&layout).unwrap();
         assert_eq!(migrated["closed"], json!(["join", "manual-save"]));
         assert_eq!(
-            migrated["root"]["children"][0],
-            json!({"type":"tabs", "tabs":["roster","readiness","mission"], "active":"readiness"})
+            migrated["root"]["children"][0]["children"][0],
+            json!({"type":"tabs",
+                "tabs":["roster","readiness","mission","attention","workload","widgets"],
+                "active":"readiness"})
         );
     }
 

@@ -37,8 +37,17 @@ Comms studio, the activity feed, the saved action journal and the session
 history join them. Those five were the desk's centre-bottom region behind a
 bespoke tab strip; they are now the dock's own default tab group, with its
 roving tablist semantics, and docking may pull any of them out. The strip,
-`#gm-desk-log` and its `data-log-view` switch are gone, and the grid is four
-regions: the left column and the map each span both rows. Their versioned
+`#gm-desk-log` and its `data-log-view` switch are gone. Issue #1503 then brought
+in the omniscient map, the attention queue, Station workload, the authored
+widget region and peer health, leaving the desk as TWO grid regions: the dock
+workspace across the left and centre, and the detail column.
+
+The map is a *document* panel — the surface this workspace is arranged around —
+and it is reparented now, which it never was before. There is no way to move a
+node between parents without disconnecting it, so `<ph-navigation-map>` restores
+its render loop and size observer in `connectedCallback` rather than only in
+`onTemplate`; without that a docking operation would leave a frozen picture.
+Every other migrated panel moves node-and-listeners intact. Their versioned
 `liveLayout` is a separate private operator-profile field from Workshop's
 `authoringLayout` and from GM reconnect identity. Pointer and keyboard docking, reset, repair and narrow
 single-panel projection therefore behave the same in browser and native GM

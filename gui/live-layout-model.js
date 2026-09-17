@@ -1,10 +1,18 @@
-import { createDockLayoutModel } from './dock-layout-model.js';
+import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 2;
-export const LIVE_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save',
-  'mission', 'comms', 'activity', 'journal', 'session-history']);
+export const LIVE_LAYOUT_VERSION = 3;
+const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
+const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
+export const LIVE_PANEL_REGISTRY = Object.freeze([
+  tool('roster'), tool('readiness'), tool('join'), tool('manual-save'),
+  tool('mission'), tool('comms'), tool('activity'), tool('journal'), tool('session-history'),
+  documentPanel('map'), tool('attention'), tool('workload'), tool('widgets'), tool('health'),
+]);
+export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
+const V2_PANELS = Object.freeze([...V1_PANELS,
+  'mission', 'comms', 'activity', 'journal', 'session-history']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -18,29 +26,58 @@ const ADDED_IN_V2 = Object.freeze([
   ['journal', 'comms', 'tab'],
   ['session-history', 'comms', 'tab'],
 ]);
+/** Panels registered after version 2. The map opens a column beside the
+ * workflow panels — it is the surface this desk is arranged around — and the
+ * awareness panels join the groups that already hold their kind. */
+const ADDED_IN_V3 = Object.freeze([
+  ['map', 'roster', 'right'],
+  ['attention', 'roster', 'tab'],
+  ['workload', 'roster', 'tab'],
+  ['widgets', 'roster', 'tab'],
+  ['health', 'comms', 'tab'],
+]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
   floats: [], closed: [], selected: 'roster' });
+const v2Default = () => ({ version: 2,
+  root: { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
+    group(['roster', 'readiness', 'join', 'manual-save', 'mission'], 'roster'),
+    group(['comms', 'activity', 'journal', 'session-history'], 'comms'),
+  ] },
+  floats: [], closed: [], selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION,
     root: { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
-      group(['roster', 'readiness', 'join', 'manual-save', 'mission'], 'roster'),
-      group(['comms', 'activity', 'journal', 'session-history'], 'comms'),
+      { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
+        group(['roster', 'readiness', 'join', 'manual-save', 'mission',
+          'attention', 'workload', 'widgets'], 'roster'),
+        group(['map'], 'map'),
+      ] },
+      group(['comms', 'activity', 'journal', 'session-history', 'health'], 'comms'),
     ] },
     floats: [], closed: [], selected: 'roster' };
 }
+/** The attention region renders connection and recovery banners verbatim and the
+ * health panel is the readable table behind them. Neither may be hidden by a
+ * role preset (they are absent from GM_ROLE_PRESET_PANEL_IDS) and neither may be
+ * closed here either: a Game Master must not be able to hide a failure from
+ * themselves, whichever mechanism does the hiding. */
+export const LIVE_PINNED_PANELS = Object.freeze(['attention', 'health']);
 const base = createDockLayoutModel({
-  version: LIVE_LAYOUT_VERSION, panels: LIVE_PANELS, defaultLayout: defaultLiveLayout,
-  compatibleVersions: [LIVE_LAYOUT_VERSION],
+  version: LIVE_LAYOUT_VERSION, panels: LIVE_PANEL_REGISTRY, defaultLayout: defaultLiveLayout,
+  pinned: LIVE_PINNED_PANELS, compatibleVersions: [LIVE_LAYOUT_VERSION],
 });
 const v1 = createDockLayoutModel({ version: 1, panels: V1_PANELS, defaultLayout: v1Default,
   compatibleVersions: [1] });
+const v2 = createDockLayoutModel({ version: 2, panels: V2_PANELS, defaultLayout: v2Default,
+  compatibleVersions: [2] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
     { version: 1, model: v1, added: [] },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V2 },
+    { version: 2, model: v2, added: ADDED_IN_V2 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V3 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

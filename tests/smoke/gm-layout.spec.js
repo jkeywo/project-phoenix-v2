@@ -2,6 +2,7 @@ import { test, expect, waitForWasmReady } from './fixtures';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES, BROWSER_ZOOMS } from '../fixtures/device-matrix.mjs';
+import { revealGmPanel } from './dock-helpers.js';
 
 // Issue #1430: the GM's smallest supported landscape surface and the top of
 // the enlargement range, from #1421's shared matrix (PRD #1418) — the same
@@ -59,33 +60,38 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   await expect(page.locator('#gm-roster-ships button').first()).toBeVisible();
   await page.locator('#gm-roster-ships button').first().click();
   // The post-M5 screen (PRD #930, canvas artboard "After M5 - facilitation +
-  // operations"). Since issue #1502 the mission events and the four record
-  // surfaces are dock panels inside the left column's workspace rather than
-  // grid regions of their own, so the grid is four regions: the left column and
-  // the map each span both rows, and the right column keeps its two.
+  // operations"). Issues #1502 and #1503 migrated the mission events, the
+  // record surfaces, the map and the awareness panels into the Live dock
+  // workspace, so the grid is TWO regions: the dock across the left and centre,
+  // and the detail column. Every migrated panel is still on the screen — it is
+  // a dock panel rather than a grid child.
   expect(await page.locator('#gm-workspace > *').evaluateAll(nodes => nodes.map(node => node.id)))
-    .toEqual(['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail', 'gm-health-panel']);
+    .toEqual(['gm-desk-brief', 'gm-desk-detail']);
+  for (const id of ['gm-map-panel', 'gm-attention-panel', 'gm-workload-panel', 'gm-health-panel',
+    'gm-mission-panel', 'gm-comms-panel']) {
+    await expect(page.locator(`#gm-live-layout #${id}`)).toHaveCount(1);
+  }
   for (const [width,height] of [[1440,900],[1280,720]]) {
     await page.setViewportSize({width,height});
     await page.locator('#gm-console').evaluate(el=>el.scrollTop=0);
     await expect(page.locator('#gm-workspace')).toBeVisible();
-    // Three columns over two rows, measured rather than declared: each column
-    // shares a left edge and each row shares a top edge, at BOTH viewports.
+    // Two regions side by side, measured rather than declared, at BOTH
+    // viewports: the dock workspace and the detail column share a top edge and
+    // the detail column is to its right.
     const boxes = {};
-    for (const id of ['gm-desk-brief', 'gm-map-panel', 'gm-desk-detail', 'gm-health-panel']) {
+    for (const id of ['gm-desk-brief', 'gm-desk-detail']) {
       await expect(page.locator(`#${id}`)).toBeVisible();
       boxes[id] = await page.locator(`#${id}`).boundingBox();
     }
-    expect(Math.round(boxes['gm-desk-detail'].x), `${width}: right column`)
-      .toBe(Math.round(boxes['gm-health-panel'].x));
-    expect(boxes['gm-desk-brief'].x, `${width}: left column is leftmost`)
-      .toBeLessThan(boxes['gm-map-panel'].x);
-    expect(boxes['gm-map-panel'].x, `${width}: centre column`)
+    expect(boxes['gm-desk-brief'].x, `${width}: dock workspace is leftmost`)
       .toBeLessThan(boxes['gm-desk-detail'].x);
-    expect(Math.round(boxes['gm-desk-brief'].y), `${width}: top row`)
+    expect(Math.round(boxes['gm-desk-brief'].y), `${width}: one row of regions`)
       .toBe(Math.round(boxes['gm-desk-detail'].y));
-    expect(boxes['gm-health-panel'].y, `${width}: second row is below the first`)
-      .toBeGreaterThan(boxes['gm-desk-detail'].y);
+    // The map keeps drawing after being docked: <ph-navigation-map> restores
+    // its render loop on reconnect, so the canvas has real pixels.
+    await expect(page.locator('#gm-entity-map')).toBeVisible();
+    expect(await page.locator('#gm-entity-map').evaluate(el =>
+      el.shadowRoot.querySelector('canvas').width), `${width}: map canvas sized`).toBeGreaterThan(0);
     const geometry = await page.locator('#gm-workspace').evaluate(el=>({
       width:el.clientWidth, scroll:el.scrollWidth,
       height:el.clientHeight, scrollHeight:el.scrollHeight,
@@ -125,6 +131,7 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   // sideways.
   await page.setViewportSize({width:1280,height:720});
   await page.evaluate(() => document.documentElement.style.setProperty('--a11y-text-scale', '2'));
+  await revealGmPanel(page, 'attention');
   await expect(page.locator('#gm-attention-panel')).toBeVisible();
   await expect(page.locator('#gm-attention-heading')).toBeVisible();
   await expect(page.locator('#gm-attention-filter-band')).toBeVisible();
@@ -132,6 +139,7 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   // holds the same contract: it reads at 200% and its rows wrap rather than
   // shrink. Its warning region is rendered into #gm-attention-banners above,
   // which is asserted here to be reachable rather than clipped away.
+  await revealGmPanel(page, 'health');
   await expect(page.locator('#gm-health-panel')).toBeVisible();
   await expect(page.locator('#gm-health-heading')).toBeVisible();
   await expect(page.locator('#gm-health-summary')).toBeVisible();
@@ -175,6 +183,7 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
       },
     }],
   })));
+  await revealGmPanel(page, 'attention');
   const beatRow = page.locator('#gm-attention-list li[data-occurrence-id="event:base-world::smoke#1"]');
   await expect(beatRow).toBeVisible();
   await expect(beatRow.locator('.gm-attention-band')).toHaveText(/\S/);
@@ -222,6 +231,7 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   await page.waitForFunction(() => window.__hostGmAttentionState().held === true);
   await expect(page.locator('#gm-attention-list li[data-occurrence-id="quiet:1"]')).toHaveCount(0);
   // The operator's own word that the presentation may catch up.
+  await revealGmPanel(page, 'attention');
   await page.locator('#gm-attention-live').click();
   await page.waitForFunction(() => window.__hostGmAttentionState().held === false);
   const quietRow = page.locator('#gm-attention-list li[data-occurrence-id="quiet:1"]');
@@ -293,6 +303,7 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
       ],
     }],
   })));
+  await revealGmPanel(page, 'workload');
   const workloadRow = page.locator('#gm-workload-list li[data-station-key="smoke-hull/comms"]');
   await expect(workloadRow).toBeVisible();
   await expect(workloadRow.locator('.gm-workload-state')).toHaveText(/\S/);
@@ -319,6 +330,7 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     path.resolve(__dirname, '../fixtures/gm-widgets-presets.json'), 'utf8');
   await page.evaluate((payload) => window.__hostGmRolePresetsSetAvailable(payload), authoredPresets);
   await page.locator('#gm-role-preset-select').selectOption('tactical');
+  await revealGmPanel(page, 'widgets');
   await expect(page.locator('#gm-widgets')).toBeVisible();
   for (const id of ['urgent-traffic', 'seats', 'session-levers', 'brief']) {
     await expect(page.locator(`#gm-widgets-list li[data-widget-id="${id}"]`)).toBeVisible();

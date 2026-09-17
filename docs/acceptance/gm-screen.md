@@ -72,17 +72,20 @@ injected into the presenters — the live payloads decide what can appear.
 
 ### What changed against the After-M3 screen
 
-One bar and three columns, as before; the nine grid cells become **six regions**,
-because the artboard's later panels arrive inside a frame that already exists
-rather than in a cell of their own.
+One bar and three columns, as before. The artboard's nine grid cells first
+became six regions, because its later panels arrive inside a frame that already
+exists rather than in a cell of their own; issues #1502 and #1503 then migrated
+most of those panels into the Live dock workspace, leaving **two regions**.
 
 | Region | Holds | Was |
 | --- | --- | --- |
-| Region | Holds | Was |
-| Rows 1–2 left `#gm-desk-brief` | Attention (M4), the Live dock workspace (Roster, readiness, join, manual save, Mission events, and the Comms · Activity · Action log · Session history tab group), Station workload, authored widgets (#1439) | four separate cells down the left column; since issue #1502 the mission and record cells are dock panels here |
-| Rows 1–2 centre `#gm-map-panel` | omniscient map | unchanged (never reparented — that would cancel `<ph-navigation-map>`'s render loop) |
-| Row 1 right `#gm-desk-detail` | Inspector, then Checkpoints + live restore | Checkpoints were a section inside the Inspector |
-| Row 2 right `#gm-health-panel` | Peer health (M5) | left column, row 3 |
+| Rows 1–2, left + centre `#gm-desk-brief` | the Live dock workspace: Roster, readiness, join, manual save, Mission events, the attention queue (M4), Station workload, authored widgets (#1439), the omniscient map, and the Comms · Activity · Action log · Session history · Peer health tab group | separate cells down the left column, the map's own cell, and the centre-bottom tab region |
+| Rows 1–2 right `#gm-desk-detail` | Inspector, then Checkpoints + live restore | Checkpoints were a section inside the Inspector |
+
+The map is a *document* panel and is reparented into the dock. Moving a node
+between parents necessarily disconnects it, so `<ph-navigation-map>` restores its
+render loop and size observer in `connectedCallback`; before #1503 the desk kept
+it in one grid cell precisely because it did not.
 
 The bar gains the artboard's health pills, and each roster row gains the
 workload word #1438 already publishes for its Stations.

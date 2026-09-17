@@ -436,18 +436,28 @@ describe('the desk carries the markup both halves need', () => {
 describe('authored advisory config cannot reach the technical treatment', () => {
   it('leaves both technical regions out of the closed role-preset panel list', async () => {
     const { GM_ROLE_PRESET_PANEL_IDS } = await import('../../gui/gm-role-presets.js');
+    const { LIVE_PINNED_PANELS } = await import('../../gui/live-layout-model.js');
     // `[[gm_role_preset]] panels` is authored config, and the ids it can act on
     // are a closed list. Neither the queue that carries the Urgent Station rows
     // nor the health panel is on it, so no authored preset can hide either —
     // and the banner region lives inside the queue.
     expect(GM_ROLE_PRESET_PANEL_IDS).not.toContain('gm-attention-panel');
     expect(GM_ROLE_PRESET_PANEL_IDS).not.toContain('gm-health-panel');
+    // Docking is the other way a panel could be hidden, so the Live dock
+    // refuses to close these two for the same reason (issue #1503).
+    expect(LIVE_PINNED_PANELS).toEqual(['attention', 'health']);
   });
 
   it('wires the desk so the queue owns the region and the health component owns the drawing', () => {
     const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
     expect(workspace).toContain('renderBanners: (rows, container) => gmHealthBanner.render(rows, container)');
-    expect(workspace).toContain('banners: (alerts) => gmAttentionPanel.banners(alerts)');
+    // The health panel feeds the region the QUEUE owns, through the one seam
+    // that also brings the queue's panel to the front (issue #1503): a banner
+    // behind another dock tab would be hidden as effectively as a role preset
+    // would hide it.
+    expect(workspace).toContain('const drawn = gmAttentionPanel.banners(alerts);');
+    expect(workspace).toContain('if (drawn > 0) shell.revealBanners?.();');
+    expect(workspace).toContain('banners: showBanners,');
     // The live restore (issue #1446) reads the SAME projection rather than
     // opening a second channel for its own state. The desk shell rides along
     // because the post-M5 bar carries a tick-health pill; it is a third READER

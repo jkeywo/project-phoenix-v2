@@ -335,10 +335,21 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   repaintGmAttention = gmAttentionPanel.repaint;
   win.__hostGmAttentionState = gmAttentionPanel.state;
   win.__hostGmAttentionRestore = gmAttentionFilters.restore;
-  win.__hostGmAttentionBanners = gmAttentionPanel.banners;
+  // A technical banner is rendered verbatim so a Game Master cannot hide a
+  // connection or recovery failure from themselves. Since issue #1503 the
+  // attention region is a dock panel, and a panel sitting behind another tab
+  // would hide it as effectively as a role preset would — so drawing one brings
+  // its panel to the front. The dock refuses to CLOSE this panel at all
+  // (LIVE_PINNED_PANELS); this is the other half of the same guarantee.
+  const showBanners = (alerts) => {
+    const drawn = gmAttentionPanel.banners(alerts);
+    if (drawn > 0) shell.revealBanners?.();
+    return drawn;
+  };
+  win.__hostGmAttentionBanners = showBanners;
   const gmHealthPanel = createGmHealthPanel({
     doc: doc, t, has,
-    banners: (alerts) => gmAttentionPanel.banners(alerts),
+    banners: showBanners,
   });
   gmRestoreControl = createGmRestoreControl({
     doc: doc,

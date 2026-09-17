@@ -2,6 +2,7 @@ import { test, expect, waitForWasmReady } from './fixtures';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
+import { revealGmPanel } from './dock-helpers.js';
 
 // The GM console's smallest supported landscape surface and the top of the
 // enlargement range, both taken from #1421's shared matrix rather than
@@ -45,6 +46,9 @@ test('GM named checkpoints stay readable and operable at 200% text on 1280x720',
     await page.evaluate((scale) => document.documentElement.style
       .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
 
+    // Browsing checkpoints is a record since issue #1509, so it shares the tab
+    // group with the other reading surfaces.
+    await revealGmPanel(page, 'checkpoint');
     const panel = page.locator('#gm-checkpoint');
     await expect(panel).toBeVisible();
 

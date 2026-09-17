@@ -52,6 +52,9 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // The entity reading surface (issue #1507). The role preset owns its `hidden`,
   // as it always has, and the dock reads it.
   ['inspector', 'gm-inspector'],
+  // Checkpoint browsing is a record; restore is a complex action (issue #1509).
+  ['checkpoint', 'gm-checkpoint'],
+  ['restore', 'gm-restore'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -149,17 +152,24 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // avoid — and clip floating panels at the region's chamfered corners.
   const brief = element('div', 'gm-desk-brief');
   brief.className = 'gm-desk-dock';
-  const detail = region('gm-desk-detail', true);
+
   const mapPanel = get('gm-map-panel');
   desk.insertBefore(brief, mapPanel);
-  mapPanel.after(detail);
   const liveSurface = element('div', 'gm-live-layout');
   liveSurface.className = 'gm-live-layout';
   brief.append(liveSurface);
   // Right: the selected hull, then the checkpoints a live event is recovered
   // from (issues #1445/#1446) at the bottom of the column, as the artboard
   // draws them. The restore control travels inside #gm-checkpoint.
-  move(detail, 'gm-inspector', 'gm-checkpoint');
+  // The detail column is gone: every panel it held is a dock panel now (issues
+  // #1507 and #1509), so the dock workspace IS the desk. They wait at the root
+  // like every other migrated panel until the dock takes them.
+  move(root, 'gm-inspector', 'gm-checkpoint');
+  // Restore leaves the checkpoint record to become a draft of its own: it
+  // combines a selection, a preflight, a consequence preview and a
+  // confirmation. The candidate it acts on is still whatever the record has
+  // selected — this moves the controls, not the decision.
+  root.append(get('gm-restore'));
   get('gm-comms-text')?.parentElement.classList.add('gm-comms-draft');
   // The session history is its own record now: it was a disclosure inside the
   // activity feed, and a dock panel carries its own header.
@@ -286,8 +296,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // second nested scroller here is a correctness problem, not a layout
   // preference). Since issue #1507 the inspector is a dock panel and can be
   // moved, so its frame is resolved when it is needed rather than at mount.
-  const detailScroller = () =>
-    inspector.closest('.workshop-dock-panel') || inspector.closest('.gm-desk-region') || inspector;
+  const detailScroller = () => inspector.closest('.workshop-dock-panel') || inspector;
   back.addEventListener('click', () => {
     back.hidden = true;
     const scroller = detailScroller();

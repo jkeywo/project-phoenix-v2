@@ -65,8 +65,10 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   // workspace, so the grid is TWO regions: the dock across the left and centre,
   // and the detail column. Every migrated panel is still on the screen — it is
   // a dock panel rather than a grid child.
+  // Issues #1502-#1509 migrated every panel the desk held into the dock, so the
+  // dock workspace IS the desk: one grid child.
   expect(await page.locator('#gm-workspace > *').evaluateAll(nodes => nodes.map(node => node.id)))
-    .toEqual(['gm-desk-brief', 'gm-desk-detail']);
+    .toEqual(['gm-desk-brief']);
   for (const id of ['gm-map-panel', 'gm-attention-panel', 'gm-workload-panel', 'gm-health-panel',
     'gm-mission-panel', 'gm-comms-panel']) {
     await expect(page.locator(`#gm-live-layout #${id}`)).toHaveCount(1);
@@ -78,15 +80,12 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     // Two regions side by side, measured rather than declared, at BOTH
     // viewports: the dock workspace and the detail column share a top edge and
     // the detail column is to its right.
-    const boxes = {};
-    for (const id of ['gm-desk-brief', 'gm-desk-detail']) {
-      await expect(page.locator(`#${id}`)).toBeVisible();
-      boxes[id] = await page.locator(`#${id}`).boundingBox();
-    }
-    expect(boxes['gm-desk-brief'].x, `${width}: dock workspace is leftmost`)
-      .toBeLessThan(boxes['gm-desk-detail'].x);
-    expect(Math.round(boxes['gm-desk-brief'].y), `${width}: one row of regions`)
-      .toBe(Math.round(boxes['gm-desk-detail'].y));
+    await expect(page.locator('#gm-desk-brief')).toBeVisible();
+    const desk = await page.locator('#gm-desk-brief').boundingBox();
+    const workspace = await page.locator('#gm-workspace').boundingBox();
+    // The dock fills the desk: it is the desk.
+    expect(Math.round(desk.width), `${width}: dock spans the workspace`)
+      .toBeGreaterThanOrEqual(Math.round(workspace.width) - 2);
     // The map keeps drawing after being docked: <ph-navigation-map> restores
     // its render loop on reconnect, so the canvas has real pixels.
     await expect(page.locator('#gm-entity-map')).toBeVisible();
@@ -377,15 +376,16 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     scroll: el.scrollWidth, width: el.clientWidth,
   }));
   expect(bar.scroll).toBeLessThanOrEqual(bar.width + 1);
-  // The checkpoint column and its restore control are on the right-hand region
-  // at 200%, which is where the artboard puts them.
-  await expect(page.locator('#gm-desk-detail > #gm-checkpoint')).toBeVisible();
+  // Browsing checkpoints is a record since issue #1509, so it sits with the
+  // other reading surfaces rather than in a column of its own.
+  await revealGmPanel(page, 'checkpoint');
+  await expect(page.locator('[data-panel="checkpoint"] > #gm-checkpoint')).toBeVisible();
   await expect(page.locator('#gm-checkpoint-bookmark')).toBeVisible();
   expect(await page.locator('#gm-checkpoint-bookmark').evaluate(el =>
     el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   // Every record tab stays pressable at 200%, and each panel scrolls inside
   // its own frame rather than widening the desk.
-  for (const view of ['comms', 'activity', 'journal', 'session-history']) {
+  for (const view of ['comms', 'activity', 'journal', 'session-history', 'checkpoint']) {
     const tab = page.locator(`[role="tab"][data-layout-panel="${view}"]`);
     await expect(tab).toBeVisible();
     expect(await tab.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);

@@ -436,10 +436,39 @@ const LIVE_PANELS_V7: &[&str] = &[
 /// reading surface, so it joins the documents.
 const LIVE_ADDED_IN_V7: &[(&str, &str, &str)] = &[("inspector", "map", "right")];
 
+const LIVE_PANELS_V8: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+    "checkpoint",
+    "restore",
+];
+/// Panels registered after version 7. Checkpoint browsing is a RECORD and joins
+/// the reading surfaces; restore is a complex action and is temporary.
+const LIVE_ADDED_IN_V8: &[(&str, &str, &str)] = &[("checkpoint", "journal", "tab")];
+
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
-const LIVE_TEMPORARY_PANELS: &[&str] = &["spawn"];
+const LIVE_TEMPORARY_PANELS: &[&str] = &["spawn", "restore"];
 
 /// Panels the operator may not close. The attention region renders connection
 /// and recovery banners verbatim and health is the table behind them: a Game
@@ -474,7 +503,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         4 => LIVE_PANELS_V4,
         5 => LIVE_PANELS_V5,
         6 => LIVE_PANELS_V6,
-        _ => LIVE_PANELS_V7,
+        7 => LIVE_PANELS_V7,
+        _ => LIVE_PANELS_V8,
     }
 }
 
@@ -496,6 +526,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     // starts closed, which is what "not open" means for a draft.
     if version < 7 {
         added.extend_from_slice(LIVE_ADDED_IN_V7);
+    }
+    if version < 8 {
+        added.extend_from_slice(LIVE_ADDED_IN_V8);
     }
     added
 }
@@ -585,7 +618,7 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 7,
+        "version": 8,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
@@ -598,14 +631,14 @@ fn default_live_layout() -> Value {
                     {"type":"tabs", "tabs":["inspector"], "active":"inspector"}
                 ]}
             ]},
-            {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
+            {"type":"tabs", "tabs":["comms","activity","journal","session-history","health","checkpoint"], "active":"comms"}
         ]},
-        "floats": [], "closed": ["spawn"], "selected": "roster"
+        "floats": [], "closed": ["spawn","restore"], "selected": "roster"
     })
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=7).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=8).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();

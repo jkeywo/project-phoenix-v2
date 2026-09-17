@@ -52,6 +52,17 @@ its surface's own `hidden` always carried. Closing it is an arrangement choice
 that releases nothing, and taking a Station over brings an OPEN console forward
 without reopening one the operator closed.
 
+Issue #1509 finished the migration. Checkpoint browsing is a RECORD and joins
+the reading surfaces beside the journal and the session history; restoring is a
+complex action and became a draft of its own, because it combines a selection, a
+preflight, a consequence preview and a confirmation. The candidate it acts on is
+still whatever the record has selected — the move carried the controls, not the
+decision — and the journal and the `gm_health` phase remain the canonical result
+surfaces. Only a restore that LANDED finishes the draft: a rollback, a failure
+and a local refusal all leave it standing with its phase on screen. With that,
+every panel the desk ever held is a dock panel, so the dock workspace IS the
+desk: one grid child across the whole screen, and the detail column is gone.
+
 Issue #1508 gave Spawn directed spatial picking through that docked map. Pick
 mode names the control capturing the chart and previews what committing would
 place — position, degrees AND a compass word, because a preview that only draws

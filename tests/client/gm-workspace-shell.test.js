@@ -28,22 +28,22 @@ function mount(extra = {}, translate = id => id) {
   mountedShells.push(shell);
   return {shell,selectEntity,win};
 }
-it('lays the desk out as two regions: the dock workspace and the detail column', () => {
+it('lays the desk out as one region: the dock workspace IS the desk', () => {
   mount();
-  // Issues #1502-#1507 migrated all but the checkpoints into the dock.
+  // Issues #1502-#1509 migrated every panel the desk held into the dock.
   expect([...document.getElementById('gm-workspace').children].map(child => child.id))
-    .toEqual(['gm-desk-brief', 'gm-desk-detail']);
-  // The detail column is a panel frame; the dock workspace deliberately is not,
-  // so it adds no padding, border, chrome or second scroll box around the dock.
-  expect(document.getElementById('gm-desk-detail').classList.contains('gm-desk-region')).toBe(true);
+    .toEqual(['gm-desk-brief']);
+  // It is deliberately not a panel frame, so it adds no padding, border, chrome
+  // or second scroll box around the dock.
   expect(document.getElementById('gm-desk-brief').classList.contains('gm-desk-region')).toBe(false);
   expect(document.getElementById('gm-desk-brief').classList.contains('gm-desk-dock')).toBe(true);
   expect([...document.getElementById('gm-desk-brief').children].map(child => child.id))
     .toEqual(['gm-live-layout']);
-  expect([...document.getElementById('gm-desk-detail').children].map(child => child.id))
-    .toEqual(['gm-checkpoint']);
-  expect(document.querySelector('#gm-checkpoint #gm-restore-apply')).not.toBeNull();
+  expect(document.getElementById('gm-desk-detail')).toBeNull();
   expect(document.getElementById('gm-desk-log')).toBeNull();
+  // Restore left the checkpoint record to become a draft of its own.
+  expect(document.querySelector('#gm-checkpoint #gm-restore-apply')).toBeNull();
+  expect(document.getElementById('gm-restore-apply')).not.toBeNull();
 });
 
 it('registers every migrated desk panel in the dock, documents included', () => {
@@ -383,6 +383,59 @@ it('asks before a stored arrangement replaces an open draft', () => {
   expect(shell.setLiveLayout(defaultLiveLayout())).toBe(true);
   expect(document.querySelector('[data-panel="spawn"]')).toBeNull();
 });
+it('keeps checkpoints as a record and restore as a draft of its own', () => {
+  const { shell } = mount();
+  // Browsing checkpoints is reading, so it sits with the other records.
+  expect(document.getElementById('gm-checkpoint').closest('[data-panel]').dataset.panel)
+    .toBe('checkpoint');
+  expect(document.getElementById('gm-checkpoint').closest('.workshop-tab-stack')
+    .contains(document.getElementById('gm-journal'))).toBe(true);
+  expect(document.querySelector('[data-panel="checkpoint"]').dataset.panelKind).toBe('tool');
+
+  // Restoring combines a selection, a preflight, a preview and a confirmation,
+  // so it is a draft: absent from the arrangement until it is opened.
+  expect(document.querySelector('[data-panel="restore"]')).toBeNull();
+  expect(shell.liveLayoutState().closed).toContain('restore');
+  expect(document.getElementById('gm-restore-apply')).not.toBeNull();
+
+  document.querySelector('[data-layout-panel="restore"][data-layout-control="switcher"]').click();
+  const framed = document.querySelector('[data-panel="restore"]');
+  expect(framed.classList.contains('is-floating')).toBe(true);
+  expect(framed.contains(document.getElementById('gm-restore-apply'))).toBe(true);
+  // A floating draft is not restored; a docked one is, and comes back empty.
+  expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed).toContain('restore');
+  shell.setLiveLayout(liveLayoutModel.dock(shell.liveLayoutState(), 'restore', 'checkpoint', 'tab'));
+  const restored = liveLayoutModel.normalize(shell.liveLayoutState());
+  expect(restored.closed).not.toContain('restore');
+  // Placement only: no candidate, phase or correlation rides along.
+  const stored = JSON.stringify(restored);
+  for (const key of ['candidate', 'phase', 'correlation', 'tick', 'slot']) {
+    expect(stored, key).not.toContain(key);
+  }
+});
+it('leaves a refused restore draft open, and keeps a kept-open one', () => {
+  const { shell } = mount();
+  let dirty = false;
+  let keep = false;
+  shell.temporaryActions.register('restore', {
+    isDirty: () => dirty, reset: () => { dirty = false; }, keepOpen: () => keep, focus: () => {},
+  });
+  document.querySelector('[data-layout-panel="restore"][data-layout-control="switcher"]').click();
+  expect(document.querySelector('[data-panel="restore"]')).not.toBeNull();
+
+  // A refusal is not a success, so nothing closes it: only `succeeded` does.
+  dirty = true;
+  expect(document.querySelector('[data-panel="restore"]')).not.toBeNull();
+
+  // Keep open holds it through a landed one.
+  keep = true;
+  expect(shell.temporaryActions.succeeded('restore')).toBe(false);
+  expect(document.querySelector('[data-panel="restore"]')).not.toBeNull();
+
+  keep = false;
+  expect(shell.temporaryActions.succeeded('restore')).toBe(true);
+  expect(document.querySelector('[data-panel="restore"]')).toBeNull();
+});
 it('refuses a layout reset that would take an unsent draft away', () => {
   const { shell } = mount();
   let dirty = true;
@@ -602,9 +655,9 @@ it('brings a record panel to the front for a caller about to focus it', () => {
   expect(shell.showLog('gm-comms-panel')).toBe(false);
   expect(recordFrame('journal').hidden).toBe(false);
   document.getElementById('gm-comms-panel').hidden = false;
-  // And a panel that is not a registered RECORD is not this seam's business,
-  // even though the inspector is a registered panel of its own.
-  expect(shell.showLog('gm-checkpoint')).toBe(false);
+  // And a node that is not a registered panel at all is not this seam's
+  // business, even though the desk is full of registered ones.
+  expect(shell.showLog('gm-live-layout')).toBe(false);
   // The desk really does wire it to the queue's own Comms navigation.
   const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
   expect(workspace).toContain("shell.showLog('gm-comms-panel');");

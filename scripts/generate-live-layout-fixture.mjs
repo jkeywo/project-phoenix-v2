@@ -90,6 +90,13 @@ const CASES = [
       'station-console', 'presentation', 'audition', 'source-link', 'spawn'],
     selected: 'map',
   }],
+  ['a version 7 layout', {
+    version: 7, root: group(['roster', 'journal'], 'journal'), floats: [],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity',
+      'session-history', 'map', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'presentation', 'audition', 'source-link', 'spawn', 'inspector'],
+    selected: 'journal',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

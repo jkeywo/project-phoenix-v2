@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 7;
+export const LIVE_LAYOUT_VERSION = 8;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -11,6 +11,7 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   tool('station'), documentPanel('station-console'),
   tool('presentation'), tool('audition'), tool('source-link'),
   tool('spawn'), documentPanel('inspector'),
+  tool('checkpoint'), tool('restore'),
 ]);
 export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
@@ -20,6 +21,7 @@ const V3_PANELS = Object.freeze([...V2_PANELS, 'map', 'attention', 'workload', '
 const V4_PANELS = Object.freeze([...V3_PANELS, 'station', 'station-console']);
 const V5_PANELS = Object.freeze([...V4_PANELS, 'presentation', 'audition', 'source-link']);
 const V6_PANELS = Object.freeze([...V5_PANELS, 'spawn']);
+const V7_PANELS = Object.freeze([...V6_PANELS, 'inspector']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -54,7 +56,7 @@ const ADDED_IN_V4 = Object.freeze([
  * from the default arrangement and open as a floating draft; a DOCKED one is a
  * tool kept to hand and comes back empty, and a floating one is not restored at
  * all. Spawn is the first (issue #1506); the later complex actions join it. */
-export const LIVE_TEMPORARY_PANELS = Object.freeze(['spawn']);
+export const LIVE_TEMPORARY_PANELS = Object.freeze(['spawn', 'restore']);
 
 /** The attention region renders connection and recovery banners verbatim and the
  * health panel is the readable table behind them. Neither may be hidden by a
@@ -78,6 +80,11 @@ const ADDED_IN_V5 = Object.freeze([
  * out behind another panel's tab is a desk that starts out with its actions
  * hidden. That is the right-hand column the screen always had. */
 const ADDED_IN_V7 = Object.freeze([['inspector', 'map', 'right']]);
+/** Panels registered after version 7. Checkpoint browsing is a RECORD — bounded,
+ * current, read beside the journal and the session history — while restore is a
+ * complex action: it combines a selection, a preflight, a consequence preview
+ * and a confirmation, so it is a draft like Spawn. */
+const ADDED_IN_V8 = Object.freeze([['checkpoint', 'journal', 'tab']]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -123,22 +130,31 @@ const liveArrangement = () => ({
         group(['inspector'], 'inspector'),
       ] },
     ] },
-    group(['comms', 'activity', 'journal', 'session-history', 'health'], 'comms'),
+    group(['comms', 'activity', 'journal', 'session-history', 'health', 'checkpoint'], 'comms'),
   ] },
 });
-/** Version 5 and 6 arranged the same panels; the inspector arrived in 7. */
+/** The arrangement before the inspector took a column of its own (version 7). */
 const arrangementBeforeV7 = () => {
-  const arrangement = liveArrangement();
+  const arrangement = arrangementBeforeV8();
   const documents = arrangement.root.children[0];
   documents.children[1] = documents.children[1].children[0];
+  return arrangement;
+};
+/** The arrangement before checkpoint browsing joined the records (version 8). */
+const arrangementBeforeV8 = () => {
+  const arrangement = liveArrangement();
+  const records = arrangement.root.children[1];
+  records.tabs = records.tabs.filter(panel => panel !== 'checkpoint');
   return arrangement;
 };
 const v5Default = () => ({ version: 5, ...arrangementBeforeV7(), floats: [], closed: [], selected: 'roster' });
 const v6Default = () => ({ version: 6, ...arrangementBeforeV7(),
   floats: [], closed: ['spawn'], selected: 'roster' });
+const v7Default = () => ({ version: 7, ...arrangementBeforeV8(),
+  floats: [], closed: ['spawn'], selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
-    floats: [], closed: ['spawn'], selected: 'roster' };
+    floats: [], closed: ['spawn', 'restore'], selected: 'roster' };
 }
 const base = createDockLayoutModel({
   version: LIVE_LAYOUT_VERSION, panels: LIVE_PANEL_REGISTRY, defaultLayout: defaultLiveLayout,
@@ -160,6 +176,8 @@ const v5 = createDockLayoutModel({ version: 5, panels: V5_PANELS, defaultLayout:
   compatibleVersions: [5] });
 const v6 = createDockLayoutModel({ version: 6, panels: V6_PANELS, defaultLayout: v6Default,
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [6] });
+const v7 = createDockLayoutModel({ version: 7, panels: V7_PANELS, defaultLayout: v7Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [7] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -171,7 +189,8 @@ const migrate = createDockLayoutMigration({
     // A temporary panel is never PLACED by migration: it starts closed, which
     // is what "not open" means for a draft.
     { version: 6, model: v6, added: [] },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V7 },
+    { version: 7, model: v7, added: ADDED_IN_V7 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V8 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

@@ -2354,8 +2354,8 @@
                failure come back on the SAME `gm_health` projection the
                unfilterable technical banner reads, so a facilitator who did
                not press Restore still sees the world being replaced. -->
-          <div id="gm-restore" role="group" aria-labelledby="gm-restore-heading">
-            <h3 id="gm-restore-heading" data-i18n="server.gm.restore.heading"></h3>
+          <section id="gm-restore" role="region" aria-labelledby="gm-restore-heading">
+            <h2 id="gm-restore-heading" data-i18n="server.gm.restore.heading"></h2>
             <p id="gm-restore-note" data-i18n="server.gm.restore.note"></p>
             <p id="gm-restore-summary"></p>
             <div id="gm-restore-actions">
@@ -2363,9 +2363,11 @@
                 data-i18n="server.gm.restore.apply"></button>
               <button id="gm-restore-resume" type="button"
                 data-i18n="server.gm.restore.resume"></button>
+              <label for="gm-restore-keep-open"><input type="checkbox" id="gm-restore-keep-open">
+                <span data-i18n="server.gm.action.keep_open"></span></label>
             </div>
             <p id="gm-restore-status" role="status" aria-live="polite" aria-atomic="true"></p>
-          </div>
+          </section>
         </section>
         <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
           <h2 id="gm-comms-heading" data-i18n="server.gm.comms.heading"></h2>

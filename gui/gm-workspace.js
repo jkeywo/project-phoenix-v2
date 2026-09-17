@@ -361,8 +361,18 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submitResume: (correlation) => privateSubmit('gm.restore.resume', { correlation }, () =>
       typeof win.__hostSetSessionPaused === 'function' && win.__hostSetSessionPaused(false, correlation)),
     confirmAction: gmConfirmations.request,
+    // Restore is a complex action: the shared lifecycle decides what a landed
+    // restore does to the draft (issue #1509).
+    onSucceeded: () => shell.temporaryActions?.succeeded('restore'),
+
   });
   win.__hostGmRestoreState = gmRestoreControl.state;
+  shell.temporaryActions?.register('restore', {
+    isDirty: () => gmRestoreControl.draftDirty(),
+    reset: () => gmRestoreControl.resetDraft(),
+    keepOpen: () => gmRestoreControl.keepOpen(),
+    focus: () => gmRestoreControl.focusDraft(),
+  });
   gmHealthPanelRef = gmHealthPanel;
   win.__hostGmHealthState = gmHealthPanel.state;
   // The M4 Station-workload advisory (issue #1438). Read-only by construction:
@@ -620,8 +630,10 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmSpawnPanel.reset();
   // The run the draft was for has gone, so there is nothing left to confirm
   // away: the panel closes rather than staying open and empty.
-  shell.temporaryActions?.discard('spawn');
-  shell.temporaryActions?.closeSilently('spawn');
+  for (const draft of ['spawn', 'restore']) {
+    shell.temporaryActions?.discard(draft);
+    shell.temporaryActions?.closeSilently(draft);
+  }
       win.__hostGmEffectReset();
     },
   };

@@ -142,6 +142,11 @@ export function createGmRestoreControl({
   doc = globalThis.document,
   t = (id) => id,
   getCandidate = () => null,
+  // A restore that LANDED finishes the draft. Every other outcome — a local
+  // refusal, an authoritative failure, a stale candidate — leaves it standing,
+  // because each is something the operator is about to correct and retry.
+  onSucceeded = () => {},
+  keepOpen = () => false,
   getOperator = () => null,
   submitRestore = () => false,
   submitResume = () => false,
@@ -152,6 +157,7 @@ export function createGmRestoreControl({
 } = {}) {
   const el = (suffix) => doc && doc.getElementById(`gm-restore-${suffix}`);
   const region = doc && doc.getElementById('gm-restore');
+  const keepOpenBox = doc && doc.getElementById('gm-restore-keep-open');
   const heading = el('heading');
   const summary = el('summary');
   const status = el('status');
@@ -162,6 +168,12 @@ export function createGmRestoreControl({
   let pending = null;
   let timer = null;
   let localRefusal = '';
+  /** Whether a phase belongs to the operator sitting at this desk. */
+  const mine = phase => {
+    const operator = getOperator();
+    const id = operator && (operator.name || operator.id);
+    return !phase.operator || !id || phase.operator === id;
+  };
 
   if (region && heading) region.setAttribute('aria-labelledby', heading.id);
   if (status) {
@@ -402,9 +414,20 @@ export function createGmRestoreControl({
     // The host has taken the request: the local pending line hands over to the
     // authoritative phase rather than both being on screen at once.
     if (pending && next.phase !== 'idle') clearPending();
+    // A landed restore is not a finished one: `restored` is where the world is
+    // rewound and HELD PAUSED, and Resume — the operator's own last decision —
+    // is on this panel. The draft finishes when that decision has been taken
+    // and the phase has gone back to idle. Finishing at `restored` would close
+    // the panel carrying Resume at the exact moment it is needed.
+    const finished = state.phase === 'restored' && next.phase === 'idle'
+      // And only for the operator whose restore it was: every desk reads this
+      // one projection, and another Game Master's rewind must not close, or
+      // clear, a draft on somebody else's screen.
+      && mine(state);
     state = next;
     if (next.phase !== 'idle') localRefusal = '';
     render();
+    if (finished) onSucceeded();
     return true;
   }
 
@@ -453,6 +476,23 @@ export function createGmRestoreControl({
     resume,
     update,
     settleJournal,
+    /** The shared complex-action contract (issue #1509).
+     *
+     * Dirty is what THIS panel holds and has not settled: a request in flight
+     * and a refusal not yet answered. The candidate belongs to the checkpoint
+     * RECORD — asking to discard a draft because a row is selected in another
+     * panel would prompt on every close the operator never typed into. */
+    draftDirty: () => !!pending || !!localRefusal,
+    resetDraft() {
+      clearPending();
+      localRefusal = '';
+      render();
+    },
+    keepOpen: () => !!keepOpenBox?.checked || keepOpen() === true,
+    focusDraft() {
+      const apply = el('apply');
+      if (apply && typeof apply.focus === 'function') apply.focus();
+    },
     /** Repaint after the candidate selection moved. */
     refresh: render,
     reset,

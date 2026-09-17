@@ -78,6 +78,8 @@ async function mount({
   accept = true,
   submitRestore = () => true,
   submitResume = () => true,
+  onSucceeded = vi.fn(),
+  keepOpen = () => false,
 } = {}) {
   submitted = [];
   resumed = [];
@@ -107,6 +109,8 @@ async function mount({
       confirmations.push(request);
       return accept ? request.accept() : (request.onCancel?.(), false);
     },
+    onSucceeded,
+    keepOpen,
     correlation: () => 'corr-1',
     schedule: () => 1,
     cancelSchedule: () => {},
@@ -518,4 +522,52 @@ it('shows no countdown in a session with nobody to wait for', async () => {
   control.update(health({ phase: 'loading', operator: 'gm-1', working: true }));
   expect(region().dataset.countdown).toBe(undefined);
   expect(status().textContent).toBe(t('server.gm.restore.phase.loading'));
+});
+
+it('finishes the draft only when a restore has landed', async () => {
+  const onSucceeded = vi.fn();
+  const control = await mount({ onSucceeded });
+  for (const phase of ['preparing', 'awaiting-agreement', 'rolled-back', 'failed']) {
+    control.update(health({ phase, operator: 'Rowan', working: false }));
+    // Every one of these is something the operator is about to answer, so the
+    // draft stays standing with its phase on screen.
+    expect(onSucceeded, phase).not.toHaveBeenCalled();
+    control.update(health({ phase: 'idle', operator: '', working: false }));
+  }
+  // A LANDED restore is not a finished one: `restored` is where the world is
+  // rewound and held paused, and Resume is on this very panel.
+  control.update(health({ phase: 'restored', operator: 'Rowan', working: false, restored_tick: 7 }));
+  expect(onSucceeded).not.toHaveBeenCalled();
+  expect(document.getElementById('gm-restore-resume').disabled).toBe(false);
+  // Resuming is the last decision, and taking it finishes the draft.
+  control.update(health({ phase: 'idle', operator: '', working: false }, { paused: false }));
+  expect(onSucceeded).toHaveBeenCalledTimes(1);
+  // A repeated idle projection is not a second restore.
+  control.update(health({ phase: 'idle', operator: '', working: false }, { paused: false }));
+  expect(onSucceeded).toHaveBeenCalledTimes(1);
+});
+
+it('is dirty only while it holds something of its own that has not settled', async () => {
+  const control = await mount();
+  expect(control.draftDirty()).toBe(false);
+  // Selecting a row is the checkpoint RECORD's business, not this draft's:
+  // prompting to discard because another panel has a selection would ask on
+  // every close the operator never typed into.
+  document.querySelector('#gm-checkpoint-list button').click();
+  expect(control.draftDirty()).toBe(false);
+  // A request in flight is this panel's own unsettled state.
+  document.getElementById('gm-restore-apply').click();
+  expect(control.draftDirty()).toBe(true);
+  control.resetDraft();
+  expect(control.draftDirty()).toBe(false);
+});
+
+it('finishes no other operator draft when another Game Master rewinds', async () => {
+  const onSucceeded = vi.fn();
+  const control = await mount({ onSucceeded });
+  control.update(health({ phase: 'restored', operator: 'Blair', working: false, restored_tick: 7 }));
+  control.update(health({ phase: 'idle', operator: '', working: false }, { paused: false }));
+  // Every desk reads this one projection; only the operator whose restore it
+  // was has a draft to finish.
+  expect(onSucceeded).not.toHaveBeenCalled();
 });

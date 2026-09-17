@@ -2,6 +2,7 @@ import { test, expect, waitForWasmReady } from './fixtures';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
+import { revealGmPanel } from './dock-helpers.js';
 
 // The GM console's smallest supported landscape surface and the top of the
 // enlargement range, both taken from #1421's shared matrix rather than
@@ -56,6 +57,9 @@ test('a GM restores a checkpoint and resumes it at 200% text on 1280x720',
     await page.evaluate((scale) => document.documentElement.style
       .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
 
+    // Browsing checkpoints is a record and restoring is a draft since issue
+    // #1509: the record is revealed, and the draft is opened.
+    await revealGmPanel(page, 'checkpoint');
     // A real checkpoint to restore, through the ordinary bookmark path.
     const name = 'Before the ambush';
     await page.locator('#gm-checkpoint-name').fill(name);
@@ -67,8 +71,11 @@ test('a GM restores a checkpoint and resumes it at 200% text on 1280x720',
     const slotId = await page.evaluate((label) => window.__hostGmCheckpointState()
       .rows.find((row) => row.displayName === label).slotId, name);
 
+    await revealGmPanel(page, 'restore');
     const restore = page.locator('#gm-restore');
     await expect(restore).toBeVisible();
+    // Restore opens as a floating draft, over the arrangement.
+    await expect(page.locator('[data-panel="restore"]')).toHaveClass(/is-floating/);
 
     // Nothing selected yet: the control asks for a selection in WORDS rather
     // than presenting a dead button (PRD #1418 story 27).
@@ -76,8 +83,10 @@ test('a GM restores a checkpoint and resumes it at 200% text on 1280x720',
     await expect(page.locator('#gm-restore-apply')).toBeDisabled();
 
     // Touch/pointer reach at this size.
+    await revealGmPanel(page, 'checkpoint');
     const row = page.locator(`#gm-checkpoint-list .gm-checkpoint-row[data-checkpoint-slot-id="${slotId}"]`);
     await row.click();
+    await revealGmPanel(page, 'restore');
     const apply = page.locator('#gm-restore-apply');
     await expect(apply).toBeEnabled();
     expect((await apply.boundingBox()).height).toBeGreaterThanOrEqual(44);

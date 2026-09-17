@@ -22,6 +22,7 @@ entities:
     architecture:
       kind: presentation-adapter
       authority: local
+      depends_on: [client-audio-presentation]
       coordinates: [gm-milestone-integrated-workshop]
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:

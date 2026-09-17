@@ -1109,6 +1109,8 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     // gm-map-panel is inside it and must stay visible.
     await expect(gmTwoReturning.locator('#gm-session-resume')).toBeHidden();
     await expect(gmTwoReturning.locator('#gm-inspector')).toBeHidden();
+    // And the dock really dropped it rather than merely framing it hidden.
+    await expect(gmTwoReturning.locator('.workshop-dock-parked #gm-inspector')).toHaveCount(1);
     await expect(gmTwoReturning.locator('#gm-map-panel')).toBeVisible();
     expect(returnedIdentity.credentialPresent).toBe(true);
     expect(returnedIdentity.credentialMatches).toBe(true);

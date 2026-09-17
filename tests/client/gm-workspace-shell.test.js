@@ -28,25 +28,9 @@ function mount(extra = {}, translate = id => id) {
   mountedShells.push(shell);
   return {shell,selectEntity,win};
 }
-it('lays the desk out as the post-M5 screen and keeps the authentic iframe outside it', () => {
+it('lays the desk out as two regions: the dock workspace and the detail column', () => {
   mount();
-  expect(document.querySelector('[data-panel="readiness"] #gm-force-start-btn')).not.toBeNull();
-  // Authentic Station operation is two dock panels (issue #1504): the takeover
-  // controls are a tool and the console is a document. The iframe stays out of
-  // the inspector, exactly as it always has.
-  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
-  expect(document.querySelector('#gm-station-tools #gm-station-pending')).not.toBeNull();
-  expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
-  expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
-  expect(document.querySelector('#gm-inspector #gm-station-toggle')).toBeNull();
-  // With no Station taken over the console has nothing to show, so it has no
-  // panel — the same rule the surface's own `hidden` always carried. Its node
-  // is parked rather than detached, because the shell is the only writer of
-  // that attribute and the only thing that can bring it back.
-  expect(document.getElementById('gm-station-surface').closest('.workshop-dock-parked')).not.toBeNull();
-  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
-  // Since issue #1503 the desk is TWO regions: the dock workspace across the
-  // left and centre, and the detail column.
+  // Issues #1502-#1507 migrated all but the checkpoints into the dock.
   expect([...document.getElementById('gm-workspace').children].map(child => child.id))
     .toEqual(['gm-desk-brief', 'gm-desk-detail']);
   // The detail column is a panel frame; the dock workspace deliberately is not,
@@ -56,42 +40,64 @@ it('lays the desk out as the post-M5 screen and keeps the authentic iframe outsi
   expect(document.getElementById('gm-desk-brief').classList.contains('gm-desk-dock')).toBe(true);
   expect([...document.getElementById('gm-desk-brief').children].map(child => child.id))
     .toEqual(['gm-live-layout']);
-  // Right: the selected hull, then the checkpoints a live event is recovered
-  // from — the restore control travels inside #gm-checkpoint.
   expect([...document.getElementById('gm-desk-detail').children].map(child => child.id))
-    .toEqual(['gm-inspector', 'gm-checkpoint']);
+    .toEqual(['gm-checkpoint']);
   expect(document.querySelector('#gm-checkpoint #gm-restore-apply')).not.toBeNull();
-  // Mission events, the four record surfaces, the map and the awareness panels
-  // are all dock panels now.
   expect(document.getElementById('gm-desk-log')).toBeNull();
+});
+
+it('registers every migrated desk panel in the dock, documents included', () => {
+  mount();
   for (const [panel, id] of [['mission', 'gm-mission-panel'], ['comms', 'gm-comms-panel'],
     ['activity', 'gm-activity'], ['journal', 'gm-journal'], ['session-history', 'gm-session-history'],
     ['map', 'gm-map-panel'], ['attention', 'gm-attention-panel'], ['workload', 'gm-workload-panel'],
-    ['health', 'gm-health-panel']]) {
+    ['health', 'gm-health-panel'], ['inspector', 'gm-inspector'], ['readiness', 'gm-start-controls'],
+    ['join', 'gm-join-controls'], ['manual-save', 'manual-save-panel']]) {
     expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
   }
+  // The surfaces this workspace is arranged around.
+  for (const panel of ['map', 'inspector']) {
+    expect(document.querySelector(`[data-panel="${panel}"]`).dataset.panelKind, panel).toBe('document');
+  }
+  expect(document.querySelector('[data-panel="roster"]').dataset.panelKind).toBe('tool');
+  expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
+  expect(document.querySelector('[data-panel="join"] #gm-join-controls').style.position).toBe('');
+});
+
+it('parks a panel whose own owner has put it away, rather than detaching it', () => {
+  mount();
   // gui/gm-widgets-panel.js owns `hidden` on the authored widget region, so a
   // scenario that authors no widget has no widget tab — and the node is parked
   // in the surface, because that owner is the only thing that can bring it back.
   expect(document.getElementById('gm-widgets').hidden).toBe(true);
   expect(document.getElementById('gm-widgets').closest('.workshop-dock-parked')).not.toBeNull();
-  expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
-  // The map is the surface this workspace is arranged around.
-  expect(document.querySelector('[data-panel="map"]').dataset.panelKind).toBe('document');
-  // The map now lives in the dock. <ph-navigation-map> restores its render loop
-  // and size observer on reconnect, which is what makes that survivable.
-  expect(document.getElementById('gm-map-panel').closest('#gm-live-layout')).not.toBeNull();
-  // And the widget region starts hidden, so a scenario that authors no widget
-  // leaves the left column exactly as it was.
-  expect(document.getElementById('gm-widgets').hidden).toBe(true);
-  // The #1437 technical-banner seam lives inside the QUEUE, not inside the
-  // health panel: it has to sit beside the list a Game Master reads and filters,
-  // which is the surface it exists to be un-hideable from.
+  // With no Station taken over the console has nothing to show, so it has no
+  // panel — the same rule the surface's own `hidden` always carried.
+  expect(document.getElementById('gm-station-surface').closest('.workshop-dock-parked')).not.toBeNull();
+  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
+});
+
+it('keeps the authentic Station iframe out of the inspector, as it always has', () => {
+  mount();
+  expect(document.querySelector('[data-panel="readiness"] #gm-force-start-btn')).not.toBeNull();
+  // Authentic Station operation is two dock panels (issue #1504): the takeover
+  // controls are a tool and the console is a document.
+  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
+  expect(document.querySelector('#gm-station-tools #gm-station-pending')).not.toBeNull();
+  expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
+  expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
+  expect(document.querySelector('#gm-inspector #gm-station-toggle')).toBeNull();
+});
+
+it('keeps the technical banner region inside the queue a Game Master reads', () => {
+  mount();
+  // The #1437 seam has to sit beside the list they read and filter, which is
+  // the surface it exists to be un-hideable from.
   expect(document.querySelector('#gm-attention-panel #gm-attention-banners')).not.toBeNull();
   expect(document.querySelector('#gm-health-panel #gm-attention-banners')).toBeNull();
   expect(document.querySelector('[data-panel="manual-save"] #manual-save-panel')).not.toBeNull();
-  expect(document.querySelector('[data-panel="join"] #gm-join-controls').style.position).toBe('');
 });
+
 it('keeps every operator and session status control in the fixed bar outside Live docking', () => {
   mount();
   const bar = document.querySelector('#gm-console > header');
@@ -502,7 +508,8 @@ it('keeps every migrated record reachable by id whatever the arrangement', () =>
     'gm-station-tools', 'gm-station-pending', 'gm-station-controls', 'gm-station-select',
     'gm-station-toggle', 'gm-station-surface', 'gm-station-frame', 'gm-station-activity',
     // The operator's own utilities mount into these AFTER the dock does.
-    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock'];
+    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock',
+    'gm-inspector', 'gm-entity-card', 'gm-inspector-tabs', 'gm-knowledge-select'];
   for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
   expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
   // Closed in a restored arrangement.
@@ -522,7 +529,8 @@ it('keeps every migrated record reachable by id in the narrow projection', () =>
   for (const id of ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history',
     'gm-station-tools', 'gm-station-controls', 'gm-station-select', 'gm-station-toggle',
     'gm-station-surface', 'gm-station-frame', 'gm-station-activity',
-    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock']) {
+    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock',
+    'gm-inspector', 'gm-entity-card', 'gm-inspector-tabs', 'gm-inspector-back']) {
     expect(document.getElementById(id), `${id} while narrow`).not.toBeNull();
   }
   // The narrow switcher offers the Station tool like any other, and the console
@@ -594,8 +602,9 @@ it('brings a record panel to the front for a caller about to focus it', () => {
   expect(shell.showLog('gm-comms-panel')).toBe(false);
   expect(recordFrame('journal').hidden).toBe(false);
   document.getElementById('gm-comms-panel').hidden = false;
-  // And a panel that is not a registered record is not this seam's business.
-  expect(shell.showLog('gm-inspector')).toBe(false);
+  // And a panel that is not a registered RECORD is not this seam's business,
+  // even though the inspector is a registered panel of its own.
+  expect(shell.showLog('gm-checkpoint')).toBe(false);
   // The desk really does wire it to the queue's own Comms navigation.
   const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
   expect(workspace).toContain("shell.showLog('gm-comms-panel');");
@@ -642,6 +651,49 @@ it('repaints the roster on a changed workload word, not on the advisory ticking'
   expect(document.querySelector('#gm-roster-ships .gm-roster-workload').dataset.level)
     .toBe('overloaded');
 });
+it('keeps entity selection and the comparison tabs across a rearranged inspector', () => {
+  const { shell, selectEntity } = mount();
+  shell.refresh({ entities: [{ entity_id: 'ship', name: 'Courier', kind: 'player_ship', faction: null }] },
+    { ships: [{ ship_id: 'ship', stations: [{ name: 'Helm', rating: 'Backfill' }] }] });
+  document.querySelector('#gm-roster-ships button').click();
+  shell.selection({ entity_id: 'ship', name: 'Courier', status: { systems: [] } });
+  const card = document.getElementById('gm-entity-card');
+  const tabs = document.getElementById('gm-inspector-tabs');
+
+  // Pull the inspector out of the documents group and float it. The selection
+  // seam is the same nodes moved, not rebuilt, so it survives.
+  shell.setLiveLayout(liveLayoutModel.float(defaultLiveLayout(), 'inspector', { x: 30, y: 40 }));
+  expect(document.getElementById('gm-entity-card')).toBe(card);
+  expect(document.getElementById('gm-inspector-tabs')).toBe(tabs);
+  expect(document.getElementById('gm-inspector').closest('[data-panel]').classList
+    .contains('is-floating')).toBe(true);
+  expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
+  document.querySelector('#gm-roster-ships button').click();
+  expect(selectEntity).toHaveBeenLastCalledWith('ship');
+
+  // The comparison tabs and their independent observing-ship scope came along.
+  document.getElementById('gm-tab-truth').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  expect(document.getElementById('gm-tab-crew').getAttribute('aria-selected')).toBe('true');
+  expect(document.getElementById('gm-knowledge-select').closest('[data-panel]').dataset.panel)
+    .toBe('inspector');
+  // Placement only: no selected entity rides along in the stored arrangement.
+  expect(JSON.stringify(shell.liveLayoutState())).not.toContain('ship');
+});
+it('drops the inspector tab when the role preset puts it away, keeping its placement', () => {
+  const { shell } = mount();
+  // gui/gm-role-presets.js lists gm-inspector in GM_ROLE_PRESET_PANEL_IDS.
+  document.getElementById('gm-inspector').hidden = true;
+  shell.refresh();
+  expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
+  // The switcher stops offering it too: a preset hiding a panel is a decision.
+  expect(document.querySelector('[data-layout-panel="inspector"][data-layout-control="switcher"]'))
+    .toBeNull();
+  expect(document.getElementById('gm-inspector').closest('.workshop-dock-parked')).not.toBeNull();
+  expect(shell.liveLayoutState().closed).not.toContain('inspector');
+  document.getElementById('gm-inspector').hidden = false;
+  shell.refresh();
+  expect(document.getElementById('gm-inspector').closest('[data-panel]').dataset.panel).toBe('inspector');
+});
 it('offers keyboard-operated comparison tabs without replacing existing comparison controls', () => {
   mount();
   document.getElementById('gm-tab-truth').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight'}));
@@ -679,17 +731,33 @@ it('offers a sticky way back to the selection card after a quick action jumps th
   const back = document.getElementById('gm-inspector-back');
   expect(inspector.firstElementChild).toBe(back);
   expect(back.hidden).toBe(true);
-  // The scroll box is the right-hand REGION: on the post-M5 screen the
-  // inspector and the checkpoints share one frame, and only the frame scrolls.
-  const detail = document.getElementById('gm-desk-detail');
-  detail.scrollTo = vi.fn();
+  // The scroll box is the FRAME the inspector sits in — one scroller, whichever
+  // frame that is. Since issue #1507 that is its dock panel.
+  const frame = inspector.closest('.workshop-dock-panel');
+  expect(frame).not.toBeNull();
+  frame.scrollTo = vi.fn();
   inspector.scrollTo = vi.fn();
   [...document.querySelectorAll('#gm-action-grid button')].find(b => b.getAttribute('aria-controls') === 'gm-objective-panel').click();
   expect(back.hidden).toBe(false);
   back.click();
   expect(back.hidden).toBe(true);
-  expect(detail.scrollTo).toHaveBeenCalledWith({ top: 0 });
+  expect(frame.scrollTo).toHaveBeenCalledWith({ top: 0 });
+  // The inspector itself never opens a second scroller inside that frame.
   expect(inspector.scrollTo).not.toHaveBeenCalled();
+
+  // Scrolling the frame back to the card clears the control too. `scroll` does
+  // not bubble, so the desk listens in the capture phase — and only for ITS
+  // scroller, not for any scroll anywhere on the console.
+  [...document.querySelectorAll('#gm-action-grid button')]
+    .find(b => b.getAttribute('aria-controls') === 'gm-objective-panel').click();
+  expect(back.hidden).toBe(false);
+  Object.defineProperty(document.getElementById('gm-journal'), 'scrollTop',
+    { configurable: true, value: 0 });
+  document.getElementById('gm-journal').dispatchEvent(new Event('scroll'));
+  expect(back.hidden).toBe(false);
+  Object.defineProperty(frame, 'scrollTop', { configurable: true, value: 0 });
+  frame.dispatchEvent(new Event('scroll'));
+  expect(back.hidden).toBe(true);
 });
 it('draws a bar pill only for a session fact a live payload carries', () => {
   const { shell } = mount();

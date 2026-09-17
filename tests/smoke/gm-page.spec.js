@@ -3002,7 +3002,9 @@ test(
       { value: 'narrative', text: '[Narrative]' },
     ]);
 
-    // The default is All: nothing authored is hidden yet.
+    // The default is All: nothing authored is hidden yet. Since issue #1507 the
+    // inspector is a dock panel with a column of its own, so it is shown from
+    // the start exactly as it was.
     await expect(page.locator('#gm-map-panel')).toBeVisible();
     await expect(page.locator('#gm-inspector')).toBeVisible();
     await expect(page.locator('#gm-session-resume')).toBeVisible();
@@ -3012,6 +3014,10 @@ test(
     // authored lists -- while gm-map-panel, which IS authored, stays visible.
     await page.selectOption('#gm-role-preset-select', 'tactical');
     await expect(page.locator('#gm-inspector')).toBeHidden();
+    // The dock stops offering it too: it reads the preset's `hidden` and drops
+    // the panel's frame, tab and switcher button rather than framing nothing.
+    await expect(page.locator('#gm-live-layout [data-layout-panel="inspector"]')).toHaveCount(0);
+    await expect(page.locator('.workshop-dock-parked #gm-inspector')).toHaveCount(1);
     await expect(page.locator('#gm-session-resume')).toBeHidden();
     await expect(page.locator('#gm-map-panel')).toBeVisible();
 

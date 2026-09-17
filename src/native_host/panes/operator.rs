@@ -409,6 +409,33 @@ const LIVE_PANELS_V6: &[&str] = &[
     "source-link",
     "spawn",
 ];
+const LIVE_PANELS_V7: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+];
+/// Panels registered after version 6. The entity inspector is the desk's other
+/// reading surface, so it joins the documents.
+const LIVE_ADDED_IN_V7: &[(&str, &str, &str)] = &[("inspector", "map", "right")];
+
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
@@ -446,7 +473,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         3 => LIVE_PANELS_V3,
         4 => LIVE_PANELS_V4,
         5 => LIVE_PANELS_V5,
-        _ => LIVE_PANELS_V6,
+        6 => LIVE_PANELS_V6,
+        _ => LIVE_PANELS_V7,
     }
 }
 
@@ -466,6 +494,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     // Version 6 registered a temporary panel, which migration never PLACES: it
     // starts closed, which is what "not open" means for a draft.
+    if version < 7 {
+        added.extend_from_slice(LIVE_ADDED_IN_V7);
+    }
     added
 }
 
@@ -554,7 +585,7 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 6,
+        "version": 7,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
@@ -562,7 +593,10 @@ fn default_live_layout() -> Value {
                         "attention","workload","widgets","station"], "active":"roster"},
                     {"type":"tabs", "tabs":["presentation","audition","source-link"], "active":"presentation"}
                 ]},
-                {"type":"tabs", "tabs":["map","station-console"], "active":"map"}
+                {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
+                    {"type":"tabs", "tabs":["map","station-console"], "active":"map"},
+                    {"type":"tabs", "tabs":["inspector"], "active":"inspector"}
+                ]}
             ]},
             {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
         ]},
@@ -571,7 +605,7 @@ fn default_live_layout() -> Value {
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=6).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=7).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();

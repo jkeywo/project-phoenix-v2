@@ -52,6 +52,20 @@ its surface's own `hidden` always carried. Closing it is an arrangement choice
 that releases nothing, and taking a Station over brings an OPEN console forward
 without reopening one the operator closed.
 
+Issue #1507 brought the entity inspector in as the desk's other *document*: the
+entity card, the Truth/Crew Knowledge/Difference tabs with their independent
+observing-ship scope, the bounded Back/Forward history and the quick-action
+shortcuts all travel as one node, so selection from the map and the roster keeps
+driving them through any rearrangement. The sticky way back to the selection
+card resolves its scroll box when it is needed rather than at mount, because the
+frame the inspector sits in is now something the operator can move; one scroller
+per frame is a correctness rule, not a layout preference. It takes a COLUMN of
+its own rather than a tab beside the map: it holds every selected-entity control
+— systems, contacts, doctrine, objectives, direct effect, despawn, factions —
+and a desk whose actions start out behind another panel's tab is a desk that
+starts out with its actions hidden. The detail column keeps the checkpoints
+until their own slice.
+
 Issue #1506 added a third kind of panel beside documents and tools: a
 *temporary* one. A complex action — one that combines several choices before it
 can be sent — opens as ONE floating draft per action type; invoking it again

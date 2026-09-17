@@ -106,6 +106,7 @@ server.gm.shell.layout.panel.source_link,Live dock Workshop source handoff panel
 server.gm.action.keep_open,Checkbox keeping a complex GM action draft open after it succeeds,[Keep open]
 server.gm.action.discard,Confirmation asked before losing an unsent GM action draft,[Discard this unsent draft?]
 server.gm.shell.layout.panel.spawn,Live dock Spawn draft panel,[Spawn]
+server.gm.shell.layout.panel.inspector,Live dock entity inspector panel,[Inspector]
 server.gm.shell.manual_save_unavailable,Native GM manual save capability status,[Manual save is unavailable on this native surface.]
 workshop.new,New pack action,[New pack]
 workshop.save,Native project save action,[Save source]

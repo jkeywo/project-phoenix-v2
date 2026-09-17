@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 6;
+export const LIVE_LAYOUT_VERSION = 7;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -10,7 +10,7 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   documentPanel('map'), tool('attention'), tool('workload'), tool('widgets'), tool('health'),
   tool('station'), documentPanel('station-console'),
   tool('presentation'), tool('audition'), tool('source-link'),
-  tool('spawn'),
+  tool('spawn'), documentPanel('inspector'),
 ]);
 export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
@@ -19,6 +19,7 @@ const V2_PANELS = Object.freeze([...V1_PANELS,
 const V3_PANELS = Object.freeze([...V2_PANELS, 'map', 'attention', 'workload', 'widgets', 'health']);
 const V4_PANELS = Object.freeze([...V3_PANELS, 'station', 'station-console']);
 const V5_PANELS = Object.freeze([...V4_PANELS, 'presentation', 'audition', 'source-link']);
+const V6_PANELS = Object.freeze([...V5_PANELS, 'spawn']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -70,6 +71,13 @@ const ADDED_IN_V5 = Object.freeze([
   ['audition', 'presentation', 'tab'],
   ['source-link', 'presentation', 'tab'],
 ]);
+/** Panels registered after version 6. The entity inspector is the desk's other
+ * reading surface, and it gets a COLUMN rather than a tab beside the map: it
+ * holds every selected-entity control — systems, contacts, doctrine,
+ * objectives, direct effect, despawn, factions — and a desk whose actions start
+ * out behind another panel's tab is a desk that starts out with its actions
+ * hidden. That is the right-hand column the screen always had. */
+const ADDED_IN_V7 = Object.freeze([['inspector', 'map', 'right']]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -110,12 +118,24 @@ const liveArrangement = () => ({
           'attention', 'workload', 'widgets', 'station'], 'roster'),
         group(['presentation', 'audition', 'source-link'], 'presentation'),
       ] },
-      group(['map', 'station-console'], 'map'),
+      { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
+        group(['map', 'station-console'], 'map'),
+        group(['inspector'], 'inspector'),
+      ] },
     ] },
     group(['comms', 'activity', 'journal', 'session-history', 'health'], 'comms'),
   ] },
 });
-const v5Default = () => ({ version: 5, ...liveArrangement(), floats: [], closed: [], selected: 'roster' });
+/** Version 5 and 6 arranged the same panels; the inspector arrived in 7. */
+const arrangementBeforeV7 = () => {
+  const arrangement = liveArrangement();
+  const documents = arrangement.root.children[0];
+  documents.children[1] = documents.children[1].children[0];
+  return arrangement;
+};
+const v5Default = () => ({ version: 5, ...arrangementBeforeV7(), floats: [], closed: [], selected: 'roster' });
+const v6Default = () => ({ version: 6, ...arrangementBeforeV7(),
+  floats: [], closed: ['spawn'], selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
     floats: [], closed: ['spawn'], selected: 'roster' };
@@ -138,6 +158,8 @@ const v4 = createDockLayoutModel({ version: 4, panels: V4_PANELS, defaultLayout:
   compatibleVersions: [4] });
 const v5 = createDockLayoutModel({ version: 5, panels: V5_PANELS, defaultLayout: v5Default,
   compatibleVersions: [5] });
+const v6 = createDockLayoutModel({ version: 6, panels: V6_PANELS, defaultLayout: v6Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [6] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -148,7 +170,8 @@ const migrate = createDockLayoutMigration({
     { version: 5, model: v5, added: ADDED_IN_V5 },
     // A temporary panel is never PLACED by migration: it starts closed, which
     // is what "not open" means for a draft.
-    { version: LIVE_LAYOUT_VERSION, model: base, added: [] },
+    { version: 6, model: v6, added: [] },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V7 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

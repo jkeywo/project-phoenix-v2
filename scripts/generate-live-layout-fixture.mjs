@@ -83,6 +83,13 @@ const CASES = [
     floats: [{ panel: 'spawn', x: 8, y: 9, width: 300, height: 200 }],
     closed: allClosedBut('roster', 'spawn'), selected: 'spawn',
   }],
+  ['a version 6 layout', {
+    version: 6, root: group(['roster', 'map'], 'map'), floats: [],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal',
+      'session-history', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'presentation', 'audition', 'source-link', 'spawn'],
+    selected: 'map',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

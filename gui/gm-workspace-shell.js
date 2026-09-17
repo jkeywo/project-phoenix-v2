@@ -49,6 +49,9 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // A complex action the operator opens, fills in and finishes (issue #1506).
   // It is absent from the default arrangement and opens as a floating draft.
   ['spawn', 'gm-spawn-panel'],
+  // The entity reading surface (issue #1507). The role preset owns its `hidden`,
+  // as it always has, and the dock reads it.
+  ['inspector', 'gm-inspector'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -278,18 +281,27 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   back.type = 'button';
   back.hidden = true;
   inspector.prepend(back);
-  // The scroll box is the REGION, not the inspector: the post-M5 right-hand
-  // column holds the inspector and the checkpoints in one frame, and only the
-  // frame scrolls (gui/gm-workspace.css explains why a second nested scroller
-  // there is a correctness problem, not a layout preference).
-  const detailScroller = inspector.closest('.gm-desk-region') || inspector;
+  // The scroll box is the FRAME the inspector sits in, not the inspector: one
+  // scroller, whichever frame that is (gui/gm-workspace.css explains why a
+  // second nested scroller here is a correctness problem, not a layout
+  // preference). Since issue #1507 the inspector is a dock panel and can be
+  // moved, so its frame is resolved when it is needed rather than at mount.
+  const detailScroller = () =>
+    inspector.closest('.workshop-dock-panel') || inspector.closest('.gm-desk-region') || inspector;
   back.addEventListener('click', () => {
     back.hidden = true;
-    if (typeof detailScroller.scrollTo === 'function') detailScroller.scrollTo({ top: 0 }); else detailScroller.scrollTop = 0;
+    const scroller = detailScroller();
+    if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top: 0 }); else scroller.scrollTop = 0;
     get('gm-entity-card')?.scrollIntoView?.({ block: 'start' });
     tabs.querySelector('button[aria-selected="true"]')?.focus({ preventScroll: true });
   });
-  detailScroller.addEventListener('scroll', () => { if (!back.hidden && detailScroller.scrollTop < 8) back.hidden = true; });
+  // `scroll` does not bubble, so the desk listens in the capture phase rather
+  // than binding to a frame that is about to be replaced by the next render.
+  const onScroll = event => {
+    if (back.hidden || event.target !== detailScroller()) return;
+    if (detailScroller().scrollTop < 8) back.hidden = true;
+  };
+  root.addEventListener('scroll', onScroll, true);
   let gms = [];
   let entities = [];
   let selected = null;
@@ -574,6 +586,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   if (liveWorkspace) mountLiveLayout(liveLayoutModel.defaultLayout());
   return {
     dispose() {
+      root.removeEventListener('scroll', onScroll, true);
       liveLayout?.dispose();
       restoreDockedNodes();
       observer.disconnect();

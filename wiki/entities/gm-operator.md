@@ -52,6 +52,21 @@ its surface's own `hidden` always carried. Closing it is an arrangement choice
 that releases nothing, and taking a Station over brings an OPEN console forward
 without reopening one the operator closed.
 
+Issue #1506 added a third kind of panel beside documents and tools: a
+*temporary* one. A complex action — one that combines several choices before it
+can be sent — opens as ONE floating draft per action type; invoking it again
+focuses the draft already open rather than opening a second. Finishing is the
+operator's decision: Keep open is on the confirm control, docking implies Keep
+open, and an undocked unchecked draft closes on authoritative success and at no
+other time — validation, local refusal, authoritative refusal and timeout all
+leave it open with its typed feedback, because each is something about to be
+corrected and resent. Losing typed work is confirmed first, including when a
+layout reset would take it. Persistence carries the fact that a draft was
+DOCKED and nothing else: a docked draft is a tool kept to hand and comes back
+empty, and a floating one is not restored at all. `gui/gm-temporary-actions.js`
+owns that lifecycle; each action still owns its own typed request, feedback and
+confirmation category. Spawn is the first, and left the roster to become one.
+
 Issue #1505 finished the migration with the operator's own instruments: typed
 presentation control, private sound audition and the one-way Workshop source
 handoff open a group of their own under the workflow panels. Docking moves the

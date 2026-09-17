@@ -36,6 +36,7 @@ function mount({
   schedule = vi.fn(),
   cancelSchedule = vi.fn(),
   map = null,
+  onSucceeded = vi.fn(),
 } = {}) {
   const queue = [...correlations];
   const panel = createGmSpawnPanel({
@@ -46,6 +47,7 @@ function mount({
     getOperator: () => operator,
     getOperatorName: (id) => ({ 'gm-a': 'Alex', 'gm-b': 'Blair' }[id] || id),
     getMap: () => map,
+    onSucceeded,
     correlation: () => queue.shift(),
     now: () => 101,
     schedule,
@@ -53,7 +55,7 @@ function mount({
     ...(capacity == null ? {} : { capacity }),
     ...(timeoutMs == null ? {} : { timeoutMs }),
   });
-  return { panel, submitPlacement, schedule, cancelSchedule, map };
+  return { panel, submitPlacement, schedule, cancelSchedule, map, onSucceeded };
 }
 
 function entry(overrides = {}) {
@@ -92,6 +94,7 @@ describe('GM placement panel', () => {
           <input id="gm-spawn-z" type="number" value="0">
           <input id="gm-spawn-facing" type="number" value="0">
           <button type="button" id="gm-spawn-exact"></button>
+          <input type="checkbox" id="gm-spawn-keep-open">
         </div>
         <p id="gm-spawn-feedback"></p>
         <ol id="gm-spawn-log"></ol>
@@ -358,6 +361,74 @@ describe('GM placement panel', () => {
       });
       expect(logRows()).toHaveLength(0);
       expect(rows()).toHaveLength(0);
+    });
+  });
+
+  describe('the draft lifecycle', () => {
+    it('reports a dirty draft, and a repeat keeps WHAT and clears WHERE', () => {
+      const { panel } = mount();
+      panel.update({ palette: [entry({ id: 'tender' })], results: [] });
+      expect(panel.state().dirty).toBe(false);
+
+      // Typing a placement, choosing a variant or arming the map is unsent work.
+      document.getElementById('gm-spawn-x').value = '250';
+      expect(panel.state().dirty).toBe(true);
+      document.getElementById('gm-spawn-x').value = '0';
+      expect(panel.state().dirty).toBe(false);
+      panel.arm('tender');
+      expect(panel.state().dirty).toBe(true);
+
+      // A repeat keeps the palette choice and clears the placement: two ships
+      // at one coordinate is a mistake far more often than an intention.
+      document.getElementById('gm-spawn-z').value = '900';
+      panel.resetDraft({ keepReusable: true });
+      expect(document.getElementById('gm-spawn-z').value).toBe('0');
+      expect(panel.state().arming).toBeNull();
+      // A fresh open clears everything, including Keep open.
+      document.getElementById('gm-spawn-keep-open').checked = true;
+      expect(panel.state().keepOpen).toBe(true);
+      panel.resetDraft({ keepReusable: false });
+      expect(panel.state().keepOpen).toBe(false);
+      expect(panel.state().variants).toEqual({});
+    });
+
+    it('does not call a variant put back to the bare template unsent work', () => {
+      const { panel } = mount();
+      panel.update({ palette: [entry({ variants: [{ id: 'removable', label: 'x' }] })], results: [] });
+      const select = document.querySelector('#gm-spawn-palette select');
+      select.value = 'removable';
+      select.dispatchEvent(new Event('change'));
+      expect(panel.state().dirty).toBe(true);
+      select.value = '';
+      select.dispatchEvent(new Event('change'));
+      // Back at the default: nothing to discard, so nothing to ask about.
+      expect(panel.state().dirty).toBe(false);
+    });
+
+    // A refusal and a no-op are both "correct it and send again": neither
+    // placed anything, so neither finishes the draft.
+    it.each([['refused', 0], ['no-op', 0], ['applied', 1]])(
+      'finishes the draft on %s exactly %i times', (outcome, finished) => {
+        const succeeded = vi.fn();
+        const { panel, submitPlacement } = mount({ onSucceeded: succeeded });
+        panel.update({ palette: [entry()], results: [] });
+        panel.place('raider', { x: 1, z: 2, heading: 0 });
+        const correlation = submitPlacement.mock.calls[0][0].correlation;
+        panel.update({ palette: [entry()], results: [result({ correlation, outcome })] });
+        expect(succeeded).toHaveBeenCalledTimes(finished);
+      });
+
+    it('leaves the draft standing when the send times out', () => {
+      const succeeded = vi.fn();
+      const { panel, schedule, submitPlacement } = mount({ onSucceeded: succeeded });
+      panel.update({ palette: [entry()], results: [] });
+      document.getElementById('gm-spawn-x').value = '250';
+      panel.place('raider', { x: 1, z: 2, heading: 0 });
+      expect(submitPlacement).toHaveBeenCalledTimes(1);
+      schedule.mock.calls.at(-1)[0]();
+      expect(succeeded).not.toHaveBeenCalled();
+      expect(panel.state().dirty).toBe(true);
+      expect(document.getElementById('gm-spawn-x').value).toBe('250');
     });
   });
 });

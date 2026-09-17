@@ -5,7 +5,12 @@ import { mountGmWorkspaceShell } from '../../gui/gm-workspace-shell.js';
 import { defaultLiveLayout, liveLayoutModel } from '../../gui/live-layout-model.js';
 const source = readFileSync('server.html', 'utf8');
 const observers = [];
+// Every mounted shell must be disposed: it registers a document-level keydown
+// listener for dock commands, and a stale one from a previous test claims the
+// event (and calls preventDefault) before the live shell ever sees it.
+const mountedShells = [];
 afterEach(() => {
+  mountedShells.splice(0).forEach(shell => shell.dispose());
   observers.forEach(observer => observer.disconnect());
   document.documentElement.classList.remove('phoenix-gm-page');
   document.head.querySelectorAll('link').forEach(link => link.remove());
@@ -20,6 +25,7 @@ function mount(extra = {}, translate = id => id) {
     constructor(fn) { super(fn); observers.push(this); }
   }, __phoenixGmPage: true, ...extra };
   const shell = mountGmWorkspaceShell({doc:document,win,t:translate,has:()=>false,selectEntity});
+  mountedShells.push(shell);
   return {shell,selectEntity,win};
 }
 it('lays the desk out as the post-M5 screen and keeps the authentic iframe outside it', () => {
@@ -296,6 +302,90 @@ it('docks the presentation, audition and Workshop source utilities', () => {
   shell.setLiveLayout(defaultLiveLayout());
   expect(document.getElementById('gm-audition-dock').closest('.workshop-tab-stack'))
     .toBe(document.getElementById('gm-presentation-dock').closest('.workshop-tab-stack'));
+});
+it('opens Spawn as a floating draft and keeps a docked one in the stored layout', () => {
+  const { shell } = mount();
+  // A draft nobody opened is not a place: it is absent from the arrangement.
+  expect(document.querySelector('[data-panel="spawn"]')).toBeNull();
+  expect(shell.liveLayoutState().closed).toContain('spawn');
+  expect(document.getElementById('gm-spawn-panel')).not.toBeNull();
+
+  // The switcher opens it floating, not as a tab in somebody else's group.
+  document.querySelector('[data-layout-panel="spawn"][data-layout-control="switcher"]').click();
+  const framed = document.querySelector('[data-panel="spawn"]');
+  expect(framed.classList.contains('is-floating')).toBe(true);
+  expect(framed.contains(document.getElementById('gm-spawn-palette'))).toBe(true);
+  // A floating draft is not restored — it is a form, not an arrangement.
+  expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed).toContain('spawn');
+
+  // A docked one is a tool the operator keeps to hand, and it does survive.
+  shell.setLiveLayout(liveLayoutModel.dock(shell.liveLayoutState(), 'spawn', 'roster', 'tab'));
+  expect(document.getElementById('gm-spawn-panel').closest('[data-panel]').dataset.panel).toBe('spawn');
+  const restored = liveLayoutModel.normalize(shell.liveLayoutState());
+  expect(restored.closed).not.toContain('spawn');
+  // Placement only: no palette choice, coordinate or correlation rides along.
+  const stored = JSON.stringify(restored);
+  for (const key of ['palette', 'variant', 'position', 'heading', 'correlation']) {
+    expect(stored, key).not.toContain(key);
+  }
+});
+it('confirms before the close button takes an unsent draft, and forgets it after', () => {
+  const { shell, win } = mount();
+  let dirty = true;
+  const resets = [];
+  shell.temporaryActions.register('spawn', {
+    isDirty: () => dirty, reset: options => { resets.push(options); dirty = false; },
+    keepOpen: () => false, focus: () => {},
+  });
+  document.querySelector('[data-layout-panel="spawn"][data-layout-control="switcher"]').click();
+  const close = () => document.querySelector('[data-panel="spawn"] [data-layout-control="close"]');
+
+  win.confirm = () => false;
+  close().click();
+  expect(document.querySelector('[data-panel="spawn"]')).not.toBeNull();
+  expect(resets).toEqual([]);
+
+  win.confirm = () => true;
+  close().click();
+  expect(document.querySelector('[data-panel="spawn"]')).toBeNull();
+  expect(resets).toEqual([{ keepReusable: false }]);
+});
+it('docks an open draft by keyboard, which makes it persistent', () => {
+  const { shell } = mount();
+  document.querySelector('[data-layout-panel="spawn"][data-layout-control="switcher"]').click();
+  const tab = document.querySelector('[data-panel="spawn"] .workshop-panel-tab');
+  tab.focus();
+  tab.dispatchEvent(new KeyboardEvent('keydown', {
+    code: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  const state = shell.liveLayoutState();
+  expect(state.floats.some(entry => entry.panel === 'spawn')).toBe(false);
+  expect(state.closed).not.toContain('spawn');
+  // Docked is the one thing about a draft worth restoring.
+  expect(liveLayoutModel.normalize(state).closed).not.toContain('spawn');
+});
+it('asks before a stored arrangement replaces an open draft', () => {
+  const { shell, win } = mount();
+  let dirty = true;
+  shell.temporaryActions.register('spawn', {
+    isDirty: () => dirty, reset: () => { dirty = false; }, keepOpen: () => false, focus: () => {},
+  });
+  document.querySelector('[data-layout-panel="spawn"][data-layout-control="switcher"]').click();
+  win.confirm = () => false;
+  expect(shell.setLiveLayout(defaultLiveLayout())).toBe(false);
+  expect(document.querySelector('[data-panel="spawn"]')).not.toBeNull();
+  win.confirm = () => true;
+  expect(shell.setLiveLayout(defaultLiveLayout())).toBe(true);
+  expect(document.querySelector('[data-panel="spawn"]')).toBeNull();
+});
+it('refuses a layout reset that would take an unsent draft away', () => {
+  const { shell } = mount();
+  let dirty = true;
+  shell.temporaryActions.register('spawn', {
+    isDirty: () => dirty, reset: () => { dirty = false; }, keepOpen: () => false, focus: () => {},
+  });
+  document.querySelector('[data-layout-panel="spawn"][data-layout-control="switcher"]').click();
+  expect(document.querySelector('[data-panel="spawn"]')).not.toBeNull();
+  expect(shell.temporaryActions.mayReset()).toBe(false);
 });
 it('carries no takeover draft or console runtime state in the stored layout', () => {
   const { shell } = mount();

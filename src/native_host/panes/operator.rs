@@ -387,6 +387,33 @@ const LIVE_ADDED_IN_V5: &[(&str, &str, &str)] = &[
     ("source-link", "presentation", "tab"),
 ];
 
+const LIVE_PANELS_V6: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+];
+/// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
+/// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
+/// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
+const LIVE_TEMPORARY_PANELS: &[&str] = &["spawn"];
+
 /// Panels the operator may not close. The attention region renders connection
 /// and recovery banners verbatim and health is the table behind them: a Game
 /// Master must not be able to hide a failure from themselves, whichever
@@ -418,7 +445,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         2 => LIVE_PANELS_V2,
         3 => LIVE_PANELS_V3,
         4 => LIVE_PANELS_V4,
-        _ => LIVE_PANELS_V5,
+        5 => LIVE_PANELS_V5,
+        _ => LIVE_PANELS_V6,
     }
 }
 
@@ -436,6 +464,8 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     if version < 5 {
         added.extend_from_slice(LIVE_ADDED_IN_V5);
     }
+    // Version 6 registered a temporary panel, which migration never PLACES: it
+    // starts closed, which is what "not open" means for a draft.
     added
 }
 
@@ -524,7 +554,7 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 5,
+        "version": 6,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
@@ -536,12 +566,12 @@ fn default_live_layout() -> Value {
             ]},
             {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
         ]},
-        "floats": [], "closed": [], "selected": "roster"
+        "floats": [], "closed": ["spawn"], "selected": "roster"
     })
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=5).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=6).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -561,6 +591,12 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
         else {
             continue;
         };
+        // A FLOATING draft is not restored. It is left unseen on purpose, so
+        // the pass below records it as closed — which is what "not open" means
+        // for a draft nobody is filling in any more.
+        if LIVE_TEMPORARY_PANELS.contains(&panel) {
+            continue;
+        }
         if !seen.insert(panel.to_owned()) {
             continue;
         }
@@ -603,8 +639,55 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
     if !added.is_empty() {
         layout = migrate_live_layout(layout, &added);
     }
+    // A version that registered only a temporary panel places nothing, so the
+    // stamp is written here rather than inside the placement pass.
+    layout["version"] = default_live_layout()["version"].clone();
     repair_pinned_live_panels(&mut layout);
+    record_unplaced_live_panels(&mut layout);
     Some(layout)
+}
+
+/// A panel the CURRENT registry has that migration did not place — a temporary
+/// one, which migration never places — is recorded as closed. Without this a
+/// layout stored before it was registered would come back claiming neither open
+/// nor closed, which the browser model does not do.
+fn record_unplaced_live_panels(layout: &mut Value) {
+    let mut placed = BTreeSet::new();
+    collect_live_panels(&layout["root"], &mut placed);
+    for entry in layout["floats"].as_array().into_iter().flatten() {
+        if let Some(panel) = entry["panel"].as_str() {
+            placed.insert(panel.to_owned());
+        }
+    }
+    for panel in layout["closed"].as_array().into_iter().flatten() {
+        if let Some(panel) = panel.as_str() {
+            placed.insert(panel.to_owned());
+        }
+    }
+    let closed = layout["closed"].as_array_mut().unwrap();
+    for panel in live_panels_for(u64::MAX) {
+        if !placed.contains(*panel) {
+            closed.push(json!(panel));
+        }
+    }
+}
+
+fn collect_live_panels(node: &Value, out: &mut BTreeSet<String>) {
+    match node["type"].as_str() {
+        Some("tabs") => {
+            for tab in node["tabs"].as_array().into_iter().flatten() {
+                if let Some(tab) = tab.as_str() {
+                    out.insert(tab.to_owned());
+                }
+            }
+        }
+        Some("split") => {
+            for child in node["children"].as_array().into_iter().flatten() {
+                collect_live_panels(child, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A pinned panel that arrived closed - from a hand-edited or older profile -
@@ -633,7 +716,6 @@ fn migrate_live_layout(mut layout: Value, added: &[(&str, &str, &str)]) -> Value
         .as_array_mut()
         .unwrap()
         .extend(added.iter().map(|(panel, _, _)| json!(panel)));
-    layout["version"] = json!(5);
     for (panel, preferred, placement) in added {
         add_migration_panel_at(&mut layout, panel, preferred, &Value::Null, placement);
     }

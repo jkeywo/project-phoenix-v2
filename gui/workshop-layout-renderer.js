@@ -6,7 +6,8 @@ const NARROW_WIDTH = 880;
 let nextLayoutInstance = 0;
 
 export function mountDockLayout({ root, surface, panels, labels, initial, onChange, onVisible,
-  available = () => true, retain = false,
+  available = () => true, retain = false, mayReset = () => true, mayClose = () => true,
+  onOpen = () => {}, onDiscard = () => {},
   model = workshopLayoutModel, viewportNarrow = false, doc = root.ownerDocument, win = doc.defaultView }) {
   surface.classList.add('workshop-dock-root');
   const panelIds = model.panels;
@@ -52,8 +53,9 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     return node.children.flatMap(orderedPanels);
   };
 
+  const settle = (value, bounds) => (model.settle || model.normalize)(value, bounds);
   const emit = (next, focusPanel = next.selected) => {
-    state = model.normalize(next, narrow ? undefined : canvasBounds()); projectedPanel = null;
+    state = settle(next, narrow ? undefined : canvasBounds()); projectedPanel = null;
     render(); onChange?.(state);
     win.requestAnimationFrame?.(() => {
       const panelTab = canvas.querySelector(`[role="tab"][data-layout-panel="${focusPanel}"]`)
@@ -150,7 +152,13 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       }));
       // A pinned panel offers no way to close it, because there is none.
       if (!model.isPinned?.(panel)) {
-        header.append(makeButton(labels.close, () => emit(model.close(state, panel), panel), {
+        header.append(makeButton(labels.close, () => {
+          // Closing a panel that holds unsent work is the operator losing it,
+          // so whoever owns that work gets asked first.
+          if (mayClose(panel) !== true) return;
+          onDiscard(panel);
+          emit(model.close(state, panel), panel);
+        }, {
           'aria-label': `${labels.close}: ${labels.panels[panel]}`, 'data-layout-control': 'close',
         }));
       }
@@ -282,14 +290,27 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   function paint() {
     switcher.replaceChildren(...panelIds.filter(usable).map(panel => makeButton(labels.panels[panel], () => {
       if (narrow) {
+        const opened = openInState(panel);
         projectedPanel = panel; render();
+        if (opened) onChange?.(state);
         switcher.querySelector(`[data-layout-panel="${panel}"]`)?.focus();
+      } else if (!state.closed.includes(panel)) {
+        emit(model.select(state, panel), panel);
       } else {
-        const next = state.closed.includes(panel) ? model.reopen(state, panel) : model.select(state, panel);
-        emit(next, panel);
+        // A temporary panel is a draft the operator is opening, so it opens
+        // where a draft belongs: floating over the arrangement, not as a tab in
+        // somebody else's group.
+        emit(model.isTemporary?.(panel) ? model.float(state, panel, {}, canvasBounds())
+          : model.reopen(state, panel), panel);
       }
     }, { 'aria-pressed': String((narrow ? projectedPanel || state.selected : state.selected) === panel), 'data-layout-panel': panel, 'data-layout-control': 'switcher' })),
-    makeButton(labels.reset, () => emit(model.defaultLayout()), { class: 'workshop-layout-reset', 'data-layout-control': 'reset' }));
+    makeButton(labels.reset, () => {
+      // Resetting the arrangement would take an open draft away with it, so the
+      // drafts get their say first.
+      if (mayReset() !== true) return;
+      onDiscard(null);
+      emit(model.defaultLayout());
+    }, { class: 'workshop-layout-reset', 'data-layout-control': 'reset' }));
     canvas.replaceChildren(); canvas.classList.toggle('is-narrow', narrow);
     if (narrow) {
       const selected = narrowProjection();
@@ -312,6 +333,22 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   /** Panels with a frame the operator can actually see. A closed panel, an
    * inactive tab and a panel the narrow projection left out are all absent, so a
    * panel holding an expensive live resource can release it. */
+  /** Bring a closed panel back into the arrangement.
+   *
+   * The narrow projection shows one panel at a time, but it must still OPEN the
+   * one it shows: a panel left `closed` while the operator is filling it in is
+   * one nothing else knows is on screen — a draft would be wiped by the next
+   * open and taken by the next reset without anybody being asked. */
+  function openInState(panel) {
+    // Only a DRAFT. The narrow projection is deliberately not a layout change
+    // for an ordinary panel — it shows one of the arrangement's panels at a
+    // time and leaves the retained desktop tree alone — but a draft has no
+    // place in that arrangement to be shown FROM, so opening one is real.
+    if (!model.isTemporary?.(panel) || !state.closed.includes(panel)) return false;
+    state = settle(model.float(state, panel, {}, canvasBounds()), canvasBounds());
+    return true;
+  }
+
   /** An operator standing on a panel its owner just put away lands on one that
    * is still there rather than on an empty projection. */
   function narrowProjection() {
@@ -346,7 +383,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       panel: active.closest?.('[data-panel]')?.dataset.panel || active.dataset?.layoutPanel,
       control: active.dataset?.layoutControl,
     } : null;
-    const repaired = nextNarrow ? state : model.normalize(state, canvasBounds());
+    const repaired = nextNarrow ? state : settle(state, canvasBounds());
     const changed = JSON.stringify(repaired) !== JSON.stringify(state);
     if (nextNarrow === narrow && !changed) return;
     narrow = nextNarrow;
@@ -369,10 +406,17 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     // undoing it. `reopen: false` says so.
     if (!reopen && state.closed.includes(panel)) return false;
     if (narrow) {
+      const opened = reopen && openInState(panel);
       projectedPanel = panel;
       render();
+      if (opened && notify) onChange?.(state);
     } else {
-      state = model.normalize(state.closed.includes(panel) ? model.reopen(state, panel) : model.select(state, panel), canvasBounds());
+      // A temporary panel is a draft: opening one opens it floating, exactly as
+      // the switcher does, rather than docking it into somebody else's group.
+      const opened = !state.closed.includes(panel) ? model.select(state, panel)
+        : model.isTemporary?.(panel) ? model.float(state, panel, {}, canvasBounds())
+          : model.reopen(state, panel);
+      state = settle(opened, canvasBounds());
       projectedPanel = null;
       render();
       if (notify) onChange?.(state);
@@ -406,7 +450,12 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     });
     return true;
   }
-  return { state: () => cloneState(state), set: next => emit(next), reset: () => emit(model.defaultLayout()),
+  return { model,
+    state: () => cloneState(state),
+    // `set` takes an arrangement from a CALLER — a stored profile, a reset —
+    // so it is guarded like any other stored state rather than merely settled.
+    set: next => emit(model.normalize(next, narrow ? undefined : canvasBounds())),
+    reset: () => { if (mayReset() !== true) return; onDiscard(null); emit(model.defaultLayout()); },
     reveal, syncAvailability, dispose() {
       painted = null;
     observer?.disconnect(); win.removeEventListener?.('resize', resize); doc.removeEventListener('keydown', keydown);

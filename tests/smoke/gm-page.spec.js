@@ -476,6 +476,8 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
     await expect(page.locator('#gm-entity-card')).toBeHidden();
   }
   // A runtime hazard receives normal spawn provenance through the real palette.
+  // Spawn is a temporary action panel since issue #1506, so it is opened first.
+  await revealGmPanel(page, 'spawn');
   const row = page.locator('#gm-spawn-palette [data-palette-id="hazard"].gm-spawn-entry');
   await row.locator('select').selectOption('removable');
   await row.locator('button[data-role="place"]').click();
@@ -1871,6 +1873,7 @@ test('a GM places palette entries by map drag and by keyboard alone', { tag: '@c
 
   // The authored palette reaches the panel from the authoritative projection —
   // nothing in this spec injects a Host Channel payload.
+  await revealGmPanel(page, 'spawn');
   const row = page.locator('#gm-spawn-palette .gm-spawn-entry[data-palette-id="tender"]');
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row.locator('.gm-spawn-entry-label'))

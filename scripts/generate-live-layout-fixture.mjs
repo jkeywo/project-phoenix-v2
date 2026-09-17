@@ -66,6 +66,23 @@ const CASES = [
       'map', 'workload', 'widgets', 'station', 'station-console'],
     selected: 'mission',
   }],
+  ['a version 5 layout', {
+    version: 5, root: group(['roster', 'presentation'], 'presentation'), floats: [],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal',
+      'session-history', 'map', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'audition', 'source-link'],
+    selected: 'presentation',
+  }],
+  ['a docked draft, which survives, beside a floating one, which does not', {
+    version: 6, root: group(['roster', 'spawn'], 'spawn'),
+    floats: [{ panel: 'spawn', x: 8, y: 9, width: 300, height: 200 }],
+    closed: allClosedBut('roster', 'spawn'), selected: 'spawn',
+  }],
+  ['a floating draft alone', {
+    version: 6, root: group(['roster'], 'roster'),
+    floats: [{ panel: 'spawn', x: 8, y: 9, width: 300, height: 200 }],
+    closed: allClosedBut('roster', 'spawn'), selected: 'spawn',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

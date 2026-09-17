@@ -5,6 +5,7 @@ import {
   closeWorkshopPanel, defaultWorkshopLayout, dockWorkshopPanel, selectWorkshopPanel, WORKSHOP_PANELS,
 } from '../../gui/workshop-layout-model.js';
 import { mountWorkshopLayout } from '../../gui/workshop-layout-renderer.js';
+import { createDockLayoutModel } from '../../gui/dock-layout-model.js';
 
 const labels = {
   switcher: 'Panels', reset: 'Reset', float: 'Float', close: 'Close',
@@ -236,6 +237,38 @@ describe('Workshop layout renderer', () => {
     expect(mounted.state().closed).toContain('findings');
     expect(mounted.reveal('findings')).toBe(true);
     expect(mounted.state().closed).not.toContain('findings');
+  });
+
+  it('opens a temporary panel as a floating draft, from the switcher or a reveal', () => {
+    // A draft belongs over the arrangement, not as a tab in somebody else's
+    // group — and it is not restored, so opening one must not be undone by the
+    // very rule that refuses to restore it.
+    const model = createDockLayoutModel({
+      version: 1, panels: ['files', 'draft'], temporary: ['draft'],
+      defaultLayout: () => ({ version: 1, root: { type: 'tabs', tabs: ['files'], active: 'files' },
+        floats: [], closed: ['draft'], selected: 'files' }),
+    });
+    document.body.innerHTML = '<main id="root"><div id="surface"></div></main>';
+    const panels = Object.fromEntries(['files', 'draft'].map(panel => {
+      const node = document.createElement('div'); node.id = `panel-${panel}`; return [panel, node];
+    }));
+    mounted = mountWorkshopLayout({
+      root: document.getElementById('root'), surface: document.getElementById('surface'),
+      panels, model,
+      labels: { ...labels, panels: { files: 'files', draft: 'draft' } },
+      initial: model.defaultLayout(),
+    });
+    expect(document.querySelector('[data-panel="draft"]')).toBeNull();
+    document.querySelector('[data-layout-panel="draft"][data-layout-control="switcher"]').click();
+    expect(document.querySelector('[data-panel="draft"]').classList.contains('is-floating')).toBe(true);
+    expect(mounted.state().floats.map(entry => entry.panel)).toEqual(['draft']);
+
+    document.querySelector('[data-panel="draft"] [data-layout-control="close"]').click();
+    expect(mounted.state().closed).toContain('draft');
+    expect(mounted.reveal('draft')).toBe(true);
+    expect(document.querySelector('[data-panel="draft"]').classList.contains('is-floating')).toBe(true);
+    // Restoring it is what discards it, which is the whole point of temporary.
+    expect(model.normalize(mounted.state()).closed).toContain('draft');
   });
 
   it('returns focus to the switcher after closing the final panel', () => {

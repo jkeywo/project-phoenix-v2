@@ -388,6 +388,10 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     doc: doc,
     win: win,
     t,
+    // The shared complex-action lifecycle decides what an authoritative success
+    // does to the draft: a docked or kept-open one stays, an undocked unchecked
+    // one closes (issue #1506).
+    onSucceeded: () => shell.temporaryActions?.succeeded('spawn'),
     actionFeedback: hostActionFeedback,
     confirmAction: gmConfirmations.request,
     getMap: () => doc.getElementById('gm-entity-map'),
@@ -402,6 +406,13 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   win.__hostGmSpawnRefresh = gmSpawnPanel.refreshAdmission;
   win.__hostGmSpawnReset = gmSpawnPanel.reset;
   win.__hostGmSpawnState = gmSpawnPanel.state;
+  shell.temporaryActions?.register('spawn', {
+    isDirty: () => gmSpawnPanel.draftDirty(),
+    reset: options => gmSpawnPanel.resetDraft(options),
+    keepOpen: () => gmSpawnPanel.keepOpen(),
+    focus: () => gmSpawnPanel.focusDraft(),
+  });
+  win.__hostGmOpenAction = panel => shell.temporaryActions?.open(panel) === true;
   win.__hostGmActivityState = gmActivity.state;
   const gmStationPuppet = createGmStationPuppet({
     doc: doc,
@@ -603,6 +614,10 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       win.__hostGmMissionReset();
       gmCommsPanel.reset();
       gmSpawnPanel.reset();
+  // The run the draft was for has gone, so there is nothing left to confirm
+  // away: the panel closes rather than staying open and empty.
+  shell.temporaryActions?.discard('spawn');
+  shell.temporaryActions?.closeSilently('spawn');
       win.__hostGmEffectReset();
     },
   };

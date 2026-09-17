@@ -179,6 +179,7 @@ function entryKey(operatorId, correlation) {
 
 /** Mount the GM placement panel over injected page/transport/map seams. */
 export function createGmSpawnPanel({
+  onSucceeded = () => {},
   doc = globalThis.document,
   win = doc && doc.defaultView,
   t = (id) => id,
@@ -205,6 +206,7 @@ export function createGmSpawnPanel({
   const exactZ = doc && doc.getElementById('gm-spawn-z');
   const exactHeading = doc && doc.getElementById('gm-spawn-facing');
   const exactButton = doc && doc.getElementById('gm-spawn-exact');
+  const keepOpenBox = doc && doc.getElementById('gm-spawn-keep-open');
   const boundedCapacity = Math.max(
     1,
     Number.isInteger(capacity) ? capacity : GM_SPAWN_FEED_CAPACITY,
@@ -671,12 +673,47 @@ export function createGmSpawnPanel({
         : ACTION_FEEDBACK_STATE.APPLIED;
       actionFeedback.settle(result.correlation, state);
       paintFeedback(state, meta.palette);
+      // Only an AUTHORITATIVE APPLIED result finishes the draft. A refusal, a
+      // timeout, a local refusal and a no-op all leave it exactly where it is:
+      // a no-op means nothing was placed, which is something the operator is
+      // about to correct and send again like any other.
+      if (result.outcome === 'applied') onSucceeded();
     }
     bindMap();
     renderPalette();
     renderLog();
     refreshAdmission();
     return true;
+  }
+
+  /** The values a repeat keeps and the values it clears.
+   *
+   * WHAT to spawn is worth repeating — the same raider, the same variant — and
+   * WHERE almost never is: sending two ships to one coordinate is a mistake far
+   * more often than an intention. So a repeat keeps the palette choice and
+   * clears the placement, and a fresh open clears both.
+   */
+  function resetDraft({ keepReusable = false } = {}) {
+    if (exactX) exactX.value = '0';
+    if (exactZ) exactZ.value = '0';
+    if (exactHeading) exactHeading.value = '0';
+    setArmed(null);
+    if (!keepReusable) {
+      selectedVariants.clear();
+      if (keepOpenBox) keepOpenBox.checked = false;
+      renderPalette();
+    }
+    refreshAdmission();
+  }
+
+  /** Has the operator typed something into this draft that has not been sent? */
+  function draftDirty() {
+    if (armedPaletteId) return true;
+    // A select touched and put back to the bare template is not a choice: the
+    // panel records that as a null, and a null is the default.
+    if ([...selectedVariants.values()].some(variant => variant !== null)) return true;
+    return [exactX, exactZ, exactHeading]
+      .some(field => field && field.value.trim() !== '' && Number(field.value) !== 0);
   }
 
   /** Explicit run boundary, called from the authoritative Lobby transition. */
@@ -691,6 +728,10 @@ export function createGmSpawnPanel({
     authoritativeResults = [];
     palette = [];
     setArmed(null);
+    if (exactX) exactX.value = '0';
+    if (exactZ) exactZ.value = '0';
+    if (exactHeading) exactHeading.value = '0';
+    if (keepOpenBox) keepOpenBox.checked = false;
     renderPalette();
     if (log) log.replaceChildren();
     paintFeedback(null, null);
@@ -724,10 +765,19 @@ export function createGmSpawnPanel({
     placeExact,
     update,
     reset,
+    resetDraft,
+    draftDirty,
+    keepOpen: () => !!keepOpenBox?.checked,
+    focusDraft() {
+      const first = [...buttons.values()][0] || exactX || null;
+      first?.focus?.();
+    },
     refreshAdmission,
     state: () => ({
       palette: palette.length,
       arming: armedPaletteId,
+      dirty: draftDirty(),
+      keepOpen: !!keepOpenBox?.checked,
       variants: Object.fromEntries(selectedVariants),
       pending: pending.size,
       authoritative: authoritativeResults.length,

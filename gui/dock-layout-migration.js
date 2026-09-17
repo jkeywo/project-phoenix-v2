@@ -82,7 +82,7 @@ export function createDockLayoutMigration({ version, generations, current, rehom
     migrated = rehome?.(migrated, from, value, generation) ?? migrated;
     // The panels this migration is about to place are still listed as closed, so
     // the pinned repair has to wait until they have been placed properly.
-    migrated = current.normalize(migrated, bounds, { repairPinned: false });
+    migrated = current.settle(migrated, bounds);
     for (const [panel, preferred, placement = 'tab'] of added) {
       migrated = addMigrationPanel(migrated, panel, preferred, current, [], placement);
     }

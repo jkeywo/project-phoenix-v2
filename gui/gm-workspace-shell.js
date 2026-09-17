@@ -12,6 +12,7 @@ import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 import { healthStateLabelId } from './gm-health-banner.js';
 import { formatAttentionAge } from './gm-attention-panel.js';
 import { liveLayoutModel } from './live-layout-model.js';
+import { createTemporaryActions } from './gm-temporary-actions.js';
 import { mountDockLayout } from './workshop-layout-renderer.js';
 
 /** Workload levels that are a claim about a PERSON, worst last. A hull's word
@@ -45,6 +46,9 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // The handoff shows itself only when a retained source pack exists, and that
   // is the panel's own decision — the dock reads it and offers no empty tab.
   ['source-link', 'gm-source-link-dock', 'gm-workshop-source'],
+  // A complex action the operator opens, fills in and finishes (issue #1506).
+  // It is absent from the default arrangement and opens as a floating draft.
+  ['spawn', 'gm-spawn-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -118,7 +122,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   const ships = element('div', 'gm-roster-ships');
   const operators = element('div', 'gm-roster-operators');
   roster.append(ships, element('h3', null, 'server.gm.shell.operators'), operators);
-  move(roster, 'gm-spawn-panel');
+  // Spawn left the roster to become a temporary action panel (issue #1506).
+  // It stays in the document for the ordinary browser host, which has no dock.
+  root.append(get('gm-spawn-panel'));
   const region = (id, stacked) => {
     const el = element('div', id);
     el.className = stacked ? 'gm-desk-region gm-desk-stack' : 'gm-desk-region';
@@ -474,6 +480,14 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     stationSurface.scrollIntoView?.({ block: 'start' });
   });
   let liveLayout = null;
+  /** The shared complex-action lifecycle. It owns when a draft is on screen and
+   * whether it may be discarded; each action still owns its own typed request,
+   * feedback and confirmation category. */
+  const temporaryActions = createTemporaryActions({
+    layout: { model: liveLayoutModel, state: () => liveLayout?.state(),
+      set: value => liveLayout?.set(value), reveal: (...args) => liveLayout?.reveal(...args) },
+    confirmDiscard: () => win.confirm?.(t('server.gm.action.discard')) === true,
+  });
   const dockOrigins = new Map();
   function preserveForDock(node, attributes = []) {
     if (!node) return;
@@ -550,6 +564,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       // The migrated panels' contents are owned by modules that resolve them by
       // id AFTER this mounts, so no registered panel may leave the document.
       retain: true,
+      mayReset: () => temporaryActions.mayReset(),
+      mayClose: panel => temporaryActions.mayDiscard(panel),
+      onDiscard: panel => temporaryActions.discard(panel),
       initial, onChange, model: liveLayoutModel, viewportNarrow: true, doc, win });
     styleButtons();
     return liveLayout;
@@ -564,7 +581,16 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       css.remove();
     },
     mountLiveLayout,
-    setLiveLayout(value) { liveLayout?.set(value); },
+    temporaryActions,
+    /** Applying a stored arrangement takes an open draft away with it — a
+     * restored layout has no floating draft in it — so the drafts get the same
+     * say they get before a reset. */
+    setLiveLayout(value) {
+      if (!temporaryActions.mayReset()) return false;
+      temporaryActions.discard(null);
+      liveLayout?.set(value);
+      return true;
+    },
     liveLayoutState() { return liveLayout?.state() || null; },
     /** Bring the attention region to the front for a banner that has just been
      * drawn into it. A technical banner is rendered verbatim so a Game Master

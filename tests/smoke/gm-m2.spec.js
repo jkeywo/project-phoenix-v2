@@ -320,6 +320,9 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
     }
     await checkpoint('Entity, Station and System damage and repair');
 
+    // Spawn is a temporary action panel since issue #1506: it opens as a
+    // floating draft rather than living in the roster.
+    await revealGmPanel(gm, 'spawn');
     const palette = gm.locator('#gm-spawn-palette [data-palette-id="relief-cruiser"].gm-spawn-entry');
     await palette.locator('select').selectOption('removable');
     const existing = await gm.evaluate(() => document.getElementById('gm-entity-map').state.blips.map(row => row.uuid));

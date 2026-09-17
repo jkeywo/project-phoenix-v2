@@ -255,6 +255,48 @@ it('keeps the Station takeover controls out of the role preset reach', () => {
   expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
   expect(document.getElementById('gm-station-frame')).not.toBeNull();
 });
+it('docks the presentation, audition and Workshop source utilities', () => {
+  const { shell } = mount();
+  for (const [panel, id] of [['presentation', 'gm-presentation-dock'],
+    ['audition', 'gm-audition-dock']]) {
+    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
+    expect(document.querySelector(`[data-panel="${panel}"]`).dataset.panelKind).toBe('tool');
+  }
+  // The handoff shows itself only when a retained source pack exists, and the
+  // dock reads that rather than the empty host, so it offers no empty tab.
+  expect(document.querySelector('[data-panel="source-link"]')).toBeNull();
+  const handoff = document.createElement('section');
+  handoff.id = 'gm-workshop-source'; handoff.hidden = true;
+  document.getElementById('gm-source-link-dock').append(handoff);
+  shell.refresh();
+  expect(document.querySelector('[data-panel="source-link"]')).toBeNull();
+  handoff.hidden = false;
+  shell.refresh();
+  expect(document.getElementById('gm-source-link-dock').closest('[data-panel]').dataset.panel)
+    .toBe('source-link');
+  // They share one group by default: each is a local instrument, not a record.
+  const group = document.getElementById('gm-presentation-dock').closest('.workshop-tab-stack');
+  expect(group.contains(document.getElementById('gm-audition-dock'))).toBe(true);
+  expect(group.contains(document.getElementById('gm-source-link-dock'))).toBe(true);
+  expect(group.contains(document.getElementById('gm-roster-ships'))).toBe(false);
+
+  // Keyboard docking moves one like any other panel, and the move is persisted
+  // as placement with no payload riding along.
+  shell.setLiveLayout(liveLayoutModel.dock(defaultLiveLayout(), 'audition', 'roster', 'tab'));
+  expect(document.getElementById('gm-audition-dock').closest('[data-panel]').dataset.panel)
+    .toBe('audition');
+  shell.setLiveLayout(liveLayoutModel.float(shell.liveLayoutState(), 'source-link', { x: 12, y: 14 }));
+  expect(document.querySelector('[data-panel="source-link"].is-floating')
+    .contains(document.getElementById('gm-source-link-dock'))).toBe(true);
+  const stored = JSON.stringify(shell.liveLayoutState());
+  for (const key of ['cue', 'audio', 'route', 'view', 'draft', 'pack', 'workshop']) {
+    expect(stored, key).not.toContain(key);
+  }
+  // Reset puts them back where the default arrangement has them.
+  shell.setLiveLayout(defaultLiveLayout());
+  expect(document.getElementById('gm-audition-dock').closest('.workshop-tab-stack'))
+    .toBe(document.getElementById('gm-presentation-dock').closest('.workshop-tab-stack'));
+});
 it('carries no takeover draft or console runtime state in the stored layout', () => {
   const { shell } = mount();
   document.getElementById('gm-station-controls').hidden = false;
@@ -368,7 +410,9 @@ it('keeps every migrated record reachable by id whatever the arrangement', () =>
     // gui/gm-station-puppet.js resolves every one of these by id at ITS mount,
     // which happens after the dock's.
     'gm-station-tools', 'gm-station-pending', 'gm-station-controls', 'gm-station-select',
-    'gm-station-toggle', 'gm-station-surface', 'gm-station-frame', 'gm-station-activity'];
+    'gm-station-toggle', 'gm-station-surface', 'gm-station-frame', 'gm-station-activity',
+    // The operator's own utilities mount into these AFTER the dock does.
+    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock'];
   for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
   expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
   // Closed in a restored arrangement.
@@ -387,7 +431,8 @@ it('keeps every migrated record reachable by id in the narrow projection', () =>
   expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(1);
   for (const id of ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history',
     'gm-station-tools', 'gm-station-controls', 'gm-station-select', 'gm-station-toggle',
-    'gm-station-surface', 'gm-station-frame', 'gm-station-activity']) {
+    'gm-station-surface', 'gm-station-frame', 'gm-station-activity',
+    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock']) {
     expect(document.getElementById(id), `${id} while narrow`).not.toBeNull();
   }
   // The narrow switcher offers the Station tool like any other, and the console

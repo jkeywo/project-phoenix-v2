@@ -415,6 +415,13 @@ jobs:
       - name: Check generated Debug Surface catalogue is current
         run: npm run debug-surfaces:check
 
+      # The browser Live dock model and the native operator-profile sanitizer
+      # read the same stored layout and must agree on what it becomes. The
+      # fixture is generated from the browser model and asserted by the Rust
+      # test, so fail here when a registered panel was not regenerated.
+      - name: Check generated Live layout parity fixture is current
+        run: npm run live-layout:check
+
       - name: Run editor tests
         run: npx vitest run
 

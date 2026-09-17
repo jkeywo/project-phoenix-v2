@@ -1,6 +1,7 @@
 import { test, expect, waitForWasmReady, captureServerPageErrors } from './fixtures';
 import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { ts } from './strings';
+import { revealGmPanel } from './dock-helpers.js';
 
 // Requires the integrated host WASM: the DOM storage tests in workshop-handoff
 // separately pin the one-use transfer and immutable source consumer.
@@ -23,6 +24,9 @@ test('a running GM opens retained authored source through the Workshop control',
   await page.locator('#gm-session-start').click();
   await page.locator('#gm-action-confirmation [data-confirmation-accept]').click();
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+  // The handoff is a dock panel since issue #1505, and not the shown tab of its
+  // group by default.
+  await revealGmPanel(page, 'source-link');
   await page.locator('#gm-workshop-pack').selectOption('workshop-test');
   await page.locator('#gm-workshop-open').click();
   await expect(page).toHaveURL(/\/workshop(?:\.html)?$/);

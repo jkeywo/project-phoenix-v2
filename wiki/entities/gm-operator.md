@@ -52,6 +52,13 @@ its surface's own `hidden` always carried. Closing it is an arrangement choice
 that releases nothing, and taking a Station over brings an OPEN console forward
 without reopening one the operator closed.
 
+Issue #1505 finished the migration with the operator's own instruments: typed
+presentation control, private sound audition and the one-way Workshop source
+handoff open a group of their own under the workflow panels. Docking moves the
+node and nothing else — the audition keeps no transport, endpoint or recipient
+and stays subject to the existing private audio preferences, and the source
+handoff stays one-way and source-only.
+
 Reparenting an `<iframe>` re-creates its document, so a dock move reloads the
 console. `gui/gm-station-puppet.js` treats any load after the one it asked for as
 a REMOUNT: the generation advances and pending commands are dropped, because

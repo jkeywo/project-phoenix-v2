@@ -21,7 +21,10 @@ import { mountDockLayout } from './workshop-layout-renderer.js';
 export const GM_ROSTER_WORKLOAD_RANK = Object.freeze(['underused', 'engaged', 'overloaded']);
 
 /** The desk panels that are registered dock panels rather than grid regions,
- * as `[dock panel id, DOM id]`. The three log views kept their tab
+ * as `[dock panel id, DOM id, availability DOM id?]`. The third entry names the
+ * node whose `hidden` says whether the panel has anything to show, for a panel
+ * whose registered node is a host its content mounts into later — without it
+ * the dock would read an empty wrapper nothing ever hides. The three log views kept their tab
  * relationship: the dock's own default arrangement puts them in one group,
  * with the dock's roving tablist semantics, and docking may pull them apart. */
 export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
@@ -37,6 +40,11 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   ['health', 'gm-health-panel'],
   ['station', 'gm-station-tools'],
   ['station-console', 'gm-station-surface'],
+  ['presentation', 'gm-presentation-dock'],
+  ['audition', 'gm-audition-dock'],
+  // The handoff shows itself only when a retained source pack exists, and that
+  // is the panel's own decision — the dock reads it and offers no empty tab.
+  ['source-link', 'gm-source-link-dock', 'gm-workshop-source'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -173,12 +181,22 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   root.append(stationTools, stationSurface);
   move(stationTools, 'gm-station-pending', 'gm-station-controls');
   move(stationSurface, 'gm-station-frame', 'gm-station-activity-heading', 'gm-station-activity');
+  // The operator's own utilities mount LATER than this shell and resolve their
+  // host by id, so each gets a stable one now. Each host sits where its panel
+  // used to, which is what the ordinary browser host — which has no dock — still
+  // sees; the dock moves them into their frames when it mounts.
+  const presentationHost = element('div', 'gm-presentation-dock');
+  const auditionHost = element('div', 'gm-audition-dock');
+  get('gm-mission-panel')?.append(presentationHost, auditionHost);
+  const sourceLinkHost = element('div', 'gm-source-link-dock');
+  brief.append(sourceLinkHost);
   // Built here, once every wrapper this shell composes exists: the dock is
   // handed NODES rather than ids, which also survives a re-mount when the
   // migrated panels already live in the previous canvas.
   const liveDockNodes = new Map(GM_LIVE_DOCK_PANEL_IDS.map(([panel, id]) => [panel,
     { 'gm-session-history': sessionHistory, 'gm-station-tools': stationTools,
-      'gm-station-surface': stationSurface }[id] || get(id)]));
+      'gm-station-surface': stationSurface, 'gm-presentation-dock': presentationHost,
+      'gm-audition-dock': auditionHost, 'gm-source-link-dock': sourceLinkHost }[id] || get(id)]));
   const tabs = element('div', 'gm-inspector-tabs');
   tabs.setAttribute('role', 'tablist');
   const knowledge = get('gm-knowledge-panel');
@@ -507,7 +525,14 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     }
     liveLayout = mountDockLayout({ root, surface: liveSurface,
       panels: { roster, readiness, join: join || element('section'), 'manual-save': manual, ...migrated },
-      available: panel => !liveDockNodes.get(panel)?.hidden,
+      available: panel => {
+        const source = GM_LIVE_DOCK_PANEL_IDS.find(([name]) => name === panel)?.[2];
+        // A panel that declares an availability node and has not mounted it yet
+        // has nothing to show, so it is not offered. The tree observer brings it
+        // back the moment that node arrives.
+        if (source) return !!get(source) && !get(source).hidden;
+        return !liveDockNodes.get(panel)?.hidden;
+      },
       onVisible(visible) {
         // A map with no frame draws 60 times a second into a canvas of no size.
         liveDockNodes.get('map')?.querySelector('ph-navigation-map')

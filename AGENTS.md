@@ -94,6 +94,7 @@ cargo clippy --workspace --all-targets \
 # the PR base/push-before SHA; first ledger introduction needs full local history.
 cargo test --workspace --features headless     # CI: test job, step 3
 npm run debug-surfaces:check                   # CI: editor-test job (Rust -> JS drift)
+npm run live-layout:check                      # CI: editor-test job (Live dock JS -> Rust drift)
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
 node scripts/check-strings.mjs --strict        # CI: editor-test job
 npm run lods:check                             # CI: editor-test job (LOD drift)

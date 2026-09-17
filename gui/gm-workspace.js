@@ -483,8 +483,11 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submit: request => privateSubmit('gm.presentation', request, () => win.__hostPresentation(request)),
   });
   win.__hostGmPresentationState = gmPresentation.state;
-  const soundAudition = doc.getElementById('gm-mission-panel')
-    ? mountSoundAudition({root:doc.getElementById('gm-mission-panel'),audio:privateAudio,win}) : null;
+  // Private audition is operator-local and stays that way: the dock moves the
+  // node, it does not give the panel a transport, an endpoint or a recipient.
+  const auditionRoot = doc.getElementById('gm-audition-dock') || doc.getElementById('gm-mission-panel');
+  const soundAudition = auditionRoot
+    ? mountSoundAudition({root:auditionRoot,audio:privateAudio,win}) : null;
   gmDespawn = createGmDespawnPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,

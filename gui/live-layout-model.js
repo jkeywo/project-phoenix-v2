@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 4;
+export const LIVE_LAYOUT_VERSION = 5;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -9,12 +9,14 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   tool('mission'), tool('comms'), tool('activity'), tool('journal'), tool('session-history'),
   documentPanel('map'), tool('attention'), tool('workload'), tool('widgets'), tool('health'),
   tool('station'), documentPanel('station-console'),
+  tool('presentation'), tool('audition'), tool('source-link'),
 ]);
 export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
 const V2_PANELS = Object.freeze([...V1_PANELS,
   'mission', 'comms', 'activity', 'journal', 'session-history']);
 const V3_PANELS = Object.freeze([...V2_PANELS, 'map', 'attention', 'workload', 'widgets', 'health']);
+const V4_PANELS = Object.freeze([...V3_PANELS, 'station', 'station-console']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -51,6 +53,15 @@ const ADDED_IN_V4 = Object.freeze([
  * closed here either: a Game Master must not be able to hide a failure from
  * themselves, whichever mechanism does the hiding. */
 export const LIVE_PINNED_PANELS = Object.freeze(['attention', 'health']);
+/** Panels registered after version 4. The operator's own utilities — typed
+ * presentation control, private sound audition and the one-way Workshop source
+ * handoff — open a group of their own under the workflow panels: each is a
+ * local instrument rather than a record or a projection. */
+const ADDED_IN_V5 = Object.freeze([
+  ['presentation', 'mission', 'bottom'],
+  ['audition', 'presentation', 'tab'],
+  ['source-link', 'presentation', 'tab'],
+]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -71,12 +82,25 @@ const v3Default = () => ({ version: 3,
     group(['comms', 'activity', 'journal', 'session-history', 'health'], 'comms'),
   ] },
   floats: [], closed: [], selected: 'roster' });
+const v4Default = () => ({ version: 4,
+  root: { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
+    { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
+      group(['roster', 'readiness', 'join', 'manual-save', 'mission',
+        'attention', 'workload', 'widgets', 'station'], 'roster'),
+      group(['map', 'station-console'], 'map'),
+    ] },
+    group(['comms', 'activity', 'journal', 'session-history', 'health'], 'comms'),
+  ] },
+  floats: [], closed: [], selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION,
     root: { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
       { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
-        group(['roster', 'readiness', 'join', 'manual-save', 'mission',
-          'attention', 'workload', 'widgets', 'station'], 'roster'),
+        { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
+          group(['roster', 'readiness', 'join', 'manual-save', 'mission',
+            'attention', 'workload', 'widgets', 'station'], 'roster'),
+          group(['presentation', 'audition', 'source-link'], 'presentation'),
+        ] },
         group(['map', 'station-console'], 'map'),
       ] },
       group(['comms', 'activity', 'journal', 'session-history', 'health'], 'comms'),
@@ -96,13 +120,16 @@ const v2 = createDockLayoutModel({ version: 2, panels: V2_PANELS, defaultLayout:
 // native profile sanitizer place a repaired panel in the same tab position.
 const v3 = createDockLayoutModel({ version: 3, panels: V3_PANELS, defaultLayout: v3Default,
   compatibleVersions: [3] });
+const v4 = createDockLayoutModel({ version: 4, panels: V4_PANELS, defaultLayout: v4Default,
+  compatibleVersions: [4] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
     { version: 1, model: v1, added: [] },
     { version: 2, model: v2, added: ADDED_IN_V2 },
     { version: 3, model: v3, added: ADDED_IN_V3 },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V4 },
+    { version: 4, model: v4, added: ADDED_IN_V4 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V5 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

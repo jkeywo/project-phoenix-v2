@@ -1,7 +1,7 @@
 import { test, expect, createTestClient, expectFixtureWorld, readHostPeerId,
   waitForJoinCode, waitForWasmReady } from './fixtures';
 import { ts } from './strings';
-import { clickGmControl } from './dock-helpers.js';
+import { clickGmControl, revealGmPanel } from './dock-helpers.js';
 
 const WORLD = `
 [global]
@@ -43,6 +43,9 @@ test('real GM presentation admission reaches the host card and crew view while r
   await crew.send('SetReady', { ready: true }); await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all([host, gm].map(page => page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')));
   expectFixtureWorld(await crew.waitForMessage('WorldSetup'), WORLD);
+  // Presentation is a dock panel since issue #1505 — the shown tab of its group
+  // by default, but a spec should not depend on that.
+  await revealGmPanel(gm, 'presentation');
   const panel = gm.locator('#gm-presentation-panel');
   await expect(panel.locator('#gm-presentation-ship option')).toHaveCount(1);
   await clickGmControl(gm, 'gm-session-pause');

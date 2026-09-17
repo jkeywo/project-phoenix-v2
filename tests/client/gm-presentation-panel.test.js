@@ -6,6 +6,20 @@ import { DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from '../../gui/action-feedback.js
 
 beforeEach(() => { document.body.innerHTML = '<section id="gm-mission-panel"></section>'; });
 const t = id => id.split('.').at(-1);
+
+it('mounts into the docked host when the GM desk composed one', () => {
+  // The desk creates the host before this panel mounts (issue #1505); without
+  // one, the mission panel it has always lived in is still the home.
+  document.body.innerHTML =
+    '<section id="gm-mission-panel"><div id="gm-presentation-dock"></div></section>';
+  const panel = createGmPresentationPanel({ t, getOperator: () => ({ id: 'Ada' }), submit: () => true });
+  expect(document.getElementById('gm-presentation-panel').parentElement.id).toBe('gm-presentation-dock');
+  panel.destroy();
+  document.body.innerHTML = '<section id="gm-mission-panel"></section>';
+  const fallback = createGmPresentationPanel({ t, getOperator: () => ({ id: 'Ada' }), submit: () => true });
+  expect(document.getElementById('gm-presentation-panel').parentElement.id).toBe('gm-mission-panel');
+  fallback.destroy();
+});
 function setup() {
   const submit = vi.fn(() => true), scheduled = [];
   const panel = createGmPresentationPanel({ t, getOperator: () => ({ id: 'Ada' }), submit,

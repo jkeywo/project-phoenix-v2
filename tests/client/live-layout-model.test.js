@@ -3,11 +3,12 @@ import { defaultLiveLayout, liveLayoutModel, normalizeLiveLayout } from '../../g
 
 describe('Live dock layout model', () => {
   it('registers the workflow and record panels in a versioned layout separate from Workshop', () => {
-    expect(defaultLiveLayout()).toMatchObject({ version: 4, selected: 'roster' });
+    expect(defaultLiveLayout()).toMatchObject({ version: 5, selected: 'roster' });
     // Every registered panel, in the order the narrow switcher offers them.
     expect(liveLayoutModel.panels).toEqual(['roster', 'readiness', 'join', 'manual-save',
       'mission', 'comms', 'activity', 'journal', 'session-history',
-      'map', 'attention', 'workload', 'widgets', 'health', 'station', 'station-console']);
+      'map', 'attention', 'workload', 'widgets', 'health', 'station', 'station-console',
+      'presentation', 'audition', 'source-link']);
     // The map and the authentic Station console are the surfaces this desk is
     // arranged around; they share a group by default.
     expect(liveLayoutModel.kind('map')).toBe('document');
@@ -20,16 +21,19 @@ describe('Live dock layout model', () => {
       type: 'tabs', tabs: ['comms', 'activity', 'journal', 'session-history', 'health'], active: 'comms' });
     expect(defaultLiveLayout().root.children[0].children[1]).toEqual({
       type: 'tabs', tabs: ['map', 'station-console'], active: 'map' });
+    // The operator's own instruments open a group of their own.
+    expect(defaultLiveLayout().root.children[0].children[0].children[1]).toEqual({ type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' });
   });
 
   it('repairs obsolete, malformed and duplicate layouts', () => {
     expect(normalizeLiveLayout({ version: 99 })).toEqual(defaultLiveLayout());
-    expect(normalizeLiveLayout({ version: 4, root: { type: 'tabs', tabs: ['roster', 'roster', 'unsafe'] },
+    expect(normalizeLiveLayout({ version: 5, root: { type: 'tabs', tabs: ['roster', 'roster', 'unsafe'] },
       floats: [{ panel: 'join' }], closed: ['readiness'], selected: 'unsafe' })).toEqual({
-      version: 4, root: { type: 'tabs', tabs: ['roster', 'attention', 'health'], active: 'roster' },
+      version: 5, root: { type: 'tabs', tabs: ['roster', 'attention', 'health'], active: 'roster' },
       floats: [{ panel: 'join', x: 12, y: 12, width: 420, height: 360 }],
       closed: ['readiness', 'manual-save', 'mission', 'comms', 'activity', 'journal', 'session-history',
-        'map', 'workload', 'widgets', 'station', 'station-console'],
+        'map', 'workload', 'widgets', 'station', 'station-console',
+        'presentation', 'audition', 'source-link'],
       selected: 'roster',
     });
   });
@@ -49,12 +53,13 @@ describe('Live dock layout model', () => {
       floats: [{ panel: 'comms', x: 5, y: 6, width: 300, height: 200 }],
       closed: ['join', 'manual-save'], selected: 'readiness',
     });
-    expect(migrated.version).toBe(4);
+    expect(migrated.version).toBe(5);
     expect(migrated.floats).toEqual([]);
     expect(migrated.closed).toEqual(['join', 'manual-save']);
-    expect(migrated.root.children[0].children[0]).toMatchObject({
+    expect(migrated.root.children[0].children[0].children[0]).toMatchObject({
       tabs: ['roster', 'readiness', 'mission', 'attention', 'workload', 'widgets', 'station'],
       active: 'readiness' });
+    expect(migrated.root.children[0].children[0].children[1]).toEqual({ type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' });
     expect(migrated.root.children[0].children[1]).toEqual({
       type: 'tabs', tabs: ['map', 'station-console'], active: 'map' });
     expect(migrated.root.children[1]).toEqual({
@@ -77,11 +82,14 @@ describe('Live dock layout model', () => {
     });
 
     expect(migrated).toEqual({
-      version: 4,
+      version: 5,
       root: { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
         { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
-          { type: 'tabs', tabs: ['roster', 'mission', 'attention', 'workload', 'widgets', 'station'],
-            active: 'roster' },
+          { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
+            { type: 'tabs', tabs: ['roster', 'mission', 'attention', 'workload', 'widgets', 'station'],
+              active: 'roster' },
+            { type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' },
+          ] },
           { type: 'tabs', tabs: ['map', 'station-console'], active: 'map' },
         ] },
         { type: 'tabs', tabs: ['comms', 'journal', 'health'], active: 'journal' },
@@ -106,19 +114,42 @@ describe('Live dock layout model', () => {
       selected: 'roster',
     });
 
-    expect(migrated.version).toBe(4);
+    expect(migrated.version).toBe(5);
     // The console joins the map; its controls join the workflow group.
     expect(migrated.root.children[1]).toEqual({
       type: 'tabs', tabs: ['map', 'station-console'], active: 'map' });
     // `health` was closed and is pinned, so it is repaired back — after the
     // panels this migration registers, which is the order the native profile
     // sanitizer runs in too.
-    expect(migrated.root.children[0].tabs).toEqual(['roster', 'attention', 'station', 'health']);
+    expect(migrated.root.children[0].children[0].tabs)
+      .toEqual(['roster', 'attention', 'station', 'health']);
+    expect(migrated.root.children[0].children[1]).toEqual({ type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' });
     // v3 had no Station vocabulary, so a stored tree cannot name one.
     expect(normalizeLiveLayout({
       version: 3, root: { type: 'tabs', tabs: ['roster', 'station-console'], active: 'station-console' },
       floats: [{ panel: 'station', x: 4, y: 5, width: 300, height: 200 }],
       closed: [], selected: 'station-console',
+    }).floats).toEqual([]);
+  });
+
+  it('registers the operator utility panels on a stored v4 layout', () => {
+    const migrated = normalizeLiveLayout({
+      version: 4,
+      root: { type: 'tabs', tabs: ['roster', 'mission'], active: 'mission' },
+      floats: [],
+      closed: ['readiness', 'join', 'manual-save', 'comms', 'activity', 'journal', 'session-history',
+        'map', 'workload', 'widgets', 'station', 'station-console'],
+      selected: 'mission',
+    });
+
+    expect(migrated.version).toBe(5);
+    // They open a group of their own under the panels they were beside.
+    expect(migrated.root.children[1]).toEqual({ type: 'tabs', tabs: ['presentation', 'audition', 'source-link'], active: 'presentation' });
+    // v4 had no utility vocabulary, so a stored tree cannot name one.
+    expect(normalizeLiveLayout({
+      version: 4, root: { type: 'tabs', tabs: ['roster', 'audition'], active: 'audition' },
+      floats: [{ panel: 'source-link', x: 4, y: 5, width: 300, height: 200 }],
+      closed: [], selected: 'audition',
     }).floats).toEqual([]);
   });
 
@@ -128,7 +159,7 @@ describe('Live dock layout model', () => {
     // failure from themselves, so neither closes — by control or by profile.
     expect(liveLayoutModel.pinned).toEqual(['attention', 'health']);
     const closedEverything = normalizeLiveLayout({
-      version: 4, root: { type: 'tabs', tabs: ['roster'], active: 'roster' }, floats: [],
+      version: 5, root: { type: 'tabs', tabs: ['roster'], active: 'roster' }, floats: [],
       closed: liveLayoutModel.panels.filter(panel => panel !== 'roster'), selected: 'roster',
     });
     expect(closedEverything.closed).not.toContain('attention');

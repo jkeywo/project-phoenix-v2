@@ -358,6 +358,35 @@ const LIVE_ADDED_IN_V4: &[(&str, &str, &str)] = &[
     ("station-console", "map", "tab"),
 ];
 
+const LIVE_PANELS_V5: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+];
+/// Panels registered after version 4. The operator's own instruments open a
+/// group of their own under the workflow panels.
+const LIVE_ADDED_IN_V5: &[(&str, &str, &str)] = &[
+    ("presentation", "mission", "bottom"),
+    ("audition", "presentation", "tab"),
+    ("source-link", "presentation", "tab"),
+];
+
 /// Panels the operator may not close. The attention region renders connection
 /// and recovery banners verbatim and health is the table behind them: a Game
 /// Master must not be able to hide a failure from themselves, whichever
@@ -388,7 +417,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         1 => LIVE_PANELS_V1,
         2 => LIVE_PANELS_V2,
         3 => LIVE_PANELS_V3,
-        _ => LIVE_PANELS_V4,
+        4 => LIVE_PANELS_V4,
+        _ => LIVE_PANELS_V5,
     }
 }
 
@@ -402,6 +432,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 4 {
         added.extend_from_slice(LIVE_ADDED_IN_V4);
+    }
+    if version < 5 {
+        added.extend_from_slice(LIVE_ADDED_IN_V5);
     }
     added
 }
@@ -491,11 +524,14 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 4,
+        "version": 5,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
-                {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission",
-                    "attention","workload","widgets","station"], "active":"roster"},
+                {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
+                    {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission",
+                        "attention","workload","widgets","station"], "active":"roster"},
+                    {"type":"tabs", "tabs":["presentation","audition","source-link"], "active":"presentation"}
+                ]},
                 {"type":"tabs", "tabs":["map","station-console"], "active":"map"}
             ]},
             {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
@@ -505,7 +541,7 @@ fn default_live_layout() -> Value {
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=4).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=5).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -597,7 +633,7 @@ fn migrate_live_layout(mut layout: Value, added: &[(&str, &str, &str)]) -> Value
         .as_array_mut()
         .unwrap()
         .extend(added.iter().map(|(panel, _, _)| json!(panel)));
-    layout["version"] = json!(4);
+    layout["version"] = json!(5);
     for (panel, preferred, placement) in added {
         add_migration_panel_at(&mut layout, panel, preferred, &Value::Null, placement);
     }
@@ -1332,6 +1368,66 @@ mod tests {
         assert!(!state.path("helm").unwrap().exists());
     }
 
+    /// The browser and this sanitizer read the same operator profile, so they
+    /// must agree exactly on what a stored Live layout becomes. The expectations
+    /// are GENERATED from the browser model — transcribing them by hand went
+    /// wrong once per registered panel — by
+    /// `scripts/generate-live-layout-fixture.mjs`, which `npm run live-layout:check`
+    /// keeps current. What the browser model itself does is covered by
+    /// tests/client/live-layout-model.test.js; this pins parity.
+    #[test]
+    fn live_layout_matches_the_browser_model_case_for_case() {
+        let fixture: Value = serde_json::from_str(
+            &std::fs::read_to_string("tests/fixtures/live-layout-migrations.json").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(fixture["version"], default_live_layout()["version"]);
+        assert_eq!(
+            numbers_as_floats(&fixture["default"]),
+            numbers_as_floats(&default_live_layout())
+        );
+        let cases = fixture["cases"].as_array().unwrap();
+        // The version before this one is the migration every existing profile
+        // will take, so it always has a case.
+        let previous = default_live_layout()["version"].as_u64().unwrap() - 1;
+        assert!(
+            cases
+                .iter()
+                .any(|case| case["stored"]["version"].as_u64() == Some(previous)),
+            "the fixture has no stored case at version {previous}"
+        );
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            // Refusing is how this side says "use the default"; its caller then
+            // does exactly that, which is what the browser returns directly.
+            let sanitized =
+                sanitize_live_layout(&case["stored"]).unwrap_or_else(default_live_layout);
+            assert_eq!(
+                numbers_as_floats(&sanitized),
+                numbers_as_floats(&case["expected"]),
+                "{name}"
+            );
+        }
+    }
+
+    /// JSON does not distinguish 1 from 1.0 but `serde_json::Value` does, and a
+    /// size written by JavaScript arrives as the former. Sizes are the only
+    /// numbers in a layout tree, so comparing them as f64 compares the values
+    /// rather than how each side happened to spell them.
+    fn numbers_as_floats(value: &Value) -> Value {
+        match value {
+            Value::Number(number) => json!(number.as_f64().unwrap_or_default()),
+            Value::Array(items) => Value::Array(items.iter().map(numbers_as_floats).collect()),
+            Value::Object(fields) => Value::Object(
+                fields
+                    .iter()
+                    .map(|(key, value)| (key.clone(), numbers_as_floats(value)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
     #[test]
     fn live_layout_is_sanitized_separately_from_authoring_layout() {
         let profile = json!({
@@ -1355,158 +1451,34 @@ mod tests {
                 .len(),
             3
         );
-        // The stored layout is version 1, so it arrives migrated: the record
-        // panels open their own group below the readiness panels, exactly as
-        // gui/live-layout-model.js places them.
+        // The stored layout is version 1, so it arrives migrated. What it
+        // becomes is pinned against the browser by the fixture test above; what
+        // matters here is that it is sanitized at all, separately from
+        // Authoring, and that nothing private rides along with it.
         assert_eq!(
-            saved["liveLayout"],
-            json!({
-                "version":4,
-                "root":{"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
-                    {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
-                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets","station"], "active":"roster"},
-                        {"type":"tabs", "tabs":["map","station-console"], "active":"map"}
-                    ]},
-                    {"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"}
-                ]},
-                "floats":[{"panel":"join","x":30.0,"y":12.0,"width":420.0,"height":360.0}],
-                "closed":["manual-save","readiness"], "selected":"roster"
-            })
+            saved["liveLayout"]["version"],
+            default_live_layout()["version"]
         );
+        assert_eq!(saved["liveLayout"]["floats"][0]["panel"], "join");
+        assert!(saved["liveLayout"]["floats"][0].get("unsafe").is_none());
         assert!(saved.get("reconnectCredential").is_none());
         assert!(!saved.to_string().contains("secret"));
-    }
-
-    #[test]
-    fn a_stored_live_layout_cannot_name_a_panel_version_one_never_registered() {
-        // v1 had no record vocabulary: these must enter through migration only.
-        let layout = json!({
-            "version":1,
-            "root":{"type":"tabs","tabs":["roster","comms","journal"],"active":"journal"},
-            "floats":[{"panel":"activity","x":7,"y":9,"width":300,"height":200}],
-            "closed":["readiness"], "selected":"journal"
-        });
-
-        let migrated = sanitize_live_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 4);
-        assert_eq!(migrated["floats"], json!([]));
-        assert_eq!(migrated["selected"], "roster");
-        assert_eq!(
-            migrated["closed"],
-            json!(["readiness", "join", "manual-save"])
-        );
-        assert_eq!(
-            migrated["root"]["children"][0]["children"][0],
-            json!({"type":"tabs", "tabs":["roster","mission","attention","workload","widgets","station"], "active":"roster"})
-        );
-        assert_eq!(
-            migrated["root"]["children"][0]["children"][1],
-            json!({"type":"tabs", "tabs":["map","station-console"], "active":"map"})
-        );
-        assert_eq!(
-            migrated["root"]["children"][1],
-            json!({"type":"tabs", "tabs":["comms","activity","journal","session-history","health"], "active":"comms"})
-        );
-    }
-
-    #[test]
-    fn a_stored_v2_live_layout_registers_the_map_and_awareness_panels() {
-        let layout = json!({
-            "version":2,
-            "root":{"type":"split","axis":"vertical","sizes":[1,1],"children":[
-                {"type":"tabs","tabs":["roster","mission"],"active":"roster"},
-                {"type":"tabs","tabs":["comms","journal"],"active":"journal"}
-            ]},
-            "floats":[],
-            "closed":["readiness","join","manual-save","activity","session-history"],
-            "selected":"journal"
-        });
-
-        assert_eq!(
-            sanitize_live_layout(&layout).unwrap(),
-            json!({
-                "version":4,
-                "root":{"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
-                    {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
-                        {"type":"tabs", "tabs":["roster","mission","attention","workload","widgets","station"], "active":"roster"},
-                        {"type":"tabs", "tabs":["map","station-console"], "active":"map"}
-                    ]},
-                    {"type":"tabs", "tabs":["comms","journal","health"], "active":"journal"}
-                ]},
-                "floats":[],
-                "closed":["readiness","join","manual-save","activity","session-history"],
-                "selected":"journal"
-            })
-        );
-    }
-
-    #[test]
-    fn a_current_live_layout_keeps_its_arrangement_and_drops_unknown_fields() {
-        let layout = json!({
-            "version":4,
-            "root":{"type":"tabs","tabs":["comms","journal","unsafe"],"active":"journal","unsafe":"secret"},
-            "floats":[{"panel":"roster","x":7,"y":9,"width":300,"height":200,"unsafe":"secret"}],
-            "closed":["readiness","join","manual-save","mission","activity","session-history","map",
-                "attention","workload","widgets","health","station","station-console"],
-            "selected":"journal", "unsafe":"secret"
-        });
-
-        // `attention` and `health` are PINNED: a stored tree claiming they were
-        // closed is repaired rather than honoured, because closing them is not
-        // a choice this surface offers.
-        assert_eq!(
-            sanitize_live_layout(&layout).unwrap(),
-            json!({
-                "version":4,
-                "root":{"type":"tabs", "tabs":["comms","journal","attention","health"], "active":"journal"},
-                "floats":[{"panel":"roster","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
-                "closed":["readiness","join","manual-save","mission","activity","session-history","map",
-                    "workload","widgets","station","station-console"],
-                "selected":"journal"
-            })
-        );
-    }
-
-    #[test]
-    fn a_stored_v3_layout_repairs_a_closed_pinned_panel_after_the_new_ones() {
-        // The browser runs the pinned repair once, at the end of migration, so
-        // both sanitizers put the repaired panel in the same tab position.
-        let layout = json!({
-            "version":3,
-            "root":{"type":"split","axis":"horizontal","sizes":[1,1],"children":[
-                {"type":"tabs","tabs":["roster","attention"],"active":"roster"},
-                {"type":"tabs","tabs":["map"],"active":"map"}
-            ]},
-            "floats":[],
-            "closed":["readiness","join","manual-save","mission","comms","activity","journal",
-                "session-history","workload","widgets","health"],
-            "selected":"roster"
-        });
-
-        let migrated = sanitize_live_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 4);
-        assert_eq!(
-            migrated["root"]["children"][0]["tabs"],
-            json!(["roster", "attention", "station", "health"])
-        );
-        assert_eq!(
-            migrated["root"]["children"][1],
-            json!({"type":"tabs", "tabs":["map","station-console"], "active":"map"})
-        );
     }
 
     #[test]
     fn the_attention_and_health_panels_cannot_be_stored_closed() {
         // A Game Master must not be able to hide a connection or recovery
         // failure from themselves, by role preset OR by arrangement.
+        let mut closed: Vec<&str> = live_panels_for(u64::MAX)
+            .iter()
+            .filter(|panel| **panel != "roster")
+            .copied()
+            .collect();
+        closed.sort_unstable();
         let layout = json!({
-            "version":4,
+            "version": default_live_layout()["version"],
             "root":{"type":"tabs","tabs":["roster"],"active":"roster"},
-            "floats":[],
-            "closed":["readiness","join","manual-save","mission","comms","activity","journal",
-                "session-history","map","attention","workload","widgets","health","station",
-                "station-console"],
-            "selected":"roster"
+            "floats":[], "closed":closed, "selected":"roster"
         });
 
         let repaired = sanitize_live_layout(&layout).unwrap();
@@ -1515,30 +1487,12 @@ mod tests {
             json!({"type":"tabs", "tabs":["roster","attention","health"], "active":"roster"})
         );
         let closed = repaired["closed"].as_array().unwrap();
-        assert!(!closed.iter().any(|panel| panel == "attention"));
-        assert!(!closed.iter().any(|panel| panel == "health"));
-    }
-
-    #[test]
-    fn a_v1_live_layout_that_closed_a_panel_keeps_it_closed() {
-        let layout = json!({
-            "version":1,
-            "root":{"type":"tabs","tabs":["roster","readiness"],"active":"readiness"},
-            "floats":[], "closed":["join","manual-save"], "selected":"readiness"
-        });
-
-        let migrated = sanitize_live_layout(&layout).unwrap();
-        assert_eq!(migrated["closed"], json!(["join", "manual-save"]));
-        assert_eq!(
-            migrated["root"]["children"][0]["children"][0],
-            json!({"type":"tabs",
-                "tabs":["roster","readiness","mission","attention","workload","widgets","station"],
-                "active":"readiness"})
-        );
-        assert_eq!(
-            migrated["root"]["children"][0]["children"][1],
-            json!({"type":"tabs", "tabs":["map","station-console"], "active":"map"})
-        );
+        for panel in LIVE_PINNED_PANELS {
+            assert!(
+                !closed.iter().any(|value| value == panel),
+                "{panel} was left closed"
+            );
+        }
     }
 
     #[test]

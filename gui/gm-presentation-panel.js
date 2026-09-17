@@ -87,7 +87,10 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
   button('clear', () => send('clear_card'));
   button('play_sound', () => sounds.includes(sound.value) && (!soundSource.value || sources.some(([id]) => id === soundSource.value))
     && send({ sound: { id: sound.value, source: soundSource.value || null } }));
-  root.append(status); doc.getElementById('gm-mission-panel')?.append(root);
+  root.append(status);
+  // The docked host when the GM desk composed one (issue #1505), and the mission
+  // panel it has always lived in otherwise.
+  (doc.getElementById('gm-presentation-dock') || doc.getElementById('gm-mission-panel'))?.append(root);
   ship.addEventListener('change', () => {
     camera.value = ''; message.value = ''; cameraKey = ''; messageKey = ''; refreshAdmission();
   });

@@ -4,6 +4,24 @@ import { mountWorkshopSourceLink } from '../../gui/workshop-source-link.js';
 
 let mounted;
 afterEach(() => { mounted?.dispose(); mounted = null; document.body.replaceChildren(); });
+it('mounts into the docked host when the GM desk composed one', () => {
+  // The desk creates the host before this panel mounts (issue #1505); without
+  // one, the desk region it has always lived in is still the home.
+  document.body.innerHTML =
+    '<section id="gm-console"><div id="gm-desk-brief"><div id="gm-source-link-dock"></div></div></section>';
+  const win = { location: { assign: () => {} }, addEventListener: () => {}, removeEventListener: () => {} };
+  const docked = mountWorkshopSourceLink({ root: document.getElementById('gm-console'), win, t: id => id });
+  expect(document.getElementById('gm-workshop-source').parentElement.id).toBe('gm-source-link-dock');
+  // It shows itself only when a retained source pack exists, which is what the
+  // dock reads to decide whether to offer the panel at all.
+  expect(document.getElementById('gm-workshop-source').hidden).toBe(true);
+  docked.dispose();
+  document.body.innerHTML = '<section id="gm-console"><div id="gm-desk-brief"></div></section>';
+  const fallback = mountWorkshopSourceLink({ root: document.getElementById('gm-console'), win, t: id => id });
+  expect(document.getElementById('gm-workshop-source').parentElement.id).toBe('gm-desk-brief');
+  fallback.dispose();
+});
+
 function setup(capability) {
   document.body.innerHTML = '<section id="gm-console"><div id="gm-desk-brief"></div></section>';
   const getStorage = vi.fn(() => { throw new DOMException('Storage denied', 'SecurityError'); });

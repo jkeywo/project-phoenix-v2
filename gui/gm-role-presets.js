@@ -67,6 +67,11 @@ export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
   // Removal and faction hostility in issue #1512.
   'gm-despawn-panel': 'gm-inspector',
   'gm-faction-panel': 'gm-inspector',
+  // The authored Objective controls in issue #1513. They went to the mission
+  // workflow rather than the inspector's column, but they were the inspector's
+  // child when this vocabulary was written, so they keep following it: a preset
+  // that puts the inspector away still puts them away.
+  'gm-objective-panel': 'gm-inspector',
 });
 
 /** Quick-action DOM ids this build actually draws. */

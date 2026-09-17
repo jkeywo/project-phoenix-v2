@@ -180,6 +180,9 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
     await event(gm, 'release_wave_2', 'pause');
     await checkpoint('session and event pause, resume, skip, cancellation');
 
+    // The authored Objective controls are a dock panel of their own since issue
+    // #1513, in the mission workflow's group rather than the inspector.
+    for (const page of gms) await revealGmPanel(page, 'objective');
     const objective = (page, id, verb) => settleControl(page, () => page.locator(
       `#gm-objective-list .gm-objective-row[data-objective="${id}"] button[data-verb="${verb}"]`).click());
     await Promise.all([

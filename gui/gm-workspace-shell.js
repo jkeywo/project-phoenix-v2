@@ -76,6 +76,10 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // hostility, are each one choice and a verb — not drafts (issue #1512).
   ['despawn', 'gm-despawn-panel'],
   ['faction', 'gm-faction-panel'],
+  // Activating, completing and failing an authored Objective: ordinary dock
+  // controls in the mission workflow, because the authored target and its
+  // recipients already define the operation (issue #1513).
+  ['objective', 'gm-objective-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
@@ -193,10 +197,10 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // System control and direct effect follow them out (issue #1511): the last
   // two selected-entity actions the inspector was still carrying.
   move(root, 'gm-system-panel', 'gm-effect-panel');
-  // Removal and faction hostility are the last of them (issue #1512), and with
-  // that the inspector holds its own reading surfaces and the authored
-  // objective region — every action panel it carried is a dock panel now.
-  move(root, 'gm-despawn-panel', 'gm-faction-panel');
+  // Removal and faction hostility followed them out in issue #1512, and the
+  // authored Objective controls in issue #1513 — the last panel the inspector
+  // carried. It is its own reading surface now and nothing else.
+  move(root, 'gm-despawn-panel', 'gm-faction-panel', 'gm-objective-panel');
   // Restore leaves the checkpoint record to become a draft of its own: it
   // combines a selection, a preflight, a consequence preview and a
   // confirmation. The candidate it acts on is still whatever the record has
@@ -212,10 +216,6 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // place it. The dock moves it out into its own frame when it mounts.
   get('gm-activity')?.append(sessionHistory);
   const inspector = get('gm-inspector');
-  // What is left inside the inspector: the authored objective region, which is
-  // a reading surface about the same selection rather than an action tool, and
-  // which stacks and scrolls with the entity card it annotates.
-  move(inspector, 'gm-objective-panel');
   // Authentic Station operation is two dock panels (issue #1504): the pending
   // state and the takeover controls are an ordinary tool, and the console
   // itself is a document. Neither is a new command route — the puppet still
@@ -317,38 +317,17 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       revealHost(control);
       control?.scrollIntoView?.({ block: 'nearest' });
       (control?.matches('input,select,button') ? control : control?.querySelector('button'))?.focus({ preventScroll: true });
-      // The way back only leads anywhere from inside the inspector itself.
-      if (control && inspector.contains(control)) back.hidden = false;
     });
     shortcuts.append(button);
   }
-  // The way back up from a quick action's control: a sticky button at the
-  // top of the inspector, shown only after a jump and cleared once the
-  // selection card is in view again (whether by this button or by scrolling).
-  const back = element('button', 'gm-inspector-back', 'server.gm.shell.back_to_selection');
-  back.type = 'button';
-  back.hidden = true;
-  inspector.prepend(back);
-  // The scroll box is the FRAME the inspector sits in, not the inspector: one
-  // scroller, whichever frame that is (gui/gm-workspace.css explains why a
-  // second nested scroller here is a correctness problem, not a layout
-  // preference). Since issue #1507 the inspector is a dock panel and can be
-  // moved, so its frame is resolved when it is needed rather than at mount.
-  const detailScroller = () => inspector.closest('.workshop-dock-panel') || inspector;
-  back.addEventListener('click', () => {
-    back.hidden = true;
-    const scroller = detailScroller();
-    if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top: 0 }); else scroller.scrollTop = 0;
-    get('gm-entity-card')?.scrollIntoView?.({ block: 'start' });
-    tabs.querySelector('button[aria-selected="true"]')?.focus({ preventScroll: true });
-  });
-  // `scroll` does not bubble, so the desk listens in the capture phase rather
-  // than binding to a frame that is about to be replaced by the next render.
-  const onScroll = event => {
-    if (back.hidden || event.target !== detailScroller()) return;
-    if (detailScroller().scrollTop < 8) back.hidden = true;
-  };
-  root.addEventListener('scroll', onScroll, true);
+  // There is no sticky way back up the inspector any more, because there is no
+  // longer a jump that stays inside it: issue #1513 moved the authored
+  // Objective controls into the mission workflow, the last of the five
+  // shortcut targets that was still the inspector's own child. Every shortcut
+  // now brings ANOTHER panel forward, and the way back from that is the
+  // arrangement's own tab — a button inside the panel the operator just left
+  // would be behind that tab and unreachable, which is what #gm-inspector-back
+  // had silently become.
   let gms = [];
   let entities = [];
   let selected = null;
@@ -647,7 +626,6 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   if (liveWorkspace) mountLiveLayout(liveLayoutModel.defaultLayout());
   return {
     dispose() {
-      root.removeEventListener('scroll', onScroll, true);
       liveLayout?.dispose();
       restoreDockedNodes();
       observer.disconnect();

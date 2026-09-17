@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 11;
+export const LIVE_LAYOUT_VERSION = 12;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -16,6 +16,7 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   tool('misclassify'), tool('report-policy'), tool('ghost'),
   tool('system'), tool('effect'),
   tool('despawn'), tool('faction'),
+  tool('objective'),
 ]);
 export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
@@ -30,6 +31,7 @@ const V8_PANELS = Object.freeze([...V7_PANELS, 'checkpoint', 'restore']);
 const V9_PANELS = Object.freeze([...V8_PANELS,
   'contact', 'npc', 'misclassify', 'report-policy', 'ghost']);
 const V10_PANELS = Object.freeze([...V9_PANELS, 'system', 'effect']);
+const V11_PANELS = Object.freeze([...V10_PANELS, 'despawn', 'faction']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -122,6 +124,13 @@ const ADDED_IN_V11 = Object.freeze([
   ['despawn', 'inspector', 'tab'],
   ['faction', 'inspector', 'tab'],
 ]);
+/** Panels registered after version 11. Activating, completing and failing an
+ * authored Objective is the mission workflow's own vocabulary — the authored
+ * target and its recipients already define the operation — so it joins the
+ * mission events it belongs to rather than the selected-entity column. It
+ * narrows to the selected ship where there is one, which is why the inspector's
+ * shortcut still points at it; pointing is not a second copy (issue #1513). */
+const ADDED_IN_V12 = Object.freeze([['objective', 'mission', 'tab']]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -159,7 +168,7 @@ const liveArrangement = () => ({
     { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
       { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
         group(['roster', 'readiness', 'join', 'manual-save', 'mission',
-          'attention', 'workload', 'widgets', 'station'], 'roster'),
+          'attention', 'workload', 'widgets', 'station', 'objective'], 'roster'),
         group(['presentation', 'audition', 'source-link'], 'presentation'),
       ] },
       { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
@@ -170,6 +179,14 @@ const liveArrangement = () => ({
     group(['comms', 'activity', 'journal', 'session-history', 'health', 'checkpoint'], 'comms'),
   ] },
 });
+/** The arrangement before the authored Objective controls joined the mission
+ * workflow (version 12). */
+const arrangementBeforeV12 = () => {
+  const arrangement = liveArrangement();
+  const workflow = arrangement.root.children[0].children[0].children[0];
+  workflow.tabs = workflow.tabs.filter(panel => panel !== 'objective');
+  return arrangement;
+};
 /** The arrangement before the inspector took a column of its own (version 7). */
 const arrangementBeforeV7 = () => {
   const arrangement = arrangementBeforeV8();
@@ -180,7 +197,7 @@ const arrangementBeforeV7 = () => {
 /** The arrangement before removal and faction hostility joined the inspector
  * (version 11). */
 const arrangementBeforeV11 = () => {
-  const arrangement = liveArrangement();
+  const arrangement = arrangementBeforeV12();
   const documents = arrangement.root.children[0].children[1].children[1];
   documents.tabs = documents.tabs.filter(panel => panel !== 'despawn' && panel !== 'faction');
   return arrangement;
@@ -222,6 +239,10 @@ const v10Default = () => ({ version: 10, ...arrangementBeforeV11(),
   floats: [],
   closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
   selected: 'roster' });
+const v11Default = () => ({ version: 11, ...arrangementBeforeV12(),
+  floats: [],
+  closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
+  selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
     floats: [],
@@ -256,6 +277,8 @@ const v9 = createDockLayoutModel({ version: 9, panels: V9_PANELS, defaultLayout:
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [9] });
 const v10 = createDockLayoutModel({ version: 10, panels: V10_PANELS, defaultLayout: v10Default,
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [10] });
+const v11 = createDockLayoutModel({ version: 11, panels: V11_PANELS, defaultLayout: v11Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [11] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -271,7 +294,8 @@ const migrate = createDockLayoutMigration({
     { version: 8, model: v8, added: ADDED_IN_V8 },
     { version: 9, model: v9, added: ADDED_IN_V9 },
     { version: 10, model: v10, added: ADDED_IN_V10 },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V11 },
+    { version: 11, model: v11, added: ADDED_IN_V11 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V12 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

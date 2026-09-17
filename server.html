@@ -2155,19 +2155,6 @@
              one lever gets one button. -->
         <section id="gm-mission-panel" role="region" aria-labelledby="gm-mission-heading">
           <h2 id="gm-mission-heading" data-i18n="server.gm.mission.heading"></h2>
-          <section id="gm-objective-panel" aria-labelledby="gm-objective-heading">
-            <h3 id="gm-objective-heading" data-i18n="server.gm.objective.heading"></h3>
-            <ul id="gm-objective-list"></ul>
-            <p id="gm-objective-empty" data-i18n="server.gm.objective.empty"></p>
-            <div id="gm-objective-confirmation" hidden role="group" aria-labelledby="gm-objective-consequence">
-              <p id="gm-objective-consequence"></p>
-              <button id="gm-objective-confirm" type="button" data-i18n="server.gm.objective.confirm"></button>
-              <button id="gm-objective-cancel" type="button" data-i18n="server.gm.objective.cancel"></button>
-            </div>
-            <p id="gm-objective-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
-            <h4 id="gm-objective-results-heading" data-i18n="server.gm.objective.results_heading"></h4>
-            <ol id="gm-objective-results" role="log" aria-labelledby="gm-objective-results-heading" aria-live="polite"></ol>
-          </section>
           <ul id="gm-mission-events" role="list"></ul>
           <p id="gm-mission-empty" role="status" aria-live="polite"
             data-i18n="server.gm.mission.empty"></p>
@@ -2184,6 +2171,23 @@
              inputs. Rows come from the absolute `gm_spawn` Host Channel
              projection, so a scenario with no palette renders the empty
              sentence and offers nothing placeable. -->
+        <!-- The authored Objective controls (issue #1513). A dock panel of its
+             own in the mission workflow rather than a region nested inside the
+             mission events: same authored verbs, same consequence
+             confirmation, one place. -->
+        <section id="gm-objective-panel" role="region" aria-labelledby="gm-objective-heading">
+          <h2 id="gm-objective-heading" data-i18n="server.gm.objective.heading"></h2>
+          <ul id="gm-objective-list"></ul>
+          <p id="gm-objective-empty" data-i18n="server.gm.objective.empty"></p>
+          <div id="gm-objective-confirmation" hidden role="group" aria-labelledby="gm-objective-consequence">
+            <p id="gm-objective-consequence"></p>
+            <button id="gm-objective-confirm" type="button" data-i18n="server.gm.objective.confirm"></button>
+            <button id="gm-objective-cancel" type="button" data-i18n="server.gm.objective.cancel"></button>
+          </div>
+          <p id="gm-objective-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-objective-results-heading" data-i18n="server.gm.objective.results_heading"></h3>
+          <ol id="gm-objective-results" role="log" aria-labelledby="gm-objective-results-heading" aria-live="polite"></ol>
+        </section>
         <section id="gm-system-panel" role="region" aria-labelledby="gm-system-heading">
           <h2 id="gm-system-heading" data-i18n="server.gm.system.heading"></h2>
           <p data-i18n="server.gm.system.explanation"></p>

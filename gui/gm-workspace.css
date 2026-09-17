@@ -334,11 +334,9 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk ::-webkit-scrollbar-thumb:hover { background: var(--ink-dim); }
 #gm-console.gm-desk ::-webkit-scrollbar-corner { background: var(--surface-deep); }
 
-/* ── Inspector way back ─────────────────────────────────────────────────
-   A quick action scrolls the inspector down to its control (Objectives,
-   Systems, …). The way back up is a sticky button that appears only after
-   such a jump and hides again once the selection card is in view. */
-#gm-console.gm-desk #gm-inspector-back { position: sticky; top: 0; z-index: 2; width: 100%; flex-shrink: 0; }
+/* ── Objective scope line ───────────────────────────────────────────────
+   The ship the Objective list has narrowed itself to, named in words rather
+   than left to the reader to infer from which rows survived the filter. */
 #gm-console.gm-desk #gm-objective-scope { color: var(--gold); font-family: var(--font-mono); margin: 0; }
 
 /* ── Saved GM action history (issue #1441) ──────────────────────────────

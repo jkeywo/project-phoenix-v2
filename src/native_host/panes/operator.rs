@@ -582,6 +582,47 @@ const LIVE_ADDED_IN_V11: &[(&str, &str, &str)] = &[
     ("faction", "inspector", "tab"),
 ];
 
+const LIVE_PANELS_V12: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+    "checkpoint",
+    "restore",
+    "contact",
+    "npc",
+    "misclassify",
+    "report-policy",
+    "ghost",
+    "system",
+    "effect",
+    "despawn",
+    "faction",
+    "objective",
+];
+/// Panels registered after version 11. Activating, completing and failing an
+/// authored Objective is the mission workflow's own vocabulary — the authored
+/// target and its recipients already define the operation — so it joins the
+/// mission events rather than the selected-entity column.
+const LIVE_ADDED_IN_V12: &[(&str, &str, &str)] = &[("objective", "mission", "tab")];
+
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
@@ -631,7 +672,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         8 => LIVE_PANELS_V8,
         9 => LIVE_PANELS_V9,
         10 => LIVE_PANELS_V10,
-        _ => LIVE_PANELS_V11,
+        11 => LIVE_PANELS_V11,
+        _ => LIVE_PANELS_V12,
     }
 }
 
@@ -665,6 +707,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 11 {
         added.extend_from_slice(LIVE_ADDED_IN_V11);
+    }
+    if version < 12 {
+        added.extend_from_slice(LIVE_ADDED_IN_V12);
     }
     added
 }
@@ -754,12 +799,12 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 11,
+        "version": 12,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
                     {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission",
-                        "attention","workload","widgets","station"], "active":"roster"},
+                        "attention","workload","widgets","station","objective"], "active":"roster"},
                     {"type":"tabs", "tabs":["presentation","audition","source-link"], "active":"presentation"}
                 ]},
                 {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
@@ -778,7 +823,7 @@ fn default_live_layout() -> Value {
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=11).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=12).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();

@@ -583,7 +583,7 @@ it('keeps every migrated record reachable by id in the narrow projection', () =>
     'gm-station-tools', 'gm-station-controls', 'gm-station-select', 'gm-station-toggle',
     'gm-station-surface', 'gm-station-frame', 'gm-station-activity',
     'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock',
-    'gm-inspector', 'gm-entity-card', 'gm-inspector-tabs', 'gm-inspector-back']) {
+    'gm-inspector', 'gm-entity-card', 'gm-inspector-tabs']) {
     expect(document.getElementById(id), `${id} while narrow`).not.toBeNull();
   }
   // The narrow switcher offers the Station tool like any other, and the console
@@ -778,40 +778,31 @@ it('keeps the observing ship selector available without changing the action targ
   expect(chooser.value).toBe('crew');
   expect(selectEntity).not.toHaveBeenCalled();
 });
-it('offers a sticky way back to the selection card after a quick action jumps the inspector', () => {
-  mount();
-  const inspector = document.getElementById('gm-inspector');
-  const back = document.getElementById('gm-inspector-back');
-  expect(inspector.firstElementChild).toBe(back);
-  expect(back.hidden).toBe(true);
-  // The scroll box is the FRAME the inspector sits in — one scroller, whichever
-  // frame that is. Since issue #1507 that is its dock panel.
-  const frame = inspector.closest('.workshop-dock-panel');
-  expect(frame).not.toBeNull();
-  frame.scrollTo = vi.fn();
-  inspector.scrollTo = vi.fn();
-  [...document.querySelectorAll('#gm-action-grid button')].find(b => b.getAttribute('aria-controls') === 'gm-objective-panel').click();
-  expect(back.hidden).toBe(false);
-  back.click();
-  expect(back.hidden).toBe(true);
-  expect(frame.scrollTo).toHaveBeenCalledWith({ top: 0 });
-  // The inspector itself never opens a second scroller inside that frame.
-  expect(inspector.scrollTo).not.toHaveBeenCalled();
-
-  // Scrolling the frame back to the card clears the control too. `scroll` does
-  // not bubble, so the desk listens in the capture phase — and only for ITS
-  // scroller, not for any scroll anywhere on the console.
+it('sends the inspector shortcut into the panel that owns the Objective controls', () => {
+  // Since issue #1513 not one of the five shortcut targets is still the
+  // inspector's own child, so every one of them brings ANOTHER dock panel
+  // forward. The sticky way back up the inspector went with them: it could
+  // only ever have appeared behind the tab the operator had just left.
+  const { shell } = mount();
+  expect(document.getElementById('gm-inspector-back')).toBeNull();
+  expect(document.querySelector('#gm-inspector #gm-objective-panel')).toBeNull();
+  // Put the objective panel behind another tab, so revealing it is observable.
+  shell.setLiveLayout(liveLayoutModel.select(shell.liveLayoutState(), 'roster'));
+  const framed = () => document.getElementById('gm-objective-panel').closest('[data-panel]');
+  expect(framed().hidden).toBe(true);
   [...document.querySelectorAll('#gm-action-grid button')]
-    .find(b => b.getAttribute('aria-controls') === 'gm-objective-panel').click();
-  expect(back.hidden).toBe(false);
-  Object.defineProperty(document.getElementById('gm-journal'), 'scrollTop',
-    { configurable: true, value: 0 });
-  document.getElementById('gm-journal').dispatchEvent(new Event('scroll'));
-  expect(back.hidden).toBe(false);
-  Object.defineProperty(frame, 'scrollTop', { configurable: true, value: 0 });
-  frame.dispatchEvent(new Event('scroll'));
-  expect(back.hidden).toBe(true);
+    .find(button => button.getAttribute('aria-controls') === 'gm-objective-panel').click();
+  expect(framed().hidden).toBe(false);
+  expect(framed().dataset.panel).toBe('objective');
+  // A panel the operator CLOSED stays closed: closing is a decision and the
+  // shortcut is a convenience, exactly as it is for every other migrated tool.
+  shell.setLiveLayout(liveLayoutModel.close(shell.liveLayoutState(), 'objective'));
+  expect(document.querySelector('[data-panel="objective"]')).toBeNull();
+  [...document.querySelectorAll('#gm-action-grid button')]
+    .find(button => button.getAttribute('aria-controls') === 'gm-objective-panel').click();
+  expect(document.querySelector('[data-panel="objective"]')).toBeNull();
 });
+
 it('gives contact control, NPC doctrine and their three drafts panels of their own', () => {
   const { shell } = mount();
   // The tools join the inspector's column: they read the selection it reads.
@@ -866,8 +857,6 @@ it('brings a quick action its own panel forward before it focuses a control in i
     .find(button => button.getAttribute('aria-controls') === 'gm-contact-observer').click();
   expect(document.getElementById('gm-contact-observer').closest('[data-panel]').hidden).toBe(false);
   expect(document.activeElement).toBe(document.getElementById('gm-contact-observer'));
-  // The way back up only leads anywhere from inside the inspector itself.
-  expect(document.getElementById('gm-inspector-back').hidden).toBe(true);
   // A panel the operator CLOSED stays closed: closing is a decision.
   shell.setLiveLayout(liveLayoutModel.close(shell.liveLayoutState(), 'contact'));
   expect(document.querySelector('[data-panel="contact"]')).toBeNull();
@@ -942,10 +931,57 @@ it('docks removal and faction hostility as ordinary tools, not drafts', () => {
   }
   expect(document.querySelector('[data-panel="despawn"] #gm-despawn-preview')).not.toBeNull();
   expect(document.querySelector('[data-panel="faction"] #gm-faction-apply')).not.toBeNull();
-  // With that, the inspector holds its own reading surfaces and the authored
-  // objective region — every action panel it used to carry is a dock panel.
+  // Since issue #1513 the inspector holds only its own reading surfaces —
+  // every panel it used to carry is a dock panel.
   expect([...document.getElementById('gm-inspector').querySelectorAll('section[id]')]
-    .map(section => section.id)).toEqual(['gm-knowledge-panel', 'gm-objective-panel']);
+    .map(section => section.id)).toEqual(['gm-knowledge-panel']);
+});
+
+it('docks the authored Objective controls in the mission workflow', () => {
+  const { shell } = mount();
+  // The authored target and its recipients already define the operation, so
+  // these are ordinary dock controls with the existing consequence
+  // confirmation rather than a draft with a lifecycle of its own.
+  const frame = document.getElementById('gm-objective-panel').closest('[data-panel]');
+  expect(frame.dataset.panel).toBe('objective');
+  expect(frame.dataset.panelKind).toBe('tool');
+  expect(liveLayoutModel.isTemporary('objective')).toBe(false);
+  expect(shell.liveLayoutState().closed).not.toContain('objective');
+  // It sits with the mission events it belongs to, not in the selected-entity
+  // column, and it is out of the inspector entirely.
+  expect(frame.closest('.workshop-tab-stack').querySelector('[data-panel="mission"]'))
+    .not.toBeNull();
+  expect(document.querySelector('#gm-inspector #gm-objective-panel')).toBeNull();
+  // Every verb travelled with it, and so did the confirmation and the results.
+  expect(frame.querySelector('#gm-objective-list')).not.toBeNull();
+  expect(frame.querySelector('#gm-objective-confirmation')).not.toBeNull();
+  expect(frame.querySelector('#gm-objective-results')).not.toBeNull();
+  // And it is ONE panel: the inspector reaches it by pointing, not by keeping
+  // a second copy of the controls.
+  expect(document.querySelectorAll('#gm-objective-list')).toHaveLength(1);
+  expect([...document.querySelectorAll('#gm-action-grid button')]
+    .filter(b => b.getAttribute('aria-controls') === 'gm-objective-panel')).toHaveLength(1);
+});
+
+it('brings the authored Objective panel back where it was, asking nothing', () => {
+  const first = mount();
+  first.shell.setLiveLayout(
+    liveLayoutModel.dock(first.shell.liveLayoutState(), 'objective', 'map', 'tab'));
+  const stored = liveLayoutModel.normalize(first.shell.liveLayoutState());
+  mountedShells.splice(mountedShells.indexOf(first.shell), 1);
+  first.shell.dispose();
+
+  const { shell } = mount();
+  shell.mountLiveLayout(stored);
+  // Placement comes back: the map's group is a place only the stored
+  // arrangement puts it, never the default.
+  const stack = document.getElementById('gm-objective-panel').closest('.workshop-tab-stack');
+  expect(stack.querySelector('[data-panel="map"]')).not.toBeNull();
+  expect(stack.querySelector('[data-panel="mission"]')).toBeNull();
+  expect(shell.liveLayoutState()).toEqual(stored);
+  // Preview and pending state do not: an arrangement carries placement only,
+  // so a reloaded desk is not sitting on a confirmation nobody opened.
+  expect(document.getElementById('gm-objective-confirmation').hidden).toBe(true);
 });
 
 it('restores where a tool was, aimed at nothing and asking nothing', () => {

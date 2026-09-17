@@ -453,7 +453,12 @@ test('GM directing panels stay reachable with a dense mission log and Objective 
       }));
     }, { eventIds: EVENT_IDS });
 
+    // Since issue #1513 the Objective controls are a dock panel of their own in
+    // the mission workflow's group, so the two dense surfaces are read one tab
+    // at a time — which is what a docked desk is. Each assertion brings its own
+    // panel forward rather than assuming a tab it did not choose.
     // The mission log: twelve rows, none shrunk sideways off the desk.
+    await revealGmPanel(page, 'mission');
     const missionRows = page.locator('#gm-mission-log .gm-mission-log-entry');
     await expect(missionRows).toHaveCount(12);
     for (const id of EVENT_IDS) {
@@ -464,6 +469,7 @@ test('GM directing panels stay reachable with a dense mission log and Objective 
     // The Objective list: twelve dense rows, each with its full ~180-char
     // description and both verb buttons — PRD #1418's "long text and dense
     // states", not a shortened stand-in.
+    await revealGmPanel(page, 'objective');
     const objectiveRows = page.locator('#gm-objective-list .gm-objective-row');
     await expect(objectiveRows).toHaveCount(12);
     const firstText = await objectiveRows.first().locator('p').first().textContent();
@@ -479,7 +485,9 @@ test('GM directing panels stay reachable with a dense mission log and Objective 
       const where = `@ ${scale}x`;
       await page.evaluate((value) => document.documentElement.style
         .setProperty('--a11y-text-scale', String(value)), scale);
+      await revealGmPanel(page, 'mission');
       await expect(missionRows).toHaveCount(12);
+      await revealGmPanel(page, 'objective');
       await expect(objectiveRows).toHaveCount(12);
 
       // Neither dense panel — nor the desk around them — grows a sideways

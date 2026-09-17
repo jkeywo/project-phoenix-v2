@@ -566,6 +566,11 @@ test('a GM activates and resolves authored Objectives through the real mission p
       window.__objectiveSmokeRequests.push(structuredClone(request)); return submit(request);
     };
   });
+  // The authored Objective controls are a dock panel of their own since issue
+  // #1513, in the mission workflow's group rather than the inspector's — and a
+  // panel behind another tab is `hidden`, so its rows have to be brought
+  // forward before they can be pressed.
+  await revealGmPanel(gm, 'objective');
   const row = id => gm.locator(`#gm-objective-list li[data-objective="${id}"]`);
   const apply = async (id, verb) => {
     await row(id).locator(`button[data-verb="${verb}"]`).click();

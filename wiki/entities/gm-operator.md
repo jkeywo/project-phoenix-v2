@@ -111,8 +111,19 @@ selection and projection they do. Rearranging them is a layout decision and
 nothing else: a stored arrangement carries placement only, never the selection
 the tools are aimed at and never an open confirmation, because a desk restored
 aimed at something the operator never chose is a desk that removes the wrong
-hull. With that, every panel the Live desk holds is a dock panel, and the
-inspector is its own reading surface and the authored objective region.
+hull.
+
+Issue #1513 moved the last panel out. Activating, completing and failing an
+authored Objective is the mission workflow's own vocabulary — the authored
+target and its recipients already define the operation — so the controls are a
+dock panel beside the mission events rather than a region inside the inspector,
+and they stay ordinary controls behind the existing consequence confirmation
+rather than becoming a draft. They are still ONE panel: the inspector reaches
+them by pointing at them, through the shortcut grid it already had, not by
+keeping a second copy. The inspector is its own reading surface now and nothing
+else, which also retired `#gm-inspector-back` — a sticky way back up a column
+that no shortcut lands in any more would only ever have appeared behind the tab
+the operator had just left.
 
 Issue #1508 gave Spawn directed spatial picking through that docked map. Pick
 mode names the control capturing the chart and previews what committing would
@@ -203,9 +214,9 @@ Bar. The authentic Station iframe remains outside the desk
 at 1280×720, with its existing console URL and command adapter. Inspector tabs
 present the existing knowledge comparison, without adding a new projection.
 
-After an action shortcut jumps the Inspector down to a control, a sticky
-`#gm-inspector-back` button offers the way back to the selection card; it
-hides again once the card is in view. The Objectives list narrows to the ship
+An action shortcut brings the dock panel that owns its control forward (every
+one of the five is another panel since issue #1513). The Objectives list
+narrows to the ship
 the map has selected (`gm-objective-panel.js` `select`): rows whose recipients
 are empty address every ship and stay listed, any non-ship selection lists
 everything. Desk panels show a thin, always-visible scrollbar in both Chrome

@@ -134,10 +134,22 @@ async function sampleShake(page, frames = 30) {
  *  drawn AND what the state is still saying, which is the pair story 15 is
  *  about: the pulse may stop, the alert may not disappear. */
 async function vignetteState(page) {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
     const overlay = document.getElementById('hud-overlay');
     overlay.classList.add('alert-on');
     const vignette = document.getElementById('hud-vignette');
+    // The vignette fades in over `transition: opacity .25s`. With the pulse
+    // running, the keyframes own the opacity and a read is immediate; with the
+    // pulse stopped the transition owns it, and a read in the same step sees
+    // its start (0), not where it settles (1). Wait for the transition itself
+    // to finish — its own `finished` promise, not a wall-clock guess, because
+    // under a software renderer a quarter-second fade can take much longer.
+    void getComputedStyle(vignette).opacity;
+    const fades = vignette.getAnimations().filter(animation => animation instanceof CSSTransition);
+    await Promise.race([
+      Promise.all(fades.map(animation => animation.finished.catch(() => {}))),
+      new Promise(resolve => setTimeout(resolve, 5000)),
+    ]);
     const style = getComputedStyle(vignette);
     return {
       animationName: style.animationName,
@@ -260,7 +272,13 @@ test.describe('the viewscreen’s three effects are set separately', () => {
       .toBe('full');
 
     // …and it is still there after a reload, because it is this endpoint's.
+    // A reloaded host is a fresh boot: combat_test authors more than one hull,
+    // so the picker comes back and a hull is chosen again before the world
+    // loads — the record under test is read off the document, not the world.
     await page.reload();
+    const reloadedCard = page.locator('#scenario-panel ph-ship-picker .ship-card').first();
+    await reloadedCard.waitFor({ state: 'visible', timeout: 60_000 });
+    await reloadedCard.click();
     await waitForWasmReady(page, 120_000);
     expect(await page.evaluate(() => document.documentElement.getAttribute('data-shake')))
       .toBe('off');

@@ -486,6 +486,42 @@ fn browser_save_store() -> vellum_save::LocalStorage {
     vellum_save::LocalStorage::new(browser_save_namespace())
 }
 
+/// The browser's save backend as the peer-local Store the live restore takes
+/// its recovery checkpoint through (issue #1446, `gm_restore`).
+///
+/// Live restore reserves, writes, lists and reads back through
+/// [`crate::save_slots_store::SaveSlotService`], the same service the native
+/// host installs over its file store. This browser never installed one, so a
+/// GM's restore settled as "no recovery checkpoint could be taken" before
+/// anything was loaded. Each call resolves the namespaced `localStorage`
+/// afresh, exactly as the catalogue readers above do, so the identity this
+/// page carries when the checkpoint is taken is the one it is filed under.
+/// Only the service is installed: the browser keeps its own drain of queued
+/// captures (`drain_lifecycle_saves`), which routes manual saves through the
+/// page's save intents; the native drain is not registered here.
+#[cfg(target_arch = "wasm32")]
+struct BrowserSlotStore;
+
+#[cfg(target_arch = "wasm32")]
+impl crate::save_slots_store::LocalSaveStore for BrowserSlotStore {
+    fn read(&self, slot: &str) -> Result<Option<String>, String> {
+        vellum_save::Store::read(&browser_save_store(), slot).map_err(|error| error.to_string())
+    }
+
+    fn write(&self, slot: &str, contents: &str) -> Result<(), String> {
+        vellum_save::Store::write(&browser_save_store(), slot, contents)
+            .map_err(|error| error.to_string())
+    }
+
+    fn remove(&self, slot: &str) -> Result<(), String> {
+        vellum_save::Store::remove(&browser_save_store(), slot).map_err(|error| error.to_string())
+    }
+
+    fn slots(&self) -> Result<Vec<String>, String> {
+        vellum_save::Store::slots(&browser_save_store()).map_err(|error| error.to_string())
+    }
+}
+
 // ── Host Channels (issue #818) ─────────────────────────────────────────────
 //
 // Named host-page-local outbound channels (CONTEXT.md "Host Channel"). These
@@ -994,6 +1030,8 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
         unfocused_mode: bevy::winit::UpdateMode::Continuous,
     })
     .init_resource::<PendingForceStart>()
+    // The live restore's Store (see `BrowserSlotStore`).
+    .insert_resource(crate::save_slots_store::SaveSlotService::new(BrowserSlotStore))
     // De-globalised bridge state (issue #1181): the durable, sim-visible half of
     // the former thread-locals lives in these Resources. `Instagib` starts off;
     // The shared startup-restore driver takes the pre-init save below.

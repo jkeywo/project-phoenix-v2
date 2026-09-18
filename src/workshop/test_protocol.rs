@@ -10,15 +10,55 @@ pub struct TestSelection {
     pub seed: u64,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// Which observer a disposable Test is drawing for.
+///
+/// PRESENTATION ONLY. The omniscient view publishes the ordinary GM projections
+/// and the ship view draws the ordinary player viewscreen; neither adds a
+/// command route, a credential or a save path, and switching between them
+/// changes nothing the fixed tick reads.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "view", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TestView {
+    /// The authentic viewscreen of one simulated player ship. `None` is the
+    /// ship the Test was launched with, which is what Start opens on.
+    Ship { entity: Option<String> },
+    /// The omniscient Game Master workspace over the same running simulation.
+    GameMaster,
+}
+
+impl Default for TestView {
+    /// A Test opens on the viewscreen of the ship it was launched with: that is
+    /// the thing an author pressed Start to look at.
+    fn default() -> Self {
+        Self::Ship { entity: None }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "command", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TestControl {
     Pause {},
     Resume {},
     Step {},
-    Rate { multiplier: u8 },
-    Visibility { visible: bool },
+    Rate {
+        multiplier: u8,
+    },
+    Visibility {
+        visible: bool,
+    },
+    /// Observe the same run through another view. Never a restart.
+    View {
+        view: TestView,
+    },
     Stop {},
+}
+
+/// One simulated player ship a Test can be observed from.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TestShip {
+    pub entity: String,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -40,6 +80,11 @@ pub struct TestStatus {
     pub error: Option<String>,
     pub revision: String,
     pub selection: TestSelection,
+    /// The view this run is drawing, and the ships it could draw instead.
+    #[serde(default)]
+    pub view: TestView,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ships: Vec<TestShip>,
 }
 impl TestStatus {
     pub fn starting(launch: &Launch) -> Self {
@@ -53,6 +98,8 @@ impl TestStatus {
             error: None,
             revision: launch.revision.clone(),
             selection: launch.selection.clone(),
+            view: TestView::default(),
+            ships: Vec::new(),
         }
     }
 }

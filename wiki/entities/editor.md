@@ -340,3 +340,37 @@ never re-pins a pack built for different content, because that pack is not out o
 date — it is for something else. Proposing is not applying: acceptance
 re-proposes first and refuses if the draft moved, since the bytes reviewed would
 otherwise not be the bytes written.
+
+## Observing a disposable Test two ways (issue #1472)
+
+One Test run can be watched through the authentic Viewscreen of a simulated
+player ship or through the omniscient Game Master workspace. Switching is a
+view change, not a restart: the same simulation keeps running at the same tick
+while the surface changes.
+
+Both levers are ones the game already classes as presentation.
+`NativeGmPresentation` turns the ordinary GM projections on and off — a native
+host already inserts and removes it beside a running ship — and `LocalShip` says
+which hull is drawn. `tests/gm_presentation_neutrality.rs` proves the first one
+is inert: it runs the same seeded world twice, switching the omniscient view on
+mid-run and then on-and-off, and compares the digest on every tick. Before that
+test, "the projection systems only read the world" was an inference.
+
+The omniscient view is the REAL GM console. `scripts/build-workshop.mjs`
+injects the `#gm-console` subtree from `server.html` into the Test page at build
+time, the same single-source approach `native_gm/document.rs` takes at runtime.
+A Workshop-only substitute would be a second surface to keep correct, and would
+stop being evidence about the real one the moment it drifted.
+
+It observes and nothing more. Every `window.__host*` GM write is bound to an
+explicit refusal rather than left undefined: a missing global crashes a panel on
+the first press and leaves "can this mutate the run?" answerable only by reading
+every panel, whereas one list answers it and a Test that somehow acquired a real
+route fails a test instead of quietly working.
+
+The surface follows the runtime's reported view rather than the request that
+asked for it, so a refused switch cannot leave the page claiming a view the run
+is not drawing; the runtime refuses a ship the run does not have. A Test today
+has one player ship, because the disposable boot keeps the default solo roster —
+multi-ship Test authoring is #1153 — but the selector reads whatever player
+ships the run actually has, so it needs no change when that arrives.

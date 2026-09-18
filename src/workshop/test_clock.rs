@@ -60,6 +60,7 @@ impl Plugin for TestClockPlugin {
                     .before(TimeSystems),
             )
             .add_systems(Last, finish_step);
+        super::test_view::install(app);
     }
 }
 
@@ -72,6 +73,7 @@ pub(crate) fn apply_controls(
     mut paused: ResMut<crate::gm_action::SimulationPaused>,
     mut exit: MessageWriter<AppExit>,
     mut windows: Query<&mut Window>,
+    mut requested_view: ResMut<super::test_view::TestViewState>,
 ) {
     // Keep this local wall-clock cursor moving while held. Always feed manual
     // durations: switching a manually stepped Real clock back to Automatic
@@ -106,6 +108,11 @@ pub(crate) fn apply_controls(
                 for mut window in &mut windows {
                     window.visible = visible;
                 }
+            }
+            // Recorded here, applied by `test_view::apply_test_view`, which has
+            // the Commands this system deliberately does not.
+            TestControl::View { view } => {
+                requested_view.requested = view;
             }
             _ => {}
         }

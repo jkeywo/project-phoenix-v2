@@ -113,3 +113,41 @@ entities:
         - cargo test --features host,headless --lib gm_npc::inspector
         - npx vitest run tests/client/gm-npc-panel.test.js tests/client/native-gm-workspace.test.js
         - tests/smoke/gm-page.spec.js
+  - component: workshop-test-observer-views
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Disposable Test Observer Views
+      summary: "One disposable Test run can be observed through the omniscient Game Master workspace or the authentic Viewscreen of a simulated player ship. Switching is a presentation-only control on the same running simulation: it never restarts, never moves the clock and never changes what the fixed tick reads. The omniscient view mounts the ordinary GM workspace over the ordinary GM markup, fed by the ordinary gm_* Host Channel projections, and every GM write is installed as an explicit refusal so a Test observes without a credential, a save path or a mutation route."
+      rationale:
+        - "[ai] Two levers, both already excluded from the authoritative fold: NativeGmPresentation turns the ordinary GM projections on and off (a native host already inserts and removes it beside a running ship), and LocalShip says which hull is drawn. tests/gm_presentation_neutrality.rs runs the same seeded world twice, switching the omniscient view on mid-run and on-then-off, and compares the digest on every tick — what was previously an inference from the projection systems being read-only."
+        - "[ai] The GM markup is INJECTED at build time from server.html rather than written again, so the Test mounts the real console. A Workshop-only substitute would be a second surface to keep correct and would stop being evidence about the real one the moment it drifted; the native GM already does the same thing at runtime."
+        - "[ai] Every window.__host* GM write is bound to a refusal rather than left undefined. An undefined global crashes a panel on first press and leaves 'can this mutate the run?' answerable only by reading every panel; one list answers it, and a Test that somehow acquired a route fails a test rather than quietly working."
+        - "[ai] The surface follows the RUNTIME's reported view, never the request that asked for it, so a refused switch cannot leave the page claiming a view the run is not drawing. The runtime refuses a ship the run does not have."
+        - "[ai] A Test today runs ONE player ship, because the disposable boot keeps the default solo roster; multi-ship Test authoring is #1153 on the T5 track. The selector reads whatever player ships the run actually has rather than assuming one, so it needs no change when that lands."
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/workshop/test_view.rs
+        - src/workshop/test_protocol.rs
+        - src/workshop/test_browser.rs
+        - src/workshop/test_clock.rs
+        - gui/workshop-test-gm.js
+        - gui/workshop-test-boot.js
+        - gui/workshop-test-panel.js
+        - editor/workshop-test-runtime.js
+        - editor/workshop-test-child.js
+        - scripts/gm-console-markup.mjs
+        - scripts/build-workshop.mjs
+        - workshop-test.html
+      symbols: [TestView, TestShip, TestViewState, mountWorkshopTestGm, gmConsoleMarkup, TEST_GM_REFUSED_ACTIONS]
+      tests:
+        - cargo test --features headless --test gm_presentation_neutrality
+        - npx vitest run tests/client/workshop-test-view.test.js
+        - npx vitest run editor/tests/workshop-test-child.test.js tests/client/workshop-test-panel.test.js

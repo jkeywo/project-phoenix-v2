@@ -8,6 +8,8 @@ export async function launchWorkshopTest(snapshot, {
   timer = globalThis,
   signal,
   onHud = () => {},
+  onGm = () => {},
+  onView = () => {},
 } = {}) {
   const runtime = await load();
   signal?.throwIfAborted();
@@ -16,7 +18,15 @@ export async function launchWorkshopTest(snapshot, {
   let failure = null, disposed = false, sequence = 0;
   const tasks = new Set();
   const requested = new Set();
-  runtime.set_host_channel_callback?.((name, payload) => { if (!disposed && name === 'hud') onHud(payload); });
+  // The HUD feeds the ship viewscreen; the gm_* channels feed the omniscient
+  // view of the SAME run (issue #1472). Both are page-local by construction —
+  // a Host Channel never enters the peer transport — so carrying them adds no
+  // credential, no socket and no command route.
+  runtime.set_host_channel_callback?.((name, payload) => {
+    if (disposed) return;
+    if (name === 'hud') onHud(payload);
+    else if (name.startsWith('gm_')) onGm(name, payload);
+  });
   const read = path => {
     const source = files[path];
     if (typeof source !== 'string') throw new Error(`Captured Test source is unavailable: ${path}`);
@@ -70,6 +80,10 @@ export async function launchWorkshopTest(snapshot, {
       if (failure) throw failure;
       const text = runtime.wasm_workshop_test_status();
       const status = text ? JSON.parse(text) : null;
+      // The page shows or hides the omniscient desk from the RUNTIME's view,
+      // never from the request that asked for it: a refused switch must not
+      // leave the surface claiming a view the run is not drawing.
+      if (status && !disposed) onView(status.view);
       if (status && predicate(status)) return status;
       if (Date.now() - began > timeoutMs) throw new Error('Workshop Test runtime did not respond');
       await new Promise(resolve => { const id = timer.setTimeout(() => { waiters.delete(id); resolve(); }, 16); waiters.set(id, resolve); });

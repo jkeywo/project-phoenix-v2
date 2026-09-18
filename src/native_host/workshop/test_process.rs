@@ -162,6 +162,9 @@ impl TestProcess {
             .sequence
             .checked_add(1)
             .ok_or("Test command sequence exhausted")?;
+        // `TestControl` stopped being `Copy` when it gained a view, so the one
+        // fact checked after the round trip is kept rather than the whole value.
+        let stopping = matches!(control, TestControl::Stop {});
         let record = ControlRecord {
             id: self.sequence,
             control,
@@ -187,7 +190,7 @@ impl TestProcess {
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
         }
-        if !state.running && !matches!(control, TestControl::Stop {}) {
+        if !state.running && !stopping {
             return Err("Disposable Test is closed".into());
         }
         Ok(state.clone())
@@ -419,6 +422,7 @@ fn publish_status(
     pipe: Res<ChildPipe>,
     clock: Res<TestClock>,
     tick: Res<crate::sim_tick::SimTick>,
+    view: Res<crate::workshop::test_view::TestViewState>,
 ) {
     let state = TestStatus {
         running: true,
@@ -430,6 +434,8 @@ fn publish_status(
         error: None,
         revision: pipe.launch.revision.clone(),
         selection: pipe.launch.selection.clone(),
+        view: view.requested.clone(),
+        ships: view.ships.clone(),
     };
     write_status(&state);
 }

@@ -12,6 +12,12 @@
 </head>
 <body>
   <canvas id="canvas"></canvas>
+  <!-- The omniscient view of this same run. scripts/build-workshop.mjs injects
+       the real #gm-console subtree from server.html here, so the Test mounts
+       the ordinary GM workspace rather than a Workshop-only copy of it. -->
+  <div id="test-gm" hidden>
+  <!--gm-console-->
+  </div>
   <iframe id="test-hud" src="gui/viewscreen-hud.html" data-i18n-title="workshop.test_heading" tabindex="-1"></iframe>
   <script type="module" src="gui/workshop-test-boot.js"></script>
 </body>

@@ -4,6 +4,18 @@
 /** The disposable Test's own control vocabulary. */
 const TEST_CONTROLS = (value, exact) => {
   if (exact(value, ['command'])) return ['pause', 'resume', 'step', 'stop'].includes(value.command);
+  // A view names which observer the SAME run is drawn for: either the
+  // omniscient Game Master workspace, or one simulated player ship's authentic
+  // viewscreen (`entity: null` being the ship the Test launched with). It
+  // carries no command, no target and no authority — the runtime still refuses
+  // a ship the run does not have.
+  if (exact(value, ['command', 'view']) && value.command === 'view') {
+    const view = value.view;
+    if (!view || typeof view !== 'object') return false;
+    if (exact(view, ['view'])) return view.view === 'game-master';
+    return exact(view, ['view', 'entity']) && view.view === 'ship'
+      && (view.entity === null || (typeof view.entity === 'string' && view.entity.length > 0));
+  }
   return (exact(value, ['command', 'multiplier']) && value.command === 'rate' && [1, 2, 4, 8].includes(value.multiplier))
     || (exact(value, ['command', 'visible']) && value.command === 'visibility' && typeof value.visible === 'boolean');
 };

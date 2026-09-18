@@ -34,6 +34,8 @@ pub(crate) mod test_browser;
 pub mod test_clock;
 pub mod test_protocol;
 pub mod test_source;
+/// Which observer a disposable Test draws for (issue #1472).
+pub mod test_view;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

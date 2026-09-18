@@ -107,6 +107,7 @@ fn publish_status(
     clock: Res<TestClock>,
     tick: Res<crate::sim_tick::SimTick>,
     phase: Res<State<crate::core::messages::GamePhase>>,
+    view: Res<super::test_view::TestViewState>,
 ) {
     use crate::core::messages::GamePhase;
     EDGE.with(|edge| {
@@ -120,6 +121,8 @@ fn publish_status(
             error: None,
             revision: run.launch.revision.clone(),
             selection: run.launch.selection.clone(),
+            view: view.requested.clone(),
+            ships: view.ships.clone(),
         })
     });
 }
@@ -133,7 +136,13 @@ pub fn wasm_workshop_test_control(record: &str) -> Result<(), JsValue> {
         let Some(status) = edge.status.as_ref() else { return Err(JsValue::from_str("Workshop Test is not running")); };
         if record.id <= edge.last_id || edge.commands.len() >= 8
             || matches!(record.control, super::test_protocol::TestControl::Rate { multiplier } if !matches!(multiplier, 1 | 2 | 4 | 8))
-            || matches!(record.control, super::test_protocol::TestControl::Step {} if !status.paused || status.starting) {
+            || matches!(record.control, super::test_protocol::TestControl::Step {} if !status.paused || status.starting)
+            // A view names a ship the run actually has, or the launched one.
+            // An unknown id is refused here rather than silently drawing
+            // whatever was already on screen.
+            || matches!(&record.control, super::test_protocol::TestControl::View {
+                view: super::test_protocol::TestView::Ship { entity: Some(entity) }
+            } if !status.ships.iter().any(|ship| &ship.entity == entity)) {
             return Err(JsValue::from_str("Workshop Test control refused"));
         }
         edge.last_id = record.id; edge.commands.push_back(record); Ok(())

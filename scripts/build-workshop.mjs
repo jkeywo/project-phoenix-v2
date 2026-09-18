@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { soundCuesJson, SOUND_CUES_JSON, soundCueInventoryJs, SOUND_CUE_INVENTORY } from './sound-cues.mjs';
 import { crc32 } from '../editor/crc32.js';
 import { assetDependencies } from '../editor/asset-dependencies.js';
+import { gmConsoleMarkup } from './gm-console-markup.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -26,7 +27,16 @@ await writeFile(path.join(root,SOUND_CUE_INVENTORY),await soundCueInventoryJs(ro
 await cp(path.join(root,'assets/audio'),path.join(out,'assets/audio'),{recursive:true});
 await cp(path.join(root,'assets/sounds'),path.join(out,'assets/sounds'),{recursive:true});
 await copyFile(path.join(root, 'workshop.html'), path.join(out, 'workshop.html'));
-await copyFile(path.join(root, 'workshop-test.html'), path.join(out, 'workshop-test.html'));
+// The disposable Test carries the REAL GM console markup, injected here rather
+// than written a second time. Its omniscient view mounts the ordinary
+// gm-workspace over the ordinary markup (issue #1472); a Workshop-only
+// substitute would be a second surface to keep correct and would stop being
+// evidence about the real one the moment it drifted.
+const testPage = await readFile(path.join(root, 'workshop-test.html'), 'utf8');
+const GM_SLOT = '<!--gm-console-->';
+if (!testPage.includes(GM_SLOT)) throw new Error('workshop-test.html has no GM console slot');
+await writeFile(path.join(out, 'workshop-test.html'),
+  testPage.replace(GM_SLOT, gmConsoleMarkup(await readFile(path.join(root, 'server.html'), 'utf8'))), 'utf8');
 await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
 await copyFile(path.join(root, 'assets/strings/strings.csv'), path.join(out, 'assets/strings/strings.csv'));
 for (const name of editorModules) {

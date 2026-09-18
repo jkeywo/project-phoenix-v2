@@ -6,6 +6,7 @@ import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/w
 import { ts } from './strings';
 import { OPERATOR_PROFILE_KEY, createOperatorProfileSnapshot } from '../../gui/operator-profile.js';
 import { revealWorkshopPanel } from './dock-helpers.js';
+import { WORKSHOP_PANELS } from '../../gui/workshop-layout-model.js';
 
 test('offline Workshop imports, edits, undoes and exports one source-preserving pack', { tag: '@core' }, async ({ page }, testInfo) => {
   const pageErrors = [];
@@ -25,7 +26,9 @@ test('offline Workshop imports, edits, undoes and exports one source-preserving 
   await page.goto('/workshop.html');
   await expect(page.getByRole('heading', { name: ts('workshop.title') })).toBeVisible();
   await expect(page.locator('#workshop-export')).toBeDisabled();
-  await expect(page.locator('.workshop-dock-panel')).toHaveCount(9);
+  // Every registered panel is rendered, counted from the registry rather than
+  // restated: the claim is "the dock renders them all", not "there are nine".
+  await expect(page.locator('.workshop-dock-panel')).toHaveCount(WORKSHOP_PANELS.length);
   const draggedTab = page.locator('[data-panel="files"] .workshop-panel-tab');
   const start = await draggedTab.boundingBox();
   expect(start).not.toBeNull();

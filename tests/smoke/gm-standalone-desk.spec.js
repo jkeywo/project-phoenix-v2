@@ -81,9 +81,14 @@ test('the Host as GM route reaches a live desk, not a disabled one',
     // operator — and records the answer on its own independently refreshed region.
     const admitted = await page.locator('#gm-console [data-admitted]')
       .evaluateAll((els) => els.map((el) => [el.id, el.dataset.admitted]));
-    expect(admitted.map(([id]) => id).sort()).toEqual([
+    // The panels named in the report, which must still be among them, asserted
+    // as a superset rather than as the whole set: docking a new action tool
+    // adds its own admission region (gm-spawn-panel and its siblings since the
+    // #1506 migrations), and that is not this regression changing.
+    expect(admitted.map(([id]) => id).sort()).toEqual(expect.arrayContaining([
       'gm-effect-panel', 'gm-mission-panel', 'gm-session-controls',
-    ]);
+    ]));
+    // Whatever the full set is, every region reports admission — the symptom.
     expect(admitted.filter(([, value]) => value !== 'true')).toEqual([]);
 
     // The verbs named in the report, individually, so a regression says which.

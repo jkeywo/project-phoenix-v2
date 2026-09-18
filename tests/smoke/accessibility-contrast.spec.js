@@ -18,6 +18,7 @@
 // bare client shell is enough — no WASM, no peer, no reconnect flake.
 
 import { test, expect } from './fixtures';
+import { workshopLayoutModel } from '../../gui/workshop-layout-model.js';
 
 /** Read the RENDERED palette off the shell root, via a probe whose colour and
  *  border resolve from the tokens — so the assertion is on painted colour, not
@@ -53,13 +54,11 @@ test('contrast setting round-trip: data-contrast="more" swaps in a visibly diffe
     closed: ['files', 'inspector'],
     selected: 'source',
   };
-  const authoringLayout = {
-    version: 3,
-    root: { type: 'tabs', tabs: ['source', 'add', 'recovery', 'dependencies', 'findings', 'feedback', 'settings'], active: 'source' },
-    floats: [],
-    closed: ['files', 'inspector'],
-    selected: 'source',
-  };
+  // What the stored profile must hold afterwards is the MIGRATION's own answer,
+  // so it is read from the model rather than restated here: this smoke proves
+  // the layout survived a contrast round-trip untouched, and a hardcoded shape
+  // would instead re-break on every version bump that adds a panel.
+  const authoringLayout = workshopLayoutModel.normalize(legacyAuthoringLayout);
   await page.addInitScript((layout) => localStorage.setItem('phoenix-operator-profile-v1', JSON.stringify({
     kind: 'project-phoenix/operator-profile',
     version: 1,

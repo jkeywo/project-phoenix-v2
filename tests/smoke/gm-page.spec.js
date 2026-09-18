@@ -1370,6 +1370,9 @@ test('a manual gm_event is listed, fired once, and then spent in the GM mission 
 
   // The authored event reaches the panel from the authoritative projection —
   // nothing in this spec injects a Host Channel payload.
+  // Mission events share the workflow column behind one tab strip since the
+  // #1502 dock migration, so the panel is selected before it is read.
+  await revealGmPanel(page, 'mission');
   const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::breach_alarm"]');
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row.locator('.gm-mission-event-label'))
@@ -1429,6 +1432,9 @@ test('an automatic event declaring gm_controls is listed and fireable, and an un
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
+  // Mission events share the workflow column behind one tab strip since the
+  // #1502 dock migration, so the panel is selected before it is read.
+  await revealGmPanel(page, 'mission');
   const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::courier_lost"]');
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row.locator('.gm-mission-event-label'))
@@ -1492,6 +1498,9 @@ test('a GM arms a Skip of an authored event and a second arm reports the No-op',
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
+  // Mission events share the workflow column behind one tab strip since the
+  // #1502 dock migration, so the panel is selected before it is read.
+  await revealGmPanel(page, 'mission');
   const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::raider_lost"]');
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row.locator('.gm-mission-event-label'))
@@ -1613,7 +1622,10 @@ test('a GM damages and repairs one Entity through the typed action path', { tag:
   // The crew-facing consequence is the ORDINARY damage row, from the same
   // unconditional balance event a beam hit produces. The feed shares the
   // desk's centre region behind one tab strip (the post-M5 screen).
-  await page.locator('[role="tab"][data-layout-panel="activity"]').click();
+  // The effect draft above is a FLOATING panel whose log overlaps this tab
+  // strip, so the tab is selected through the dock helper rather than by a
+  // pointer click that would land on the float (issue #1511).
+  await revealGmPanel(page, 'activity');
   await expect(page.locator('#gm-activity-list [data-category="damage"]').first())
     .toBeVisible({ timeout: 30_000 });
   // And the GM's own attributed row names what it hit.
@@ -1855,7 +1867,10 @@ test('a GM damages and repairs one Station and one System without touching their
   )).toHaveCount(0);
 
   // And the GM activity feed names the Station the applied hit was aimed at.
-  await page.locator('[role="tab"][data-layout-panel="activity"]').click();
+  // The effect draft above is a FLOATING panel whose log overlaps this tab
+  // strip, so the tab is selected through the dock helper rather than by a
+  // pointer click that would land on the float (issue #1511).
+  await revealGmPanel(page, 'activity');
   await expect(
     page.locator('#gm-activity-list [data-category="gm_action"]')
       .filter({ hasText: ts('server.gm.activity.action.direct_effect_station', { scope: 'captain' }) })
@@ -1893,7 +1908,11 @@ test('a GM places palette entries by map drag and by keyboard alone', { tag: '@c
 
   // The authored palette reaches the panel from the authoritative projection —
   // nothing in this spec injects a Host Channel payload.
-  await revealGmPanel(page, 'spawn');
+  // Spawn is a temporary action panel: the draft closes itself once the world
+  // takes the press it carried (issues #1506/#1511), and this test places twice
+  // — by drag and then by keyboard — so it ticks the panel's own Keep open,
+  // exactly as an operator sending several in a row would.
+  await openGmDraft(page, 'spawn', 'gm-spawn-keep-open');
   const row = page.locator('#gm-spawn-palette .gm-spawn-entry[data-palette-id="tender"]');
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row.locator('.gm-spawn-entry-label'))
@@ -1981,6 +2000,9 @@ test('a pausable authored event toggles end to end and an undeclared one has no 
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
+  // Mission events share the workflow column behind one tab strip since the
+  // #1502 dock migration, so the panel is selected before it is read.
+  await revealGmPanel(page, 'mission');
   const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::courier_lost"]');
   const witness = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::witness"]');
   await expect(row).toBeVisible({ timeout: 30_000 });
@@ -3129,6 +3151,10 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
       }));
       throw new Error('Held Captain projection missing: ' + JSON.stringify({ state, errors, gmErrors }), { cause: error });
     }
+    // Station shares the workflow column behind one tab strip since the #1504
+    // dock migration: the select is reachable through the DOM either way, but
+    // the Take over below is a real press and needs the panel shown.
+    await revealGmPanel(gm, 'station');
     await gm.evaluate(() => {
       const select = document.getElementById('gm-station-select');
       select.value = [...select.options].find(option => option.textContent.endsWith('Captain')).value;
@@ -3245,6 +3271,8 @@ test('two equal GMs operate a compatible NPC Helm and recover without stale targ
   const npc = await gms[0].evaluate(() => window.__hostGmStationState().projection.ships
     .find(ship => ship.ship_config.helm_radar_range === 173).ship_id);
   const selectNpc = async page => {
+    // As above: the panel is shown before its controls are pressed (#1504).
+    await revealGmPanel(page, 'station');
     await page.evaluate(id => {
       const controller = window.__hostGmStationState();
       const row = controller.projection.ships.find(ship => ship.ship_id === id);

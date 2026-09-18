@@ -171,7 +171,12 @@ export function createNativeWorkshopProvider({ request }) {
         const value = (await call({ op: 'recovery-load' })).recovery;
         if (!value) return null;
         const record = JSON.parse(value.record);
-        if (record?.draft?.version !== 3) {
+        // A native draft carries its members as `sourceFiles`; every other
+        // version is a browser record whose archive has to come back as bytes.
+        // Listed rather than compared, so a new native version is a deliberate
+        // addition instead of silently taking the browser branch (issue #1471
+        // added version 5 alongside 3).
+        if (![3, 5].includes(record?.draft?.version)) {
           if (!Array.isArray(record?.draft?.source) || !record.draft.source.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) throw new Error('Invalid native recovery archive');
           record.draft.source = Uint8Array.from(record.draft.source);
         }

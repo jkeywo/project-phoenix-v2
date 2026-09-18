@@ -2,7 +2,10 @@
  * no filesystem provider, GM connection, simulation or live-state capture.
  */
 import { WorkshopDocument, isWorkshopBinary } from '../editor/workshop-document.js';
+import { workspaceDiff, workspaceDiffIsEmpty } from '../editor/workshop-diff.js';
+import { proposeWorkshopMigration } from '../editor/workshop-migration.js';
 import { newWorkshopPack } from '../editor/workshop-provider.js';
+import { parse as parseToml } from 'smol-toml';
 import { createWorkshopRuntime } from '../editor/workshop-runtime.js';
 import { createWorkshopRecovery } from '../editor/workshop-recovery.js';
 import { mountWorkshopTestPanel } from './workshop-test-panel.js';
@@ -85,7 +88,31 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const assetInput = el('input', null, { type: 'file', hidden: '' });
   const addSource = button('workshop.add_source', 'workshop-add-source', () => addDocument());
   const addAsset = button('workshop.add_asset', 'workshop-add-asset', () => assetInput.click());
-  addPanel.append(el('label', 'workshop.add_path', { for: 'workshop-add-path' }), addPath, addSource, addAsset, assetInput);
+  // Rename and delete act on the SELECTED member and read the same path box the
+  // add controls do: one place to say where a member should be, rather than a
+  // second field that can disagree with the first.
+  const renameButton = button('workshop.rename_file', 'workshop-rename', () => renameDocument());
+  const deleteButton = button('workshop.delete_file', 'workshop-delete', () => deleteDocument());
+  addPanel.append(el('label', 'workshop.add_path', { for: 'workshop-add-path' }), addPath, addSource, addAsset,
+    renameButton, deleteButton, assetInput);
+  // What this draft has done to the source it was imported as.
+  const changesPanel = el('div', null, { class: 'workshop-changes' });
+  const changesSummary = el('p', null, { id: 'workshop-changes-summary', role: 'status' });
+  const changesList = el('ul', null, { id: 'workshop-changes-list' });
+  // A proposed migration of older supported content: shown as the exact before
+  // and after of the member it would rewrite, and applied only by a deliberate
+  // press. Nothing here changes source on its own.
+  const migrationPanel = el('div', null, { class: 'workshop-migration', id: 'workshop-migration' });
+  const migrationSummary = el('p', null, { id: 'workshop-migration-summary', role: 'status' });
+  const migrationBefore = el('textarea', null, { id: 'workshop-migration-before', rows: '4', readonly: '', spellcheck: 'false' });
+  const migrationAfter = el('textarea', null, { id: 'workshop-migration-after', rows: '4', readonly: '', spellcheck: 'false' });
+  const migrationAccept = button('workshop.migration.accept', 'workshop-migration-accept', () => acceptMigration());
+  migrationPanel.append(migrationSummary,
+    el('label', 'workshop.migration.before', { for: 'workshop-migration-before' }), migrationBefore,
+    el('label', 'workshop.migration.after', { for: 'workshop-migration-after' }), migrationAfter,
+    migrationAccept);
+  migrationPanel.hidden = true;
+  changesPanel.append(changesSummary, changesList, migrationPanel);
   const inspector = el('details', null, { class: 'workshop-inspector' });
   inspector.append(el('summary', 'workshop.inspector'));
   const inspectButton = button('workshop.inspect', 'workshop-inspect', () => inspect());
@@ -185,7 +212,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
       findings, feedback, dependencies, settings,
-      models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node },
+      models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node,
+      changes: changesPanel },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -200,7 +228,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         findings: translate('workshop.findings'), feedback: translate('workshop.feedback'),
         dependencies: translate('workshop.dependencies'), settings: translate('editor.mod.settings.heading'),
         models: translate('workshop.models.title'), 'model-preview': translate('workshop.models.preview.title'),
-        sound: translate('sound_cues.title'),
+        sound: translate('sound_cues.title'), changes: translate('workshop.changes.title'),
       },
     },
     initial: profile.authoringLayout, doc, win,
@@ -317,6 +345,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     newButton.disabled = busy;
     saveButton.disabled = !draft || busy;
     addPath.disabled = addSource.disabled = addAsset.disabled = !draft || busy;
+    // Both act on the selection, so neither is offered without one.
+    renameButton.disabled = deleteButton.disabled = !draft || busy || !selected;
     undoButton.disabled = !draft?.canUndo() || busy;
     redoButton.disabled = !draft?.canRedo() || busy;
     inspectButton.disabled = !draft || busy || !selected?.endsWith('.toml');
@@ -330,6 +360,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       fieldValue.value = '';
       fieldInfo.textContent = translate('workshop.inspector_stale');
     }
+    paintChanges();
+    paintMigration();
     dirty.textContent = translate(!draft ? 'workshop.empty' : draft.isDirty() ? 'workshop.dirty' : 'workshop.saved');
     testPanel?.refresh();
   }
@@ -505,6 +537,128 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       if (draft.put(path, value)) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); }
     } catch (error) { show('workshop.add_refused', [errorText(error)], true); }
   }
+  /** Move the selected member to the path box's value, bytes untouched. */
+  function renameDocument() {
+    if (!draft || !selected || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    const path = addPath.value.trim();
+    if (!path.startsWith('assets/') || (!/\.(toml|rhai)$/.test(path) && !isWorkshopBinary(path))) {
+      show('workshop.add_refused', [], true); return;
+    }
+    if (draft.paths().includes(path) && !win.confirm(translate('workshop.replace_file_confirm', { path }))) return;
+    try {
+      if (draft.rename(selected, path)) {
+        selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed');
+      }
+    } catch (error) { show('workshop.add_refused', [errorText(error)], true); }
+  }
+
+  /** Remove the selected member. Confirmed, because one press otherwise takes
+   * away source whose only other copy may be the imported archive — and undone
+   * by the ordinary history if it was not what the operator meant. */
+  function deleteDocument() {
+    if (!draft || !selected || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    const path = selected;
+    if (!win.confirm(translate('workshop.delete_file_confirm', { path }))) return;
+    if (!draft.remove(path)) return;
+    selected = draft.paths()[0] || null;
+    refresh({ selection: true }); persistDraft(); show('workshop.changed');
+  }
+
+  /** The content identity the base declares, from its own scenarios.toml.
+   *
+   * Parsed with the same narrow reader the proposal uses rather than a TOML
+   * round-trip: this only needs two scalars, and anything it cannot read
+   * confidently is simply no proposal. */
+  function readBaseContent(snapshot) {
+    const manifest = snapshot?.base_files?.['assets/scenarios.toml']
+      ?? snapshot?.base_files?.['scenarios.toml'];
+    if (typeof manifest !== 'string') return null;
+    // Parsed, not pattern-matched. A regex for `id = "..."` takes the FIRST one
+    // in the file, which is only the content id while `[content]` happens to
+    // precede the first `[[scenario]]`; reorder the manifest and the Workshop
+    // would quietly pin packs to a scenario id. `newWorkshopPack` already reads
+    // it this way.
+    try {
+      const content = parseToml(manifest)?.content;
+      if (typeof content?.epoch !== 'number') return null;
+      return { contentId: typeof content.id === 'string' ? content.id : null,
+        contentEpoch: content.epoch };
+    } catch { return null; }
+  }
+
+  /** The migration on offer for this draft, or null. Recomputed rather than
+   * cached: the draft it describes can change under it, and a stale before/after
+   * is a review of source that is no longer there. */
+  let baseContent = null;
+  function currentMigration() {
+    return draft ? proposeWorkshopMigration(draft, baseContent) : null;
+  }
+
+  /** Apply the exact text that was on screen, as ONE undoable entry.
+   *
+   * Re-proposed first: if the draft moved while the proposal was being read,
+   * the bytes reviewed are not the bytes that would be written, and writing
+   * them anyway would be applying a review of something else. */
+  function acceptMigration() {
+    if (!draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    const proposed = currentMigration();
+    if (!proposed || proposed.before !== migrationBefore.value || proposed.after !== migrationAfter.value) {
+      show('workshop.migration.stale', [], true); refresh(); return;
+    }
+    if (draft.apply([{ path: proposed.path, before: proposed.before, after: proposed.after }])) {
+      selected = proposed.path;
+      refresh({ selection: true }); persistDraft(); show('workshop.changed');
+    }
+  }
+
+  function paintMigration() {
+    const proposed = currentMigration();
+    const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
+    migrationPanel.hidden = !proposed;
+    migrationAccept.disabled = !proposed || busy;
+    if (!proposed) { migrationBefore.value = ''; migrationAfter.value = ''; return; }
+    migrationSummary.textContent = translate('workshop.migration.content_epoch', {
+      path: proposed.path, from: String(proposed.from), to: String(proposed.to),
+      line: String(proposed.line),
+    });
+    migrationBefore.value = proposed.before;
+    migrationAfter.value = proposed.after;
+  }
+
+  /** What this draft has done to the source it was imported as.
+   *
+   * Against the IMPORTED members rather than the last export: the question this
+   * answers is "what have I changed about this pack", and an export in the
+   * middle does not make earlier edits stop being changes. */
+  function paintChanges() {
+    if (!draft) {
+      changesSummary.textContent = translate('workshop.changes.none');
+      changesList.replaceChildren();
+      return;
+    }
+    const diff = draft.changes(workspaceDiff);
+    changesSummary.textContent = workspaceDiffIsEmpty(diff)
+      ? translate('workshop.changes.none')
+      : translate('workshop.changes.summary', {
+        added: String(diff.added.length), removed: String(diff.removed.length),
+        renamed: String(diff.renamed.length), modified: String(diff.modified.length),
+      });
+    const rows = [
+      ...diff.added.map(path => ['added', path]),
+      ...diff.removed.map(path => ['removed', path]),
+      ...diff.renamed.map(entry => ['renamed', `${entry.from} → ${entry.to}`]),
+      ...diff.modified.map(path => ['modified', path]),
+    ];
+    changesList.replaceChildren(...rows.map(([kind, text]) => {
+      const row = el('li');
+      row.dataset.change = kind;
+      // The kind is a word, never a colour alone: a reader who cannot tell
+      // green from red still has to be able to tell an addition from a removal.
+      row.textContent = `${translate(`workshop.changes.${kind}`)} ${text}`;
+      return row;
+    }));
+  }
+
   assetInput.addEventListener('change', async () => {
     const file = assetInput.files?.[0];
     if (!file || !draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
@@ -527,6 +681,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     try {
       const snapshot = await runtime.dependencies();
       if (disposed) return;
+      // The pin a migration would move this draft onto. Read from the same
+      // dependency snapshot the Test and preview merge from, so the Workshop
+      // never proposes an epoch the runtime would not itself accept.
+      baseContent = readBaseContent(snapshot);
       dependencyFiles = [['base', snapshot.base_files], ...snapshot.packs.map(pack => [pack.id,
         { ...pack.files, 'scenarios.toml': pack.manifest_toml }])]
         .flatMap(([label, files]) => Object.entries(files).map(([path, text]) => ({ label: `${label}: ${path}`, text })));
@@ -535,7 +693,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       }));
       dependencySource.value = dependencyFiles[0]?.text || '';
     } catch (error) { if (!disposed) show('workshop.runtime_unavailable', [errorText(error)], true); }
-    finally { dependencyButton.disabled = false; }
+    finally { dependencyButton.disabled = false; if (!disposed) refresh(); }
   }
   dependencySelect.addEventListener('change', () => { dependencySource.value = dependencyFiles[Number(dependencySelect.value)]?.text || ''; });
   fileInput.addEventListener('change', async () => {
@@ -646,8 +804,26 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   refresh({ selection: true });
   show('workshop.start');
   nativeStorageStatus();
+  /** The base identity a migration is measured against.
+   *
+   * Read at boot rather than waiting for the Dependencies panel's Load button:
+   * the criterion is that older content OPENS with a proposal, and a proposal
+   * nobody can see until they press an unrelated control has not opened with
+   * anything. Failure is silence — no base identity simply means no proposal.
+   */
+  async function loadBaseContent() {
+    if (!runtime.dependencies) return;
+    try {
+      const snapshot = await runtime.dependencies();
+      if (disposed) return;
+      baseContent = readBaseContent(snapshot);
+      refresh();
+    } catch { /* No identity, no proposal. */ }
+  }
+
   const ready = (async () => {
     let record;
+    void loadBaseContent();
     if (provider?.load) {
       try {
         const loaded = await provider.load();

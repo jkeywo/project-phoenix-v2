@@ -49,7 +49,7 @@ describe('Workshop layout model', () => {
       ] },
       floats: [], closed: [], selected: 'source', recovery: { draft: 'must not persist' },
     });
-    expect(migrated.version).toBe(4);
+    expect(migrated.version).toBe(5);
     expect(migrated.selected).toBe('source');
     for (const panel of ['dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound']) {
       expect(panels(migrated)).toContain(`"${panel}"`);
@@ -69,7 +69,7 @@ describe('Workshop layout model', () => {
       closed: [], selected: 'source',
     });
 
-    expect(migrated.version).toBe(4);
+    expect(migrated.version).toBe(5);
     const placed = [];
     const collect = node => {
       if (node?.type === 'tabs') placed.push(...node.tabs);
@@ -98,10 +98,11 @@ describe('Workshop layout model', () => {
     });
 
     expect(migrated).toEqual({
-      version: 4,
+      version: 5,
       root: { type: 'split', axis: 'vertical', sizes: [17, 83], children: [
         { type: 'tabs',
-          tabs: ['inspector', 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound'],
+          tabs: ['inspector', 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview',
+            'sound', 'changes'],
           active: 'inspector' },
         { type: 'tabs', tabs: ['recovery'], active: 'recovery' },
       ] },
@@ -119,7 +120,7 @@ describe('Workshop layout model', () => {
       ],
       closed: ['source', 'inspector', 'files'], selected: 'inspector',
     });
-    expect(repaired.version).toBe(4);
+    expect(repaired.version).toBe(5);
     expect(repaired.selected).toBe('inspector');
     expect(repaired.closed).toEqual(['add', 'recovery']);
     for (const panel of ['source', 'inspector', 'files', 'dependencies', 'findings', 'feedback', 'settings',
@@ -158,8 +159,9 @@ describe('Workshop layout model', () => {
     for (const version of [1, 2]) {
       expect(normalizeWorkshopLayout({
         version, root: null, floats: [], closed, selected: 'source',
-      })).toEqual({ version: 4, root: null, floats: [],
-        closed: [...closed, 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound'],
+      })).toEqual({ version: 5, root: null, floats: [],
+        closed: [...closed, 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview',
+          'sound', 'changes'],
         selected: 'files' });
     }
   });
@@ -185,7 +187,7 @@ describe('Workshop layout model', () => {
       floats: [], closed: ['feedback', 'settings'], selected: 'source',
     });
 
-    expect(migrated.version).toBe(4);
+    expect(migrated.version).toBe(5);
     expect(migrated.selected).toBe('source');
     // The operator closed feedback and settings under v3; migration must not undo that.
     expect(migrated.closed).toEqual(['feedback', 'settings']);

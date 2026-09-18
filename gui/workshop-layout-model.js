@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { addMigrationPanel, createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const WORKSHOP_LAYOUT_VERSION = 4;
+export const WORKSHOP_LAYOUT_VERSION = 5;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
@@ -9,6 +9,7 @@ export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
   tool('add'), tool('recovery'), tool('findings'),
   tool('feedback'), tool('dependencies'), tool('settings'),
   tool('models'), documentPanel('model-preview'), tool('sound'),
+  tool('changes'),
 ]);
 export const WORKSHOP_PANELS = Object.freeze(WORKSHOP_PANEL_REGISTRY.map(panel => panel.id));
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
@@ -18,9 +19,21 @@ const V3_PANELS = Object.freeze([...LEGACY_PANELS, 'findings', 'feedback', 'depe
 const ADDED_IN_V3 = Object.freeze([['dependencies', 'files'], ['findings', 'source'],
   ['feedback', 'source'], ['settings', 'inspector']]);
 const ADDED_IN_V4 = Object.freeze([['models', 'inspector'], ['model-preview', 'source'], ['sound', 'inspector']]);
+const V4_PANELS = Object.freeze([...V3_PANELS, 'models', 'model-preview', 'sound']);
+/** Panels registered after version 4. The workspace changes view reads the same
+ * draft the file list does — what has been added, removed, renamed or modified
+ * against the source this draft was imported as — so it joins that column
+ * (issue #1471). */
+const ADDED_IN_V5 = Object.freeze([['changes', 'files']]);
 const legacyDefault = () => ({ version: 2,
   root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
     children: [group(['files']), group(['source']), group(['inspector', 'add', 'recovery'], 'inspector')] },
+  floats: [], closed: [], selected: 'source' });
+const v4Default = () => ({ version: 4,
+  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
+    children: [group(['files', 'dependencies'], 'files'),
+      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
+      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound'], 'inspector')] },
   floats: [], closed: [], selected: 'source' });
 const v3Default = () => ({ version: 3,
   root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
@@ -30,7 +43,7 @@ const v3Default = () => ({ version: 3,
 export function defaultWorkshopLayout() {
   return { version: WORKSHOP_LAYOUT_VERSION,
     root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-      children: [group(['files', 'dependencies'], 'files'),
+      children: [group(['files', 'dependencies', 'changes'], 'files'),
         group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
         group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound'], 'inspector')] },
     floats: [], closed: [], selected: 'source' };
@@ -41,6 +54,8 @@ const legacy = createDockLayoutModel({ version: 2, panels: LEGACY_PANELS,
   defaultLayout: legacyDefault, compatibleVersions: [1, 2] });
 const v3 = createDockLayoutModel({ version: 3, panels: V3_PANELS,
   defaultLayout: v3Default, compatibleVersions: [3] });
+const v4 = createDockLayoutModel({ version: 4, panels: V4_PANELS,
+  defaultLayout: v4Default, compatibleVersions: [4] });
 
 // Version 1 held `add` and `recovery` as fixed chrome rather than as placements.
 // They are rehomed first, so a v1 tree ends up where a v2 tree of the same shape
@@ -61,7 +76,8 @@ const migrate = createDockLayoutMigration({
     { version: 1, model: legacy, added: [] },
     { version: 2, model: legacy, added: [] },
     { version: 3, model: v3, added: ADDED_IN_V3 },
-    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V4 },
+    { version: 4, model: v4, added: ADDED_IN_V4 },
+    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V5 },
   ],
 });
 export const workshopLayoutModel = Object.freeze({ ...base, normalize: migrate });

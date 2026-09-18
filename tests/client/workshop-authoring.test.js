@@ -47,19 +47,19 @@ describe('Workshop Authoring browser surface', () => {
   it('mounts the docked workflow, persists keyboard moves, restores focus and repairs a reopened layout', async () => {
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'dependencies', 'source', 'findings', 'feedback', 'model-preview',
+      .toEqual(['files', 'dependencies', 'changes', 'source', 'findings', 'feedback', 'model-preview',
         'inspector', 'add', 'recovery', 'settings', 'models', 'sound']);
     const sourceTab = document.querySelector('[data-panel="source"] .workshop-panel-tab');
     sourceTab.focus();
     sourceTab.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(document.activeElement.closest('[data-panel]')?.dataset.panel).toBe('source'));
-    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(4);
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(5);
     document.querySelector('[data-panel="inspector"] .workshop-panel-header button:last-child').click();
     expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
     [...document.querySelectorAll('.workshop-panel-switcher button')].find(node => node.textContent === t('workshop.inspector')).click();
     expect(document.querySelector('[data-panel="inspector"]')).not.toBeNull();
     document.querySelector('.workshop-layout-reset').click();
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(12);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(13);
     expect(document.querySelectorAll('#workshop-add-source')).toHaveLength(1);
     expect(document.querySelectorAll('#workshop-restore')).toHaveLength(1);
     expect(byId('add-source').closest('[data-panel]')?.dataset.panel).toBe('add');
@@ -87,7 +87,7 @@ describe('Workshop Authoring browser surface', () => {
     document.querySelector('[data-panel="model-preview"] [data-layout-control="float"]').click();
     document.querySelector('[data-panel="sound"] [data-layout-control="close"]').click();
     const stored = JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout;
-    expect(stored.version).toBe(4);
+    expect(stored.version).toBe(5);
     expect(stored.floats.map(entry => entry.panel)).toContain('model-preview');
     expect(stored.closed).toContain('sound');
     // Placement only: no captured picture, cue selection or audition state may travel with it.
@@ -114,7 +114,7 @@ describe('Workshop Authoring browser surface', () => {
     mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['source', 'inspector', 'models', 'model-preview', 'sound']);
+      .toEqual(['source', 'inspector', 'models', 'model-preview', 'sound', 'changes']);
     // Panels the operator closed under v3 stay closed.
     expect(document.querySelector('[data-panel="findings"]')).toBeNull();
   });
@@ -123,11 +123,11 @@ describe('Workshop Authoring browser surface', () => {
     mounted.dispose();
     const profile = createOperatorProfileSnapshot();
     profile.authoringLayout = {
-      version: 4,
+      version: 5,
       root: { type: 'tabs', tabs: ['source'], active: 'source' },
       floats: [],
       closed: ['files', 'inspector', 'add', 'recovery', 'findings', 'feedback', 'dependencies',
-        'settings', 'models', 'model-preview', 'sound'],
+        'settings', 'models', 'model-preview', 'sound', 'changes'],
       selected: 'source',
     };
     localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(profile));
@@ -173,7 +173,7 @@ describe('Workshop Authoring browser surface', () => {
     byId('source').value = 'retained';
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     window.dispatchEvent(new Event('resize'));
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(12);
+    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(13);
     expect(byId('source').value).toBe('retained');
   });
 
@@ -322,6 +322,61 @@ describe('Workshop Authoring browser surface', () => {
     expect(byId('source').value).toBe(sourceBeforeEdit);
   });
 
+  it('renames a member without touching its bytes, and undoes as one press', async () => {
+    await importBytes();
+    select(WORKSHOP_WORLD);
+    const before = byId('source').value;
+    document.querySelector('[data-layout-panel="add"][role="tab"]').click();
+    byId('add-path').value = 'assets/worlds/renamed.toml';
+    byId('rename').click();
+    expect(byId('files').value).toBe('assets/worlds/renamed.toml');
+    // Renaming a file is not an edit of it: the bytes arrive exactly as they
+    // left, CRLF and all.
+    expect(byId('source').value).toBe(before);
+    expect([...byId('files').options].map(option => option.value)).not.toContain(WORKSHOP_WORLD);
+    // ONE press, not one per half: a rename that half-undid would leave a
+    // member with no name.
+    byId('undo').click();
+    expect([...byId('files').options].map(option => option.value)).toContain(WORKSHOP_WORLD);
+    expect([...byId('files').options].map(option => option.value)).not.toContain('assets/worlds/renamed.toml');
+    expect(byId('undo').disabled).toBe(true);
+  });
+
+  it('removes a member only after confirmation, and puts it back on undo', async () => {
+    await importBytes();
+    select(WORKSHOP_WORLD);
+    const before = byId('source').value;
+    document.querySelector('[data-layout-panel="add"][role="tab"]').click();
+    window.confirm = () => false;
+    byId('delete').click();
+    expect([...byId('files').options].map(option => option.value)).toContain(WORKSHOP_WORLD);
+    window.confirm = () => true;
+    byId('delete').click();
+    expect([...byId('files').options].map(option => option.value)).not.toContain(WORKSHOP_WORLD);
+    byId('undo').click();
+    select(WORKSHOP_WORLD);
+    expect(byId('source').value).toBe(before);
+  });
+
+  it('reports what the draft has done to its imported source', async () => {
+    await importBytes();
+    document.querySelector('[data-layout-panel="changes"][role="tab"]').click();
+    expect(byId('changes-summary').textContent).toBe(t('workshop.changes.none'));
+    select(WORKSHOP_WORLD);
+    edit(`${byId('source').value}# changed
+`);
+    const rows = () => [...document.querySelectorAll('#workshop-changes-list li')]
+      .map(row => row.dataset.change);
+    expect(rows()).toEqual(['modified']);
+    document.querySelector('[data-layout-panel="add"][role="tab"]').click();
+    byId('add-path').value = 'assets/worlds/added.toml';
+    byId('add-source').click();
+    expect(rows().sort()).toEqual(['added', 'modified']);
+    // Each row names its kind in words, never by colour alone.
+    expect(document.querySelector('#workshop-changes-list li').textContent)
+      .toContain(t('workshop.changes.added'));
+  });
+
   it('adds source from its dock panel while fixed history commands target the active document', async () => {
     await importBytes();
     select(WORKSHOP_WORLD);
@@ -398,7 +453,9 @@ describe('Workshop Authoring browser surface', () => {
     select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# native draft\n`);
     await vi.waitFor(() => expect(request.mock.calls.some(([value]) => value.op === 'recovery-save')).toBe(true));
     const record = JSON.parse(request.mock.calls.filter(([value]) => value.op === 'recovery-save').at(-1)[0].record);
-    expect(record.draft.version).toBe(3);
+    // Version 5 since issue #1471: a native snapshot whose history entries are
+    // grouped, so a rename or an accepted migration undoes as one press.
+    expect(record.draft.version).toBe(5);
     expect(record.draft.sourceFiles.find(([file]) => file === path)[1]).toEqual(reference);
     expect(JSON.stringify(record).length).toBeLessThan(20000);
     expect(request.mock.calls.some(([value]) => value.op === 'asset-read')).toBe(false);

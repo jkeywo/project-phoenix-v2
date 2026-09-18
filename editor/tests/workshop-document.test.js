@@ -173,7 +173,7 @@ describe('offline Workshop source documents', () => {
     const snapshot = draft.snapshot();
     const restored = WorkshopDocument.restore(snapshot);
     snapshot.files[0][1] = 'later mutation';
-    snapshot.history.undo[0].after = 'later mutation';
+    snapshot.history.undo[0].changes[0].after = 'later mutation';
     expect(restored.sourceBytes()).toEqual(workshopPack());
     expect(restored.read('scenarios.toml')).toBe('[pack\r\n');
     expect(restored.isDirty()).toBe(true);
@@ -184,6 +184,56 @@ describe('offline Workshop source documents', () => {
     expect(restored.isDirty()).toBe(false);
   });
 
+  it('recovers a draft that deleted or renamed an imported member', () => {
+    // The guard that every imported path must still be present was only valid
+    // while a member could not be removed. Refusing here would throw away the
+    // whole crash draft over the very edit the operator most wants back.
+    const draft = new WorkshopDocument(workshopPack());
+    const before = draft.read(WORKSHOP_WORLD);
+    draft.remove(WORKSHOP_WORLD);
+    const recovered = WorkshopDocument.restore(draft.snapshot());
+    expect(recovered.paths()).not.toContain(WORKSHOP_WORLD);
+    // And the removal is still one undo away, with its exact bytes.
+    expect(recovered.undo()).toBe(WORKSHOP_WORLD);
+    expect(recovered.read(WORKSHOP_WORLD)).toBe(before);
+
+    const moved = new WorkshopDocument(workshopPack());
+    moved.rename(WORKSHOP_WORLD, 'assets/worlds/moved.toml');
+    const back = WorkshopDocument.restore(moved.snapshot());
+    expect(back.read('assets/worlds/moved.toml')).toBe(before);
+    expect(back.paths()).not.toContain(WORKSHOP_WORLD);
+    // One press returns BOTH halves of the rename.
+    back.undo();
+    expect(back.read(WORKSHOP_WORLD)).toBe(before);
+    expect(back.paths()).not.toContain('assets/worlds/moved.toml');
+  });
+
+  it('exports a candidate that reflects a removal and a rename', () => {
+    const draft = new WorkshopDocument(workshopPack());
+    draft.rename(WORKSHOP_WORLD, 'assets/worlds/moved.toml');
+    // The archive short-circuit returns the imported container only when the
+    // members still match it; a rename keeps the COUNT equal, so this proves
+    // the short-circuit is not fooled by size alone.
+    const renamed = new WorkshopDocument(draft.archive());
+    expect(renamed.paths()).toContain('assets/worlds/moved.toml');
+    expect(renamed.paths()).not.toContain(WORKSHOP_WORLD);
+
+    draft.remove('assets/worlds/moved.toml');
+    const removed = new WorkshopDocument(draft.archive());
+    expect(removed.paths()).not.toContain('assets/worlds/moved.toml');
+  });
+
+  it('omits a removed member from what a native save is given', () => {
+    const draft = WorkshopDocument.fromNativeFiles({
+      'assets/worlds/a.toml': new TextEncoder().encode('[global]\n'),
+      'assets/worlds/b.toml': new TextEncoder().encode('[global]\n'),
+    }, { kind: 'project' });
+    draft.remove('assets/worlds/b.toml');
+    // The native save sends the members that remain; the Rust side turns a
+    // baseline path missing from that map into a deletion on disk.
+    expect(Object.keys(draft.toNativeSources())).toEqual(['assets/worlds/a.toml']);
+  });
+
   it('refuses corrupt recovery paths or history before creating an editable draft', () => {
     const draft = new WorkshopDocument(workshopPack());
     draft.edit(WORKSHOP_WORLD, '[invalid\n');
@@ -191,7 +241,7 @@ describe('offline Workshop source documents', () => {
     foreign.files[0][0] = '../outside.toml';
     expect(() => WorkshopDocument.restore(foreign)).toThrow('recovery document');
     const inconsistent = draft.snapshot();
-    inconsistent.history.undo[0].after = 'different source';
+    inconsistent.history.undo[0].changes[0].after = 'different source';
     expect(() => WorkshopDocument.restore(inconsistent)).toThrow('Inconsistent recovery history');
   });
 
@@ -217,7 +267,7 @@ describe('offline Workshop source documents', () => {
     recovered.redo(); expect(recovered.isDirty()).toBe(false);
     expect(recovered.toFiles()['assets/models/test.glb']).toEqual(next);
     expect(() => new WorkshopDocument(workshopPack()).put('assets/models/test.glb', next)).toThrow('Invalid Workshop document');
-    snapshot.history.redo[0].after = { ...next, asset: '../outside' };
+    snapshot.history.redo[0].changes[0].after = { ...next, asset: '../outside' };
     expect(() => WorkshopDocument.restore(snapshot, { native: true })).toThrow('recovery document');
   });
 });

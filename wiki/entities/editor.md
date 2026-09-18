@@ -306,3 +306,37 @@ retained picture stale. Its camera, distance, lighting, marker and LOD controls
 operate only on the disposable renderer and show its measured mesh/texture
 statistics. Test, draft replacement and exit stop the preview. External
 generation remains in the existing tooling pending its Workshop integration.
+
+## Workshop exact-source member lifecycle (issue #1471)
+
+A draft can create, rename and delete text and binary members. Renaming carries
+the member's VALUE across rather than re-encoding it, so a move cannot normalise
+line endings, a BOM or a native asset reference — renaming a file is not an edit
+of it. Deleting is confirmed, and undone by the ordinary history if it was not
+what the operator meant.
+
+History entries are now GROUPS of changes rather than one path each. A rename is
+two changes (the old path goes, the new arrives) and an accepted migration
+rewrites a member wholesale; both must undo as ONE press, because half a rename
+is a member with no name and half an accepted migration is source nobody
+reviewed. Recovery snapshots are version 4 (browser) and 5 (native); versions 2
+and 3 are still read, as one-change groups, since a draft recovered from an older
+crash is still a draft.
+
+The Changes panel reports what the draft has done to the source it was imported
+as: added, removed, renamed and modified members. It compares BYTES and paths and
+never meaning — nothing is normalised before comparing, which is the same promise
+exact-source authoring makes everywhere else. A rename is recognised from
+identical content rather than guessed from similarity, and a member that moved
+AND changed is reported honestly as a removal plus an addition, because the bytes
+that arrived are not the bytes that left.
+
+Older supported content is offered a migration rather than a refusal. The only
+one that exists is the content pin: the runtime refuses a pack pinned to a
+superseded `content_epoch` with no remediation, so an author's only recourse was
+a blind hand-edit. The proposal rewrites ONE scalar and leaves every comment, key
+order and line ending around it untouched; it never moves a pin backwards, and
+never re-pins a pack built for different content, because that pack is not out of
+date — it is for something else. Proposing is not applying: acceptance
+re-proposes first and refuses if the draft moved, since the bytes reviewed would
+otherwise not be the bytes written.

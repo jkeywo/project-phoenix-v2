@@ -118,10 +118,54 @@ export class WorkshopDocument {
     const before = this._files.get(path) ?? null;
     const after = copy(value);
     if (equal(before, after)) return false;
-    this._history.push({ path, before: copy(before), after });
-    this._files.set(path, after);
+    return this.apply([{ path, before: copy(before), after }]);
+  }
+
+  /** Record one or more member changes as a SINGLE history entry.
+   *
+   * A rename is two changes — the old path goes, the new path arrives — and a
+   * migration may rewrite several members at once. Both have to undo as one
+   * press: half a rename is a member with no name, and half an accepted
+   * migration is source nobody reviewed. `after: null` removes the member.
+   */
+  apply(changes) {
+    const applicable = changes.filter(change => !equal(change.before, change.after));
+    if (!applicable.length) return false;
+    this._history.push({ changes: applicable.map(change => ({
+      path: change.path, before: copy(change.before), after: copy(change.after) })) });
+    for (const change of applicable) {
+      if (change.after === null) this._files.delete(change.path);
+      else this._files.set(change.path, copy(change.after));
+    }
     this._sourceRevision = this.sourceRevision + 1;
     return true;
+  }
+
+  /** Remove one authored member. */
+  remove(path) {
+    const before = this._files.get(path) ?? null;
+    if (before === null) return false;
+    return this.apply([{ path, before: copy(before), after: null }]);
+  }
+
+  /** Move one authored member to another path, bytes untouched.
+   *
+   * The VALUE is carried across rather than re-encoded, so a rename cannot
+   * normalise line endings, a BOM or an asset reference — renaming a file is
+   * not an edit of it.
+   */
+  rename(from, to) {
+    if (!safePath(to)) throw new Error('Invalid Workshop document');
+    const value = this._files.get(from);
+    if (value === undefined) return false;
+    if (from === to) return false;
+    if (isWorkshopBinary(from) !== isWorkshopBinary(to)) {
+      throw new Error('Workshop document type does not match path');
+    }
+    return this.apply([
+      { path: from, before: copy(value), after: null },
+      { path: to, before: copy(this._files.get(to) ?? null), after: copy(value) },
+    ]);
   }
   sourceBytes() {
     if (this._native) throw new Error('Native source has no imported archive');
@@ -134,32 +178,66 @@ export class WorkshopDocument {
     return !mapsEqual(this._files, this._exported);
   }
 
+  /** The members as they stand, for a reader that compares rather than edits.
+   * A copy: the live map is the document's own, and a diff view holding it
+   * would see edits it never asked for. */
+  members() {
+    return new Map([...this._files].map(([path, value]) => [path, copy(value)]));
+  }
+
+  /** What this draft has done to the source it was imported as.
+   *
+   * Computed from the live maps WITHOUT copying them. `members()` deep-copies
+   * every binary member, and this runs on each keystroke; on a pack carrying
+   * multi-megabyte models and audio that is two full copies of the asset set
+   * per character typed. Comparison never mutates, so it does not need copies.
+   */
+  changes(diff) {
+    const imported = new Map(this._source.entries.map(entry => [entry.path, entry.text ?? entry.bytes]));
+    return diff(imported, this._files);
+  }
+
+  /** The members this draft was imported as, which is what "changed" is
+   * measured against. Native drafts carry their opened files here too. */
+  importedMembers() {
+    return new Map(this._source.entries.map(entry => [entry.path, copy(entry.text ?? entry.bytes)]));
+  }
+
+  /** The members at the last successful save or export. */
+  exportedMembers() {
+    return new Map([...this._exported].map(([path, value]) => [path, copy(value)]));
+  }
+
   edit(path, text) {
     if (typeof this._files.get(path) !== 'string' || typeof text !== 'string') return false;
     const before = this._files.get(path);
     const after = editedLineEndings(before, text);
     if (before === after) return false;
-    this._history.push({ path, before, after });
-    this._files.set(path, after);
-    this._sourceRevision = this.sourceRevision + 1;
-    return true;
+    return this.apply([{ path, before, after }]);
   }
 
   undo() {
     const entry = this._history.undo();
     if (!entry) return null;
-    if (entry.before === null) this._files.delete(entry.path);
-    else this._files.set(entry.path, copy(entry.before));
+    // Reversed: a rename's two halves must come back in the opposite order they
+    // were applied, or the arriving member is deleted after it is restored.
+    for (const change of [...entry.changes].reverse()) {
+      if (change.before === null) this._files.delete(change.path);
+      else this._files.set(change.path, copy(change.before));
+    }
     this._sourceRevision = this.sourceRevision + 1;
-    return entry.path;
+    return entry.changes[0].path;
   }
 
   redo() {
     const entry = this._history.redo();
     if (!entry) return null;
-    this._files.set(entry.path, copy(entry.after));
+    for (const change of entry.changes) {
+      if (change.after === null) this._files.delete(change.path);
+      else this._files.set(change.path, copy(change.after));
+    }
     this._sourceRevision = this.sourceRevision + 1;
-    return entry.path;
+    return entry.changes.at(-1).path;
   }
 
   /** Exact candidate for runtime validation/export, even while its text is
@@ -200,8 +278,13 @@ export class WorkshopDocument {
   snapshot() {
     const history = this._history.snapshot();
     const serialize = value => value instanceof Uint8Array ? Array.from(value) : isNativeAssetReference(value) ? { ...value } : value;
-    const entry = value => ({ ...value, before: serialize(value.before), after: serialize(value.after) });
-    return { version: this._native ? 3 : 2, kind: this.kind,
+    const entry = value => ({ changes: value.changes.map(change => ({
+      path: change.path, before: serialize(change.before), after: serialize(change.after) })) });
+    // Versions 4 and 5 carry grouped history entries: a rename and an accepted
+    // migration each undo as ONE press, so an entry is a list of changes rather
+    // than a single path. Versions 2 and 3 are still READ, as one-change
+    // groups, because a draft recovered from a pre-#1471 crash is still a draft.
+    return { version: this._native ? 5 : 4, kind: this.kind,
       ...(this._native ? { sourceFiles: this._source.entries.map(entry => [entry.path, serialize(entry.text ?? entry.bytes)]) } : { source: this.sourceBytes() }),
       files: [...this._files].map(([path, value]) => [path, serialize(value)]),
       exported: [...this._exported].map(([path, value]) => [path, serialize(value)]), history: {
@@ -210,8 +293,9 @@ export class WorkshopDocument {
   }
 
   static restore(snapshot, { native = false } = {}) {
-    const nativeSource = native && snapshot?.version === 3;
-    if (!nativeSource && (![1, 2].includes(snapshot?.version) || !(snapshot.source instanceof Uint8Array))) throw new Error('Unsupported Workshop recovery record.');
+    const nativeSource = native && [3, 5].includes(snapshot?.version);
+    if (!nativeSource && (![1, 2, 4].includes(snapshot?.version) || !(snapshot.source instanceof Uint8Array))) throw new Error('Unsupported Workshop recovery record.');
+    const grouped = [4, 5].includes(snapshot?.version);
     let draft;
     if (nativeSource) {
       if (!Array.isArray(snapshot.sourceFiles) || new Set(snapshot.sourceFiles.map(entry => entry?.[0])).size !== snapshot.sourceFiles.length
@@ -233,7 +317,12 @@ export class WorkshopDocument {
         if (!Array.isArray(entry) || entry.length !== 2 || !safePath(entry[0]) || files.has(entry[0])) throw new Error('Invalid recovery document.');
         files.set(entry[0], decode(entry[0], entry[1]));
       }
-      for (const path of draft._files.keys()) if (!files.has(path)) throw new Error('Invalid recovery document.');
+      // Deliberately NOT requiring every imported path to be present. That was
+      // valid only while a member could not be removed; since issue #1471 a
+      // deleted or renamed member is legitimately absent, and refusing it here
+      // would throw away the whole crash draft over the very edit the operator
+      // most wants back. History consistency is still proved by the replay
+      // below, which is the check that actually protects the bytes.
       return files;
     };
     const files = readFiles(snapshot.files);
@@ -243,15 +332,32 @@ export class WorkshopDocument {
     for (const entries of [undo, redo]) {
       if (!Array.isArray(entries) || entries.length > 100) throw new Error('Invalid recovery history.');
       const values = entries.map(entry => {
-        if (!safePath(entry?.path)) throw new Error('Invalid recovery document.');
-        return { path: entry.path, before: decode(entry.path, entry.before, true), after: decode(entry.path, entry.after) };
+        // A pre-#1471 record has one change per entry; read it as a group of
+        // one rather than refusing a draft someone was in the middle of.
+        const changes = grouped ? entry?.changes : [entry];
+        if (!Array.isArray(changes) || !changes.length || changes.length > 64) {
+          throw new Error('Invalid recovery history.');
+        }
+        return { changes: changes.map(change => {
+          if (!safePath(change?.path)) throw new Error('Invalid recovery document.');
+          return { path: change.path, before: decode(change.path, change.before, true),
+            after: decode(change.path, change.after, true) };
+        }) };
       });
       const current = new Map(files);
       for (const entry of values.toReversed()) {
         const direction = entries === undo;
-        if (!equal(current.get(entry.path) ?? null, direction ? entry.after : entry.before)) throw new Error('Inconsistent recovery history.');
-        const value = direction ? entry.before : entry.after;
-        if (value === null) current.delete(entry.path); else current.set(entry.path, value);
+        // Undo walks a group backwards, redo forwards: the same order the live
+        // document applies them, so the replay proves the recorded bytes really
+        // do reconstruct what was on screen.
+        const ordered = direction ? [...entry.changes].reverse() : entry.changes;
+        for (const change of ordered) {
+          if (!equal(current.get(change.path) ?? null, direction ? change.after : change.before)) {
+            throw new Error('Inconsistent recovery history.');
+          }
+          const value = direction ? change.before : change.after;
+          if (value === null) current.delete(change.path); else current.set(change.path, value);
+        }
       }
       decoded.push(values);
     }

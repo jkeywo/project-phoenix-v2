@@ -388,6 +388,195 @@ fn the_native_provider_answers_definitions_edit_and_new_faction() {
     let _ = std::fs::remove_dir_all(&directory);
 }
 
+// ── Composition findings and the same validated catalogue (issue #1475) ──────
+
+const COMPOSITION_HULL: &str = "class='lancer'\nname='Test hull'\n\
+[[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
+[[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
+
+/// The one member set both paths read: two roots, one curating its hull.
+fn composition_members() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "assets/worlds/alpha.toml".to_owned(),
+            "[global]\ntitle = \"Alpha\"\ndescription = \"First\"\n\n[[available_ships]]\ntemplate_path = \"assets/entities/hull.toml\"\nlabel = \"Hull\"\n\n[[available_ships]]\ntemplate_path = \"assets/entities/other.toml\"\n".to_owned(),
+        ),
+        (
+            "assets/worlds/beta.toml".to_owned(),
+            "extra_worlds = [\"assets/worlds/alpha.toml\"]\n[global]\ntitle = \"Beta\"\n".to_owned(),
+        ),
+        ("assets/entities/hull.toml".to_owned(), COMPOSITION_HULL.to_owned()),
+        ("assets/entities/other.toml".to_owned(), COMPOSITION_HULL.to_owned()),
+    ])
+}
+
+const COMPOSITION_SCENARIOS: &str = "[[scenario]]\nid = \"alpha\"\nworld = \"assets/worlds/alpha.toml\"\nships = [\"assets/entities/hull.toml\"]\n\n[[scenario]]\nid = \"beta\"\nworld = \"assets/worlds/beta.toml\"\nlabel = \"Beta label\"\n";
+
+#[test]
+fn a_pack_and_a_project_of_the_same_members_validate_to_the_same_catalogue() {
+    // The pack path: members inside a store zip plus a dependency bundle,
+    // the candidate exactly as validate_pack assembles it.
+    let mut pack_members = composition_members();
+    pack_members.insert(
+        "scenarios.toml".into(),
+        format!(
+            "[pack]\nformat = 1\nid = \"twin\"\nversion = \"1.0.0\"\nname = \"Twin\"\n\n[pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 1\n\n{COMPOSITION_SCENARIOS}"
+        ),
+    );
+    let zip = crate::workshop::archive::store_zip(
+        &pack_members
+            .iter()
+            .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+            .collect(),
+    )
+    .unwrap();
+    let dependencies = dependencies();
+    let pack_report = validate_pack(&zip, &dependencies);
+    assert!(pack_report.accepted, "{:?}", pack_report.findings);
+    // The gate itself carries the catalogue it read, and it is the one the
+    // pure function reads over the candidate the gate assembled.
+    let pack_candidate = read_store_zip(&zip).unwrap();
+    let mut beneath = dependencies.base_files.clone();
+    for pack in &dependencies.packs {
+        beneath.extend(pack.files.clone());
+    }
+    let through_pack = pack_report.catalogue.clone();
+    assert_eq!(
+        through_pack,
+        composition::scenario_catalogue(&pack_candidate, &beneath)
+    );
+
+    // The project path: the same members as files, nothing beneath, the
+    // base manifest inlined as assets/scenarios.toml.
+    let mut project_members = composition_members();
+    project_members.insert(
+        "assets/scenarios.toml".into(),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+    );
+    let project_files: BTreeMap<String, Vec<u8>> = project_members
+        .iter()
+        .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+        .collect();
+    let project_report = validate_project(&project_files);
+    assert!(project_report.accepted, "{:?}", project_report.findings);
+    let through_project = project_report.catalogue.clone();
+    assert_eq!(
+        through_project,
+        composition::scenario_catalogue(&project_members, &BTreeMap::new())
+    );
+
+    assert_eq!(through_pack.len(), 2);
+    for (pack_entry, project_entry) in through_pack.iter().zip(&through_project) {
+        assert_eq!(pack_entry, project_entry);
+    }
+    assert_eq!(through_pack, through_project);
+    assert_eq!(through_pack[0].label.as_deref(), Some("Alpha"));
+    assert_eq!(through_pack[0].description.as_deref(), Some("First"));
+    assert_eq!(
+        through_pack[0]
+            .ships
+            .iter()
+            .map(|ship| (ship.template_path.as_str(), ship.label.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![("assets/entities/hull.toml", Some("Hull"))],
+        "the manifest curates the world's offer"
+    );
+    assert_eq!(through_pack[1].label.as_deref(), Some("Beta label"));
+}
+
+#[test]
+fn a_project_world_declaring_a_missing_or_cyclic_child_is_refused_at_the_entry_line() {
+    let mut members = composition_members();
+    members.insert(
+        "assets/scenarios.toml".into(),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+    );
+    members.insert(
+        "assets/worlds/beta.toml".into(),
+        "extra_worlds = [\n    \"assets/worlds/alpha.toml\",\n    \"assets/worlds/gamma.toml\",\n]\n[global]\ntitle = \"Beta\"\n".into(),
+    );
+    members.insert(
+        "assets/worlds/alpha.toml".into(),
+        "extra_worlds = [\"assets/worlds/beta.toml\"]\n[global]\ntitle = \"Alpha\"\n".into(),
+    );
+    let files: BTreeMap<String, Vec<u8>> = members
+        .iter()
+        .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+        .collect();
+    let report = validate_project(&files);
+    assert!(!report.accepted);
+    let located = |category: &str| {
+        report
+            .findings
+            .iter()
+            .filter(|finding| finding.category == category)
+            .map(|finding| (finding.file.clone(), finding.line, finding.severity.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        located("extra-worlds-missing"),
+        vec![(
+            "assets/worlds/beta.toml".to_owned(),
+            Some(3),
+            "error".to_owned()
+        )]
+    );
+    assert_eq!(
+        located("extra-worlds-cycle"),
+        vec![
+            (
+                "assets/worlds/alpha.toml".to_owned(),
+                Some(1),
+                "error".to_owned()
+            ),
+            (
+                "assets/worlds/beta.toml".to_owned(),
+                Some(2),
+                "error".to_owned()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_pack_world_declaring_a_duplicate_child_is_refused_at_the_entry_line() {
+    let mut members = crate::world::mod_pack::read_store_zip_bytes(include_bytes!(
+        "../../tests/fixtures/mod-packs/valid-v1.zip"
+    ))
+    .unwrap();
+    let manifest =
+        parse_manifest(std::str::from_utf8(&members["scenarios.toml"]).unwrap()).unwrap();
+    let root = manifest.scenarios[0].world.clone();
+    members.insert(
+        root.clone(),
+        b"extra_worlds = [\n    \"assets/worlds/twin.toml\",\n    \"assets/worlds/twin.toml\",\n]\n[global]\n".to_vec(),
+    );
+    members.insert(
+        "assets/worlds/twin.toml".into(),
+        b"[global]\ntitle = \"Twin\"\n".to_vec(),
+    );
+    let zip = crate::workshop::archive::store_zip(&members).unwrap();
+    let report = validate_pack(&zip, &dependencies());
+    assert!(!report.accepted);
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.category == "extra-worlds-duplicate")
+        .unwrap_or_else(|| panic!("{:?}", report.findings));
+    assert_eq!(
+        (finding.file.as_str(), finding.line),
+        (root.as_str(), Some(3))
+    );
+    assert!(
+        !report
+            .findings
+            .iter()
+            .any(|finding| finding.category == "member-disallowed"),
+        "a pack's members are the archive gate's: {:?}",
+        report.findings
+    );
+}
+
 #[test]
 fn partial_entity_include_is_validated_only_as_part_of_its_complete_template() {
     let bytes = include_bytes!("../../tests/fixtures/mod-packs/partial-entity-include.zip");

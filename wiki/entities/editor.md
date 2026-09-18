@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs, src/workshop/composition.rs, src/workshop/source_spans.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js]
 updated: 2026-09-18
 ---
 
@@ -416,6 +416,102 @@ tree. Known residue: two DEPENDENCY packs sharing a uuid under different file
 names resolve by stack order on the Live host but by file name in a Test's
 staged directory (the warning above says so); a Test whose draft deletes a
 faction has no end-to-end browser run yet, only the traced capture path.
+
+## Workshop world composition and scenario entry points (issue #1475)
+
+The `composition` dock panel (Workshop layout v7, in the `files` column beside
+`changes` on both the browser and the native operator profile) authors what a
+mod or project composes and which roots it offers. Composition is authored in
+three places; the panel edits two — the manifest's `[[scenario]]` roots (`id`,
+`world`, `label`, curated `ships`) in `scenarios.toml` (pack, `[pack]` header)
+or `assets/scenarios.toml` (project, `[content]` header), and each world's
+`extra_worlds` — and LISTS the third read-only: script-driven `load_world` /
+`unload_world` references, whether TOML trigger actions, calls in an inline
+`[script]` body or in the sibling `.rhai` a world declares, each with its line,
+its source and the origin of the path it names. Editing Rhai is #1478's.
+
+`src/workshop/composition.rs:828` `catalog` reads the draft's text members plus
+the immutable dependency bundle into a `CompositionCatalog`: the manifest view
+(kind, header, every root with `id_line`/`world_line`, the world's origin, the
+ships it curates and whether the world offers each, the unknown keys preserved
+read-only), every world of the effective set (draft first, then base, then
+packs) with its `extra_worlds`, script references and `[[available_ships]]`,
+the members with origin, whether a mod pack may carry them
+(`is_allowed_content_path`) and which manifest or world references them, the
+runtime's choices (worlds; hull templates that compose to a class with a ship
+config, the Test catalog's rule), the catalogue and the findings. Lines are
+1-based `toml_edit` spans through the `src/workshop/source_spans.rs` helpers
+lifted out of `definitions.rs`. Browser: `wasm_workshop_composition(files,
+textDependencies)`; native: `Operation::Composition` → `Response::Composition`,
+a Project workspace resolving against nothing beneath through the provider's
+shared `reference_dependencies` (Definitions uses it too).
+
+Unlike the definition forms, a composition edit is REFUSED at edit time with the
+source untouched: `composition.rs:1250` `compose` applies `document::edit` to a
+copy and re-checks the edited member over candidate ∪ dependencies (the
+candidate winning a path) — a duplicate or empty scenario id, an empty, non-
+`assets/worlds/*.toml` or missing world, a ship the world does not offer, a
+dropped `[pack]`/`[content]` header; an `extra_worlds` entry that is missing,
+duplicate, the world itself, outside `assets/worlds/`, or one that closes a
+CYCLE over the `extra_worlds` graph (DFS, the message lists `a -> b -> a`). The
+refusal is `<rule>: <detail>`, the rule being the finding category the same
+violation reports as, and only rules the edit INTRODUCES are refused, so a
+hand-broken draft is repaired one edit at a time. The pure
+`editor/workshop-composition.js` plans the edits (`planScenarioEdits`,
+`planExtraWorldEdits`; a reorder is `set`s on the swapped slots so comments stay
+with their positions) and maps a refusal's rule prefix to a
+`workshop.composition.refused.*` string with the runtime's sentence as the
+detail; `gui/workshop-composition-panel.js` sends ONE `runtime.compose` per
+member per Apply and lands the answer as one `draft.edit`. A new world is
+`composition.rs:972` `new_world_source` (a `[global]` with the title, built
+through `toml_edit` and asserted through `parse_world`) put at
+`assets/worlds/<slug>.toml`. Browser: `wasm_workshop_compose`,
+`wasm_workshop_new_world`; native: `Operation::Compose`, `Operation::NewWorld`
+→ `Response::Patched`.
+
+The same rules are findings with lines: `composition.rs:1327` `findings` runs
+beside `definitions::findings` in both `validate_pack` and `validate_project`
+and reports `extra-worlds-missing` (before this a load error with no line),
+`extra-worlds-duplicate`, `extra-worlds-self`, `extra-worlds-disallowed`,
+`extra-worlds-cycle` (at the entry that closes it), `world-missing-load-reference`
+(a trigger or scripted load/unload path in the candidate's worlds and
+`assets/worlds/*.rhai` that is in neither the draft nor its dependencies),
+`scenario-world-disallowed`, and `member-disallowed` as a WARNING for a project
+workspace only (a pack already gets `disallowed-path` from the archive gate) and
+only for a member the manifest or a world NAMES, so the audio catalogues, string
+tables and join codes a project legitimately carries draw no warning. `catalog`
+additionally reports `runtime-source-invalid` for a draft manifest or world the
+parser refuses, so the panel is not silently missing a member it cannot read.
+"The same validated catalogue" is `composition.rs:934` `scenario_catalogue`:
+`world::manifest::build_catalog` over the candidate manifest resolving worlds
+through candidate ∪ beneath, which `src/workshop/tests.rs` proves equal entry
+for entry between the pack path (store zip plus dependency bundle) and the
+project path (the same members as files, nothing beneath); the panel's
+Catalogue section is that list. `src/workshop/test_source.rs:38`
+`validate_selection` accepts a root whose draft-declared child exists only in
+the candidate and refuses when the child is missing, so the exact unsaved
+composition is what a Test runs. It also applies
+`composition.rs:1417` `selection_findings` — the composition rules in the
+selected root's own scope — so a Test no longer starts on a cyclic or
+dangling-reference composition that save and export would refuse. A rule another
+world breaks still only reaches Check, because a Test runs one root.
+
+Known residue: the world loader reads `extra_worlds` ONE level deep, so a
+child's own `extra_worlds` are silently ignored at runtime (a cycle is refused
+here because the authored graph and the runtime's flat list have parted, not
+because it would loop); script references are listed, never edited; a dangling
+`load_world` in a read-only base or pack script is listed with a null origin but
+is not a finding, since nothing the author can edit carries it; the literal scan
+cannot judge a path built from a variable, and it reads a `load_world("...")`
+spelled INSIDE another string literal as a reference. A refusal names the slot of
+the violation that has no counterpart in what the member already carried, which
+for a repeated value is the LATER slot — so adding a second copy of an entry is
+refused at the copy that was already there, not at the one just written. A reorder of roots moves
+the scalars between two slots rather than the entries themselves, because the
+edit vocabulary cannot insert mid-array: a comment authored beside one root
+therefore stays at its slot and ends up beside the root that moved into it. The
+alternative, remove-and-append, would drop the moved root to the end of a list
+whose order IS the lobby's.
 
 ## Observing a disposable Test two ways (issue #1472)
 

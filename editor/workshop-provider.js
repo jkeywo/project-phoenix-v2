@@ -103,6 +103,15 @@ export function createNativeWorkshopProvider({ request }) {
       },
       async edit(source, edit) { return (await call({ op: 'edit', source, edit })).source; },
       async newFaction(name, uuid) { return (await call({ op: 'new-faction', name, uuid })).source; },
+      // Composition (issue #1475) crosses the bridge the same way: the draft's
+      // text members only, the host resolving the dependencies beneath them.
+      async composition(files) {
+        const response = await call({ op: 'composition', files });
+        if (response?.status !== 'composition' || !response.catalog || typeof response.catalog !== 'object') throw new Error('Invalid native composition catalog');
+        return response.catalog;
+      },
+      async compose(files, request) { return (await call({ op: 'compose', files, request })).source; },
+      async newWorld(title) { return (await call({ op: 'new-world', title })).source; },
     },
     async save(draft) {
       const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });

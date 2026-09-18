@@ -59,7 +59,7 @@ describe('native Workshop shared boot', () => {
     window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });
     await pending;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'dependencies', 'changes', 'source', 'findings', 'feedback', 'model-preview',
+      .toEqual(['files', 'dependencies', 'changes', 'composition', 'source', 'findings', 'feedback', 'model-preview',
         'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions']);
   });
 

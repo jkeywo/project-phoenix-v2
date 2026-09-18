@@ -84,6 +84,31 @@ export function createWorkshopRuntime({
       const { runtime } = await ready();
       return runtime.wasm_workshop_new_faction(name, uuid);
     },
+    /** The runtime-derived composition catalog of the draft's text members
+     * (issue #1475): the manifest's roots, every world's extra worlds and
+     * script-driven references with their origins, the members, the choices,
+     * what Test and the lobby would list, and the findings. Text-only
+     * dependencies, as the definition catalog takes: origins and cycles are
+     * resolved by parsing sources. */
+    async composition(files) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_composition(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies))));
+    },
+    /** Structural edits over one member checked against the whole candidate
+     * and its dependencies: the runtime answers with the new source or refuses
+     * a missing, cyclic, duplicate or disallowed reference with the source
+     * untouched. */
+    async compose(files, request) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_compose(JSON.stringify(files), JSON.stringify(textDependencies(dependencies)),
+        JSON.stringify(request));
+    },
+    /** A world skeleton spelled by the runtime type, never a JS template. */
+    async newWorld(title) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_new_world(title);
+    },
     async validate(bytes) {
       const loaded = await ready();
       const required = loaded.runtime.wasm_workshop_asset_dependencies?.(bytes) || [];

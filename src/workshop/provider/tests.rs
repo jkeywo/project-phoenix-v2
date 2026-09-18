@@ -124,6 +124,51 @@ fn project_definitions_resolve_against_nothing_beneath_while_a_mod_sees_its_depe
 }
 
 #[test]
+fn the_native_provider_answers_composition_compose_and_new_world() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    let files = "{\"assets/scenarios.toml\":\"[content]\\nid = \\\"phoenix-base\\\"\\nepoch = 1\\n\\n[[scenario]]\\nid = \\\"test\\\"\\nworld = \\\"assets/worlds/test.toml\\\"\\n\",\"assets/worlds/test.toml\":\"[global]\\n\",\"assets/worlds/other.toml\":\"[global]\\n\"}";
+    let catalog = provider.handle_json(&format!(
+        "{{\"id\":1,\"op\":\"composition\",\"files\":{files}}}"
+    ));
+    assert!(catalog.contains("\"status\":\"composition\""), "{catalog}");
+    assert!(catalog.contains("\"kind\":\"project\""), "{catalog}");
+    assert!(
+        catalog.contains("\"path\":\"assets/scenarios.toml\""),
+        "{catalog}"
+    );
+    assert!(catalog.contains("\"world_origin\":\"draft\""), "{catalog}");
+    assert!(
+        catalog.contains("\"catalogue\":[{\"id\":\"test\""),
+        "{catalog}"
+    );
+
+    let compose = |value: &str| {
+        format!(
+            "{{\"id\":2,\"op\":\"compose\",\"files\":{files},\"request\":{{\"document_path\":\"assets/worlds/test.toml\",\"expected_source\":\"[global]\\n\",\"edits\":[{{\"op\":\"put\",\"path\":[\"extra_worlds\"],\"value_source\":\"[\\\"{value}\\\"]\"}}]}}}}"
+        )
+    };
+    let refused = provider.handle_json(&compose("assets/worlds/nope.toml"));
+    assert!(refused.contains("\"status\":\"refused\""), "{refused}");
+    assert!(refused.contains("extra-worlds-missing"), "{refused}");
+    let patched = provider.handle_json(&compose("assets/worlds/other.toml"));
+    assert!(patched.contains("\"status\":\"patched\""), "{patched}");
+    assert!(
+        patched.contains("extra_worlds = [\\\"assets/worlds/other.toml\\\"]"),
+        "{patched}"
+    );
+
+    let world = provider.handle_json("{\"id\":3,\"op\":\"new-world\",\"title\":\"Fresh\"}");
+    assert!(world.contains("\"status\":\"patched\""), "{world}");
+    assert!(
+        world.contains("\"source\":\"[global]\\ntitle = \\\"Fresh\\\"\\n\""),
+        "{world}"
+    );
+    let refused = provider.handle_json("{\"id\":4,\"op\":\"new-world\",\"title\":\" \"}");
+    assert!(refused.contains("\"status\":\"refused\""), "{refused}");
+}
+
+#[test]
 fn private_json_bridge_loads_exact_source_and_roundtrips_a_runtime_validated_save() {
     let fixture = Fixture::new();
     let mut provider = fixture.open();

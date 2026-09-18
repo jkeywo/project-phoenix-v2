@@ -86,4 +86,31 @@ describe('offline Workshop runtime capability', () => {
     expect(await runtime.newFaction('Harrow', 'u')).toContain('name = "Harrow"');
     expect(newFaction).toHaveBeenCalledExactlyOnceWith('Harrow', 'u');
   });
+
+  it('reads the composition catalog with text-only dependencies and routes compose requests and new worlds to the runtime (issue #1475)', async () => {
+    const source = { base_files: { 'assets/worlds/base.toml': '[global]\n' },
+      base_asset_manifest: { 'assets/models/a.glb': { length: 2, crc32: 0 } },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/worlds/raid.toml': '[global]\n' },
+        assets: { 'assets/sounds/x.ogg': [1, 2] } }] };
+    const catalog = { manifest: null, worlds: [], members: [], choices: { worlds: [], templates: [] }, catalogue: [], findings: [] };
+    const composition = vi.fn(() => JSON.stringify(catalog));
+    const compose = vi.fn(() => '[global]\nextra_worlds = ["assets/worlds/base.toml"]\n');
+    const newWorld = vi.fn(() => '[global]\ntitle = "Harrow"\n');
+    const runtime = createWorkshopRuntime({ load: async () => ({
+      wasm_workshop_validate_pack: () => '{}', wasm_workshop_composition: composition, wasm_workshop_compose: compose,
+      wasm_workshop_new_world: newWorld,
+    }), dependencies: async () => source });
+    const files = { 'assets/worlds/mine.toml': '[global]\n' };
+    const textOnly = JSON.stringify({ base_files: { 'assets/worlds/base.toml': '[global]\n' },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/worlds/raid.toml': '[global]\n' } }] });
+    expect(await runtime.composition(files)).toEqual(catalog);
+    // Text only: no base asset bytes, no pack assets — the catalog parses sources.
+    expect(composition).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly);
+    const request = { document_path: 'assets/worlds/mine.toml', expected_source: '[global]\n',
+      edits: [{ op: 'put', path: ['extra_worlds'], value_source: '["assets/worlds/base.toml"]' }] };
+    expect(await runtime.compose(files, request)).toContain('extra_worlds = ["assets/worlds/base.toml"]');
+    expect(compose).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly, JSON.stringify(request));
+    expect(await runtime.newWorld('Harrow')).toContain('title = "Harrow"');
+    expect(newWorld).toHaveBeenCalledExactlyOnceWith('Harrow');
+  });
 });

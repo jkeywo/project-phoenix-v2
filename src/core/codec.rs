@@ -248,6 +248,19 @@ pub fn decode_workshop_edit(value: &str) -> Result<crate::workshop::document::Ed
     serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
+/// The composition edit group a Workshop panel applies to one member (issue #1475).
+pub fn decode_workshop_composition_request(
+    value: &str,
+) -> Result<crate::workshop::composition::ComposeRequest, String> {
+    serde_json::from_str(value).map_err(|error| error.to_string())
+}
+
+pub fn encode_workshop_composition_catalog(
+    value: &crate::workshop::composition::CompositionCatalog,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+
 /// Encode a one-shot positional audio cue for `__audioCue`. Coordinates are
 /// listener-relative — see `audio_config::listener_relative`.
 pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {

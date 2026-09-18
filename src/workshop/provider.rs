@@ -85,6 +85,16 @@ pub enum Operation {
         name: String,
         uuid: String,
     },
+    Composition {
+        files: BTreeMap<String, String>,
+    },
+    Compose {
+        files: BTreeMap<String, String>,
+        request: super::composition::ComposeRequest,
+    },
+    NewWorld {
+        title: String,
+    },
     RecoveryLoad,
     RecoverySave {
         record: String,
@@ -154,6 +164,9 @@ pub enum Response {
     // carry its size.
     Definitions {
         catalog: Box<super::definitions::DefinitionCatalog>,
+    },
+    Composition {
+        catalog: Box<super::composition::CompositionCatalog>,
     },
     Recovery {
         recovery: Option<RecoveryRecord>,
@@ -413,21 +426,36 @@ impl NativeWorkshopProvider {
             // project IS the whole content set and nothing lies beneath it —
             // a faction the project deletes must dangle in the panel exactly
             // as Check reports it.
-            Operation::Definitions { files } => {
-                let nothing = WorkshopDependencies::default();
-                let dependencies = match self.kind {
-                    WorkspaceKind::Project => &nothing,
-                    WorkspaceKind::Mod => &self.dependencies,
-                };
-                Response::Definitions {
-                    catalog: Box::new(super::definitions::catalog(&files, dependencies)),
-                }
-            }
+            Operation::Definitions { files } => Response::Definitions {
+                catalog: Box::new(super::definitions::catalog(
+                    &files,
+                    self.reference_dependencies(),
+                )),
+            },
             Operation::Edit { source, edit } => Response::Patched {
                 source: document::edit(&source, &edit)?,
             },
             Operation::NewFaction { name, uuid } => Response::Patched {
                 source: super::definitions::new_faction_source(&name, &uuid)?,
+            },
+            // Composition resolves against the same bundle Definitions does:
+            // a project is the whole content set, so a child it does not
+            // carry is missing exactly as Check reports it (issue #1475).
+            Operation::Composition { files } => Response::Composition {
+                catalog: Box::new(super::composition::catalog(
+                    &files,
+                    self.reference_dependencies(),
+                )),
+            },
+            Operation::Compose { files, request } => Response::Patched {
+                source: super::composition::compose(
+                    &files,
+                    self.reference_dependencies(),
+                    &request,
+                )?,
+            },
+            Operation::NewWorld { title } => Response::Patched {
+                source: super::composition::new_world_source(&title)?,
             },
             Operation::RecoveryLoad => {
                 let recovery = read_optional(&self.private.join("draft.json"))?
@@ -466,6 +494,21 @@ impl NativeWorkshopProvider {
                 return Err("Disposable Test requires its explicit offline native shell".into());
             }
         })
+    }
+
+    /// The read-only bundle a catalog resolves references against: a mod's
+    /// definitions and composition see the base set and the packs beneath it,
+    /// while a project IS the whole content set and nothing lies beneath it.
+    fn reference_dependencies(&self) -> &WorkshopDependencies {
+        static NOTHING: WorkshopDependencies = WorkshopDependencies {
+            base_files: BTreeMap::new(),
+            base_assets: BTreeMap::new(),
+            packs: Vec::new(),
+        };
+        match self.kind {
+            WorkspaceKind::Project => &NOTHING,
+            WorkspaceKind::Mod => &self.dependencies,
+        }
     }
 
     fn validate(&self, files: &Files) -> WorkshopValidation {

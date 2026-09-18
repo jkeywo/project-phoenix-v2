@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { addMigrationPanel, createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const WORKSHOP_LAYOUT_VERSION = 6;
+export const WORKSHOP_LAYOUT_VERSION = 7;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
@@ -9,7 +9,7 @@ export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
   tool('add'), tool('recovery'), tool('findings'),
   tool('feedback'), tool('dependencies'), tool('settings'),
   tool('models'), documentPanel('model-preview'), tool('sound'),
-  tool('changes'), tool('definitions'),
+  tool('changes'), tool('definitions'), tool('composition'),
 ]);
 export const WORKSHOP_PANELS = Object.freeze(WORKSHOP_PANEL_REGISTRY.map(panel => panel.id));
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
@@ -30,6 +30,11 @@ const V5_PANELS = Object.freeze([...V4_PANELS, 'changes']);
  * specialised form over the same runtime the inspector reads, so it joins the
  * inspector's column beside the model form (issue #1474). */
 const ADDED_IN_V6 = Object.freeze([['definitions', 'inspector']]);
+const V6_PANELS = Object.freeze([...V5_PANELS, 'definitions']);
+/** Panels registered after version 6. World composition reads the draft's
+ * member set the way the changes view does — which members exist, which
+ * reference which — so it joins that column beside it (issue #1475). */
+const ADDED_IN_V7 = Object.freeze([['composition', 'files']]);
 const legacyDefault = () => ({ version: 2,
   root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
     children: [group(['files']), group(['source']), group(['inspector', 'add', 'recovery'], 'inspector')] },
@@ -51,10 +56,16 @@ const v5Default = () => ({ version: 5,
       group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
       group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound'], 'inspector')] },
   floats: [], closed: [], selected: 'source' });
+const v6Default = () => ({ version: 6,
+  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
+    children: [group(['files', 'dependencies', 'changes'], 'files'),
+      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
+      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions'], 'inspector')] },
+  floats: [], closed: [], selected: 'source' });
 export function defaultWorkshopLayout() {
   return { version: WORKSHOP_LAYOUT_VERSION,
     root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-      children: [group(['files', 'dependencies', 'changes'], 'files'),
+      children: [group(['files', 'dependencies', 'changes', 'composition'], 'files'),
         group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
         group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions'], 'inspector')] },
     floats: [], closed: [], selected: 'source' };
@@ -69,6 +80,8 @@ const v4 = createDockLayoutModel({ version: 4, panels: V4_PANELS,
   defaultLayout: v4Default, compatibleVersions: [4] });
 const v5 = createDockLayoutModel({ version: 5, panels: V5_PANELS,
   defaultLayout: v5Default, compatibleVersions: [5] });
+const v6 = createDockLayoutModel({ version: 6, panels: V6_PANELS,
+  defaultLayout: v6Default, compatibleVersions: [6] });
 
 // Version 1 held `add` and `recovery` as fixed chrome rather than as placements.
 // They are rehomed first, so a v1 tree ends up where a v2 tree of the same shape
@@ -91,7 +104,8 @@ const migrate = createDockLayoutMigration({
     { version: 3, model: v3, added: ADDED_IN_V3 },
     { version: 4, model: v4, added: ADDED_IN_V4 },
     { version: 5, model: v5, added: ADDED_IN_V5 },
-    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V6 },
+    { version: 6, model: v6, added: ADDED_IN_V6 },
+    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V7 },
   ],
 });
 export const workshopLayoutModel = Object.freeze({ ...base, normalize: migrate });

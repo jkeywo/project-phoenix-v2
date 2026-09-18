@@ -12,13 +12,15 @@
 //! finding, never an edit-time refusal: an author adds the enemy first and the
 //! faction second, and the Check button says what is still dangling.
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use toml_edit::{Document, Item, Table, TableLike, Value};
+use toml_edit::{Document, Item, Table, Value};
 use uuid::Uuid;
 
 use super::document::Segment;
+use super::source_spans::{
+    is_member, line_at, span_line, string_field, table_line, value_text, visit_tables,
+};
 use super::{WorkshopDependencies, WorkshopFinding};
 use crate::ai::faction::FactionConfig;
 use crate::civilian::{ComplianceDisposition, OrderResponse};
@@ -149,45 +151,8 @@ pub struct AiRule {
 }
 
 // ── Source helpers ────────────────────────────────────────────────────────────
-
-fn is_member(path: &str, directory: &str) -> bool {
-    path.starts_with(directory) && path.ends_with(".toml")
-}
-
-fn line_at(source: &str, offset: usize) -> usize {
-    source[..offset.min(source.len())]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1
-}
-
-fn span_line(source: &str, span: Option<Range<usize>>) -> Option<usize> {
-    span.map(|span| line_at(source, span.start))
-}
-
-/// The header line of a `[[table]]`, or its first value's line for a table
-/// the parser gave no header span (an implicit or dotted one).
-fn table_line(source: &str, table: &Table) -> usize {
-    span_line(source, table.span())
-        .or_else(|| {
-            table
-                .iter()
-                .find_map(|(_, item)| span_line(source, item.span()))
-        })
-        .unwrap_or(1)
-}
-
-/// The string content of a string value, or the exact source text of any
-/// other value, so a mistyped `uuid = 42` still shows what was written.
-fn value_text(source: &str, value: &Value) -> String {
-    value.as_str().map(str::to_owned).unwrap_or_else(|| {
-        value
-            .span()
-            .map(|span| source[span].to_owned())
-            .unwrap_or_default()
-    })
-}
+// The span/line helpers live in `source_spans`, shared with the composition
+// catalog (issue #1475).
 
 fn source_span(source: &str, value: &Value) -> Option<SourceSpan> {
     let span = value.span()?;
@@ -195,10 +160,6 @@ fn source_span(source: &str, value: &Value) -> Option<SourceSpan> {
         source: source[span.clone()].to_owned(),
         line: line_at(source, span.start),
     })
-}
-
-fn string_field<'a>(table: &'a dyn TableLike, key: &str) -> Option<&'a str> {
-    table.get(key)?.as_str()
 }
 
 // ── Effective faction set ─────────────────────────────────────────────────────
@@ -1092,46 +1053,6 @@ fn entity_findings(
                 None => {}
             }
         }
-    }
-}
-
-/// Every table-like node of a document, depth first, so a trigger action is
-/// found wherever the world schema nests it.
-fn visit_tables<'a>(item: &'a Item, visit: &mut dyn FnMut(&'a dyn TableLike)) {
-    match item {
-        Item::Table(table) => {
-            visit(table);
-            for (_, child) in table.iter() {
-                visit_tables(child, visit);
-            }
-        }
-        Item::ArrayOfTables(tables) => {
-            for table in tables.iter() {
-                visit(table);
-                for (_, child) in table.iter() {
-                    visit_tables(child, visit);
-                }
-            }
-        }
-        Item::Value(value) => visit_values(value, visit),
-        Item::None => {}
-    }
-}
-
-fn visit_values<'a>(value: &'a Value, visit: &mut dyn FnMut(&'a dyn TableLike)) {
-    match value {
-        Value::InlineTable(table) => {
-            visit(table);
-            for (_, child) in table.iter() {
-                visit_values(child, visit);
-            }
-        }
-        Value::Array(array) => {
-            for element in array.iter() {
-                visit_values(element, visit);
-            }
-        }
-        _ => {}
     }
 }
 

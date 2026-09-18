@@ -120,6 +120,32 @@ describe('explicit Workshop capability providers', () => {
     await expect(refused.runtime.edit('x', edit)).rejects.toThrow('Stale source');
   });
 
+  it('routes composition readings, compose requests and new worlds over the bridge with the native op spellings (issue #1475)', async () => {
+    const catalog = { manifest: null, worlds: [], members: [], choices: {}, catalogue: [], findings: [] };
+    const request = vi.fn(async value => {
+      if (value.op === 'composition') return { status: 'composition', catalog };
+      if (value.op === 'compose') return { status: 'patched', source: `${value.files[value.request.document_path]}# composed\n` };
+      if (value.op === 'new-world') return { status: 'patched', source: `[global]\ntitle = "${value.title}"\n` };
+      return { status: 'done' };
+    });
+    const provider = createNativeWorkshopProvider({ request });
+    const files = { 'assets/worlds/mine.toml': '[global]\n' };
+    expect(await provider.runtime.composition(files)).toEqual(catalog);
+    expect(request).toHaveBeenCalledWith({ op: 'composition', files });
+    const compose = { document_path: 'assets/worlds/mine.toml', expected_source: '[global]\n',
+      edits: [{ op: 'put', path: ['extra_worlds'], value_source: '["assets/worlds/base.toml"]' }] };
+    expect(await provider.runtime.compose(files, compose)).toBe('[global]\n# composed\n');
+    expect(request).toHaveBeenCalledWith({ op: 'compose', files, request: compose });
+    expect(await provider.runtime.newWorld('Harrow')).toBe('[global]\ntitle = "Harrow"\n');
+    expect(request).toHaveBeenCalledWith({ op: 'new-world', title: 'Harrow' });
+    const broken = createNativeWorkshopProvider({ request: async () => ({ status: 'done' }) });
+    await expect(broken.runtime.composition(files)).rejects.toThrow('Invalid native composition catalog');
+    // A refusal keeps the runtime's own words: the panel maps them to a category.
+    const refused = createNativeWorkshopProvider({ request: async () => ({ status: 'refused',
+      message: 'extra_worlds entry assets/worlds/x.toml would form a cycle', report: null }) });
+    await expect(refused.runtime.compose(files, compose)).rejects.toThrow('would form a cycle');
+  });
+
   it('correlates private replies and rejects pending work when its surface closes', async () => {
     const sent = [];
     const bridge = createWorkshopBridge({ send: value => sent.push(JSON.parse(value)) });

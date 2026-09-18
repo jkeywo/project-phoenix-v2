@@ -25,12 +25,15 @@ use crate::world::validate::{
 pub mod archive;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod captured_source;
+/// World composition and scenario entry points with exact lines (issue #1475).
+pub mod composition;
 /// Faction and complexity definitions with exact lines (issue #1474).
 pub mod definitions;
 pub mod document;
 mod model_fields;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
+mod source_spans;
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
 pub(crate) mod test_browser;
 pub mod test_clock;
@@ -91,6 +94,12 @@ impl From<WorldFinding> for WorkshopFinding {
 pub struct WorkshopValidation {
     pub accepted: bool,
     pub findings: Vec<WorkshopFinding>,
+    /// The scenario catalogue the validated candidate would publish — what
+    /// Test and the lobby list — read by ONE function in both `validate_pack`
+    /// and `validate_project`, so a native save and a browser ZIP export of
+    /// the same members cannot catalogue differently (issue #1475). A Test
+    /// selection report, which validates one root, carries none.
+    pub catalogue: Vec<composition::CatalogueEntry>,
 }
 
 impl WorkshopValidation {
@@ -206,6 +215,11 @@ pub fn validate_pack(bytes: &[u8], dependencies: &WorkshopDependencies) -> Works
     // so a pack may name a BASE faction as an enemy and a draft that deletes
     // a faction is told where it is still referenced (issue #1474).
     report.extend_workshop(definitions::findings(&candidate, &beneath));
+    // Composition rules are findings here as well as edit-time refusals: a
+    // hand-edited draft can still declare a missing or cyclic child, and
+    // save, export and Test refuse it with a line (issue #1475).
+    report.extend_workshop(composition::findings(&candidate, &beneath));
+    report.catalogue = composition::scenario_catalogue(&candidate, &beneath);
     let mut sources = beneath;
     sources.extend(candidate.clone());
     let sources = Sources(sources);
@@ -352,6 +366,8 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
     report.extend(crate::world::mod_pack::validate_pack_scripts(&sources.0));
     // A project is its whole content set; nothing lies beneath it.
     report.extend_workshop(definitions::findings(&sources.0, &BTreeMap::new()));
+    report.extend_workshop(composition::findings(&sources.0, &BTreeMap::new()));
+    report.catalogue = composition::scenario_catalogue(&sources.0, &BTreeMap::new());
     for (path, text) in &sources.0 {
         let result = if path.starts_with("assets/worlds/") && path.ends_with(".toml") {
             crate::world::config::parse_world(text).map(|_| ())

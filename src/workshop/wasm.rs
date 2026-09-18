@@ -96,3 +96,41 @@ pub fn wasm_workshop_edit(source: &str, edit: &str) -> Result<String, JsValue> {
 pub fn wasm_workshop_new_faction(name: &str, uuid: &str) -> Result<String, JsValue> {
     super::definitions::new_faction_source(name, uuid).map_err(|error| JsValue::from_str(&error))
 }
+
+/// The composition catalog over the draft's text members plus the same
+/// explicit dependency bundle validation takes (issue #1475).
+#[wasm_bindgen]
+pub fn wasm_workshop_composition(files: &str, dependencies: &str) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_definition_files(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::encode_workshop_composition_catalog(&super::composition::catalog(
+        &files,
+        &dependencies,
+    ))
+    .map_err(|error| JsValue::from_str(&error))
+}
+
+/// One composition edit group, refused with the source untouched when it
+/// introduces a missing, cyclic, duplicate or disallowed reference.
+#[wasm_bindgen]
+pub fn wasm_workshop_compose(
+    files: &str,
+    dependencies: &str,
+    request: &str,
+) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_definition_files(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let request = crate::core::codec::decode_workshop_composition_request(request)
+        .map_err(|error| JsValue::from_str(&error))?;
+    super::composition::compose(&files, &dependencies, &request)
+        .map_err(|error| JsValue::from_str(&error))
+}
+
+#[wasm_bindgen]
+pub fn wasm_workshop_new_world(title: &str) -> Result<String, JsValue> {
+    super::composition::new_world_source(title).map_err(|error| JsValue::from_str(&error))
+}

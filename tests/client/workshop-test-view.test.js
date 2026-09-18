@@ -1,12 +1,42 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { TEST_GM_REFUSED_ACTIONS } from '../../gui/workshop-test-gm.js';
+import { TEST_GM_REFUSED_ACTIONS, mountWorkshopTestGm } from '../../gui/workshop-test-gm.js';
 import { gmConsoleMarkup } from '../../scripts/gm-console-markup.mjs';
 
 const SERVER = readFileSync('server.html', 'utf8');
 
 describe('the disposable Test view', () => {
+  afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML = ''; });
+
+  it('mounts the omniscient view without reading a single project asset', async () => {
+    // The Test page's whole guarantee is that an uncaptured project file is
+    // ABSENT, not fetched. The ordinary GM workspace reaches for the shipped
+    // private-feedback manifest, the cue catalogue and every sample they name
+    // the moment it mounts; the smoke isolation spec caught exactly that, so
+    // this pins the mount itself rather than one panel's behaviour.
+    // The map's custom element needs ResizeObserver and a 2D canvas, neither
+    // of which jsdom has; it draws projections and fetches nothing, so it is
+    // left out of the markup here rather than stubbed into half-existing.
+    document.body.innerHTML = gmConsoleMarkup(SERVER)
+      .replace(/<ph-navigation-map\b[\s\S]*?<\/ph-navigation-map>/g, '');
+    const requested = [];
+    vi.spyOn(window, 'fetch').mockImplementation(async input => {
+      requested.push(String(input?.url ?? input));
+      return new Response('', { status: 404 });
+    });
+    const gm = mountWorkshopTestGm({ win: window });
+    expect(gm).not.toBeNull();
+    await window.__privateAudio.ready;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(requested.filter(url => /\/?assets\/(audio|sounds)\//.test(url))).toEqual([]);
+    // No manifest and a silent output, reported as such rather than pretending.
+    expect(window.__privateAudio.state().status).toBe('unavailable');
+    // And the page says so where it mounts, so a reader sees why.
+    expect(readFileSync('gui/workshop-test-gm.js', 'utf8')).toContain('isolated: true');
+    gm.dispose();
+  });
+
   it('accepts only a view naming the GM desk or one ship', async () => {
     // The child's allow-list is the boundary: a control that is not exactly one
     // of these shapes never reaches the runtime at all.

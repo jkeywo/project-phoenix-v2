@@ -368,6 +368,13 @@ the first press and leaves "can this mutate the run?" answerable only by reading
 every panel, whereas one list answers it and a Test that somehow acquired a real
 route fails a test instead of quietly working.
 
+It reads nothing its capture did not hand it, either. The ordinary GM workspace
+fetches the private-feedback manifest, the cue catalogue and every sample they
+name the moment it mounts — project assets outside the capture, which the Test
+isolation smoke spec caught. The Test mounts the workspace `isolated`: feedback
+audio gets a silent output with no manifest and the local audition is not
+mounted, while every projection panel is unchanged.
+
 The surface follows the runtime's reported view rather than the request that
 asked for it, so a refused switch cannot leave the page claiming a view the run
 is not drawing; the runtime refuses a ship the run does not have. A Test today

@@ -46,7 +46,11 @@ export function mountWorkshopTestGm({ win = window, doc = win.document } = {}) {
   win.__hostLocalGm = () => null;
 
   applyToDom(doc);
-  const workspace = mountGmWorkspace({ win, doc });
+  // Isolated: this page may read nothing its capture did not hand it. The
+  // ordinary mount would fetch the private-feedback manifest, the cue catalogue
+  // and their samples from the server — project assets outside the capture —
+  // which is the one thing a disposable Test must never do.
+  const workspace = mountGmWorkspace({ win, doc, isolated: true });
   const dispatch = createHostChannel({ handlers: workspace.handlers, strings: { t } });
   return {
     /** Fold one `gm_*` projection of the running Test. */

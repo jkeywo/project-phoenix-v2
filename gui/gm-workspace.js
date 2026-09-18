@@ -44,7 +44,18 @@ import { mountSoundAudition } from './sound-audition-panel.js';
 import { createPrivateRequestFeedback } from './private-request-feedback.js';
 import { createPrivateAlerts, attachPrivateAlertLifecycle } from './private-alerts.js';
 
-export function mountGmWorkspace({ win = window, doc = win.document, requireNativeProvider = false } = {}) {
+/**
+ * `isolated` mounts the workspace for a document that may read NOTHING beyond
+ * what it was handed — the disposable Workshop Test's omniscient view (issue
+ * #1472), whose whole guarantee is that an uncaptured project file is absent
+ * rather than fetched. Operator feedback audio and the local sound audition
+ * are the only parts of this workspace that reach for project assets on their
+ * own (the private-feedback manifest, the cue catalogue and every sample they
+ * name), so an isolated mount gives feedback audio a silent output with no
+ * manifest and mounts no audition at all. Every projection panel is unchanged.
+ */
+export function mountGmWorkspace({ win = window, doc = win.document, requireNativeProvider = false,
+  isolated = false } = {}) {
   let privateAudio = null;
   const privateAlerts = createPrivateAlerts({ audio: { actionable: () => privateAudio?.actionable() } });
   const disposePrivateAlerts = attachPrivateAlertLifecycle(privateAlerts, win);
@@ -188,8 +199,12 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let disposePrivateAudio = null, unsubscribePrivateProfile = null;
   {
     privateAudio = createPrivateAudio({ root: win,
-      requireNativeProvider,
-      allowAudition: true,
+      // An isolated document gets the silent output the native pane gets
+      // without an injected provider, and no manifest: the shipped feedback
+      // catalogue and its samples are project assets it was never handed.
+      requireNativeProvider: requireNativeProvider || isolated,
+      allowAudition: !isolated,
+      ...(isolated ? { fetchManifest: () => Promise.reject(new Error('private-audio-isolated')) } : {}),
       read: gmConfirmationProfile.audio, save: gmConfirmationProfile.setAudio,
       isEnabled: () => win.__phoenixGmPage === true && gmConfirmationProfile.feedback().semanticCues !== false });
     win.__privateAudio = privateAudio;
@@ -539,7 +554,9 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   // Private audition is operator-local and stays that way: the dock moves the
   // node, it does not give the panel a transport, an endpoint or a recipient.
   const auditionRoot = doc.getElementById('gm-audition-dock') || doc.getElementById('gm-mission-panel');
-  const soundAudition = auditionRoot
+  // The audition previews the SHIPPED cue catalogue, which an isolated
+  // document cannot read; its panel stays empty there rather than fetching.
+  const soundAudition = auditionRoot && !isolated
     ? mountSoundAudition({root:auditionRoot,audio:privateAudio,win}) : null;
   gmDespawn = createGmDespawnPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,

@@ -1031,7 +1031,9 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
     })
     .init_resource::<PendingForceStart>()
     // The live restore's Store (see `BrowserSlotStore`).
-    .insert_resource(crate::save_slots_store::SaveSlotService::new(BrowserSlotStore))
+    .insert_resource(crate::save_slots_store::SaveSlotService::new(
+        BrowserSlotStore,
+    ))
     // De-globalised bridge state (issue #1181): the durable, sim-visible half of
     // the former thread-locals lives in these Resources. `Instagib` starts off;
     // The shared startup-restore driver takes the pre-init save below.

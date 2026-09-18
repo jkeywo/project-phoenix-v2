@@ -37,8 +37,24 @@ import {
   DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
   isValidActionCorrelation,
 } from './action-feedback.js';
+import { emptyTutorialProgress, tutorialProgressAfterAction } from './tutorial-state.js';
 import { ClientSimState } from './sim-state.js';
 import { applyViewscreenEffectsToRoot } from './viewscreen-presentation.js';
+
+/** Tutorial progress of the consoles THIS Game Master has puppeted, by ship.
+ *
+ * A puppeted console is a real first-run console and carries the same tutorial
+ * cards; dismissing one is presentation state, handled where the console is
+ * shown and never sent to the host (gui/tutorial-state.js). It is kept here
+ * rather than on the projected state, which is rebuilt on every update, and
+ * kept per GM session rather than persisted: the human at that Station keeps
+ * their own progress, and a GM looking over their shoulder must not write it.
+ */
+const puppetTutorialProgress = new Map();
+const tutorialProgressFor = shipId => {
+  if (!puppetTutorialProgress.has(shipId)) puppetTutorialProgress.set(shipId, emptyTutorialProgress());
+  return puppetTutorialProgress.get(shipId);
+};
 
 const STATION_COMMAND_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 const LOCAL_INGRESS_REFUSAL = 'ingress-rejected';
@@ -172,7 +188,7 @@ export function buildGmStationConsoleInput(projection, ship) {
   }
   state.controlSources = ship.control_sources || {};
   state.stationPuppets = stationPuppets;
-  state.tutorialProgress = {};
+  state.tutorialProgress = tutorialProgressFor(ship.ship_id);
 
   // Regions remain a local presentation projection, just as on player
   // clients. Their only raw inputs are the authoritative entity/objective
@@ -491,6 +507,17 @@ export function createGmStationPuppet({
     if (!selectedRow) return false;
     const action = parsePayload(raw);
     if (!action || typeof action !== 'object') return false;
+    // The console's tutorial bookkeeping runs here exactly as it does on a
+    // player client: a dismiss is recorded and shown, never forwarded; every
+    // other action records the control as used and flows on unchanged.
+    const shipId = selectedRow.ship.ship_id;
+    const hull = selectedRow.ship.ship_config?.hull_id;
+    const folded = tutorialProgressAfterAction(tutorialProgressFor(shipId), action, hull);
+    if (folded.changed) {
+      puppetTutorialProgress.set(shipId, folded.progress);
+      renderSelected();
+    }
+    if (folded.handled) return true;
     let submitted = false;
     dispatchConsoleAction(action, (type, data = {}) => {
       if (submitted || (type !== 'ControlSystem' && type !== 'ControlSystemCorrelated')

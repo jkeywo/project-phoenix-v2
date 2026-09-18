@@ -200,36 +200,44 @@ fn on_survey(ctx) {
 // `context` fixture shape — it still hands each spec a BrowserContext, just one
 // with the shim, the QR stub, the registry route and the default world route
 // already installed.
+/** Install the transport stand-in, the QR stub, the registry routes and the
+ *  default world route on a context a spec built itself (a browser-zoom
+ *  context, say) — the same preparation the `context` fixture below gives
+ *  every page, so `waitForWasmReady` has a host socket to wait on there too.
+ */
+export async function prepareSmokeContext(ctx) {
+  await installTransportFixture(ctx);
+  await ctx.addInitScript({ content: STUB_QRCODE });
+
+  // Serve the rendezvous service's own registry module to the host page,
+  // and the sibling it imports at the path that import resolves to. See the
+  // note beside RENDEZVOUS_RELAY_JS — this second route is the difference
+  // between the whole suite running and the whole suite timing out.
+  await ctx.route('**/__rendezvous-registry.js', (route) =>
+    route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_REGISTRY_JS }),
+  );
+  await ctx.route('**/relay.js', (route) =>
+    route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_RELAY_JS }),
+  );
+
+  // Intercept the QR CDN load — stub QRCode so it doesn't block.
+  await ctx.route('**/qrcode*.js', (route) =>
+    route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
+  );
+
+  // Default scenario: serve the minimal smoke-test world above instead of
+  // the production `assets/worlds/default.toml`. See MINIMAL_DEFAULT_WORLD
+  // for the full rationale. Tests that route their own scenario register
+  // their handler later, so it matches first (most-recently-added wins).
+  await ctx.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: MINIMAL_DEFAULT_WORLD }),
+  );
+}
+
 export const test = base.extend({
   context: async ({ browser }, use) => {
     const ctx = await browser.newContext();
-    await installTransportFixture(ctx);
-    await ctx.addInitScript({ content: STUB_QRCODE });
-
-    // Serve the rendezvous service's own registry module to the host page,
-    // and the sibling it imports at the path that import resolves to. See the
-    // note beside RENDEZVOUS_RELAY_JS — this second route is the difference
-    // between the whole suite running and the whole suite timing out.
-    await ctx.route('**/__rendezvous-registry.js', (route) =>
-      route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_REGISTRY_JS }),
-    );
-    await ctx.route('**/relay.js', (route) =>
-      route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_RELAY_JS }),
-    );
-
-    // Intercept the QR CDN load — stub QRCode so it doesn't block.
-    await ctx.route('**/qrcode*.js', (route) =>
-      route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
-    );
-
-    // Default scenario: serve the minimal smoke-test world above instead of
-    // the production `assets/worlds/default.toml`. See MINIMAL_DEFAULT_WORLD
-    // for the full rationale. Tests that route their own scenario register
-    // their handler later, so it matches first (most-recently-added wins).
-    await ctx.route('**/assets/worlds/default.toml', (route) =>
-      route.fulfill({ contentType: 'text/plain', body: MINIMAL_DEFAULT_WORLD }),
-    );
-
+    await prepareSmokeContext(ctx);
     await use(ctx);
     await ctx.close();
   },

@@ -1,7 +1,17 @@
 .workshop-dock-root.workshop-layout { min-height: 32rem; }
-.workshop-dock-root .workshop-panel-switcher { display: flex; gap: .35rem; align-items: center; margin-bottom: .5rem; }
+/* The switcher wraps: at 200% text a dozen tabs no longer fit one row, and a
+   row that will not wrap squeezes each tab below its label and pushes the page
+   sideways instead. */
+.workshop-dock-root .workshop-panel-switcher { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-bottom: .5rem; }
 .workshop-dock-root .workshop-layout-reset { margin-left: auto; }
-.workshop-dock-root .workshop-dock-canvas { position: relative; display: grid; min-height: 32rem; overflow: hidden; border: 1px solid #52687a; background: #0c141d; }
+.workshop-dock-root .workshop-dock-canvas { position: relative; display: grid; min-height: 32rem; overflow: hidden auto; border: 1px solid #52687a; background: #0c141d; }
+/* A docked frame never shrinks past a header and one row of controls. A group's
+   tab list wraps at narrow widths and takes its rows out of the frame beneath
+   it — at 1280 wide a ten-tab group left its frame a 21px sliver — so the floor
+   is here, the row it sits in is at least its content (the renderer sizes
+   vertical rows minmax(min-content, …)), and the canvas above scrolls the rest
+   rather than clipping it. */
+.workshop-dock-root .workshop-tab-stack > .workshop-dock-panel { min-height: 6rem; }
 .workshop-dock-root .workshop-split { display: grid; gap: .25rem; min-width: 0; min-height: 0; height: 100%; }
 .workshop-dock-root .workshop-tab-stack { display: flex; flex-direction: column; }
 .workshop-dock-root :is(.workshop-tab-stack, .workshop-dock-panel) { min-width: 0; min-height: 0; height: 100%; }

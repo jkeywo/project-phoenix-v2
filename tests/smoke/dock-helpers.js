@@ -1,3 +1,5 @@
+import { expect } from './fixtures';
+
 export async function revealGmPanel(page, panel) {
   const settings = page.locator('#server-settings-overlay');
   if (await settings.isVisible()) {
@@ -6,6 +8,11 @@ export async function revealGmPanel(page, panel) {
   }
   await page.locator(`#gm-live-layout .workshop-panel-switcher [data-layout-panel="${panel}"]`)
     .evaluate(control => control.click());
+  // The tab is pressed; the panel is what the caller is about to touch. A
+  // scroll or press that lands while the dock is still bringing it forward
+  // races the repaint, so wait for the panel to actually be on screen.
+  await page.locator(`#gm-live-layout .workshop-dock-panel[data-panel="${panel}"]`)
+    .waitFor({ state: 'visible' });
 }
 
 /** Open a complex-action draft and keep it open across presses.
@@ -29,4 +36,26 @@ export async function clickGmControl(page, controlId, panel = 'readiness') {
 
 export async function revealWorkshopPanel(page, panel) {
   await page.locator(`.workshop-layout .workshop-panel-switcher [data-layout-panel="${panel}"]`).click();
+}
+
+/** Scroll a docked console frame to the bottom edge of its panel, the way an
+ *  operator reaches a control near the foot of a console: the dock canvas
+ *  scrolls, the frame is not resized. */
+export async function bringConsoleIntoView(page, frameSelector) {
+  await page.locator(frameSelector).evaluate(node => node.scrollIntoView({ block: 'end' }));
+}
+
+/** Dismiss every tutorial card a console shows on first use, one press each,
+ *  so the control under test is the one under the pointer. */
+export async function dismissTutorialCards(page, frameSelector) {
+  const frame = page.frameLocator(frameSelector);
+  const tutorial = frame.locator('ph-tutorial-overlay');
+  for (let dismissed = 0; dismissed < 16 && await tutorial.isVisible(); dismissed++) {
+    await bringConsoleIntoView(page, frameSelector);
+    const activeId = await tutorial.evaluate(element => element.state?.active?.id ?? null);
+    await tutorial.locator('#dismiss').click();
+    await expect.poll(() => tutorial.evaluate(element => element.state?.active?.id ?? null))
+      .not.toBe(activeId);
+  }
+  await expect(tutorial).toBeHidden();
 }

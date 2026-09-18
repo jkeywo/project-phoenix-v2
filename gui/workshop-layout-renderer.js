@@ -252,7 +252,11 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     if (rendered.length === 1) return rendered[0][0];
     const split = doc.createElement('div'); split.className = `workshop-split is-${node.axis}`;
     split.style.setProperty('--workshop-sizes', rendered.map(([, size]) => size).join('fr '));
-    const tracks = rendered.map(([, size]) => `minmax(0, ${size}fr)`).join(' ');
+    // A column may squeeze to nothing — min-width: 0 handles what is inside —
+    // but a row is at least its content: a wrapped tab list must not take its
+    // rows out of the frame below it, and the canvas scrolls what will not fit.
+    const floor = node.axis === 'vertical' ? 'min-content' : '0';
+    const tracks = rendered.map(([, size]) => `minmax(${floor}, ${size}fr)`).join(' ');
     split.style.gridTemplateColumns = node.axis === 'horizontal' ? tracks : '';
     split.style.gridTemplateRows = node.axis === 'vertical' ? tracks : '';
     split.append(...rendered.map(([child]) => child)); return split;

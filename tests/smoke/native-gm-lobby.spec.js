@@ -35,7 +35,10 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1920, height: 108
     await readiness.click();
     const ready = page.locator('#gm-ready-btn');
     await expect(ready).toBeEnabled();
-    await ready.scrollIntoViewIfNeeded();
+    // Centred rather than nearest-edge: a nearest scroll leaves the control
+    // flush with its frame's fractional clip edge, a third of a pixel short of
+    // the whole button, which is reachable but not "ratio 1".
+    await ready.evaluate(node => node.scrollIntoView({ block: 'center' }));
     await expect(ready).toBeInViewport({ ratio: 1 });
     await ready.click({ timeout: 5000 });
     expect(await page.evaluate(() => window.__phoenixNativeGmOutDrain().split('\n').filter(Boolean).map(JSON.parse)))

@@ -29,7 +29,8 @@ test('a running GM opens retained authored source through the Workshop control',
   await revealGmPanel(page, 'source-link');
   await page.locator('#gm-workshop-pack').selectOption('workshop-test');
   await page.locator('#gm-workshop-open').click();
-  await expect(page).toHaveURL(/\/workshop(?:\.html)?$/);
+  // The handoff URL carries the one-use transfer token in its fragment.
+  await expect(page).toHaveURL(/\/workshop(?:\.html)?(?:#source=[^#]+)?$/);
   await page.locator('#workshop-files').selectOption(WORKSHOP_WORLD);
   await expect(page.locator('#workshop-source')).toHaveValue(WORKSHOP_WORLD_TEXT.replaceAll('\r\n', '\n'));
   await expect(page.locator('#workshop-undo')).toBeDisabled();

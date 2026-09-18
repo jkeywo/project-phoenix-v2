@@ -4375,7 +4375,9 @@
     // never a reconstruction of the live World or its GM interventions.
     const canOpenWorkshopSource = () => !!window.__phoenixGmPage && !!localGm();
     window.__hostWorkshopPacks = function() {
-      if (!canOpenWorkshopSource()) return [];
+      // The GM desk paints before the wasm exports arrive (a fresh `?gm=1`
+      // document joining a fleet); no packs yet is an answer, not a fault.
+      if (!canOpenWorkshopSource() || !window.wasmBindings) return [];
       return Array.from(wasmBindings.wasm_active_pack_manifest().packs || [])
         .map(pack => ({ id: pack.id, name: pack.name }));
     };

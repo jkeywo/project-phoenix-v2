@@ -142,7 +142,9 @@ describe('Workshop layout renderer', () => {
       code: 'ArrowDown', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true,
     }));
     const nested = document.querySelector('.workshop-split .workshop-split.is-vertical');
-    expect(nested.style.gridTemplateRows).toMatch(/^minmax\(0, .+fr\) minmax\(0, .+fr\)$/);
+    // Rows are at least their content, so a wrapped tab list cannot take its
+    // rows out of the frame beneath it; columns still squeeze to their sizes.
+    expect(nested.style.gridTemplateRows).toMatch(/^minmax\(min-content, .+fr\) minmax\(min-content, .+fr\)$/);
 
     const css = readFileSync('gui/dock-layout.css', 'utf8');
     expect(css).toMatch(/\.workshop-dock-root \.workshop-dock-canvas\s*\{[^}]*min-height:\s*32rem/);

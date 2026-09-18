@@ -247,7 +247,11 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
     'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback',
     'gamepad', 'gmConfirmations', 'kind', 'liveLayout', 'version',
   ]);
-  expect(JSON.stringify(storedProfile)).not.toMatch(/session-token|player-name|station|saveCatalogue/i);
+  // The dock's placement trees are part of the profile and name panels — among
+  // them `station` and `station-console` — so the leak check reads the profile
+  // WITHOUT its placement, where a Station's state would have to live to leak.
+  const { liveLayout: _live, authoringLayout: _authoring, ...profileState } = storedProfile;
+  expect(JSON.stringify(profileState)).not.toMatch(/session-token|player-name|station|saveCatalogue/i);
   const downloadPromise = captain.waitForEvent('download');
   await captain.click('[data-control="operator-profile-export"]');
   const download = await downloadPromise;

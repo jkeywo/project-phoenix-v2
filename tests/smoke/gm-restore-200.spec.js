@@ -77,10 +77,14 @@ test('a GM restores a checkpoint and resumes it at 200% text on 1280x720',
     // Restore opens as a floating draft, over the arrangement.
     await expect(page.locator('[data-panel="restore"]')).toHaveClass(/is-floating/);
 
-    // Nothing selected yet: the control asks for a selection in WORDS rather
-    // than presenting a dead button (PRD #1418 story 27).
-    await expect(page.locator('#gm-restore-summary')).not.toBeEmpty();
-    await expect(page.locator('#gm-restore-apply')).toBeDisabled();
+    // The checkpoint just confirmed is the candidate (issue #1445 selects a
+    // confirmed checkpoint), so the control says in WORDS what it will restore
+    // rather than presenting a dead button (PRD #1418 story 27), and Apply is
+    // pressable. The truth is on `aria-disabled` (story 29): native `disabled`
+    // is withheld while the control is focused so a GM is never dropped to the
+    // document body mid-rewind.
+    await expect(page.locator('#gm-restore-summary')).toContainText(name);
+    await expect(page.locator('#gm-restore-apply')).toHaveAttribute('aria-disabled', 'false');
 
     // Touch/pointer reach at this size.
     await revealGmPanel(page, 'checkpoint');

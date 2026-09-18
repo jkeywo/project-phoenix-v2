@@ -12,7 +12,7 @@ import {
   waitForJoinCode,
 } from './fixtures';
 import { ts } from './strings';
-import { clickGmControl, openGmDraft, revealGmPanel } from './dock-helpers.js';
+import { bringConsoleIntoView, clickGmControl, dismissTutorialCards, openGmDraft, revealGmPanel } from './dock-helpers.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -21,6 +21,18 @@ const GM_NPC_WORLD = readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm
 
 // Generated acceptance assets are deliberately absent from ordinary CI. Run
 // after prepare-gm-live-event.mjs with PHOENIX_GM_PRECHECK=1 on the served bundle.
+/** Dismiss the first-run tutorial cards a real console carries.
+ *
+ * They sit OVER the console's own controls, so a spec that presses one has to
+ * clear them first — through the ordinary local control an operator uses, not
+ * by hiding them, so this keeps proving the console is really driveable.
+ *
+ * The console is an iframe inside a dock panel a little shorter than it. The
+ * scroll an operator makes is to bring the console's bottom edge into view,
+ * and that is what puts a card within reach; scrolling the card into view
+ * INSIDE the iframe, which is all a press does on its own, leaves the outer
+ * panel where it was and the press lands on whatever the dock drew below.
+ */
 test('prepared GM event admits crew and delivers Comms to both live Fleet hulls', async ({ context }, testInfo) => {
   test.skip(process.env.PHOENIX_GM_PRECHECK !== '1', 'requires generated #1320 acceptance assets');
   test.setTimeout(240_000);
@@ -324,15 +336,7 @@ test('GM Comms preserves exact text and recipient dialogue through ordinary crew
   await expect(response).toBeVisible();
   await expect(crewFrame.locator('ph-comms-current-message .msg .text').filter({ hasText: offer })).toHaveText(offer);
   // The real first-run console carries tutorial cards over its response area.
-  // Dismiss each through the ordinary local control before answering the hail.
-  const tutorial = crewFrame.locator('ph-tutorial-overlay');
-  for (let dismissed = 0; dismissed < 16 && await tutorial.isVisible(); dismissed++) {
-    const activeId = await tutorial.evaluate(element => element.state?.active?.id ?? null);
-    await tutorial.locator('#dismiss').click();
-    await expect.poll(() => tutorial.evaluate(element => element.state?.active?.id ?? null))
-      .not.toBe(activeId);
-  }
-  await expect(tutorial).toBeHidden();
+  await dismissTutorialCards(crewPage, '#comms-iframe');
   await response.click();
   const responseFeedback = crewFrame.locator('.semantic-action-feedback__item[data-action-id="comms.respond"]');
   await expect(responseFeedback).toHaveAttribute('data-state', /^(Applied|Refused|TimedOut)$/);
@@ -2615,6 +2619,10 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     '.semantic-action-feedback__item[data-action-id="helm.impulse"]',
   );
   await expect(impulse).toBeVisible();
+  // The console is a document panel behind the map tab, and the press is
+  // inside its iframe: bring the panel forward and the console into view.
+  await revealGmPanel(gm, 'station-console');
+  await bringConsoleIntoView(gm, '#gm-station-frame');
   await impulse.click();
   await expect(impulseFeedback).toHaveAttribute('data-state', 'Applied', { timeout: 30_000 });
   await gm.waitForFunction(
@@ -2870,6 +2878,10 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   await revealGmPanel(gm, 'station-console');
   await frameElement.scrollIntoViewIfNeeded();
   await expect(impulse).toBeEnabled({ timeout: 20_000 });
+  // The console is a document panel behind the map tab, and the press is
+  // inside its iframe: bring the panel forward and the console into view.
+  await revealGmPanel(gm, 'station-console');
+  await bringConsoleIntoView(gm, '#gm-station-frame');
   await impulse.click();
   await gm.waitForFunction(
     () => window.__gmStationCorrelatedActions
@@ -3174,8 +3186,13 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
     return row?.station.operators.length === 2 && ids.every(id => row.station.operators.includes(id))
       && row.station.rating === 'Std' && row.ship.control_sources['red-alert'] === 'Human';
   }, operators);
+  // The console is a document panel in the map group since issue #1504, so it
+  // is brought to the front, then into view, before it is driven — and it is a
+  // real first-run console, so its tutorial cards go first.
+  await revealGmPanel(gm, 'station-console');
+  await dismissTutorialCards(gm, '#gm-station-frame');
   const alert = gm.frameLocator('#gm-station-frame').locator('ph-red-alert');
-  await gm.locator('#gm-station-frame').scrollIntoViewIfNeeded();
+  await bringConsoleIntoView(gm, '#gm-station-frame');
   const initialAlert = await alert.locator('#alert-btn').evaluate(button => button.classList.contains('active'));
   await alert.locator('#alert-btn').click();
   await expect(alert.locator('#feedback-status')).toHaveAttribute('data-state', 'Applied');
@@ -3220,8 +3237,12 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
     return row.station.operators.length === 1 && row.station.operators[0] === id;
   }, operators[0]);
   await humanOrder(initialAlert, 'human-after-gm-disconnect');
-  await gm.locator('#gm-station-toggle').scrollIntoViewIfNeeded();
-  await gm.locator('#gm-station-toggle').click();
+  // Releasing is a press on the Station tools panel, which sits behind the
+  // console the operator was just driving; it is brought forward and pressed
+  // as one step, because the attention queue brings ITS panel forward in the
+  // same group when a banner lands (the other GM has just left), and a press
+  // that waits for the pointer to settle can lose the tab in between.
+  await clickGmControl(gm, 'gm-station-toggle', 'station');
   await gm.waitForFunction(() => {
     const row = window.__hostGmStationState().selectedRow;
     return row.station.operators.length === 0 && row.station.rating === 'Std'

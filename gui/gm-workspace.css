@@ -258,7 +258,11 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-session-history #gm-session-log { display: block; }
 #gm-console.gm-desk #gm-armed-chip { color: var(--gold); }
 #gm-console.gm-desk .gm-segment { display: flex; gap: var(--space-1); flex-wrap: wrap; }
-#gm-console.gm-desk .gm-segment-source { position: absolute; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); overflow: hidden; }
+/* Pinned to the corner: an auto-placed absolute box takes its static position
+   after the grid's content, and at 200% text that landed a viewport past the
+   header's right edge, which is a horizontal scroll the bar promised never to
+   have. */
+#gm-console.gm-desk .gm-segment-source { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); overflow: hidden; }
 #gm-console.gm-desk #gm-session-clock { font-family: var(--font-mono); font-size: var(--text-xs); }
 #gm-console.gm-desk #gm-role-preset-label { max-width: 280px; }
 

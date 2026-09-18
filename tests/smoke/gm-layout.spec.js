@@ -1,4 +1,5 @@
-import { test, expect, waitForWasmReady } from './fixtures';
+import { test, expect, waitForWasmReady, prepareSmokeContext } from './fixtures';
+import { WORKSHOP_LAYOUT_VERSION } from '../../gui/workshop-layout-model.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES, BROWSER_ZOOMS } from '../fixtures/device-matrix.mjs';
@@ -22,6 +23,35 @@ async function joinAsReadyGm(page, world) {
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 }
 
+/**
+ * A game master that OWNS the fixture's player ship: the landing's Host as GM
+ * route, which selects a hull like any host. The `?gm=1&scenario=` bypass
+ * above deliberately spawns no ship of its own since the standalone route
+ * landed (src/lobby/server.rs, `update_session_with_config`), and an NPC hull
+ * only exposes the battleship Helm to puppeting — so a test that reads a
+ * REAL Ship/Station row of the Alliance Cruiser needs the crewed hull.
+ */
+async function hostAsReadyGm(page, world) {
+  await page.route('**/assets/worlds/*.toml', route => route.fulfill({ contentType: 'text/plain', body: world }));
+  await page.goto('/');
+  await page.locator('#landing-menu [data-landing-entry="host_gm"]').click();
+  const first = page.locator('#world-list .world-btn[data-scenario-id]').first();
+  await first.waitFor({ state: 'visible', timeout: 60_000 });
+  await first.click();
+  const shipCard = page.locator('ph-ship-picker .ship-card').first();
+  await Promise.race([
+    shipCard.waitFor({ state: 'visible', timeout: 60_000 }),
+    page.locator('#landing-panel').waitFor({ state: 'hidden', timeout: 60_000 }),
+  ]);
+  if (await shipCard.isVisible()) await shipCard.click();
+  await expect(page.locator('#landing-panel')).toBeHidden({ timeout: 60_000 });
+  await waitForWasmReady(page);
+  await page.waitForFunction(() => !!window.__hostLocalGm?.(), null, { timeout: 60_000 });
+  await page.locator('#gm-session-start').click();
+  await page.locator('#gm-action-confirmation [data-confirmation-accept]').click();
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress', null, { timeout: 60_000 });
+}
+
 test('Live dock persists separately and keeps the operator bar visible in narrow mode', async ({ page }) => {
   test.setTimeout(90000);
   const world = fs.readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
@@ -32,7 +62,9 @@ test('Live dock persists separately and keeps the operator bar visible in narrow
   await expect(page.locator('[data-panel="roster"].is-floating')).toBeVisible();
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('phoenix-operator-profile-v1')));
   expect(stored.liveLayout.floats[0].panel).toBe('roster');
-  expect(stored.authoringLayout.version).toBe(3);
+  // Whatever version the Workshop registry is at: the claim is that the GM page
+  // stored a current Authoring layout, not that the registry stopped moving.
+  expect(stored.authoringLayout.version).toBe(WORKSHOP_LAYOUT_VERSION);
 
   await page.reload();
   await waitForWasmReady(page);
@@ -83,9 +115,15 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
     await expect(page.locator('#gm-desk-brief')).toBeVisible();
     const desk = await page.locator('#gm-desk-brief').boundingBox();
     const workspace = await page.locator('#gm-workspace').boundingBox();
-    // The dock fills the desk: it is the desk.
+    // The dock fills the desk: it is the desk. The desk keeps its own padding
+    // around it — the framing the artboard draws — so the span is measured
+    // against the room inside that padding, not the padded box.
+    const framing = await page.locator('#gm-workspace').evaluate(el => {
+      const s = getComputedStyle(el);
+      return parseFloat(s.paddingLeft) + parseFloat(s.paddingRight);
+    });
     expect(Math.round(desk.width), `${width}: dock spans the workspace`)
-      .toBeGreaterThanOrEqual(Math.round(workspace.width) - 2);
+      .toBeGreaterThanOrEqual(Math.round(workspace.width - framing) - 2);
     // The map keeps drawing after being docked: <ph-navigation-map> restores
     // its render loop on reconnect, so the canvas has real pixels.
     await expect(page.locator('#gm-entity-map')).toBeVisible();
@@ -535,7 +573,7 @@ test('the authentic Station puppet mounts the real per-hull console and reads th
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width: GM_VIEWPORT.width, height: GM_VIEWPORT.height });
-    await joinAsReadyGm(page, world);
+    await hostAsReadyGm(page, world);
 
     // The fixture's player ship is an Alliance Cruiser (#1424 corrected its
     // Tactical console at 200%). A real Ship/Station row is selected as soon
@@ -554,8 +592,11 @@ test('the authentic Station puppet mounts the real per-hull console and reads th
     const before = await frameFontPx();
     expect(before).toBeGreaterThan(0);
 
-    await page.evaluate((scale) => document.documentElement.style
-      .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
+    // The desk's OWN text setting: the puppet mirrors the resolved presentation
+    // record (`gui/gm-station-puppet.js` `applyPresentation`), not a raw custom
+    // property poked onto the root, so the change is made where an operator
+    // makes it.
+    await page.evaluate((scale) => window.__serverSettings.presentation.set('textScale', scale), MAX_TEXT_SCALE);
     // The puppet's own tick cadence (`gm_station` arriving again) is what
     // carries the change in — no reload, matching the production comment in
     // `gui/gm-station-puppet.js`.
@@ -567,7 +608,7 @@ test('the authentic Station puppet mounts the real per-hull console and reads th
     const after = await frameFontPx();
     expect(after).toBeGreaterThan(before);
 
-    await page.evaluate(() => document.documentElement.style.removeProperty('--a11y-text-scale'));
+    await page.evaluate(() => window.__serverSettings.presentation.reset('textScale'));
     expect(errors).toEqual([]);
   });
 
@@ -591,13 +632,18 @@ test('browser zoom on the GM desk works alongside the Phoenix text setting', asy
     },
     deviceScaleFactor: zoom,
   });
+  // A context this test built itself has none of the fixture's transport
+  // stand-in, and a host page without it never reports its socket open.
+  await prepareSmokeContext(zoomContext);
   try {
     const page = await zoomContext.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await joinAsReadyGm(page, world);
+    await hostAsReadyGm(page, world);
 
     await expect(page.locator('#gm-workspace')).toBeVisible();
+    // A dock panel behind its group's shown tab; brought forward to be read.
+    await revealGmPanel(page, 'mission');
     await expect(page.locator('#gm-mission-panel')).toBeVisible();
     const before = await page.evaluate(() =>
       parseFloat(getComputedStyle(document.getElementById('gm-console')).fontSize));
@@ -650,7 +696,13 @@ test('forced colours keep the GM desk\'s focus ring, edges and selected entity v
     // Under forced colours the ring redraws as a BORDER on the chamfered
     // `.btn-bg` body (`ph-console-styles.js`), not an outline on the button
     // itself — the box-shadow ring `forced-colors` drops entirely.
+    // The ring is `:focus-visible`, which Chromium withholds from a script
+    // focus that follows a mouse press — the click above. A keyboard operator
+    // reaches the button by Tab, so this does what they do: step off and back.
     await row.locator('button').focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(row.locator('button')).toBeFocused();
     const ring = await row.locator('button .btn-bg').evaluate(el => {
       const s = getComputedStyle(el);
       return { width: parseFloat(s.borderTopWidth), colour: s.borderTopColor };
@@ -686,7 +738,7 @@ test('GM performing panels (Comms, Knowledge Compare, role presets) stay reachab
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width: GM_VIEWPORT.width, height: GM_VIEWPORT.height });
-    await joinAsReadyGm(page, world);
+    await hostAsReadyGm(page, world);
 
     // Knowledge Compare: a real ship's Truth/Crew comparison, waited for
     // exactly as the #1318 exit tests do (tests/smoke/gm-page.spec.js).
@@ -709,6 +761,10 @@ test('GM performing panels (Comms, Knowledge Compare, role presets) stay reachab
 
     await page.evaluate(() => document.documentElement.style.setProperty('--a11y-text-scale', '2'));
 
+    // Knowledge Compare is the inspector's Crew view since issue #1512: the
+    // inspector is a dock panel, and the comparison its own tab within it.
+    await revealGmPanel(page, 'inspector');
+    await page.locator('#gm-tab-crew').click();
     await expect(page.locator('#gm-knowledge-panel')).toBeVisible();
     const hint = await page.locator('#gm-knowledge-hint').textContent();
     expect(hint?.length).toBeGreaterThan(100);
@@ -716,6 +772,7 @@ test('GM performing panels (Comms, Knowledge Compare, role presets) stay reachab
     const summary = await page.locator('#gm-knowledge-contacts-summary').textContent();
     expect(summary?.trim().length).toBeGreaterThan(0);
 
+    await revealGmPanel(page, 'comms');
     await expect(page.locator('#gm-comms-panel')).toBeVisible();
     await expect(page.locator('#gm-role-preset-label')).toBeVisible();
     await expect(page.locator('#gm-role-preset-select')).toHaveValue(longPresetId);

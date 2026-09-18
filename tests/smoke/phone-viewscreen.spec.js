@@ -58,8 +58,11 @@ const device = (id) => {
 async function openShell(page) {
   await page.goto('/');
   await expect(page.locator(COG)).toBeVisible({ timeout: 30_000 });
+  // No scenario is ever selected here, so the boot spinner that startServer()
+  // would clear stays up; it sits over the HUD (z-index 100) and would take
+  // every tap. Clear it the way the synthetic GM shells do.
   await page.evaluate(() => {
-    for (const id of ['landing-panel', 'scenario-panel']) {
+    for (const id of ['landing-panel', 'scenario-panel', 'wasm-spinner']) {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     }

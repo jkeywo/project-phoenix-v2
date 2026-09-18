@@ -18,7 +18,7 @@ import {
   test,
   waitForWasmReady,
 } from './fixtures';
-import { revealGmPanel } from './dock-helpers.js';
+import { bringConsoleIntoView, clickGmControl, dismissTutorialCards, revealGmPanel } from './dock-helpers.js';
 
 const GM_IDENTITY_KEY = 'phoenix.fleet.gm-identity.v1';
 const REPORT_PATH = path.resolve(__dirname, '../../target/gm-m1-exit/report.json');
@@ -359,9 +359,6 @@ async function reconnectCrew(context, hostId, token, station) {
   return page;
 }
 
-function clickGmControl(page, id) {
-  return page.locator(`#${id}`).click();
-}
 
 function readStatusEvidence(page, id) {
   return page.evaluate((nodeId) => {
@@ -938,6 +935,10 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     track(gmTwo, 'gm-2-first-join');
     await installMeshTrace(gmTwo, 'gm-2-first-join');
     await joinGm(gmTwo, fleetCode, { waitForAdmission: false });
+    // The join request lands in its own dock panel (issue #1505); once the
+    // request has unhidden it, it is brought forward like any other panel.
+    await gmOne.waitForFunction(() => !document.getElementById('gm-join-controls')?.hidden, null, { timeout: 30_000 });
+    await revealGmPanel(gmOne, 'join');
     await expect(gmOne.locator('#gm-join-controls')).toBeVisible({ timeout: 30_000 });
     await expect(gmOne.locator('#gm-join-accept')).toBeVisible();
     await expect(gmOne.locator('#gm-join-reject')).toBeVisible();
@@ -1077,6 +1078,8 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       undefined,
       { timeout: 60_000 },
     );
+    await gmOne.waitForFunction(() => !document.getElementById('gm-join-controls')?.hidden, null, { timeout: 30_000 });
+    await revealGmPanel(gmOne, 'join');
     await expect(gmOne.locator('#gm-join-controls')).toBeVisible();
     await expect(gmOne.locator('#gm-join-accept')).toBeHidden();
     await expect(gmOne.locator('#gm-join-reject')).toBeHidden();
@@ -1212,8 +1215,11 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       { timeout: 30_000 },
     );
     await revealGmPanel(gmOne, 'station-console');
-    const stationFrame = gmOne.locator('#gm-station-frame');
-    await stationFrame.scrollIntoViewIfNeeded();
+    // First use of this console shows its tutorial cards over the controls;
+    // they are dismissed the way a player dismisses them, and the console is
+    // scrolled to where its impulse control sits (issue #1504).
+    await dismissTutorialCards(gmOne, '#gm-station-frame');
+    await bringConsoleIntoView(gmOne, '#gm-station-frame');
     const helmFrame = gmOne.frameLocator('#gm-station-frame');
     const impulse = helmFrame.locator('#impulse-btn').locator('#btn');
     const impulseFeedback = helmFrame.locator(

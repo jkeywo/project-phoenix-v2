@@ -66,7 +66,7 @@ desk: one grid child across the whole screen, and the detail column is gone.
 Issue #1510 separated what the contact tool had been carrying. Deciding what one
 observing ship may see of one target is a verb — reveal, conceal, normal — and
 stays on the contact panel beside the observer it applies to. Misclassifying a
-contact, setting a reported-information policy and creating a ghost contact each
+contact and setting a reported-information policy each
 compose several choices before anything can be sent, so each became a draft of
 its own with the shared temporary lifecycle: absent from the default
 arrangement, opened floating, cleared or kept by its own Keep open, and finished
@@ -87,6 +87,14 @@ gesture Spawn uses: the chart speaks metres and the position is canonical
 integer millimetres, so the picked place is converted into the same fields, with
 the same bounds, checked by the same validation. A place beyond those bounds is
 written verbatim and refused, not quietly clamped.
+
+Creating a ghost contact was the third such draft until placing one became a
+Spawn outcome: the placement panel's palette, its chart gesture and its typed
+form place either a real entity or a false Sensors report of that entry for one
+observing ship. A ghost is reported to a ship and never spawned, so that outcome
+asks which ship, and under what identity it can later be removed; the contact
+tool keeps the per-observer record and a Remove beside each entry. Live layout
+version 14 retired the ghost draft panel.
 
 Issue #1511 took the last two selected-entity actions out of the inspector.
 Disabling and restoring one authored System is a target-relative choice and a

@@ -2981,6 +2981,13 @@ server.gm.spawn.result_refused_local,Immediate local refusal of a GM placement. 
 server.gm.spawn.result_applied,Applied GM placement. {name} is the operator; {entry} the palette entry; {tick} the authoritative tick; {correlation} the request identity,[{name} placed {entry} at tick {tick}. Applied ({correlation}).]
 server.gm.spawn.result_no_op,No-op GM placement. {name} is the operator; {entry} the palette entry; {tick} the authoritative tick; {correlation} the request identity,[{name} placed {entry} at tick {tick}. No-op ({correlation}).]
 server.gm.spawn.result_refused,Refused GM placement. {name} is the operator; {entry} the palette entry; {tick} the authoritative tick; {correlation} the request identity; {reason} the refusal reason,[{name} placed {entry} at tick {tick}. Refused: {reason} ({correlation}).]
+server.gm.spawn.outcome,Legend of the choice between spawning an entity and placing a ghost report,[Outcome]
+server.gm.spawn.outcome_entity,Outcome option that spawns the palette entry as a real entity,[Spawn the entity]
+server.gm.spawn.outcome_ghost,Outcome option that places a false Sensors report of the palette entry for one observing ship,[Ghost for a ship]
+server.gm.spawn.ghost_observer,Placeholder and label for the ship a placed ghost is reported to,[Observing ship]
+server.gm.spawn.ghost_id,Label for the identity a placed ghost is reported under and later removed by,[Report ID]
+server.gm.spawn.ghost_scope,Line naming the ship a placed ghost would be reported to; {ship} is its name,[Reported to {ship} as a Sensors contact.]
+server.gm.spawn.ghost_entry,Log wording for a placed ghost; {id} is its report identity and {entry} the palette label and {ship} the observing ship,[ghost {id} of {entry} for {ship}]
 server.gm.mission.result_pending,Pending local GM event control. {name} is the operator; {verb} what they did; {event} the qualified event id; {correlation} the request identity,[{name} {verb} {event}. Pending ({correlation}).]
 server.gm.mission.result_timed_out,Timed-out local GM event control. {name} is the operator; {verb} what they did; {event} the qualified event id; {correlation} the request identity,[{name} {verb} {event}. Timed out while waiting for an authoritative result ({correlation}).]
 server.gm.mission.result_refused_local,Immediate local refusal of a GM event control. {name} is the operator; {verb} what they did; {event} the qualified event id; {correlation} the request identity; {reason} is localized detail,[{name} {verb} {event}. Refused: {reason} ({correlation}).]
@@ -3674,18 +3681,10 @@ server.gm.presentation.current_card,GM active title or Comms card,[Card shown un
 server.gm.presentation.no_card,GM presentation current state,[No card shown]
 server.gm.contact.information,GM contact information result kind,[Contact report]
 server.gm.contact.ghosts,GM false report controls heading,[Ghost contacts]
-server.gm.contact.ghost-explanation,GM ghost scope explanation,[Place or replace a false Sensors point for this observing ship. It has no physical entity and cannot be targeted. Coordinates are world millimetres.]
-server.gm.contact.ghost-id,GM observer local ghost identity,[Report ID]
-server.gm.contact.ghost-x,GM ghost world X coordinate,[World X (mm)]
-server.gm.contact.ghost-y,GM ghost world Y coordinate,[World Y (mm)]
-server.gm.contact.ghost-z,GM ghost world Z coordinate,[World Z (mm)]
 server.gm.contact.ghost-set,GM absolute ghost action,[Set ghost]
 server.gm.contact.draft_scope,GM line naming the observing ship and target a contact draft would act on,"[{ship} sees {target}.]"
-server.gm.contact.ghost_scope,GM line naming the observing ship a ghost contact draft would report to,"[Reported to {ship}.]"
-server.gm.contact.ghost_pick,GM button arming the chart to place a ghost contact,[Pick on chart]
-server.gm.contact.ghost_pick_armed,GM status while the chart is capturing a ghost contact position,"[Picking a place for the ghost. Click the chart.]"
-server.gm.contact.ghost_pick_preview,GM preview of the position a chart click would give a ghost contact,"[Ghost at {x}, {z} millimetres.]"
 server.gm.contact.ghost-remove,GM clear ghost action,[Remove ghost]
+server.gm.contact.ghost-remove_accessibility,Accessible name of the Remove control beside one listed ghost; {id} is its report identity,[Remove ghost {id}]
 
 "console.sensors.report_source","Allowed Sensors observation source","[Sensors report]"
 "console.sensors.report_label","Live reported contact and observation age","[{name} · {source} · observed tick {tick} · age {age} ticks]"

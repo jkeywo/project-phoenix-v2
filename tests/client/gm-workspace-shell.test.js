@@ -846,10 +846,12 @@ it('gives contact control, NPC doctrine and their three drafts panels of their o
     expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
     expect(document.querySelector(`#gm-inspector #${id}`), id).toBeNull();
   }
-  // The three drafts split out of the contact tool are complex actions: absent
-  // from the arrangement, present in the document, ready to be opened.
+  // The two drafts split out of the contact tool are complex actions: absent
+  // from the arrangement, present in the document, ready to be opened. (The
+  // ghost draft that stood beside them was retired in Live layout version 14:
+  // placing a ghost is a Spawn outcome.)
   for (const [panel, id] of [['misclassify', 'gm-contact-misclassify-panel'],
-    ['report-policy', 'gm-contact-report-panel'], ['ghost', 'gm-contact-ghost-panel']]) {
+    ['report-policy', 'gm-contact-report-panel']]) {
     expect(document.querySelector(`[data-panel="${panel}"]`), panel).toBeNull();
     expect(shell.liveLayoutState().closed, panel).toContain(panel);
     expect(document.getElementById(id), id).not.toBeNull();
@@ -862,7 +864,6 @@ it('gives contact control, NPC doctrine and their three drafts panels of their o
   }
   // Nothing about the contact tool's own controls moved into a draft panel.
   expect(document.querySelector('#gm-contact-panel #gm-contact-observer')).not.toBeNull();
-  expect(document.querySelector('#gm-contact-ghost-panel #gm-contact-ghost-x')).not.toBeNull();
   expect(document.querySelector('#gm-contact-misclassify-panel #gm-contact-classification'))
     .not.toBeNull();
   expect(document.querySelector('#gm-contact-report-panel #gm-contact-report-delay')).not.toBeNull();
@@ -870,8 +871,7 @@ it('gives contact control, NPC doctrine and their three drafts panels of their o
   // tab is `hidden`, so a refusal written only into the contact tool is one the
   // operator never sees.
   for (const [id, feedback] of [['gm-contact-misclassify-panel', 'gm-contact-misclassify-feedback'],
-    ['gm-contact-report-panel', 'gm-contact-report-feedback'],
-    ['gm-contact-ghost-panel', 'gm-contact-ghost-feedback']]) {
+    ['gm-contact-report-panel', 'gm-contact-report-feedback']]) {
     expect(document.querySelector(`#${id} #${feedback}`), feedback).not.toBeNull();
   }
   // What is in FORCE is a record, not a draft, and so is the simple action

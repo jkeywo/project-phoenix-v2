@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 13;
+export const LIVE_LAYOUT_VERSION = 14;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -13,7 +13,7 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   tool('spawn'), documentPanel('inspector'),
   tool('checkpoint'), tool('restore'),
   tool('contact'), tool('npc'),
-  tool('misclassify'), tool('report-policy'), tool('ghost'),
+  tool('misclassify'), tool('report-policy'),
   tool('system'), tool('effect'),
   tool('despawn'), tool('faction'),
   tool('objective'),
@@ -34,6 +34,7 @@ const V9_PANELS = Object.freeze([...V8_PANELS,
 const V10_PANELS = Object.freeze([...V9_PANELS, 'system', 'effect']);
 const V11_PANELS = Object.freeze([...V10_PANELS, 'despawn', 'faction']);
 const V12_PANELS = Object.freeze([...V11_PANELS, 'objective']);
+const V13_PANELS = Object.freeze([...V12_PANELS, 'entity-fields']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -70,16 +71,24 @@ const ADDED_IN_V4 = Object.freeze([
  * all. Spawn is the first (issue #1506); the later complex actions join it. */
 export const LIVE_TEMPORARY_PANELS = Object.freeze([
   'spawn', 'restore',
-  // Each of these combines an observer and a target with a classification, a
-  // delay/quantisation/privacy policy, or an identity and a position — several
-  // choices before anything can be sent, which is what makes it a draft rather
-  // than a verb (issue #1510).
-  'misclassify', 'report-policy', 'ghost',
+  // Each of these combines an observer and a target with a classification or a
+  // delay/quantisation/privacy policy — several choices before anything can be
+  // sent, which is what makes it a draft rather than a verb (issue #1510). The
+  // ghost draft that stood beside them was retired in version 14: placing a
+  // ghost is a Spawn OUTCOME now, the same palette and the same chart gesture,
+  // reported to a ship instead of spawned into the world.
+  'misclassify', 'report-policy',
   // Direct damage and repair combine an effect kind, an amount, a scope over
   // the hull, a Station or one System, and a clamp/lethality preview — several
   // choices about one press, which is what makes it a draft (issue #1511).
   'effect',
 ]);
+/** The draft vocabulary every version up to 13 stored, which still carried the
+ * ghost draft. A stored tree is sanitized against ITS version's drafts — a
+ * floating ghost draft in a version-13 profile was a draft then, and is not
+ * restored — before the current registry drops the panel altogether. */
+const TEMPORARY_UNTIL_V13 = Object.freeze([...LIVE_TEMPORARY_PANELS.slice(0, 4), 'ghost',
+  ...LIVE_TEMPORARY_PANELS.slice(4)]);
 
 /** The attention region renders connection and recovery banners verbatim and the
  * health panel is the readable table behind them. Neither may be hidden by a
@@ -137,6 +146,8 @@ const ADDED_IN_V12 = Object.freeze([['objective', 'mission', 'tab']]);
  * same selection the entity inspector does, so it joins that column as a tab
  * rather than opening a surface of its own (issue #1489). */
 const ADDED_IN_V13 = Object.freeze([['entity-fields', 'inspector', 'tab']]);
+/** Nothing. Version 14 retires the ghost draft (see LIVE_TEMPORARY_PANELS). */
+const ADDED_IN_V14 = Object.freeze([]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -262,10 +273,14 @@ const v12Default = () => ({ version: 12, ...arrangementBeforeV13(),
   floats: [],
   closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
   selected: 'roster' });
+const v13Default = () => ({ version: 13, ...liveArrangement(),
+  floats: [],
+  closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
+  selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
     floats: [],
-    closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
+    closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'effect'],
     selected: 'roster' };
 }
 const base = createDockLayoutModel({
@@ -287,19 +302,21 @@ const v4 = createDockLayoutModel({ version: 4, panels: V4_PANELS, defaultLayout:
 const v5 = createDockLayoutModel({ version: 5, panels: V5_PANELS, defaultLayout: v5Default,
   compatibleVersions: [5] });
 const v6 = createDockLayoutModel({ version: 6, panels: V6_PANELS, defaultLayout: v6Default,
-  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [6] });
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [6] });
 const v7 = createDockLayoutModel({ version: 7, panels: V7_PANELS, defaultLayout: v7Default,
-  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [7] });
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [7] });
 const v8 = createDockLayoutModel({ version: 8, panels: V8_PANELS, defaultLayout: v8Default,
-  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [8] });
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [8] });
 const v9 = createDockLayoutModel({ version: 9, panels: V9_PANELS, defaultLayout: v9Default,
-  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [9] });
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [9] });
 const v10 = createDockLayoutModel({ version: 10, panels: V10_PANELS, defaultLayout: v10Default,
-  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [10] });
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [10] });
 const v11 = createDockLayoutModel({ version: 11, panels: V11_PANELS, defaultLayout: v11Default,
-  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [11] });
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [11] });
 const v12 = createDockLayoutModel({ version: 12, panels: V12_PANELS, defaultLayout: v12Default,
-  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [12] });
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [12] });
+const v13 = createDockLayoutModel({ version: 13, panels: V13_PANELS, defaultLayout: v13Default,
+  temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [13] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -317,7 +334,11 @@ const migrate = createDockLayoutMigration({
     { version: 10, model: v10, added: ADDED_IN_V10 },
     { version: 11, model: v11, added: ADDED_IN_V11 },
     { version: 12, model: v12, added: ADDED_IN_V12 },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V13 },
+    { version: 13, model: v13, added: ADDED_IN_V13 },
+    // Version 14 registers nothing: it RETIRES the ghost draft. A retired panel
+    // needs no placement pass — the current registry does not know it, so the
+    // final sanitize drops it from wherever a stored tree held it.
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V14 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

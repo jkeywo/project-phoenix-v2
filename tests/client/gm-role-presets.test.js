@@ -162,7 +162,6 @@ function mount() {
     <section id="gm-contact-panel"></section>
     <section id="gm-contact-misclassify-panel"></section>
     <section id="gm-contact-report-panel"></section>
-    <section id="gm-contact-ghost-panel"></section>
     <section id="gm-npc-panel"></section>
     <section id="gm-system-panel"></section>
     <section id="gm-effect-panel"></section>

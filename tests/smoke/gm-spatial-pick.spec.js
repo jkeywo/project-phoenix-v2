@@ -114,63 +114,48 @@ test('a GM places a ghost contact on the docked map', { tag: '@core' }, async ({
   await page.locator('#gm-action-confirmation [data-confirmation-accept]').click();
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
-  // Creating a ghost is a complex action, so it opens as a floating draft.
-  await revealGmPanel(page, 'contact');
-  await page.waitForFunction(
-    () => document.querySelectorAll('#gm-contact-observer option').length > 1,
-    null, { timeout: 60_000 });
-  const observer = await page.locator('#gm-contact-observer option').nth(1).getAttribute('value');
-  await page.locator('#gm-contact-observer').selectOption(observer);
-  await revealGmPanel(page, 'ghost');
-  const ghost = page.locator('[data-panel="ghost"]');
-  await expect(ghost).toHaveClass(/is-floating/);
-  await page.locator('#gm-contact-ghost-id').fill('smoke-ghost');
-  await page.locator('#gm-contact-ghost-palette')
-    .selectOption({ index: 1 });
-
-  const pick = page.locator('#gm-contact-ghost-pick');
-  const status = page.locator('#gm-contact-ghost-pick-status');
-  await pick.click();
-  await expect(page.locator('#gm-entity-map')).toHaveAttribute('data-placement-armed', '');
-  await expect(status).toHaveText(ts('server.gm.contact.ghost_pick_armed'));
-
-  // One chart, one gesture: arming Spawn ends the ghost pick rather than
-  // leaving two panels listening for the same click.
+  // Placing a ghost IS placing: the same draft, the same palette, the same
+  // chart gesture. Only the OUTCOME differs — reported to one observing ship as
+  // a false Sensors contact, never spawned into the world.
   await revealGmPanel(page, 'spawn');
-  await page.locator('#gm-spawn-palette .gm-spawn-entry').first()
-    .locator('button[data-role="place"]').click();
-  await expect(status).toHaveText('');
+  const spawn = page.locator('[data-panel="spawn"]');
+  await expect(spawn).toHaveClass(/is-floating/);
+  await page.locator('#gm-spawn-outcome-ghost').check();
+  await expect(page.locator('#gm-spawn-ghost')).toBeVisible();
+  const observers = page.locator('#gm-spawn-ghost-observer');
+  await page.waitForFunction(
+    () => document.querySelectorAll('#gm-spawn-ghost-observer option').length > 1,
+    null, { timeout: 60_000 });
+  const observer = await observers.locator('option').nth(1).getAttribute('value');
+  await observers.selectOption(observer);
+  await page.locator('#gm-spawn-ghost-id').fill('smoke-ghost');
+  const row = page.locator('#gm-spawn-palette .gm-spawn-entry').first();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  const palette = await row.getAttribute('data-palette-id');
+  const spawnedBefore = await page.evaluate(() => window.__hostGmSpawnState().authoritative);
+
+  await row.locator('button[data-role="place"]').click();
   await expect(page.locator('#gm-spawn-pick')).toHaveAttribute('data-picking', /.+/);
-  await page.keyboard.press('Escape');
+  await expect(page.locator('#gm-entity-map')).toHaveAttribute('data-placement-armed', '');
+  const chart = await page.locator('#gm-entity-map').boundingBox();
+  expect(chart).not.toBeNull();
+  await page.mouse.click(chart.x + chart.width * 0.6, chart.y + chart.height * 0.4);
 
-  // Pick the ghost's place on the real chart.
-  await revealGmPanel(page, 'ghost');
-  await pick.click();
-  const box = await page.locator('#gm-entity-map').boundingBox();
-  await page.mouse.click(box.x + box.width * 0.65, box.y + box.height * 0.35);
-  await expect(status).toHaveText('');
-  // Metres in, canonical integer millimetres out, in the field that has always
-  // carried those bounds.
-  for (const axis of ['x', 'z']) {
-    const field = page.locator(`#gm-contact-ghost-${axis}`);
-    await expect(field).toHaveAttribute('max', '2147483647');
-    expect(Number(await field.inputValue())).toEqual(Math.trunc(Number(await field.inputValue())));
-  }
-  await page.locator('#gm-contact-ghost-set').click();
-  await expect(page.locator('#gm-contact-ghost-feedback'))
-    .toHaveAttribute('data-state', 'applied', { timeout: 30_000 });
-  // A landed draft closes, and what it created is a record on the tool that is
-  // always there — not behind reopening a temporary panel.
-  await expect(page.locator('[data-panel="ghost"]')).toHaveCount(0);
-  await expect(page.locator('#gm-contact-ghosts li')).toHaveCount(1);
+  // The result lands on the panel that placed it, as a ghost, and the world
+  // has spawned nothing: a ghost never produces a placement result.
+  const applied = page.locator('#gm-spawn-log .gm-spawn-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied.first()).toHaveAttribute('data-palette', palette);
+  await expect(applied.first()).toContainText('smoke-ghost');
+  expect(await page.evaluate(() => window.__hostGmSpawnState().authoritative)).toBe(spawnedBefore);
 
-  // Removing one is a simple action: load the ghost into the draft and remove
-  // it, and the draft stays open because nothing about it was composed.
-  await revealGmPanel(page, 'ghost');
-  await page.locator('#gm-contact-ghosts button').first().click();
-  await expect(page.locator('#gm-contact-ghost-id')).toHaveValue('smoke-ghost');
-  await page.locator('#gm-contact-ghost-remove').click();
-  await expect(page.locator('#gm-contact-ghosts li')).toHaveCount(0, { timeout: 30_000 });
-  await expect(page.locator('[data-panel="ghost"]')).toHaveCount(1);
+  // The observing ship's record on the contact tool shows it, with the one
+  // simple action that undoes it — and that action undoes it.
+  await revealGmPanel(page, 'contact');
+  await page.locator('#gm-contact-observer').selectOption(observer);
+  const listed = page.locator('#gm-contact-ghosts li').filter({ hasText: 'smoke-ghost' });
+  await expect(listed).toHaveCount(1, { timeout: 30_000 });
+  await listed.locator('button[data-role="remove"]').click();
+  await expect(listed).toHaveCount(0, { timeout: 30_000 });
   expect(errors).toEqual([]);
 });

@@ -90,7 +90,11 @@ export function createDockLayoutMigration({ version, generations, current, rehom
     restoreActives(migrated.root, previousActives);
     // Backstop for a pinned panel that found no target to join.
     migrated = current.normalize(migrated, bounds);
-    migrated.selected = normalized.selected;
+    // The view the operator left the surface on survives migration — unless it
+    // was a panel the current registry has since RETIRED, which the sanitize
+    // above just dropped from the tree. Restoring that verbatim would name a
+    // panel nothing can show, so the sanitize's own choice stands instead.
+    if (current.panels.includes(normalized.selected)) migrated.selected = normalized.selected;
     return migrated;
   };
 }

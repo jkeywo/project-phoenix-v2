@@ -713,7 +713,17 @@ fn publish_local_projection(
         ),
         With<Ship>,
     >,
-    npc_control: crate::gm_npc::NpcDoctrineControl,
+    // Doctrine control and the inspector's sources both touch BehaviourSection —
+    // the control mutably, the inspector read-only — and Bevy refuses one
+    // system holding both (B0001). This publisher only ever READS the control,
+    // for its owned projection, so the two take turns: the control first, then
+    // the sources, never both at once. A read-only doctrine view would let a
+    // publisher stop holding a control at all; that is a change to gm_npc's
+    // shape rather than to this system, and belongs to its own issue.
+    mut doctrine_then_inspector: ParamSet<(
+        crate::gm_npc::NpcDoctrineControl,
+        GmInspectorSourceQuery,
+    )>,
     ships: GmShipProjectionQuery,
     world_entities: GmWorldProjectionQuery,
     all_names: Query<(&EntityUuid, Option<&EntityName>, Option<&EntityId>)>,
@@ -724,7 +734,6 @@ fn publish_local_projection(
     local_refusals: Res<LocalGmActionRefusals>,
     mut previous: Local<Option<GmEntityProjectionPayload>>,
     mut changed: MessageWriter<GmEntityProjectionChanged>,
-    inspector_sources: GmInspectorSourceQuery,
     removal_targets: crate::gm_despawn::RemovalQuery,
     presentation_control: crate::gm_presentation::PresentationControl,
 ) {
@@ -902,12 +911,13 @@ fn publish_local_projection(
         .collect();
     let npc_doctrines = world_content
         .as_deref()
-        .map(|runtime| npc_control.projection(runtime))
+        .map(|runtime| doctrine_then_inspector.p0().projection(runtime))
         .unwrap_or_default();
     let inspector_intents: BTreeMap<String, String> = npc_doctrines
         .iter()
         .filter_map(|(uuid, status)| Some((uuid.clone(), status.intent.clone()?)))
         .collect();
+    let inspector_sources = doctrine_then_inspector.p1();
     let entity_inspector = entity_inspector_projection(
         &inspector_sources,
         factions.as_deref(),

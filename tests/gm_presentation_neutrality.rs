@@ -29,6 +29,9 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 #[path = "common/default_pool.rs"]
+// The shared pool helper carries guards and observers this binary has no use
+// for; the lint stays strict for every other test that includes it.
+#[allow(dead_code)]
 mod default_pool;
 
 use project_phoenix::gm_projection::NativeGmPresentation;

@@ -406,12 +406,11 @@
     #gm-comms-log pre { white-space: pre-wrap; overflow-wrap: anywhere; }
     #gm-comms-feedback[data-state="Refused"] { color: var(--fire-bright); }
     #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel, #gm-system-panel, #gm-npc-panel,
-    #gm-contact-misclassify-panel, #gm-contact-report-panel, #gm-contact-ghost-panel {
+    #gm-contact-misclassify-panel, #gm-contact-report-panel {
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
     #gm-contact-report-panel .gm-contact-fields,
-    #gm-contact-ghost-panel .gm-contact-fields { display: grid; gap: .5rem; min-width: 0; }
     #gm-contact-ghosts { margin: 0; padding: 0; list-style: none; }
     #gm-contact-ghosts button { width: 100%; white-space: normal; overflow-wrap: anywhere; }
     #gm-spawn-palette { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
@@ -2246,29 +2245,6 @@
             <span data-i18n="server.gm.action.keep_open"></span></label>
           <p id="gm-contact-report-feedback" role="status" aria-live="polite"></p>
         </section>
-        <section id="gm-contact-ghost-panel" role="region"
-          aria-labelledby="gm-contact-ghost-heading">
-          <h2 id="gm-contact-ghost-heading" data-i18n="server.gm.contact.ghosts"></h2>
-          <p id="gm-contact-ghost-scope" role="status"></p>
-          <div class="gm-contact-fields">
-            <p data-i18n="server.gm.contact.ghost-explanation"></p>
-            <label for="gm-contact-ghost-id" data-i18n="server.gm.contact.ghost-id"></label><input id="gm-contact-ghost-id" type="text" maxlength="128">
-            <label for="gm-contact-ghost-palette" data-i18n="server.gm.contact.classification"></label><select id="gm-contact-ghost-palette"></select>
-            <label for="gm-contact-ghost-x" data-i18n="server.gm.contact.ghost-x"></label><input id="gm-contact-ghost-x" type="number" step="1" min="-2147483648" max="2147483647" value="0">
-            <label for="gm-contact-ghost-y" data-i18n="server.gm.contact.ghost-y"></label><input id="gm-contact-ghost-y" type="number" step="1" min="-2147483648" max="2147483647" value="0">
-            <label for="gm-contact-ghost-z" data-i18n="server.gm.contact.ghost-z"></label><input id="gm-contact-ghost-z" type="number" step="1" min="-2147483648" max="2147483647" value="0">
-            <button id="gm-contact-ghost-pick" type="button" disabled
-              data-i18n="server.gm.contact.ghost_pick"></button>
-            <p id="gm-contact-ghost-pick-status" role="status" aria-live="polite"
-              aria-atomic="true"></p>
-            <button id="gm-contact-ghost-set" type="button" disabled data-i18n="server.gm.contact.ghost-set"></button>
-            <button id="gm-contact-ghost-remove" type="button" disabled data-i18n="server.gm.contact.ghost-remove"></button>
-          </div>
-          <label for="gm-contact-ghost-keep-open">
-            <input type="checkbox" id="gm-contact-ghost-keep-open">
-            <span data-i18n="server.gm.action.keep_open"></span></label>
-          <p id="gm-contact-ghost-feedback" role="status" aria-live="polite"></p>
-        </section>
         <!-- The entities/AI domain of the Live Inspector (issue #1489). Every
              row is a reading rendered through the shared disabled control; the
              one authored field with a named action links to the panel that
@@ -2500,6 +2476,27 @@
         </section>
         <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
           <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
+          <!-- What a placement PRODUCES. The same palette, the same chart gesture
+               and the same typed form place either a real entity or a false
+               Sensors report of that entry for one observing ship. A ghost is
+               reported TO a ship and never spawned, so that outcome asks which
+               ship, and under what identity it can later be removed. -->
+          <fieldset id="gm-spawn-outcome">
+            <legend data-i18n="server.gm.spawn.outcome"></legend>
+            <label><input type="radio" name="gm-spawn-outcome" id="gm-spawn-outcome-entity"
+                value="entity" checked>
+              <span data-i18n="server.gm.spawn.outcome_entity"></span></label>
+            <label><input type="radio" name="gm-spawn-outcome" id="gm-spawn-outcome-ghost"
+                value="ghost">
+              <span data-i18n="server.gm.spawn.outcome_ghost"></span></label>
+          </fieldset>
+          <div id="gm-spawn-ghost" hidden>
+            <label for="gm-spawn-ghost-observer" data-i18n="server.gm.spawn.ghost_observer"></label>
+            <select id="gm-spawn-ghost-observer"></select>
+            <label for="gm-spawn-ghost-id" data-i18n="server.gm.spawn.ghost_id"></label>
+            <input id="gm-spawn-ghost-id" type="text" maxlength="128" autocomplete="off">
+            <p id="gm-spawn-ghost-scope" role="status" aria-live="polite"></p>
+          </div>
           <ul id="gm-spawn-palette" role="list"></ul>
           <p id="gm-spawn-empty" role="status" aria-live="polite"
             data-i18n="server.gm.spawn.empty"></p>

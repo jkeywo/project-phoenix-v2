@@ -15,24 +15,18 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   onSucceeded = () => {},
   // Picking a ghost's place covers the chart with a gesture, so the surface
   // puts its other floating panels away for the duration (issue #1508).
-  onPickModeChange = () => {},
-  getMap = () => (doc ? doc.getElementById('gm-entity-map') : null),
   // Bring a draft panel on screen. The surface owns whether a panel is open;
   // this panel only ever asks.
-  onOpenDraft = () => {},
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = suffix => doc?.getElementById(`gm-contact-${suffix}`);
   const keepOpen = draft => el(`${draft}-keep-open`)?.checked === true;
   let selected = null, observer = '', entities = [], overrides = {}, classifications = {}, palette = [], information = { ghosts: {} }, pending = null, timer = null;
   let renderedPalette = null, renderedObservers = null, renderedGhosts = null;
-  let picking = false, boundMap = null;
   /** The picker speaks metres; a ghost's position is canonical integer
    * millimetres. The bounds themselves do not move: the converted value lands
    * in the same fields, checked by the same `validPosition`. */
-  const MM_PER_METRE = 1000;
   const validObserver = () => getOperator() && !pending && entities.some(row => row.entity_id === observer && row.kind === 'player_ship');
   const boundedId = value => typeof value === 'string' && value.length > 0 && new TextEncoder().encode(value).length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
-  const ghostPosition = () => ['x', 'y', 'z'].map(axis => { const value = el(`ghost-${axis}`)?.value; return value?.trim() ? Number(value) : NaN; });
   const validPosition = values => values.every(value => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647);
   const valid = () => getOperator() && !pending && selected && selected.entity_id !== observer
     && entities.some(row => row.entity_id === observer && row.kind === 'player_ship')
@@ -68,33 +62,8 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
       keepOpen: () => keepOpen('report'),
       focus: () => el('report-delay')?.focus(),
     },
-    ghost: {
-      // The classification is part of the draft too: choosing one and closing
-      // the panel discards a real choice, and leaving it behind would load the
-      // next ghost with the last one's identity.
-      isDirty: () => !!el('ghost-id')?.value || picking || !!el('ghost-palette')?.value
-        || ['x', 'y', 'z'].some(axis => (el(`ghost-${axis}`)?.value || '') !== '0'),
-      reset: ({ keepReusable = false } = {}) => {
-        setGhostPicking(false);
-        // WHICH ghost and WHERE always go; WHAT it is reported as is reusable.
-        if (el('ghost-id')) el('ghost-id').value = '';
-        for (const axis of ['x', 'y', 'z']) if (el(`ghost-${axis}`)) el(`ghost-${axis}`).value = '0';
-        if (!keepReusable && el('ghost-palette')) el('ghost-palette').value = '';
-        render();
-      },
-      keepOpen: () => keepOpen('ghost'),
-      focus: () => el('ghost-id')?.focus(),
-    },
   };
   function render() {
-    // The chart lives in a panel of its own that may mount, or be rebuilt,
-    // long after this panel exists.
-    bindMap();
-    if (picking && !validObserver()) { setGhostPicking(false); return; }
-    if (el('ghost-pick')) {
-      el('ghost-pick').disabled = !validObserver() && !picking;
-      el('ghost-pick').dataset.picking = picking ? 'ghost' : '';
-    }
     if (el('target')) el('target').textContent = selected ? wireText(selected.name) : t('server.gm.contact.select');
     // Each draft is a panel of its own, so it names the observer and target it
     // would act on rather than relying on the tool that used to hold it.
@@ -104,12 +73,6 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
       : t('server.gm.contact.select');
     for (const draft of ['misclassify', 'report']) {
       if (el(`${draft}-scope`)) el(`${draft}-scope`).textContent = scope;
-    }
-    // A ghost needs no real target: it is reported TO an observing ship.
-    if (el('ghost-scope')) {
-      el('ghost-scope').textContent = observer
-        ? t('server.gm.contact.ghost_scope', { ship: wireText(ship?.name || observer) })
-        : t('server.gm.contact.observer');
     }
     if (el('mode')) el('mode').textContent = t(`server.gm.contact.${overrides[observer]?.[selected?.entity_id] || 'normal'}`);
     for (const mode of MODES) if (el(mode)) el(mode).disabled = !valid();
@@ -123,31 +86,25 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     if (el('report-set')) el('report-set').disabled = !valid() || !validPolicy(chosenPolicy());
     if (el('report-clear')) el('report-clear').disabled = !valid() || !report;
     if (el('report-current')) el('report-current').textContent = report ? t('server.gm.contact.report_current', { delay: report.policy.delay_ticks, step: report.policy.position_step_mm, identity: t(report.policy.hide_identity ? 'server.gm.contact.report_hidden' : 'server.gm.contact.report_visible') }) : t('server.gm.contact.report_normal');
-    const ghostId = el('ghost-id')?.value;
-    for (const id of ['ghost-id', 'ghost-palette', 'ghost-x', 'ghost-y', 'ghost-z']) if (el(id)) el(id).disabled = !validObserver();
-    if (el('ghost-set')) el('ghost-set').disabled = !validObserver() || !boundedId(ghostId) || !validPosition(ghostPosition()) || !palette.some(row => row.palette === el('ghost-palette')?.value);
-    if (el('ghost-remove')) el('ghost-remove').disabled = !validObserver() || !information.ghosts?.[observer]?.[ghostId];
     const ghostKey = JSON.stringify([observer, information.ghosts?.[observer], !!validObserver()]);
     if (el('ghosts') && renderedGhosts !== ghostKey) {
       renderedGhosts = ghostKey;
       el('ghosts').replaceChildren();
+      // Placing a ghost is a Spawn outcome since the ghost draft was retired
+      // (Live layout version 14), so this list is what remains on the contact
+      // tool: the record of what each observing ship has been told, and the
+      // one simple action that undoes it. Removal is a verb, not a draft.
       for (const ghost of Object.values(information.ghosts?.[observer] || {})) {
-        const li = doc.createElement('li'), button = doc.createElement('button'); button.type = 'button';
-        button.textContent = `${ghost.id}: ${wireText(ghost.label)} (${ghost.position_mm.join(', ')})`;
-        button.disabled = !validObserver(); button.addEventListener('click', () => {
-          // The list is a record on the always-present tool, and the fields it
-          // loads are in a draft panel that is closed by default. Open that
-          // draft FIRST: opening clears it, so filling it before would be
-          // wiped, and writing into a closed panel would show the operator
-          // nothing at all.
-          onOpenDraft('ghost');
-          // An armed chart and a place loaded from the record are two answers
-          // to the same question: the next click would overwrite what was just
-          // loaded, so loading ends the pick.
-          setGhostPicking(false);
-          el('ghost-id').value = ghost.id; el('ghost-palette').value = ghost.palette;
-          ['x', 'y', 'z'].forEach((axis, index) => { el(`ghost-${axis}`).value = ghost.position_mm[index]; }); render(); el('ghost-id').focus();
-        }); li.appendChild(button); el('ghosts').appendChild(li);
+        const li = doc.createElement('li');
+        const label = doc.createElement('span');
+        label.textContent = `${ghost.id}: ${wireText(ghost.label)} (${ghost.position_mm.join(', ')})`;
+        const remove = doc.createElement('button'); remove.type = 'button';
+        remove.dataset.role = 'remove'; remove.dataset.ghostId = ghost.id;
+        remove.textContent = t('server.gm.contact.ghost-remove');
+        remove.setAttribute('aria-label', t('server.gm.contact.ghost-remove_accessibility', { id: ghost.id }));
+        remove.disabled = !validObserver();
+        remove.addEventListener('click', () => chooseInformation({ remove_ghost: { id: ghost.id } }));
+        li.append(label, remove); el('ghosts').appendChild(li);
       }
     }
   }
@@ -158,7 +115,6 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     if (!request) return null;
     if (Object.hasOwn(request, 'palette')) return request.palette === null ? null : 'misclassify';
     if (request.change?.set_report_policy) return 'report-policy';
-    if (request.change?.set_ghost) return 'ghost';
     return null;
   }
   /** Say how a request went ON THE PANEL IT WAS COMPOSED ON.
@@ -200,14 +156,12 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   function chooseInformation(change) {
     const target = informationTarget(change);
     if (!validObserver() || !boundedId(target)) return false;
-    const ghost = change.set_ghost;
-    if (ghost && (!validPosition(ghost.position_mm) || !palette.some(row => row.palette === ghost.palette))) return false;
     const policy = change.set_report_policy;
     if (policy && (!valid() || policy.target !== selected.entity_id || !validPolicy(policy.policy))) return false;
     if (change.clear_report_policy && (!valid() || change.clear_report_policy.target !== selected.entity_id)) return false;
-    if (!ghost && !change.remove_ghost && !policy && !change.clear_report_policy) return false;
+    if (!change.remove_ghost && !policy && !change.clear_report_policy) return false;
     const chosen = { operator_id: getOperator().id, ship: observer, change: structuredClone(change) };
-    const description = t('settings.gm.confirmation.contact', { mode: t(policy ? 'server.gm.contact.report_set' : change.clear_report_policy ? 'server.gm.contact.report_normal' : ghost ? 'server.gm.contact.ghost-set' : 'server.gm.contact.ghost-remove'), target,
+    const description = t('settings.gm.confirmation.contact', { mode: t(policy ? 'server.gm.contact.report_set' : change.clear_report_policy ? 'server.gm.contact.report_normal' : 'server.gm.contact.ghost-remove'), target,
       ship: wireText(entities.find(row => row.entity_id === observer)?.name || observer) });
     return confirmAction({ category: 'contact.override', description, preview: () => description, accept: () => submitChosen(chosen) });
   }
@@ -218,7 +172,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     try { accepted = (request.change ? submitInformation(request) : Object.hasOwn(request, 'palette') ? submitClassification(request) : submit(request)) !== false; } catch (_) { /* report below */ }
     // Whatever the last request left on another draft is old news now —
     // including when this one is refused before it ever leaves the desk.
-    for (const node of ['misclassify-feedback', 'report-feedback', 'ghost-feedback']) {
+    for (const node of ['misclassify-feedback', 'report-feedback']) {
       if (el(node)) { el(node).textContent = ''; delete el(node).dataset.state; }
     }
     if (!accepted) { feedback('refused', chosen); return false; }
@@ -257,7 +211,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     // Moving entities publish continuously. Keep the native dropdown's option
     // nodes intact while an operator is choosing from an unchanged palette.
     const paletteKey = JSON.stringify(palette.map(row => [row.palette, row.label]));
-    if (renderedPalette !== paletteKey) for (const classificationSelect of [el('classification'), el('ghost-palette')].filter(Boolean)) {
+    if (renderedPalette !== paletteKey) for (const classificationSelect of [el('classification')].filter(Boolean)) {
       const prior = classificationSelect.value;
       classificationSelect.replaceChildren();
       const placeholder = doc.createElement('option'); placeholder.value = ''; placeholder.textContent = t('server.gm.contact.classification'); classificationSelect.appendChild(placeholder);
@@ -313,7 +267,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     timer = null; pending = null; selected = null; observer = ''; entities = []; overrides = {}; classifications = {}; palette = [];
     renderedPalette = null; renderedObservers = null; renderedGhosts = null; information = { ghosts: {} };
     el('results')?.replaceChildren();
-    for (const node of ['feedback', 'misclassify-feedback', 'report-feedback', 'ghost-feedback']) {
+    for (const node of ['feedback', 'misclassify-feedback', 'report-feedback']) {
       if (el(node)) { el(node).textContent = ''; delete el(node).dataset.state; }
     }
     // The run these drafts were for has gone, so what was typed into them has
@@ -322,102 +276,17 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     for (const draft of Object.values(drafts)) draft.reset({ keepReusable: false });
     render();
   }
-  function paintPick(preview) {
-    const status = el('ghost-pick-status');
-    if (!status) return;
-    if (!picking) { status.textContent = ''; delete status.dataset.picking; return; }
-    status.dataset.picking = 'ghost';
-    status.textContent = preview
-      ? t('server.gm.contact.ghost_pick_preview', {
-        x: String(Math.round(preview.x * MM_PER_METRE)),
-        z: String(Math.round(preview.z * MM_PER_METRE)) })
-      : t('server.gm.contact.ghost_pick_armed');
-  }
-  function chart() {
-    try { return typeof getMap === 'function' ? getMap() : null; } catch (_) { return null; }
-  }
-  /** Arm (or disarm) the chart gesture for the ghost's position. */
-  function setGhostPicking(value) {
-    const next = value === true && !!validObserver();
-    if (picking === next) return false;
-    // ARMING tells the surface first, and only then takes the chart: that is
-    // what makes the other picker let go, and a chart let go of dispatches
-    // `navplacecancel` synchronously. Arriving here while this panel had
-    // already claimed the gesture, it would disarm it again — and nothing
-    // would be picking at all (issue #1510).
-    if (next) onPickModeChange(true);
-    picking = next;
-    if (!next) onPickModeChange(false);
-    const map = chart();
-    if (map) {
-      if (picking) map.navigationBeginPlacement?.();
-      else map.navigationCancelPlacement?.();
-    }
-    paintPick(null);
-    render();
-    return true;
-  }
-  function onGhostPreview(event) { if (picking) paintPick(event?.detail || null); }
-  function endPick() {
-    picking = false;
-    onPickModeChange(false);
-    paintPick(null);
-    render();
-    // Back to the control that started the pick — but only if it can still
-    // hold focus. A stale observer disables it and a docked panel behind
-    // another tab is `hidden`; focusing neither is better than dropping the
-    // operator onto the document body.
-    const button = el('ghost-pick');
-    if (button && !button.disabled && !button.closest('[hidden]')) button.focus();
-  }
-  function onGhostPlaced(event) {
-    const detail = event?.detail;
-    if (!picking || !Number.isFinite(detail?.x) || !Number.isFinite(detail?.z)) return;
-    // Height is not something a chart can say, so the operator's own y stands.
-    if (el('ghost-x')) el('ghost-x').value = String(Math.round(detail.x * MM_PER_METRE));
-    if (el('ghost-z')) el('ghost-z').value = String(Math.round(detail.z * MM_PER_METRE));
-    endPick();
-  }
-  function onGhostPickCancelled() { if (picking) endPick(); }
-  function bindMap() {
-    const map = chart();
-    if (map === boundMap) return;
-    if (boundMap) {
-      boundMap.removeEventListener('navplace', onGhostPlaced);
-      boundMap.removeEventListener('navplacecancel', onGhostPickCancelled);
-      boundMap.removeEventListener('navplacepreview', onGhostPreview);
-    }
-    boundMap = map;
-    if (!boundMap) return;
-    boundMap.addEventListener('navplace', onGhostPlaced);
-    boundMap.addEventListener('navplacecancel', onGhostPickCancelled);
-    boundMap.addEventListener('navplacepreview', onGhostPreview);
-  }
-  el('ghost-pick')?.addEventListener('click', () => setGhostPicking(!picking));
   el('observer')?.addEventListener('change', () => { observer = el('observer').value; render(); });
   for (const mode of MODES) el(mode)?.addEventListener('click', () => choose(mode));
   el('classification')?.addEventListener('change', render);
   el('misclassify')?.addEventListener('click', () => chooseClassification(el('classification').value));
   el('classification-normal')?.addEventListener('click', () => chooseClassification(null));
-  for (const id of ['ghost-id', 'ghost-palette', 'ghost-x', 'ghost-y', 'ghost-z']) el(id)?.addEventListener('input', render);
   for (const id of ['report-delay', 'report-step', 'report-identity']) el(id)?.addEventListener('input', render);
   el('report-set')?.addEventListener('click', () => chooseInformation({ set_report_policy: { target: selected?.entity_id, policy: chosenPolicy() } }));
   el('report-clear')?.addEventListener('click', () => chooseInformation({ clear_report_policy: { target: selected?.entity_id } }));
-  el('ghost-set')?.addEventListener('click', () => chooseInformation({ set_ghost: { id: el('ghost-id').value, palette: el('ghost-palette').value, position_mm: ghostPosition() } }));
-  el('ghost-remove')?.addEventListener('click', () => chooseInformation({ remove_ghost: { id: el('ghost-id').value } }));
   render();
   return { update, choose, chooseClassification, chooseInformation, reset, refreshAdmission: render, select: entity => { selected = entity; render(); },
-    setGhostPicking, isPicking: () => picking,
-    /** Leaving while armed would leave the surface with its floating panels
-     * hidden and nothing left to bring them back. */
-    dispose() {
-      setGhostPicking(false);
-      if (!boundMap) return;
-      boundMap.removeEventListener('navplace', onGhostPlaced);
-      boundMap.removeEventListener('navplacecancel', onGhostPickCancelled);
-      boundMap.removeEventListener('navplacepreview', onGhostPreview);
-      boundMap = null;
-    },
+    dispose() {},
     drafts,
     state: () => ({ observer, target: selected?.entity_id || null, pending, overrides, classifications, palette, information }) };
 }

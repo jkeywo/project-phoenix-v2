@@ -65,7 +65,6 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // of its own with the shared temporary lifecycle.
   ['misclassify', 'gm-contact-misclassify-panel'],
   ['report-policy', 'gm-contact-report-panel'],
-  ['ghost', 'gm-contact-ghost-panel'],
   // One authored System, disabled or restored: a target-relative choice and a
   // verb, so an ordinary tool beside the selection it reads (issue #1511).
   ['system', 'gm-system-panel'],
@@ -206,7 +205,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // Contact, its three drafts and NPC doctrine leave the inspector column for
   // panels of their own (issue #1510) and wait at the root for the dock.
   move(root, 'gm-contact-panel', 'gm-contact-misclassify-panel', 'gm-contact-report-panel',
-    'gm-contact-ghost-panel', 'gm-npc-panel');
+    'gm-npc-panel');
   // System control and direct effect follow them out (issue #1511): the last
   // two selected-entity actions the inspector was still carrying.
   move(root, 'gm-system-panel', 'gm-effect-panel');

@@ -409,13 +409,13 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     // Picking covers the map with a gesture, and an in-surface floating panel
     // sits on exactly that, so the surface puts its floats away for the
     // duration and brings the same ones back afterwards (issue #1508).
-    onPickModeChange: picking => {
-      // One chart cannot capture two gestures at once, and both panels can be
-      // docked and enabled at the same time. Whoever arms disarms the other.
-      if (picking) gmContact?.setGhostPicking(false);
-      return shell.setPicking?.(picking, 'spawn');
-    },
+    onPickModeChange: picking => shell.setPicking?.(picking, 'spawn'),
     actionFeedback: hostActionFeedback,
+    // A ghost is a Spawn OUTCOME: the same palette entry, placed by the same
+    // gesture, reported to one observing ship as a false Sensors contact
+    // instead of spawned into the world. It travels the contact-information
+    // route, so its result comes back on the entity projection below.
+    submitInformation: request => privateSubmit('gm.information', request, () => win.__hostSetContactInformation(request)),
     confirmAction: gmConfirmations.request,
     getMap: () => doc.getElementById('gm-entity-map'),
     submitPlacement: (request) =>
@@ -518,18 +518,11 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submit: request => privateSubmit('gm.contact', request, () => win.__hostSetContactOverride(request)),
     submitClassification: request => privateSubmit('gm.classification', request, () => win.__hostSetContactClassification(request)),
     submitInformation: request => privateSubmit('gm.information', request, () => win.__hostSetContactInformation(request)),
-    // The three drafts this tool composes are complex actions of their own
+    // The two drafts this tool composes are complex actions of their own
     // (issue #1510); the shared lifecycle decides what a landed one does to
-    // the panel that carried it.
+    // the panel that carried it. Placing a ghost used to be the third: it is
+    // a Spawn outcome now, and only its record and removal remain here.
     onSucceeded: draft => shell.temporaryActions?.succeeded(draft),
-    // Placing a ghost is a chart gesture, so the surface puts its other
-    // floating panels away while it runs (issue #1508).
-    onPickModeChange: picking => {
-      if (picking) gmSpawnPanel.cancelPick();
-      return shell.setPicking?.(picking, 'ghost');
-    },
-    getMap: () => doc.getElementById('gm-entity-map'),
-    onOpenDraft: panel => shell.temporaryActions?.open(panel),
   });
   win.__hostGmContactState = gmContact.state;
   for (const [panel, draft] of Object.entries(gmContact.drafts)) {
@@ -585,6 +578,9 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     gm_entity:    function(p) {
       gmDespawn.update(p);
       gmContact.update(p);
+      // Spawn's ghost outcome reads the observing ships from the same
+      // projection, and its ghost results come back on it too.
+      gmSpawnPanel.updateContacts(p);
       gmPresentation.update(p);
       gmSystem.update(p);
       gmNpc.update(p);

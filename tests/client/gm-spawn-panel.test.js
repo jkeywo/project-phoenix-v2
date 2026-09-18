@@ -31,6 +31,7 @@ function mount({
   correlations = ['gm-place-1', 'gm-place-2', 'gm-place-3'],
   operator = { id: 'gm-a', name: 'Alex' },
   submitPlacement = vi.fn(() => true),
+  submitInformation = vi.fn(() => true),
   capacity,
   timeoutMs,
   schedule = vi.fn(),
@@ -45,6 +46,7 @@ function mount({
     win: window,
     t,
     submitPlacement,
+    submitInformation,
     getOperator: () => operator,
     getOperatorName: (id) => ({ 'gm-a': 'Alex', 'gm-b': 'Blair' }[id] || id),
     getMap: () => map,
@@ -57,7 +59,7 @@ function mount({
     ...(capacity == null ? {} : { capacity }),
     ...(timeoutMs == null ? {} : { timeoutMs }),
   });
-  return { panel, submitPlacement, schedule, cancelSchedule, map, onSucceeded, onPickModeChange };
+  return { panel, submitPlacement, submitInformation, schedule, cancelSchedule, map, onSucceeded, onPickModeChange };
 }
 
 function entry(overrides = {}) {
@@ -89,6 +91,15 @@ describe('GM placement panel', () => {
     document.body.innerHTML = `
       <section id="gm-spawn-panel">
         <h2 id="gm-spawn-heading"></h2>
+        <fieldset id="gm-spawn-outcome">
+          <input type="radio" name="gm-spawn-outcome" id="gm-spawn-outcome-entity" value="entity" checked>
+          <input type="radio" name="gm-spawn-outcome" id="gm-spawn-outcome-ghost" value="ghost">
+        </fieldset>
+        <div id="gm-spawn-ghost" hidden>
+          <select id="gm-spawn-ghost-observer"></select>
+          <input id="gm-spawn-ghost-id" type="text">
+          <p id="gm-spawn-ghost-scope"></p>
+        </div>
         <ul id="gm-spawn-palette"></ul>
         <p id="gm-spawn-empty"></p>
         <div id="gm-spawn-exact-form">
@@ -490,6 +501,132 @@ describe('GM placement panel', () => {
       expect(document.getElementById('gm-spawn-x').value).toBe('250');
     });
   });
+
+  describe('placing a ghost', () => {
+    const ships = [
+      { entity_id: 'ship-1', kind: 'player_ship', name: 'Courier' },
+      { entity_id: 'npc-1', kind: 'npc_ship', name: 'Raider' },
+    ];
+    const setOutcome = (value) => {
+      document.getElementById('gm-spawn-outcome-entity').checked = value === 'entity';
+      document.getElementById('gm-spawn-outcome-ghost').checked = value === 'ghost';
+      document.getElementById(`gm-spawn-outcome-${value}`).dispatchEvent(new Event('change'));
+    };
+    const chooseGhost = (panel, { observer = 'ship-1', id = 'echo' } = {}) => {
+      panel.updateContacts({ entities: ships });
+      setOutcome('ghost');
+      document.getElementById('gm-spawn-ghost-observer').value = observer;
+      document.getElementById('gm-spawn-ghost-observer').dispatchEvent(new Event('change'));
+      document.getElementById('gm-spawn-ghost-id').value = id;
+      document.getElementById('gm-spawn-ghost-id').dispatchEvent(new Event('input'));
+    };
+    const contactResult = (overrides = {}) => ({
+      operator_id: 'gm-a', correlation: 'gm-place-1', observer: 'ship-1', target: 'echo',
+      action_kind: 'contact-information', tick: 42, outcome: 'applied', ...overrides,
+    });
+
+    it('places a ghost through the same gesture and reports it to the chosen ship, never spawning', () => {
+      const map = makeMap();
+      const { panel, submitPlacement, submitInformation, onSucceeded } = mount({ map });
+      panel.update({ palette: [entry()], results: [] });
+      chooseGhost(panel);
+      expect(document.getElementById('gm-spawn-ghost').hidden).toBe(false);
+      expect(document.getElementById('gm-spawn-panel').dataset.outcome).toBe('ghost');
+      // The observing ships are the live player ships and nothing else.
+      expect([...document.querySelectorAll('#gm-spawn-ghost-observer option')].map((o) => o.value))
+        .toEqual(['', 'ship-1']);
+      placeButton('raider').click();
+      expect(map.armCalls).toBe(1);
+      map.emitPlacement({ x: 1.2345, z: -2, heading: 90 });
+      // Same entry, same place, canonical millimetres — reported, not spawned,
+      // and without a heading, which is not part of a report.
+      expect(submitPlacement).not.toHaveBeenCalled();
+      expect(submitInformation).toHaveBeenCalledExactlyOnceWith({
+        operator_id: 'gm-a', ship: 'ship-1', correlation: 'gm-place-1',
+        change: { set_ghost: { id: 'echo', palette: 'raider', position_mm: [1235, 0, -2000] } },
+      });
+      expect(panel.state().pending).toBe(1);
+      const pendingRow = logRows()[0];
+      expect(pendingRow.dataset.outcome).toBe('pending');
+      expect(pendingRow.dataset.ghost).toBe('echo');
+      // A placement result is not its result: a ghost never has one.
+      panel.update({ palette: [entry()], results: [result({ correlation: 'gm-place-1' })] });
+      expect(panel.state().pending).toBe(1);
+      expect(onSucceeded).not.toHaveBeenCalled();
+      // (Outside a test no placement result can share a ghost's correlation —
+      // every press gets its own — so that row is cleared before the log is
+      // read, or it would shadow the ghost's own line under the same key.)
+      panel.update({ palette: [entry()], results: [] });
+      // Another ship's, or another identity's, contact result is not it either.
+      panel.updateContacts({ contact_results: [contactResult({ observer: 'ship-2' }), contactResult({ target: 'other' })] });
+      expect(panel.state().pending).toBe(1);
+      // Its own contact result settles it, finishes the draft, and is drawn
+      // beside the placements it was made among — as a ghost, with its tick.
+      panel.updateContacts({ contact_results: [contactResult()] });
+      expect(panel.state().pending).toBe(0);
+      expect(onSucceeded).toHaveBeenCalledOnce();
+      const settled = logRows().find((row) => row.dataset.ghost === 'echo');
+      expect(settled.dataset.outcome).toBe('applied');
+      expect(settled.dataset.tick).toBe('42');
+      expect(settled.dataset.palette).toBe('raider');
+      expect(document.getElementById('gm-spawn-feedback').dataset.state).toBe('Applied');
+    });
+
+    it('holds Place until a ghost has a ship to be reported to and a bounded identity', () => {
+      const { panel, submitInformation } = mount();
+      panel.update({ palette: [entry()], results: [] });
+      panel.updateContacts({ entities: ships });
+      setOutcome('ghost');
+      expect(placeButton('raider').disabled).toBe(true);
+      expect(panel.place('raider', { x: 0, z: 0, heading: 0 })).toBe(false);
+      chooseGhost(panel, { id: '' });
+      expect(placeButton('raider').disabled).toBe(true);
+      chooseGhost(panel, { id: 'x'.repeat(129) });
+      expect(placeButton('raider').disabled).toBe(true);
+      chooseGhost(panel, { id: 'echo' });
+      expect(placeButton('raider').disabled).toBe(false);
+      expect(document.getElementById('gm-spawn-exact').disabled).toBe(false);
+      // The typed form reaches the same outcome by the same rule.
+      expect(panel.place('raider', { x: 1, z: 2, heading: 0 })).toBe(true);
+      expect(submitInformation.mock.calls[0][0].change.set_ghost.position_mm).toEqual([1000, 0, 2000]);
+      // Back to an entity, and the ship and identity stop mattering.
+      chooseGhost(panel, { id: '' });
+      setOutcome('entity');
+      expect(document.getElementById('gm-spawn-ghost').hidden).toBe(true);
+      expect(placeButton('raider').disabled).toBe(false);
+    });
+
+    it('keeps what a landed ghost described and drops which one it was about', () => {
+      const { panel } = mount();
+      panel.update({ palette: [entry()], results: [] });
+      chooseGhost(panel);
+      expect(panel.draftDirty()).toBe(true);
+      // After a success the OUTCOME and the ship stay — sending the next report
+      // to the same ship is the common case — and the identity goes.
+      panel.resetDraft({ keepReusable: true });
+      expect(panel.state()).toMatchObject({ outcome: 'ghost', ghost: { observer: 'ship-1', id: '' } });
+      // A fresh open starts as a placement of an entity, ship and all.
+      panel.resetDraft();
+      expect(panel.state()).toMatchObject({ outcome: 'entity', ghost: { observer: '', id: '' } });
+      expect(document.getElementById('gm-spawn-ghost').hidden).toBe(true);
+      expect(panel.draftDirty()).toBe(false);
+    });
+
+    it('keeps a chosen ship across unrelated entity updates and drops one that has gone', () => {
+      const { panel } = mount();
+      panel.update({ palette: [entry()], results: [] });
+      chooseGhost(panel);
+      const select = document.getElementById('gm-spawn-ghost-observer');
+      const option = select.options[1];
+      panel.updateContacts({ entities: ships.map((row) => ({ ...row, pose: { x: 20 } })) });
+      expect(select.options[1]).toBe(option);
+      expect(select.value).toBe('ship-1');
+      panel.updateContacts({ entities: ships.filter((row) => row.entity_id !== 'ship-1') });
+      expect(select.value).toBe('');
+      expect(placeButton('raider').disabled).toBe(true);
+    });
+  });
+
 });
 
 it('keeps the chart it just claimed when the other picker lets go inside the handover', () => {

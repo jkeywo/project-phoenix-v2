@@ -681,6 +681,48 @@ const LIVE_PANELS_V13: &[&str] = &[
     "objective",
     "entity-fields",
 ];
+/// Version 14 registers nothing and RETIRES the ghost draft: placing a ghost
+/// became a Spawn outcome — the same palette and the same chart gesture,
+/// reported to a ship instead of spawned — so the draft that composed one
+/// has nothing left to compose. Mirrors LIVE_PANEL_REGISTRY in
+/// gui/live-layout-model.js.
+const LIVE_PANELS_V14: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+    "checkpoint",
+    "restore",
+    "contact",
+    "npc",
+    "misclassify",
+    "report-policy",
+    "system",
+    "effect",
+    "despawn",
+    "faction",
+    "objective",
+    "entity-fields",
+];
+const LIVE_ADDED_IN_V14: &[(&str, &str, &str)] = &[];
+
 /// Panels registered after version 12. The entities/AI Live Inspector reads the
 /// same selection the entity inspector does, so it joins that column as a tab.
 const LIVE_ADDED_IN_V13: &[(&str, &str, &str)] = &[("entity-fields", "inspector", "tab")];
@@ -688,14 +730,8 @@ const LIVE_ADDED_IN_V13: &[(&str, &str, &str)] = &[("entity-fields", "inspector"
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
-const LIVE_TEMPORARY_PANELS: &[&str] = &[
-    "spawn",
-    "restore",
-    "misclassify",
-    "report-policy",
-    "ghost",
-    "effect",
-];
+const LIVE_TEMPORARY_PANELS: &[&str] =
+    &["spawn", "restore", "misclassify", "report-policy", "effect"];
 
 /// Panels the operator may not close. The attention region renders connection
 /// and recovery banners verbatim and health is the table behind them: a Game
@@ -736,7 +772,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         10 => LIVE_PANELS_V10,
         11 => LIVE_PANELS_V11,
         12 => LIVE_PANELS_V12,
-        _ => LIVE_PANELS_V13,
+        13 => LIVE_PANELS_V13,
+        _ => LIVE_PANELS_V14,
     }
 }
 
@@ -776,6 +813,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 13 {
         added.extend_from_slice(LIVE_ADDED_IN_V13);
+    }
+    if version < 14 {
+        added.extend_from_slice(LIVE_ADDED_IN_V14);
     }
     added
 }
@@ -865,7 +905,7 @@ fn default_authoring_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 13,
+        "version": 14,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
@@ -883,13 +923,13 @@ fn default_live_layout() -> Value {
             {"type":"tabs", "tabs":["comms","activity","journal","session-history","health","checkpoint"], "active":"comms"}
         ]},
         "floats": [],
-        "closed": ["spawn","restore","misclassify","report-policy","ghost","effect"],
+        "closed": ["spawn","restore","misclassify","report-policy","effect"],
         "selected": "roster"
     })
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=13).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=14).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -960,9 +1000,88 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
     // A version that registered only a temporary panel places nothing, so the
     // stamp is written here rather than inside the placement pass.
     layout["version"] = default_live_layout()["version"].clone();
+    // Retire BEFORE the pinned repair, as the browser does: its current-registry
+    // sanitize drops a retired panel (and collapses the group it emptied) and
+    // only then puts a pinned panel back into the first group. Repairing first
+    // would land the pinned panels in a group about to be emptied and keep it.
+    retire_unregistered_live_panels(&mut layout);
     repair_pinned_live_panels(&mut layout);
     record_unplaced_live_panels(&mut layout);
     Some(layout)
+}
+
+/// Drop every panel the CURRENT registry no longer has.
+///
+/// A stored tree is sanitized against ITS version's vocabulary, so a panel that
+/// was registered then and has been retired since survives that pass and the
+/// placement pass alike. The browser model sanitizes the migrated tree against
+/// its current registry last (`normalizeNode` in gui/dock-layout-model.js keeps
+/// only known tabs, drops a group left empty and collapses a split left with
+/// one child), and this is the same pass, so a native profile and a browser
+/// profile still read back as the same layout. Version 14 is the first to need
+/// it: it retired the ghost draft.
+fn retire_unregistered_live_panels(layout: &mut Value) {
+    let current = live_panels_for(u64::MAX);
+    let known = |panel: &Value| panel.as_str().is_some_and(|p| current.contains(&p));
+    fn prune(node: &Value, known: &dyn Fn(&Value) -> bool) -> Option<Value> {
+        match node["type"].as_str() {
+            Some("tabs") => {
+                let tabs: Vec<Value> = node["tabs"]
+                    .as_array()?
+                    .iter()
+                    .filter(|tab| known(tab))
+                    .cloned()
+                    .collect();
+                if tabs.is_empty() {
+                    return None;
+                }
+                let active = if tabs.contains(&node["active"]) {
+                    node["active"].clone()
+                } else {
+                    tabs[0].clone()
+                };
+                Some(json!({"type":"tabs", "tabs":tabs, "active":active}))
+            }
+            Some("split") => {
+                let mut children = Vec::new();
+                let mut sizes = Vec::new();
+                for child in node["children"].as_array()?.iter() {
+                    if let Some(kept) = prune(child, known) {
+                        // The browser reads the size at the KEPT child's index,
+                        // not the original one, so this does the same.
+                        let size = node["sizes"]
+                            .get(children.len())
+                            .filter(|size| size.as_f64().is_some_and(|s| s > 0.0))
+                            .cloned()
+                            .unwrap_or_else(|| json!(1));
+                        children.push(kept);
+                        sizes.push(size);
+                    }
+                }
+                match children.len() {
+                    0 => None,
+                    1 => children.pop(),
+                    _ => Some(json!({"type":"split", "axis":node["axis"].clone(),
+                        "sizes":sizes, "children":children})),
+                }
+            }
+            _ => None,
+        }
+    }
+    if !layout["root"].is_null() {
+        layout["root"] = prune(&layout["root"], &known).unwrap_or(Value::Null);
+    }
+    if let Some(floats) = layout["floats"].as_array_mut() {
+        floats.retain(|entry| known(&entry["panel"]));
+    }
+    if let Some(closed) = layout["closed"].as_array_mut() {
+        closed.retain(|panel| known(panel));
+    }
+    if !known(&layout["selected"]) {
+        let floats: Vec<Value> = layout["floats"].as_array().cloned().unwrap_or_default();
+        layout["selected"] =
+            first_visible(&layout["root"], &floats).unwrap_or_else(|| json!("roster"));
+    }
 }
 
 /// A panel the CURRENT registry has that migration did not place — a temporary

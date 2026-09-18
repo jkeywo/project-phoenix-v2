@@ -139,6 +139,31 @@ const CASES = [
       'despawn', 'faction'],
     selected: 'inspector',
   }],
+  // Version 14 RETIRED the ghost draft. A version-13 profile could hold it as a
+  // docked tab, as the selected panel, or as a float; every one of those must
+  // come back without it, with the view falling to what is left.
+  ['a version 13 layout with the ghost draft docked and selected', {
+    version: 13, root: group(['roster', 'contact', 'ghost'], 'ghost'), floats: [],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal',
+      'session-history', 'map', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'presentation', 'audition', 'source-link', 'spawn', 'inspector',
+      'checkpoint', 'restore', 'npc', 'misclassify', 'report-policy', 'system', 'effect',
+      'despawn', 'faction', 'objective', 'entity-fields'],
+    selected: 'ghost',
+  }],
+  ['a version 13 layout with the ghost draft floating over an emptied group', {
+    version: 13,
+    root: { type: 'split', axis: 'horizontal', sizes: [2, 3], children: [
+      group(['ghost'], 'ghost'), group(['roster', 'map'], 'map'),
+    ] },
+    floats: [{ panel: 'ghost', x: 8, y: 9, width: 300, height: 200 }],
+    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal',
+      'session-history', 'attention', 'workload', 'widgets', 'health', 'station',
+      'station-console', 'presentation', 'audition', 'source-link', 'spawn', 'inspector',
+      'checkpoint', 'restore', 'contact', 'npc', 'misclassify', 'report-policy', 'system',
+      'effect', 'despawn', 'faction', 'objective', 'entity-fields'],
+    selected: 'ghost',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

@@ -29,6 +29,7 @@
  * which palette row is armed.
  */
 
+import { wireText } from './strings.js';
 import {
   ACTION_FEEDBACK_STATE,
   ActionFeedbackLifecycle,
@@ -187,6 +188,10 @@ export function createGmSpawnPanel({
   win = doc && doc.defaultView,
   t = (id) => id,
   submitPlacement = null,
+  // A ghost is reported TO a ship on the contact-information route rather than
+  // spawned, so it has a submit of its own; its result comes back through
+  // `updateContacts` rather than the placement projection.
+  submitInformation = null,
   confirmAction = (request) => request.accept(),
   getOperator = () => null,
   getOperatorName = (id) => id,
@@ -211,6 +216,16 @@ export function createGmSpawnPanel({
   const exactButton = doc && doc.getElementById('gm-spawn-exact');
   const keepOpenBox = doc && doc.getElementById('gm-spawn-keep-open');
   const pickStatus = doc && doc.getElementById('gm-spawn-pick');
+  // What a placement PRODUCES. The palette, the gesture and the typed form are
+  // shared; only the outcome differs — an entity in the world, or a false
+  // Sensors report of that entry for one observing ship, under an identity
+  // the operator can later remove it by.
+  const outcomeEntity = doc && doc.getElementById('gm-spawn-outcome-entity');
+  const outcomeGhost = doc && doc.getElementById('gm-spawn-outcome-ghost');
+  const ghostFields = doc && doc.getElementById('gm-spawn-ghost');
+  const ghostObserver = doc && doc.getElementById('gm-spawn-ghost-observer');
+  const ghostIdInput = doc && doc.getElementById('gm-spawn-ghost-id');
+  const ghostScope = doc && doc.getElementById('gm-spawn-ghost-scope');
   const boundedCapacity = Math.max(
     1,
     Number.isInteger(capacity) ? capacity : GM_SPAWN_FEED_CAPACITY,
@@ -231,6 +246,8 @@ export function createGmSpawnPanel({
   const buttons = new Map();
   const selects = new Map();
   let boundMap = null;
+  let observers = [];
+  let renderedObservers = null;
 
   const actionFeedback = suppliedActionFeedback || new ActionFeedbackLifecycle({
     ...(typeof correlation === 'function' ? { correlation } : {}),
@@ -254,6 +271,100 @@ export function createGmSpawnPanel({
     } catch (_) {
       return id;
     }
+  }
+
+  /** A report identity is bounded exactly as gm_information::bounded bounds it. */
+  const boundedId = (value) => typeof value === 'string' && value.length > 0
+    && new TextEncoder().encode(value).length <= 128
+    && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+  const outcome = () => (outcomeGhost && outcomeGhost.checked ? 'ghost' : 'entity');
+  const ghostIdValue = () => (ghostIdInput ? ghostIdInput.value : '');
+  const observerRow = () => observers.find(
+    (row) => row.entity_id === (ghostObserver ? ghostObserver.value : ''),
+  ) || null;
+  const ghostReady = () => !!observerRow() && boundedId(ghostIdValue());
+  /** Whether a press can go anywhere: an entity needs only the operator, a
+   * ghost also needs a ship to report to and an identity to report under. */
+  const placeable = () => outcome() !== 'ghost' || ghostReady();
+
+  function paintOutcome() {
+    const ghost = outcome() === 'ghost';
+    if (region) region.dataset.outcome = outcome();
+    if (ghostFields) ghostFields.hidden = !ghost;
+    if (ghostScope) {
+      const ship = observerRow();
+      ghostScope.textContent = !ghost ? ''
+        : ship ? t('server.gm.spawn.ghost_scope', { ship: ship.name })
+          : t('server.gm.spawn.ghost_observer');
+    }
+  }
+
+  /** The ships a ghost can be reported to: the live player ships, kept as
+   * option nodes across unrelated entity updates so a choice survives them. */
+  function setObservers(rows) {
+    observers = (Array.isArray(rows) ? rows : [])
+      .filter((row) => row && row.kind === 'player_ship'
+        && typeof row.entity_id === 'string' && row.entity_id.length > 0)
+      .map((row) => ({ entity_id: row.entity_id, name: wireText(row.name) }));
+    const key = JSON.stringify(observers.map((row) => [row.entity_id, row.name]));
+    if (ghostObserver && renderedObservers !== key) {
+      renderedObservers = key;
+      const prior = ghostObserver.value;
+      ghostObserver.replaceChildren();
+      const placeholder = doc.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = t('server.gm.spawn.ghost_observer');
+      ghostObserver.append(placeholder);
+      for (const row of observers) {
+        const option = doc.createElement('option');
+        option.value = row.entity_id;
+        option.textContent = row.name;
+        ghostObserver.append(option);
+      }
+      ghostObserver.value = observers.some((row) => row.entity_id === prior) ? prior : '';
+    }
+    paintOutcome();
+    refreshAdmission();
+  }
+
+  /** The entity projection, which carries both what a ghost needs — the
+   * observing ships — and how a ghost went: its result is a contact-information
+   * row, never a placement result. */
+  function updateContacts(payload) {
+    let value = payload;
+    if (typeof value === 'string') {
+      try { value = JSON.parse(value); } catch (_) { return false; }
+    }
+    if (!value || typeof value !== 'object') return false;
+    if (Array.isArray(value.entities)) setObservers(value.entities);
+    if (Array.isArray(value.contact_results)) settleGhostResults(value.contact_results);
+    return true;
+  }
+
+  function settleGhostResults(rows) {
+    let settled = false;
+    for (const row of rows) {
+      if (!row || row.action_kind !== 'contact-information' || typeof row.correlation !== 'string') continue;
+      const meta = pending.get(row.correlation);
+      if (!meta || !meta.ghost || meta.operatorId !== row.operator_id
+          || meta.ghost.ship !== row.observer || meta.ghost.id !== row.target) continue;
+      clearPendingTimer(meta);
+      pending.delete(row.correlation);
+      // No placement result will ever come for it, so the terminal is kept
+      // here and drawn beside the placements it was made among.
+      rememberLocalTerminal({ ...meta, tick: row.tick }, row.outcome, row.reason || null);
+      const state = row.outcome === 'refused'
+        ? ACTION_FEEDBACK_STATE.REFUSED : ACTION_FEEDBACK_STATE.APPLIED;
+      actionFeedback.settle(row.correlation, state);
+      paintFeedback(state, meta.palette);
+      if (row.outcome === 'applied') onSucceeded();
+      settled = true;
+    }
+    if (settled) {
+      renderLog();
+      refreshAdmission();
+    }
+    return settled;
   }
 
   function map() {
@@ -313,12 +424,36 @@ export function createGmSpawnPanel({
     });
   }
 
+  function rowEntryLabel(meta) {
+    return meta.ghost
+      ? t('server.gm.spawn.ghost_entry', {
+          id: meta.ghost.id, entry: entryLabel(meta.palette), ship: meta.ghost.shipName,
+        })
+      : entryLabel(meta.palette);
+  }
+
   function paintLocalRow(meta, outcome, reason) {
     const row = appendRow(meta.operatorId, meta.correlation);
     if (!row) return;
     row.dataset.outcome = outcome;
     row.dataset.palette = meta.palette;
+    if (meta.ghost) row.dataset.ghost = meta.ghost.id;
     if (reason) row.dataset.reason = reason;
+    // A ghost settled by its contact result is a terminal like an authoritative
+    // placement, tick and all; it is only kept locally because no placement
+    // result exists for it.
+    if (meta.ghost && Number.isSafeInteger(meta.tick)
+        && ['applied', 'no-op', 'refused'].includes(outcome)) {
+      row.dataset.tick = String(meta.tick);
+      row.textContent = t(`server.gm.spawn.result_${outcome === 'no-op' ? 'no_op' : outcome}`, {
+        name: meta.operatorName,
+        entry: rowEntryLabel(meta),
+        tick: String(meta.tick),
+        correlation: meta.correlation,
+        reason: refusalText(reason),
+      });
+      return;
+    }
     const statusId = {
       pending: 'server.gm.spawn.result_pending',
       'timed-out': 'server.gm.spawn.result_timed_out',
@@ -326,7 +461,7 @@ export function createGmSpawnPanel({
     }[outcome];
     row.textContent = t(statusId, {
       name: meta.operatorName,
-      entry: entryLabel(meta.palette),
+      entry: rowEntryLabel(meta),
       correlation: meta.correlation,
       reason: refusalText(reason),
     });
@@ -403,6 +538,7 @@ export function createGmSpawnPanel({
     const entry = palette.find((candidate) => candidate.id === paletteId);
     const wire = placementToWire(placement);
     if (!current || !entry || !wire) return false;
+    if (outcome() === 'ghost') return placeGhost(current, entry, wire);
     const variant = selectedVariants.get(paletteId) || null;
     if (variant !== null && !entry.variants.some((candidate) => candidate.id === variant)) {
       return false;
@@ -415,7 +551,44 @@ export function createGmSpawnPanel({
     });
   }
 
+  /** The ghost outcome: the same entry at the same place, reported to one ship.
+   *
+   * The same words the contact tool used for this report, because it is the
+   * same report; the same confirmation category, because it is the same
+   * command on the wire — heading is not part of a report, so it is not sent.
+   */
+  function placeGhost(current, entry, wire) {
+    const ship = observerRow();
+    const id = ghostIdValue();
+    if (!ship || !boundedId(id)) return false;
+    const description = t('settings.gm.confirmation.contact', {
+      mode: t('server.gm.contact.ghost-set'), target: id, ship: ship.name,
+    });
+    return confirmAction({ category: 'contact.override', description, preview: () => description,
+      accept: () => submitIntent(current, entry.id, null, { ship, id }, (correlation) =>
+        typeof submitInformation === 'function' && submitInformation({
+          operator_id: current.id,
+          ship: ship.entity_id,
+          correlation,
+          change: { set_ghost: { id, palette: entry.id, position_mm: wire.position_mm } },
+        }) !== false),
+    });
+  }
+
   function submitPlacementIntent(current, paletteId, variant, wire) {
+    return submitIntent(current, paletteId, variant, null, (correlation) =>
+      typeof submitPlacement === 'function'
+        && submitPlacement({
+          palette: paletteId,
+          variant,
+          position_mm: wire.position_mm,
+          heading_mdeg: wire.heading_mdeg,
+          correlation,
+        }) !== false);
+  }
+
+  /** One pending lifecycle for both outcomes; `send` is the only difference. */
+  function submitIntent(current, paletteId, variant, ghost, send) {
     if (operator()?.id !== current.id) return false;
     while (pending.size >= boundedCapacity) {
       const oldest = pending.keys().next().value;
@@ -432,18 +605,12 @@ export function createGmSpawnPanel({
         ? current.name : operatorName(current.id),
       timer: null,
       timerScheduled: false,
+      ...(ghost ? { ghost: { ship: ghost.ship.entity_id, shipName: ghost.ship.name, id: ghost.id } } : {}),
     };
     pending.set(press.correlation, meta);
     let accepted = false;
     try {
-      accepted = typeof submitPlacement === 'function'
-        && submitPlacement({
-          palette: paletteId,
-          variant,
-          position_mm: wire.position_mm,
-          heading_mdeg: wire.heading_mdeg,
-          correlation: press.correlation,
-        }) !== false;
+      accepted = send(press.correlation) === true;
     } catch (_) {
       accepted = false;
     }
@@ -701,17 +868,21 @@ export function createGmSpawnPanel({
   function refreshAdmission() {
     const admitted = !!operator();
     if (region) region.dataset.admitted = String(admitted);
+    const ready = admitted && placeable();
     for (const [paletteId, button] of buttons) {
-      button.disabled = !admitted;
-      button.setAttribute('aria-disabled', admitted ? 'false' : 'true');
+      button.disabled = !ready;
+      button.setAttribute('aria-disabled', ready ? 'false' : 'true');
       button.dataset.arming = String(armedPaletteId === paletteId);
+    }
+    for (const control of [outcomeEntity, outcomeGhost, ghostObserver, ghostIdInput]) {
+      if (control) control.disabled = !admitted;
     }
     if (exactButton) {
       // The typed form acts on the armed row, falling back to the first — so
       // which row it will place is never a guess: it is on the button, in the
       // DOM, and in the accessible name beside the coordinates.
       const target = exactTarget();
-      const enabled = admitted && !!target;
+      const enabled = ready && !!target;
       exactButton.disabled = !enabled;
       exactButton.setAttribute('aria-disabled', enabled ? 'false' : 'true');
       exactButton.dataset.paletteId = target ? target.id : '';
@@ -749,7 +920,9 @@ export function createGmSpawnPanel({
     localTerminals.clear();
     for (const result of projection.results) {
       const meta = pending.get(result.correlation);
-      if (!meta || meta.operatorId !== result.operator_id) continue;
+      // A ghost is settled by its contact result, never by a placement result:
+      // it placed nothing, so no placement result is about it.
+      if (!meta || meta.ghost || meta.operatorId !== result.operator_id) continue;
       clearPendingTimer(meta);
       pending.delete(result.correlation);
       const state = result.outcome === 'refused'
@@ -781,17 +954,33 @@ export function createGmSpawnPanel({
     if (exactX) exactX.value = '0';
     if (exactZ) exactZ.value = '0';
     if (exactHeading) exactHeading.value = '0';
+    // WHICH ghost always goes; WHAT it is — the outcome and the ship it is
+    // reported to — is reusable, exactly as the palette choice is.
+    if (ghostIdInput) ghostIdInput.value = '';
     setArmed(null);
     if (!keepReusable) {
       selectedVariants.clear();
       if (keepOpenBox) keepOpenBox.checked = false;
+      if (outcomeEntity) outcomeEntity.checked = true;
+      if (outcomeGhost) outcomeGhost.checked = false;
+      if (ghostObserver) ghostObserver.value = '';
       renderPalette();
     }
+    paintOutcome();
     refreshAdmission();
   }
 
   /** Has the operator typed something into this draft that has not been sent? */
+  function draftDirtyGhost() {
+    return outcome() === 'ghost' || !!ghostIdValue() || !!(ghostObserver && ghostObserver.value);
+  }
+
   function draftDirty() {
+    if (draftDirtyGhost()) return true;
+    return draftDirtyPlacement();
+  }
+
+  function draftDirtyPlacement() {
     if (armedPaletteId) return true;
     // A select touched and put back to the bare template is not a choice: the
     // panel records that as a null, and a null is the default.
@@ -823,6 +1012,16 @@ export function createGmSpawnPanel({
   }
 
   if (exactButton) exactButton.addEventListener('click', onExactClick);
+
+  for (const control of [outcomeEntity, outcomeGhost, ghostObserver]) {
+
+    if (control) control.addEventListener('change', () => { paintOutcome(); refreshAdmission(); });
+
+  }
+
+  if (ghostIdInput) ghostIdInput.addEventListener('input', refreshAdmission);
+
+  paintOutcome();
   bindMap();
   renderPalette();
   refreshAdmission();
@@ -868,6 +1067,8 @@ export function createGmSpawnPanel({
       first?.focus?.();
     },
     refreshAdmission,
+    updateContacts,
+    setObservers,
     state: () => ({
       palette: palette.length,
       arming: armedPaletteId,
@@ -876,6 +1077,8 @@ export function createGmSpawnPanel({
       variants: Object.fromEntries(selectedVariants),
       pending: pending.size,
       authoritative: authoritativeResults.length,
+      outcome: outcome(),
+      ghost: { observer: ghostObserver ? ghostObserver.value : '', id: ghostIdValue() },
     }),
     destroy,
     win,

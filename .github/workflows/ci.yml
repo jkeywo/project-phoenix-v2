@@ -574,12 +574,20 @@ jobs:
         # the two words `--grep @core`.
         run: npx playwright test $SMOKE_GREP --shard=${{ matrix.shard }}/3
 
-      - name: Upload Playwright report
+      # What a failed shard leaves behind. The CI reporter writes JSON to
+      # target/ and Playwright puts failure screenshots (and any traces) under
+      # tests/smoke/test-results/; the old path here named an HTML report the
+      # CI reporter never produced, so every upload found nothing and a flaky
+      # spec left no evidence at all.
+      - name: Upload Playwright results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.shard }}
-          path: tests/smoke/playwright-report/
+          name: playwright-results-${{ matrix.shard }}
+          path: |
+            target/playwright-results.json
+            tests/smoke/test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
       # Issue #1300's peer-tracer is a stable, sanitized index of the complete

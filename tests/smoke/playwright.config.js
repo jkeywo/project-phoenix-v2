@@ -25,8 +25,16 @@ export default defineConfig({
 
   use: {
     baseURL: `http://localhost:${port}`,
-    // Capture traces on first retry to aid debugging
+    // No retries are configured, on purpose: a spec that passes on its second
+    // go has not proved the suite green, and this project's determinism claims
+    // are exactly the kind of race a retry would hide. This trace setting is
+    // therefore inert in CI and only serves a local `--retries 1` run.
     trace: 'on-first-retry',
+    // What a failing spec leaves behind without a retry: the page as it was
+    // when the step gave up. Cheap (nothing is captured on a pass) and it is
+    // the difference between "a wait timed out" and seeing which overlay,
+    // panel or boot screen the wait was actually looking at.
+    screenshot: 'only-on-failure',
   },
 
   projects: [

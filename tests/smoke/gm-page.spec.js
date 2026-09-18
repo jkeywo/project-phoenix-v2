@@ -3098,7 +3098,14 @@ test(
 // #1313: actual human and two equal GM operators share the authored Captain
 // interface. Every effect and receipt below comes back from ordinary consumers.
 test('two equal GMs puppet a human-held Station without blocking its player', { tag: '@core' }, async ({ context }) => {
-  test.setTimeout(180_000);
+  // The heaviest spec in the suite: five sequential WASM boots (the ship, and
+  // each GM page twice — once as a host page, again after it becomes a GM)
+  // beside four crew pages, each boot capped at WASM_READY_TIMEOUT. It runs in
+  // ~25 s on a quiet runner and has twice blown a 180 s budget on a loaded
+  // one while every single step was still inside its own cap, which reports
+  // a bare test timeout instead of the step that stalled. The budget is the
+  // sum of the step caps, so a genuine stall is named by its own wait.
+  test.setTimeout(420_000);
   const ship = await context.newPage();
   const errors = captureServerPageErrors(ship);
   await ship.goto('/?scenario=assets/worlds/default.toml');

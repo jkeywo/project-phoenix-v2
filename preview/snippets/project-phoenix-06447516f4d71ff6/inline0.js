@@ -1,0 +1,1 @@
+export async function phoenixTranscode(bytes, target) { const m = await import(new URL('assets/texture-codecs/uastc.js', document.baseURI).href); return m.transcode(bytes, target); }

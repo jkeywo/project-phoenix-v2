@@ -52,15 +52,52 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     const option = doc.createElement('option'); option.value = String(value); option.textContent = `${value}×`; speed.append(option);
   }
   speed.addEventListener('change', () => { void session.control({ command: 'rate', multiplier: Number(speed.value) }).catch(() => {}); });
+  // Which observer this run is drawn for. A switch is not a restart: the same
+  // simulation keeps running at the same tick while the surface changes.
+  const view = make('select', 'view');
+  view.addEventListener('change', () => {
+    const value = view.value;
+    const control = value === 'game-master'
+      ? { command: 'view', view: { view: 'game-master' } }
+      : { command: 'view', view: { view: 'ship', entity: value || null } };
+    void session.control(control).catch(() => {});
+  });
   panel.append(make('h2', 'heading', 'workshop.test_heading'), make('p', 'scope', 'workshop.test_scope'));
   const label = (target, id) => { const node = doc.createElement('label'); node.htmlFor = target.id; node.textContent = t(id); panel.append(node, target); };
   label(world, 'workshop.test_world'); label(ship, 'workshop.test_ship'); label(seed, 'workshop.test_seed');
   panel.append(start, returnTest, authoring, pause, resume, step);
-  label(speed, 'workshop.test_speed'); panel.append(stop, status); root.append(panel);
+  label(speed, 'workshop.test_speed'); label(view, 'workshop.test_view');
+  panel.append(stop, status); root.append(panel);
   if (provider.test.mount) {
     const viewport = doc.createElement('div'); viewport.className = 'workshop-test-viewport';
     panel.append(viewport); provider.test.mount(viewport, t('workshop.test_heading'));
   }
+  /** Offer the omniscient desk and every simulated player ship this run has.
+   *
+   * Rebuilt only when the offer actually changes, so a selector the operator is
+   * working does not reshuffle under them each time the status polls. */
+  let offered = '';
+  function paintViews(run) {
+    const ships = Array.isArray(run?.ships) ? run.ships : [];
+    const signature = JSON.stringify(ships);
+    if (signature !== offered) {
+      offered = signature;
+      const options = [
+        ['game-master', t('workshop.test_view_gm')],
+        // `''` is the ship the Test launched with, which is what Start opens
+        // on and the only entry a single-ship run needs.
+        ['', t('workshop.test_view_launched')],
+        ...ships.map(ship => [ship.entity, ship.name]),
+      ];
+      view.replaceChildren(...options.map(([value, text]) => {
+        const option = doc.createElement('option');
+        option.value = value; option.textContent = text; return option;
+      }));
+    }
+    const current = run?.view?.view === 'game-master' ? 'game-master' : (run?.view?.entity || '');
+    if (doc.activeElement !== view) view.value = current;
+  }
+
   function render() {
     if (!session) return;
     const state = session.state(), draft = getDraft();
@@ -77,6 +114,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     resume.disabled = busy || !testing || !state.run?.paused || state.run?.starting;
     step.disabled = resume.disabled;
     speed.disabled = busy || !testing || state.run?.starting;
+    view.disabled = speed.disabled;
+    paintViews(state.run);
     // A browser boot can wait on large captured assets or a GPU. Its explicit
     // cancellation retires an in-flight frame before the serialized Stop.
     const cancellable = state.busy && typeof provider.test.cancelStart === 'function';

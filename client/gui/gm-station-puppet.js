@@ -37,8 +37,24 @@ import {
   DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
   isValidActionCorrelation,
 } from './action-feedback.js';
+import { emptyTutorialProgress, tutorialProgressAfterAction } from './tutorial-state.js';
 import { ClientSimState } from './sim-state.js';
 import { applyViewscreenEffectsToRoot } from './viewscreen-presentation.js';
+
+/** Tutorial progress of the consoles THIS Game Master has puppeted, by ship.
+ *
+ * A puppeted console is a real first-run console and carries the same tutorial
+ * cards; dismissing one is presentation state, handled where the console is
+ * shown and never sent to the host (gui/tutorial-state.js). It is kept here
+ * rather than on the projected state, which is rebuilt on every update, and
+ * kept per GM session rather than persisted: the human at that Station keeps
+ * their own progress, and a GM looking over their shoulder must not write it.
+ */
+const puppetTutorialProgress = new Map();
+const tutorialProgressFor = shipId => {
+  if (!puppetTutorialProgress.has(shipId)) puppetTutorialProgress.set(shipId, emptyTutorialProgress());
+  return puppetTutorialProgress.get(shipId);
+};
 
 const STATION_COMMAND_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 const LOCAL_INGRESS_REFUSAL = 'ingress-rejected';
@@ -172,7 +188,7 @@ export function buildGmStationConsoleInput(projection, ship) {
   }
   state.controlSources = ship.control_sources || {};
   state.stationPuppets = stationPuppets;
-  state.tutorialProgress = {};
+  state.tutorialProgress = tutorialProgressFor(ship.ship_id);
 
   // Regions remain a local presentation projection, just as on player
   // clients. Their only raw inputs are the authoritative entity/objective
@@ -228,6 +244,11 @@ export function createGmStationPuppet({
   let loadedUrl = null;
   let mountedKey = null;
   let mountGeneration = 0;
+  // Whether the document currently in the frame is the one this puppet asked
+  // for. A frame that loads again after that — because the dock moved the
+  // panel, and moving a node between parents re-creates its document — is a
+  // REMOUNT, not the mount we were waiting for.
+  let mountSettled = false;
   const pendingCommands = new Map();
   const boundedPendingCapacity = Math.max(1, Math.min(
     GM_STATION_PENDING_CAPACITY,
@@ -381,6 +402,7 @@ export function createGmStationPuppet({
       // document to masquerade as commands for the newly selected Ship.
       replaceFrame(selectedKey);
       loadedUrl = selectedRow.station.console;
+      mountSettled = false;
       frame.dataset.station = selectedRow.station.station_id;
       frame.dataset.ship = selectedRow.ship.ship_id;
       frame.setAttribute('title', `${selectedRow.ship.name} — ${selectedRow.station.name}`);
@@ -401,14 +423,29 @@ export function createGmStationPuppet({
     frame = replacement;
     mountedKey = key;
     loadedUrl = null;
+    invalidateMount();
+    frame.addEventListener('load', onFrameLoad);
+  }
+
+  /** Feedback belongs to its originating interface; a later mount cannot
+   * inherit its timers or correlation, even if it uses the same URL. */
+  function invalidateMount() {
     mountGeneration += 1;
-    // Feedback belongs to its originating interface; a later mount cannot
-    // inherit its timers or correlation, even if it uses the same URL.
+    mountSettled = false;
     for (const command of pendingCommands.values()) {
       if (command.timer != null) cancelSchedule(command.timer);
     }
     pendingCommands.clear();
-    frame.addEventListener('load', pushState);
+  }
+
+  function onFrameLoad() {
+    // The first load after we set `src` is the mount we asked for. Any load
+    // after that is a document we did not ask for — the dock reparented the
+    // panel — and the commands the previous document sent must not have their
+    // feedback delivered into it.
+    if (mountSettled) invalidateMount();
+    mountSettled = true;
+    pushState();
   }
 
   function rebuildOptions() {
@@ -470,6 +507,17 @@ export function createGmStationPuppet({
     if (!selectedRow) return false;
     const action = parsePayload(raw);
     if (!action || typeof action !== 'object') return false;
+    // The console's tutorial bookkeeping runs here exactly as it does on a
+    // player client: a dismiss is recorded and shown, never forwarded; every
+    // other action records the control as used and flows on unchanged.
+    const shipId = selectedRow.ship.ship_id;
+    const hull = selectedRow.ship.ship_config?.hull_id;
+    const folded = tutorialProgressAfterAction(tutorialProgressFor(shipId), action, hull);
+    if (folded.changed) {
+      puppetTutorialProgress.set(shipId, folded.progress);
+      renderSelected();
+    }
+    if (folded.handled) return true;
     let submitted = false;
     dispatchConsoleAction(action, (type, data = {}) => {
       if (submitted || (type !== 'ControlSystem' && type !== 'ControlSystemCorrelated')
@@ -539,7 +587,7 @@ export function createGmStationPuppet({
     renderSelected();
   });
   if (button) button.addEventListener('click', toggle);
-  if (frame) frame.addEventListener('load', pushState);
+  if (frame) frame.addEventListener('load', onFrameLoad);
   win.addEventListener('message', event => {
     if (!frame || event.source !== frame.contentWindow
         || !event.data || event.data.type !== 'console_action') return;

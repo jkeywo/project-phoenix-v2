@@ -49,6 +49,33 @@ export const GM_ROLE_PRESET_PANEL_IDS = Object.freeze([
   'gm-comms-panel',
 ]);
 
+/** Panels that used to be CHILDREN of a panel this vocabulary already names,
+ * and so keep following it (issue #1510). Contact control, NPC doctrine and
+ * the three contact drafts left the inspector for panels of their own; a
+ * preset that puts the inspector away must still put them away, or a
+ * restricted desk keeps every control the preset was written to remove. The
+ * authored vocabulary is unchanged: no scenario has to name them. */
+export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
+  'gm-contact-panel': 'gm-inspector',
+  'gm-contact-misclassify-panel': 'gm-inspector',
+  'gm-contact-report-panel': 'gm-inspector',
+  'gm-npc-panel': 'gm-inspector',
+  // System control and direct effect followed them out in issue #1511.
+  'gm-system-panel': 'gm-inspector',
+  'gm-effect-panel': 'gm-inspector',
+  // Removal and faction hostility in issue #1512.
+  'gm-despawn-panel': 'gm-inspector',
+  'gm-faction-panel': 'gm-inspector',
+  // The authored Objective controls in issue #1513. They went to the mission
+  // workflow rather than the inspector's column, but they were the inspector's
+  // child when this vocabulary was written, so they keep following it: a preset
+  // that puts the inspector away still puts them away.
+  'gm-objective-panel': 'gm-inspector',
+  // The entities/AI Live Inspector reads the inspector's own selection, so a
+  // preset that puts the inspector away puts its readings away too (#1489).
+  'gm-entity-fields-panel': 'gm-inspector',
+});
+
 /** Quick-action DOM ids this build actually draws. */
 export const GM_ROLE_PRESET_QUICK_ACTION_IDS = Object.freeze([
   'gm-session-pause', 'gm-session-resume',
@@ -253,6 +280,10 @@ export function createGmRolePresets({
     for (const id of GM_ROLE_PRESET_PANEL_IDS) {
       const el = doc && doc.getElementById(id);
       if (el) el.hidden = !isGmPanelVisible(effective, id);
+    }
+    for (const [id, leader] of Object.entries(GM_ROLE_PRESET_PANEL_FOLLOWERS)) {
+      const el = doc && doc.getElementById(id);
+      if (el) el.hidden = !isGmPanelVisible(effective, leader);
     }
     for (const id of GM_ROLE_PRESET_QUICK_ACTION_IDS) {
       const el = doc && doc.getElementById(id);

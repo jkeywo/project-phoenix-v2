@@ -1,17 +1,32 @@
 /** The embedded Test page accepts one parent's private port exactly once.
  * Its adapter boots one captured snapshot; subsequent messages can only read
  * status or operate the finite clock vocabulary. */
-export function attachWorkshopTestChild({ port, launch }) {
+/** The disposable Test's own control vocabulary. */
+const TEST_CONTROLS = (value, exact) => {
+  if (exact(value, ['command'])) return ['pause', 'resume', 'step', 'stop'].includes(value.command);
+  // A view names which observer the SAME run is drawn for: either the
+  // omniscient Game Master workspace, or one simulated player ship's authentic
+  // viewscreen (`entity: null` being the ship the Test launched with). It
+  // carries no command, no target and no authority — the runtime still refuses
+  // a ship the run does not have.
+  if (exact(value, ['command', 'view']) && value.command === 'view') {
+    const view = value.view;
+    if (!view || typeof view !== 'object') return false;
+    if (exact(view, ['view'])) return view.view === 'game-master';
+    return exact(view, ['view', 'entity']) && view.view === 'ship'
+      && (view.entity === null || (typeof view.entity === 'string' && view.entity.length > 0));
+  }
+  return (exact(value, ['command', 'multiplier']) && value.command === 'rate' && [1, 2, 4, 8].includes(value.multiplier))
+    || (exact(value, ['command', 'visible']) && value.command === 'visibility' && typeof value.visible === 'boolean');
+};
+
+export function attachWorkshopTestChild({ port, launch, controls = TEST_CONTROLS }) {
   let started = false, disposed = false, runtime = null, lastId = 0, pending = 0;
   const abort = new AbortController();
   let queue = Promise.resolve();
   const exact = (value, keys) => value && typeof value === 'object'
     && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-  const validControl = value => {
-    if (exact(value, ['command'])) return ['pause', 'resume', 'step', 'stop'].includes(value.command);
-    return (exact(value, ['command', 'multiplier']) && value.command === 'rate' && [1, 2, 4, 8].includes(value.multiplier))
-      || (exact(value, ['command', 'visible']) && value.command === 'visibility' && typeof value.visible === 'boolean');
-  };
+  const validControl = value => controls(value, exact);
   function send(id, value) { if (!disposed) port.postMessage({ id, ...value }); }
   async function handle(value) {
     if (disposed) return;
@@ -43,13 +58,14 @@ export function attachWorkshopTestChild({ port, launch }) {
   return { dispose };
 }
 
-export function installWorkshopTestChild({ win = window, launch }) {
+export function installWorkshopTestChild({ win = window, launch,
+  type = 'phoenix-workshop-test-connect', controls = TEST_CONTROLS }) {
   let owner = null;
   function connect(event) {
     if (win.parent === win || event.source !== win.parent || event.origin !== win.location.origin
-        || event.data?.type !== 'phoenix-workshop-test-connect' || event.ports?.length !== 1) return;
+        || event.data?.type !== type || event.ports?.length !== 1) return;
     win.removeEventListener('message', connect);
-    owner = attachWorkshopTestChild({ port: event.ports[0], launch });
+    owner = attachWorkshopTestChild({ port: event.ports[0], launch, controls });
   }
   function dispose() { win.removeEventListener('message', connect); owner?.dispose(); }
   win.addEventListener('message', connect);

@@ -16,6 +16,21 @@ export function modelDocuments(paths) {
       a.name === 'model' ? -1 : b.name === 'model' ? 1 : a.name.localeCompare(b.name)) }));
 }
 
+/** Entity templates the preview can show as a composed subject.
+ *
+ * The shared viewer dispatches an entity's `[star]`, `[planet]` or `[mesh]`
+ * visual through the same constructors the game uses, so a star and a planet
+ * are previewable exactly by being entity templates — there is no separate
+ * star list and no separate planet list to keep in step with the authored
+ * content. Rig sidecars under assets/models/ are not templates and are
+ * excluded; those are reached through their model instead.
+ */
+export function entityDocuments(paths) {
+  return paths
+    .filter(path => path.startsWith('assets/entities/') && path.endsWith('.toml'))
+    .sort((a, b) => a.localeCompare(b));
+}
+
 export function modelFieldGroup(field) {
   return ['base', 'markers', 'target_points', 'lod', 'extents', 'base_build'].includes(field.path[0])
     ? field.path[0] : 'other';

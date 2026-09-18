@@ -40,7 +40,10 @@ export function mountWorkshopSourceLink({ root, win, t }) {
   button.id = 'gm-workshop-open'; button.textContent = t('workshop.leave_live');
   const status = doc.createElement('p'); status.setAttribute('role', 'status');
   panel.append(label, select, button, status);
-  (doc.getElementById('gm-desk-brief') || root).append(panel);
+  // The docked host when the GM desk composed one (issue #1505); the desk's own
+  // region, or the given root, otherwise.
+  (doc.getElementById('gm-source-link-dock') || doc.getElementById('gm-desk-brief') || root)
+    .append(panel);
   let handoffStore;
   // Storage can be denied (including a throwing indexedDB getter). Acquire it
   // only inside the guarded click operation, never while mounting GM controls.

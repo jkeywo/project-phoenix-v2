@@ -12,6 +12,607 @@
 </head>
 <body>
   <canvas id="canvas"></canvas>
+  <!-- The omniscient view of this same run. scripts/build-workshop.mjs injects
+       the real #gm-console subtree from server.html here, so the Test mounts
+       the ordinary GM workspace rather than a Workshop-only copy of it. -->
+  <div id="test-gm" hidden>
+  <main id="gm-console" aria-labelledby="gm-console-title">
+        <header>
+          <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
+          <p data-i18n="server.gm.console.local_truth"></p>
+          <!-- Presentation-only role preset (issue #1319): filters which
+               panels/quick actions THIS browser shows. Never authority --
+               see gui/gm-role-presets.js. Defaults to the built-in All, which
+               is the only option when the scenario authors none. -->
+          <label id="gm-role-preset-label" class="gm-activity-filter" for="gm-role-preset-select">
+            <span data-i18n="server.gm.role_preset.heading"></span>
+            <select id="gm-role-preset-select">
+              <option value="all" data-i18n="server.gm.role_preset.option.all"></option>
+            </select>
+          </label>
+        </header>
+        <section id="gm-session-controls" role="region" aria-labelledby="gm-session-heading">
+          <h2 id="gm-session-heading" data-i18n="server.gm.session.heading"></h2>
+          <div id="gm-session-actions">
+            <button id="gm-session-pause" type="button"
+              data-i18n="semantic_action.gm.session_pause.label"></button>
+            <button id="gm-session-resume" type="button"
+              data-i18n="semantic_action.gm.session_resume.label"></button>
+            <!-- The standalone game master's Start (the `host_gm` landing
+                 route). The lobby rail's `#gm-start-controls` is the fleet's
+                 start surface and lives in `#lobby-panel`, which the GM page
+                 never shows — so a GM who IS the whole session starts it from
+                 the session controls in front of them. Hidden except for a
+                 fleetless GM whose session is still in the Lobby phase;
+                 `paintGmStartControls` owns that. -->
+            <button id="gm-session-start" type="button" hidden
+              data-i18n="server.gm.session.start_standalone"></button>
+          </div>
+          <p id="gm-session-state" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="gm-session-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-session-log-heading" data-i18n="server.gm.session.log_heading"></h3>
+          <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <!-- The mission panel (issues #1301, #1303 and #1304): every
+             GM-operable authored event the loaded scenario declares, with the
+             levers it declared. Rows and their Fire / Pause / Skip-next
+             controls are built by gui/gm-mission-panel.js from the absolute
+             `gm_mission` Host Channel projection, so an empty scenario renders
+             the empty sentence and nothing else, and an event that declares
+             one lever gets one button. -->
+        <section id="gm-mission-panel" role="region" aria-labelledby="gm-mission-heading">
+          <h2 id="gm-mission-heading" data-i18n="server.gm.mission.heading"></h2>
+          <ul id="gm-mission-events" role="list"></ul>
+          <p id="gm-mission-empty" role="status" aria-live="polite"
+            data-i18n="server.gm.mission.empty"></p>
+          <p id="gm-mission-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-mission-log-heading" data-i18n="server.gm.mission.log_heading"></h3>
+          <ol id="gm-mission-log" role="log" aria-labelledby="gm-mission-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <!-- The placement panel (issue #1305): the scenario's authored GM spawn
+             palette, and the two ways to place one. PLACE arms the map gesture
+             (click/press picks the position, drag picks the heading, and the
+             chart's own keyboard cursor does both without a pointer); the typed
+             form below is the same command with the coordinates read out of the
+             inputs. Rows come from the absolute `gm_spawn` Host Channel
+             projection, so a scenario with no palette renders the empty
+             sentence and offers nothing placeable. -->
+        <!-- The authored Objective controls (issue #1513). A dock panel of its
+             own in the mission workflow rather than a region nested inside the
+             mission events: same authored verbs, same consequence
+             confirmation, one place. -->
+        <section id="gm-objective-panel" role="region" aria-labelledby="gm-objective-heading">
+          <h2 id="gm-objective-heading" data-i18n="server.gm.objective.heading"></h2>
+          <ul id="gm-objective-list"></ul>
+          <p id="gm-objective-empty" data-i18n="server.gm.objective.empty"></p>
+          <div id="gm-objective-confirmation" hidden role="group" aria-labelledby="gm-objective-consequence">
+            <p id="gm-objective-consequence"></p>
+            <button id="gm-objective-confirm" type="button" data-i18n="server.gm.objective.confirm"></button>
+            <button id="gm-objective-cancel" type="button" data-i18n="server.gm.objective.cancel"></button>
+          </div>
+          <p id="gm-objective-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-objective-results-heading" data-i18n="server.gm.objective.results_heading"></h3>
+          <ol id="gm-objective-results" role="log" aria-labelledby="gm-objective-results-heading" aria-live="polite"></ol>
+        </section>
+        <section id="gm-system-panel" role="region" aria-labelledby="gm-system-heading">
+          <h2 id="gm-system-heading" data-i18n="server.gm.system.heading"></h2>
+          <p data-i18n="server.gm.system.explanation"></p>
+          <p id="gm-system-target"></p>
+          <label for="gm-system-select" data-i18n="server.gm.system.choose"></label>
+          <select id="gm-system-select"></select>
+          <p id="gm-system-state" role="status"></p>
+          <button id="gm-system-disable" type="button" disabled data-i18n="server.gm.system.disable"></button>
+          <button id="gm-system-restore" type="button" disabled data-i18n="server.gm.system.restore"></button>
+          <p id="gm-system-feedback" role="status" aria-live="polite"></p>
+        </section>
+        <section id="gm-contact-panel" role="region" aria-labelledby="gm-contact-heading">
+          <h2 id="gm-contact-heading" data-i18n="server.gm.contact.heading"></h2>
+          <p data-i18n="server.gm.contact.explanation"></p>
+          <label for="gm-contact-observer" data-i18n="server.gm.contact.observer"></label>
+          <select id="gm-contact-observer"></select>
+          <p id="gm-contact-target" role="status"></p>
+          <p id="gm-contact-mode" role="status"></p>
+          <button id="gm-contact-reveal" type="button" disabled data-i18n="server.gm.contact.reveal"></button>
+          <button id="gm-contact-conceal" type="button" disabled data-i18n="server.gm.contact.conceal"></button>
+          <button id="gm-contact-normal" type="button" disabled data-i18n="server.gm.contact.normal"></button>
+          <p id="gm-contact-classification-current" role="status"></p>
+          <button id="gm-contact-classification-normal" type="button" disabled data-i18n="server.gm.contact.classification-normal"></button>
+          <p id="gm-contact-report-current" role="status"></p>
+          <button id="gm-contact-report-clear" type="button" disabled data-i18n="server.gm.contact.report_normal"></button>
+          <ul id="gm-contact-ghosts" aria-label="" data-i18n-aria-label="server.gm.contact.ghosts"></ul>
+          <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-contact-results"></ol>
+        </section>
+        <section id="gm-contact-misclassify-panel" role="region"
+          aria-labelledby="gm-contact-misclassify-heading">
+          <h2 id="gm-contact-misclassify-heading" data-i18n="server.gm.contact.misclassify"></h2>
+          <p id="gm-contact-misclassify-scope" role="status"></p>
+          <label for="gm-contact-classification" data-i18n="server.gm.contact.classification"></label>
+          <select id="gm-contact-classification"></select>
+          <button id="gm-contact-misclassify" type="button" disabled data-i18n="server.gm.contact.misclassify"></button>
+          <label for="gm-contact-misclassify-keep-open">
+            <input type="checkbox" id="gm-contact-misclassify-keep-open">
+            <span data-i18n="server.gm.action.keep_open"></span></label>
+          <p id="gm-contact-misclassify-feedback" role="status" aria-live="polite"></p>
+          <p data-i18n="server.gm.contact.classification-explanation"></p>
+        </section>
+        <section id="gm-contact-report-panel" role="region"
+          aria-labelledby="gm-contact-report-heading">
+          <h2 id="gm-contact-report-heading" data-i18n="server.gm.contact.report_heading"></h2>
+          <p id="gm-contact-report-scope" role="status"></p>
+          <div class="gm-contact-fields">
+            <p data-i18n="server.gm.contact.report_explanation"></p>
+            <label for="gm-contact-report-delay" data-i18n="server.gm.contact.report_delay"></label><input id="gm-contact-report-delay" type="number" min="0" max="4294967295" step="1" value="0">
+            <label for="gm-contact-report-step" data-i18n="server.gm.contact.report_step"></label><input id="gm-contact-report-step" type="number" min="0" max="4294967295" step="1" value="0">
+            <label><input id="gm-contact-report-identity" type="checkbox"><span data-i18n="server.gm.contact.report_identity"></span></label>
+            <button id="gm-contact-report-set" type="button" disabled data-i18n="server.gm.contact.report_set"></button>
+          </div>
+          <label for="gm-contact-report-keep-open">
+            <input type="checkbox" id="gm-contact-report-keep-open">
+            <span data-i18n="server.gm.action.keep_open"></span></label>
+          <p id="gm-contact-report-feedback" role="status" aria-live="polite"></p>
+        </section>
+        <!-- The entities/AI domain of the Live Inspector (issue #1489). Every
+             row is a reading rendered through the shared disabled control; the
+             one authored field with a named action links to the panel that
+             owns that transaction rather than repeating its form. -->
+        <section id="gm-entity-fields-panel" role="region" aria-labelledby="gm-entity-fields-heading">
+          <h2 id="gm-entity-fields-heading" data-i18n="inspector.entity.heading"></h2>
+          <div id="gm-entity-fields-nav" role="group" aria-labelledby="gm-entity-fields-heading">
+            <button id="gm-entity-fields-back" type="button" disabled
+              data-i18n="inspector.entity.back"></button>
+            <button id="gm-entity-fields-forward" type="button" disabled
+              data-i18n="inspector.entity.forward"></button>
+          </div>
+          <p id="gm-entity-fields-empty" data-i18n="inspector.entity.empty"></p>
+          <article id="gm-entity-fields-card" hidden>
+            <p id="gm-entity-fields-status" role="status" aria-live="polite" tabindex="-1"></p>
+            <div id="gm-entity-fields-list"></div>
+          </article>
+        </section>
+        <section id="gm-npc-panel" role="region" aria-labelledby="gm-npc-heading">
+          <h2 id="gm-npc-heading" data-i18n="server.gm.npc.heading"></h2>
+          <p id="gm-npc-target" role="status"></p>
+          <dl><dt data-i18n="server.gm.npc.current"></dt><dd id="gm-npc-current"></dd>
+            <dt data-i18n="server.gm.npc.intent"></dt><dd id="gm-npc-intent"></dd></dl>
+          <p id="gm-npc-field-info"></p>
+          <label data-i18n="inspector.authored_definition"></label>
+          <div id="gm-npc-definition"></div>
+          <label for="gm-npc-choice" data-i18n="server.gm.npc.choice"></label>
+          <select id="gm-npc-choice"></select>
+          <p id="gm-npc-empty" data-i18n="server.gm.npc.empty"></p>
+          <button id="gm-npc-apply" type="button" disabled data-i18n="server.gm.npc.apply"></button>
+          <p id="gm-npc-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-npc-results" aria-live="polite"></ol>
+        </section>
+        <section id="gm-despawn-panel" role="region" aria-labelledby="gm-despawn-heading">
+          <h2 id="gm-despawn-heading" data-i18n="server.gm.despawn.heading"></h2>
+          <p id="gm-despawn-target" role="status"></p>
+          <button id="gm-despawn-preview" type="button" disabled data-i18n="server.gm.despawn.preview"></button>
+          <div id="gm-despawn-confirmation" hidden role="group" aria-labelledby="gm-despawn-consequence">
+            <p id="gm-despawn-consequence"></p>
+            <button id="gm-despawn-confirm" type="button" data-i18n="server.gm.despawn.confirm"></button>
+            <button id="gm-despawn-cancel" type="button" data-i18n="server.gm.despawn.cancel"></button>
+          </div>
+          <p id="gm-despawn-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-despawn-results" aria-live="polite"></ol>
+        </section>
+        <!-- GM faction relations (issue #1442). A narrow adapter over the
+             authored faction registry: two authored names and one absolute
+             hostility value, never free text and never a UUID. -->
+        <section id="gm-faction-panel" role="region" aria-labelledby="gm-faction-heading">
+          <h2 id="gm-faction-heading" data-i18n="server.gm.faction.heading"></h2>
+          <p id="gm-faction-empty" data-i18n="server.gm.faction.empty"></p>
+          <div id="gm-faction-controls">
+            <label class="gm-activity-filter" for="gm-faction-source">
+              <span data-i18n="server.gm.faction.source"></span>
+              <select id="gm-faction-source"></select>
+            </label>
+            <label class="gm-activity-filter" for="gm-faction-enemy">
+              <span data-i18n="server.gm.faction.enemy"></span>
+              <select id="gm-faction-enemy"></select>
+            </label>
+          </div>
+          <p id="gm-faction-relation"></p>
+          <button id="gm-faction-apply" type="button"></button>
+          <p id="gm-faction-feedback" role="status" aria-live="polite"></p>
+        </section>
+        <!-- Saved GM action history (issue #1441). A reader over the ONE
+             canonical journal published on `gm_session`; #1442 adds the Undo
+             control, which submits an ordinary typed GM action. -->
+        <section id="gm-journal" role="region" aria-labelledby="gm-journal-heading">
+          <h2 id="gm-journal-heading" data-i18n="server.gm.journal.heading"></h2>
+          <div id="gm-journal-filters">
+            <label class="gm-activity-filter" for="gm-journal-operator-filter">
+              <span data-i18n="server.gm.journal.filter.operator"></span>
+              <select id="gm-journal-operator-filter"></select>
+            </label>
+            <label class="gm-activity-filter" for="gm-journal-outcome-filter">
+              <span data-i18n="server.gm.journal.filter.outcome"></span>
+              <select id="gm-journal-outcome-filter">
+                <option value="all" data-i18n="server.gm.journal.filter.outcome_all"></option>
+                <option value="applied" data-i18n="server.gm.journal.outcome.applied"></option>
+                <option value="no-op" data-i18n="server.gm.journal.outcome.no_op"></option>
+                <option value="refused" data-i18n="server.gm.journal.outcome.refused"></option>
+              </select>
+            </label>
+            <button id="gm-journal-clear-filters" type="button"
+              data-i18n="server.gm.journal.filter.clear"></button>
+          </div>
+          <p id="gm-journal-inverse-support"></p>
+          <p id="gm-journal-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="gm-journal-empty" data-i18n="server.gm.journal.empty"></p>
+          <ol id="gm-journal-list" role="list" aria-labelledby="gm-journal-heading"></ol>
+          <div id="gm-journal-detail" hidden role="group"
+            aria-labelledby="gm-journal-detail-heading">
+            <h3 id="gm-journal-detail-heading" data-i18n="server.gm.journal.detail_heading"></h3>
+            <p id="gm-journal-detail-summary"></p>
+            <p id="gm-journal-detail-target"></p>
+            <p id="gm-journal-detail-outcome"></p>
+            <div id="gm-journal-inverse"></div>
+            <button id="gm-journal-undo" type="button" hidden></button>
+            <p id="gm-journal-undo-feedback" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+        <!-- Named GM checkpoints (issue #1445). Bookmark asks the ORDINARY
+             save machinery for a manual capture and then re-reads this
+             browser's own catalogue: a capture tick appears only once a row
+             with that id has actually come back. The candidate list is the
+             shared preflight from src/gm_checkpoint.rs; it restores nothing. -->
+        <section id="gm-checkpoint" role="region" aria-labelledby="gm-checkpoint-heading">
+          <h2 id="gm-checkpoint-heading" data-i18n="server.gm.checkpoint.heading"></h2>
+          <p id="gm-checkpoint-intro" data-i18n="server.gm.checkpoint.intro"></p>
+          <div id="gm-checkpoint-create">
+            <label for="gm-checkpoint-name" data-i18n="server.gm.checkpoint.name_label"></label>
+            <input id="gm-checkpoint-name" type="text"
+              data-i18n-attr="placeholder:server.gm.checkpoint.name_placeholder"
+              aria-describedby="gm-checkpoint-hint">
+            <button id="gm-checkpoint-bookmark" type="button"
+              data-i18n="server.gm.checkpoint.bookmark"></button>
+          </div>
+          <p id="gm-checkpoint-hint"></p>
+          <p id="gm-checkpoint-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-checkpoint-candidates-heading"
+            data-i18n="server.gm.checkpoint.candidates_heading"></h3>
+          <p id="gm-checkpoint-restore-note" data-i18n="server.gm.checkpoint.restore_note"></p>
+          <p id="gm-checkpoint-summary"></p>
+          <p id="gm-checkpoint-empty"></p>
+          <ol id="gm-checkpoint-list" role="list"
+            aria-labelledby="gm-checkpoint-candidates-heading"></ol>
+          <div id="gm-checkpoint-detail" hidden role="group"
+            aria-labelledby="gm-checkpoint-detail-heading">
+            <h3 id="gm-checkpoint-detail-heading"
+              data-i18n="server.gm.checkpoint.detail_heading"></h3>
+            <p id="gm-checkpoint-detail-name"></p>
+            <p id="gm-checkpoint-detail-record"></p>
+            <div id="gm-checkpoint-detail-preflight"></div>
+          </div>
+          <!-- Single-simulation-peer live restore (issue #1446). The candidate
+               is whatever the list above has selected; the phase and every
+               failure come back on the SAME `gm_health` projection the
+               unfilterable technical banner reads, so a facilitator who did
+               not press Restore still sees the world being replaced. -->
+          <section id="gm-restore" role="region" aria-labelledby="gm-restore-heading">
+            <h2 id="gm-restore-heading" data-i18n="server.gm.restore.heading"></h2>
+            <p id="gm-restore-note" data-i18n="server.gm.restore.note"></p>
+            <p id="gm-restore-summary"></p>
+            <div id="gm-restore-actions">
+              <button id="gm-restore-apply" type="button"
+                data-i18n="server.gm.restore.apply"></button>
+              <button id="gm-restore-resume" type="button"
+                data-i18n="server.gm.restore.resume"></button>
+              <label for="gm-restore-keep-open"><input type="checkbox" id="gm-restore-keep-open">
+                <span data-i18n="server.gm.action.keep_open"></span></label>
+            </div>
+            <p id="gm-restore-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          </section>
+        </section>
+        <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
+          <h2 id="gm-comms-heading" data-i18n="server.gm.comms.heading"></h2>
+          <p id="gm-comms-empty" role="status" data-i18n="server.gm.comms.empty"></p>
+          <label><span data-i18n="server.gm.comms.route"></span><select id="gm-comms-route"></select></label>
+          <label><span data-i18n="server.gm.comms.sender"></span><select id="gm-comms-sender"></select></label>
+          <label><span data-i18n="server.gm.comms.recipients"></span><select id="gm-comms-recipients" multiple size="4"></select></label>
+          <label><span data-i18n="server.gm.comms.text"></span><textarea id="gm-comms-text" aria-describedby="gm-comms-count"></textarea></label>
+          <p id="gm-comms-count"></p>
+          <button type="button" id="gm-comms-send" data-i18n="server.gm.comms.send"></button>
+          <label><span data-i18n="server.gm.comms.hail"></span><select id="gm-comms-hail"></select></label>
+          <button type="button" id="gm-comms-start-hail" data-i18n="server.gm.comms.start_hail"></button>
+          <p id="gm-comms-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <ol id="gm-comms-log" role="log" aria-label="" data-i18n-aria-label="server.gm.comms.history"></ol>
+        </section>
+        <!-- GM attention queue (issue #1433). Three bands, oldest first, one
+             short reason per row. #gm-attention-banners is the #1437 seam for
+             technical connection/recovery warnings: it sits OUTSIDE the
+             filtered, snoozeable, holdable list on purpose. -->
+        <section id="gm-attention-panel" role="region" aria-labelledby="gm-attention-heading">
+          <h2 id="gm-attention-heading" data-i18n="server.gm.attention.heading"></h2>
+          <div id="gm-attention-banners" role="alert" aria-live="assertive" hidden></div>
+          <div id="gm-attention-filters" role="group" aria-label=""
+            data-i18n-aria-label="server.gm.attention.filters">
+            <label for="gm-attention-filter-band"><span data-i18n="server.gm.attention.filter.band"></span>
+              <select id="gm-attention-filter-band"></select></label>
+            <label for="gm-attention-filter-category"><span data-i18n="server.gm.attention.filter.category"></span>
+              <select id="gm-attention-filter-category"></select></label>
+            <label for="gm-attention-filter-ship"><span data-i18n="server.gm.attention.filter.ship"></span>
+              <select id="gm-attention-filter-ship"></select></label>
+          </div>
+          <p id="gm-attention-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <button type="button" id="gm-attention-live"
+            data-i18n="server.gm.attention.return_to_live" hidden></button>
+          <div id="gm-attention-list"></div>
+          <p id="gm-attention-empty" role="status" data-i18n="server.gm.attention.empty"></p>
+        </section>
+        <!-- Public technical health (issue #1437). A READER: peers, Station
+             assignments and tick freshness, each row stating its condition as
+             a word rather than a colour. The unfilterable warning region for
+             the same facts is #gm-attention-banners above; this panel is where
+             a Game Master reads the detail behind one. -->
+        <section id="gm-health-panel" role="region" aria-labelledby="gm-health-heading">
+          <h2 id="gm-health-heading" data-i18n="server.gm.health.heading"></h2>
+          <p id="gm-health-summary" role="status" aria-live="polite" aria-atomic="true"></p>
+          <!-- The tick this sample was taken at, OUTSIDE the live region: it
+               changes on every republish, and announcing it would make routine
+               simulation intrusive (PRD #1418). -->
+          <p id="gm-health-tick" class="gm-health-tick"></p>
+          <div id="gm-health-groups"></div>
+          <p id="gm-health-empty" role="status" data-i18n="server.gm.health.empty"></p>
+        </section>
+        <!-- GM Station-workload advisory (issue #1438). One row per Station,
+             the level as a WORD, and an expander holding the exact source
+             demands that produced the count. Read-only: no verb here submits
+             anything, and nothing here is a rating of the person sitting
+             there. -->
+        <section id="gm-workload-panel" role="region" aria-labelledby="gm-workload-heading">
+          <h2 id="gm-workload-heading" data-i18n="server.gm.workload.heading"></h2>
+          <p id="gm-workload-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <ul id="gm-workload-list" role="list"></ul>
+          <p id="gm-workload-empty" role="status" data-i18n="server.gm.workload.empty"></p>
+        </section>
+        <!-- The typed world-authored widget region (issue #1439). Composed
+             from the EFFECTIVE role preset's `[[gm_role_preset.widget]]`
+             blocks: a filtered attention list, a Station workload summary,
+             existing permitted GM action buttons and an authored note, and
+             nothing else. gui/gm-widgets-panel.js owns the `hidden` attribute
+             here, so a scenario that authors no widget has no region at all.
+             There is no path from authored content to markup: a note is a
+             String Table id rendered through textContent. -->
+        <section id="gm-widgets" role="region" aria-labelledby="gm-widgets-heading" hidden>
+          <h2 id="gm-widgets-heading" data-i18n="server.gm.widget.heading"></h2>
+          <ul id="gm-widgets-list" role="list"></ul>
+        </section>
+        <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
+          <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
+          <!-- What a placement PRODUCES. The same palette, the same chart gesture
+               and the same typed form place either a real entity or a false
+               Sensors report of that entry for one observing ship. A ghost is
+               reported TO a ship and never spawned, so that outcome asks which
+               ship, and under what identity it can later be removed. -->
+          <fieldset id="gm-spawn-outcome">
+            <legend data-i18n="server.gm.spawn.outcome"></legend>
+            <label><input type="radio" name="gm-spawn-outcome" id="gm-spawn-outcome-entity"
+                value="entity" checked>
+              <span data-i18n="server.gm.spawn.outcome_entity"></span></label>
+            <label><input type="radio" name="gm-spawn-outcome" id="gm-spawn-outcome-ghost"
+                value="ghost">
+              <span data-i18n="server.gm.spawn.outcome_ghost"></span></label>
+          </fieldset>
+          <div id="gm-spawn-ghost" hidden>
+            <label for="gm-spawn-ghost-observer" data-i18n="server.gm.spawn.ghost_observer"></label>
+            <select id="gm-spawn-ghost-observer"></select>
+            <label for="gm-spawn-ghost-id" data-i18n="server.gm.spawn.ghost_id"></label>
+            <input id="gm-spawn-ghost-id" type="text" maxlength="128" autocomplete="off">
+            <p id="gm-spawn-ghost-scope" role="status" aria-live="polite"></p>
+          </div>
+          <ul id="gm-spawn-palette" role="list"></ul>
+          <p id="gm-spawn-empty" role="status" aria-live="polite"
+            data-i18n="server.gm.spawn.empty"></p>
+          <p id="gm-spawn-hint" data-i18n="server.gm.spawn.hint"></p>
+          <h3 id="gm-spawn-exact-heading" data-i18n="server.gm.spawn.exact_heading"></h3>
+          <div id="gm-spawn-exact-form" role="group" aria-labelledby="gm-spawn-exact-heading">
+            <label for="gm-spawn-x"><span data-i18n="server.gm.spawn.exact_x"></span>
+              <input id="gm-spawn-x" type="number" step="1" value="0"></label>
+            <label for="gm-spawn-z"><span data-i18n="server.gm.spawn.exact_z"></span>
+              <input id="gm-spawn-z" type="number" step="1" value="0"></label>
+            <label for="gm-spawn-facing"><span data-i18n="server.gm.spawn.exact_facing"></span>
+              <input id="gm-spawn-facing" type="number" step="1" value="0"></label>
+            <button type="button" id="gm-spawn-exact"
+              data-i18n="server.gm.spawn.exact_submit"></button>
+            <label for="gm-spawn-keep-open"><input type="checkbox" id="gm-spawn-keep-open">
+              <span data-i18n="server.gm.action.keep_open"></span></label>
+          </div>
+          <p id="gm-spawn-pick" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="gm-spawn-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-spawn-log-heading" data-i18n="server.gm.spawn.log_heading"></h3>
+          <ol id="gm-spawn-log" role="log" aria-labelledby="gm-spawn-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <div id="gm-workspace">
+          <section id="gm-map-panel" role="region" aria-labelledby="gm-map-heading">
+            <h2 id="gm-map-heading" data-i18n="server.gm.map.heading"></h2>
+            <p id="gm-entity-pending" role="status" data-i18n="server.gm.entity.pending"></p>
+            <ph-navigation-map id="gm-entity-map" hidden></ph-navigation-map>
+            <p id="gm-map-legend" data-i18n="server.gm.map.legend"></p>
+          </section>
+          <section id="gm-inspector" role="region" aria-labelledby="gm-inspector-heading">
+            <h2 id="gm-inspector-heading" data-i18n="server.gm.inspector.heading"></h2>
+            <p id="gm-inspector-empty" data-i18n="server.gm.inspector.empty"></p>
+            <article id="gm-entity-card" hidden aria-live="polite">
+              <h3 id="gm-entity-name"></h3>
+              <dl>
+                <dt data-i18n="server.gm.entity.identity"></dt><dd id="gm-entity-identity"></dd>
+                <dt data-i18n="server.gm.entity.kind"></dt><dd id="gm-entity-kind"></dd>
+                <dt data-i18n="server.gm.entity.position"></dt><dd id="gm-entity-position"></dd>
+                <dt data-i18n="server.gm.entity.faction"></dt><dd id="gm-entity-faction"></dd>
+                <dt id="gm-entity-status-label" data-i18n="server.gm.entity.status"></dt><dd id="gm-entity-status"></dd>
+                <dt data-i18n="server.gm.entity.target"></dt><dd><button id="gm-entity-target" type="button" disabled></button></dd>
+              </dl>
+              <meter id="gm-entity-hull" min="0" max="100" value="0"
+                aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
+            </article>
+          </section>
+          <!-- Direct damage and repair on the selected entity (issue #1310).
+               The controls are built by gui/gm-direct-effect-panel.js from the
+               same absolute `gm_entity` projection the inspector reads, so the
+               thing a GM aims at and the thing it reports about are one
+               selection. Amounts are hull POINTS here and milli-HP everywhere
+               below the input. Since issue #1511 it is a complex action of its
+               own: a kind, an amount, a scope and a clamp/lethality preview
+               are several choices about one press. -->
+            <section id="gm-effect-panel" role="region" aria-labelledby="gm-effect-heading">
+              <h2 id="gm-effect-heading" data-i18n="server.gm.effect.heading"></h2>
+              <p id="gm-effect-empty" role="status" aria-live="polite"
+                data-i18n="server.gm.effect.empty"></p>
+              <div id="gm-effect-controls" hidden>
+                <p id="gm-effect-target"></p>
+                <!-- Scope narrows the SAME press to one Station's authored
+                     Systems or to one System (issue #1311). Its options are
+                     built from the per-System breakdown the `gm_entity`
+                     projection publishes, so the page never composes a
+                     ship-local authoring key of its own. -->
+                <label id="gm-effect-scope-label" for="gm-effect-scope">
+                  <span data-i18n="server.gm.effect.scope_label"></span>
+                  <select id="gm-effect-scope"></select>
+                </label>
+                <p id="gm-effect-hull"></p>
+                <label id="gm-effect-amount-label" for="gm-effect-amount">
+                  <span data-i18n="server.gm.effect.amount_label"></span>
+                  <input id="gm-effect-amount" type="number" min="0" step="1" value="10">
+                </label>
+                <div id="gm-effect-actions">
+                  <button id="gm-effect-damage" type="button"
+                    data-i18n="server.gm.effect.damage"></button>
+                  <button id="gm-effect-heal" type="button"
+                    data-i18n="server.gm.effect.heal"></button>
+                </div>
+                <p id="gm-effect-warning" role="status" aria-live="polite"
+                  aria-atomic="true"></p>
+              </div>
+              <!-- Outside the aiming controls on purpose: those are hidden
+                   while nothing damageable is selected, and a Keep open the
+                   operator can neither tick nor untick would still be deciding
+                   whether this panel closes. -->
+              <label for="gm-effect-keep-open">
+                <input type="checkbox" id="gm-effect-keep-open">
+                <span data-i18n="server.gm.action.keep_open"></span></label>
+              <p id="gm-effect-feedback" role="status" aria-live="polite"
+                aria-atomic="true"></p>
+              <h3 id="gm-effect-log-heading" data-i18n="server.gm.effect.log_heading"></h3>
+              <ol id="gm-effect-log" role="log" aria-labelledby="gm-effect-log-heading"
+                aria-live="polite" aria-relevant="additions text"></ol>
+            </section>
+          <section id="gm-activity" role="region" aria-labelledby="gm-activity-heading">
+            <h2 id="gm-activity-heading" data-i18n="server.gm.activity.heading"></h2>
+            <div id="gm-activity-filters">
+              <label class="gm-activity-filter" for="gm-activity-category-filter">
+                <span data-i18n="server.gm.activity.filter.category"></span>
+                <select id="gm-activity-category-filter">
+                  <option value="all" data-i18n="server.gm.activity.filter.category_all"></option>
+                  <option value="damage" data-i18n="server.gm.activity.category.damage"></option>
+                  <option value="destruction" data-i18n="server.gm.activity.category.destruction"></option>
+                  <option value="objective" data-i18n="server.gm.activity.category.objective"></option>
+                  <option value="trigger" data-i18n="server.gm.activity.category.trigger"></option>
+                  <option value="red_alert" data-i18n="server.gm.activity.category.red_alert"></option>
+                  <option value="connection" data-i18n="server.gm.activity.category.connection"></option>
+                  <option value="gm_action" data-i18n="server.gm.activity.category.gm_action"></option>
+                </select>
+              </label>
+              <label class="gm-activity-filter" for="gm-activity-ship-filter">
+                <span data-i18n="server.gm.activity.filter.ship"></span>
+                <select id="gm-activity-ship-filter"></select>
+              </label>
+              <button id="gm-activity-clear-filters" type="button"
+                data-i18n="server.gm.activity.filter.clear"></button>
+            </div>
+            <p id="gm-activity-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <p id="gm-activity-empty" data-i18n="server.gm.activity.empty"></p>
+            <ol id="gm-activity-list" role="log" aria-labelledby="gm-activity-heading"
+              aria-live="polite" aria-relevant="additions text"></ol>
+          </section>
+        </div>
+        <p id="gm-station-pending" role="status" data-i18n="server.gm.station.pending"></p>
+        <section id="gm-station-controls" hidden role="region" aria-labelledby="gm-station-heading">
+          <h2 id="gm-station-heading" data-i18n="server.gm.station.heading"></h2>
+          <select id="gm-station-select" aria-labelledby="gm-station-heading"></select>
+          <button id="gm-station-toggle" type="button"></button>
+          <p id="gm-station-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <iframe id="gm-station-frame" title="" sandbox="allow-scripts allow-same-origin"></iframe>
+          <h3 id="gm-station-activity-heading" data-i18n="server.gm.station.activity_heading"></h3>
+          <ol id="gm-station-activity" role="log" aria-labelledby="gm-station-activity-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <!-- Truth / Crew Knowledge / Difference comparison for one selected
+             ship (issue #1318). Selection here is independent of the Station
+             takeover control above: comparing a ship never opens its Station
+             iframe (AC #2 — Station-private detail stays absent unless the
+             GM opens that authentic interface instead). -->
+        <p id="gm-knowledge-pending" role="status" data-i18n="server.gm.knowledge.pending"></p>
+        <section id="gm-knowledge-panel" hidden role="region" aria-labelledby="gm-knowledge-heading">
+          <h2 id="gm-knowledge-heading" data-i18n="server.gm.knowledge.heading"></h2>
+          <p id="gm-knowledge-hint" data-i18n="server.gm.knowledge.hint"></p>
+          <label for="gm-knowledge-select" data-i18n="server.gm.knowledge.select_label"></label>
+          <select id="gm-knowledge-select"></select>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-contacts-heading">
+            <h3 id="gm-knowledge-contacts-heading" data-i18n="server.gm.knowledge.contacts_heading"></h3>
+            <p id="gm-knowledge-contacts-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-contacts-empty" data-i18n="server.gm.knowledge.contacts_empty"></p>
+            <table id="gm-knowledge-contacts-table" hidden aria-labelledby="gm-knowledge-contacts-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-contacts-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-objectives-heading">
+            <h3 id="gm-knowledge-objectives-heading" data-i18n="server.gm.knowledge.objectives_heading"></h3>
+            <p id="gm-knowledge-objectives-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-objectives-empty" data-i18n="server.gm.knowledge.objectives_empty"></p>
+            <table id="gm-knowledge-objectives-table" hidden aria-labelledby="gm-knowledge-objectives-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-objectives-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-comms-messages-heading">
+            <h3 id="gm-knowledge-comms-messages-heading" data-i18n="server.gm.knowledge.comms_messages_heading"></h3>
+            <p id="gm-knowledge-comms-messages-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-comms-messages-empty" data-i18n="server.gm.knowledge.comms_empty"></p>
+            <table id="gm-knowledge-comms-messages-table" hidden aria-labelledby="gm-knowledge-comms-messages-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-comms-messages-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-comms-contacts-heading">
+            <h3 id="gm-knowledge-comms-contacts-heading" data-i18n="server.gm.knowledge.comms_contacts_heading"></h3>
+            <p id="gm-knowledge-comms-contacts-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-comms-contacts-empty" data-i18n="server.gm.knowledge.comms_empty"></p>
+            <table id="gm-knowledge-comms-contacts-table" hidden aria-labelledby="gm-knowledge-comms-contacts-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-comms-contacts-rows"></tbody>
+            </table>
+          </section>
+        </section>
+      </main>
+  </div>
   <iframe id="test-hud" src="gui/viewscreen-hud.html" data-i18n-title="workshop.test_heading" tabindex="-1"></iframe>
   <script type="module" src="gui/workshop-test-boot.js"></script>
 </body>

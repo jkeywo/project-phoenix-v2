@@ -6,6 +6,7 @@ import { createWorkshopRuntime } from './workshop-runtime.js';
 import { createStoreZip } from './mod-pack-export.js';
 import { createBrowserWorkshopTest, createWorkshopTestFrame } from './workshop-test-frame.js';
 import { createWorkshopTestPreparation } from './workshop-test-snapshot.js';
+import { createBrowserWorkshopPreview, createWorkshopPreviewFrame } from './workshop-preview.js';
 
 export function newWorkshopPack(dependencies) {
   const content = parse(dependencies.base_files['assets/scenarios.toml']).content;
@@ -21,7 +22,7 @@ export function newWorkshopPack(dependencies) {
 /** Caller supplies an immutable loaded pack only after leaving Live. No GM
  * state, credentials, profile, document object or installation API is accepted. */
 export function createBrowserWorkshopProvider({ loadedPack = null, dependencies, load,
-  testFrame = createWorkshopTestFrame } = {}) {
+  testFrame = createWorkshopTestFrame, previewFrame = createWorkshopPreviewFrame } = {}) {
   const pack = loadedPack ? Uint8Array.from(loadedPack) : null;
   const editableId = pack ? parse(new WorkshopDocument(pack).read('scenarios.toml')).pack?.id : null;
   const source = dependencies ? structuredClone({ ...dependencies,
@@ -34,8 +35,22 @@ export function createBrowserWorkshopProvider({ loadedPack = null, dependencies,
     if (!viewport) throw new Error('Workshop Test viewport is unavailable');
     return testFrame({ mount: viewport, title });
   } });
+  // The preview shares the Test's preparation — one merger, one set of
+  // dependency rules, one definition of what a captured draft is.
+  let previewViewport = null, previewTitle = '';
+  const modelPreview = createBrowserWorkshopPreview({ prepare: preparation.prepareSubject, frame: () => {
+    if (!previewViewport) throw new Error('Workshop preview viewport is unavailable');
+    return previewFrame({ mount: previewViewport, title: previewTitle });
+  } });
   return { runtime, canImport: true, canCreate: true,
     test: { ...test, mount(target, label) { viewport = target; title = label; } },
+    modelPreview: { ...modelPreview,
+      // The preview session passes `{ title }`; the Test panel passes a plain
+      // string. Accept both rather than putting an object into a frame title.
+      mount(target, label) {
+        previewViewport = target;
+        previewTitle = typeof label === 'string' ? label : label?.title || '';
+      } },
     async load() { return pack ? new WorkshopDocument(pack) : null; },
   };
 }
@@ -156,7 +171,12 @@ export function createNativeWorkshopProvider({ request }) {
         const value = (await call({ op: 'recovery-load' })).recovery;
         if (!value) return null;
         const record = JSON.parse(value.record);
-        if (record?.draft?.version !== 3) {
+        // A native draft carries its members as `sourceFiles`; every other
+        // version is a browser record whose archive has to come back as bytes.
+        // Listed rather than compared, so a new native version is a deliberate
+        // addition instead of silently taking the browser branch (issue #1471
+        // added version 5 alongside 3).
+        if (![3, 5].includes(record?.draft?.version)) {
           if (!Array.isArray(record?.draft?.source) || !record.draft.source.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) throw new Error('Invalid native recovery archive');
           record.draft.source = Uint8Array.from(record.draft.source);
         }

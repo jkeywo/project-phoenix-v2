@@ -1,15 +1,18 @@
 /** Presentation only: both hosts compose their existing presenters into one desk.
  *
  * The composition is the design canvas's "After M5 - facilitation + operations"
- * artboard (PRD #930): one bar, three columns, two rows, six REGIONS. A region
- * is the artboard's panel frame; the sections inside it are the blocks that
- * frame holds. Nothing changed column against the After-M3 screen this file
- * already drew - each milestone adds panels to the column that already held
- * its kind. */
+ * artboard (PRD #930): one bar, three columns, two rows. The artboard's nine
+ * grid cells first became six REGIONS - a region is the artboard's panel frame
+ * and the sections inside it are the blocks that frame holds - and issues #1502
+ * and #1503 then migrated most of those panels into the Live dock workspace,
+ * leaving TWO grid children: the dock across the left and centre, and the
+ * detail column. Nothing changed column on the way: each panel became a dock
+ * panel in the place its region already held. */
 import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 import { healthStateLabelId } from './gm-health-banner.js';
 import { formatAttentionAge } from './gm-attention-panel.js';
 import { liveLayoutModel } from './live-layout-model.js';
+import { createTemporaryActions } from './gm-temporary-actions.js';
 import { mountDockLayout } from './workshop-layout-renderer.js';
 
 /** Workload levels that are a claim about a PERSON, worst last. A hull's word
@@ -18,30 +21,97 @@ import { mountDockLayout } from './workshop-layout-renderer.js';
  * published rows for says nothing at all. */
 export const GM_ROSTER_WORKLOAD_RANK = Object.freeze(['underused', 'engaged', 'overloaded']);
 
-/** The three views that share the desk's centre-bottom region, in tab order. */
-export const GM_DESK_LOG_VIEWS = Object.freeze([
+/** The desk panels that are registered dock panels rather than grid regions,
+ * as `[dock panel id, DOM id, availability DOM id?]`. The third entry names the
+ * node whose `hidden` says whether the panel has anything to show, for a panel
+ * whose registered node is a host its content mounts into later — without it
+ * the dock would read an empty wrapper nothing ever hides. The three log views kept their tab
+ * relationship: the dock's own default arrangement puts them in one group,
+ * with the dock's roving tablist semantics, and docking may pull them apart. */
+export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
+  ['mission', 'gm-mission-panel'],
   ['comms', 'gm-comms-panel'],
   ['activity', 'gm-activity'],
   ['journal', 'gm-journal'],
+  ['session-history', 'gm-session-history'],
+  ['map', 'gm-map-panel'],
+  ['attention', 'gm-attention-panel'],
+  ['workload', 'gm-workload-panel'],
+  ['widgets', 'gm-widgets'],
+  ['health', 'gm-health-panel'],
+  ['station', 'gm-station-tools'],
+  ['station-console', 'gm-station-surface'],
+  ['presentation', 'gm-presentation-dock'],
+  ['audition', 'gm-audition-dock'],
+  // The handoff shows itself only when a retained source pack exists, and that
+  // is the panel's own decision — the dock reads it and offers no empty tab.
+  ['source-link', 'gm-source-link-dock', 'gm-workshop-source'],
+  // A complex action the operator opens, fills in and finishes (issue #1506).
+  // It is absent from the default arrangement and opens as a floating draft.
+  ['spawn', 'gm-spawn-panel'],
+  // The entity reading surface (issue #1507). The role preset owns its `hidden`,
+  // as it always has, and the dock reads it.
+  ['inspector', 'gm-inspector'],
+  // Checkpoint browsing is a record; restore is a complex action (issue #1509).
+  ['checkpoint', 'gm-checkpoint'],
+  ['restore', 'gm-restore'],
+  // Contact control and NPC doctrine are ordinary tools about the selected
+  // entity (issue #1510): they read a selection the inspector also reads, so
+  // they join it rather than living inside it.
+  ['contact', 'gm-contact-panel'],
+  ['npc', 'gm-npc-panel'],
+  // The three complex actions the contact tool used to carry inline. Each
+  // composes several choices before anything can be sent, so each is a draft
+  // of its own with the shared temporary lifecycle.
+  ['misclassify', 'gm-contact-misclassify-panel'],
+  ['report-policy', 'gm-contact-report-panel'],
+  // One authored System, disabled or restored: a target-relative choice and a
+  // verb, so an ordinary tool beside the selection it reads (issue #1511).
+  ['system', 'gm-system-panel'],
+  // Direct damage and repair is a complex action: a kind, an amount, a scope
+  // over the hull or one Station or one System, and a clamp/lethality preview.
+  ['effect', 'gm-effect-panel'],
+  // Removing one selected entity, and an ordered faction pair's absolute
+  // hostility, are each one choice and a verb — not drafts (issue #1512).
+  ['despawn', 'gm-despawn-panel'],
+  ['faction', 'gm-faction-panel'],
+  // Activating, completing and failing an authored Objective: ordinary dock
+  // controls in the mission workflow, because the authored target and its
+  // recipients already define the operation (issue #1513).
+  ['objective', 'gm-objective-panel'],
+  // The entities/AI domain of the Live Inspector (issue #1489): a reading
+  // surface beside the selection it reads, never a second action route.
+  ['entity-fields', 'gm-entity-fields-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
   const root = doc.getElementById('gm-console');
   if (!root) return { refresh() {}, metadata() {}, selection() {}, dispose() {},
-    mountLiveLayout() {}, setLiveLayout() {}, showLog() { return false; } };
+    mountLiveLayout() {}, setLiveLayout() {}, liveLayoutState() { return null; },
+    showLog() { return false; } };
   phAdoptConsoleStyles(doc);
   const css = doc.createElement('link');
   css.rel = 'stylesheet';
   css.href = new URL('./gm-workspace.css', import.meta.url).href;
   doc.head.append(css);
-  const liveWorkspace = native || win.__phoenixGmPage === true
+  // Whether this page is a GM desk is a QUESTION, not a value captured once.
+  //
+  // `?gm=1` has the flag up before this shell mounts, but the landing's Host as
+  // GM entry raises it afterwards through `__phoenixRequestGameMaster` and does
+  // not reload — so a shell that decided at mount time left that route with an
+  // undocked desk: the flag up, `.phoenix-gm-page` on the root, and an empty
+  // #gm-live-layout. Re-reading it, and mounting when it becomes true, makes
+  // both entries to the same desk reach the same desk.
+  const isLiveWorkspace = () => native || win.__phoenixGmPage === true
     || doc.documentElement.classList.contains('phoenix-gm-page');
-  const dockCss = liveWorkspace ? doc.createElement('link') : null;
-  if (dockCss) {
+  let dockCss = null;
+  const ensureDockCss = () => {
+    if (dockCss) return;
+    dockCss = doc.createElement('link');
     dockCss.rel = 'stylesheet';
     dockCss.href = new URL('./dock-layout.css', import.meta.url).href;
     doc.head.append(dockCss);
-  }
+  };
   root.classList.add('gm-desk');
   const get = id => doc.getElementById(id);
   const move = (parent, ...ids) => ids.forEach(id => { if (get(id)) parent.append(get(id)); });
@@ -95,120 +165,101 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   const ships = element('div', 'gm-roster-ships');
   const operators = element('div', 'gm-roster-operators');
   roster.append(ships, element('h3', null, 'server.gm.shell.operators'), operators);
-  move(roster, 'gm-spawn-panel');
+  // Spawn left the roster to become a temporary action panel (issue #1506).
+  // It stays in the document for the ordinary browser host, which has no dock.
+  root.append(get('gm-spawn-panel'));
   const region = (id, stacked) => {
     const el = element('div', id);
     el.className = stacked ? 'gm-desk-region gm-desk-stack' : 'gm-desk-region';
     return el;
   };
-  const brief = region('gm-desk-brief', true);
-  const detail = region('gm-desk-detail', true);
-  const logRegion = region('gm-desk-log', false);
-  // The map is NEVER reparented: moving it would disconnect
-  // <ph-navigation-map> and cancel its render loop. The regions are placed
-  // around the cell it already occupies, and the panels move into regions that
-  // are already in the document so `getElementById` keeps finding them.
+  // The dock workspace is the desk's left and centre: since issue #1503 the
+  // map, the attention queue, Station workload, the authored widget region and
+  // peer health are registered panels in it rather than grid regions.
+  //
+  // The map IS reparented now, which it never was before. There is no way to
+  // move a node between parents without disconnecting it, so
+  // <ph-navigation-map> restores its render loop and size observer in
+  // `connectedCallback` instead of only in `onTemplate`. Every other migrated
+  // panel moves node-and-listeners intact, exactly as the roster panels do.
+  // The dock workspace is NOT a panel frame: it carries no padding, border or
+  // chrome and opens no scroll box of its own, because each dock panel scrolls
+  // inside its own frame. Giving it `.gm-desk-region` would put a second
+  // scroller in the chain — the nested-scroll fault the region layout exists to
+  // avoid — and clip floating panels at the region's chamfered corners.
+  const brief = element('div', 'gm-desk-brief');
+  brief.className = 'gm-desk-dock';
+
   const mapPanel = get('gm-map-panel');
-  for (const id of ['gm-map-panel', 'gm-mission-panel', 'gm-health-panel']) {
-    get(id)?.classList.add('gm-desk-region');
-  }
   desk.insertBefore(brief, mapPanel);
-  mapPanel.after(detail);
-  detail.after(get('gm-mission-panel'), logRegion, get('gm-health-panel'));
-  // Left: what is waiting, who is flying it, and whatever the world authored.
-  // `gm-widgets` is last on purpose — gui/gm-widgets-panel.js owns its
-  // `hidden` state, which is why it is absent from GM_ROLE_PRESET_PANEL_IDS:
-  // a second writer there would race it, exactly as it would for the Station
-  // puppet's controls.
-  move(brief, 'gm-attention-panel');
   const liveSurface = element('div', 'gm-live-layout');
   liveSurface.className = 'gm-live-layout';
   brief.append(liveSurface);
-  move(brief, 'gm-workload-panel', 'gm-widgets');
   // Right: the selected hull, then the checkpoints a live event is recovered
   // from (issues #1445/#1446) at the bottom of the column, as the artboard
   // draws them. The restore control travels inside #gm-checkpoint.
-  move(detail, 'gm-inspector', 'gm-checkpoint');
-  // Centre-bottom: Comms, the activity feed and the saved action journal share
-  // ONE region behind a tab strip.
-  move(logRegion, 'gm-comms-panel', 'gm-activity', 'gm-journal');
+  // The detail column is gone: every panel it held is a dock panel now (issues
+  // #1507 and #1509), so the dock workspace IS the desk. They wait at the root
+  // like every other migrated panel until the dock takes them.
+  move(root, 'gm-inspector', 'gm-checkpoint');
+  // Contact, its three drafts and NPC doctrine leave the inspector column for
+  // panels of their own (issue #1510) and wait at the root for the dock.
+  move(root, 'gm-contact-panel', 'gm-contact-misclassify-panel', 'gm-contact-report-panel',
+    'gm-npc-panel');
+  // System control and direct effect follow them out (issue #1511): the last
+  // two selected-entity actions the inspector was still carrying.
+  move(root, 'gm-system-panel', 'gm-effect-panel');
+  // Removal and faction hostility followed them out in issue #1512, and the
+  // authored Objective controls in issue #1513 — the last panel the inspector
+  // carried. It is its own reading surface now and nothing else.
+  move(root, 'gm-despawn-panel', 'gm-faction-panel', 'gm-objective-panel',
+    'gm-entity-fields-panel');
+  // Restore leaves the checkpoint record to become a draft of its own: it
+  // combines a selection, a preflight, a consequence preview and a
+  // confirmation. The candidate it acts on is still whatever the record has
+  // selected — this moves the controls, not the decision.
+  root.append(get('gm-restore'));
   get('gm-comms-text')?.parentElement.classList.add('gm-comms-draft');
-  const sessionHistory = element('details', 'gm-session-history');
-  sessionHistory.append(element('summary', null, 'server.gm.session.log_heading'));
+  // The session history is its own record now: it was a disclosure inside the
+  // activity feed, and a dock panel carries its own header.
+  const sessionHistory = element('section', 'gm-session-history');
   move(sessionHistory, 'gm-session-log-heading', 'gm-session-log');
-  get('gm-activity').append(sessionHistory);
+  // It has to be IN the document from here on: gui/gm-session-controls.js finds
+  // #gm-session-log by id, and on the ordinary browser host there is no dock to
+  // place it. The dock moves it out into its own frame when it mounts.
+  get('gm-activity')?.append(sessionHistory);
   const inspector = get('gm-inspector');
-  // The saved action history (issue #1441) joins the inspector column: it is
-  // the desk's detail/reading column, it already stacks and scrolls its own
-  // sections, and that is what keeps the journal legible at 200% text rather
-  // than competing for one of the fixed grid cells.
-  move(inspector, 'gm-system-panel', 'gm-contact-panel', 'gm-npc-panel', 'gm-objective-panel', 'gm-station-pending', 'gm-station-controls', 'gm-despawn-panel', 'gm-faction-panel');
+  // Authentic Station operation is two dock panels (issue #1504): the pending
+  // state and the takeover controls are an ordinary tool, and the console
+  // itself is a document. Neither is a new command route — the puppet still
+  // owns the iframe, its typed bridge and the capability gate — and neither is
+  // another simulation participant.
+  const stationTools = element('section', 'gm-station-tools');
   const stationSurface = element('section', 'gm-station-surface');
   stationSurface.hidden = true;
+  // Both wrappers join the document BEFORE anything moves into them. The
+  // console iframe starts inside #gm-station-controls, so moving the controls
+  // into a detached wrapper would take the iframe out of the document with them
+  // and `getElementById` would stop finding it for the move that follows.
+  root.append(stationTools, stationSurface);
+  move(stationTools, 'gm-station-pending', 'gm-station-controls');
   move(stationSurface, 'gm-station-frame', 'gm-station-activity-heading', 'gm-station-activity');
-  root.append(stationSurface);
-  // The centre-bottom tab strip. It switches views with `data-log-view` on the
-  // region and NEVER with `hidden` on the panels: `hidden` on Comms and
-  // Activity belongs to the role preset (gui/gm-role-presets.js,
-  // GM_ROLE_PRESET_PANEL_IDS), and two writers on one attribute is the race
-  // the authored widget region is deliberately kept out of. A preset that
-  // hides a panel hides its TAB, which this shell owns.
-  const logTabs = element('div', 'gm-desk-log-tabs');
-  logTabs.setAttribute('role', 'tablist');
-  logTabs.setAttribute('aria-label', t('server.gm.shell.log_tabs'));
-  logRegion.prepend(logTabs);
-  let logView = GM_DESK_LOG_VIEWS[0][0];
-  function setLogView(view) {
-    logView = view;
-    logRegion.dataset.logView = view;
-    for (const [name] of GM_DESK_LOG_VIEWS) {
-      const button = get(`gm-log-tab-${name}`);
-      if (!button) continue;
-      button.setAttribute('aria-selected', String(name === view));
-      button.tabIndex = name === view ? 0 : -1;
-    }
-  }
-  for (const [view, panelId] of GM_DESK_LOG_VIEWS) {
-    const panel = get(panelId);
-    const button = element('button', `gm-log-tab-${view}`, `server.gm.shell.log.${view}`);
-    button.type = 'button';
-    button.setAttribute('role', 'tab');
-    button.dataset.logView = view;
-    if (panel) {
-      button.setAttribute('aria-controls', panelId);
-      panel.setAttribute('role', 'tabpanel');
-      panel.setAttribute('aria-labelledby', button.id);
-    }
-    button.addEventListener('keydown', event => {
-      const buttons = [...logTabs.children].filter(node => !node.hidden);
-      const index = buttons.indexOf(button);
-      if (index < 0) return;
-      const next = event.key === 'ArrowRight' ? (index + 1) % buttons.length
-        : event.key === 'ArrowLeft' ? (index + buttons.length - 1) % buttons.length
-        : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : null;
-      if (next !== null) { event.preventDefault(); buttons[next].click(); buttons[next].focus(); }
-    });
-    button.addEventListener('click', () => setLogView(view));
-    logTabs.append(button);
-  }
-  setLogView(logView);
-  /** Keep the strip honest about what the effective role preset is showing. A
-   * hidden panel has no tab, and an operator standing on a tab that just went
-   * away lands on the first view that is still there. */
-  function reconcileLogTabs() {
-    let fallback = null;
-    let visible = false;
-    for (const [view, panelId] of GM_DESK_LOG_VIEWS) {
-      const panel = get(panelId);
-      const button = get(`gm-log-tab-${view}`);
-      if (!button) continue;
-      const available = !!panel && !panel.hidden;
-      if (button.hidden !== !available) button.hidden = !available;
-      if (available && fallback === null) fallback = view;
-      if (available && view === logView) visible = true;
-    }
-    if (!visible && fallback !== null) setLogView(fallback);
-  }
+  // The operator's own utilities mount LATER than this shell and resolve their
+  // host by id, so each gets a stable one now. Each host sits where its panel
+  // used to, which is what the ordinary browser host — which has no dock — still
+  // sees; the dock moves them into their frames when it mounts.
+  const presentationHost = element('div', 'gm-presentation-dock');
+  const auditionHost = element('div', 'gm-audition-dock');
+  get('gm-mission-panel')?.append(presentationHost, auditionHost);
+  const sourceLinkHost = element('div', 'gm-source-link-dock');
+  brief.append(sourceLinkHost);
+  // Built here, once every wrapper this shell composes exists: the dock is
+  // handed NODES rather than ids, which also survives a re-mount when the
+  // migrated panels already live in the previous canvas.
+  const liveDockNodes = new Map(GM_LIVE_DOCK_PANEL_IDS.map(([panel, id]) => [panel,
+    { 'gm-session-history': sessionHistory, 'gm-station-tools': stationTools,
+      'gm-station-surface': stationSurface, 'gm-presentation-dock': presentationHost,
+      'gm-audition-dock': auditionHost, 'gm-source-link-dock': sourceLinkHost }[id] || get(id)]));
   const tabs = element('div', 'gm-inspector-tabs');
   tabs.setAttribute('role', 'tablist');
   const knowledge = get('gm-knowledge-panel');
@@ -252,8 +303,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   get('gm-map-panel').insertBefore(chip, get('gm-map-legend'));
   const armedChip = element('p', 'gm-armed-chip');
   get('gm-map-panel').insertBefore(armedChip, get('gm-map-legend'));
-  // Keep the upgraded map connected: moving it would cancel its render loop.
-  // CSS shares its grid cell with the chip overlay instead of reparenting it.
+  // The chips are laid over the map's own grid rather than inserted into its
+  // canvas, so they travel with it when it is docked.
   const mapChips = element('div', 'gm-map-chips');
   mapChips.append(chip, armedChip);
   get('gm-map-panel').insertBefore(mapChips, get('gm-map-legend'));
@@ -271,31 +322,25 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     button.setAttribute('aria-controls', target);
     button.addEventListener('click', () => {
       const control = get(target);
+      // Since issue #1510 some of these controls live in panels of their own,
+      // and a panel behind another tab is `hidden` — scrolling to it and
+      // focusing it would do nothing at all. Bring its panel forward first. A
+      // panel the operator CLOSED stays closed: closing is a decision, and a
+      // shortcut is a convenience.
+      revealHost(control);
       control?.scrollIntoView?.({ block: 'nearest' });
       (control?.matches('input,select,button') ? control : control?.querySelector('button'))?.focus({ preventScroll: true });
-      back.hidden = false;
     });
     shortcuts.append(button);
   }
-  // The way back up from a quick action's control: a sticky button at the
-  // top of the inspector, shown only after a jump and cleared once the
-  // selection card is in view again (whether by this button or by scrolling).
-  const back = element('button', 'gm-inspector-back', 'server.gm.shell.back_to_selection');
-  back.type = 'button';
-  back.hidden = true;
-  inspector.prepend(back);
-  // The scroll box is the REGION, not the inspector: the post-M5 right-hand
-  // column holds the inspector and the checkpoints in one frame, and only the
-  // frame scrolls (gui/gm-workspace.css explains why a second nested scroller
-  // there is a correctness problem, not a layout preference).
-  const detailScroller = inspector.closest('.gm-desk-region') || inspector;
-  back.addEventListener('click', () => {
-    back.hidden = true;
-    if (typeof detailScroller.scrollTo === 'function') detailScroller.scrollTo({ top: 0 }); else detailScroller.scrollTop = 0;
-    get('gm-entity-card')?.scrollIntoView?.({ block: 'start' });
-    tabs.querySelector('button[aria-selected="true"]')?.focus({ preventScroll: true });
-  });
-  detailScroller.addEventListener('scroll', () => { if (!back.hidden && detailScroller.scrollTop < 8) back.hidden = true; });
+  // There is no sticky way back up the inspector any more, because there is no
+  // longer a jump that stays inside it: issue #1513 moved the authored
+  // Objective controls into the mission workflow, the last of the five
+  // shortcut targets that was still the inspector's own child. Every shortcut
+  // now brings ANOTHER panel forward, and the way back from that is the
+  // arrangement's own tab — a button inside the panel the operator just left
+  // would be behind that tab and unreachable, which is what #gm-inspector-back
+  // had silently become.
   let gms = [];
   let entities = [];
   let selected = null;
@@ -469,17 +514,45 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       button.append(background, label);
     });
   }
-  const observer = new win.MutationObserver(() => { styleButtons(); reconcileLogTabs(); });
+  const observer = new win.MutationObserver(() => { styleButtons(); liveLayout?.syncAvailability(); });
   // `hidden` is watched as well as the tree: the role preset toggles Comms and
   // Activity without any other signal reaching this shell, and a tab for a
   // panel the preset has put away is a control that leads nowhere.
   observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
   styleButtons();
-  reconcileLogTabs();
   get('gm-station-toggle')?.addEventListener('click', () => {
-    if (!get('gm-station-frame').hidden) stationSurface.scrollIntoView?.({ block: 'start' });
+    // Taking a Station over brings its console to hand. In the dock that is a
+    // reveal; without one it is still the scroll it always was. A console the
+    // operator CLOSED stays closed — closing it is a decision, and this is a
+    // convenience — and a console with nothing to show has nothing to bring.
+    if (stationSurface.hidden) return;
+    if (liveLayout?.reveal('station-console', { reopen: false })) return;
+    if (liveLayout) return;
+    stationSurface.scrollIntoView?.({ block: 'start' });
   });
   let liveLayout = null;
+  /** Bring forward the registered panel a control sits in, if it is in one. */
+  function revealHost(node) {
+    for (let candidate = node; candidate; candidate = candidate.parentElement) {
+      const entry = GM_LIVE_DOCK_PANEL_IDS.find(([panel]) => liveDockNodes.get(panel) === candidate);
+      if (!entry) continue;
+      // A DRAFT that is closed is not a panel the operator put away — a draft
+      // nobody opened is simply not there — so a shortcut that points into one
+      // opens it, through the lifecycle that owns what opening means. Every
+      // other panel is only brought forward: closing one is a decision.
+      if (liveLayoutModel.isTemporary(entry[0])) return temporaryActions.open(entry[0]) === true;
+      return liveLayout?.reveal(entry[0], { reopen: false }) === true;
+    }
+    return false;
+  }
+  /** The shared complex-action lifecycle. It owns when a draft is on screen and
+   * whether it may be discarded; each action still owns its own typed request,
+   * feedback and confirmation category. */
+  const temporaryActions = createTemporaryActions({
+    layout: { model: liveLayoutModel, state: () => liveLayout?.state(),
+      set: value => liveLayout?.set(value), reveal: (...args) => liveLayout?.reveal(...args) },
+    confirmDiscard: () => win.confirm?.(t('server.gm.action.discard')) === true,
+  });
   const dockOrigins = new Map();
   function preserveForDock(node, attributes = []) {
     if (!node) return;
@@ -502,8 +575,14 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     }
     dockOrigins.clear();
   }
+  let pendingMount = null;
   function mountLiveLayout(initial, onChange) {
-    if (!liveWorkspace) return null;
+    // Held, not dropped. The caller that owns the operator's saved arrangement
+    // asks once; if this page is not a GM desk YET, that request is what gets
+    // mounted when it becomes one, so a late dock is still the stored dock.
+    if (!isLiveWorkspace()) { pendingMount = { initial, onChange }; return null; }
+    pendingMount = null;
+    ensureDockCss();
     liveLayout?.dispose();
     const readiness = element('section', 'gm-readiness-dock');
     const startControls = get('gm-start-controls');
@@ -520,45 +599,106 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       manualPanel?.setAttribute('hidden', '');
       manual.append(element('p', 'gm-native-manual-save-unavailable', 'server.gm.shell.manual_save_unavailable'));
     }
+    const migrated = {};
+    for (const [panel] of GM_LIVE_DOCK_PANEL_IDS) {
+      const node = liveDockNodes.get(panel);
+      // The role preset owns `hidden` on these panels (gui/gm-role-presets.js).
+      // It stays the only writer: the dock READS that attribute through
+      // `available` below, so a preset and the arrangement can never race.
+      preserveForDock(node);
+      migrated[panel] = node || element('section');
+    }
     liveLayout = mountDockLayout({ root, surface: liveSurface,
-      panels: { roster, readiness, join: join || element('section'), 'manual-save': manual },
+      panels: { roster, readiness, join: join || element('section'), 'manual-save': manual, ...migrated },
+      available: panel => {
+        const source = GM_LIVE_DOCK_PANEL_IDS.find(([name]) => name === panel)?.[2];
+        // A panel that declares an availability node and has not mounted it yet
+        // has nothing to show, so it is not offered. The tree observer brings it
+        // back the moment that node arrives.
+        if (source) return !!get(source) && !get(source).hidden;
+        return !liveDockNodes.get(panel)?.hidden;
+      },
+      onVisible(visible) {
+        // A map with no frame draws 60 times a second into a canvas of no size.
+        liveDockNodes.get('map')?.querySelector('ph-navigation-map')
+          ?.setRendering?.(visible.has('map'));
+      },
       labels: {
         switcher: t('server.gm.shell.layout.switcher'), reset: t('server.gm.shell.layout.reset'),
         float: t('server.gm.shell.layout.float'), close: t('server.gm.shell.layout.close'),
         dock: Object.fromEntries(['left', 'right', 'top', 'bottom', 'tab'].map(place =>
           [place, t(`server.gm.shell.layout.dock_${place}`)])),
-        panels: Object.fromEntries(['roster', 'readiness', 'join', 'manual-save'].map(panel =>
-          [panel, t(`server.gm.shell.layout.panel.${panel.replace('-', '_')}`)])),
-      }, initial, onChange, model: liveLayoutModel, viewportNarrow: true, doc, win });
+        panels: Object.fromEntries(liveLayoutModel.panels.map(panel =>
+          [panel, t(`server.gm.shell.layout.panel.${panel.replace(/-/g, '_')}`)])),
+        tabs: t('server.gm.shell.log_tabs'),
+      },
+      // The migrated panels' contents are owned by modules that resolve them by
+      // id AFTER this mounts, so no registered panel may leave the document.
+      retain: true,
+      mayReset: () => temporaryActions.mayReset(),
+      mayClose: panel => temporaryActions.mayDiscard(panel),
+      onDiscard: panel => temporaryActions.discard(panel),
+      initial, onChange, model: liveLayoutModel, viewportNarrow: true, doc, win });
     styleButtons();
     return liveLayout;
   }
-  if (liveWorkspace) mountLiveLayout(liveLayoutModel.defaultLayout());
+  if (isLiveWorkspace()) mountLiveLayout(liveLayoutModel.defaultLayout());
+  // `__phoenixRequestGameMaster` toggles `.phoenix-gm-page` on the root, so the
+  // root's class IS the signal that this became a GM desk. Watching it keeps
+  // this shell independent of the page that raises the flag.
+  const rootObserver = new win.MutationObserver(() => {
+    if (!liveLayout && isLiveWorkspace()) {
+      const { initial, onChange } = pendingMount
+        || { initial: liveLayoutModel.defaultLayout(), onChange: undefined };
+      mountLiveLayout(initial, onChange);
+    }
+  });
+  rootObserver.observe(doc.documentElement, { attributes: true, attributeFilter: ['class'] });
   return {
     dispose() {
       liveLayout?.dispose();
       restoreDockedNodes();
       observer.disconnect();
+      rootObserver.disconnect();
       dockCss?.remove();
       css.remove();
     },
     mountLiveLayout,
-    setLiveLayout(value) { liveLayout?.set(value); },
-    /** Bring one of the centre region's three views to the front.
+    temporaryActions,
+    /** Put the in-surface floating panels away while a gesture owns the map,
+     * and bring the same ones back when it ends (issue #1508). */
+    setPicking(value, forPanel = null) { return liveLayout?.setPicking(value, forPanel) === true; },
+    isPicking() { return liveLayout?.isPicking() === true; },
+    /** Applying a stored arrangement takes an open draft away with it — a
+     * restored layout has no floating draft in it — so the drafts get the same
+     * say they get before a reset. */
+    setLiveLayout(value) {
+      if (!temporaryActions.mayReset()) return false;
+      temporaryActions.discard(null);
+      liveLayout?.set(value);
+      return true;
+    },
+    liveLayoutState() { return liveLayout?.state() || null; },
+    /** Bring the attention region to the front for a banner that has just been
+     * drawn into it. A technical banner is rendered verbatim so a Game Master
+     * cannot hide a connection or recovery failure from themselves; a panel
+     * sitting behind another tab would hide it just as effectively as a role
+     * preset would, so the arrangement yields to it. */
+    revealBanners() { return liveLayout?.reveal('attention') === true; },
+    /** Bring one of the migrated record panels to the front.
      *
-     * A view that is not current is `display: none`, so anything inside it is
+     * A panel that is not the active tab is `hidden`, so anything inside it is
      * unfocusable and unclickable — which would silently break the navigations
      * the desk already has: the attention queue opening an authored Comms
      * route, or any later surface pointing at the action log. Callers ask for
-     * the PANEL they are about to touch and this resolves the view; a panel the
+     * the PANEL they are about to touch and the dock reveals it; a panel the
      * effective role preset has put away is left alone, because a preset
      * hiding a panel is a decision, not an accident. */
     showLog(panelId) {
-      const entry = GM_DESK_LOG_VIEWS.find(([, id]) => id === panelId);
-      const panel = entry && get(panelId);
+      const entry = GM_LIVE_DOCK_PANEL_IDS.find(([, id]) => id === panelId);
+      const panel = entry && liveDockNodes.get(entry[0]);
       if (!entry || !panel || panel.hidden) return false;
-      setLogView(entry[0]);
-      return true;
+      return liveLayout?.reveal(entry[0]) === true;
     },
     metadata(value) { gms = value.gms || []; paintRoster(); },
     selection(entity) {
@@ -593,7 +733,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       armedChip.hidden = !armed;
       armedChip.textContent = armed ? t('server.gm.shell.armed', { palette: armed }) : '';
       paintHealthPills();
-      reconcileLogTabs();
+      // The role preset may have just put a record panel away or brought it
+      // back; the dock re-reads that rather than being told twice.
+      liveLayout?.syncAvailability();
       paintRoster();
     },
   };

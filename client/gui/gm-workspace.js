@@ -17,6 +17,7 @@ import { createGmContactPanel } from './gm-contact-panel.js';
 import { createGmPresentationPanel } from './gm-presentation-panel.js';
 import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
+import { createGmEntityInspectorPanel } from './gm-entity-inspector-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
 import { createGmAttentionPanel } from './gm-attention-panel.js';
@@ -43,7 +44,18 @@ import { mountSoundAudition } from './sound-audition-panel.js';
 import { createPrivateRequestFeedback } from './private-request-feedback.js';
 import { createPrivateAlerts, attachPrivateAlertLifecycle } from './private-alerts.js';
 
-export function mountGmWorkspace({ win = window, doc = win.document, requireNativeProvider = false } = {}) {
+/**
+ * `isolated` mounts the workspace for a document that may read NOTHING beyond
+ * what it was handed — the disposable Workshop Test's omniscient view (issue
+ * #1472), whose whole guarantee is that an uncaptured project file is absent
+ * rather than fetched. Operator feedback audio and the local sound audition
+ * are the only parts of this workspace that reach for project assets on their
+ * own (the private-feedback manifest, the cue catalogue and every sample they
+ * name), so an isolated mount gives feedback audio a silent output with no
+ * manifest and mounts no audition at all. Every projection panel is unchanged.
+ */
+export function mountGmWorkspace({ win = window, doc = win.document, requireNativeProvider = false,
+  isolated = false } = {}) {
   let privateAudio = null;
   const privateAlerts = createPrivateAlerts({ audio: { actionable: () => privateAudio?.actionable() } });
   const disposePrivateAlerts = attachPrivateAlertLifecycle(privateAlerts, win);
@@ -75,6 +87,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let gmSystem = null;
   let gmDespawn = null;
   let gmNpc = null;
+  let gmEntityFields = null;
   let gmObjectivePanel = null;
   const gmProjection = createGmLocalProjection({
     doc: doc,
@@ -89,6 +102,8 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       // Objectives narrow to the selected ship; the mission panel's events
       // stay scenario-wide.
       if (gmObjectivePanel) gmObjectivePanel.select(entity);
+      // The entities/AI Live Inspector reads the same selection (issue #1489).
+      if (gmEntityFields) gmEntityFields.select(entity);
     },
   });
   const gmActivity = createGmActivityFeed({
@@ -184,8 +199,12 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let disposePrivateAudio = null, unsubscribePrivateProfile = null;
   {
     privateAudio = createPrivateAudio({ root: win,
-      requireNativeProvider,
-      allowAudition: true,
+      // An isolated document gets the silent output the native pane gets
+      // without an injected provider, and no manifest: the shipped feedback
+      // catalogue and its samples are project assets it was never handed.
+      requireNativeProvider: requireNativeProvider || isolated,
+      allowAudition: !isolated,
+      ...(isolated ? { fetchManifest: () => Promise.reject(new Error('private-audio-isolated')) } : {}),
       read: gmConfirmationProfile.audio, save: gmConfirmationProfile.setAudio,
       isEnabled: () => win.__phoenixGmPage === true && gmConfirmationProfile.feedback().semanticCues !== false });
     win.__privateAudio = privateAudio;
@@ -335,10 +354,21 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   repaintGmAttention = gmAttentionPanel.repaint;
   win.__hostGmAttentionState = gmAttentionPanel.state;
   win.__hostGmAttentionRestore = gmAttentionFilters.restore;
-  win.__hostGmAttentionBanners = gmAttentionPanel.banners;
+  // A technical banner is rendered verbatim so a Game Master cannot hide a
+  // connection or recovery failure from themselves. Since issue #1503 the
+  // attention region is a dock panel, and a panel sitting behind another tab
+  // would hide it as effectively as a role preset would — so drawing one brings
+  // its panel to the front. The dock refuses to CLOSE this panel at all
+  // (LIVE_PINNED_PANELS); this is the other half of the same guarantee.
+  const showBanners = (alerts) => {
+    const drawn = gmAttentionPanel.banners(alerts);
+    if (drawn > 0) shell.revealBanners?.();
+    return drawn;
+  };
+  win.__hostGmAttentionBanners = showBanners;
   const gmHealthPanel = createGmHealthPanel({
     doc: doc, t, has,
-    banners: (alerts) => gmAttentionPanel.banners(alerts),
+    banners: showBanners,
   });
   gmRestoreControl = createGmRestoreControl({
     doc: doc,
@@ -350,8 +380,18 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submitResume: (correlation) => privateSubmit('gm.restore.resume', { correlation }, () =>
       typeof win.__hostSetSessionPaused === 'function' && win.__hostSetSessionPaused(false, correlation)),
     confirmAction: gmConfirmations.request,
+    // Restore is a complex action: the shared lifecycle decides what a landed
+    // restore does to the draft (issue #1509).
+    onSucceeded: () => shell.temporaryActions?.succeeded('restore'),
+
   });
   win.__hostGmRestoreState = gmRestoreControl.state;
+  shell.temporaryActions?.register('restore', {
+    isDirty: () => gmRestoreControl.draftDirty(),
+    reset: () => gmRestoreControl.resetDraft(),
+    keepOpen: () => gmRestoreControl.keepOpen(),
+    focus: () => gmRestoreControl.focusDraft(),
+  });
   gmHealthPanelRef = gmHealthPanel;
   win.__hostGmHealthState = gmHealthPanel.state;
   // The M4 Station-workload advisory (issue #1438). Read-only by construction:
@@ -377,7 +417,20 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     doc: doc,
     win: win,
     t,
+    // The shared complex-action lifecycle decides what an authoritative success
+    // does to the draft: a docked or kept-open one stays, an undocked unchecked
+    // one closes (issue #1506).
+    onSucceeded: () => shell.temporaryActions?.succeeded('spawn'),
+    // Picking covers the map with a gesture, and an in-surface floating panel
+    // sits on exactly that, so the surface puts its floats away for the
+    // duration and brings the same ones back afterwards (issue #1508).
+    onPickModeChange: picking => shell.setPicking?.(picking, 'spawn'),
     actionFeedback: hostActionFeedback,
+    // A ghost is a Spawn OUTCOME: the same palette entry, placed by the same
+    // gesture, reported to one observing ship as a false Sensors contact
+    // instead of spawned into the world. It travels the contact-information
+    // route, so its result comes back on the entity projection below.
+    submitInformation: request => privateSubmit('gm.information', request, () => win.__hostSetContactInformation(request)),
     confirmAction: gmConfirmations.request,
     getMap: () => doc.getElementById('gm-entity-map'),
     submitPlacement: (request) =>
@@ -391,6 +444,13 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   win.__hostGmSpawnRefresh = gmSpawnPanel.refreshAdmission;
   win.__hostGmSpawnReset = gmSpawnPanel.reset;
   win.__hostGmSpawnState = gmSpawnPanel.state;
+  shell.temporaryActions?.register('spawn', {
+    isDirty: () => gmSpawnPanel.draftDirty(),
+    reset: options => gmSpawnPanel.resetDraft(options),
+    keepOpen: () => gmSpawnPanel.keepOpen(),
+    focus: () => gmSpawnPanel.focusDraft(),
+  });
+  win.__hostGmOpenAction = panel => shell.temporaryActions?.open(panel) === true;
   win.__hostGmActivityState = gmActivity.state;
   const gmStationPuppet = createGmStationPuppet({
     doc: doc,
@@ -452,6 +512,14 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       ? win.__hostLocalGm() : null,
     getOperatorName: (id) => typeof win.__hostGmName === 'function'
       ? win.__hostGmName(id) : id,
+    // A press the world took finishes the draft (issue #1511).
+    onSucceeded: () => shell.temporaryActions?.succeeded('effect'),
+  });
+  shell.temporaryActions?.register('effect', {
+    isDirty: () => gmDirectEffect.draftDirty(),
+    reset: options => gmDirectEffect.resetDraft(options),
+    keepOpen: () => gmDirectEffect.keepOpen(),
+    focus: () => gmDirectEffect.focusDraft(),
   });
   gmSystem = createGmSystemPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
@@ -465,15 +533,31 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submit: request => privateSubmit('gm.contact', request, () => win.__hostSetContactOverride(request)),
     submitClassification: request => privateSubmit('gm.classification', request, () => win.__hostSetContactClassification(request)),
     submitInformation: request => privateSubmit('gm.information', request, () => win.__hostSetContactInformation(request)),
+    // The two drafts this tool composes are complex actions of their own
+    // (issue #1510); the shared lifecycle decides what a landed one does to
+    // the panel that carried it. Placing a ghost used to be the third: it is
+    // a Spawn outcome now, and only its record and removal remain here.
+    onSucceeded: draft => shell.temporaryActions?.succeeded(draft),
   });
   win.__hostGmContactState = gmContact.state;
+  for (const [panel, draft] of Object.entries(gmContact.drafts)) {
+    shell.temporaryActions?.register(panel, {
+      isDirty: draft.isDirty, reset: draft.reset,
+      keepOpen: draft.keepOpen, focus: draft.focus,
+    });
+  }
   gmPresentation = createGmPresentationPanel({ doc, t,
     getOperator: () => win.__hostLocalGm?.() || null,
     submit: request => privateSubmit('gm.presentation', request, () => win.__hostPresentation(request)),
   });
   win.__hostGmPresentationState = gmPresentation.state;
-  const soundAudition = doc.getElementById('gm-mission-panel')
-    ? mountSoundAudition({root:doc.getElementById('gm-mission-panel'),audio:privateAudio,win}) : null;
+  // Private audition is operator-local and stays that way: the dock moves the
+  // node, it does not give the panel a transport, an endpoint or a recipient.
+  const auditionRoot = doc.getElementById('gm-audition-dock') || doc.getElementById('gm-mission-panel');
+  // The audition previews the SHIPPED cue catalogue, which an isolated
+  // document cannot read; its panel stays empty there rather than fetching.
+  const soundAudition = auditionRoot && !isolated
+    ? mountSoundAudition({root:auditionRoot,audio:privateAudio,win}) : null;
   gmDespawn = createGmDespawnPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
@@ -485,9 +569,25 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     confirmAction: gmConfirmations.request,
   });
   win.__hostGmNpcState = gmNpc.state;
+  gmEntityFields = createGmEntityInspectorPanel({ doc: doc, t,
+    // The named action is REACHED, not repeated: this brings the panel that
+    // owns the checked doctrine transaction forward, aims it at the same
+    // entity, and leaves the transaction, its confirmation and its attribution
+    // exactly where they already are.
+    focusDoctrine: entityId => {
+      const entity = gmProjection.state().entities
+        .find(row => row.entity_id === entityId);
+      if (entity) gmNpc.select(entity);
+      return shell.showLog('gm-npc-panel');
+    },
+    // A reference hop goes through the desk's own selection owner, so the map,
+    // the entity card and every selection-scoped panel move together.
+    selectEntity: entityId => gmProjection.select(entityId),
+  });
+  win.__hostGmEntityFieldsState = gmEntityFields.state;
   win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -495,9 +595,13 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     gm_entity:    function(p) {
       gmDespawn.update(p);
       gmContact.update(p);
+      // Spawn's ghost outcome reads the observing ships from the same
+      // projection, and its ghost results come back on it too.
+      gmSpawnPanel.updateContacts(p);
       gmPresentation.update(p);
       gmSystem.update(p);
       gmNpc.update(p);
+      gmEntityFields.update(p);
       if (gmProjection.update(p)) {
         gmActivity.reconcileAvailability();
         gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
@@ -554,7 +658,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
-    dispose() { workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { gmContact?.dispose(); workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       workshopSource.refresh();
       if (!alertScope()) privateAlerts.reset();
@@ -589,6 +693,12 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       win.__hostGmMissionReset();
       gmCommsPanel.reset();
       gmSpawnPanel.reset();
+  // The run the draft was for has gone, so there is nothing left to confirm
+  // away: the panel closes rather than staying open and empty.
+  for (const draft of ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect']) {
+    shell.temporaryActions?.discard(draft);
+    shell.temporaryActions?.closeSilently(draft);
+  }
       win.__hostGmEffectReset();
     },
   };

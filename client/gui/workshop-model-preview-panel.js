@@ -3,7 +3,7 @@ import { t } from './strings.js';
 
 /** Local renderer controls. Source edits only mark the retained picture stale;
  * Refresh is the deliberate boundary that replaces its immutable input. */
-export function mountWorkshopModelPreview({ root, provider, draft, selection, busy }) {
+export function mountWorkshopModelPreview({ root, provider, draft, selection, busy, attach = true }) {
   const doc = root.ownerDocument;
   const make = (tag, name, text) => {
     const value = doc.createElement(tag);
@@ -66,12 +66,17 @@ export function mountWorkshopModelPreview({ root, provider, draft, selection, bu
     button('up', 'workshop.models.preview.up', () => camera(0, Math.PI / 12)),
     button('down', 'workshop.models.preview.down', () => camera(0, -Math.PI / 12)),
   ];
-  panel.append(heading, controls, status, stats, viewport); root.append(panel);
+  panel.append(heading, controls, status, stats, viewport);
+  // See mountWorkshopModels: a docked panel is placed by the renderer alone.
+  if (attach) root.append(panel);
   function render() {
     if (!session || disposed) return;
     const state = session.snapshot(), measured = state.status?.stats;
     const held = hidden || busy() || state.loading;
-    refreshButton.disabled = held || !state.available || !draft() || !selection().model;
+    // Either subject kind is a subject: a GLB model, or an entity template
+    // whose composed visual the shared viewer dispatches (issue #1470).
+    const chosen = selection();
+    refreshButton.disabled = held || !state.available || !draft() || !(chosen.model || chosen.entity);
     stop.disabled = !state.running && !state.loading;
     for (const value of [lod, lighting, gizmos, distance]) value.disabled = held || !state.running || !measured?.settled;
     for (const value of cameraButtons) value.disabled = held || !state.running || !measured?.camera;
@@ -116,5 +121,5 @@ export function mountWorkshopModelPreview({ root, provider, draft, selection, bu
     hidden = nextHidden; panel.hidden = hidden; render();
   }
   refresh();
-  return { refresh, dispose() { disposed = true; void Promise.resolve(session.dispose()).catch(() => {}); panel.remove(); } };
+  return { refresh, node: panel, dispose() { disposed = true; void Promise.resolve(session.dispose()).catch(() => {}); panel.remove(); } };
 }

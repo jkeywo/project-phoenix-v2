@@ -231,6 +231,9 @@ export function createGmDirectEffectPanel({
   actionFeedback: suppliedActionFeedback = null,
   confirmAction = (request) => request.accept(),
   getEntity = null,
+  // Direct effect is a complex action since issue #1511: the shared lifecycle
+  // decides what a press the world TOOK does to the panel that composed it.
+  onSucceeded = () => {},
 } = {}) {
   const region = doc && doc.getElementById('gm-effect-panel');
   const empty = doc && doc.getElementById('gm-effect-empty');
@@ -243,7 +246,12 @@ export function createGmDirectEffectPanel({
   const healButton = doc && doc.getElementById('gm-effect-heal');
   const warning = doc && doc.getElementById('gm-effect-warning');
   const feedbackStatus = doc && doc.getElementById('gm-effect-feedback');
+  const keepOpenBox = doc && doc.getElementById('gm-effect-keep-open');
   const log = doc && doc.getElementById('gm-effect-log');
+  /** The amount the draft starts at, read from the authored markup so the page
+   * and this module cannot drift apart about what "untouched" means. */
+  const defaultAmount = (doc && doc.getElementById('gm-effect-amount')
+    ? doc.getElementById('gm-effect-amount').getAttribute('value') : null) || '10';
 
   const boundedCapacity = Math.max(
     1,
@@ -263,6 +271,19 @@ export function createGmDirectEffectPanel({
   let authoritativeResults = [];
   const pending = new Map();
   const localTerminals = new Map();
+  /** Presses this desk stopped waiting for, until the world answers them.
+   *
+   * `localTerminals` cannot carry this: it is cleared on every `update()`, and
+   * the projection pushes continuously. The world is slower than the local
+   * timeout sometimes, and a press it TOOK is a press that finished — a draft
+   * left open waiting for something that already happened is how the same
+   * damage gets sent twice. */
+  const abandoned = new Map();
+  /** Whether everything this panel holds has already been sent. Dirty means
+   * unsent work: after a press the world took, the amount and the scope stay
+   * so the next press is one button away, but they are no longer work the
+   * operator would lose. Touching either makes them work again. */
+  let composedSincePress = false;
 
   const actionFeedback = suppliedActionFeedback || new ActionFeedbackLifecycle({
     ...(typeof correlation === 'function' ? { correlation } : {}),
@@ -615,6 +636,12 @@ export function createGmDirectEffectPanel({
     if (!meta) return false;
     clearPendingTimer(meta);
     pending.delete(correlationValue);
+    if (outcome === 'timed-out') {
+      abandoned.set(correlationValue, meta);
+      while (abandoned.size > boundedCapacity) {
+        abandoned.delete(abandoned.keys().next().value);
+      }
+    }
     rememberLocalTerminal(meta, outcome, reason);
     paintFeedback(
       outcome === 'timed-out' ? ACTION_FEEDBACK_STATE.TIMED_OUT : ACTION_FEEDBACK_STATE.REFUSED,
@@ -765,11 +792,13 @@ export function createGmDirectEffectPanel({
   }
 
   function onAmountInput() {
+    composedSincePress = true;
     paintWarning();
     refreshAdmission();
   }
 
   function onScopeChange() {
+    composedSincePress = true;
     scopeKey = scopeSelect ? scopeSelect.value : 'entity';
     // A full re-render rather than a warning repaint: the hull line, the
     // accessible names and the readiness of both buttons all answer the scope.
@@ -792,11 +821,22 @@ export function createGmDirectEffectPanel({
   function update(payload) {
     const results = parseGmEffectResults(payload);
     if (results === undefined) return false;
+    let settled = false;
     authoritativeResults = results.slice(-boundedCapacity);
     localTerminals.clear();
     for (const result of results) {
       const meta = pending.get(result.correlation);
-      if (!meta || meta.operatorId !== result.operator_id) continue;
+      if (!meta || meta.operatorId !== result.operator_id) {
+        // A press this desk gave up on, answered at last. Any terminal result
+        // answers it, so the memory goes either way; only one the world TOOK
+        // finishes the draft.
+        const gaveUp = abandoned.get(result.correlation);
+        if (gaveUp && gaveUp.operatorId === result.operator_id) {
+          abandoned.delete(result.correlation);
+          if (result.outcome !== 'refused') settled = true;
+        }
+        continue;
+      }
       clearPendingTimer(meta);
       pending.delete(result.correlation);
       const state = result.outcome === 'refused'
@@ -804,6 +844,15 @@ export function createGmDirectEffectPanel({
         : ACTION_FEEDBACK_STATE.APPLIED;
       actionFeedback.settle(result.correlation, state);
       paintFeedback(state, meta.entity);
+      // Only a press the world TOOK finishes the draft. A refusal — a stale
+      // selection, a scope that tracks nothing, a hull already at zero — leaves
+      // it open with its numbers and its reason on screen, which is the whole
+      // point of composing them in a panel of their own.
+      if (result.outcome !== 'refused') settled = true;
+    }
+    if (settled) {
+      composedSincePress = false;
+      onSucceeded();
     }
     renderLog();
     refreshAdmission();
@@ -818,7 +867,9 @@ export function createGmDirectEffectPanel({
     }
     pending.clear();
     localTerminals.clear();
+    abandoned.clear();
     authoritativeResults = [];
+    composedSincePress = false;
     selected = null;
     scopeKey = 'entity';
     renderedScopeSignature = null;
@@ -834,6 +885,7 @@ export function createGmDirectEffectPanel({
     if (scopeSelect) scopeSelect.removeEventListener('change', onScopeChange);
     for (const meta of pending.values()) clearPendingTimer(meta);
     pending.clear();
+    abandoned.clear();
   }
 
   renderTarget();
@@ -864,6 +916,38 @@ export function createGmDirectEffectPanel({
       authoritative: authoritativeResults.length,
     }),
     destroy,
+    /** The shared complex-action contract (issue #1511).
+     *
+     * Dirty is what this panel holds and has not settled: an amount the
+     * operator typed over the authored default, a scope narrowed off the whole
+     * hull, and a press still in flight. The SELECTION is not part of it — it
+     * belongs to the map and the inspector, and asking to discard a draft
+     * because a different hull is selected would prompt on every close nobody
+     * typed into. */
+    draftDirty: () => pending.size > 0
+      || (composedSincePress
+        && (scopeKey !== 'entity' || (!!amountInput && amountInput.value !== defaultAmount))),
+    /** `keepReusable` is the shared rule Spawn set: after a press the world
+     * took, the choices that describe WHAT it was stay.
+     *
+     * Everything this draft holds is such a choice. How much, and whether the
+     * press lands on the whole hull, one Station's authored Systems or one
+     * System, are both about the press — a GM repairing one Station repairs it
+     * again — and neither names a place or a one-off. The thing that is not
+     * reusable is the SELECTION, and that belongs to the map and the inspector
+     * rather than to this panel. So a landed press leaves the draft exactly as
+     * it was, and only a fresh open clears it. The scoped hull reading stays
+     * pointed where the operator pointed it, which is also what keeps the panel
+     * consistent with the canonical result it just reported. */
+    resetDraft: ({ keepReusable = false } = {}) => {
+      if (keepReusable) return;
+      composedSincePress = false;
+      scopeKey = 'entity';
+      if (amountInput) amountInput.value = defaultAmount;
+      renderTarget();
+    },
+    keepOpen: () => !!keepOpenBox && keepOpenBox.checked === true,
+    focusDraft: () => amountInput?.focus?.(),
     win,
   };
 }

@@ -1,11 +1,26 @@
 .workshop-dock-root.workshop-layout { min-height: 32rem; }
-.workshop-dock-root .workshop-panel-switcher { display: flex; gap: .35rem; align-items: center; margin-bottom: .5rem; }
+/* The switcher wraps: at 200% text a dozen tabs no longer fit one row, and a
+   row that will not wrap squeezes each tab below its label and pushes the page
+   sideways instead. */
+.workshop-dock-root .workshop-panel-switcher { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-bottom: .5rem; }
 .workshop-dock-root .workshop-layout-reset { margin-left: auto; }
-.workshop-dock-root .workshop-dock-canvas { position: relative; display: grid; min-height: 32rem; overflow: hidden; border: 1px solid #52687a; background: #0c141d; }
+.workshop-dock-root .workshop-dock-canvas { position: relative; display: grid; min-height: 32rem; overflow: hidden auto; border: 1px solid #52687a; background: #0c141d; }
+/* A docked frame never shrinks past a header and one row of controls. A group's
+   tab list wraps at narrow widths and takes its rows out of the frame beneath
+   it — at 1280 wide a ten-tab group left its frame a 21px sliver — so the floor
+   is here, the row it sits in is at least its content (the renderer sizes
+   vertical rows minmax(min-content, …)), and the canvas above scrolls the rest
+   rather than clipping it. */
+.workshop-dock-root .workshop-tab-stack > .workshop-dock-panel { min-height: 6rem; }
 .workshop-dock-root .workshop-split { display: grid; gap: .25rem; min-width: 0; min-height: 0; height: 100%; }
 .workshop-dock-root .workshop-tab-stack { display: flex; flex-direction: column; }
 .workshop-dock-root :is(.workshop-tab-stack, .workshop-dock-panel) { min-width: 0; min-height: 0; height: 100%; }
-.workshop-dock-root .workshop-tab-list { display: flex; gap: .25rem; padding: .25rem; background: #0c141d; border-bottom: 1px solid #52687a; }
+/* Wrapping, not scrolling: a tab strip is a set of destinations, and a group
+   can hold six of them in a quarter-width column (the Live inspector's, since
+   issue #1512). A strip that overflowed sideways would put a panel behind a
+   horizontal scroll nobody looks for; one that wraps grows downward, which is
+   what every other control in this console does at 200% text. */
+.workshop-dock-root .workshop-tab-list { display: flex; flex-wrap: wrap; gap: .25rem; padding: .25rem; background: #0c141d; border-bottom: 1px solid #52687a; }
 .workshop-dock-root .workshop-tab-list button[aria-selected="true"] { border-color: #ffe49b; background: #22384b; }
 .workshop-dock-root .workshop-dock-panel { position: relative; display: flex; flex: 1 1 0; flex-direction: column; overflow: auto; padding: .65rem; background: #111923; }
 .workshop-dock-root .workshop-dock-targets { display: none; position: absolute; inset: 50% auto auto 50%; z-index: 30; grid-template: repeat(3, 2.5rem) / repeat(3, 2.5rem); transform: translate(-50%, -50%); }
@@ -26,3 +41,7 @@
 @media (max-width: 55rem) {
   .workshop-dock-root .workshop-panel-switcher { overflow-x: auto; }
 }
+
+/* Document panels are the surfaces a context is arranged around: they take the
+   room a split gives them rather than shrinking to their content. */
+.workshop-dock-root .workshop-dock-panel[data-panel-kind="document"] > :last-child { flex: 1 1 auto; min-height: 0; }

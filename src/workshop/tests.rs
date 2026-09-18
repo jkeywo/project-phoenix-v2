@@ -215,6 +215,179 @@ fn validation_does_not_change_the_active_overlay() {
     assert_eq!(before, crate::entities::config_cache::active_packs());
 }
 
+// ── Definition findings through the validators (issue #1474) ─────────────────
+
+const ALLIANCE: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+const ROGUE: &str = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+const NOBODY: &str = "ffffffff-6666-4666-8666-ffffffffffff";
+
+fn pack_with_faction(enemy: &str) -> Vec<u8> {
+    let mut members = crate::world::mod_pack::read_store_zip_bytes(include_bytes!(
+        "../../tests/fixtures/mod-packs/valid-v1.zip"
+    ))
+    .unwrap();
+    members.insert(
+        "assets/factions/rogue.toml".into(),
+        format!("uuid = \"{ROGUE}\"\nname = \"Rogue\"\nenemies = [\n    \"{enemy}\",\n]\n")
+            .into_bytes(),
+    );
+    crate::workshop::archive::store_zip(&members).unwrap()
+}
+
+fn dependencies_with_base_factions() -> WorkshopDependencies {
+    let mut dependencies = dependencies();
+    dependencies.base_files.insert(
+        "assets/factions/alliance.toml".into(),
+        include_str!("../../assets/factions/alliance.toml").into(),
+    );
+    dependencies.base_files.insert(
+        "assets/factions/pirate.toml".into(),
+        include_str!("../../assets/factions/pirate.toml").into(),
+    );
+    dependencies
+}
+
+#[test]
+fn a_pack_faction_naming_an_unknown_enemy_is_refused_with_the_entry_line() {
+    let result = validate_pack(
+        &pack_with_faction(NOBODY),
+        &dependencies_with_base_factions(),
+    );
+    assert!(!result.accepted);
+    let finding = result
+        .findings
+        .iter()
+        .find(|finding| finding.category == "faction-unknown-enemy")
+        .unwrap_or_else(|| panic!("{:?}", result.findings));
+    assert_eq!(finding.file, "assets/factions/rogue.toml");
+    assert_eq!(finding.line, Some(4));
+    assert_eq!(finding.severity, "error");
+}
+
+#[test]
+fn a_pack_faction_may_name_a_base_faction_as_its_enemy() {
+    let result = validate_pack(
+        &pack_with_faction(ALLIANCE),
+        &dependencies_with_base_factions(),
+    );
+    assert!(result.accepted, "{:?}", result.findings);
+    // Without the base set beneath it the same pack dangles: the resolution
+    // really is against the dependency bundle, not a compiled-in list.
+    let alone = validate_pack(&pack_with_faction(ALLIANCE), &dependencies());
+    assert!(!alone.accepted);
+    assert!(alone
+        .findings
+        .iter()
+        .any(|finding| finding.category == "faction-unknown-enemy"));
+}
+
+#[test]
+fn a_project_rung_naming_an_unowned_system_reports_the_rung_entry_line() {
+    let hull = format!(
+        "class = \"cruiser\"\nfaction = \"{ALLIANCE}\"\n\n[[station]]\nid = \"captain\"\nname = \"Captain\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[station.rating]]\nname = \"Simplified\"\nautomated_systems = [\n    \"red-alert\",\n    \"phaser-fore\",\n]\n\n[[station]]\nid = \"tactical\"\nname = \"Tactical\"\n\n[[system]]\nid = \"red-alert\"\nkind = \"red_alert\"\nstation = \"captain\"\n\n[[system]]\nid = \"phaser-fore\"\nkind = \"phaser_bank\"\nstation = \"tactical\"\n"
+    );
+    let files = BTreeMap::from([
+        (
+            "assets/scenarios.toml".into(),
+            b"[content]\nid=\"base\"\nepoch=1\n".to_vec(),
+        ),
+        ("assets/entities/probe_hull.toml".into(), hull.into_bytes()),
+        (
+            "assets/factions/alliance.toml".into(),
+            include_str!("../../assets/factions/alliance.toml")
+                .as_bytes()
+                .to_vec(),
+        ),
+    ]);
+    let report = validate_project(&files);
+    assert!(!report.accepted);
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.category == "rating-unowned-system")
+        .unwrap_or_else(|| panic!("{:?}", report.findings));
+    assert_eq!(finding.file, "assets/entities/probe_hull.toml");
+    assert_eq!(finding.line, Some(16));
+    assert!(finding.message.contains("RatingReferencesUnownedSystem"));
+    assert!(
+        !report
+            .findings
+            .iter()
+            .any(|finding| finding.category == "entity-unknown-faction"),
+        "{:?}",
+        report.findings
+    );
+}
+
+#[test]
+fn the_native_provider_answers_definitions_edit_and_new_faction() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let directory = std::env::temp_dir().join(format!(
+        "phoenix-workshop-definitions-{}-{nanos}",
+        std::process::id()
+    ));
+    let root = directory.join("project");
+    std::fs::create_dir_all(root.join("assets/factions")).unwrap();
+    std::fs::write(
+        root.join("assets/scenarios.toml"),
+        "[content]\nid='phoenix-base'\nepoch=1\n",
+    )
+    .unwrap();
+    let source = format!("uuid = \"{ROGUE}\"\nname = \"Rogue\"\nenemies = []\n");
+    std::fs::write(root.join("assets/factions/rogue.toml"), &source).unwrap();
+    let mut provider = provider::NativeWorkshopProvider::open(
+        provider::WorkspaceKind::Project,
+        &root,
+        directory.join("private"),
+        WorkshopDependencies::default(),
+    )
+    .unwrap();
+
+    let catalog = provider.handle_json(&format!(
+        "{{\"id\":1,\"op\":\"definitions\",\"files\":{{\"assets/factions/rogue.toml\":\"uuid = \\\"{ROGUE}\\\"\\nname = \\\"Rogue\\\"\\nenemies = []\\n\"}}}}"
+    ));
+    assert!(catalog.contains("\"status\":\"definitions\""), "{catalog}");
+    assert!(catalog.contains("\"origin\":\"draft\""), "{catalog}");
+    assert!(
+        catalog.contains("\"order_responses\":[\"comply\",\"refuse\"]"),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("\"ai_rules\":[\"torpedo_auto_fire\"]"),
+        "{catalog}"
+    );
+
+    let skeleton = provider.handle_json(&format!(
+        "{{\"id\":2,\"op\":\"new-faction\",\"name\":\"Rogue\",\"uuid\":\"{ROGUE}\"}}"
+    ));
+    assert!(skeleton.contains("\"status\":\"patched\""), "{skeleton}");
+    assert!(skeleton.contains("name = \\\"Rogue\\\""), "{skeleton}");
+    let refused = provider
+        .handle_json("{\"id\":3,\"op\":\"new-faction\",\"name\":\" \",\"uuid\":\"not-a-uuid\"}");
+    assert!(refused.contains("\"status\":\"refused\""), "{refused}");
+
+    let edited = provider.handle_json(&format!(
+        "{{\"id\":4,\"op\":\"edit\",\"source\":\"uuid = 1\\n\",\"edit\":{{\"document_path\":\"assets/factions/rogue.toml\",\"expected_source\":\"uuid = 1\\n\",\"edits\":[{{\"op\":\"put\",\"path\":[\"name\"],\"value_source\":\"\\\"Renamed\\\"\"}},{{\"op\":\"insert\",\"path\":[\"enemies\"],\"index\":0,\"value_source\":\"\\\"{ALLIANCE}\\\"\"}}]}}}}"
+    ));
+    assert!(
+        edited.contains("\"status\":\"refused\""),
+        "an insert into a missing array refuses the whole group: {edited}"
+    );
+    let edited = provider.handle_json(
+        "{\"id\":5,\"op\":\"edit\",\"source\":\"uuid = 1\\n\",\"edit\":{\"document_path\":\"assets/factions/rogue.toml\",\"expected_source\":\"uuid = 1\\n\",\"edits\":[{\"op\":\"put\",\"path\":[\"name\"],\"value_source\":\"\\\"Renamed\\\"\"}]}}",
+    );
+    assert!(edited.contains("\"status\":\"patched\""), "{edited}");
+    assert!(
+        edited.contains("\"source\":\"uuid = 1\\nname = \\\"Renamed\\\"\\n\""),
+        "{edited}"
+    );
+    drop(provider);
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 #[test]
 fn partial_entity_include_is_validated_only_as_part_of_its_complete_template() {
     let bytes = include_bytes!("../../tests/fixtures/mod-packs/partial-entity-include.zip");

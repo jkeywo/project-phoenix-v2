@@ -94,6 +94,15 @@ export function createNativeWorkshopProvider({ request }) {
       async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
       async inspect(source, document_path) { return (await call({ op: 'inspect', source, document_path })).fields; },
       async patch(source, patch) { return (await call({ op: 'patch', source, patch })).source; },
+      // The native provider builds the dependency bundle itself, the way the
+      // validate route does, so only the draft's text members cross the bridge.
+      async definitions(files) {
+        const response = await call({ op: 'definitions', files });
+        if (response?.status !== 'definitions' || !response.catalog || typeof response.catalog !== 'object') throw new Error('Invalid native definition catalog');
+        return response.catalog;
+      },
+      async edit(source, edit) { return (await call({ op: 'edit', source, edit })).source; },
+      async newFaction(name, uuid) { return (await call({ op: 'new-faction', name, uuid })).source; },
     },
     async save(draft) {
       const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });

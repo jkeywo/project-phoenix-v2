@@ -25,6 +25,8 @@ use crate::world::validate::{
 pub mod archive;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod captured_source;
+/// Faction and complexity definitions with exact lines (issue #1474).
+pub mod definitions;
 pub mod document;
 mod model_fields;
 #[cfg(not(target_arch = "wasm32"))]
@@ -103,8 +105,11 @@ impl WorkshopValidation {
     }
 
     fn extend(&mut self, findings: impl IntoIterator<Item = WorldFinding>) {
+        self.extend_workshop(findings.into_iter().map(WorkshopFinding::from));
+    }
+
+    fn extend_workshop(&mut self, findings: impl IntoIterator<Item = WorkshopFinding>) {
         for finding in findings {
-            let finding = WorkshopFinding::from(finding);
             if !self.findings.contains(&finding) {
                 self.findings.push(finding);
             }
@@ -197,6 +202,10 @@ pub fn validate_pack(bytes: &[u8], dependencies: &WorkshopDependencies) -> Works
     report.extend(validation.findings);
     let mut candidate = validation.files;
     candidate.insert("scenarios.toml".into(), validation.manifest_toml);
+    // Definition references resolve against everything beneath the candidate,
+    // so a pack may name a BASE faction as an enemy and a draft that deletes
+    // a faction is told where it is still referenced (issue #1474).
+    report.extend_workshop(definitions::findings(&candidate, &beneath));
     let mut sources = beneath;
     sources.extend(candidate.clone());
     let sources = Sources(sources);
@@ -341,6 +350,8 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
         }
     }
     report.extend(crate::world::mod_pack::validate_pack_scripts(&sources.0));
+    // A project is its whole content set; nothing lies beneath it.
+    report.extend_workshop(definitions::findings(&sources.0, &BTreeMap::new()));
     for (path, text) in &sources.0 {
         let result = if path.starts_with("assets/worlds/") && path.ends_with(".toml") {
             crate::world::config::parse_world(text).map(|_| ())

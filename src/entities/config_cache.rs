@@ -1268,30 +1268,40 @@ pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsV
     }
 }
 
-/// Get the loaded FactionRegistry.
+/// The effective FactionRegistry (issue #1474).
 ///
-/// Pre-populates from compile-time includes if the thread-local is still
-/// empty (e.g. when `wasm_load_faction` was never called from JS due to
-/// missing wiring).  This ensures the registry always contains the four
-/// built-in factions — Alliance, Pirate, Harrow, Requiem — on every
-/// target, WASM included.
+/// The base set is the thread-local one when something filled it — a
+/// disposable Test's captured factions through [`replace_faction_registry`],
+/// or `wasm_load_faction` — and otherwise the four compiled-in factions, so a
+/// host page that never loaded a faction still has Alliance, Pirate, Harrow
+/// and Requiem. Every active pack's `assets/factions/*.toml` is then inserted
+/// in stack order, later winning by uuid, so a pack's factions reach the same
+/// registry its hulls reference.
 #[cfg(target_arch = "wasm32")]
 pub fn get_faction_registry() -> crate::ai::faction::FactionRegistry {
+    let mut registry = FACTION_REGISTRY.with(|reg| reg.borrow().clone());
+    if registry.is_empty() {
+        insert_built_in_factions(&mut registry);
+    }
+    overlay_pack_factions(&mut registry, &active_packs());
+    registry
+}
+
+/// Replace the thread-local faction set entirely. A Test iframe captures the
+/// draft's faction files before its App boots; a faction the draft deleted is
+/// therefore gone in the Test rather than resurrected from the compiled-in
+/// four.
+#[cfg(target_arch = "wasm32")]
+pub fn replace_faction_registry(
+    configs: impl IntoIterator<Item = crate::ai::faction::FactionConfig>,
+) {
     FACTION_REGISTRY.with(|reg| {
-        if reg.borrow().is_empty() {
-            for toml_str in &[
-                include_str!("../../assets/factions/alliance.toml"),
-                include_str!("../../assets/factions/pirate.toml"),
-                include_str!("../../assets/factions/harrow.toml"),
-                include_str!("../../assets/factions/requiem.toml"),
-            ] {
-                if let Ok(config) = crate::ai::faction::parse_faction_config(toml_str) {
-                    reg.borrow_mut().insert(config);
-                }
-            }
+        let mut reg = reg.borrow_mut();
+        *reg = crate::ai::faction::FactionRegistry::new();
+        for config in configs {
+            reg.insert(config);
         }
-        reg.borrow().clone()
-    })
+    });
 }
 
 /// Get a reference to the config cache.
@@ -1722,9 +1732,73 @@ pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, Js
     Ok(JsValue::from_bool(false))
 }
 
+/// The effective FactionRegistry (issue #1474): the faction files under the
+/// content root's `assets/factions/`, then every active pack's, later winning
+/// by uuid. The content root is the cwd — a native host pins it and a
+/// disposable Test child pins its stage — so the Test runs the exact unsaved
+/// faction set without installing anything. A missing or unreadable directory
+/// falls back to the four compiled-in factions.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_faction_registry() -> crate::ai::faction::FactionRegistry {
+    faction_registry_from(std::path::Path::new("assets/factions"), &active_packs())
+}
+
+/// The faction directory that sits beside a template directory: a content
+/// tree keeps `assets/entities` and `assets/factions` as siblings, so a run
+/// told where its hulls are (`phoenix-headless --ship`) reads the factions of
+/// that same tree rather than of whatever directory it was launched from.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn faction_directory_beside(template_dir: &std::path::Path) -> std::path::PathBuf {
+    template_dir
+        .parent()
+        .map(|assets| assets.join("factions"))
+        .unwrap_or_else(|| std::path::PathBuf::from("assets/factions"))
+}
+
+/// The pure half of [`get_faction_registry`], so a test can point it at a
+/// directory without moving the process's cwd under other tests.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn faction_registry_from(
+    directory: &std::path::Path,
+    packs: &[ActivePack],
+) -> crate::ai::faction::FactionRegistry {
     let mut registry = crate::ai::faction::FactionRegistry::new();
+    match std::fs::read_dir(directory) {
+        Ok(entries) => {
+            // Sorted by name so two files declaring one uuid resolve the same
+            // way on every filesystem, not in directory-listing order.
+            let mut paths: Vec<std::path::PathBuf> = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.is_file()
+                        && path
+                            .extension()
+                            .is_some_and(|extension| extension == "toml")
+                })
+                .collect();
+            paths.sort();
+            for path in paths {
+                match std::fs::read_to_string(&path) {
+                    Ok(source) => {
+                        insert_faction_source(&mut registry, &path.display().to_string(), &source)
+                    }
+                    Err(error) => bevy::log::warn!(
+                        target: crate::logging::LogCat::Config.target(),
+                        "faction file {} is unreadable and was skipped: {error}",
+                        path.display()
+                    ),
+                }
+            }
+        }
+        Err(_) => insert_built_in_factions(&mut registry),
+    }
+    overlay_pack_factions(&mut registry, packs);
+    registry
+}
+
+/// The four shipped factions, compiled in as the last resort on both targets.
+fn insert_built_in_factions(registry: &mut crate::ai::faction::FactionRegistry) {
     for toml_str in &[
         include_str!("../../assets/factions/alliance.toml"),
         include_str!("../../assets/factions/pirate.toml"),
@@ -1735,7 +1809,39 @@ pub fn get_faction_registry() -> crate::ai::faction::FactionRegistry {
             registry.insert(config);
         }
     }
-    registry
+}
+
+fn insert_faction_source(
+    registry: &mut crate::ai::faction::FactionRegistry,
+    path: &str,
+    source: &str,
+) {
+    match crate::ai::faction::parse_faction_config(source) {
+        Ok(config) => registry.insert(config),
+        // An unparsable file is skipped rather than fatal, as the compiled-in
+        // loop always did; the Workshop refuses it before it can be saved.
+        Err(error) => bevy::log::warn!(
+            target: crate::logging::LogCat::Config.target(),
+            "faction file {path} did not parse and was skipped: {error}"
+        ),
+    }
+}
+
+/// Every active pack's `assets/factions/*.toml`, oldest pack first so the
+/// newest wins a shared uuid — the same precedence every other overlay read
+/// applies.
+fn overlay_pack_factions(registry: &mut crate::ai::faction::FactionRegistry, packs: &[ActivePack]) {
+    for pack in packs {
+        let mut files: Vec<(&String, &String)> = pack
+            .files
+            .iter()
+            .filter(|(path, _)| path.starts_with("assets/factions/") && path.ends_with(".toml"))
+            .collect();
+        files.sort();
+        for (path, source) in files {
+            insert_faction_source(registry, path, source);
+        }
+    }
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────────
@@ -2674,5 +2780,137 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
             super::push_catalog_template(fragment, "class = \"escort\"\n".to_string(), false);
         assert!(awaiting.is_empty(), "no root is waiting on anything");
         assert!(super::catalog_entity_config(&hull).is_none());
+    }
+
+    // ── Faction registry from effective content (issue #1474) ────────────
+
+    const ALPHA: &str = "aaaaaaaa-0000-4000-8000-00000000000a";
+    const BETA: &str = "bbbbbbbb-0000-4000-8000-00000000000b";
+    const GAMMA: &str = "cccccccc-0000-4000-8000-00000000000c";
+
+    fn faction_uuid(text: &str) -> uuid::Uuid {
+        uuid::Uuid::parse_str(text).unwrap()
+    }
+
+    /// A private directory under the OS temp root; the pid and clock keep
+    /// parallel test binaries apart without an OS-entropy uuid.
+    fn private_directory(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("phoenix-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn faction_registry_reads_the_directory_then_the_pack_overlays_in_stack_order() {
+        let directory = private_directory("factions");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("a.toml"),
+            format!("uuid = \"{ALPHA}\"\nname = \"Alpha\"\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            directory.join("b.toml"),
+            format!("uuid = \"{BETA}\"\nname = \"Beta\"\nenemies = [\"{ALPHA}\"]\n"),
+        )
+        .unwrap();
+        std::fs::write(directory.join("broken.toml"), "uuid = 1\n").unwrap();
+        std::fs::write(directory.join("notes.txt"), "not a faction").unwrap();
+
+        let from_disk = super::faction_registry_from(&directory, &[]);
+        assert_eq!(from_disk.len(), 2, "the unparsable file is skipped");
+        assert_eq!(from_disk.get(&faction_uuid(ALPHA)).unwrap().name, "Alpha");
+        assert!(crate::ai::faction::is_enemy(
+            Some(faction_uuid(BETA)),
+            Some(faction_uuid(ALPHA)),
+            &from_disk
+        ));
+
+        let older = pack_with(
+            "older",
+            &[(
+                "assets/factions/alpha.toml",
+                &format!("uuid = \"{ALPHA}\"\nname = \"AlphaOlder\"\n"),
+            )],
+        );
+        let newer = pack_with(
+            "newer",
+            &[
+                (
+                    "assets/factions/alpha.toml",
+                    &format!("uuid = \"{ALPHA}\"\nname = \"AlphaNewer\"\n"),
+                ),
+                (
+                    "assets/factions/gamma.toml",
+                    &format!("uuid = \"{GAMMA}\"\nname = \"Gamma\"\n"),
+                ),
+                ("assets/worlds/gamma.toml", "[global]\n"),
+            ],
+        );
+        let overlaid = super::faction_registry_from(&directory, &[older, newer]);
+        assert_eq!(overlaid.len(), 3);
+        assert_eq!(
+            overlaid.get(&faction_uuid(ALPHA)).unwrap().name,
+            "AlphaNewer",
+            "the newest pack wins a shared uuid"
+        );
+        assert_eq!(overlaid.get(&faction_uuid(GAMMA)).unwrap().name, "Gamma");
+        assert_eq!(overlaid.get(&faction_uuid(BETA)).unwrap().name, "Beta");
+
+        let _ = std::fs::remove_dir_all(&directory);
+        let absent = super::faction_registry_from(&directory, &[]);
+        assert_eq!(
+            absent.len(),
+            4,
+            "an absent directory falls back to the compiled-in four"
+        );
+        assert!(absent.uuid_by_name("Alliance").is_some());
+        assert!(absent.uuid_by_name("Requiem").is_some());
+    }
+
+    #[test]
+    fn the_checkout_registry_matches_the_compiled_in_set_with_no_pack_installed() {
+        // Under `cargo test` the cwd is the crate root, whose assets/factions
+        // holds exactly the four compiled-in files, so the effective registry
+        // and the fallback describe the same set whichever arm was taken. This
+        // is a smoke check of the thin wrapper from the crate root, not the
+        // proof that the directory is read — that proof is the temp-directory
+        // test above. The guard keeps a pack another test installs out of it.
+        let _overlay = super::overlay_test_guard();
+        let effective = super::get_faction_registry();
+        let mut compiled = crate::ai::faction::FactionRegistry::new();
+        super::insert_built_in_factions(&mut compiled);
+        assert_eq!(effective.len(), compiled.len());
+        for faction in compiled.iter() {
+            assert_eq!(effective.get(&faction.uuid), Some(faction));
+        }
+    }
+
+    #[test]
+    fn the_faction_directory_beside_a_template_directory_is_its_sibling() {
+        assert_eq!(
+            super::faction_directory_beside(std::path::Path::new("assets/entities")),
+            std::path::PathBuf::from("assets/factions")
+        );
+        let directory = private_directory("beside");
+        let templates = directory.join("assets").join("entities");
+        std::fs::create_dir_all(&templates).unwrap();
+        std::fs::create_dir_all(directory.join("assets").join("factions")).unwrap();
+        std::fs::write(
+            directory.join("assets").join("factions").join("only.toml"),
+            format!("uuid = \"{ALPHA}\"\nname = \"Alpha\"\n"),
+        )
+        .unwrap();
+        let registry =
+            super::faction_registry_from(&super::faction_directory_beside(&templates), &[]);
+        assert_eq!(
+            registry.len(),
+            1,
+            "the factions beside the templates, not the cwd's"
+        );
+        assert_eq!(registry.get(&faction_uuid(ALPHA)).unwrap().name, "Alpha");
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

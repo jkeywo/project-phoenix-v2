@@ -71,6 +71,59 @@ fn dependencies_are_exposed_as_read_only_text_without_editable_assets() {
 }
 
 #[test]
+fn project_definitions_resolve_against_nothing_beneath_while_a_mod_sees_its_dependencies() {
+    let alliance = include_str!("../../../assets/factions/alliance.toml");
+    let uuid = crate::ai::faction::parse_faction_config(alliance)
+        .unwrap()
+        .uuid
+        .to_string();
+    let dependencies = WorkshopDependencies {
+        base_files: BTreeMap::from([("assets/factions/alliance.toml".into(), alliance.into())]),
+        base_assets: BTreeMap::new(),
+        packs: Vec::new(),
+    };
+    let files = BTreeMap::from([(
+        "assets/entities/hull.toml".to_owned(),
+        format!("faction = \"{uuid}\"\n"),
+    )]);
+    let mut findings = Vec::new();
+    for kind in [WorkspaceKind::Project, WorkspaceKind::Mod] {
+        let fixture = Fixture::new();
+        let mut provider = NativeWorkshopProvider::open(
+            kind,
+            &fixture.root,
+            &fixture.recovery,
+            dependencies.clone(),
+        )
+        .unwrap();
+        let response = provider.handle(WorkshopRequest {
+            id: 7,
+            operation: Operation::Definitions {
+                files: files.clone(),
+            },
+        });
+        let Response::Definitions { catalog } = response.result else {
+            panic!("expected a definitions response");
+        };
+        findings.push((
+            kind,
+            catalog.choices.factions.len(),
+            catalog
+                .findings
+                .iter()
+                .filter(|finding| finding.category == "entity-unknown-faction")
+                .count(),
+        ));
+    }
+    // A project is its whole content set, so the base faction it does not
+    // carry is unknown to it — exactly as Check reports; a mod resolves it.
+    assert_eq!(
+        findings,
+        vec![(WorkspaceKind::Project, 0, 1), (WorkspaceKind::Mod, 1, 0)]
+    );
+}
+
+#[test]
 fn private_json_bridge_loads_exact_source_and_roundtrips_a_runtime_validated_save() {
     let fixture = Fixture::new();
     let mut provider = fixture.open();

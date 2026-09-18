@@ -25,7 +25,7 @@ describe('Workshop layout model', () => {
     expect(panels(state)).toContain('inspector');
     expect(defaultWorkshopLayout().root.children).toHaveLength(3);
     expect(defaultWorkshopLayout().root.children[2]).toMatchObject({
-      tabs: ['inspector', 'add', 'recovery', 'settings', 'models', 'sound'], active: 'inspector',
+      tabs: ['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions'], active: 'inspector',
     });
     expect(defaultWorkshopLayout().root.children[1]).toMatchObject({
       tabs: ['source', 'findings', 'feedback', 'model-preview'], active: 'source',
@@ -49,9 +49,10 @@ describe('Workshop layout model', () => {
       ] },
       floats: [], closed: [], selected: 'source', recovery: { draft: 'must not persist' },
     });
-    expect(migrated.version).toBe(5);
+    expect(migrated.version).toBe(6);
     expect(migrated.selected).toBe('source');
-    for (const panel of ['dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound']) {
+    for (const panel of ['dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview', 'sound', 'changes',
+      'definitions']) {
       expect(panels(migrated)).toContain(`"${panel}"`);
     }
     expect(migrated).not.toHaveProperty('recovery');
@@ -69,7 +70,7 @@ describe('Workshop layout model', () => {
       closed: [], selected: 'source',
     });
 
-    expect(migrated.version).toBe(5);
+    expect(migrated.version).toBe(6);
     const placed = [];
     const collect = node => {
       if (node?.type === 'tabs') placed.push(...node.tabs);
@@ -78,7 +79,7 @@ describe('Workshop layout model', () => {
     collect(migrated.root);
     placed.push(...migrated.floats.map(entry => entry.panel), ...migrated.closed);
     for (const panel of ['files', 'source', 'inspector', 'add', 'recovery', 'dependencies', 'findings', 'feedback',
-      'settings', 'models', 'model-preview', 'sound']) {
+      'settings', 'models', 'model-preview', 'sound', 'changes', 'definitions']) {
       expect(placed.filter(candidate => candidate === panel)).toHaveLength(1);
     }
   });
@@ -98,11 +99,11 @@ describe('Workshop layout model', () => {
     });
 
     expect(migrated).toEqual({
-      version: 5,
+      version: 6,
       root: { type: 'split', axis: 'vertical', sizes: [17, 83], children: [
         { type: 'tabs',
           tabs: ['inspector', 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview',
-            'sound', 'changes'],
+            'sound', 'changes', 'definitions'],
           active: 'inspector' },
         { type: 'tabs', tabs: ['recovery'], active: 'recovery' },
       ] },
@@ -120,11 +121,11 @@ describe('Workshop layout model', () => {
       ],
       closed: ['source', 'inspector', 'files'], selected: 'inspector',
     });
-    expect(repaired.version).toBe(5);
+    expect(repaired.version).toBe(6);
     expect(repaired.selected).toBe('inspector');
     expect(repaired.closed).toEqual(['add', 'recovery']);
     for (const panel of ['source', 'inspector', 'files', 'dependencies', 'findings', 'feedback', 'settings',
-      'models', 'model-preview', 'sound']) {
+      'models', 'model-preview', 'sound', 'changes', 'definitions']) {
       expect(panels(repaired)).toContain(`"${panel}"`);
     }
   });
@@ -159,9 +160,9 @@ describe('Workshop layout model', () => {
     for (const version of [1, 2]) {
       expect(normalizeWorkshopLayout({
         version, root: null, floats: [], closed, selected: 'source',
-      })).toEqual({ version: 5, root: null, floats: [],
+      })).toEqual({ version: 6, root: null, floats: [],
         closed: [...closed, 'dependencies', 'findings', 'feedback', 'settings', 'models', 'model-preview',
-          'sound', 'changes'],
+          'sound', 'changes', 'definitions'],
         selected: 'files' });
     }
   });
@@ -187,14 +188,42 @@ describe('Workshop layout model', () => {
       floats: [], closed: ['feedback', 'settings'], selected: 'source',
     });
 
-    expect(migrated.version).toBe(5);
+    expect(migrated.version).toBe(6);
     expect(migrated.selected).toBe('source');
     // The operator closed feedback and settings under v3; migration must not undo that.
     expect(migrated.closed).toEqual(['feedback', 'settings']);
     expect(migrated.root.children[1]).toMatchObject({
       tabs: ['source', 'findings', 'model-preview'], active: 'source' });
     expect(migrated.root.children[2]).toMatchObject({
-      tabs: ['inspector', 'add', 'recovery', 'models', 'sound'], active: 'inspector' });
+      tabs: ['inspector', 'add', 'recovery', 'models', 'sound', 'definitions'], active: 'inspector' });
+  });
+
+  it('registers the definitions panel on a stored v5 layout beside the inspector without reopening a closed v5 panel', () => {
+    const migrated = normalizeWorkshopLayout({
+      version: 5,
+      root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22], children: [
+        { type: 'tabs', tabs: ['files', 'dependencies', 'changes'], active: 'changes' },
+        { type: 'tabs', tabs: ['source', 'findings', 'feedback', 'model-preview'], active: 'source' },
+        { type: 'tabs', tabs: ['inspector', 'add', 'recovery', 'settings', 'sound'], active: 'sound' },
+      ] },
+      floats: [], closed: ['models'], selected: 'source',
+    });
+    expect(migrated.version).toBe(6);
+    expect(migrated.closed).toEqual(['models']);
+    expect(migrated.root.children[0]).toMatchObject({ tabs: ['files', 'dependencies', 'changes'], active: 'changes' });
+    // Joins the inspector's group at the end and leaves the group on the tab the operator had open.
+    expect(migrated.root.children[2]).toMatchObject({
+      tabs: ['inspector', 'add', 'recovery', 'settings', 'sound', 'definitions'], active: 'sound' });
+    // A v5 tree could not have named the panel: it enters through migration only.
+    const crafted = normalizeWorkshopLayout({
+      version: 5, floats: [{ panel: 'definitions', x: 1, y: 2, width: 300, height: 200 }], closed: [], selected: 'definitions',
+      root: { type: 'tabs', tabs: ['source', 'definitions'], active: 'definitions' },
+    });
+    expect(crafted.version).toBe(6);
+    expect(crafted.floats).toEqual([]);
+    expect(crafted.selected).toBe('source');
+    expect(crafted.root.active).toBe('source');
+    expect(JSON.stringify(crafted.root)).toContain('"definitions"');
   });
 
   it('refuses a panel a stored v3 layout could not have named', () => {
@@ -212,7 +241,7 @@ describe('Workshop layout model', () => {
   it('classifies the source and model preview as document panels', () => {
     expect(workshopLayoutModel.kind('source')).toBe('document');
     expect(workshopLayoutModel.kind('model-preview')).toBe('document');
-    for (const panel of ['files', 'inspector', 'models', 'sound', 'settings']) {
+    for (const panel of ['files', 'inspector', 'models', 'sound', 'settings', 'changes', 'definitions']) {
       expect(workshopLayoutModel.kind(panel)).toBe('tool');
     }
     expect(workshopLayoutModel.kind('nonexistent')).toBeNull();

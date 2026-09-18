@@ -269,6 +269,21 @@ fn build_headless_inner(
     app.insert_resource(args.log.clone())
         .add_plugins(LoggingPlugin);
 
+    // The factions of the SAME content tree as the templates (issue #1474).
+    // Headless pins no content root: its templates come from beside `--ship`
+    // and its world from the path given, while the registry the simulation
+    // plugins inserted was read relative to the cwd. A run launched from
+    // another directory would otherwise fly the hulls of one tree against the
+    // factions of another, or against the compiled-in four.
+    app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
+        crate::entities::config_cache::faction_registry_from(
+            &crate::entities::config_cache::faction_directory_beside(std::path::Path::new(
+                &template_dir,
+            )),
+            &crate::entities::config_cache::active_packs(),
+        ),
+    ));
+
     // Seed precedence: `--seed`, then the world TOML's `[global] seed`, then a
     // seed drawn from the OS. The world config boot parsed and inserted is read
     // back here — the first point at which both the CLI args and the parsed

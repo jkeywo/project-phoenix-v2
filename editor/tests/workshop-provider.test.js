@@ -96,6 +96,30 @@ describe('explicit Workshop capability providers', () => {
     expect(request.mock.calls.at(-1)[0].expected_revision).toBe('draft-older');
   });
 
+  it('routes definition readings, structural edits and new factions over the bridge with the native op spellings', async () => {
+    const catalog = { factions: [], hulls: [], choices: {}, defaults: {}, findings: [] };
+    const request = vi.fn(async value => {
+      if (value.op === 'definitions') return { status: 'definitions', catalog };
+      if (value.op === 'edit') return { status: 'patched', source: `${value.source}# edited\n` };
+      if (value.op === 'new-faction') return { status: 'patched', source: `uuid = "${value.uuid}"\nname = "${value.name}"\n` };
+      return { status: 'done' };
+    });
+    const provider = createNativeWorkshopProvider({ request });
+    const files = { 'assets/factions/mine.toml': 'name = "Mine"\n' };
+    expect(await provider.runtime.definitions(files)).toEqual(catalog);
+    expect(request).toHaveBeenCalledWith({ op: 'definitions', files });
+    const edit = { document_path: 'assets/factions/mine.toml', expected_source: 'name = "Mine"\n',
+      edits: [{ op: 'set', path: ['name'], value_source: '"Mine Two"' }] };
+    expect(await provider.runtime.edit('name = "Mine"\n', edit)).toBe('name = "Mine"\n# edited\n');
+    expect(request).toHaveBeenCalledWith({ op: 'edit', source: 'name = "Mine"\n', edit });
+    expect(await provider.runtime.newFaction('Harrow', 'u')).toBe('uuid = "u"\nname = "Harrow"\n');
+    expect(request).toHaveBeenCalledWith({ op: 'new-faction', name: 'Harrow', uuid: 'u' });
+    const broken = createNativeWorkshopProvider({ request: async () => ({ status: 'done' }) });
+    await expect(broken.runtime.definitions(files)).rejects.toThrow('Invalid native definition catalog');
+    const refused = createNativeWorkshopProvider({ request: async () => ({ status: 'refused', message: 'Stale source', report: null }) });
+    await expect(refused.runtime.edit('x', edit)).rejects.toThrow('Stale source');
+  });
+
   it('correlates private replies and rejects pending work when its surface closes', async () => {
     const sent = [];
     const bridge = createWorkshopBridge({ send: value => sent.push(JSON.parse(value)) });

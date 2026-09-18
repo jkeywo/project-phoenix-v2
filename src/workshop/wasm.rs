@@ -69,3 +69,30 @@ pub fn wasm_workshop_patch(source: &str, patch: &str) -> Result<String, JsValue>
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     super::document::patch(source, &patch).map_err(|error| JsValue::from_str(&error))
 }
+
+/// The faction and complexity catalog over the draft's text members plus the
+/// same explicit dependency bundle validation takes (issue #1474).
+#[wasm_bindgen]
+pub fn wasm_workshop_definitions(files: &str, dependencies: &str) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_definition_files(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::encode_workshop_definition_catalog(&super::definitions::catalog(
+        &files,
+        &dependencies,
+    ))
+    .map_err(|error| JsValue::from_str(&error))
+}
+
+#[wasm_bindgen]
+pub fn wasm_workshop_edit(source: &str, edit: &str) -> Result<String, JsValue> {
+    let edit = crate::core::codec::decode_workshop_edit(edit)
+        .map_err(|error| JsValue::from_str(&error))?;
+    super::document::edit(source, &edit).map_err(|error| JsValue::from_str(&error))
+}
+
+#[wasm_bindgen]
+pub fn wasm_workshop_new_faction(name: &str, uuid: &str) -> Result<String, JsValue> {
+    super::definitions::new_faction_source(name, uuid).map_err(|error| JsValue::from_str(&error))
+}

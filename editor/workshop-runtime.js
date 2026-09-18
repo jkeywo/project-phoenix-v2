@@ -2,6 +2,14 @@
  * the simulation. Every validation call gets an explicit immutable dependency
  * bundle and the exact candidate bytes, never a live host overlay. */
 import { createWorkshopAssetSnapshot } from './workshop-assets.js';
+
+/** The dependency bundle with every byte member stripped: base files plus each
+ * pack's id, manifest and text files. */
+export function textDependencies(source) {
+  return { base_files: { ...(source?.base_files || {}) },
+    packs: (source?.packs || []).map(({ id, manifest_toml, files }) => ({ id, manifest_toml, files: { ...(files || {}) } })) };
+}
+
 export function createWorkshopRuntime({
   load = async () => {
     const moduleUrl = new URL('../phoenix.js', import.meta.url).href;
@@ -55,6 +63,26 @@ export function createWorkshopRuntime({
     async patch(source, change) {
       const { runtime } = await ready();
       return runtime.wasm_workshop_patch(source, JSON.stringify(change));
+    },
+    /** The runtime-derived faction and complexity catalog of the draft's text
+     * members (issue #1474). Dependencies travel as TEXT ONLY: the catalog
+     * resolves cross-file references by parsing sources, so the asset bytes the
+     * validator needs would only be serialised to be ignored. */
+    async definitions(files) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_definitions(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies))));
+    },
+    /** All-or-nothing structural edits over exact source; the runtime answers
+     * with the whole new document or refuses without touching anything. */
+    async edit(source, request) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_edit(source, JSON.stringify(request));
+    },
+    /** A faction skeleton spelled by the runtime type, never a JS template. */
+    async newFaction(name, uuid) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_new_faction(name, uuid);
     },
     async validate(bytes) {
       const loaded = await ready();

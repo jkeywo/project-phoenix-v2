@@ -74,6 +74,17 @@ pub enum Operation {
         source: String,
         patch: document::Patch,
     },
+    Definitions {
+        files: BTreeMap<String, String>,
+    },
+    Edit {
+        source: String,
+        edit: document::EditRequest,
+    },
+    NewFaction {
+        name: String,
+        uuid: String,
+    },
     RecoveryLoad,
     RecoverySave {
         record: String,
@@ -138,6 +149,11 @@ pub enum Response {
     },
     Patched {
         source: String,
+    },
+    // Boxed like `Test`: a whole catalog would otherwise make every refusal
+    // carry its size.
+    Definitions {
+        catalog: Box<super::definitions::DefinitionCatalog>,
     },
     Recovery {
         recovery: Option<RecoveryRecord>,
@@ -391,6 +407,27 @@ impl NativeWorkshopProvider {
             },
             Operation::Patch { source, patch } => Response::Patched {
                 source: document::patch(&source, &patch)?,
+            },
+            // The same read-only bundle Validate resolves against: a mod's
+            // definitions see the base set and the packs beneath it, while a
+            // project IS the whole content set and nothing lies beneath it —
+            // a faction the project deletes must dangle in the panel exactly
+            // as Check reports it.
+            Operation::Definitions { files } => {
+                let nothing = WorkshopDependencies::default();
+                let dependencies = match self.kind {
+                    WorkspaceKind::Project => &nothing,
+                    WorkspaceKind::Mod => &self.dependencies,
+                };
+                Response::Definitions {
+                    catalog: Box::new(super::definitions::catalog(&files, dependencies)),
+                }
+            }
+            Operation::Edit { source, edit } => Response::Patched {
+                source: document::edit(&source, &edit)?,
+            },
+            Operation::NewFaction { name, uuid } => Response::Patched {
+                source: super::definitions::new_faction_source(&name, &uuid)?,
             },
             Operation::RecoveryLoad => {
                 let recovery = read_optional(&self.private.join("draft.json"))?

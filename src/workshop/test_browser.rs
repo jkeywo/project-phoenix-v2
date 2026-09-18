@@ -28,6 +28,19 @@ impl BrowserTest {
         let captured = super::captured_source::capture(source, "Workshop Test", "Test")
             .map_err(|message| fail(&message))?;
         let (assets, text) = (captured.assets, captured.text);
+        // The captured factions ARE the Test's registry (issue #1474): a
+        // faction the draft deleted is gone, one it added is there, and the
+        // compiled-in set never fills a gap. Validation already refuses an
+        // unparsable file; this keeps that belt on the launch itself.
+        let mut factions = Vec::new();
+        for (path, source) in &text {
+            if path.starts_with("assets/factions/") && path.ends_with(".toml") {
+                factions.push(
+                    crate::ai::faction::parse_faction_config(source)
+                        .map_err(|error| fail(&format!("{path}: {error}")))?,
+                );
+            }
+        }
         let report = super::test_source::validate_selection(text, &launch.selection);
         if !report.accepted {
             return Err(fail(
@@ -35,6 +48,7 @@ impl BrowserTest {
                     .map_err(|e| fail(&e.to_string()))?,
             ));
         }
+        crate::entities::config_cache::replace_faction_registry(factions);
         Ok(Self {
             launch,
             assets: Arc::new(assets),

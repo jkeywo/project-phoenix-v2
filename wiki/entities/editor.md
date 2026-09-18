@@ -2,8 +2,8 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml]
-updated: 2026-09-15
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs]
+updated: 2026-09-18
 ---
 
 # Editor
@@ -340,6 +340,82 @@ never re-pins a pack built for different content, because that pack is not out o
 date — it is for something else. Proposing is not applying: acceptance
 re-proposes first and refuses if the draft moved, since the bytes reviewed would
 otherwise not be the bytes written.
+
+## Workshop faction and complexity definitions (issue #1474)
+
+The `definitions` dock panel (Workshop layout v6, beside the inspector) edits
+faction relationships and the console-complexity ladder through forms whose
+fields, choices and defaults come from the runtime rather than a JS schema.
+"Complexity definitions" are the `[[station.rating]]` rungs (`name`,
+`automated_systems`, optional `ai_tuning`) and each station's `visiting_rating`
+on hull templates under `assets/entities/`; `assets/complexity/*.toml` no longer
+exists. Faction definitions are `assets/factions/*.toml` (`FactionConfig`: uuid,
+name, display_name, enemies, compliance), whose unknown keys are legal and are
+preserved byte-for-byte and listed read-only.
+
+`src/workshop/definitions.rs:509` `catalog` reads the draft's text members plus
+the immutable dependency bundle into a `DefinitionCatalog`: every faction and
+hull with 1-based lines from the `toml_edit` spans, enemies resolved to names
+across the effective set, the stations' owned systems (the only legal
+`automated_systems` choices), order responses spelled by `OrderResponse`'s serde
+contract, AI rules from `console_ai::server`'s constants and compliance defaults
+from `ComplianceDisposition::default()`. Base and pack members are listed with
+their origin and carry no controls; only draft members are editable. Browser:
+`wasm_workshop_definitions`; native: `Operation::Definitions` → `Response::Definitions`.
+
+Structural edits are a Rust `toml_edit` transaction — `src/workshop/document.rs:316`
+`edit` applies `set`/`put`/`insert`/`remove`/`append_table` in order, all-or-nothing,
+behind an exact `expected_source` guard, each value parsed as exactly one TOML
+value. The emitter drops carriage returns, so surviving lines are given their
+original endings back and new lines follow the document's convention. The pure
+`editor/workshop-definitions.js` plans the edit list from a form
+(`planFactionEdits`, `planRatingEdits`); `gui/workshop-definitions-panel.js`
+sends ONE `runtime.edit` per member per Apply and lands the answer as one
+`draft.edit`, never touching the draft before the runtime answers and refusing
+when the draft moved. A new faction is `toml::to_string(FactionConfig)` through
+`wasm_workshop_new_faction` / `Operation::NewFaction`, put at
+`assets/factions/<slug>.toml`; deletion is confirmed and undone by the ordinary
+history, with the dangling references becoming findings.
+
+Cross-file validity is a finding, not an edit-time refusal, so an author can add
+the enemy first and the faction second. `definitions.rs:774` `findings` runs from
+both `validate_pack` (candidate = the pack, beneath = base + other packs) and
+`validate_project`, so an error refuses save and export: duplicate faction
+uuid/name, self-enemy, unknown or invalid enemy, an entity's unknown `faction`,
+a world trigger or scripted `add_faction_enemy`/`remove_faction_enemy` naming no
+faction, and the rating rules mirrored from `src/ship/config.rs` (duplicate rung
+name, unknown or unowned automated system, unknown or missing visiting rating, a
+visiting rating or host order on a station that seats no human) with the
+runtime's own message text plus the line the runtime lacks. Two READ-ONLY files
+beneath the draft sharing a uuid are a `dependency-duplicate-uuid` warning on
+the last path, never a refusal. The one edit-time refusal beyond type checks is
+a rung whose name a station already has. A rung's `ai_tuning` rules are put and
+removed one key at a time: a rung whose last rule was removed keeps an empty
+`[station.rating.ai_tuning]` standard table, which a table-valued put would be
+refused over, while a per-key put enters it and materialises a missing table
+alike. The catalog resolves a uuid declared twice the way the registry does —
+base, packs in stack order, then the draft, latest winning — so a choice label
+and a resolved enemy name never disagree; a Project workspace's catalog resolves
+against nothing beneath, as its Check does.
+
+The faction registry is built from EFFECTIVE content on both targets
+(`src/entities/config_cache.rs:1742` native, `:1281` wasm): native reads
+`assets/factions/*.toml` under the cwd — the pinned content root, or a disposable
+Test child's stage — then overlays every active pack's faction files, newest
+winning a shared uuid; wasm takes the set a browser Test captured through
+`replace_faction_registry` (`src/workshop/test_browser.rs`), so a faction the draft
+deleted is gone in the Test. The compiled-in four are only the fallback for an
+absent directory or an empty thread-local set. Packs' factions therefore reach the
+registry when the App builds; live pack UPLOAD still does not validate faction
+references (follow-up), and a pack uploaded after boot does not refresh the
+resource until the next App. `phoenix-headless` pins no content root, so
+`src/headless/app.rs` replaces the registry with the factions BESIDE its
+templates (`faction_directory_beside`, the sibling of `--ship`'s directory):
+a run launched from another directory flies the hulls and the factions of one
+tree. Known residue: two DEPENDENCY packs sharing a uuid under different file
+names resolve by stack order on the Live host but by file name in a Test's
+staged directory (the warning above says so); a Test whose draft deletes a
+faction has no end-to-end browser run yet, only the traced capture path.
 
 ## Observing a disposable Test two ways (issue #1472)
 

@@ -11,6 +11,7 @@ import { createWorkshopRecovery } from '../editor/workshop-recovery.js';
 import { mountWorkshopTestPanel } from './workshop-test-panel.js';
 import { mountWorkshopSoundCues } from '../editor/workshop-sound-cues.js';
 import { mountWorkshopModels } from './workshop-models-panel.js';
+import { mountWorkshopDefinitions } from './workshop-definitions-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -159,6 +160,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let testPanel = null;
   let soundAudition = null;
   let modelPanel = null;
+  let definitionsPanel = null;
   let layoutMount = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
@@ -208,12 +210,16 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  definitionsPanel = mountWorkshopDefinitions({ root, attach: false, runtime, win, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
       findings, feedback, dependencies, settings,
       models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node,
-      changes: changesPanel },
+      changes: changesPanel, definitions: definitionsPanel.node },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -229,6 +235,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         dependencies: translate('workshop.dependencies'), settings: translate('editor.mod.settings.heading'),
         models: translate('workshop.models.title'), 'model-preview': translate('workshop.models.preview.title'),
         sound: translate('sound_cues.title'), changes: translate('workshop.changes.title'),
+        definitions: translate('workshop.definitions.title'),
       },
     },
     initial: profile.authoringLayout, doc, win,
@@ -334,6 +341,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     toolbar.setAttribute('aria-busy', String(busy));
     const testing = testPanel?.testing() || false;
     modelPanel?.refresh({ hidden: testing });
+    definitionsPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     sourceScope.hidden = testing;
     root.querySelector('.workshop-mode').textContent = translate(testing ? 'workshop.test_mode' : 'workshop.authoring');
@@ -864,6 +872,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     testPanel.dispose();
     soundAudition?.dispose();
     modelPanel?.dispose();
+    definitionsPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);

@@ -231,6 +231,23 @@ pub fn decode_workshop_patch(
     serde_json::from_str(value)
 }
 
+/// The draft's text members, `{path: text}`, for the definition catalog.
+pub fn decode_workshop_definition_files(
+    value: &str,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    serde_json::from_str(value).map_err(|error| error.to_string())
+}
+
+pub fn encode_workshop_definition_catalog(
+    value: &crate::workshop::definitions::DefinitionCatalog,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+
+pub fn decode_workshop_edit(value: &str) -> Result<crate::workshop::document::EditRequest, String> {
+    serde_json::from_str(value).map_err(|error| error.to_string())
+}
+
 /// Encode a one-shot positional audio cue for `__audioCue`. Coordinates are
 /// listener-relative — see `audio_config::listener_relative`.
 pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {

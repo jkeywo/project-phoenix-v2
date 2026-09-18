@@ -58,4 +58,32 @@ describe('offline Workshop runtime capability', () => {
     expect(await runtime.patch(source, change)).toContain("title = 'B'");
     expect(patch).toHaveBeenCalledWith(source, JSON.stringify(change));
   });
+
+  it('reads the definition catalog with text-only dependencies and routes structural edits and new factions to the runtime', async () => {
+    const source = { base_files: { 'assets/factions/alliance.toml': 'name = "Alliance"\n' },
+      base_asset_manifest: { 'assets/models/a.glb': { length: 2, crc32: 0 } },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/factions/pirate.toml': 'name = "Pirate"\n' },
+        assets: { 'assets/sounds/x.ogg': [1, 2] } }] };
+    const catalog = { factions: [], hulls: [], choices: { factions: [], order_responses: ['comply', 'refuse'], ai_rules: [] },
+      defaults: { compliance: { ack_secs: 2 } }, findings: [] };
+    const definitions = vi.fn(() => JSON.stringify(catalog));
+    const edit = vi.fn(() => 'name = "Mine"\nenemies = ["b"]\n');
+    const newFaction = vi.fn(() => 'uuid = "u"\nname = "Harrow"\nenemies = []\n');
+    const runtime = createWorkshopRuntime({ load: async () => ({
+      wasm_workshop_validate_pack: () => '{}', wasm_workshop_definitions: definitions, wasm_workshop_edit: edit,
+      wasm_workshop_new_faction: newFaction,
+    }), dependencies: async () => source });
+    const files = { 'assets/factions/mine.toml': 'name = "Mine"\nenemies = []\n' };
+    expect(await runtime.definitions(files)).toEqual(catalog);
+    // Text only: no base asset bytes, no pack assets — the catalog parses sources.
+    expect(definitions).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), JSON.stringify({
+      base_files: { 'assets/factions/alliance.toml': 'name = "Alliance"\n' },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/factions/pirate.toml': 'name = "Pirate"\n' } }] }));
+    const request = { document_path: 'assets/factions/mine.toml', expected_source: files['assets/factions/mine.toml'],
+      edits: [{ op: 'put', path: ['enemies'], value_source: '["b"]' }] };
+    expect(await runtime.edit(files['assets/factions/mine.toml'], request)).toContain('enemies = ["b"]');
+    expect(edit).toHaveBeenCalledExactlyOnceWith(files['assets/factions/mine.toml'], JSON.stringify(request));
+    expect(await runtime.newFaction('Harrow', 'u')).toContain('name = "Harrow"');
+    expect(newFaction).toHaveBeenCalledExactlyOnceWith('Harrow', 'u');
+  });
 });

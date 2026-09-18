@@ -263,6 +263,22 @@ const WORKSHOP_PANELS_V5: &[&str] = &[
     "sound",
     "changes",
 ];
+const WORKSHOP_PANELS_V6: &[&str] = &[
+    "files",
+    "source",
+    "inspector",
+    "add",
+    "recovery",
+    "findings",
+    "feedback",
+    "dependencies",
+    "settings",
+    "models",
+    "model-preview",
+    "sound",
+    "changes",
+    "definitions",
+];
 /// Panels registered after a stored version, with the group each joins on migration.
 const WORKSHOP_ADDED_IN_V3: &[(&str, &str)] = &[
     ("dependencies", "files"),
@@ -278,13 +294,18 @@ const WORKSHOP_ADDED_IN_V4: &[(&str, &str)] = &[
 /// Panels registered after version 4. The workspace changes view reads the same
 /// draft the file list does, so it joins that column.
 const WORKSHOP_ADDED_IN_V5: &[(&str, &str)] = &[("changes", "files")];
+/// Panels registered after version 5. Faction and complexity definitions are a
+/// specialised form over the same runtime the inspector reads, so it joins the
+/// inspector's column beside the model form (issue #1474).
+const WORKSHOP_ADDED_IN_V6: &[(&str, &str)] = &[("definitions", "inspector")];
 
 fn workshop_panels_for(version: u64) -> &'static [&'static str] {
     match version {
         1 | 2 => WORKSHOP_PANELS_V2,
         3 => WORKSHOP_PANELS_V3,
         4 => WORKSHOP_PANELS_V4,
-        _ => WORKSHOP_PANELS_V5,
+        5 => WORKSHOP_PANELS_V5,
+        _ => WORKSHOP_PANELS_V6,
     }
 }
 
@@ -298,6 +319,9 @@ fn workshop_panels_added_after(version: u64) -> Vec<(&'static str, &'static str)
     }
     if version < 5 {
         added.extend_from_slice(WORKSHOP_ADDED_IN_V5);
+    }
+    if version < 6 {
+        added.extend_from_slice(WORKSHOP_ADDED_IN_V6);
     }
     added
 }
@@ -893,11 +917,11 @@ fn sanitize_workshop_node(
 
 fn default_authoring_layout() -> Value {
     json!({
-        "version": 5,
+        "version": 6,
         "root": {"type":"split", "axis":"horizontal", "sizes":[22,56,22], "children":[
             {"type":"tabs", "tabs":["files","dependencies","changes"], "active":"files"},
             {"type":"tabs", "tabs":["source","findings","feedback","model-preview"], "active":"source"},
-            {"type":"tabs", "tabs":["inspector","add","recovery","settings","models","sound"], "active":"inspector"}
+            {"type":"tabs", "tabs":["inspector","add","recovery","settings","models","sound","definitions"], "active":"inspector"}
         ]},
         "floats": [], "closed": [], "selected": "source"
     })
@@ -1271,7 +1295,7 @@ fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
 }
 
 fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=5).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=6).contains(v))?;
     let allowed = workshop_panels_for(stored);
     let added = workshop_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -2090,7 +2114,7 @@ mod tests {
 
         let saved: Value =
             serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
-        assert_eq!(saved["authoringLayout"]["version"], 5);
+        assert_eq!(saved["authoringLayout"]["version"], 6);
         assert!(saved["authoringLayout"]["root"].is_null());
         assert_eq!(saved["authoringLayout"]["floats"], json!([]));
         assert_eq!(
@@ -2108,7 +2132,8 @@ mod tests {
                 "models",
                 "model-preview",
                 "sound",
-                "changes"
+                "changes",
+                "definitions"
             ])
         );
     }
@@ -2126,7 +2151,7 @@ mod tests {
         });
 
         let repaired = sanitize_authoring_layout(&layout).unwrap();
-        assert_eq!(repaired["version"], 5);
+        assert_eq!(repaired["version"], 6);
         assert_eq!(repaired["selected"], "inspector");
         assert_eq!(repaired["closed"], json!(["add", "recovery"]));
         fn placements(node: &Value, panel: &str) -> usize {
@@ -2158,6 +2183,7 @@ mod tests {
             "model-preview",
             "sound",
             "changes",
+            "definitions",
         ] {
             let count = placements(&repaired["root"], panel)
                 + repaired["floats"]
@@ -2180,7 +2206,7 @@ mod tests {
         });
 
         let migrated = sanitize_authoring_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 5);
+        assert_eq!(migrated["version"], 6);
         assert_eq!(
             migrated["root"]["tabs"],
             json!([
@@ -2195,7 +2221,8 @@ mod tests {
                 "models",
                 "model-preview",
                 "sound",
-                "changes"
+                "changes",
+                "definitions"
             ])
         );
         assert_eq!(migrated["selected"], "files");
@@ -2218,11 +2245,11 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":5,
+                "version":6,
                 "root":{"type":"split","axis":"horizontal","sizes":[10.0,30.0,60.0],"children":[
                     {"type":"tabs","tabs":["files","add","dependencies","changes"],"active":"add"},
                     {"type":"tabs","tabs":["source","findings","feedback","model-preview"],"active":"source"},
-                    {"type":"tabs","tabs":["inspector","settings","models","sound"],"active":"inspector"}
+                    {"type":"tabs","tabs":["inspector","settings","models","sound","definitions"],"active":"inspector"}
                 ]},
                 "floats":[{"panel":"recovery","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
                 "closed":[],"selected":"source"
@@ -2249,9 +2276,9 @@ mod tests {
             assert_eq!(
                 sanitize_authoring_layout(&layout).unwrap(),
                 json!({
-                    "version":5,
+                    "version":6,
                     "root":{"type":"split","axis":"vertical","sizes":[17.0,83.0],"children":[
-                        {"type":"tabs","tabs":["inspector","dependencies","findings","feedback","settings","models","model-preview","sound","changes"],"active":"inspector"},
+                        {"type":"tabs","tabs":["inspector","dependencies","findings","feedback","settings","models","model-preview","sound","changes","definitions"],"active":"inspector"},
                         {"type":"tabs","tabs":["recovery"],"active":"recovery"}
                     ]},
                     "floats":floats, "closed":["add"], "selected":"source"
@@ -2268,7 +2295,7 @@ mod tests {
                 "closed":["files","source","inspector","add","recovery"], "selected":"source"
             });
             let migrated = sanitize_authoring_layout(&layout).unwrap();
-            assert_eq!(migrated["version"], 5);
+            assert_eq!(migrated["version"], 6);
             assert!(migrated["root"].is_null());
             assert_eq!(migrated["floats"], json!([]));
             assert_eq!(
@@ -2286,7 +2313,8 @@ mod tests {
                     "models",
                     "model-preview",
                     "sound",
-                    "changes"
+                    "changes",
+                    "definitions"
                 ])
             );
         }
@@ -2295,7 +2323,7 @@ mod tests {
     #[test]
     fn current_authoring_layout_preserves_registered_panels_and_drops_unknown_fields() {
         let layout = json!({
-            "version":5,
+            "version":6,
             "root":{"type":"tabs","tabs":["source","findings","feedback","dependencies","settings","models","model-preview","sound","unsafe"],"active":"feedback","unsafe":"secret"},
             "floats":[{"panel":"files","x":7,"y":9,"width":300,"height":200,"unsafe":"secret"}],
             "closed":["inspector","add","recovery"],"selected":"feedback","unsafe":"secret"
@@ -2304,10 +2332,10 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":5,
+                "version":6,
                 "root":{"type":"tabs","tabs":["source","findings","feedback","dependencies","settings","models","model-preview","sound"],"active":"feedback"},
                 "floats":[{"panel":"files","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
-                "closed":["inspector","add","recovery","changes"],"selected":"feedback"
+                "closed":["inspector","add","recovery","changes","definitions"],"selected":"feedback"
             })
         );
     }
@@ -2327,11 +2355,11 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":5,
+                "version":6,
                 "root":{"type":"split","axis":"horizontal","sizes":[22.0,56.0,22.0],"children":[
                     {"type":"tabs","tabs":["files","dependencies","changes"],"active":"files"},
                     {"type":"tabs","tabs":["source","findings","model-preview"],"active":"source"},
-                    {"type":"tabs","tabs":["inspector","add","recovery","models","sound"],"active":"inspector"}
+                    {"type":"tabs","tabs":["inspector","add","recovery","models","sound","definitions"],"active":"inspector"}
                 ]},
                 "floats":[],"closed":["feedback","settings"],"selected":"source"
             })
@@ -2349,7 +2377,7 @@ mod tests {
         });
 
         let migrated = sanitize_authoring_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 5);
+        assert_eq!(migrated["version"], 6);
         assert_eq!(migrated["floats"], json!([]));
         assert_eq!(migrated["selected"], "source");
         assert_eq!(migrated["root"]["active"], "source");

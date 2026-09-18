@@ -183,6 +183,33 @@ describe('Workshop layout renderer', () => {
     expect(mounted.syncAvailability()).toBe(false);
   });
 
+  it('brings back a panel an ordinary repaint dropped while its owner had it away', () => {
+    // The drift this pins: `paint` reads availability too, so an arrangement
+    // change landing WHILE a panel is unavailable repaints without it. Nothing
+    // told `syncAvailability` that happened, so a sync that compared against its
+    // own memo of the last sync found "no change" and left the operator with a
+    // switcher button and no panel — issue #1505's handoff at session start.
+    const hidden = new Set();
+    ({ mounted } = mount(defaultWorkshopLayout(), { available: panel => !hidden.has(panel) }));
+    expect(document.querySelector('[data-panel="findings"]')).not.toBeNull();
+
+    // Its owner puts it away, and an UNRELATED arrangement change repaints
+    // before any sync runs.
+    hidden.add('findings');
+    mounted.set(closeWorkshopPanel(mounted.state(), 'recovery'));
+    expect(document.querySelector('[data-panel="findings"]')).toBeNull();
+
+    // Its owner brings it back. The sync must repaint, because what is drawn
+    // and what is available no longer agree.
+    hidden.delete('findings');
+    expect(mounted.syncAvailability()).toBe(true);
+    expect(document.querySelector('[data-panel="findings"]')).not.toBeNull();
+    // And it is still reachable, not merely present.
+    expect(document.querySelector('[data-layout-panel="findings"][data-layout-control="switcher"]'))
+      .not.toBeNull();
+    expect(mounted.syncAvailability()).toBe(false);
+  });
+
   it('moves focus off a tab whose panel its owner just put away', async () => {
     const hidden = new Set();
     ({ mounted } = mount(defaultWorkshopLayout(), { available: panel => !hidden.has(panel) }));

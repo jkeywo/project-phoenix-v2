@@ -442,12 +442,20 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     return true;
   }
   /** Re-read availability after its owner changed a panel's own visibility.
-   * Nothing in the arrangement changes, so this neither persists nor notifies. */
-  let lastAvailable = panelIds.filter(usable).join('\u0000');
+   * Nothing in the arrangement changes, so this neither persists nor notifies.
+   *
+   * What is already DRAWN is the comparison, not a memo of its own. A record
+   * of "the availability I last synced" drifts, because `paint` reads
+   * availability too: an ordinary arrangement change landing in a window where
+   * a panel's owner had it hidden repaints without that panel and leaves the
+   * memo still claiming it is shown. The panel then never returns — the next
+   * sync compares reality against the memo, finds them equal, and returns
+   * early while the surface holds no frame for it. `signature()` is what
+   * `render` paints FROM and `painted` is what it last painted, so comparing
+   * those two cannot disagree with what the operator can see.
+   */
   function syncAvailability() {
-    const current = panelIds.filter(usable).join('\u0000');
-    if (current === lastAvailable) return false;
-    lastAvailable = current;
+    if (signature() === painted) return false;
     const active = doc.activeElement;
     // A tab button and a switcher button name their panel directly and live
     // OUTSIDE the frame, so the frame lookup alone would miss the commonest

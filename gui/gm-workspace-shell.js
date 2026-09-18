@@ -95,14 +95,24 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   css.rel = 'stylesheet';
   css.href = new URL('./gm-workspace.css', import.meta.url).href;
   doc.head.append(css);
-  const liveWorkspace = native || win.__phoenixGmPage === true
+  // Whether this page is a GM desk is a QUESTION, not a value captured once.
+  //
+  // `?gm=1` has the flag up before this shell mounts, but the landing's Host as
+  // GM entry raises it afterwards through `__phoenixRequestGameMaster` and does
+  // not reload — so a shell that decided at mount time left that route with an
+  // undocked desk: the flag up, `.phoenix-gm-page` on the root, and an empty
+  // #gm-live-layout. Re-reading it, and mounting when it becomes true, makes
+  // both entries to the same desk reach the same desk.
+  const isLiveWorkspace = () => native || win.__phoenixGmPage === true
     || doc.documentElement.classList.contains('phoenix-gm-page');
-  const dockCss = liveWorkspace ? doc.createElement('link') : null;
-  if (dockCss) {
+  let dockCss = null;
+  const ensureDockCss = () => {
+    if (dockCss) return;
+    dockCss = doc.createElement('link');
     dockCss.rel = 'stylesheet';
     dockCss.href = new URL('./dock-layout.css', import.meta.url).href;
     doc.head.append(dockCss);
-  }
+  };
   root.classList.add('gm-desk');
   const get = id => doc.getElementById(id);
   const move = (parent, ...ids) => ids.forEach(id => { if (get(id)) parent.append(get(id)); });
@@ -566,8 +576,14 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     }
     dockOrigins.clear();
   }
+  let pendingMount = null;
   function mountLiveLayout(initial, onChange) {
-    if (!liveWorkspace) return null;
+    // Held, not dropped. The caller that owns the operator's saved arrangement
+    // asks once; if this page is not a GM desk YET, that request is what gets
+    // mounted when it becomes one, so a late dock is still the stored dock.
+    if (!isLiveWorkspace()) { pendingMount = { initial, onChange }; return null; }
+    pendingMount = null;
+    ensureDockCss();
     liveLayout?.dispose();
     const readiness = element('section', 'gm-readiness-dock');
     const startControls = get('gm-start-controls');
@@ -627,12 +643,24 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     styleButtons();
     return liveLayout;
   }
-  if (liveWorkspace) mountLiveLayout(liveLayoutModel.defaultLayout());
+  if (isLiveWorkspace()) mountLiveLayout(liveLayoutModel.defaultLayout());
+  // `__phoenixRequestGameMaster` toggles `.phoenix-gm-page` on the root, so the
+  // root's class IS the signal that this became a GM desk. Watching it keeps
+  // this shell independent of the page that raises the flag.
+  const rootObserver = new win.MutationObserver(() => {
+    if (!liveLayout && isLiveWorkspace()) {
+      const { initial, onChange } = pendingMount
+        || { initial: liveLayoutModel.defaultLayout(), onChange: undefined };
+      mountLiveLayout(initial, onChange);
+    }
+  });
+  rootObserver.observe(doc.documentElement, { attributes: true, attributeFilter: ['class'] });
   return {
     dispose() {
       liveLayout?.dispose();
       restoreDockedNodes();
       observer.disconnect();
+      rootObserver.disconnect();
       dockCss?.remove();
       css.remove();
     },

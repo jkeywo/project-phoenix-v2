@@ -28,6 +28,42 @@ function mount(extra = {}, translate = id => id) {
   mountedShells.push(shell);
   return {shell,selectEntity,win};
 }
+it('docks the desk when the page BECOMES a Game Master page, not only when it loaded as one', async () => {
+  // The Host as GM landing route raises the Game Master request in place and
+  // deliberately does NOT reload — `requestStandaloneGameMaster` commits the
+  // flag before taking the role precisely so the press does not pull the page
+  // out from under the picker it is opening. A shell that read the flag once,
+  // at mount, therefore left that route with an undocked desk: the flag up,
+  // `.phoenix-gm-page` on the root, and an empty #gm-live-layout.
+  const parsed = new DOMParser().parseFromString(source, 'text/html');
+  document.body.innerHTML = parsed.body.innerHTML;
+  const win = { document, Event, MutationObserver: class extends MutationObserver {
+    constructor(fn) { super(fn); observers.push(this); }
+  }, __phoenixGmPage: false };
+  const shell = mountGmWorkspaceShell({ doc: document, win, t: id => id, has: () => false,
+    selectEntity: vi.fn() });
+  mountedShells.push(shell);
+  // A ship page has no dock, which is what it always had.
+  expect(document.querySelector('#gm-live-layout [data-panel]')).toBeNull();
+  expect(shell.liveLayoutState()).toBeNull();
+
+  // The stored arrangement is asked for ONCE, before the route commits. It has
+  // to be what gets mounted when the flag goes up, or a late dock would come
+  // back as a default and silently lose the operator's own arrangement.
+  const stored = liveLayoutModel.close(defaultLiveLayout(), 'checkpoint');
+  shell.mountLiveLayout(stored, () => {});
+  expect(document.querySelector('#gm-live-layout [data-panel]')).toBeNull();
+
+  // Exactly what `__phoenixRequestGameMaster` does.
+  win.__phoenixGmPage = true;
+  document.documentElement.classList.add('phoenix-gm-page');
+  await vi.waitFor(() => expect(document.querySelector('#gm-live-layout [data-panel]')).not.toBeNull());
+  expect(shell.liveLayoutState().closed).toContain('checkpoint');
+  // The dock's own stylesheet arrives with it rather than never at all.
+  expect([...document.head.querySelectorAll('link')].some(l => l.href.includes('dock-layout.css')))
+    .toBe(true);
+});
+
 it('lays the desk out as one region: the dock workspace IS the desk', () => {
   mount();
   // Issues #1502-#1509 migrated every panel the desk held into the dock.

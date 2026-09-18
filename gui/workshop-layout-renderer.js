@@ -49,9 +49,25 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
    * frame, tab and switcher button. Availability is read, never written: one
    * writer owns the panel's own visibility (on the Live desk that is the role
    * preset) and the dock derives from it, so the two can never race. */
-  const usable = panel => {
+  const readAvailable = panel => {
     try { return available(panel) !== false; } catch { return true; }
   };
+  /** Availability as ONE render sees it.
+   *
+   * A render decides what it will draw from availability, then `paint` clears
+   * the canvas and asks again while it builds — and clearing the canvas takes
+   * every old frame out of the document, panel contents included. An owner that
+   * answers by looking its node up in the document (the Live desk's handoff
+   * panel resolves `#gm-workshop-source` by id, and that node lives INSIDE the
+   * panel) then answers "no" mid-paint: the frame the signature promised is
+   * never built, `painted` records that it was, and the panel is parked with
+   * a switcher button pointing at nothing. So a render reads availability once,
+   * before it touches the tree, and signature, paint and park all see that
+   * one answer. Outside a render — `reveal` deciding whether to proceed, a
+   * sync asking whether anything changed — the live answer is the right one. */
+  let observed = null;
+  const usable = panel => observed ? observed.has(panel) : readAvailable(panel);
+  const observeAvailability = () => new Set(panelIds.filter(readAvailable));
   const availableTabs = node => node.tabs.filter(usable);
   const activeTab = node => {
     const tabs = availableTabs(node);
@@ -264,10 +280,14 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     : { root: shapeOf(state.root), floats: state.floats.map(entry => entry.panel) });
   let painted = null;
   const render = (...args) => {
-    const next = signature();
-    if (painted === next) restyle();
-    else { paint(...args); painted = next; }
-    park(); reportVisible();
+    observed = observeAvailability();
+    try {
+      const next = signature();
+      if (painted === next) restyle();
+      else { paint(...args); painted = next; }
+      park();
+    } finally { observed = null; }
+    reportVisible();
   };
   /** Bring an unchanged arrangement up to date without touching the tree. */
   function restyle() {

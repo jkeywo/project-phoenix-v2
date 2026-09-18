@@ -210,6 +210,29 @@ describe('Workshop layout renderer', () => {
     expect(mounted.syncAvailability()).toBe(false);
   });
 
+  it('draws what its signature promised even when an owner answers by looking its node up', () => {
+    // The Live desk's handoff panel answers availability by resolving
+    // `#gm-workshop-source` by id — and that node lives INSIDE the panel. A
+    // paint clears the canvas before it builds, which takes every old frame
+    // out of the document, so an owner that answers that way says "no"
+    // mid-paint: the frame the signature promised is never built and the
+    // panel is parked behind a switcher button pointing at nothing.
+    const marker = document.createElement('span'); marker.id = 'findings-marker';
+    let panels;
+    ({ mounted, panels } = mount(defaultWorkshopLayout(), {
+      available: panel => panel !== 'findings' || !!document.getElementById('findings-marker') }));
+    expect(document.querySelector('[data-panel="findings"]')).toBeNull();
+    panels.findings.append(marker);
+    expect(mounted.syncAvailability()).toBe(true);
+    expect(document.querySelector('[data-panel="findings"]')).not.toBeNull();
+
+    // Any ordinary repaint.
+    mounted.set(closeWorkshopPanel(mounted.state(), 'recovery'));
+    expect(document.querySelector('[data-panel="findings"]')).not.toBeNull();
+    expect(document.querySelector('.workshop-dock-parked').contains(panels.findings)).toBe(false);
+    expect(mounted.syncAvailability()).toBe(false);
+  });
+
   it('moves focus off a tab whose panel its owner just put away', async () => {
     const hidden = new Set();
     ({ mounted } = mount(defaultWorkshopLayout(), { available: panel => !hidden.has(panel) }));

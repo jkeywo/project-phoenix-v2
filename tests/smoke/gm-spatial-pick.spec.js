@@ -37,11 +37,19 @@ test('a GM picks a place and a direction on the docked map', { tag: '@core' }, a
   const row = page.locator('#gm-spawn-palette .gm-spawn-entry').first();
   await expect(row).toBeVisible({ timeout: 30_000 });
 
-  // A second floating panel, to watch it go away and come back.
+  // A second floating panel, to watch it go away and come back. The journal is
+  // an inactive tab of the records group, so it is brought to the front first —
+  // its float control is only there to press once its frame is the shown one.
+  await revealGmPanel(page, 'journal');
   await page.locator('#gm-live-layout [data-panel="journal"] [data-layout-control="float"]').click();
   const journal = page.locator('[data-panel="journal"].is-floating');
   await expect(journal).toBeVisible();
 
+  // Two floats now, and the newer one opened over the draft. Bringing the draft
+  // forward is what an operator does before pressing into it — the dock raises
+  // a float on focus — so the press below is a real pointer press on a real
+  // control, not one routed around the panel sitting on top of it.
+  await spawn.locator('.workshop-panel-tab').focus();
   await row.locator('button[data-role="place"]').click();
 
   // Pick mode names the control capturing the map, and the chart says it is armed.

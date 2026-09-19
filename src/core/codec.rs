@@ -261,6 +261,21 @@ pub fn encode_workshop_composition_catalog(
     serde_json::to_string(value).map_err(|error| error.to_string())
 }
 
+/// One entity template's composition: its includes, its effective fields and
+/// who owns each of them (issue #1476).
+pub fn encode_workshop_entity_composition(
+    value: &crate::workshop::entity::EntityComposition,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+
+/// The entity edit group a Workshop panel applies to one template (issue #1476).
+pub fn decode_workshop_entity_request(
+    value: &str,
+) -> Result<crate::workshop::entity::EntityEditRequest, String> {
+    serde_json::from_str(value).map_err(|error| error.to_string())
+}
+
 /// Encode a one-shot positional audio cue for `__audioCue`. Coordinates are
 /// listener-relative — see `audio_config::listener_relative`.
 pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {

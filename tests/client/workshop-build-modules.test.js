@@ -56,6 +56,7 @@ describe('the Workshop build ships every editor module its pages import', () => 
   it('reaches the modules the pages are known to need, so the walk is not vacuous', () => {
     const reached = reachableModules();
     for (const file of ['gui/workshop-authoring.js', 'editor/workshop-document.js', 'editor/workshop-definitions.js',
+      'editor/workshop-composition.js', 'editor/workshop-entity.js',
       'editor/workshop-test-runtime.js', 'editor/workshop-preview-runtime.js']) {
       expect(reached.has(file), file).toBe(true);
     }

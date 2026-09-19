@@ -146,6 +146,35 @@ describe('explicit Workshop capability providers', () => {
     await expect(refused.runtime.compose(files, compose)).rejects.toThrow('would form a cycle');
   });
 
+  it('routes entity readings, entity edits and materialising over the bridge with the native op spellings (issue #1476)', async () => {
+    const composition = { path: 'assets/entities/mine.toml', origin: 'draft', resolvable: true, error: null, includes: [],
+      sources: [], components: [], fields: [], supported_components: [], fragment_choices: [], findings: [] };
+    const request = vi.fn(async value => {
+      if (value.op === 'entity') return { status: 'entity', composition };
+      if (value.op === 'entity-edit') return { status: 'patched', source: `${value.files[value.request.document_path]}# edited\n` };
+      if (value.op === 'entity-materialise') return { status: 'patched', source: `${value.files[value.path]}# ${value.address}\n` };
+      return { status: 'done' };
+    });
+    const provider = createNativeWorkshopProvider({ request });
+    const files = { 'assets/entities/mine.toml': 'name = "mine"\n' };
+    expect(await provider.runtime.entity(files, 'assets/entities/mine.toml')).toEqual(composition);
+    expect(request).toHaveBeenCalledWith({ op: 'entity', files, path: 'assets/entities/mine.toml' });
+    const edit = { document_path: 'assets/entities/mine.toml', expected_source: 'name = "mine"\n',
+      edits: [{ op: 'put', path: ['includes'], value_source: '["fragments/ai/base.toml"]' }] };
+    expect(await provider.runtime.editEntity(files, edit)).toBe('name = "mine"\n# edited\n');
+    expect(request).toHaveBeenCalledWith({ op: 'entity-edit', files, request: edit });
+    expect(await provider.runtime.materialiseEntity(files, 'assets/entities/mine.toml', 'hull.hull_integrity'))
+      .toBe('name = "mine"\n# hull.hull_integrity\n');
+    expect(request).toHaveBeenCalledWith({ op: 'entity-materialise', files, path: 'assets/entities/mine.toml',
+      address: 'hull.hull_integrity' });
+    const broken = createNativeWorkshopProvider({ request: async () => ({ status: 'done' }) });
+    await expect(broken.runtime.entity(files, 'assets/entities/mine.toml')).rejects.toThrow('Invalid native entity composition');
+    // A refusal keeps the runtime's own words: the panel maps them to a category.
+    const refused = createNativeWorkshopProvider({ request: async () => ({ status: 'refused',
+      message: 'include-cycle: fragments/ai/base.toml would form a cycle', report: null }) });
+    await expect(refused.runtime.editEntity(files, edit)).rejects.toThrow('include-cycle');
+  });
+
   it('correlates private replies and rejects pending work when its surface closes', async () => {
     const sent = [];
     const bridge = createWorkshopBridge({ send: value => sent.push(JSON.parse(value)) });

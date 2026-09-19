@@ -551,6 +551,18 @@ fn remove_element(array: &mut Array, index: usize) -> Result<(), String> {
             .map(|at| &trailing[at + 1..])
             .unwrap_or("");
         array.set_trailing(format!("{}\n{closing}", &removed_prefix[..newline]));
+    } else {
+        // The padding before `]` is the LAST element's suffix (`[ "a", "b" ]`),
+        // so removing the last element would take the page's own spacing with
+        // it: it belongs to the element that is last now. The mirror of
+        // `insert_element`'s `index == length` branch. Only horizontal padding
+        // moves — a comment is the removed element's own and goes with it.
+        let suffix = suffix_of(&removed);
+        if !suffix.is_empty() && suffix.chars().all(|c| c == ' ' || c == '\t') {
+            if let Some(last) = array.get_mut(length - 2) {
+                last.decor_mut().set_suffix(suffix);
+            }
+        }
     }
     Ok(())
 }
@@ -1420,6 +1432,65 @@ mod tests {
             )
         )
         .is_err());
+    }
+
+    /// A single-line array's padding belongs to the PAGE, not to the element
+    /// that happened to be last: `insert_element` already moves it onto a
+    /// newcomer at the end, and a removal has to hand it back the same way.
+    /// `toml_edit` stores the space before `]` as the last element's suffix, so
+    /// without this the array closes up tight (`[ "a"]`) — a byte-identity
+    /// break on the one shape the includes list is authored in by hand.
+    #[test]
+    fn removing_the_last_element_of_a_padded_single_line_array_keeps_the_padding() {
+        let source = format!(
+            "# Rogue traders\nuuid = \"{ROGUE}\"\nenemies = [ \"{ALLIANCE}\", \"{PIRATE}\" ]\n"
+        );
+        let last = edit(
+            &source,
+            &request(
+                FACTION,
+                &source,
+                vec![remove(&[key("enemies"), Segment::Index(1)])],
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            last,
+            source.replace(&format!(", \"{PIRATE}\" ]"), " ]"),
+            "the padding before ] survives"
+        );
+        // …and the symmetric insert puts it back exactly where it was, so the
+        // two round-trip.
+        assert_eq!(
+            edit(
+                &last,
+                &request(
+                    FACTION,
+                    &last,
+                    vec![insert(&[key("enemies")], 1, &format!("\"{PIRATE}\""))],
+                ),
+            )
+            .unwrap(),
+            source
+        );
+        // Tight brackets stay tight: nothing is invented where there was no
+        // padding.
+        let tight = source.replace(
+            &format!("[ \"{ALLIANCE}\", \"{PIRATE}\" ]"),
+            &format!("[\"{ALLIANCE}\", \"{PIRATE}\"]"),
+        );
+        assert_eq!(
+            edit(
+                &tight,
+                &request(
+                    FACTION,
+                    &tight,
+                    vec![remove(&[key("enemies"), Segment::Index(1)])],
+                ),
+            )
+            .unwrap(),
+            tight.replace(&format!(", \"{PIRATE}\"]"), "]")
+        );
     }
 
     #[test]

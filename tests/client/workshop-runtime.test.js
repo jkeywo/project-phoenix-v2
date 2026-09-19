@@ -113,4 +113,35 @@ describe('offline Workshop runtime capability', () => {
     expect(await runtime.newWorld('Harrow')).toContain('title = "Harrow"');
     expect(newWorld).toHaveBeenCalledExactlyOnceWith('Harrow');
   });
+
+  it('reads one template\'s composition with text-only dependencies and routes entity edits and materialising (issue #1476)', async () => {
+    const source = { base_files: { 'assets/entities/base.toml': 'name = "base"\n' },
+      base_asset_manifest: { 'assets/models/a.glb': { length: 2, crc32: 0 } },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/entities/raid.toml': 'name = "raid"\n' },
+        assets: { 'assets/sounds/x.ogg': [1, 2] } }] };
+    const composition = { path: 'assets/entities/mine.toml', origin: 'draft', resolvable: true, error: null,
+      includes: [], sources: ['assets/entities/mine.toml'], components: [], fields: [], supported_components: ['hull'],
+      fragment_choices: [], findings: [] };
+    const entity = vi.fn(() => JSON.stringify(composition));
+    const entityEdit = vi.fn(() => 'name = "mine"\nincludes = ["fragment.toml"]\n');
+    const materialise = vi.fn(() => 'name = "mine"\n[hull]\nhull_integrity = 100\n');
+    const runtime = createWorkshopRuntime({ load: async () => ({
+      wasm_workshop_validate_pack: () => '{}', wasm_workshop_entity: entity, wasm_workshop_entity_edit: entityEdit,
+      wasm_workshop_entity_materialise: materialise,
+    }), dependencies: async () => source });
+    const files = { 'assets/entities/mine.toml': 'name = "mine"\n' };
+    const textOnly = JSON.stringify({ base_files: { 'assets/entities/base.toml': 'name = "base"\n' },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/entities/raid.toml': 'name = "raid"\n' } }] });
+    expect(await runtime.entity(files, 'assets/entities/mine.toml')).toEqual(composition);
+    // Text only: no base asset bytes, no pack assets — the resolver parses sources.
+    expect(entity).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly, 'assets/entities/mine.toml');
+    const request = { document_path: 'assets/entities/mine.toml', expected_source: 'name = "mine"\n',
+      edits: [{ op: 'put', path: ['includes'], value_source: '["fragment.toml"]' }] };
+    expect(await runtime.editEntity(files, request)).toContain('includes = ["fragment.toml"]');
+    expect(entityEdit).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly, JSON.stringify(request));
+    expect(await runtime.materialiseEntity(files, 'assets/entities/mine.toml', 'hull.hull_integrity'))
+      .toContain('hull_integrity = 100');
+    expect(materialise).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly, 'assets/entities/mine.toml',
+      'hull.hull_integrity');
+  });
 });

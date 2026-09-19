@@ -112,6 +112,18 @@ export function createNativeWorkshopProvider({ request }) {
       },
       async compose(files, request) { return (await call({ op: 'compose', files, request })).source; },
       async newWorld(title) { return (await call({ op: 'new-world', title })).source; },
+      // Entity composition (issue #1476) crosses the bridge the same way: the
+      // draft's text members only, the host resolving the dependencies beneath
+      // them and the template named by path.
+      async entity(files, path) {
+        const response = await call({ op: 'entity', files, path });
+        if (response?.status !== 'entity' || !response.composition || typeof response.composition !== 'object') throw new Error('Invalid native entity composition');
+        return response.composition;
+      },
+      async editEntity(files, request) { return (await call({ op: 'entity-edit', files, request })).source; },
+      async materialiseEntity(files, path, address) {
+        return (await call({ op: 'entity-materialise', files, path, address })).source;
+      },
     },
     async save(draft) {
       const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });

@@ -601,3 +601,163 @@ fn partial_entity_include_is_validated_only_as_part_of_its_complete_template() {
     let result = validate_pack(bytes, &dependencies());
     assert!(result.accepted, "{:?}", result.findings);
 }
+
+/// A draft template whose `includes` names something that is not there, or
+/// that composes a cycle, refuses save and export with the offending ENTRY's
+/// own line — for every entity member the draft carries, not only the hulls a
+/// manifest root happens to spawn (issue #1476).
+#[test]
+fn a_project_template_declaring_a_missing_or_cyclic_include_is_refused_at_the_entry_line() {
+    let mut members = composition_members();
+    members.insert(
+        "assets/scenarios.toml".into(),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+    );
+    // Neither template is reachable from a manifest root, so the world-driven
+    // composition check never looks at them.
+    members.insert(
+        "assets/entities/fragments/loop_a.toml".into(),
+        "includes = [\n    \"loop_b.toml\",\n]\n[hull]\nhull_integrity = 1.0\n".into(),
+    );
+    members.insert(
+        "assets/entities/fragments/loop_b.toml".into(),
+        "includes = [\n    \"loop_a.toml\",\n    \"gone.toml\",\n]\n".into(),
+    );
+    let files: BTreeMap<String, Vec<u8>> = members
+        .iter()
+        .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+        .collect();
+    let report = validate_project(&files);
+    assert!(!report.accepted);
+    let located = |category: &str| {
+        report
+            .findings
+            .iter()
+            .filter(|finding| finding.category == category)
+            .map(|finding| (finding.file.clone(), finding.line, finding.severity.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        located("include-missing"),
+        vec![(
+            "assets/entities/fragments/loop_b.toml".to_owned(),
+            Some(3),
+            "error".to_owned()
+        )]
+    );
+    assert_eq!(
+        located("include-cycle"),
+        vec![
+            (
+                "assets/entities/fragments/loop_a.toml".to_owned(),
+                Some(2),
+                "error".to_owned()
+            ),
+            (
+                "assets/entities/fragments/loop_b.toml".to_owned(),
+                Some(2),
+                "error".to_owned()
+            ),
+        ]
+    );
+}
+
+/// A pack hull may include a BASE fragment — the include findings resolve
+/// against everything beneath the candidate, exactly as the pack gate does —
+/// and a hull naming a fragment neither carries refuses the pack at the entry
+/// line.
+#[test]
+fn a_pack_template_resolves_an_include_beneath_it_and_is_refused_for_one_that_is_nowhere() {
+    let mut dependencies = dependencies();
+    dependencies.base_files.insert(
+        "assets/entities/fragments/base_core.toml".into(),
+        "[repair]\nrepair_rate_hp_per_sec = 2.0\n".into(),
+    );
+    let mut members = crate::world::mod_pack::read_store_zip_bytes(include_bytes!(
+        "../../tests/fixtures/mod-packs/valid-v1.zip"
+    ))
+    .unwrap();
+    let hull = "assets/entities/pack_hull.toml";
+    members.insert(
+        hull.into(),
+        format!("includes = [\n    \"fragments/base_core.toml\",\n]\n{COMPOSITION_HULL}")
+            .into_bytes(),
+    );
+    let zip = crate::workshop::archive::store_zip(&members).unwrap();
+    let report = validate_pack(&zip, &dependencies);
+    assert!(report.accepted, "{:?}", report.findings);
+
+    members.insert(
+        hull.into(),
+        format!("includes = [\n    \"fragments/nowhere.toml\",\n]\n{COMPOSITION_HULL}")
+            .into_bytes(),
+    );
+    let zip = crate::workshop::archive::store_zip(&members).unwrap();
+    let report = validate_pack(&zip, &dependencies);
+    assert!(!report.accepted);
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.category == "include-missing")
+        .unwrap_or_else(|| panic!("{:?}", report.findings));
+    assert_eq!((finding.file.as_str(), finding.line), (hull, Some(2)));
+}
+
+/// A hull a manifest root REACHES is looked at by two gates: the world-driven
+/// composition check (`include_resolve::composition_finding`, per spawned
+/// instance, naming the world and entity and locating the declaring file by a
+/// text search) and #1476's include rules (per entity member, at the offending
+/// array ENTRY). Both are wanted and neither is the other's duplicate — so one
+/// broken include on a hull two scenarios fly is ONE finding, not two, on both
+/// the project and the pack path. Nothing pinned that: the pre-existing
+/// assertions use `find`, which a duplicate passes.
+#[test]
+fn a_world_reachable_hull_with_a_broken_include_is_reported_once_and_not_twice() {
+    let mut members = composition_members();
+    members.insert(
+        "assets/entities/hull.toml".into(),
+        format!("includes = [\n    \"fragments/gone.toml\",\n]\n{COMPOSITION_HULL}"),
+    );
+    let broken = |report: &WorkshopValidation| {
+        report
+            .findings
+            .iter()
+            .filter(|finding| finding.category == "include-missing")
+            .map(|finding| (finding.file.clone(), finding.line))
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![("assets/entities/hull.toml".to_owned(), Some(2))];
+
+    let mut project = members.clone();
+    project.insert(
+        "assets/scenarios.toml".into(),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+    );
+    let report = validate_project(
+        &project
+            .iter()
+            .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+            .collect(),
+    );
+    assert!(!report.accepted);
+    assert_eq!(broken(&report), expected, "{:?}", report.findings);
+
+    members.insert(
+        "scenarios.toml".into(),
+        format!(
+            "[pack]\nformat = 1\nid = \"twin\"\nversion = \"1.0.0\"\nname = \"Twin\"\n\n\
+             [pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 1\n\n\
+             {COMPOSITION_SCENARIOS}"
+        ),
+    );
+    let zip = crate::workshop::archive::store_zip(
+        &members
+            .iter()
+            .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+            .collect(),
+    )
+    .unwrap();
+    let pack = validate_pack(&zip, &dependencies());
+    assert!(!pack.accepted);
+    assert_eq!(broken(&pack), expected, "{:?}", pack.findings);
+}

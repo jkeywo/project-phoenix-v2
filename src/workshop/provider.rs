@@ -95,6 +95,19 @@ pub enum Operation {
     NewWorld {
         title: String,
     },
+    Entity {
+        files: BTreeMap<String, String>,
+        path: String,
+    },
+    EntityEdit {
+        files: BTreeMap<String, String>,
+        request: super::entity::EntityEditRequest,
+    },
+    EntityMaterialise {
+        files: BTreeMap<String, String>,
+        path: String,
+        address: String,
+    },
     RecoveryLoad,
     RecoverySave {
         record: String,
@@ -167,6 +180,9 @@ pub enum Response {
     },
     Composition {
         catalog: Box<super::composition::CompositionCatalog>,
+    },
+    Entity {
+        composition: Box<super::entity::EntityComposition>,
     },
     Recovery {
         recovery: Option<RecoveryRecord>,
@@ -456,6 +472,32 @@ impl NativeWorkshopProvider {
             },
             Operation::NewWorld { title } => Response::Patched {
                 source: super::composition::new_world_source(&title)?,
+            },
+            // Entity composition resolves against the same bundle the other
+            // two catalogs do, and for the same reason: a project IS the whole
+            // content set, so a fragment it does not carry is missing exactly
+            // as Check reports it (issue #1476).
+            Operation::Entity { files, path } => Response::Entity {
+                composition: Box::new(super::entity::catalog(
+                    &files,
+                    self.reference_dependencies(),
+                    &path,
+                )),
+            },
+            Operation::EntityEdit { files, request } => Response::Patched {
+                source: super::entity::compose(&files, self.reference_dependencies(), &request)?,
+            },
+            Operation::EntityMaterialise {
+                files,
+                path,
+                address,
+            } => Response::Patched {
+                source: super::entity::materialise(
+                    &files,
+                    self.reference_dependencies(),
+                    &path,
+                    &address,
+                )?,
             },
             Operation::RecoveryLoad => {
                 let recovery = read_optional(&self.private.join("draft.json"))?

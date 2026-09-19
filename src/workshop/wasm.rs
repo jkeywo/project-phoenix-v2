@@ -134,3 +134,62 @@ pub fn wasm_workshop_compose(
 pub fn wasm_workshop_new_world(title: &str) -> Result<String, JsValue> {
     super::composition::new_world_source(title).map_err(|error| JsValue::from_str(&error))
 }
+
+/// One entity template's composition over the draft's text members plus the
+/// same explicit dependency bundle validation takes: its includes, the merge
+/// order, who owns each effective field, and what may still be added
+/// (issue #1476).
+#[wasm_bindgen]
+pub fn wasm_workshop_entity(
+    files: &str,
+    dependencies: &str,
+    path: &str,
+) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_definition_files(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::encode_workshop_entity_composition(&super::entity::catalog(
+        &files,
+        &dependencies,
+        path,
+    ))
+    .map_err(|error| JsValue::from_str(&error))
+}
+
+/// One entity edit group, refused with the source untouched when it introduces
+/// a missing, cyclic, self or disallowed include, a component the runtime does
+/// not know, or a composed document that no longer parses.
+#[wasm_bindgen]
+pub fn wasm_workshop_entity_edit(
+    files: &str,
+    dependencies: &str,
+    request: &str,
+) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_definition_files(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let request = crate::core::codec::decode_workshop_entity_request(request)
+        .map_err(|error| JsValue::from_str(&error))?;
+    super::entity::compose(&files, &dependencies, &request)
+        .map_err(|error| JsValue::from_str(&error))
+}
+
+/// Write one inherited value into the local document as an exact-source
+/// override — the only place a runtime value is serialised into source, and it
+/// writes new local text only.
+#[wasm_bindgen]
+pub fn wasm_workshop_entity_materialise(
+    files: &str,
+    dependencies: &str,
+    path: &str,
+    address: &str,
+) -> Result<String, JsValue> {
+    let files = crate::core::codec::decode_workshop_definition_files(files)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    super::entity::materialise(&files, &dependencies, path, address)
+        .map_err(|error| JsValue::from_str(&error))
+}

@@ -169,6 +169,98 @@ fn the_native_provider_answers_composition_compose_and_new_world() {
 }
 
 #[test]
+fn the_native_provider_answers_entity_entity_edit_and_entity_materialise() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    // A hull that composes one draft fragment, plus a second fragment it could
+    // add and a third that includes it (so the choices must exclude that one).
+    let files = concat!(
+        "{\"assets/entities/hull.toml\":\"includes = [\\n    \\\"fragments/core.toml\\\",\\n]\\nclass = \\\"lancer\\\"\\nname = \\\"Test hull\\\"\\n\",",
+        "\"assets/entities/fragments/core.toml\":\"[hull]\\nhull_integrity = 120.0\\n\",",
+        "\"assets/entities/fragments/extra.toml\":\"[reference_grid]\\nplane_y = -1.0\\n\",",
+        "\"assets/entities/fragments/cycle.toml\":\"includes = [\\\"../hull.toml\\\"]\\n\"}"
+    );
+    let catalog = provider.handle_json(&format!(
+        "{{\"id\":1,\"op\":\"entity\",\"files\":{files},\"path\":\"assets/entities/hull.toml\"}}"
+    ));
+    assert!(catalog.contains("\"status\":\"entity\""), "{catalog}");
+    assert!(catalog.contains("\"origin\":\"draft\""), "{catalog}");
+    assert!(catalog.contains("\"resolvable\":true"), "{catalog}");
+    assert!(
+        catalog.contains(
+            "\"sources\":[\"assets/entities/fragments/core.toml\",\"assets/entities/hull.toml\"]"
+        ),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("\"address\":\"hull.hull_integrity\""),
+        "{catalog}"
+    );
+    // Whether Materialise could write a row at all crosses the bridge too: the
+    // panel offers the control exactly where the runtime answers, and only the
+    // runtime can tell (the local document has to be able to name the address).
+    assert!(catalog.contains("\"materialisable\":true"), "{catalog}");
+    // The supported list is serde's own, and the cyclic fragment is not a
+    // choice while the additive one is.
+    assert!(
+        catalog.contains("\"supported_components\":[\"name\","),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("\"path\":\"assets/entities/fragments/extra.toml\",\"origin\":\"draft\""),
+        "{catalog}"
+    );
+    assert!(
+        !catalog.contains("\"path\":\"assets/entities/fragments/cycle.toml\",\"origin\""),
+        "{catalog}"
+    );
+    // A component the runtime can default carries its default's TEXT across the
+    // bridge, not only the flag: the panel's Add is an exact-source `put` and a
+    // bool has no `value_source`. One with no default says so on both fields.
+    assert!(
+        catalog.contains(
+            "\"key\":\"reference_grid\",\"local\":false,\"local_line\":null,\
+             \"inherited_from\":null,\"skeleton\":true,\"skeleton_source\":\"{"
+        ),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("\"skeleton\":false,\"skeleton_source\":null"),
+        "{catalog}"
+    );
+
+    let edit = |value: &str| {
+        format!(
+            "{{\"id\":2,\"op\":\"entity-edit\",\"files\":{files},\"request\":{{\"document_path\":\"assets/entities/hull.toml\",\"expected_source\":\"includes = [\\n    \\\"fragments/core.toml\\\",\\n]\\nclass = \\\"lancer\\\"\\nname = \\\"Test hull\\\"\\n\",\"edits\":[{{\"op\":\"insert\",\"path\":[\"includes\"],\"index\":1,\"value_source\":\"\\\"{value}\\\"\"}}]}}}}"
+        )
+    };
+    let refused = provider.handle_json(&edit("fragments/cycle.toml"));
+    assert!(refused.contains("\"status\":\"refused\""), "{refused}");
+    assert!(refused.contains("include-cycle"), "{refused}");
+    let patched = provider.handle_json(&edit("fragments/extra.toml"));
+    assert!(patched.contains("\"status\":\"patched\""), "{patched}");
+    assert!(
+        patched.contains("\\\"fragments/core.toml\\\",\\n    \\\"fragments/extra.toml\\\","),
+        "{patched}"
+    );
+
+    let materialise = |address: &str| {
+        format!(
+            "{{\"id\":3,\"op\":\"entity-materialise\",\"files\":{files},\"path\":\"assets/entities/hull.toml\",\"address\":\"{address}\"}}"
+        )
+    };
+    let patched = provider.handle_json(&materialise("hull.hull_integrity"));
+    assert!(patched.contains("\"status\":\"patched\""), "{patched}");
+    assert!(
+        patched.contains("hull = { hull_integrity = 120.0 }"),
+        "{patched}"
+    );
+    let refused = provider.handle_json(&materialise("class"));
+    assert!(refused.contains("\"status\":\"refused\""), "{refused}");
+    assert!(refused.contains("materialise-local"), "{refused}");
+}
+
+#[test]
 fn private_json_bridge_loads_exact_source_and_roundtrips_a_runtime_validated_save() {
     let fixture = Fixture::new();
     let mut provider = fixture.open();

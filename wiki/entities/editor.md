@@ -2,8 +2,8 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs, src/workshop/composition.rs, src/workshop/source_spans.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js]
-updated: 2026-09-18
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs, src/workshop/composition.rs, src/workshop/source_spans.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js, src/workshop/entity.rs, editor/workshop-entity.js, gui/workshop-entity-panel.js, src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config.rs, tests/smoke/workshop-entity.render.spec.js]
+updated: 2026-09-19
 ---
 
 # Editor
@@ -353,7 +353,7 @@ exists. Faction definitions are `assets/factions/*.toml` (`FactionConfig`: uuid,
 name, display_name, enemies, compliance), whose unknown keys are legal and are
 preserved byte-for-byte and listed read-only.
 
-`src/workshop/definitions.rs:509` `catalog` reads the draft's text members plus
+`src/workshop/definitions.rs:470` `catalog` reads the draft's text members plus
 the immutable dependency bundle into a `DefinitionCatalog`: every faction and
 hull with 1-based lines from the `toml_edit` spans, enemies resolved to names
 across the effective set, the stations' owned systems (the only legal
@@ -378,7 +378,7 @@ when the draft moved. A new faction is `toml::to_string(FactionConfig)` through
 history, with the dangling references becoming findings.
 
 Cross-file validity is a finding, not an edit-time refusal, so an author can add
-the enemy first and the faction second. `definitions.rs:774` `findings` runs from
+the enemy first and the faction second. `definitions.rs:735` `findings` runs from
 both `validate_pack` (candidate = the pack, beneath = base + other packs) and
 `validate_project`, so an error refuses save and export: duplicate faction
 uuid/name, self-enemy, unknown or invalid enemy, an entity's unknown `faction`,
@@ -430,7 +430,7 @@ or `assets/scenarios.toml` (project, `[content]` header), and each world's
 `[script]` body or in the sibling `.rhai` a world declares, each with its line,
 its source and the origin of the path it names. Editing Rhai is #1478's.
 
-`src/workshop/composition.rs:828` `catalog` reads the draft's text members plus
+`src/workshop/composition.rs:850` `catalog` reads the draft's text members plus
 the immutable dependency bundle into a `CompositionCatalog`: the manifest view
 (kind, header, every root with `id_line`/`world_line`, the world's origin, the
 ships it curates and whether the world offers each, the unknown keys preserved
@@ -447,7 +447,7 @@ a Project workspace resolving against nothing beneath through the provider's
 shared `reference_dependencies` (Definitions uses it too).
 
 Unlike the definition forms, a composition edit is REFUSED at edit time with the
-source untouched: `composition.rs:1250` `compose` applies `document::edit` to a
+source untouched: `composition.rs:1272` `compose` applies `document::edit` to a
 copy and re-checks the edited member over candidate ∪ dependencies (the
 candidate winning a path) — a duplicate or empty scenario id, an empty, non-
 `assets/worlds/*.toml` or missing world, a ship the world does not offer, a
@@ -463,13 +463,13 @@ with their positions) and maps a refusal's rule prefix to a
 `workshop.composition.refused.*` string with the runtime's sentence as the
 detail; `gui/workshop-composition-panel.js` sends ONE `runtime.compose` per
 member per Apply and lands the answer as one `draft.edit`. A new world is
-`composition.rs:972` `new_world_source` (a `[global]` with the title, built
+`composition.rs:994` `new_world_source` (a `[global]` with the title, built
 through `toml_edit` and asserted through `parse_world`) put at
 `assets/worlds/<slug>.toml`. Browser: `wasm_workshop_compose`,
 `wasm_workshop_new_world`; native: `Operation::Compose`, `Operation::NewWorld`
 → `Response::Patched`.
 
-The same rules are findings with lines: `composition.rs:1327` `findings` runs
+The same rules are findings with lines: `composition.rs:1349` `findings` runs
 beside `definitions::findings` in both `validate_pack` and `validate_project`
 and reports `extra-worlds-missing` (before this a load error with no line),
 `extra-worlds-duplicate`, `extra-worlds-self`, `extra-worlds-disallowed`,
@@ -482,7 +482,7 @@ only for a member the manifest or a world NAMES, so the audio catalogues, string
 tables and join codes a project legitimately carries draw no warning. `catalog`
 additionally reports `runtime-source-invalid` for a draft manifest or world the
 parser refuses, so the panel is not silently missing a member it cannot read.
-"The same validated catalogue" is `composition.rs:934` `scenario_catalogue`:
+"The same validated catalogue" is `composition.rs:956` `scenario_catalogue`:
 `world::manifest::build_catalog` over the candidate manifest resolving worlds
 through candidate ∪ beneath, which `src/workshop/tests.rs` proves equal entry
 for entry between the pack path (store zip plus dependency bundle) and the
@@ -491,7 +491,7 @@ Catalogue section is that list. `src/workshop/test_source.rs:38`
 `validate_selection` accepts a root whose draft-declared child exists only in
 the candidate and refuses when the child is missing, so the exact unsaved
 composition is what a Test runs. It also applies
-`composition.rs:1417` `selection_findings` — the composition rules in the
+`composition.rs:1439` `selection_findings` — the composition rules in the
 selected root's own scope — so a Test no longer starts on a cyclic or
 dangling-reference composition that save and export would refuse. A rule another
 world breaks still only reaches Check, because a Test runs one root.
@@ -512,6 +512,175 @@ edit vocabulary cannot insert mid-array: a comment authored beside one root
 therefore stays at its slot and ends up beside the root that moved into it. The
 alternative, remove-and-append, would drop the moved root to the end of a list
 whose order IS the lobby's.
+
+## Workshop entity template and fragment composition (issue #1476)
+
+The `entity` dock panel (Workshop layout v8, in the `inspector` column after
+`definitions` on both the browser and the native operator profile —
+`gui/workshop-layout-model.js:44` `ADDED_IN_V8` and
+`src/native_host/panes/operator.rs:343` `WORKSHOP_ADDED_IN_V8`, both
+`[['entity','inspector']]`) composes ONE entity template from its ordered
+`includes`. It adds, removes and reorders included fragments, adds and removes
+supported components, shows every effective field with the member that authored
+it and the merge chain it came through, and writes an inherited value into the
+local document as an exact-source override on request. #1481 (ship stations,
+systems and AI) will extend this panel rather than add another, because it
+authors the same document.
+
+Nothing here re-implements the merge. `src/workshop/entity.rs:736` `catalog`
+READS `src/entities/include_resolve.rs:629` `resolve_template`'s `Provenance`
+— the composed value plus a `BTreeMap` from field address
+(`hull.hull_integrity`, `system[id=helm-thrust].ai_only`,
+`station[id=bridge].rating[name=Std].automated_systems`) to the member that
+authored it and the chain it came through — and turns it into an
+`EntityComposition` (`entity.rs:76`): the template's origin (`draft`, `base`,
+`pack:<id>`), whether the closure resolves and the resolver's own sentence when
+it does not, the `includes` with each entry's authored text, the member it
+canonicalises to, its 1-based line and that member's origin, the merge order
+(`provenance.sources()`), one `ComponentView` per supported key (local with its
+line, inherited from a named member, or absent — and `local` and `inherited_from`
+are INDEPENDENT, see below), one `FieldView` per effective field (the exact span
+text and line when local, the resolved value serialised to TOML when inherited,
+the value's TOML type, and whether materialising it could write anything at all),
+the fragments it could still include, and the findings. `entity.rs:357`
+`parse_address` reads a keyed address
+back into steps and takes each identity key from the merge's own
+`MergePolicy::array_rule`, never a copy of `entity_override::COMPOSE_KEYED_ARRAYS`.
+Browser: `src/workshop/wasm.rs:143` `wasm_workshop_entity(files,
+textDependencies, path)`; native: `Operation::Entity` → `Response::Entity`, a
+Project workspace resolving against nothing beneath through the provider's
+shared `reference_dependencies`.
+
+The component vocabulary is the runtime's. `EntityConfig` is
+`deny_unknown_fields`, so `entity.rs:668` `supported_components` parses a probe
+document carrying one impossible key and reads serde's own "unknown field `x`,
+expected one of `a`, `b`, …" list out of the error (53 keys, `OnceLock`-cached,
+ratchet-tested). `entity.rs:709` `component_skeleton` asks the runtime what a
+component with nothing authored IS — deserialise `{}` into it through
+`EntityConfig::from_toml`, serialise back, take that subtree (18 of the 53
+answer) — and the catalog carries both `skeleton` (the flag) and
+`skeleton_source` (that default as ONE inline TOML value), because a component
+Add is an exact-source `Edit::Put` and `Put` needs a `value_source` string. A
+component with no skeleton is LISTED with `skeleton: false` and the panel says
+why it offers no Add. Serde's list deliberately omits `includes` (the resolver
+strips it) and the keys `EntityConfig::from_toml` consumes before serde sees them
+(`station`, `system`, `power_groups`, `shield_arc`), which is why
+`component-unsupported` is asked of the RUNTIME at edit time rather than
+compared against that list.
+
+An edit is REFUSED at edit time with the source untouched: `entity.rs:1193`
+`compose` applies `document::edit` to a copy, re-resolves and re-parses over
+candidate ∪ dependencies with the edited member winning, and refuses
+`include-missing`, `include-cycle`, `include-self`, `include-disallowed` (not an
+`assets/entities/**.toml` path), `component-unsupported`, `entity-invalid`
+(carrying the runtime's own parse error), `component-inherited` and
+`unknown-document`, as `<rule>: <detail>`. Only rules the edit INTRODUCES are
+refused (#1475's before/after multiset over `entity.rs:1131` `member_issues`),
+because a fragment is legitimately not a complete entity on its own —
+`tests/fixtures/mod-packs/partial-entity-include.zip` pins that — and a
+hand-broken draft must be repairable one edit at a time. The panel's own
+include pre-checks follow the same rule (`editor/workshop-entity.js:89`
+`includeViolations`): a draft whose `includes` was hand-edited to hold a bad entry
+can still have its other entries reordered or removed.
+
+**Who authors a component is a STRUCTURAL question, never a provenance reading.**
+`entity.rs:945` `component_owners` asks each contributing template's own document
+whether it declares that top-level key, because `Provenance` records only the
+WINNER of each leaf and the two come apart in both directions. A template that
+overrides PART of an inherited component wins those leaves while the inherited
+table is still beneath it — 38 component-and-fragment pairs on the shipped
+composed hulls, `helm_console` on `assets/entities/alliance_cruiser.toml` among
+them — and a template that SHADOWS every leaf a fragment authors wins them all
+while that fragment's whole component waits to be composed back (`power` on all
+four Harrow hulls). So `local` and `inherited_from` are independent, and the row
+says both: a component with LOCAL text offers Remove and names the fragment whose
+copy composes once the override is dropped (`workshop.entity.component_override`),
+while a component with NO local text of its own offers no Remove at all, because a
+whole inherited table has no tombstone the merge understands — that is the one
+case `component-inherited` refuses, judged from the request BEFORE the edit runs
+so the message names the owning member rather than `toml_edit`'s "the key does not
+exist". A keyed array ENTRY does have a tombstone (`{ id = "…", _remove = true }`)
+and is an ordinary local edit inside the array.
+
+Materialising is the ONLY place a runtime value becomes source, and it writes NEW
+local text only (criterion 2): `entity.rs:1244` `materialise` reads the resolved
+value at the provenance address, serialises exactly that subtree and `put`s it at
+the address's own path, so no existing span is rewritten. It refuses
+`materialise-local` (already this template's own), `materialise-unknown-address`
+(not in the resolved document, or a gap deeper than the one missing plain-key
+level a `put` creates) and `materialise-keyed-entry` (the merge reconciles that
+array by key and this template authors no entry with it — including a provenance
+POSITION such as `system[2]`, the fallback for an entry carrying no key, which
+`entity.rs:532` `put_path_in` refuses wherever it appears in the address because
+the merge APPENDS a keyless entry: the resolved index and the local one are not
+the same array). `FieldView::materialisable` is that same answer computed per row,
+so the panel draws Materialise exactly where it would land. Browser:
+`wasm.rs:164` `wasm_workshop_entity_edit`, `wasm.rs:183`
+`wasm_workshop_entity_materialise`; native: `Operation::EntityEdit`,
+`Operation::EntityMaterialise` → `Response::Patched`.
+
+The same include rules are findings with lines: `entity.rs:1333` `findings` runs
+beside `definitions::findings` and `composition::findings` in both
+`validate_pack` and `validate_project` and reports `include-missing`,
+`include-cycle`, `include-self` and `include-disallowed` at the offending
+ENTRY's line, plus `entity-unresolvable` carrying the resolver's sentence and the
+include chain. That last one follows `include_resolve::composition_finding`'s own
+asymmetry — it fires only for a COMPOSED template, because a template that
+composes nothing and is not a valid entity is the ordinary source error the
+source gate already owns. Shipped content yields zero. It does not double up with
+the world-driven composition check either: a hull a manifest root reaches carries
+ONE `include-missing`, pinned on both the project and the pack path in
+`src/workshop/tests.rs`.
+
+The pure `editor/workshop-entity.js` plans every edit and maps every refusal:
+`:36` `authoredInclude` computes the text the resolver reads (relative to the
+DECLARING template's directory, the form `canonical_include_path` joins) from the
+two member paths rather than by a second copy of the resolver's rules; `:122`
+`planIncludeEdits` expresses a reorder as `set`s on the swapped slots so an
+entry's comments stay with their positions, removes by descending index, inserts
+new entries at the end and creates an absent key with one whole-array `put`;
+`:170` `planComponentAdd` / `:183` `planComponentRemove`; `:251`
+`planFieldEdits` for local scalars only, a row being read-only for one of three
+named reasons — inherited and not yet materialised, a keyed address `:208`
+`fieldSegments` cannot express (a split that tracks quoting exactly as
+`entity.rs:317` `split_address` does, because `join_field` quotes any key holding
+a dot, a bracket, an equals or a space), or a list or sub-table `:232`
+`fieldIsScalar` refuses because `document::edit`'s `Set` refuses an array and an
+inline table outright — and `:240` `fieldIsMaterialisable` withholding the
+Materialise button for an inherited row the runtime could not write; `:366`
+`refusalStringId` maps the runtime's rule prefix to a
+`workshop.entity.refused.*` string with word-pattern fallbacks, sends
+`unknown-document` and a stale `expected_source` to the shared
+`workshop.inspector_stale`, and keeps the runtime's own sentence in the
+catch-all's `{detail}`. `gui/workshop-entity-panel.js:20` `mountWorkshopEntity`
+sends ONE runtime call per press and lands the answer as one `draft.edit`, so one
+undo reverts it. Focus moves AFTER the busy hold comes down (`:435` `guarded`
+applies the landing spot `:462` `land` returns), because every control is disabled
+while the hold is up: a landing spot chosen inside it could only ever be one the
+rebuild happened to recreate, and after removing a component the runtime has no
+default for — no Add takes the Remove's place — focus fell to the document body.
+Criterion 5 reuses the surfaces that exist: Preview drives the
+models panel's own `#workshop-preview-subject` select and reveals the
+`model-preview` dock panel, Test drives the Test panel's own
+`#workshop-test-ship` select (that panel is not a dock panel, so there is nothing
+to reveal), and a surface that cannot take the template answers false, which the
+panel reports rather than appearing to work.
+
+Known residue: a second unsupported component added to a document that already
+carries one is not refused, because the runtime issue is keyed by its category
+and reads as carried — the document was already unparseable and the author learns
+nothing new. A LOCAL field whose provenance address is keyed is read-only too,
+because the local array index an edit would need is not in the address; those
+arrays are #1481's. Dropping the local override off a component a fragment also
+authors composes the fragment's copy back — that is what the row says it does, and
+the next reading shows the component as purely inherited — so an author who wanted
+the component GONE has to remove the include or tombstone the entries, which is the
+merge's own vocabulary and not this panel's. `findings` resolves every entity
+member on every Check and
+`catalog` calls it as well (≈0.1 s over the whole shipped `assets/` tree), which
+is the cost the panel pays per refresh, matching `composition::catalog`. A local
+value the syntax tree cannot address falls back to the resolved serialisation
+with a null line rather than showing nothing.
 
 ## Observing a disposable Test two ways (issue #1472)
 

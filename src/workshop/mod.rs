@@ -30,6 +30,8 @@ pub mod composition;
 /// Faction and complexity definitions with exact lines (issue #1474).
 pub mod definitions;
 pub mod document;
+/// Entity template and fragment composition with exact lines (issue #1476).
+pub mod entity;
 mod model_fields;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
@@ -219,6 +221,11 @@ pub fn validate_pack(bytes: &[u8], dependencies: &WorkshopDependencies) -> Works
     // hand-edited draft can still declare a missing or cyclic child, and
     // save, export and Test refuse it with a line (issue #1475).
     report.extend_workshop(composition::findings(&candidate, &beneath));
+    // Include rules at the offending `includes` ENTRY line, for every entity
+    // member the pack carries rather than only the templates a manifest root
+    // spawns, so save and export refuse a broken closure with a location
+    // (issue #1476).
+    report.extend_workshop(entity::findings(&candidate, &beneath));
     report.catalogue = composition::scenario_catalogue(&candidate, &beneath);
     let mut sources = beneath;
     sources.extend(candidate.clone());
@@ -367,6 +374,7 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
     // A project is its whole content set; nothing lies beneath it.
     report.extend_workshop(definitions::findings(&sources.0, &BTreeMap::new()));
     report.extend_workshop(composition::findings(&sources.0, &BTreeMap::new()));
+    report.extend_workshop(entity::findings(&sources.0, &BTreeMap::new()));
     report.catalogue = composition::scenario_catalogue(&sources.0, &BTreeMap::new());
     for (path, text) in &sources.0 {
         let result = if path.starts_with("assets/worlds/") && path.ends_with(".toml") {

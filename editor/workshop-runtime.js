@@ -109,6 +109,34 @@ export function createWorkshopRuntime({
       const { runtime } = await ready();
       return runtime.wasm_workshop_new_world(title);
     },
+    /** The runtime-derived composition of ONE entity template (issue #1476):
+     * its includes with their origins, the merge order, which components are
+     * local or inherited, every effective field with the member that authored
+     * it, the components the runtime type supports, the fragments it could
+     * still include, and the findings. Text-only dependencies, as the other two
+     * catalogs take: the resolver reads sources. */
+    async entity(files, path) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_entity(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), path));
+    },
+    /** Structural edits over one template checked against the whole candidate
+     * and its dependencies: the runtime answers with the new source or refuses a
+     * missing, cyclic, self or disallowed include, an unsupported component or a
+     * template that would stop parsing, with the source untouched. */
+    async editEntity(files, request) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_entity_edit(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), JSON.stringify(request));
+    },
+    /** The one place a resolved runtime VALUE becomes source: the runtime reads
+     * the value at that provenance address and writes it into the local
+     * document as new text, leaving every other byte alone (criterion 2). */
+    async materialiseEntity(files, path, address) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_entity_materialise(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), path, address);
+    },
     async validate(bytes) {
       const loaded = await ready();
       const required = loaded.runtime.wasm_workshop_asset_dependencies?.(bytes) || [];

@@ -61,6 +61,21 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-composition-row :is(input, select) { flex: 1 1 12rem; width: auto; }
 .workshop-composition-origin, .workshop-composition-finding { font-weight: 700; }
 .workshop-composition-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-entity { display: grid; align-content: start; gap: .75rem; min-width: 0; }
+.workshop-entity :is(p, label, legend, small, li, span) { overflow-wrap: anywhere; }
+.workshop-entity fieldset { min-width: 0; display: grid; gap: .5rem; margin: 0; }
+.workshop-entity :is(input:not([type=checkbox]), select) { width: 100%; min-height: 2.75rem; }
+.workshop-entity ul { margin: 0; padding-left: 1.25rem; }
+.workshop-entity li { margin: .25rem 0; }
+.workshop-entity-form { display: grid; gap: .5rem; }
+.workshop-entity-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.workshop-entity-row :is(input, select) { flex: 1 1 12rem; width: auto; }
+.workshop-entity-group { display: grid; gap: .5rem; }
+.workshop-entity-origin p, .workshop-entity-finding { font-weight: 700; }
+/* State is a word in the row's own text; the weight only makes it easier to scan. */
+.workshop-entity li[data-state="local"] span, .workshop-entity li[data-state="override"] span,
+.workshop-entity li[data-owner="local"] label { font-weight: 700; }
+.workshop-entity-findings li[data-severity="error"] { font-weight: 700; }
 .workshop-model-preview :is(input, select) { max-width: 100%; }
 .workshop-model-preview-viewport { width: 100%; }
 .workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }

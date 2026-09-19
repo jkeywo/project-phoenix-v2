@@ -13,6 +13,7 @@ import { mountWorkshopSoundCues } from '../editor/workshop-sound-cues.js';
 import { mountWorkshopModels } from './workshop-models-panel.js';
 import { mountWorkshopDefinitions } from './workshop-definitions-panel.js';
 import { mountWorkshopComposition } from './workshop-composition-panel.js';
+import { mountWorkshopEntity } from './workshop-entity-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -163,6 +164,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let modelPanel = null;
   let definitionsPanel = null;
   let compositionPanel = null;
+  let entityPanel = null;
   let layoutMount = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
@@ -220,12 +222,18 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  entityPanel = mountWorkshopEntity({ root, attach: false, runtime, win, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); },
+    preview: previewTemplate, test: testTemplate });
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
       findings, feedback, dependencies, settings,
       models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node,
-      changes: changesPanel, definitions: definitionsPanel.node, composition: compositionPanel.node },
+      changes: changesPanel, definitions: definitionsPanel.node, composition: compositionPanel.node,
+      entity: entityPanel.node },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -242,6 +250,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         models: translate('workshop.models.title'), 'model-preview': translate('workshop.models.preview.title'),
         sound: translate('sound_cues.title'), changes: translate('workshop.changes.title'),
         definitions: translate('workshop.definitions.title'), composition: translate('workshop.composition.title'),
+        entity: translate('workshop.entity.title'),
       },
     },
     initial: profile.authoringLayout, doc, win,
@@ -254,6 +263,33 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       if (saveOperatorProfile(storage, profile).status !== 'saved') reportPersistenceFailure();
     },
   });
+
+  /** Show a composed entity template in the shared model preview (issue #1476).
+   *
+   * Through the models panel's OWN subject control rather than a second preview:
+   * there is one captured preview, one subject list and one set of dependency
+   * rules, and a template the list does not offer is answered honestly instead
+   * of appearing to work. Returns whether the surface took it. */
+  function previewTemplate(path) {
+    const subject = modelPanel?.node.querySelector('#workshop-preview-subject');
+    if (!subject || ![...subject.options].some(option => option.value === path)) return false;
+    subject.value = path;
+    subject.dispatchEvent(new win.Event('change'));
+    layoutMount.reveal('model-preview');
+    return true;
+  }
+
+  /** Exercise the same unsaved source in the existing disposable Test, through
+   * the Test panel's own ship control — one Test, one catalogue. A template that
+   * catalogue does not offer as a hull is refused rather than silently ignored. */
+  function testTemplate(path) {
+    const ship = root.querySelector('#workshop-test-ship');
+    if (!ship || ![...ship.options].some(option => option.value === path && !option.disabled)) return false;
+    ship.value = path;
+    ship.dispatchEvent(new win.Event('change'));
+    ship.focus();
+    return true;
+  }
 
   function reportPersistenceFailure() {
     const message = translate('editor.mod.settings.storage_refused');
@@ -349,6 +385,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     modelPanel?.refresh({ hidden: testing });
     definitionsPanel?.refresh({ hidden: testing });
     compositionPanel?.refresh({ hidden: testing });
+    entityPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     sourceScope.hidden = testing;
     root.querySelector('.workshop-mode').textContent = translate(testing ? 'workshop.test_mode' : 'workshop.authoring');
@@ -881,6 +918,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     modelPanel?.dispose();
     definitionsPanel?.dispose();
     compositionPanel?.dispose();
+    entityPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);

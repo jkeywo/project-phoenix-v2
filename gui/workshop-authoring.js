@@ -25,6 +25,7 @@ import { createSemanticControlsRemapper } from './semantic-controls-remapper.js'
 import { t } from './strings.js';
 import { renderInspectorMetadata, validInspectorDescriptor } from './inspector-field.js';
 import { mountWorkshopLayout } from './workshop-layout-renderer.js';
+import { workshopTestLayoutModel } from './workshop-test-layout-model.js';
 
 // wasm-bindgen may reject with a string JsValue rather than an Error object.
 const ERROR_STRING_IDS = Object.freeze({
@@ -72,6 +73,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const importButton = button('editor.mod.import.button', 'workshop-import', () => activate(MOD_IMPORT_ACTION_ID));
   const newButton = button('workshop.new', 'workshop-new', () => createPack());
   const saveButton = button('workshop.save', 'workshop-save', () => saveNative());
+  let testWorkspace = false;
+  let testHadRun = false;
+  const openTestButton = button('workshop.test_heading', 'workshop-open-test', () => {
+    testWorkspace = true;
+    refresh();
+    void testPanel?.enter().catch(() => {}).finally(refresh);
+  });
+  openTestButton.hidden = !provider?.test;
   saveButton.hidden = !provider?.save;
   newButton.hidden = provider?.canCreate === false;
   importButton.hidden = provider?.canImport === false;
@@ -81,8 +90,11 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const exportButton = button('editor.mod.export.button', 'workshop-export', () => activate(MOD_EXPORT_ACTION_ID));
   const dirty = el('span', null, { role: 'status', id: 'workshop-dirty' });
   exportButton.hidden = Boolean(provider?.save);
-  toolbar.append(newButton, importButton, undoButton, redoButton, checkButton, saveButton, exportButton, dirty, fileInput);
+  toolbar.append(newButton, importButton, undoButton, redoButton, checkButton, saveButton, exportButton,
+    openTestButton, dirty, fileInput);
   const layout = el('div', null, { class: 'workshop-layout' });
+  const testLayout = el('div', null, { class: 'workshop-test-layout' });
+  testLayout.hidden = true;
   const filesPanel = el('div', null, { class: 'workshop-files' });
   const filesLabel = el('label', 'workshop.files', { for: 'workshop-files' });
   const files = el('select', null, { id: 'workshop-files' });
@@ -149,7 +161,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   dependencies.append(dependencyButton, el('label', 'workshop.files', { for: 'workshop-dependency' }), dependencySelect,
     el('label', 'workshop.dependency_source', { for: 'workshop-dependency-source' }), dependencySource);
   dependencyButton.disabled = !runtime.dependencies;
-  root.append(toolbar, layout);
+  root.append(toolbar, layout, testLayout);
   let dependencyFiles = [];
   let draft = null;
   let selected = null;
@@ -168,6 +180,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let entityPanel = null;
   let presetsPanel = null;
   let layoutMount = null;
+  let testLayoutMount = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -387,13 +400,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     }
     const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
     toolbar.setAttribute('aria-busy', String(busy));
-    const testing = testPanel?.testing() || false;
+    const testing = testWorkspace;
     modelPanel?.refresh({ hidden: testing });
     definitionsPanel?.refresh({ hidden: testing });
     compositionPanel?.refresh({ hidden: testing });
     entityPanel?.refresh({ hidden: testing });
     presetsPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
+    testLayout.hidden = !testing;
     sourceScope.hidden = testing;
     root.querySelector('.workshop-mode').textContent = translate(testing ? 'workshop.test_mode' : 'workshop.authoring');
     files.disabled = !draft || busy;
@@ -859,7 +873,36 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   doc.addEventListener('keydown', keydown);
   win.addEventListener('beforeunload', beforeUnload);
   testPanel = mountWorkshopTestPanel({ root, provider, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed: () => refresh(), win });
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed(state) {
+      if (state?.run) testHadRun = true;
+      else if (testHadRun) { testHadRun = false; testWorkspace = false; }
+      refresh();
+    },
+    leave() { testWorkspace = false; refresh(); }, win });
+  if (testPanel.node && testPanel.viewNode) {
+    testLayoutMount = mountWorkshopLayout({
+      root, surface: testLayout, model: workshopTestLayoutModel,
+      panels: { 'test-controls': testPanel.node, 'test-viewscreen': testPanel.viewNode },
+      labels: {
+        switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
+        float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
+        dock: {
+          left: translate('workshop.layout.dock_left'), right: translate('workshop.layout.dock_right'),
+          top: translate('workshop.layout.dock_top'), bottom: translate('workshop.layout.dock_bottom'),
+          tab: translate('workshop.layout.dock_tab'),
+        },
+        panels: {
+          'test-controls': translate('workshop.test_heading'),
+          'test-viewscreen': translate('workshop.test_view'),
+        },
+      },
+      initial: profile.testLayout, doc, win,
+      onChange(testLayoutValue) {
+        profile = { ...profile, testLayout: testLayoutValue };
+        if (saveOperatorProfile(storage, profile).status !== 'saved') reportPersistenceFailure();
+      },
+    });
+  }
   refresh({ selection: true });
   show('workshop.start');
   nativeStorageStatus();
@@ -920,6 +963,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   })();
   return { ready, dispose() {
     disposed = true;
+    testLayoutMount?.dispose();
     testPanel.dispose();
     soundAudition?.dispose();
     modelPanel?.dispose();

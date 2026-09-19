@@ -81,6 +81,7 @@ test('a real disposable browser Test boots unsaved captured source, steps, retur
   await page.locator('#workshop-files').selectOption(WORLD);
   await revealWorkshopPanel(page, 'source');
   await page.locator('#workshop-source').fill(SOURCE.replace('Captured Workshop Test', 'Unsaved source reaches the runtime'));
+  await page.locator('#workshop-open-test').click();
   await page.locator('#workshop-test-world').selectOption(WORLD);
   await page.locator('#workshop-test-ship').selectOption(SHIP);
   await page.locator('#workshop-test-seed').fill('41');
@@ -127,12 +128,12 @@ test('a real disposable browser Test boots unsaved captured source, steps, retur
   await page.locator('#workshop-files').selectOption(SCRIPT);
   await page.locator('#workshop-source').fill('import "uncaptured" as forbidden;');
   await expect(page.locator('#workshop-test-status')).toContainText(ts('workshop.test_stale'));
+  await page.locator('#workshop-open-test').click();
   await expect(page.locator('#workshop-test-start')).toBeEnabled();
   await page.locator('#workshop-test-start').click();
   await expect(page.locator('#workshop-test-status')).toHaveAttribute('role', 'alert');
   expect(page.frames().filter(isTestFrame)).toEqual([iframe]);
   expect((await state()).tick).toBe(held.tick + 1);
-  await page.locator('#workshop-test-return').click();
   await expect(page.locator('#workshop-test-step')).toBeEnabled();
   await page.locator('#workshop-test-step').click();
   await expect.poll(async () => (await state()).tick).toBe(held.tick + 2);

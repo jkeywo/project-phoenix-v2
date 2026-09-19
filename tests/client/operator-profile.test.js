@@ -148,6 +148,21 @@ describe('private operator profile schema', () => {
     expect(result.profile.authoringLayout).toEqual(createDefaultOperatorProfile(registry).authoringLayout);
   });
 
+  it('repairs Test independently and never retains launch or simulation state', () => {
+    const registry = createClientSemanticActionRegistry();
+    const profile = createDefaultOperatorProfile(registry);
+    const authoring = profile.authoringLayout;
+    profile.testLayout = { version: 1, root: { type: 'tabs', tabs: ['test-viewscreen'], active: 'test-viewscreen' },
+      floats: [], closed: ['test-controls'], selected: 'test-viewscreen',
+      selection: { world: 'old.toml', ship: 'old-hull.toml', seed: 4 }, run: { tick: 99 } };
+    const result = prepareOperatorProfileImport(JSON.stringify(profile), { registry });
+    expect(result.profile.authoringLayout).toEqual(authoring);
+    expect(result.profile.testLayout).toEqual({ version: 1,
+      root: { type: 'tabs', tabs: ['test-viewscreen'], active: 'test-viewscreen' },
+      floats: [], closed: ['test-controls'], selected: 'test-viewscreen' });
+    expect(JSON.stringify(result.profile.testLayout)).not.toMatch(/old|seed|tick|run|selection/);
+  });
+
   it('repairs Live independently without changing Authoring or reconnect fields', () => {
     const registry = createClientSemanticActionRegistry();
     const profile = createDefaultOperatorProfile(registry);
@@ -337,12 +352,12 @@ describe('private persistence and export boundary', () => {
     const exported = JSON.parse(serializeOperatorProfile(profile));
     expect(Object.keys(exported).sort()).toEqual([
       'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback', 'gamepad',
-      'gmConfirmations', 'kind', 'liveLayout', 'version',
+      'gmConfirmations', 'kind', 'liveLayout', 'testLayout', 'version',
     ]);
-    // The two layout fields are placement vocabulary — `station` and
+    // The three layout fields are placement vocabulary — `station` and
     // `station-console` are PANEL IDS since issue #1504, not a Station identity —
     // so they are checked for what they may contain rather than by keyword.
-    const { authoringLayout, liveLayout, ...rest } = exported;
+    const { authoringLayout, testLayout, liveLayout, ...rest } = exported;
     expect(JSON.stringify(rest)).not.toMatch(
       /secret|"player"|"station"|"session"|saveCatalogue|hardware|generation|pendingFeedback/i,
     );
@@ -355,7 +370,7 @@ describe('private persistence and export boundary', () => {
       }
       return out;
     };
-    for (const layout of [authoringLayout, liveLayout]) {
+    for (const layout of [authoringLayout, testLayout, liveLayout]) {
       for (const key of layoutKeys(layout)) expect(ALLOWED_LAYOUT_KEYS, key).toContain(key);
     }
   });

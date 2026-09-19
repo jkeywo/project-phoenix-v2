@@ -16,12 +16,19 @@ it('derives a browser pack catalog from exact text instead of native byte-array 
   const start = vi.fn(async () => ({ running: true, tick: 0 }));
   const provider = { test: { catalog, capture, start, status: async () => ({ running: true }), stop: async () => {} } };
   panel = mountWorkshopTestPanel({ root: document.body, provider, draft: () => draft, busy: () => false });
+  expect(panel.node.className).toBe('workshop-test');
+  expect(panel.viewNode.className).toBe('workshop-test-document');
+  expect(panel.node.contains(panel.viewNode)).toBe(false);
   await vi.waitFor(() => expect(catalog).toHaveBeenCalledOnce());
   expect(catalog.mock.calls[0][0]).toEqual({ 'scenarios.toml': WORKSHOP_MANIFEST, [WORKSHOP_WORLD]: WORKSHOP_WORLD_TEXT });
   document.getElementById('workshop-test-start').click();
   await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
   expect(capture).toHaveBeenCalledExactlyOnceWith(draft);
   expect(Array.from(start.mock.calls[0][0].bytes)).toEqual([3]);
+  panel.dispose();
+  expect(document.querySelector('.workshop-test')).toBeNull();
+  expect(document.querySelector('.workshop-test-document')).toBeNull();
+  panel = null;
 });
 
 it('lets Stop retire a browser boot before its slow launch promise settles', async () => {

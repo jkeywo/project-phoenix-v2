@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "default": {
+    "version": 1,
+    "root": {
+      "type": "split",
+      "axis": "horizontal",
+      "sizes": [30, 70],
+      "children": [
+        { "type": "tabs", "tabs": ["test-controls"], "active": "test-controls" },
+        { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" }
+      ]
+    },
+    "floats": [],
+    "closed": [],
+    "selected": "test-viewscreen"
+  },
+  "cases": [
+    {
+      "name": "placement strips stale run values",
+      "stored": {
+        "version": 1,
+        "root": { "type": "tabs", "tabs": ["test-viewscreen", "unknown"], "active": "unknown", "payload": "stale" },
+        "floats": [],
+        "closed": ["test-controls"],
+        "selected": "unknown",
+        "selection": { "world": "old.toml", "seed": 4 },
+        "run": { "tick": 99 }
+      },
+      "expected": {
+        "version": 1,
+        "root": { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" },
+        "floats": [],
+        "closed": ["test-controls"],
+        "selected": "test-viewscreen"
+      }
+    },
+    {
+      "name": "obsolete version returns the current default",
+      "stored": { "version": 99, "root": { "unsafe": true } },
+      "expected": {
+        "version": 1,
+        "root": {
+          "type": "split",
+          "axis": "horizontal",
+          "sizes": [30, 70],
+          "children": [
+            { "type": "tabs", "tabs": ["test-controls"], "active": "test-controls" },
+            { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" }
+          ]
+        },
+        "floats": [],
+        "closed": [],
+        "selected": "test-viewscreen"
+      }
+    }
+  ]
+}

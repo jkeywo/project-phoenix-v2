@@ -46,7 +46,7 @@ afterEach(() => {
 describe('Workshop Authoring browser surface', () => {
   it('mounts the docked workflow, persists keyboard moves, restores focus and repairs a reopened layout', async () => {
     await mounted.ready;
-    expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
+    expect([...document.querySelectorAll('.workshop-layout .workshop-dock-panel')].map(node => node.dataset.panel))
       .toEqual(['files', 'dependencies', 'changes', 'composition', 'presets', 'source', 'findings', 'feedback',
         'model-preview', 'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity']);
     const sourceTab = document.querySelector('[data-panel="source"] .workshop-panel-tab');
@@ -59,7 +59,7 @@ describe('Workshop Authoring browser surface', () => {
     [...document.querySelectorAll('.workshop-panel-switcher button')].find(node => node.textContent === t('workshop.inspector')).click();
     expect(document.querySelector('[data-panel="inspector"]')).not.toBeNull();
     document.querySelector('.workshop-layout-reset').click();
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(17);
+    expect(document.querySelectorAll('.workshop-layout .workshop-dock-panel')).toHaveLength(17);
     expect(document.querySelectorAll('#workshop-add-source')).toHaveLength(1);
     expect(document.querySelectorAll('#workshop-restore')).toHaveLength(1);
     expect(byId('add-source').closest('[data-panel]')?.dataset.panel).toBe('add');
@@ -221,7 +221,7 @@ describe('Workshop Authoring browser surface', () => {
     document.body.innerHTML = '<main id="root"></main>';
     mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
     await mounted.ready;
-    expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
+    expect([...document.querySelectorAll('.workshop-layout .workshop-dock-panel')].map(node => node.dataset.panel))
       .toEqual(['source', 'inspector', 'models', 'model-preview', 'sound', 'changes', 'definitions', 'composition',
         'entity', 'presets']);
     // Panels the operator closed under v3 stay closed.
@@ -280,11 +280,11 @@ describe('Workshop Authoring browser surface', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
     window.dispatchEvent(new Event('resize'));
     expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-narrow')).toBe(true);
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(1);
+    expect(document.querySelectorAll('.workshop-layout .workshop-dock-panel')).toHaveLength(1);
     byId('source').value = 'retained';
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     window.dispatchEvent(new Event('resize'));
-    expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(17);
+    expect(document.querySelectorAll('.workshop-layout .workshop-dock-panel')).toHaveLength(17);
     expect(byId('source').value).toBe('retained');
   });
 
@@ -313,13 +313,44 @@ describe('Workshop Authoring browser surface', () => {
     });
     mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), provider: createNativeWorkshopProvider({ request }) });
     await mounted.ready;
+    select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# unsaved first\n`);
+    byId('open-test').click();
+    expect(document.querySelector('.workshop-test-layout').hidden).toBe(false);
     await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
     expect([...byId('files').options].some(option => option.value === baseHull)).toBe(false);
     expect(byId('test-ship').value).toBe(baseHull);
-    select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# unsaved first\n`);
     await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
     byId('test-start').click();
     await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(true));
+    expect(document.querySelector('.workshop-test-layout').hidden).toBe(false);
+    expect([...document.querySelectorAll('.workshop-test-layout .workshop-dock-panel')]
+      .map(node => node.dataset.panel)).toEqual(['test-controls', 'test-viewscreen']);
+    expect(document.querySelector('.workshop-test-layout [data-panel="test-controls"]')
+      .dataset.panelKind).toBe('tool');
+    expect(document.querySelector('.workshop-test-layout [data-panel="test-viewscreen"]')
+      .dataset.panelKind).toBe('document');
+    const authoringBefore = createOperatorProfileSnapshot().authoringLayout;
+    const testControls = document.querySelector(
+      '.workshop-test-layout [data-panel="test-controls"] .workshop-panel-tab',
+    );
+    testControls.focus();
+    testControls.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'ArrowDown', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true,
+    }));
+    const storedLayouts = JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY));
+    expect(storedLayouts.authoringLayout).toEqual(authoringBefore);
+    expect(storedLayouts.testLayout.version).toBe(1);
+    expect(JSON.stringify(storedLayouts.testLayout)).not.toMatch(/world|ship|seed|tick|run|paused/);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
+    window.dispatchEvent(new Event('resize'));
+    expect(document.querySelector('.workshop-test-layout .workshop-dock-canvas').classList.contains('is-narrow'))
+      .toBe(true);
+    expect(document.querySelectorAll('.workshop-test-layout .workshop-dock-panel')).toHaveLength(1);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    window.dispatchEvent(new Event('resize'));
+    expect(document.querySelectorAll('.workshop-test-layout .workshop-dock-panel')).toHaveLength(2);
+    document.querySelector('.workshop-test-layout .workshop-layout-reset').click();
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).testLayout.root.type).toBe('split');
     expect(document.querySelector('#root > .workshop-toolbar').hidden).toBe(true);
     expect(byId('models').hidden).toBe(true);
     expect(byId('definitions').hidden).toBe(true);
@@ -328,12 +359,14 @@ describe('Workshop Authoring browser surface', () => {
     expect(byId('presets').hidden).toBe(true);
     expect(document.querySelector('.sound-audition').hidden).toBe(true);
     expect(byId('test-world').disabled).toBe(true);
+    await vi.waitFor(() => expect(request.mock.calls.some(([value]) => value.op === 'test-start')).toBe(true));
     const first = request.mock.calls.find(([value]) => value.op === 'test-start')[0];
     expect(first.files[WORKSHOP_WORLD]).toContain('# unsaved first');
     expect(first.selection).toMatchObject({ ship: baseHull, seed: 1 });
     edit('must not enter the running draft'); // Even synthetic input is held.
     byId('test-authoring').click();
     await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(false));
+    expect(document.querySelector('.workshop-test-layout').hidden).toBe(true);
     // Audition is a dock panel now, so leaving Test mode returns it to the
     // arrangement rather than to the surface: revealing it makes it usable again.
     document.querySelector('[data-layout-panel="sound"][data-layout-control="switcher"]').click();
@@ -344,9 +377,11 @@ describe('Workshop Authoring browser surface', () => {
     ]);
     edit(`${WORKSHOP_WORLD_TEXT}# unsaved second\n`);
     expect(byId('test-status').textContent).toContain(t('workshop.test_stale'));
+    byId('open-test').click();
     await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
     byId('test-start').click();
-    await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(true));
+    await vi.waitFor(() => expect(request.mock.calls.filter(([value]) => value.op === 'test-start')).toHaveLength(2));
+    expect(document.querySelector('.workshop-layout').hidden).toBe(true);
     const starts = request.mock.calls.filter(([value]) => value.op === 'test-start');
     expect(starts).toHaveLength(2);
     expect(starts[1][0].files[WORKSHOP_WORLD]).toContain('# unsaved second');

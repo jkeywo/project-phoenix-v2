@@ -95,10 +95,11 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-model-preview :is(input, select) { max-width: 100%; }
 .workshop-model-preview-viewport { width: 100%; }
 .workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }
-.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: 1.5rem; }
+.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
 .workshop-test h2, .workshop-test p { flex-basis: 100%; margin: .25rem 0; overflow-wrap: anywhere; }
 .workshop-test select, .workshop-test input { max-width: 100%; }
 .workshop-test label { overflow-wrap: anywhere; }
+.workshop-test-document { min-width: 0; width: 100%; }
 .workshop-test-viewport { width: 100%; }
 .workshop-test-viewscreen { display: block; width: 100%; height: clamp(24rem, 65vh, 55rem); border: 1px solid #8195a8; }
 .workshop-test-viewscreen[data-pending] { position: fixed; inset: 0; width: 100vw; height: 100vh; opacity: 0; pointer-events: none; }

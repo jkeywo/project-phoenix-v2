@@ -333,6 +333,7 @@ const WORKSHOP_PANELS_V9: &[&str] = &[
     "entity",
     "presets",
 ];
+const WORKSHOP_TEST_PANELS: &[&str] = &["test-controls", "test-viewscreen"];
 /// Panels registered after a stored version, with the group each joins on migration.
 const WORKSHOP_ADDED_IN_V3: &[(&str, &str)] = &[
     ("dependencies", "files"),
@@ -1005,6 +1006,17 @@ fn default_authoring_layout() -> Value {
     })
 }
 
+fn default_test_layout() -> Value {
+    json!({
+        "version": 1,
+        "root": {"type":"split", "axis":"horizontal", "sizes":[30,70], "children":[
+            {"type":"tabs", "tabs":["test-controls"], "active":"test-controls"},
+            {"type":"tabs", "tabs":["test-viewscreen"], "active":"test-viewscreen"}
+        ]},
+        "floats": [], "closed": [], "selected": "test-viewscreen"
+    })
+}
+
 fn default_live_layout() -> Value {
     json!({
         "version": 14,
@@ -1442,6 +1454,74 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
     Some(layout)
 }
 
+fn sanitize_test_layout(value: &Value) -> Option<Value> {
+    if value["version"].as_u64()? != 1 {
+        return None;
+    }
+    let allowed = WORKSHOP_TEST_PANELS;
+    let mut seen = BTreeSet::new();
+    let root = match value.get("root")? {
+        Value::Null => Value::Null,
+        root => match sanitize_workshop_node(root, &mut seen, 0, allowed) {
+            Ok(Some(root)) => root,
+            Ok(None) => Value::Null,
+            Err(()) => return Some(default_test_layout()),
+        },
+    };
+    let mut floats = Vec::new();
+    for entry in value["floats"].as_array().into_iter().flatten() {
+        let Some(panel) = entry["panel"]
+            .as_str()
+            .filter(|_| known_panel(&entry["panel"], allowed))
+        else {
+            continue;
+        };
+        if !seen.insert(panel.to_owned()) {
+            continue;
+        }
+        let number = |name: &str, fallback: f64| entry[name].as_f64().unwrap_or(fallback);
+        floats.push(json!({
+            "panel": panel,
+            "x": number("x", 12.0).max(0.0),
+            "y": number("y", 12.0).max(0.0),
+            "width": number("width", 420.0).max(240.0),
+            "height": number("height", 360.0).max(180.0),
+        }));
+        if floats.len() == allowed.len() {
+            break;
+        }
+    }
+    if !value["root"].is_null() && root.is_null() && floats.is_empty() {
+        return Some(default_test_layout());
+    }
+    let mut closed = Vec::new();
+    for panel in value["closed"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|panel| known_panel(panel, allowed))
+    {
+        let panel = panel.as_str().unwrap();
+        if seen.insert(panel.to_owned()) {
+            closed.push(json!(panel));
+        }
+    }
+    for panel in allowed {
+        if seen.insert((*panel).to_owned()) {
+            closed.push(json!(panel));
+        }
+    }
+    let selected = value
+        .get("selected")
+        .filter(|panel| known_panel(panel, allowed) && !closed.contains(panel))
+        .cloned()
+        .or_else(|| first_visible(&root, &floats))
+        .unwrap_or_else(|| json!("test-controls"));
+    Some(json!({
+        "version": 1, "root": root, "floats": floats, "closed": closed, "selected": selected
+    }))
+}
+
 fn add_workshop_tab(node: &mut Value, target: &str, panel: &str) -> bool {
     match node["type"].as_str() {
         Some("tabs")
@@ -1861,6 +1941,9 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
     if let Some(layout) = sanitize_authoring_layout(&raw["authoringLayout"]) {
         safe["authoringLayout"] = layout;
     }
+    if let Some(layout) = sanitize_test_layout(&raw["testLayout"]) {
+        safe["testLayout"] = layout;
+    }
     if let Some(layout) = sanitize_live_layout(&raw["liveLayout"]) {
         safe["liveLayout"] = layout;
     }
@@ -1888,6 +1971,26 @@ mod tests {
         }
     }
     const PADS: &str = "window.__phoenixSetGamepads([{\"index\":0,\"id\":\"pad\",\"buttons\":[{\"pressed\":true,\"value\":1}],\"axes\":[1]}])";
+
+    #[test]
+    fn test_layout_matches_the_browser_model_case_for_case() {
+        let fixture: Value = serde_json::from_str(
+            &std::fs::read_to_string("tests/fixtures/workshop-test-layout-migrations.json")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(fixture["version"], default_test_layout()["version"]);
+        assert_eq!(fixture["default"], default_test_layout());
+        for case in fixture["cases"].as_array().unwrap() {
+            let actual = sanitize_test_layout(&case["stored"]).unwrap_or_else(default_test_layout);
+            assert_eq!(
+                numbers_as_floats(&actual),
+                numbers_as_floats(&case["expected"]),
+                "{}",
+                case["name"]
+            );
+        }
+    }
     #[test]
     fn host_excludes_other_consoles_and_neutralizes_unowned_snapshots() {
         let mut state = NativeOperators::default();

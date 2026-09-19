@@ -46,9 +46,10 @@ test('built Workshop Test controls keep Authoring exclusive and fit 200% text', 
     window.__testWorkspace = workspace;
     await workspace.ready;
   }, { files: readStoreZip(workshopPack()), world: WORKSHOP_WORLD });
-  await expect(page.locator('#workshop-test-start')).toBeEnabled();
   await page.locator('#workshop-files').selectOption(WORKSHOP_WORLD);
   await page.locator('#workshop-source').fill(`${WORKSHOP_WORLD_TEXT}# exact unsaved run\n`);
+  await page.locator('#workshop-open-test').click();
+  await expect(page.locator('#workshop-test-start')).toBeEnabled();
   await page.locator('#workshop-test-start').click();
   await expect(page.locator('.workshop-layout')).toBeHidden();
   await expect(page.locator('#workshop > .workshop-toolbar')).toBeHidden();

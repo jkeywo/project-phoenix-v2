@@ -91,7 +91,7 @@ describe('private GM confirmation policies', () => {
     expect(createGmConfirmationProfile({ storage: disk }).mode('effect.damage')).toBe('confirm-preview');
     expect(Object.keys(JSON.parse(exported))).toEqual([
       'kind', 'version', 'accessibility', 'bindings', 'gamepad', 'feedback', 'audio',
-      'gmConfirmations', 'authoringLayout', 'liveLayout',
+      'gmConfirmations', 'authoringLayout', 'testLayout', 'liveLayout',
     ]);
   });
 

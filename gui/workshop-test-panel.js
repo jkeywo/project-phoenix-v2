@@ -3,11 +3,14 @@ import { t } from './strings.js';
 
 /** Shared offline controls over the native child/browser iframe capability. */
 export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: isBusy,
-  changed = () => {}, win = root.ownerDocument.defaultView }) {
-  if (!provider?.test) return { refresh() {}, held: () => false, testing: () => false, dispose() {} };
+  changed = () => {}, leave = () => {}, win = root.ownerDocument.defaultView }) {
+  if (!provider?.test) return { node: null, viewNode: null, refresh() {}, held: () => false,
+    testing: () => false, dispose() {} };
   const doc = root.ownerDocument;
   const panel = doc.createElement('section');
   panel.className = 'workshop-test';
+  const viewPanel = doc.createElement('section');
+  viewPanel.className = 'workshop-test-document';
   const make = (tag, id, textId) => {
     const node = doc.createElement(tag); node.id = `workshop-test-${id}`;
     if (textId) node.textContent = t(textId);
@@ -41,12 +44,16 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     catch (error) { localError = error; render(); }
   });
   for (const field of [world, ship, seed]) field.addEventListener('change', () => { localError = null; render(); });
-  const authoring = command('authoring', 'workshop.test_authoring', () => session.authoring());
+  const authoring = command('authoring', 'workshop.test_authoring', async () => {
+    await session.authoring(); leave();
+  });
   const returnTest = command('return', 'workshop.test_return', () => session.test());
   const pause = command('pause', 'workshop.test_pause', () => session.control({ command: 'pause' }));
   const resume = command('resume', 'workshop.test_resume', () => session.control({ command: 'resume' }));
   const step = command('step', 'workshop.test_step', () => session.control({ command: 'step' }));
-  const stop = command('stop', 'workshop.test_stop', () => session.stop());
+  const stop = command('stop', 'workshop.test_stop', async () => {
+    await session.stop(); leave();
+  });
   const speed = make('select', 'speed');
   for (const value of [1, 2, 4, 8]) {
     const option = doc.createElement('option'); option.value = String(value); option.textContent = `${value}×`; speed.append(option);
@@ -70,8 +77,13 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   panel.append(stop, status); root.append(panel);
   if (provider.test.mount) {
     const viewport = doc.createElement('div'); viewport.className = 'workshop-test-viewport';
-    panel.append(viewport); provider.test.mount(viewport, t('workshop.test_heading'));
+    viewPanel.append(viewport); provider.test.mount(viewport, t('workshop.test_heading'));
+  } else {
+    const unavailable = doc.createElement('p');
+    unavailable.textContent = t('workshop.test_scope');
+    viewPanel.append(unavailable);
   }
+  root.append(viewPanel);
   /** Offer the omniscient desk and every simulated player ship this run has.
    *
    * Rebuilt only when the offer actually changes, so a selector the operator is
@@ -108,7 +120,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     start.disabled = busy || catalogPending || !draft || !validSelection();
     start.textContent = t(running ? 'workshop.test_restart' : 'workshop.test_start');
     world.disabled = ship.disabled = seed.disabled = busy || testing;
-    authoring.hidden = !testing; authoring.disabled = busy;
+    authoring.hidden = false; authoring.disabled = busy;
     returnTest.hidden = testing || !running; returnTest.disabled = busy;
     pause.disabled = busy || !testing || state.run?.paused || state.run?.starting;
     resume.disabled = busy || !testing || !state.run?.paused || state.run?.starting;
@@ -133,7 +145,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   }
   session = createWorkshopTest({ provider: provider.test,
     snapshot: () => provider.test.capture ? provider.test.capture(getDraft()) : getDraft().toNativeSources(),
-    onChange() { render(); changed(); } });
+    onChange(state) { render(); changed(state); } });
   function refresh() {
     const draft = getDraft();
     if (draft !== previousDraft || draft?.sourceRevision !== previousRevision) {
@@ -175,7 +187,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   }
   const timer = win.setInterval(() => { void session.poll().catch(() => {}); }, 500);
   refresh();
-  return { refresh, held: () => session.state().busy || session.state().mode === 'test', testing: () => session.state().mode === 'test',
+  return { node: panel, viewNode: viewPanel, refresh, enter: () => session.test(),
+    held: () => session.state().busy || session.state().mode === 'test', testing: () => session.state().mode === 'test',
     dispose() { disposed = true; win.clearInterval(timer); if (catalogTimer !== null) win.clearTimeout(catalogTimer);
-      void session.dispose().catch(() => {}); panel.remove(); } };
+      void session.dispose().catch(() => {}); panel.remove(); viewPanel.remove(); } };
 }

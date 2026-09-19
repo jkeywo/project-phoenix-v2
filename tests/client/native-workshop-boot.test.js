@@ -59,8 +59,8 @@ describe('native Workshop shared boot', () => {
     window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: null });
     await pending;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
-      .toEqual(['files', 'dependencies', 'changes', 'composition', 'source', 'findings', 'feedback', 'model-preview',
-        'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity']);
+      .toEqual(['files', 'dependencies', 'changes', 'composition', 'presets', 'source', 'findings', 'feedback',
+        'model-preview', 'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity']);
   });
 
   it('mounts with visible storage status when preference loading fails and bounds the private queue', async () => {

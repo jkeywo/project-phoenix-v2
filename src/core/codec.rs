@@ -276,6 +276,21 @@ pub fn decode_workshop_entity_request(
     serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
+/// One world's GM role presets: every authored value with its line, which
+/// references resolve, and the vocabularies the runtime owns (issue #1477).
+pub fn encode_workshop_preset_catalog(
+    value: &crate::workshop::presets::PresetCatalog,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+
+/// The preset edit group a Workshop panel applies to one world (issue #1477).
+pub fn decode_workshop_preset_request(
+    value: &str,
+) -> Result<crate::workshop::presets::PresetEditRequest, String> {
+    serde_json::from_str(value).map_err(|error| error.to_string())
+}
+
 /// Encode a one-shot positional audio cue for `__audioCue`. Coordinates are
 /// listener-relative — see `audio_config::listener_relative`.
 pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {

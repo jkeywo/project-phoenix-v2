@@ -261,6 +261,80 @@ fn the_native_provider_answers_entity_entity_edit_and_entity_materialise() {
 }
 
 #[test]
+fn the_native_provider_answers_presets_presets_edit_and_new_preset() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+    // One world declaring an entity a widget narrows to, so the reference the
+    // catalog reports as known crosses the bridge as well as the lines do.
+    let world = concat!(
+        "[[entity]]\\ntemplate_path = \\\"assets/entities/hull.toml\\\"\\nname = \\\"escort\\\"\\n",
+        "\\n[[gm_role_preset]]\\nid = \\\"tactical\\\"\\nlabel = \\\"world.desk.tactical\\\"\\n",
+        "panels = [\\\"gm-map-panel\\\"]\\ncontacts = [\\\"escort\\\"]\\n",
+        "\\n[[gm_role_preset.widget]]\\nid = \\\"w\\\"\\ntype = \\\"attention\\\"\\n",
+        "label = \\\"world.desk.w\\\"\\nband = \\\"urgent\\\"\\nship = \\\"escort\\\"\\n"
+    );
+    let files = format!("{{\"assets/worlds/desk.toml\":\"{world}\"}}");
+    let catalog = provider.handle_json(&format!(
+        "{{\"id\":1,\"op\":\"presets\",\"files\":{files},\"path\":\"assets/worlds/desk.toml\"}}"
+    ));
+    assert!(catalog.contains("\"status\":\"presets\""), "{catalog}");
+    assert!(catalog.contains("\"origin\":\"draft\""), "{catalog}");
+    assert!(
+        catalog.contains("\"id\":\"tactical\",\"id_line\":6"),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("\"value\":\"escort\",\"line\":9,\"known\":true"),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("\"kind\":\"attention\",\"kind_line\":13"),
+        "{catalog}"
+    );
+    // The choices the RUNTIME owns cross the bridge; the panel-id vocabulary
+    // deliberately does not (D2).
+    assert!(
+        catalog.contains(
+            "\"widget_types\":[\"attention\",\"workload\",\"actions\",\"note\"],\
+             \"widget_actions\":[\"gm-session-pause\",\"gm-session-resume\"],\
+             \"bands\":[\"urgent\",\"attention\",\"background\"]"
+        ),
+        "{catalog}"
+    );
+    assert!(catalog.contains("\"entities\":[\"escort\"]"), "{catalog}");
+    assert!(!catalog.contains("gm-map-panel\",\"origin"), "{catalog}");
+
+    let edit = |value: &str| {
+        format!(
+            "{{\"id\":2,\"op\":\"presets-edit\",\"files\":{files},\"request\":{{\"document_path\":\"assets/worlds/desk.toml\",\"expected_source\":\"{world}\",\"edits\":[{{\"op\":\"set\",\"path\":[\"gm_role_preset\",0,\"widget\",0,\"band\"],\"value_source\":\"\\\"{value}\\\"\"}}]}}}}"
+        )
+    };
+    let refused = provider.handle_json(&edit("critical"));
+    assert!(refused.contains("\"status\":\"refused\""), "{refused}");
+    assert!(refused.contains("widget-unknown-band"), "{refused}");
+    // The runtime's own sentence rides the refusal, so a panel with no string
+    // for a rule can still say what was refused.
+    assert!(refused.contains("the authored bands are"), "{refused}");
+    let patched = provider.handle_json(&edit("background"));
+    assert!(patched.contains("\"status\":\"patched\""), "{patched}");
+    assert!(patched.contains("band = \\\"background\\\""), "{patched}");
+
+    let new = provider.handle_json(
+        "{\"id\":3,\"op\":\"new-preset\",\"preset_id\":\"observer\",\"label\":\"world.desk.obs\"}",
+    );
+    assert!(new.contains("\"status\":\"patched\""), "{new}");
+    assert!(
+        new.contains(
+            "\"source\":\"[[gm_role_preset]]\\nid = \\\"observer\\\"\\nlabel = \\\"world.desk.obs\\\"\\n\""
+        ),
+        "{new}"
+    );
+    let refused = provider
+        .handle_json("{\"id\":4,\"op\":\"new-preset\",\"preset_id\":\"all\",\"label\":\"l\"}");
+    assert!(refused.contains("\"status\":\"refused\""), "{refused}");
+}
+
+#[test]
 fn private_json_bridge_loads_exact_source_and_roundtrips_a_runtime_validated_save() {
     let fixture = Fixture::new();
     let mut provider = fixture.open();

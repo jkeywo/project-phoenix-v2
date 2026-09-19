@@ -137,6 +137,35 @@ export function createWorkshopRuntime({
       return runtime.wasm_workshop_entity_materialise(JSON.stringify(files),
         JSON.stringify(textDependencies(dependencies)), path, address);
     },
+    /** The runtime-derived GM role preset catalog of ONE world member (issue
+     * #1477): every preset with its panels, quick actions, contacts and typed
+     * widgets at their exact lines, the runtime-owned choices (widget types and
+     * action ids, attention bands and categories, the world's own entity names),
+     * the world members a preset may be authored in, and the findings. Text-only
+     * dependencies, as the other three catalogs take: the reading parses sources.
+     * The panel ids and quick-action ids this build DRAWS are the browser's own
+     * vocabulary and never travel here. */
+    async presets(files, path) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_presets(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), path));
+    },
+    /** Structural edits over one world's presets checked against the whole
+     * candidate and its dependencies: the runtime answers with the new source or
+     * refuses a reserved or duplicate id, an unknown widget type, a key on a
+     * type that does not own it or a reference the world does not have, with the
+     * source untouched. */
+    async editPresets(files, request) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_presets_edit(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), JSON.stringify(request));
+    },
+    /** A `[[gm_role_preset]]` block spelled by the runtime type, never a JS
+     * template. */
+    async newPreset(id, label) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_new_preset(id, label);
+    },
     async validate(bytes) {
       const loaded = await ready();
       const required = loaded.runtime.wasm_workshop_asset_dependencies?.(bytes) || [];

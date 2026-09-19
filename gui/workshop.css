@@ -76,6 +76,22 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-entity li[data-state="local"] span, .workshop-entity li[data-state="override"] span,
 .workshop-entity li[data-owner="local"] label { font-weight: 700; }
 .workshop-entity-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-presets { display: grid; align-content: start; gap: .75rem; min-width: 0; }
+.workshop-presets :is(p, label, legend, small, li, span) { overflow-wrap: anywhere; }
+.workshop-presets fieldset { min-width: 0; display: grid; gap: .5rem; margin: 0; }
+.workshop-presets :is(input:not([type=checkbox]), select) { width: 100%; min-height: 2.75rem; }
+.workshop-presets input[type=checkbox] { width: 1.5rem; height: 1.5rem; margin: 0 .5rem 0 0; vertical-align: middle; }
+.workshop-presets ul { margin: 0; padding-left: 1.25rem; }
+.workshop-presets li { margin: .25rem 0; }
+.workshop-presets-form { display: grid; gap: .5rem; }
+.workshop-presets-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.workshop-presets-row :is(input, select) { flex: 1 1 12rem; width: auto; }
+.workshop-presets-preset, .workshop-presets-widget { display: grid; gap: .5rem; }
+.workshop-presets-origin p, .workshop-presets-finding { font-weight: 700; }
+/* Authored-but-not-drawn is a word in the row's own label; the weight only makes
+   it easier to scan, and the severity below is a word too. */
+.workshop-presets-undrawn label { font-weight: 700; }
+.workshop-presets-findings li[data-severity="error"] { font-weight: 700; }
 .workshop-model-preview :is(input, select) { max-width: 100%; }
 .workshop-model-preview-viewport { width: 100%; }
 .workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }

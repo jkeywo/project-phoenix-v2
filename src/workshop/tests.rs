@@ -761,3 +761,117 @@ fn a_world_reachable_hull_with_a_broken_include_is_reported_once_and_not_twice()
     assert!(!pack.accepted);
     assert_eq!(broken(&pack), expected, "{:?}", pack.findings);
 }
+
+/// A draft world whose role presets break the rules refuses save and export at
+/// the OFFENDING VALUE's own line, for every world the draft carries rather
+/// than only the ones a manifest root names (issue #1477).
+///
+/// The contrast is the point. `gamma`'s unknown band is a rule the runtime
+/// already has: the source gate refuses that world with no line at all, and
+/// this issue adds the location beside it. `alpha`'s empty label and its
+/// contact naming no entity are rules the runtime does NOT have — one world's
+/// text cannot resolve an entity name — so without these findings a draft
+/// would save and export with a preset an operator cannot read and a contact
+/// that resolves to nothing.
+#[test]
+fn a_project_world_whose_presets_break_the_rules_is_refused_at_the_offending_line() {
+    let mut members = composition_members();
+    let alpha = members
+        .get_mut("assets/worlds/alpha.toml")
+        .expect("the composition fixture carries alpha");
+    // Lines 11-15 of alpha: a blank, the header, the id, the empty label and
+    // the contact naming nothing.
+    alpha.push_str(
+        "\n[[gm_role_preset]]\nid = \"tactical\"\nlabel = \"\"\ncontacts = [\"ghost\"]\n",
+    );
+    members.insert(
+        "assets/worlds/gamma.toml".into(),
+        "[global]\ntitle = \"Gamma\"\n\n[[gm_role_preset]]\nid = \"watch\"\nlabel = \"l\"\n\n\
+         [[gm_role_preset.widget]]\nid = \"w\"\ntype = \"attention\"\nlabel = \"wl\"\n\
+         band = \"critical\"\n"
+            .into(),
+    );
+    let located = |report: &WorkshopValidation| {
+        report
+            .findings
+            .iter()
+            .filter(|finding| {
+                finding.category.starts_with("preset-") || finding.category.starts_with("widget-")
+            })
+            .map(|finding| {
+                (
+                    finding.file.clone(),
+                    finding.line,
+                    finding.category.clone(),
+                    finding.severity.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        (
+            "assets/worlds/alpha.toml".to_owned(),
+            Some(14),
+            "preset-empty-label".to_owned(),
+            "error".to_owned(),
+        ),
+        (
+            "assets/worlds/alpha.toml".to_owned(),
+            Some(15),
+            "preset-unknown-contact".to_owned(),
+            "error".to_owned(),
+        ),
+        (
+            "assets/worlds/gamma.toml".to_owned(),
+            Some(12),
+            "widget-unknown-band".to_owned(),
+            "error".to_owned(),
+        ),
+    ];
+
+    let mut project = members.clone();
+    project.insert(
+        "assets/scenarios.toml".into(),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+    );
+    let report = validate_project(
+        &project
+            .iter()
+            .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+            .collect(),
+    );
+    assert!(!report.accepted);
+    assert_eq!(located(&report), expected, "{:?}", report.findings);
+    // The runtime's own whole-file gate refuses the band with NO line; the
+    // world whose rules are the Workshop's alone still parses.
+    assert!(report
+        .findings
+        .iter()
+        .any(|finding| finding.category == "runtime-source-invalid"
+            && finding.file == "assets/worlds/gamma.toml"
+            && finding.line.is_none()));
+    assert!(!report
+        .findings
+        .iter()
+        .any(|finding| finding.category == "runtime-source-invalid"
+            && finding.file == "assets/worlds/alpha.toml"));
+
+    members.insert(
+        "scenarios.toml".into(),
+        format!(
+            "[pack]\nformat = 1\nid = \"twin\"\nversion = \"1.0.0\"\nname = \"Twin\"\n\n\
+             [pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 1\n\n\
+             {COMPOSITION_SCENARIOS}"
+        ),
+    );
+    let zip = crate::workshop::archive::store_zip(
+        &members
+            .iter()
+            .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+            .collect(),
+    )
+    .unwrap();
+    let pack = validate_pack(&zip, &dependencies());
+    assert!(!pack.accepted);
+    assert_eq!(located(&pack), expected, "{:?}", pack.findings);
+}

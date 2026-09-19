@@ -1005,7 +1005,12 @@ impl GmRolePresetWidget {
     /// Semantic validation for one widget, with the caller's own source context
     /// already spelled — `[[gm_role_preset]] #i 'id' [[gm_role_preset.widget]]
     /// #j` — so an author reads WHERE before they read what.
-    fn validate(&self, at: &str) -> Result<(), String> {
+    ///
+    /// Crate-visible because the Workshop's preset form asks THIS function
+    /// rather than restating its rules (issue #1477): `workshop::presets`
+    /// hands it a probe carrying one authored facet and reports the sentence it
+    /// returns, so an authoring refusal and a load refusal cannot drift apart.
+    pub(crate) fn validate(&self, at: &str) -> Result<(), String> {
         if self.id.trim().is_empty() {
             return Err(format!(
                 "{at} has an empty id; every widget needs a stable id for the \

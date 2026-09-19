@@ -124,6 +124,19 @@ export function createNativeWorkshopProvider({ request }) {
       async materialiseEntity(files, path, address) {
         return (await call({ op: 'entity-materialise', files, path, address })).source;
       },
+      // GM role presets (issue #1477) cross the bridge the same way: the draft's
+      // text members only, the host resolving the dependencies beneath them and
+      // the world named by path.
+      async presets(files, path) {
+        const response = await call({ op: 'presets', files, path });
+        if (response?.status !== 'presets' || !response.presets || typeof response.presets !== 'object') throw new Error('Invalid native preset catalog');
+        return response.presets;
+      },
+      async editPresets(files, request) { return (await call({ op: 'presets-edit', files, request })).source; },
+      // `preset_id`, not `id`: the bridge envelope owns the key `id` (it is the
+      // request's correlation number, and the host strips it before the
+      // operation is read), so a preset's own id cannot travel under that name.
+      async newPreset(id, label) { return (await call({ op: 'new-preset', preset_id: id, label })).source; },
     },
     async save(draft) {
       const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });

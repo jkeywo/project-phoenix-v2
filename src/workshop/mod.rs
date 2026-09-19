@@ -33,6 +33,8 @@ pub mod document;
 /// Entity template and fragment composition with exact lines (issue #1476).
 pub mod entity;
 mod model_fields;
+/// GM role presets and typed mission widgets with exact lines (issue #1477).
+pub mod presets;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
 mod source_spans;
@@ -226,6 +228,11 @@ pub fn validate_pack(bytes: &[u8], dependencies: &WorkshopDependencies) -> Works
     // spawns, so save and export refuse a broken closure with a location
     // (issue #1476).
     report.extend_workshop(entity::findings(&candidate, &beneath));
+    // Role-preset rules at the offending value's own line, including the
+    // entity names a widget's `ship` and a preset's `contacts` resolve against
+    // — which one world's text cannot answer and the candidate can (issue
+    // #1477).
+    report.extend_workshop(presets::findings(&candidate, &beneath));
     report.catalogue = composition::scenario_catalogue(&candidate, &beneath);
     let mut sources = beneath;
     sources.extend(candidate.clone());
@@ -375,6 +382,7 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
     report.extend_workshop(definitions::findings(&sources.0, &BTreeMap::new()));
     report.extend_workshop(composition::findings(&sources.0, &BTreeMap::new()));
     report.extend_workshop(entity::findings(&sources.0, &BTreeMap::new()));
+    report.extend_workshop(presets::findings(&sources.0, &BTreeMap::new()));
     report.catalogue = composition::scenario_catalogue(&sources.0, &BTreeMap::new());
     for (path, text) in &sources.0 {
         let result = if path.starts_with("assets/worlds/") && path.ends_with(".toml") {

@@ -108,6 +108,21 @@ pub enum Operation {
         path: String,
         address: String,
     },
+    Presets {
+        files: BTreeMap<String, String>,
+        path: String,
+    },
+    PresetsEdit {
+        files: BTreeMap<String, String>,
+        request: super::presets::PresetEditRequest,
+    },
+    NewPreset {
+        /// Spelled `preset_id` because the request ENVELOPE owns the key `id`
+        /// (`codec::decode_workshop_request` removes it before the operation is
+        /// deserialized), so a preset's own id cannot travel under that name.
+        preset_id: String,
+        label: String,
+    },
     RecoveryLoad,
     RecoverySave {
         record: String,
@@ -183,6 +198,9 @@ pub enum Response {
     },
     Entity {
         composition: Box<super::entity::EntityComposition>,
+    },
+    Presets {
+        presets: Box<super::presets::PresetCatalog>,
     },
     Recovery {
         recovery: Option<RecoveryRecord>,
@@ -498,6 +516,23 @@ impl NativeWorkshopProvider {
                     &path,
                     &address,
                 )?,
+            },
+            // Role presets resolve against the same bundle the other catalogs
+            // do: a widget's `ship` may name an entity a DEPENDENCY's world
+            // declares, so the reference set is candidate ∪ dependencies
+            // exactly as Check resolves it (issue #1477).
+            Operation::Presets { files, path } => Response::Presets {
+                presets: Box::new(super::presets::catalog(
+                    &files,
+                    self.reference_dependencies(),
+                    &path,
+                )),
+            },
+            Operation::PresetsEdit { files, request } => Response::Patched {
+                source: super::presets::compose(&files, self.reference_dependencies(), &request)?,
+            },
+            Operation::NewPreset { preset_id, label } => Response::Patched {
+                source: super::presets::new_preset_source(&preset_id, &label)?,
             },
             Operation::RecoveryLoad => {
                 let recovery = read_optional(&self.private.join("draft.json"))?

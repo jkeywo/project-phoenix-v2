@@ -144,4 +144,33 @@ describe('offline Workshop runtime capability', () => {
     expect(materialise).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly, 'assets/entities/mine.toml',
       'hull.hull_integrity');
   });
+
+  it('reads one world\'s GM role presets with text-only dependencies and routes preset edits and new presets (issue #1477)', async () => {
+    const source = { base_files: { 'assets/worlds/base.toml': '[global]\n' },
+      base_asset_manifest: { 'assets/models/a.glb': { length: 2, crc32: 0 } },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/worlds/raid.toml': '[global]\n' },
+        assets: { 'assets/sounds/x.ogg': [1, 2] } }] };
+    const catalog = { path: 'assets/worlds/mine.toml', origin: 'draft', presets: [],
+      choices: { widget_types: ['attention'], widget_actions: [], bands: [], categories: [], entities: [] },
+      worlds: [], findings: [] };
+    const presets = vi.fn(() => JSON.stringify(catalog));
+    const presetsEdit = vi.fn(() => '[[gm_role_preset]]\nid = "watch"\nlabel = "server.gm.watch"\n');
+    const newPreset = vi.fn(() => '[[gm_role_preset]]\nid = "watch"\nlabel = "server.gm.watch"\n');
+    const runtime = createWorkshopRuntime({ load: async () => ({
+      wasm_workshop_validate_pack: () => '{}', wasm_workshop_presets: presets,
+      wasm_workshop_presets_edit: presetsEdit, wasm_workshop_new_preset: newPreset,
+    }), dependencies: async () => source });
+    const files = { 'assets/worlds/mine.toml': '[global]\n' };
+    const textOnly = JSON.stringify({ base_files: { 'assets/worlds/base.toml': '[global]\n' },
+      packs: [{ id: 'raiders', manifest_toml: '[pack]\n', files: { 'assets/worlds/raid.toml': '[global]\n' } }] });
+    expect(await runtime.presets(files, 'assets/worlds/mine.toml')).toEqual(catalog);
+    // Text only: no base asset bytes, no pack assets — the reading parses sources.
+    expect(presets).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly, 'assets/worlds/mine.toml');
+    const request = { document_path: 'assets/worlds/mine.toml', expected_source: '[global]\n',
+      edits: [{ op: 'set', path: ['gm_role_preset', 0, 'label'], value_source: '"server.gm.watch"' }] };
+    expect(await runtime.editPresets(files, request)).toContain('id = "watch"');
+    expect(presetsEdit).toHaveBeenCalledExactlyOnceWith(JSON.stringify(files), textOnly, JSON.stringify(request));
+    expect(await runtime.newPreset('watch', 'server.gm.watch')).toContain('[[gm_role_preset]]');
+    expect(newPreset).toHaveBeenCalledExactlyOnceWith('watch', 'server.gm.watch');
+  });
 });

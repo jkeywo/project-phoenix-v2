@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs, src/workshop/composition.rs, src/workshop/source_spans.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js, src/workshop/entity.rs, editor/workshop-entity.js, gui/workshop-entity-panel.js, src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config.rs, tests/smoke/workshop-entity.render.spec.js]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, editor/workshop-provider.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs, src/workshop/composition.rs, src/workshop/source_spans.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js, src/workshop/entity.rs, editor/workshop-entity.js, gui/workshop-entity-panel.js, src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config.rs, tests/smoke/workshop-entity.render.spec.js, src/workshop/presets.rs, editor/workshop-presets.js, gui/workshop-presets-panel.js, gui/gm-role-presets.js, tests/gm_role_preset_digest_neutrality.rs]
 updated: 2026-09-19
 ---
 
@@ -681,6 +681,244 @@ member on every Check and
 is the cost the panel pays per refresh, matching `composition::catalog`. A local
 value the syntax tree cannot address falls back to the resolved serialisation
 with a null line rather than showing nothing.
+
+## Workshop GM role presets and typed widgets (issue #1477)
+
+The `presets` dock panel (Workshop layout v9, in the `files` column after
+`composition` on both the browser and the native operator profile —
+`gui/workshop-layout-model.js:52` `ADDED_IN_V9` and
+`src/native_host/panes/operator.rs:366` `WORKSHOP_ADDED_IN_V9`, both
+`[['presets','files']]`, because both forms edit a WORLD member) creates, edits,
+reorders and removes `[[gm_role_preset]]` blocks: a preset's id and label, the
+panels and quick actions it shows, the contacts it narrows to, and its typed
+`[[gm_role_preset.widget]]` mission cards. #1483 (preview draft GM roles and
+widgets) will extend this panel rather than add another, because it previews the
+same authored presets.
+
+**The runtime owns every rule it has, and `src/workshop/presets.rs` invents none.**
+`src/world/config.rs:1013` `GmRolePresetWidget::validate` already refuses an
+empty id or label, an unknown `type` (`config.rs:920` `GM_WIDGET_TYPES` —
+`attention`, `workload`, `actions`, `note`, closed on purpose), a key that
+belongs to another type, an unknown band or category, an empty ship, an unknown
+or repeated GM action id (`config.rs:939` `GM_WIDGET_ACTION_IDS`) and a note
+whose text is not a String Table id — but its whole-file caller `parse_world`
+never knew a LINE, and criterion 2 asks for exact source locations. So this
+module supplies the location and asks the runtime for the judgement:
+`presets.rs:397` `probe` builds a widget carrying a valid id, a valid label, the
+authored type and ONE authored facet, `presets.rs:693` `runtime_issue` reports
+the sentence `validate` returns word for word, and `presets.rs:442` `owns` asks
+the same question with a value the runtime ACCEPTS, so even the type-owns-key
+table is read by probing rather than copied. `presets.rs:450` `vocabulary` reads
+the band and category lists out of `GmAttentionBand::authored_vocabulary()` and
+re-checks each through `from_authored`, so a spelling the runtime would refuse
+can never reach the panel as a choice. `validate` was private and is now
+`pub(crate)` for exactly this: an authoring refusal and a load refusal cannot
+drift apart.
+
+Six sentences are written in the module, for want of a runtime function to ask,
+and the header says which are whose. FOUR repeat `parse_world`'s own words —
+`preset-empty-id`, `preset-reserved-id`, `preset-duplicate-id` and
+`widget-duplicate-id`, which `parse_world` builds inline in its own loop, per
+index, with no per-entry predicate to call, and whose duplicate messages name
+BOTH indices where a finding points at one line and names one. Those four are the
+only place a reword in `world::config` could drift unnoticed, so
+`presets/tests.rs` `the_preset_sentences_are_pinned_to_parse_worlds_own_words`
+compares each clause by clause against `parse_world`'s own error (the offender
+before the first delimiter, the reason after the last `;`) — verified by
+rewording the runtime and watching it fail. TWO are Workshop-owned:
+`preset-empty-label`, because a preset with no heading is a row an operator cannot
+read and the form authors one, and the REFERENCE rules, because `parse_world` sees
+one world's text and cannot resolve them. A widget's `ship` and a preset's `contacts` name world
+entities by their `[[entity]] name`, and `presets.rs:379` `entity_names` resolves
+that set as the selected world's own names plus those of the worlds its
+`extra_worlds` compose, over candidate ∪ dependencies — so `known: false` on a
+`contacts` entry or a `ship` is an ERROR with a line, never a silent flag. Ground
+truth was wrong here and was verified against the runtime: `validate` refuses
+only an EMPTY ship, never one the world lacks, and there is no preset-label rule
+at all.
+
+Those two reference rules are the Workshop's own, because the runtime's
+declarative cross-reference checks are vacuous: `src/world/validate.rs:307`
+`collect_entity_references` was emptied when #985 deleted the `[[trigger]]`
+front-end, and a scripted world's references are resolved by
+`world::script::validate` instead. An authoring form that offers the world's own
+entity names should say when an authored one resolves to nothing, and the finding
+names the LINE.
+
+The finding is an ERROR, so it refuses save and export — and refusing content the
+GAME would load is worse than missing a typo. A name a script mints with
+`spawn_entity` is authored correctly and appears in no `[[entity]]` block, so the
+known set counts those too: in a script text that calls `spawn_entity` at all,
+every `name:` literal is taken as a name that world may mint. The set errs toward
+ACCEPTING a reference, which is the direction a gate that blocks an export has to
+err in, while a typo in a world whose scripts never spawn is still caught; a name
+assembled from a variable is the one case nothing structural can see, and
+`a_ship_or_contact_a_script_spawns_is_known_and_one_nobody_mints_is_not` pins
+both halves. `preset-empty-label` is stricter than the game in the same way
+(`GmRolePresetEntry.label` is `#[serde(default)]`), which is why the form's
+repair of a MISSING `label` key had to work: see the residue note below.
+
+`presets.rs:564` `catalog(files, dependencies, path)` reads ONE world member into
+a `PresetCatalog` (`presets.rs:138`): the path and its origin (`draft`, `base`,
+`pack:<id>`), every preset with its index and the 1-based line of its id and
+label, `panels` and `quick_actions` as open-vocabulary entries with lines,
+`contacts` and widget `actions` as references carrying `known`, one `WidgetView`
+per widget (index, id, kind, label and their lines; `band`, `category`, `ship`
+and `text` as `{value,line}` or null, which is what tells a `put` from a `set`
+for those — an id, `type` or `label` has no null to read, so an EMPTY reading is
+written with `put`, which inserts or replaces, and a non-empty one with `set`,
+which keeps the key's decor and its type. The LINE cannot make that choice: an
+absent key reads as the entry's own header line, so choosing by line planned a
+`set` for a key that is not there, and the exact-source owner refuses a `set` it
+cannot locate — which left a preset or widget whose `label` key was MISSING
+unrepairable from the form, exactly the hand-broken world the form exists for),
+the `unknown_keys` every level preserves and shows read-only, the RUNTIME-owned
+`choices`, the world members a preset may be authored in, and every preset
+finding over the whole candidate so the panel's list and Check agree. A path in
+neither the draft nor its dependencies yields an empty catalog, an empty origin
+and an `unknown-document` finding rather than a silently blank panel. Browser:
+`src/workshop/wasm.rs:203` `wasm_workshop_presets(files, textDependencies, path)`;
+native: `Operation::Presets` → `Response::Presets` (status `presets`), a Project
+workspace resolving against nothing beneath through the provider's shared
+`reference_dependencies`; codec helpers at `src/core/codec.rs:281`
+`encode_workshop_preset_catalog` and `:288` `decode_workshop_preset_request`.
+
+**The vocabulary is SPLIT, and the catalog says which half is which.** From the
+runtime: widget types, widget action ids, attention bands and categories, and the
+world's own entity names. From the BROWSER: the panel ids this build DRAWS and
+the quick-action ids, `gui/gm-role-presets.js:47` `GM_ROLE_PRESET_PANEL_IDS`,
+`:58` `GM_ROLE_PRESET_PANEL_FOLLOWERS` and `:80`
+`GM_ROLE_PRESET_QUICK_ACTION_IDS`, imported by `editor/workshop-presets.js`
+rather than restated. `panels`, `quick_actions` and `contacts` are open string
+vocabularies in Rust ON PURPOSE — a preset may already name a panel this build
+does not draw yet — so an authored id nobody draws is NOT an error: Rust raises
+no such warning and offers no such choice, and
+`editor/workshop-presets.js:467` `presetFindings` raises
+`preset-panel-not-drawn` and `preset-quick-action-not-drawn` as WARNINGS from the
+browser's own list, in the same findings list as the runtime's own. A browser
+finding carries a string id plus params instead of a sentence, so the panel
+localises it exactly as it localises a severity word and the pure module stays
+free of `gui/strings.js`.
+
+An edit is REFUSED at edit time with the source untouched: `presets.rs:1061`
+`compose` applies `document::edit` to a copy, re-reads the preset rules over it
+(`presets.rs:925` `preset_issues`, `:713` `widget_issues`) and refuses only what
+the edit INTRODUCES — `presets.rs:1040` `introduced` compares a multiset of
+(category, offending VALUE), never of messages, because every message names an
+index and a reorder shifts every index after the moved entry. The browser's own
+pre-check (`workshop-presets.js:265` `presetViolations`) keys each rule EXACTLY as
+`Issue::key` does — an empty id or label by the key NAME, an unknown type by the
+type — so the two agree about what is pre-existing. Keying a label or a type by
+the entry's id instead made the browser refuse renaming any preset or widget that
+already carried one: a pre-existing violation read as new, which is the one
+mistake the introduced-only rule exists to stop, and a refusal `compose` would not
+have made. The message shape
+is `<rule>: <detail>` with the runtime's own sentence as the detail, which
+`editor/workshop-presets.js:572` `refusalStringId` maps by prefix to a
+`workshop.presets.refused.*` string. Beyond contract B's fourteen categories the
+runtime also refuses `widget-empty-actions`, `widget-empty-text`,
+`widget-invalid-text` and `widget-duplicate-action`, because each is a LOAD
+refusal an edit could otherwise introduce unchecked; those four are named in
+`workshop-presets.js:544` `DETAIL_ONLY_RULES` and take the catch-all row with the
+runtime's sentence, rather than borrowing `empty` (which would claim an empty ID
+for an empty BUTTON ROW) or `duplicate` (which would claim a duplicate PRESET for
+one button named twice). `presets.rs:1116` `findings` reports the same rules as
+located ERROR findings beside the other three catalogs in `validate_pack` and
+`validate_project`; shipped content yields zero. `presets.rs:637`
+`new_preset_source(id, label)` builds the `[[gm_role_preset]]` block a new preset
+is appended as through `toml_edit` and then ASSERTS it through `parse_world`, and
+is exposed as `wasm.rs:241` `wasm_workshop_new_preset` / `Operation::NewPreset` /
+`runtime.newPreset`. That operation spells a preset's own id `preset_id`: the
+bridge envelope owns the key `id` (`codec::decode_workshop_request` removes it
+before the typed operation is read, and `createWorkshopBridge` spreads the
+operation OVER `{ id, ...operation }`), so a preset id travelling as `id` would
+replace the correlation number the reply is matched by.
+
+`gui/workshop-presets-panel.js:29` `mountWorkshopPresets` renders the world
+selector (draft members editable, base and pack read-only with their origin), the
+Presets list with per-row id, label, Move up/down and Remove, an add-preset form
+that refuses the reserved id, an empty id or label and a duplicate before the
+runtime is asked — the duplicate judged against the READING, because the block is
+appended to that source and form state hides a preset pending Remove and shows a
+rename nobody applied, either of which would write one id twice; the same press is
+refused outright while the forms hold unapplied edits, since appending to the
+member they are editing forces a re-read that would drop them without a word —
+and — for the selected preset — Panels and Quick actions as
+checkbox lists over the BROWSER vocabulary (`:302` `renderFacet`, with every
+authored-but-not-drawn value kept as an extra row that says so and can be
+removed), Contacts added from the runtime's entity names, Widgets whose
+per-widget controls FOLLOW the type (`:378` `renderWidgets`, gated by
+`workshop-presets.js:124` `widgetOwns`, so a key is never OFFERED on a type that
+does not own it) — including the TYPE itself, which is editable per row and not
+only at Add, because the planner already rewrites the type and drops the old
+type's keys as ONE group while the only route to it was otherwise
+remove-then-add, two history entries and a new id — and Findings. The open-
+vocabulary arrays (`panels`, `quick_actions`, `contacts`, a widget's `actions`)
+are diffed by OCCURRENCE rather than membership, because Rust keeps them open with
+no duplicate rule, so a hand-authored repeated entry is reachable and the Remove
+beside one of two identical rows has to plan an edit; the surplus goes from the
+tail so the kept rows keep their own lines. One Apply is ONE `runtime.editPresets` for ONE
+member and ONE `draft.edit`, so one undo reverts it; focus moves after the busy
+hold comes down, as the other three panels do. Which keys a type owns is itself
+DERIVED in the browser too: `workshop-presets.js:101` `probeWidget` asks
+`gui/gm-role-presets.js:185` `parseGmRolePresets` — the desk's own normaliser —
+which keys a widget of that type keeps, so the rule has two readers and no third
+copy.
+
+**Criterion 4 is proved, not asserted.**
+`tests/gm_role_preset_digest_neutrality.rs` runs the shipped probe world twice in
+one process, seeded and `--deterministic`, comparing `world_digest` on every one
+of 400 ticks, with exactly one difference between the arms: whether the world
+carries presets. The authored arm is not hand-typed — it is built by
+`presets::new_preset_source` plus one `presets::compose` `AppendTable` per widget
+type, exactly as one Apply press is — so what is proved neutral is what the panel
+actually writes, and the test asserts the run really simulated (the digest moves)
+before concluding the two agree. Its own binary for the same reason
+`tests/gm_presentation_neutrality.rs` is: Bevy's task pools are process-global,
+so a determinism claim made beside other App-building tests is a claim about
+whoever won that race. The browser half is the other direction:
+`workshop-presets.js:134` `widgetActionChoices` intersects the runtime's action
+list with `GM_WIDGET_ACTION_IDS` from the desk, because a widget button activates
+a shipped control BY DOM ID and an id this build has no control for would be a
+card with a dead button — and `tests/client/workshop-presets-panel.test.js`
+asserts that every id the form OFFERS is in that vocabulary even when the runtime
+lists a route AND the world authors one. The assertion is about what is offered,
+not about what the page displays: an authored `__host*` id must be rendered, as a
+removable row saying this build draws no button for it beside its warning, so
+forbidding the string in the page would fail on exactly the row that lets an
+author delete it while proving nothing about routes. The Rust binary also asserts
+the two things that make its equality mean something: the LOADED `WorldConfig` of
+the two arms is identical once `gm_role_presets` is set aside (so a preset block
+changes no other authored input a GM's authority or the Admission gate could
+read), and a third arm over the same world with one hull moved two metres must
+produce a DIFFERENT digest series, so a `world_digest` blind to the world cannot
+pass the comparison for the wrong reason. Its temp world fixtures remove
+themselves through a `Drop`.
+
+Known residue: a reorder is `set` edits on the swapped slots (the shape #1475's
+roots use), and those edits can carry every scalar and list a preset holds but
+NOT its `[[gm_role_preset.widget]]` tables nor an unknown key whose value the
+catalog does not carry — so `workshop-presets.js:214` `presetMovable` refuses the
+move on BOTH neighbours with a stated reason rather than handing one preset
+another's widgets, and reordering such a preset is a source edit. That is a
+CRITERION GAP, not a covered case: no edit in `document::edit`'s vocabulary moves
+an array-of-tables entry, so criterion 1's preset reorder is delivered for
+widget-less presets only — and both `[[gm_role_preset]]` blocks in the shipped
+`assets/worlds/probe_gm_widgets.toml` carry widgets, so neither of them can be
+reordered here. Each row now states which case it is in: the one that cannot be
+carried says so, and one that CAN but whose neighbour cannot says that instead,
+because a disabled control whose only explanation lives on the neighbour's row is
+state without a word.
+`widget-key-on-wrong-type` is not a browser pre-check at all: the planner writes a
+key only when the type owns it and removes the old type's keys when the type
+changes, so no edit it plans can introduce that violation, and a pre-existing one
+is left byte-identical as the runtime's finding. An `actions` widget reports its
+FIRST offending id only, exactly as the runtime refuses it, so fixing it reveals
+the next. A ship or contact name minted only by a script is not structurally
+knowable and reads as unknown; the finding names the line so an author can see
+which reference is judged. `findings` re-reads every world member on every Check
+and `catalog` calls it as well, which is the cost the panel pays per refresh,
+matching `composition::catalog`.
 
 ## Observing a disposable Test two ways (issue #1472)
 

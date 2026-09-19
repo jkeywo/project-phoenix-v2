@@ -175,6 +175,47 @@ describe('explicit Workshop capability providers', () => {
     await expect(refused.runtime.editEntity(files, edit)).rejects.toThrow('include-cycle');
   });
 
+  it('routes preset readings, preset edits and new presets over the bridge with the native op spellings (issue #1477)', async () => {
+    const presets = { path: 'assets/worlds/mine.toml', origin: 'draft', presets: [],
+      choices: { widget_types: [], widget_actions: [], bands: [], categories: [], entities: [] },
+      worlds: [], findings: [] };
+    const request = vi.fn(async value => {
+      if (value.op === 'presets') return { status: 'presets', presets };
+      if (value.op === 'presets-edit') return { status: 'patched', source: `${value.files[value.request.document_path]}# edited\n` };
+      if (value.op === 'new-preset') return { status: 'patched', source: `[[gm_role_preset]]\nid = "${value.preset_id}"\nlabel = "${value.label}"\n` };
+      return { status: 'done' };
+    });
+    const provider = createNativeWorkshopProvider({ request });
+    const files = { 'assets/worlds/mine.toml': '[global]\n' };
+    expect(await provider.runtime.presets(files, 'assets/worlds/mine.toml')).toEqual(presets);
+    expect(request).toHaveBeenCalledWith({ op: 'presets', files, path: 'assets/worlds/mine.toml' });
+    const edit = { document_path: 'assets/worlds/mine.toml', expected_source: '[global]\n',
+      edits: [{ op: 'put', path: ['gm_role_preset', 0, 'panels'], value_source: '["gm-map-panel"]' }] };
+    expect(await provider.runtime.editPresets(files, edit)).toBe('[global]\n# edited\n');
+    expect(request).toHaveBeenCalledWith({ op: 'presets-edit', files, request: edit });
+    expect(await provider.runtime.newPreset('watch', 'server.gm.watch')).toContain('id = "watch"');
+    expect(request).toHaveBeenCalledWith({ op: 'new-preset', preset_id: 'watch', label: 'server.gm.watch' });
+    // `preset_id`, never `id`: the bridge spreads the operation OVER its own
+    // envelope (`{ id, ...operation }`), so an operation carrying `id` would
+    // replace the correlation number the host reads the reply back by — and the
+    // host removes that field before the typed operation is read at all. No
+    // operation may name it, which is why a preset's own id travels as
+    // `preset_id`.
+    for (const [value] of request.mock.calls) expect(value).not.toHaveProperty('id');
+    const sent = [];
+    const bridge = createWorkshopBridge({ send: value => sent.push(JSON.parse(value)) });
+    const pending = bridge.request(request.mock.calls.at(-1)[0]).catch(() => {});
+    expect(sent[0]).toEqual({ id: 1, op: 'new-preset', preset_id: 'watch', label: 'server.gm.watch' });
+    bridge.dispose();
+    await pending;
+    const broken = createNativeWorkshopProvider({ request: async () => ({ status: 'done' }) });
+    await expect(broken.runtime.presets(files, 'assets/worlds/mine.toml')).rejects.toThrow('Invalid native preset catalog');
+    // A refusal keeps the runtime's own words: the panel maps them to a category.
+    const refused = createNativeWorkshopProvider({ request: async () => ({ status: 'refused',
+      message: 'widget-unknown-band: unknown attention band "puce"', report: null }) });
+    await expect(refused.runtime.editPresets(files, edit)).rejects.toThrow('widget-unknown-band');
+  });
+
   it('correlates private replies and rejects pending work when its surface closes', async () => {
     const sent = [];
     const bridge = createWorkshopBridge({ send: value => sent.push(JSON.parse(value)) });

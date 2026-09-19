@@ -56,6 +56,23 @@ pub(super) fn string_field<'a>(table: &'a dyn TableLike, key: &str) -> Option<&'
     table.get(key)?.as_str()
 }
 
+/// The exact text and 1-based line of one scalar key of a table, or `None`
+/// when the table does not carry it (issue #1477). `fallback` is the line a
+/// panel should point at for a value whose own span the parser did not record
+/// — the entry's header line, which only the caller knows.
+pub(super) fn scalar_at(
+    source: &str,
+    table: &dyn TableLike,
+    key: &str,
+    fallback: usize,
+) -> Option<(String, usize)> {
+    let value = table.get(key)?.as_value()?;
+    Some((
+        value_text(source, value),
+        span_line(source, value.span()).unwrap_or(fallback),
+    ))
+}
+
 /// Every table-like node of a document, depth first, so a trigger action is
 /// found wherever the world schema nests it.
 pub(super) fn visit_tables<'a>(item: &'a Item, visit: &mut dyn FnMut(&'a dyn TableLike)) {

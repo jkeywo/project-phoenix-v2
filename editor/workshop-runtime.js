@@ -2,6 +2,14 @@
  * the simulation. Every validation call gets an explicit immutable dependency
  * bundle and the exact candidate bytes, never a live host overlay. */
 import { createWorkshopAssetSnapshot } from './workshop-assets.js';
+
+/** The dependency bundle with every byte member stripped: base files plus each
+ * pack's id, manifest and text files. */
+export function textDependencies(source) {
+  return { base_files: { ...(source?.base_files || {}) },
+    packs: (source?.packs || []).map(({ id, manifest_toml, files }) => ({ id, manifest_toml, files: { ...(files || {}) } })) };
+}
+
 export function createWorkshopRuntime({
   load = async () => {
     const moduleUrl = new URL('../phoenix.js', import.meta.url).href;
@@ -55,6 +63,108 @@ export function createWorkshopRuntime({
     async patch(source, change) {
       const { runtime } = await ready();
       return runtime.wasm_workshop_patch(source, JSON.stringify(change));
+    },
+    /** The runtime-derived faction and complexity catalog of the draft's text
+     * members (issue #1474). Dependencies travel as TEXT ONLY: the catalog
+     * resolves cross-file references by parsing sources, so the asset bytes the
+     * validator needs would only be serialised to be ignored. */
+    async definitions(files) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_definitions(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies))));
+    },
+    /** All-or-nothing structural edits over exact source; the runtime answers
+     * with the whole new document or refuses without touching anything. */
+    async edit(source, request) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_edit(source, JSON.stringify(request));
+    },
+    /** A faction skeleton spelled by the runtime type, never a JS template. */
+    async newFaction(name, uuid) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_new_faction(name, uuid);
+    },
+    /** The runtime-derived composition catalog of the draft's text members
+     * (issue #1475): the manifest's roots, every world's extra worlds and
+     * script-driven references with their origins, the members, the choices,
+     * what Test and the lobby would list, and the findings. Text-only
+     * dependencies, as the definition catalog takes: origins and cycles are
+     * resolved by parsing sources. */
+    async composition(files) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_composition(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies))));
+    },
+    /** Structural edits over one member checked against the whole candidate
+     * and its dependencies: the runtime answers with the new source or refuses
+     * a missing, cyclic, duplicate or disallowed reference with the source
+     * untouched. */
+    async compose(files, request) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_compose(JSON.stringify(files), JSON.stringify(textDependencies(dependencies)),
+        JSON.stringify(request));
+    },
+    /** A world skeleton spelled by the runtime type, never a JS template. */
+    async newWorld(title) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_new_world(title);
+    },
+    /** The runtime-derived composition of ONE entity template (issue #1476):
+     * its includes with their origins, the merge order, which components are
+     * local or inherited, every effective field with the member that authored
+     * it, the components the runtime type supports, the fragments it could
+     * still include, and the findings. Text-only dependencies, as the other two
+     * catalogs take: the resolver reads sources. */
+    async entity(files, path) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_entity(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), path));
+    },
+    /** Structural edits over one template checked against the whole candidate
+     * and its dependencies: the runtime answers with the new source or refuses a
+     * missing, cyclic, self or disallowed include, an unsupported component or a
+     * template that would stop parsing, with the source untouched. */
+    async editEntity(files, request) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_entity_edit(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), JSON.stringify(request));
+    },
+    /** The one place a resolved runtime VALUE becomes source: the runtime reads
+     * the value at that provenance address and writes it into the local
+     * document as new text, leaving every other byte alone (criterion 2). */
+    async materialiseEntity(files, path, address) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_entity_materialise(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), path, address);
+    },
+    /** The runtime-derived GM role preset catalog of ONE world member (issue
+     * #1477): every preset with its panels, quick actions, contacts and typed
+     * widgets at their exact lines, the runtime-owned choices (widget types and
+     * action ids, attention bands and categories, the world's own entity names),
+     * the world members a preset may be authored in, and the findings. Text-only
+     * dependencies, as the other three catalogs take: the reading parses sources.
+     * The panel ids and quick-action ids this build DRAWS are the browser's own
+     * vocabulary and never travel here. */
+    async presets(files, path) {
+      const { runtime, dependencies } = await ready();
+      return JSON.parse(runtime.wasm_workshop_presets(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), path));
+    },
+    /** Structural edits over one world's presets checked against the whole
+     * candidate and its dependencies: the runtime answers with the new source or
+     * refuses a reserved or duplicate id, an unknown widget type, a key on a
+     * type that does not own it or a reference the world does not have, with the
+     * source untouched. */
+    async editPresets(files, request) {
+      const { runtime, dependencies } = await ready();
+      return runtime.wasm_workshop_presets_edit(JSON.stringify(files),
+        JSON.stringify(textDependencies(dependencies)), JSON.stringify(request));
+    },
+    /** A `[[gm_role_preset]]` block spelled by the runtime type, never a JS
+     * template. */
+    async newPreset(id, label) {
+      const { runtime } = await ready();
+      return runtime.wasm_workshop_new_preset(id, label);
     },
     async validate(bytes) {
       const loaded = await ready();

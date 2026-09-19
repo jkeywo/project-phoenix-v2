@@ -36,6 +36,62 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-model-fields fieldset { min-width: 0; }
 .workshop-model-field { display: grid; gap: .25rem; margin: .5rem 0; }
 .workshop-model-field input { width: 100%; min-height: 2.75rem; }
+.workshop-definitions { display: grid; align-content: start; gap: .75rem; min-width: 0; }
+.workshop-definitions :is(p, label, legend, small, li, span) { overflow-wrap: anywhere; }
+.workshop-definitions fieldset { min-width: 0; display: grid; gap: .5rem; margin: 0; }
+.workshop-definitions :is(input:not([type=checkbox]), select) { width: 100%; min-height: 2.75rem; }
+.workshop-definitions input[type=checkbox] { width: 1.5rem; height: 1.5rem; margin: 0 .5rem 0 0; vertical-align: middle; }
+.workshop-definitions ul { margin: 0; padding-left: 1.25rem; }
+.workshop-definitions li { margin: .25rem 0; }
+.workshop-definitions-form { display: grid; gap: .5rem; }
+.workshop-definitions-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.workshop-definitions-row :is(input, select) { flex: 1 1 12rem; width: auto; }
+.workshop-definitions-rungs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr)); gap: 1rem; }
+.workshop-definitions-origin { font-weight: 700; }
+.workshop-definitions-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-composition { display: grid; align-content: start; gap: .75rem; min-width: 0; }
+.workshop-composition :is(p, label, legend, small, li, span) { overflow-wrap: anywhere; }
+.workshop-composition fieldset { min-width: 0; display: grid; gap: .5rem; margin: 0; }
+.workshop-composition :is(input:not([type=checkbox]), select) { width: 100%; min-height: 2.75rem; }
+.workshop-composition input[type=checkbox] { width: 1.5rem; height: 1.5rem; margin: 0 .5rem 0 0; vertical-align: middle; }
+.workshop-composition ul { margin: 0; padding-left: 1.25rem; }
+.workshop-composition li { margin: .25rem 0; }
+.workshop-composition-form { display: grid; gap: .5rem; }
+.workshop-composition-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.workshop-composition-row :is(input, select) { flex: 1 1 12rem; width: auto; }
+.workshop-composition-origin, .workshop-composition-finding { font-weight: 700; }
+.workshop-composition-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-entity { display: grid; align-content: start; gap: .75rem; min-width: 0; }
+.workshop-entity :is(p, label, legend, small, li, span) { overflow-wrap: anywhere; }
+.workshop-entity fieldset { min-width: 0; display: grid; gap: .5rem; margin: 0; }
+.workshop-entity :is(input:not([type=checkbox]), select) { width: 100%; min-height: 2.75rem; }
+.workshop-entity ul { margin: 0; padding-left: 1.25rem; }
+.workshop-entity li { margin: .25rem 0; }
+.workshop-entity-form { display: grid; gap: .5rem; }
+.workshop-entity-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.workshop-entity-row :is(input, select) { flex: 1 1 12rem; width: auto; }
+.workshop-entity-group { display: grid; gap: .5rem; }
+.workshop-entity-origin p, .workshop-entity-finding { font-weight: 700; }
+/* State is a word in the row's own text; the weight only makes it easier to scan. */
+.workshop-entity li[data-state="local"] span, .workshop-entity li[data-state="override"] span,
+.workshop-entity li[data-owner="local"] label { font-weight: 700; }
+.workshop-entity-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-presets { display: grid; align-content: start; gap: .75rem; min-width: 0; }
+.workshop-presets :is(p, label, legend, small, li, span) { overflow-wrap: anywhere; }
+.workshop-presets fieldset { min-width: 0; display: grid; gap: .5rem; margin: 0; }
+.workshop-presets :is(input:not([type=checkbox]), select) { width: 100%; min-height: 2.75rem; }
+.workshop-presets input[type=checkbox] { width: 1.5rem; height: 1.5rem; margin: 0 .5rem 0 0; vertical-align: middle; }
+.workshop-presets ul { margin: 0; padding-left: 1.25rem; }
+.workshop-presets li { margin: .25rem 0; }
+.workshop-presets-form { display: grid; gap: .5rem; }
+.workshop-presets-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.workshop-presets-row :is(input, select) { flex: 1 1 12rem; width: auto; }
+.workshop-presets-preset, .workshop-presets-widget { display: grid; gap: .5rem; }
+.workshop-presets-origin p, .workshop-presets-finding { font-weight: 700; }
+/* Authored-but-not-drawn is a word in the row's own label; the weight only makes
+   it easier to scan, and the severity below is a word too. */
+.workshop-presets-undrawn label { font-weight: 700; }
+.workshop-presets-findings li[data-severity="error"] { font-weight: 700; }
 .workshop-model-preview :is(input, select) { max-width: 100%; }
 .workshop-model-preview-viewport { width: 100%; }
 .workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }

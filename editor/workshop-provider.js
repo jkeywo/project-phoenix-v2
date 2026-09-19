@@ -94,6 +94,49 @@ export function createNativeWorkshopProvider({ request }) {
       async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
       async inspect(source, document_path) { return (await call({ op: 'inspect', source, document_path })).fields; },
       async patch(source, patch) { return (await call({ op: 'patch', source, patch })).source; },
+      // The native provider builds the dependency bundle itself, the way the
+      // validate route does, so only the draft's text members cross the bridge.
+      async definitions(files) {
+        const response = await call({ op: 'definitions', files });
+        if (response?.status !== 'definitions' || !response.catalog || typeof response.catalog !== 'object') throw new Error('Invalid native definition catalog');
+        return response.catalog;
+      },
+      async edit(source, edit) { return (await call({ op: 'edit', source, edit })).source; },
+      async newFaction(name, uuid) { return (await call({ op: 'new-faction', name, uuid })).source; },
+      // Composition (issue #1475) crosses the bridge the same way: the draft's
+      // text members only, the host resolving the dependencies beneath them.
+      async composition(files) {
+        const response = await call({ op: 'composition', files });
+        if (response?.status !== 'composition' || !response.catalog || typeof response.catalog !== 'object') throw new Error('Invalid native composition catalog');
+        return response.catalog;
+      },
+      async compose(files, request) { return (await call({ op: 'compose', files, request })).source; },
+      async newWorld(title) { return (await call({ op: 'new-world', title })).source; },
+      // Entity composition (issue #1476) crosses the bridge the same way: the
+      // draft's text members only, the host resolving the dependencies beneath
+      // them and the template named by path.
+      async entity(files, path) {
+        const response = await call({ op: 'entity', files, path });
+        if (response?.status !== 'entity' || !response.composition || typeof response.composition !== 'object') throw new Error('Invalid native entity composition');
+        return response.composition;
+      },
+      async editEntity(files, request) { return (await call({ op: 'entity-edit', files, request })).source; },
+      async materialiseEntity(files, path, address) {
+        return (await call({ op: 'entity-materialise', files, path, address })).source;
+      },
+      // GM role presets (issue #1477) cross the bridge the same way: the draft's
+      // text members only, the host resolving the dependencies beneath them and
+      // the world named by path.
+      async presets(files, path) {
+        const response = await call({ op: 'presets', files, path });
+        if (response?.status !== 'presets' || !response.presets || typeof response.presets !== 'object') throw new Error('Invalid native preset catalog');
+        return response.presets;
+      },
+      async editPresets(files, request) { return (await call({ op: 'presets-edit', files, request })).source; },
+      // `preset_id`, not `id`: the bridge envelope owns the key `id` (it is the
+      // request's correlation number, and the host strips it before the
+      // operation is read), so a preset's own id cannot travel under that name.
+      async newPreset(id, label) { return (await call({ op: 'new-preset', preset_id: id, label })).source; },
     },
     async save(draft) {
       const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });

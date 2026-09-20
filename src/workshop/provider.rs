@@ -166,6 +166,14 @@ pub enum Operation {
     },
     BillboardCaptureStatus,
     BillboardCaptureCancel,
+    LodGenerateStart {
+        files: assets::Sources,
+        sidecar: String,
+        source_revision: u64,
+        remesh: bool,
+    },
+    LodGenerateStatus,
+    LodGenerateCancel,
 }
 
 #[derive(Debug, Serialize)]
@@ -278,6 +286,17 @@ pub enum Response {
         base_url: Option<String>,
         paths: Vec<String>,
     },
+    LodGeneration {
+        run: String,
+        state: String,
+        progress: Vec<String>,
+        sidecar: String,
+        source_revision: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        base_url: Option<String>,
+        paths: Vec<String>,
+        required_paths: Vec<String>,
+    },
     Refused {
         message: String,
         report: Option<WorkshopValidation>,
@@ -325,9 +344,30 @@ impl NativeWorkshopProvider {
         &mut self,
         sources: assets::Sources,
     ) -> Result<Files, Response> {
+        self.prepare_native_model_tool(
+            sources,
+            "Native billboard capture requires a selected project root",
+        )
+    }
+
+    pub(crate) fn prepare_lod_generation(
+        &mut self,
+        sources: assets::Sources,
+    ) -> Result<Files, Response> {
+        self.prepare_native_model_tool(
+            sources,
+            "Native LOD generation requires a selected project root",
+        )
+    }
+
+    fn prepare_native_model_tool(
+        &mut self,
+        sources: assets::Sources,
+        refusal: &str,
+    ) -> Result<Files, Response> {
         if self.kind != WorkspaceKind::Project {
             return Err(Response::Refused {
-                message: "Native billboard capture requires a selected project root".into(),
+                message: refusal.into(),
                 report: None,
             });
         }
@@ -349,6 +389,11 @@ impl NativeWorkshopProvider {
     #[cfg(feature = "server")]
     pub(crate) fn capture_paths(&self) -> (PathBuf, PathBuf) {
         (self.root.clone(), self.private.join("billboard-captures"))
+    }
+
+    #[cfg(feature = "server")]
+    pub(crate) fn lod_generation_paths(&self) -> (PathBuf, PathBuf) {
+        (self.root.clone(), self.private.join("lod-generation"))
     }
     /// Host-only document lifecycle boundary. Completed immutable versions and
     /// accepted writes survive; an abandoned upload cannot block the next view.
@@ -683,7 +728,10 @@ impl NativeWorkshopProvider {
             | Operation::PreviewStop
             | Operation::BillboardCaptureStart { .. }
             | Operation::BillboardCaptureStatus
-            | Operation::BillboardCaptureCancel => {
+            | Operation::BillboardCaptureCancel
+            | Operation::LodGenerateStart { .. }
+            | Operation::LodGenerateStatus
+            | Operation::LodGenerateCancel => {
                 return Err(
                     "Disposable Test and preview require their explicit offline native shell"
                         .into(),
@@ -744,19 +792,25 @@ impl NativeWorkshopProvider {
         let mut files = Files::new();
         self.walk(&self.root, &mut files)?;
         if self.kind == WorkspaceKind::Project {
-            let manifest = "scripts/lod-capture-manifest.toml";
-            let path = self
-                .root
-                .join(manifest.replace('/', std::path::MAIN_SEPARATOR_STR));
-            match fs::symlink_metadata(&path) {
-                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-                    return Err("Linked Workshop paths are not supported: scripts/lod-capture-manifest.toml".into());
+            for manifest in [
+                "scripts/lod-capture-manifest.toml",
+                "scripts/lod-manifest.toml",
+            ] {
+                let path = self
+                    .root
+                    .join(manifest.replace('/', std::path::MAIN_SEPARATOR_STR));
+                match fs::symlink_metadata(&path) {
+                    Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                        return Err(format!(
+                            "Linked Workshop paths are not supported: {manifest}"
+                        ));
+                    }
+                    Ok(_) => {
+                        files.insert(manifest.into(), fs::read(path).map_err(io_error)?);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(io_error(error)),
                 }
-                Ok(_) => {
-                    files.insert(manifest.into(), fs::read(path).map_err(io_error)?);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(io_error(error)),
             }
         }
         self.check_files(&files)?;
@@ -775,7 +829,14 @@ impl NativeWorkshopProvider {
             // The project root is explicit authority over authored content,
             // never over code, git metadata or endpoint-private files.
             if entry.file_type().map_err(io_error)?.is_dir() {
-                if relative == "assets" || relative.starts_with("assets/") {
+                if relative == "assets"
+                    || relative.starts_with("assets/")
+                    || matches!(
+                        relative.as_str(),
+                        "scripts" | "scripts/art" | "scripts/art/lod-sources"
+                    )
+                    || relative.starts_with("scripts/art/lod-sources/")
+                {
                     self.resolve(&relative)?;
                     self.walk(&path, files)?;
                 }
@@ -792,7 +853,8 @@ impl NativeWorkshopProvider {
                     return Err("Workshop source bundle is too large".into());
                 }
             } else if entry.file_type().map_err(io_error)?.is_symlink()
-                && relative.starts_with("assets")
+                && (relative.starts_with("assets")
+                    || relative.starts_with("scripts/art/lod-sources"))
             {
                 return Err(format!(
                     "Linked Workshop paths are not supported: {relative}"
@@ -905,7 +967,10 @@ pub fn safe_path(path: &str) -> bool {
 
 pub fn allowed_path(kind: WorkspaceKind, path: &str) -> bool {
     safe_path(path)
-        && ((kind == WorkspaceKind::Project && path == "scripts/lod-capture-manifest.toml")
+        && ((kind == WorkspaceKind::Project
+            && (path == "scripts/lod-capture-manifest.toml"
+                || path == "scripts/lod-manifest.toml"
+                || (path.starts_with("scripts/art/lod-sources/") && assets::binary_path(path))))
             || crate::world::mod_pack::is_allowed_content_path(path)
             || (path.starts_with("assets/")
                 && ((kind == WorkspaceKind::Project

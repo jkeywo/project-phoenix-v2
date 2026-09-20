@@ -121,5 +121,7 @@ export function mountWorkshopModelPreview({ root, provider, draft, selection, bu
     hidden = nextHidden; panel.hidden = hidden; render();
   }
   refresh();
-  return { refresh, node: panel, dispose() { disposed = true; void Promise.resolve(session.dispose()).catch(() => {}); panel.remove(); } };
+  return { refresh, node: panel,
+    review(candidate, selected) { return invoke(() => session.refresh(candidate, selected)); },
+    dispose() { disposed = true; void Promise.resolve(session.dispose()).catch(() => {}); panel.remove(); } };
 }

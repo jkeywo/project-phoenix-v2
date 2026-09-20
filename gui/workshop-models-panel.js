@@ -44,6 +44,7 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   let disposed = false, snapshot = null, rows = [], previousDraft = null, previousPaths = '', preview = null;
   let dependencies = null, dependencyLoad = null, structureSnapshot = null;
   let billboardResult = null;
+  let lodGenerationResult = null;
   let previewVisible = true, testHidden = false;
   const option = (value, label) => { const item = node('option', null, { value }); item.textContent = label; return item; };
   const show = (id, error = false) => {
@@ -221,6 +222,44 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
         captureGroup.append(row);
       }
     }
+    if (provider?.lodGeneration && view.lod.some(level => level.generate)) {
+      const generation = group('workshop.models.generation.heading', 'workshop-model-generation');
+      const remesh = node('input', null, { type: 'checkbox', id: 'workshop-model-generation-remesh' });
+      const progress = node('pre', null, { id: 'workshop-model-generation-progress', 'aria-live': 'polite' });
+      progress.textContent = (lodGenerationResult?.progress || []).join('\n');
+      const run = async work => {
+        if (busy()) return;
+        setBusy(true);
+        try { await work(); }
+        catch (error) { lodGenerationResult = provider.lodGeneration.active;
+          if (!disposed) show(error.message === 'workshop.lod_generation.stale' ? error.message : 'workshop.models.generation.failed', true); }
+        finally { if (!disposed) { setBusy(false); renderStructure(); refresh(); } }
+      };
+      const start = action('workshop-model-generation-start', 'workshop.models.generation.start', () => run(async () => {
+        lodGenerationResult = await provider.lodGeneration.start(current, selected, { remesh: remesh.checked });
+        show('workshop.models.generation.running');
+      }));
+      const poll = action('workshop-model-generation-status', 'workshop.models.generation.status', () => run(async () => {
+        lodGenerationResult = await provider.lodGeneration.status(current, selected);
+        show(lodGenerationResult.reviewReady ? 'workshop.models.generation.ready' : 'workshop.models.generation.running');
+      }), lodGenerationResult?.sidecar !== selected);
+      const review = action('workshop-model-generation-review', 'workshop.models.generation.review', () => run(async () => {
+        const candidate = provider.lodGeneration.reviewDraft(current, selected);
+        const name = modelDocuments(candidate.paths()).find(entry => entry.model === model.value)?.variants
+          .find(entry => entry.path === selected)?.name || null;
+        await preview.review(candidate, { model: model.value, variant: name }); show('workshop.models.generation.previewing');
+      }), !lodGenerationResult?.reviewReady || lodGenerationResult?.sidecar !== selected);
+      const adopt = action('workshop-model-generation-adopt', 'workshop.models.generation.adopt', () => run(async () => {
+        const adopted = await provider.lodGeneration.adopt(current, selected); lodGenerationResult = null;
+        if (adopted.changed) changed(adopted.paths[0]);
+        show(adopted.changed ? 'workshop.models.generation.adopted' : 'workshop.models.generation.unchanged');
+      }), !lodGenerationResult?.reviewReady || lodGenerationResult?.sidecar !== selected);
+      const cancel = action('workshop-model-generation-cancel', 'workshop.models.generation.cancel', () => run(async () => {
+        await provider.lodGeneration.cancel(); lodGenerationResult = null; show('workshop.models.generation.cancelled');
+      }), lodGenerationResult?.sidecar !== selected);
+      generation.append(node('label', 'workshop.models.generation.remesh', { for: remesh.id }), remesh,
+        start, poll, review, adopt, cancel, progress);
+    }
     for (const control of structure.querySelectorAll('button,input,select')) control.disabled = busy() || control.dataset.boundary === 'true';
   }
   function refreshVariants() {
@@ -236,6 +275,9 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     if (current !== previousDraft || paths !== previousPaths) {
       if (previousDraft && current !== previousDraft && provider?.billboardCapture) {
         billboardResult = null; provider.billboardCapture.cancel().catch(() => {});
+      }
+      if (previousDraft && current !== previousDraft && provider?.lodGeneration) {
+        lodGenerationResult = null; provider.lodGeneration.cancel().catch(() => {});
       }
       const old = model.value;
       const entries = modelDocuments(current?.paths() || []);
@@ -341,13 +383,17 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     newName.value = ''; inspect.focus();
   });
   removeVariant.addEventListener('click', () => commitStructure({ type: 'variant-remove', path: variant.value, model: model.value }));
-  const cancelCaptureSelection = () => {
-    if (!billboardResult || !provider?.billboardCapture) return;
-    billboardResult = null; provider.billboardCapture.cancel().catch(() => {});
+  const cancelModelToolsSelection = () => {
+    if (billboardResult && provider?.billboardCapture) {
+      billboardResult = null; provider.billboardCapture.cancel().catch(() => {});
+    }
+    if (lodGenerationResult && provider?.lodGeneration) {
+      lodGenerationResult = null; provider.lodGeneration.cancel().catch(() => {});
+    }
   };
-  model.addEventListener('change', () => { cancelCaptureSelection(); refreshVariants(); renderStructure(); refresh(); });
+  model.addEventListener('change', () => { cancelModelToolsSelection(); refreshVariants(); renderStructure(); refresh(); });
   subject.addEventListener('change', () => refresh());
-  variant.addEventListener('change', () => { cancelCaptureSelection(); renderStructure(); refresh(); });
+  variant.addEventListener('change', () => { cancelModelToolsSelection(); renderStructure(); refresh(); });
   if (typeof runtime.dependencies === 'function') loadDependencies();
   refresh();
   if (typeof runtime.dependencies !== 'function') renderStructure();
@@ -366,5 +412,11 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       if (previewVisible === value) return;
       previewVisible = value; refresh();
     },
-    dispose() { disposed = true; provider?.billboardCapture?.cancel().catch(() => {}); preview.dispose(); section.remove(); } };
+    dispose() {
+      disposed = true;
+      provider?.billboardCapture?.cancel().catch(() => {});
+      provider?.lodGeneration?.cancel().catch(() => {});
+      preview.dispose();
+      section.remove();
+    } };
 }

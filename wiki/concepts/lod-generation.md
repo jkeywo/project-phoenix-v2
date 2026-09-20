@@ -2,7 +2,7 @@
 title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
-sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, editor/workshop-billboard-capture.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
+sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, src/native_host/workshop/lod_generation.rs, editor/workshop-billboard-capture.js, editor/workshop-lod-generation.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
 updated: 2026-09-20
 ---
 
@@ -61,6 +61,16 @@ same sidecars, with the `--remesh` and `--force` flags as checkboxes — see
 [Model Viewer](./model-viewer.md). There is no second code path: the panel edits
 the sidecar and shells out to this script, because a ladder that only the viewer
 could produce would be a ladder CI's drift check could not verify.
+
+Native Workshop runs that same script for the exact selected sidecar against a
+private stage of the captured draft. Its pinned Node tools and optional
+configured Blender stay in the selected project checkout. Progress is bounded,
+and cancellation kills the child. Successful GLBs, an optional remesh
+intermediate, the exact sidecar and the manifest are served from nonce-bearing
+loopback routes. The exact candidate must pass ordinary validation and can be
+rendered in the captured model preview before one grouped adoption. A changed
+draft or selection, tool failure, Test start, surface loss or exit removes the
+stage without changing the draft. Browser Workshop has no process capability.
 
 It reads every sidecar under `assets/models`, de-duplicates by output path (the
 small/large/huge/cosmetic variants of one rock share one generated `.glb`, and are

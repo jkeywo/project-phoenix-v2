@@ -30,6 +30,21 @@ workshop.models.capture.failed,Native billboard capture failed,[Billboard captur
 workshop.models.capture.preview_alt,Native billboard preview image,[Captured preview for {output}]
 workshop.models.capture.provenance,Native billboard preview provenance,"[Draft revision {revision}; source {source}; {views} views at {resolution}px, pitch {pitch}°.]"
 workshop.billboard.stale,Native billboard result is stale,[The draft changed after capture started. Capture again before adopting.]
+workshop.models.generation.heading,Native LOD generation controls,[Generate model levels]
+workshop.models.generation.remesh,Optional authored Blender voxel remesh,[Run the configured Blender remesh before generation]
+workshop.models.generation.start,Start selected model LOD generation,[Generate]
+workshop.models.generation.status,Refresh bounded LOD generation progress,[Check progress]
+workshop.models.generation.review,Render generated candidate before adoption,[Preview generated model]
+workshop.models.generation.adopt,Adopt generated GLBs and manifest,[Adopt generated files]
+workshop.models.generation.cancel,Cancel LOD generation,[Cancel generation]
+workshop.models.generation.running,LOD generation running,[LOD generation is running.]
+workshop.models.generation.ready,LOD generation ready for preview,[Generated files passed validation. Preview them before adoption.]
+workshop.models.generation.previewing,Generated LOD review preview active,[The captured preview is rendering the generated draft candidate.]
+workshop.models.generation.adopted,Generated LOD files adopted,[Generated GLBs and provenance were adopted as one undoable draft change.]
+workshop.models.generation.unchanged,Generated LOD files match draft,[The generated files already match this draft. No history entry was added.]
+workshop.models.generation.cancelled,LOD generation cancelled,[LOD generation cancelled; the draft was not changed.]
+workshop.models.generation.failed,LOD generation failed,[LOD generation failed; temporary outputs were removed and the draft was not changed.]
+workshop.lod_generation.stale,LOD generation stale source or selection,[The source or selected model changed. Generate again before preview or adoption.]
 workshop.models.owner,Exact model source ownership,"[Source: {file}, line {line}]"
 workshop.models.name,Structural model item name,[Name]
 workshop.models.position,Raw model-space vector position,"[Position (x, y, z)]"

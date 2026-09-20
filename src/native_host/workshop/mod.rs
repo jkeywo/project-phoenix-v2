@@ -4,6 +4,7 @@ pub mod billboard_capture;
 pub mod bridge;
 pub mod document;
 pub mod keyboard;
+pub mod lod_generation;
 pub mod preview;
 pub mod test_clock;
 pub mod test_process;

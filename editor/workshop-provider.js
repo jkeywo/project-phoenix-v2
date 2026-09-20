@@ -8,6 +8,7 @@ import { createBrowserWorkshopTest, createWorkshopTestFrame } from './workshop-t
 import { createWorkshopTestPreparation } from './workshop-test-snapshot.js';
 import { createBrowserWorkshopPreview, createWorkshopPreviewFrame } from './workshop-preview.js';
 import { createWorkshopBillboardCapture } from './workshop-billboard-capture.js';
+import { createWorkshopLodGeneration } from './workshop-lod-generation.js';
 
 export function newWorkshopPack(dependencies) {
   const content = parse(dependencies.base_files['assets/scenarios.toml']).content;
@@ -128,6 +129,8 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
   };
   const billboardCapture = createWorkshopBillboardCapture({ call, fetcher, upload: uploadBytes,
     runtime: nativeRuntime, restoreDocument: snapshot => WorkshopDocument.restore(snapshot, { native: true }) });
+  const lodGeneration = createWorkshopLodGeneration({ call, fetcher, upload: uploadBytes, runtime: nativeRuntime,
+    restoreDocument: snapshot => WorkshopDocument.restore(snapshot, { native: true }) });
   return {
     canImport: false, canCreate: false,
     async load() {
@@ -258,6 +261,7 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
       },
     },
     billboardCapture,
+    lodGeneration,
     test: {
       async catalog(files) {
         const response = await call({ op: 'test-catalog', files });

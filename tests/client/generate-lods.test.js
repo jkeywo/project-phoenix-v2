@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parse as parseToml } from 'smol-toml';
 import {
   collectTargets,
+  selectTargets,
   canonicalParams,
   matchesFilter,
   planSteps,
@@ -103,6 +104,14 @@ shape = "sphere"
 `;
 
 describe('collectTargets', () => {
+  it('restricts a native Workshop run to the exact reviewed sidecar instead of substring matches', () => {
+    const targets = [
+      { output: 'a.glb', source: 'source.glb', declaredBy: ['assets/models/ship.model.toml'] },
+      { output: 'b.glb', source: 'source.glb', declaredBy: ['assets/models/ship.model.toml.bak'] },
+    ];
+    expect(selectTargets(targets, ['ship.model.toml'], 'assets/models/ship.model.toml')).toEqual([targets[0]]);
+    expect(selectTargets(targets, ['ship.model.toml'])).toEqual(targets);
+  });
   it('collects one target per generated level, in output order', () => {
     const { targets, errors } = collectTargets([sidecar('assets/models/rock.large.toml', ROCK_LADDER)]);
     expect(errors).toEqual([]);

@@ -260,6 +260,12 @@ export function matchesFilter(target, filters) {
   return filters.some((f) => haystack.includes(f));
 }
 
+export function selectTargets(targets, filters, selectedSidecar = null) {
+  return selectedSidecar
+    ? targets.filter((target) => target.declaredBy.includes(selectedSidecar))
+    : targets.filter((target) => matchesFilter(target, filters));
+}
+
 /**
  * The gltf-transform invocations for one target, in order.
  *
@@ -773,6 +779,9 @@ function parseArgs(argv) {
 
 async function main() {
   const root = process.cwd();
+  // Native Workshop runs this same production script against an immutable
+  // private stage. Its pinned JS tools stay in the selected project checkout.
+  const toolRoot = process.env.PHOENIX_LOD_TOOL_ROOT || root;
   const cli = parseArgs(process.argv.slice(2));
   if (cli.unknown.length) {
     console.error(`[generate-lods] unknown flag(s): ${cli.unknown.join(', ')}`);
@@ -790,9 +799,13 @@ async function main() {
     return;
   }
 
-  const selected = allTargets.filter((t) => matchesFilter(t, cli.filters));
+  // The native Workshop supplies an exact reviewed sidecar rather than a
+  // human substring filter. This private process environment cannot widen a
+  // normal CLI run and prevents similarly named models joining one adoption.
+  const selectedSidecar = process.env.PHOENIX_LOD_SIDECAR || null;
+  const selected = selectTargets(allTargets, cli.filters, selectedSidecar);
   if (!selected.length) {
-    console.error(`[generate-lods] no declared LOD output matches ${cli.filters.join(' ')}`);
+    console.error(`[generate-lods] no declared LOD output matches ${selectedSidecar || cli.filters.join(' ')}`);
     process.exit(1);
   }
 
@@ -853,7 +866,7 @@ async function main() {
   }
 
   // ── Default: generate. ───────────────────────────────────────────────────
-  const gltf = gltfTransformCli(root);
+  const gltf = gltfTransformCli(toolRoot);
   const blender = cli.remesh && selected.some((t) => t.params.remeshVoxelSize !== null)
     ? await resolveBlender(root)
     : null;
@@ -862,7 +875,8 @@ async function main() {
     console.error(`\n[generate-lods] ${target.output}`);
     console.error(`  from ${target.effectiveSource}  [${canonicalParams(target.params)}]`);
 
-    const remesh = remeshStep(target, { blender });
+    const remesh = remeshStep(target, { blender,
+      script: path.join(toolRoot, BLENDER_SCRIPT) });
     if (remesh) {
       if (cli.remesh) {
         console.error(`  ${remesh.label}`);

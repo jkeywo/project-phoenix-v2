@@ -134,3 +134,23 @@ it('cancels a native capture immediately when the selected variant changes', asy
   variants.dispatchEvent(new Event('change'));
   await vi.waitFor(() => expect(billboardCapture.cancel).toHaveBeenCalled());
 });
+
+it('exposes labelled native generation and optional remesh controls only when the capability and recipe exist', async () => {
+  panel.dispose();
+  const generated = 'assets/models/ship_lod1.glb';
+  draft.put(generated, Uint8Array.of(4, 5, 6));
+  draft.edit(path, `${source}\r\n[[lod]]\r\nmodel = "${generated}"\r\n\r\n[lod.generate]\r\nsource = "assets/models/ship.glb"\r\nratio = 0.5\r\n`);
+  const lodGeneration = { active: null, start: vi.fn(async () => ({ sidecar: path, progress: [] })),
+    status: vi.fn(), reviewDraft: vi.fn(), adopt: vi.fn(), cancel: vi.fn(async () => {}) };
+  panel = mountWorkshopModels({ root: document.getElementById('root'), provider: { lodGeneration }, runtime, draft: () => draft,
+    busy: () => held, setBusy(value) { held = value; panel?.refresh(); }, changed });
+  document.getElementById('workshop-model').value = 'assets/models/ship.glb';
+  document.getElementById('workshop-model').dispatchEvent(new Event('change'));
+  await vi.waitFor(() => expect(document.getElementById('workshop-model-generation')).not.toBeNull());
+  const remesh = document.getElementById('workshop-model-generation-remesh');
+  expect(remesh.type).toBe('checkbox');
+  expect(document.querySelector(`label[for="${remesh.id}"]`).textContent).toBe(t('workshop.models.generation.remesh'));
+  expect(document.getElementById('workshop-model-generation-progress').getAttribute('aria-live')).toBe('polite');
+  document.getElementById('workshop-model-generation-start').click();
+  await vi.waitFor(() => expect(lodGeneration.start).toHaveBeenCalledWith(draft, path, { remesh: false }));
+});

@@ -126,7 +126,7 @@ impl WorkshopWorker {
     pub fn spawn(provider: NativeWorkshopProvider) -> Result<Self, String> {
         let mut operators = crate::native_host::panes::operator::NativeOperators::default();
         operators.configure("workshop");
-        Self::spawn_with_operators(provider, operators, None, None)
+        Self::spawn_with_operators(provider, operators, None, None, None)
     }
 
     pub fn spawn_hosted(
@@ -143,11 +143,19 @@ impl WorkshopWorker {
             tool_root,
             capture_directory,
         )?;
+        let (tool_root, generation_directory) = provider.lod_generation_paths();
+        let generation = super::lod_generation::LodGeneration::new(
+            documents.clone(),
+            origin.clone(),
+            tool_root,
+            generation_directory,
+        )?;
         Self::spawn_with_operators(
             provider,
             operators,
             Some(super::preview::PreviewRoutes::new(documents, origin)),
             Some(capture),
+            Some(generation),
         )
     }
 
@@ -156,6 +164,7 @@ impl WorkshopWorker {
         mut operators: crate::native_host::panes::operator::NativeOperators,
         mut preview: Option<super::preview::PreviewRoutes>,
         mut billboard: Option<super::billboard_capture::BillboardCapture>,
+        mut lod_generation: Option<super::lod_generation::LodGeneration>,
     ) -> Result<Self, String> {
         super::test_process::retire_abandoned_stages(&provider.test_directory());
         let (requests, input) = mpsc::sync_channel(8);
@@ -184,7 +193,12 @@ impl WorkshopWorker {
                                     if let Some(preview) = preview.as_mut() {
                                         preview.retire();
                                     }
-                                    if let Some(capture) = billboard.as_mut() { capture.retire(); }
+                                    if let Some(capture) = billboard.as_mut() {
+                                        capture.retire();
+                                    }
+                                    if let Some(run) = lod_generation.as_mut() {
+                                        run.retire();
+                                    }
                                     test = None;
                                     active_epoch = epoch;
                                 }
@@ -228,7 +242,12 @@ impl WorkshopWorker {
                             if let Some(preview) = preview.as_mut() {
                                 preview.retire();
                             }
-                            if let Some(capture) = billboard.as_mut() { capture.retire(); }
+                            if let Some(capture) = billboard.as_mut() {
+                                capture.retire();
+                            }
+                            if let Some(run) = lod_generation.as_mut() {
+                                run.retire();
+                            }
                             // A view crash/replacement retains source recovery, but
                             // cannot leave a detached disposable simulation alive.
                             test = None;
@@ -250,7 +269,12 @@ impl WorkshopWorker {
                                         if let Some(preview) = preview.as_mut() {
                                             preview.retire();
                                         }
-                                        if let Some(capture) = billboard.as_mut() { capture.retire(); }
+                                        if let Some(capture) = billboard.as_mut() {
+                                            capture.retire();
+                                        }
+                                        if let Some(run) = lod_generation.as_mut() {
+                                            run.retire();
+                                        }
                                         match provider.prepare_test(files, selection, breakpoint) {
                                             Ok(snapshot) => {
                                                 let started = std::env::current_exe()
@@ -346,6 +370,23 @@ impl WorkshopWorker {
                                     Operation::BillboardCaptureCancel => match billboard.as_mut() {
                                         Some(capture) => capture.cancel(),
                                         None => Response::Done,
+                                    },
+                                    Operation::LodGenerateStart { files, sidecar, source_revision, remesh } => {
+                                        match lod_generation.as_mut() {
+                                            Some(run) => match provider.prepare_lod_generation(files) {
+                                                Ok(files) => run.start(files, sidecar, source_revision, remesh)
+                                                    .unwrap_or_else(|message| Response::Refused { message, report: None }),
+                                                Err(response) => response,
+                                            },
+                                            None => Response::Refused { message: "Native LOD generation is unavailable".into(), report: None },
+                                        }
+                                    }
+                                    Operation::LodGenerateStatus => match lod_generation.as_mut() {
+                                        Some(run) => run.status().unwrap_or_else(|message| Response::Refused { message, report: None }),
+                                        None => Response::Refused { message: "Native LOD generation is unavailable".into(), report: None },
+                                    },
+                                    Operation::LodGenerateCancel => match lod_generation.as_mut() {
+                                        Some(run) => run.cancel(), None => Response::Done,
                                     },
                                     operation => {
                                         provider
@@ -447,7 +488,7 @@ mod tests {
             let mut operators = NativeOperators::default();
             operators.configure("workshop");
             operators.root = Some(self.0.join("profiles"));
-            WorkshopWorker::spawn_with_operators(provider, operators, None, None).unwrap()
+            WorkshopWorker::spawn_with_operators(provider, operators, None, None, None).unwrap()
         }
         fn hosted_worker(
             &self,
@@ -469,6 +510,7 @@ mod tests {
                     documents,
                     "http://127.0.0.1:7".into(),
                 )),
+                None,
                 None,
             )
             .unwrap()

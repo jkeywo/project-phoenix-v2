@@ -656,6 +656,26 @@ fn project_binary_members_are_exact() {
         WorkspaceKind::Mod,
         "scripts/lod-capture-manifest.toml"
     ));
+    assert!(allowed_path(
+        WorkspaceKind::Project,
+        "scripts/lod-manifest.toml"
+    ));
+    assert!(allowed_path(
+        WorkspaceKind::Project,
+        "scripts/art/lod-sources/cruiser.glb"
+    ));
+    assert!(!allowed_path(
+        WorkspaceKind::Project,
+        "scripts/generate-lods.mjs"
+    ));
+    assert!(!allowed_path(
+        WorkspaceKind::Mod,
+        "scripts/lod-manifest.toml"
+    ));
+    assert!(!allowed_path(
+        WorkspaceKind::Mod,
+        "scripts/art/lod-sources/cruiser.glb"
+    ));
 }
 
 #[test]

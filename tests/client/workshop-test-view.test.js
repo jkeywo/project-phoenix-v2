@@ -37,6 +37,55 @@ describe('the disposable Test view', () => {
     gm.dispose();
   });
 
+  it('tests captured role presets and typed widgets as local presentation that resets with the disposable page', () => {
+    const markup = () => gmConsoleMarkup(SERVER)
+      .replace(/<ph-navigation-map\b[\s\S]*?<\/ph-navigation-map>/g, '');
+    const payload = JSON.stringify([{ id: 'draft-gm', label: 'draft.role',
+      panels: ['gm-map-panel'], quick_actions: [], contacts: [], widget: [
+        { id: 'brief', type: 'note', label: 'draft.brief', text: 'draft.note' },
+        { id: 'controls', type: 'actions', label: 'draft.controls', actions: ['gm-session-pause'] },
+      ] }]);
+    document.body.innerHTML = markup();
+    const first = mountWorkshopTestGm({ win: window });
+    const refusePause = vi.fn(window.__hostSetSessionPaused);
+    window.__hostSetSessionPaused = refusePause;
+    window.__hostLocalGm = () => ({ id: 'test-only', name: 'Test only', connected: true });
+    first.channel('gm_session', JSON.stringify({ paused: false, results: [] }));
+    first.setRolePresets(payload);
+    const select = document.getElementById('gm-role-preset-select');
+    expect(document.querySelector('label[for="gm-role-preset-select"]')).not.toBeNull();
+    expect([...select.options].map(option => option.value)).toEqual(['all', 'draft-gm']);
+    select.value = 'draft-gm'; select.dispatchEvent(new Event('change'));
+    expect(first.rolePresetState()).toMatchObject({ desiredId: 'draft-gm', effectivePresetId: 'draft-gm' });
+    const card = document.querySelector('[data-widget-id="brief"]');
+    expect(card.querySelector('[data-note-id="draft.note"]')).not.toBeNull();
+    expect(card.getAttribute('aria-labelledby')).toBe(card.querySelector('h3').id);
+    // The authored actions card presses the shipped session control. Even if
+    // a Test page is hand-poked with an apparent operator, that ordinary path
+    // reaches the explicit refusal and cannot become a silent no-op.
+    const pause = document.querySelector('[data-widget-action="gm-session-pause"]');
+    expect(pause.disabled).toBe(false);
+    pause.click();
+    expect(refusePause).toHaveBeenCalledWith(true, expect.any(String));
+    expect(() => window.__hostGmCheckpointCreate('forbidden')).toThrow();
+    // A captured list going stale falls back through the ordinary controller,
+    // retaining only this disposable page's local choice for a reappearance.
+    first.setRolePresets('[]');
+    expect(first.rolePresetState()).toMatchObject({ desiredId: 'draft-gm', effectivePresetId: 'all' });
+    first.setRolePresets(payload);
+    expect(first.rolePresetState().effectivePresetId).toBe('draft-gm');
+    first.dispose();
+
+    // Restart is a fresh iframe and therefore a fresh local selection. No
+    // reconnect identity or operator profile crosses the Test boundary.
+    document.body.innerHTML = markup();
+    const restarted = mountWorkshopTestGm({ win: window });
+    restarted.setRolePresets(payload);
+    expect(restarted.rolePresetState()).toMatchObject({ desiredId: null, effectivePresetId: 'all' });
+    expect(document.getElementById('gm-widgets').hidden).toBe(true);
+    restarted.dispose();
+  });
+
   it('accepts only a view naming the GM desk or one ship', async () => {
     // The child's allow-list is the boundary: a control that is not exactly one
     // of these shapes never reaches the runtime at all.
@@ -73,6 +122,9 @@ describe('the disposable Test view', () => {
     for (const action of actions) {
       expect(TEST_GM_REFUSED_ACTIONS, `${action} must be refused in Test`).toContain(action);
     }
+    expect(TEST_GM_REFUSED_ACTIONS).toEqual(expect.arrayContaining([
+      '__hostSetSessionPaused', '__hostGmCheckpointCreate',
+    ]));
   });
 
   it('switches view through the runtime status, never the request', () => {

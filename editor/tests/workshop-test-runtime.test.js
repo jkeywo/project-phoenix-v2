@@ -17,6 +17,10 @@ function fixture() {
     wasm_load_config: vi.fn(), wasm_preload_error: vi.fn(() => ''), wasm_is_preload_complete: vi.fn(() => true),
     wasm_fail_preload_fetch: vi.fn(), wasm_fail_world_fetch: vi.fn(),
     wasm_select_ship: vi.fn(), wasm_validate_stations: vi.fn(),
+    wasm_get_gm_role_presets: vi.fn(() => JSON.stringify([{ id: 'draft-gm', label: 'draft.label',
+      panels: ['gm-map-panel'], quick_actions: [], contacts: [], widget: [
+        { id: 'brief', type: 'note', label: 'draft.brief', text: 'draft.note' },
+      ] }])),
     wasm_workshop_test_init: vi.fn(() => { status = { running: true, starting: false, tick: 0, acknowledged: 0 }; }),
     wasm_workshop_test_status: vi.fn(() => status && JSON.stringify(status)),
     wasm_workshop_test_control: vi.fn(json => { const value = JSON.parse(json); status = { ...status, tick: status.tick + 1, acknowledged: value.id }; }),
@@ -28,7 +32,8 @@ describe('captured browser Test boot', () => {
   it('loads the selected hull/include/optional rig and Rhai through normal callbacks using only captured text', async () => {
     const { runtime, load } = fixture();
     const captured = snapshot();
-    const run = await launchWorkshopTest(captured, { load });
+    const onGmRolePresets = vi.fn();
+    const run = await launchWorkshopTest(captured, { load, onGmRolePresets });
     expect(runtime.wasm_load_world).toHaveBeenCalledWith(world, captured.files[world], [ship]);
     expect(runtime.wasm_load_config).toHaveBeenCalledExactlyOnceWith(fragment, '# included\r\n');
     expect(runtime.wasm_push_sidecar_toml).toHaveBeenCalledWith(rig, '');
@@ -36,6 +41,8 @@ describe('captured browser Test boot', () => {
     expect(runtime.wasm_select_ship).toHaveBeenCalledWith(ship);
     expect(runtime.wasm_validate_stations).toHaveBeenCalledWith(ship, captured.files[ship]);
     expect(runtime.wasm_workshop_test_init).toHaveBeenCalledWith(JSON.stringify({ selection: captured.selection, revision: captured.revision }), captured.files);
+    expect(onGmRolePresets).toHaveBeenCalledExactlyOnceWith(runtime.wasm_get_gm_role_presets());
+    expect(runtime.wasm_workshop_test_control).not.toHaveBeenCalled();
     expect(await run.control({ command: 'step' })).toMatchObject({ tick: 1, acknowledged: 1 });
     run.dispose(); await expect(run.status()).rejects.toThrow('closed');
   });
@@ -58,11 +65,23 @@ describe('captured browser Test boot', () => {
   });
 
   it('does not start a late-loaded WASM module after the iframe is retired', async () => {
-    const { runtime } = fixture(); const abort = new AbortController(); let finish;
-    const launch = launchWorkshopTest(snapshot(), { load: () => new Promise(resolve => { finish = resolve; }), signal: abort.signal });
+    const { runtime } = fixture(); const abort = new AbortController(); let finish; const onGmRolePresets = vi.fn();
+    const launch = launchWorkshopTest(snapshot(), { load: () => new Promise(resolve => { finish = resolve; }),
+      signal: abort.signal, onGmRolePresets });
     abort.abort(); finish(runtime);
     await expect(launch).rejects.toThrow();
     expect(runtime.set_config_request_callback).not.toHaveBeenCalled();
     expect(runtime.wasm_workshop_test_init).not.toHaveBeenCalled();
+    expect(onGmRolePresets).not.toHaveBeenCalled();
+  });
+
+  it('rejects a retired boot before stale role descriptors can reach the page', async () => {
+    const { runtime, load } = fixture(); const abort = new AbortController(); const onGmRolePresets = vi.fn();
+    runtime.wasm_workshop_test_init.mockImplementation(() => {});
+    const launch = launchWorkshopTest(snapshot(), { load, signal: abort.signal, onGmRolePresets });
+    await vi.waitFor(() => expect(runtime.wasm_workshop_test_init).toHaveBeenCalled());
+    abort.abort();
+    await expect(launch).rejects.toThrow();
+    expect(onGmRolePresets).not.toHaveBeenCalled();
   });
 });

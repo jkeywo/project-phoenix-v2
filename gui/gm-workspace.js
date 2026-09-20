@@ -723,6 +723,11 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
+    // The live host and disposable Workshop Test both feed the same ordinary
+    // presentation controller. Keeping this on the workspace avoids a second
+    // parser or widget renderer in the Test adapter.
+    setRolePresets: gmRolePresets.setAvailablePresets,
+    rolePresetState: gmRolePresets.state,
     dispose() { gmContact?.dispose(); workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       workshopSource.refresh();

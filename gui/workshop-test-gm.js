@@ -21,6 +21,7 @@ import { t, applyToDom } from './strings.js';
 /** Every write a GM surface can attempt. Kept as a list so a new action added
  * to the live console is a visible addition here rather than a silent gap. */
 export const TEST_GM_REFUSED_ACTIONS = Object.freeze([
+  '__hostSetSessionPaused', '__hostGmCheckpointCreate',
   '__hostFireGmEvent', '__hostSetGmEventPaused', '__hostArmGmEventSkip',
   '__hostObjectiveAction', '__hostTransmitComms', '__hostSpawnPaletteEntity',
   '__hostApplyDirectEffect', '__hostSetSystemDisabled', '__hostSetContactOverride',
@@ -55,6 +56,10 @@ export function mountWorkshopTestGm({ win = window, doc = win.document } = {}) {
   return {
     /** Fold one `gm_*` projection of the running Test. */
     channel(name, payload) { dispatch(name, payload); },
+    /** Exact role/widget descriptors parsed from this captured run, through
+     * the ordinary GM role-preset and widget controllers. */
+    setRolePresets(payload) { workspace.setRolePresets(payload); },
+    rolePresetState() { return workspace.rolePresetState(); },
     dispose() {
       workspace.dispose?.();
       for (const name of TEST_GM_REFUSED_ACTIONS) delete win[name];

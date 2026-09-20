@@ -122,16 +122,16 @@ entities:
         - editor/workshop-entity-composition.js
         - editor/entity-includes.js
         - editor/component-schema.js
-        - gui/workshop-entity-composition-panel.js
+        - gui/workshop-ship-authoring-panel.js
         - gui/workshop-authoring.js
       symbols:
         - entityInventory
         - inspectEntityComposition
         - prepareEntityOperation
         - applyEntityOperation
-        - mountWorkshopEntityComposition
+        - mountWorkshopShipAuthoring
       tests:
-        - npx vitest run editor/tests/workshop-entity-composition.test.js tests/client/workshop-entity-composition-panel.test.js
+        - npx vitest run editor/tests/workshop-ship-authoring.test.js tests/client/workshop-ship-authoring-panel.test.js
         - npx vitest run tests/client/workshop-authoring.test.js
   - component: workshop-gm-role-preset-authoring
     core:
@@ -153,8 +153,8 @@ entities:
     implementation:
       status: declared
       paths:
-        - editor/workshop-role-presets.js
-        - gui/workshop-role-presets-panel.js
+        - editor/workshop-presets.js
+        - gui/workshop-presets-panel.js
         - gui/gm-role-presets.js
         - gui/workshop-authoring.js
       symbols:
@@ -162,9 +162,9 @@ entities:
         - inspectRolePresets
         - prepareRolePresetOperation
         - applyRolePresetOperation
-        - mountWorkshopRolePresets
+        - mountWorkshopPresets
       tests:
-        - npx vitest run editor/tests/workshop-role-presets.test.js tests/client/workshop-role-presets-panel.test.js
+        - npx vitest run editor/tests/workshop-presets.test.js tests/client/workshop-presets-panel.test.js
         - npx vitest run tests/client/workshop-authoring.test.js
   - component: workshop-playable-ship-authoring
     core:

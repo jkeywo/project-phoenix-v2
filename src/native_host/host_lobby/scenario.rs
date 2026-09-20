@@ -131,6 +131,34 @@ pub enum HostLobbyRecord {
     /// host's own rule de-wasm-gated rather than a second one — so a fully
     /// AI-crewed launch obeys the same Lobby/preload/world checks on both hosts.
     ForceStart,
+    FleetCode {
+        code: String,
+        suffix: String,
+    },
+    FleetRoster {
+        generation: u64,
+        roster: String,
+    },
+    FleetFrame {
+        frame: String,
+        authenticated_slot: u32,
+    },
+    FleetStartGrant {
+        grant: serde_json::Value,
+    },
+    FleetHostLost {
+        slot: u32,
+    },
+    FleetSlotClaimed {
+        slot: u32,
+    },
+    FleetWireSend {
+        frame: String,
+    },
+    FleetFault {
+        reason: String,
+        detail: String,
+    },
     /// The operator pressed a button in the monitor row: show the shared
     /// viewscreen on this display (issue #1330).
     ///

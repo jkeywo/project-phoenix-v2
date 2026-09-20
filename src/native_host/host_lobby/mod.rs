@@ -134,6 +134,7 @@
 
 pub mod bridge;
 pub mod document;
+pub mod fleet;
 pub mod fullscreen;
 pub mod join;
 pub mod landing;
@@ -1058,7 +1059,10 @@ pub(crate) fn drain_surface_records(
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
     mut assignments: Option<ResMut<super::console_assignment::ConsoleAssignments>>,
     mut pending_save: Option<ResMut<super::layout_store_systems::PendingLayoutSave>>,
-    mut audio: Option<ResMut<super::audio::NativeRoomAudio>>,
+    mut room_records: ParamSet<(
+        Option<ResMut<super::audio::NativeRoomAudio>>,
+        Option<ResMut<fleet::NativeFleetEvents>>,
+    )>,
 ) {
     let Some(bridge) = bridge else {
         return;
@@ -1094,6 +1098,28 @@ pub(crate) fn drain_surface_records(
             );
             continue;
         };
+        if room_records
+            .p1()
+            .as_mut()
+            .is_some_and(|events| events.record(&record))
+        {
+            continue;
+        }
+        match &record {
+            HostLobbyRecord::FleetCode { code, suffix } => {
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "native fleet code {suffix} (full: {code})"
+                );
+                continue;
+            }
+            HostLobbyRecord::FleetFault { reason, detail } => {
+                crate::pwarn!(log, LogCat::Lobby, "native fleet: {reason} {detail}");
+                continue;
+            }
+            _ => {}
+        }
         // The three layout verbs fall through to ONE arm, below. What separates
         // them is only which [`LayoutAction`] they name; everything after that
         // — the law that judges it, the notice a refusal earns, the line the
@@ -1280,7 +1306,7 @@ pub(crate) fn drain_surface_records(
             | HostLobbyRecord::SelectAudioOutput { .. }
             | HostLobbyRecord::RetryAudioOutput
             | HostLobbyRecord::TestAudioOutput) => {
-                if let Some(audio) = audio.as_mut() {
+                if let Some(audio) = room_records.p0().as_mut() {
                     audio.command(&record);
                 }
                 continue;
@@ -1297,6 +1323,14 @@ pub(crate) fn drain_surface_records(
             HostLobbyRecord::UnassignStation { station } => {
                 layout::unassign_station_action(station)
             }
+            HostLobbyRecord::FleetCode { .. }
+            | HostLobbyRecord::FleetRoster { .. }
+            | HostLobbyRecord::FleetFrame { .. }
+            | HostLobbyRecord::FleetStartGrant { .. }
+            | HostLobbyRecord::FleetHostLost { .. }
+            | HostLobbyRecord::FleetSlotClaimed { .. }
+            | HostLobbyRecord::FleetWireSend { .. }
+            | HostLobbyRecord::FleetFault { .. } => continue,
         };
         let Some(layout) = layout.as_mut() else {
             crate::pwarn!(

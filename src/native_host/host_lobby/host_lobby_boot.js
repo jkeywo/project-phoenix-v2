@@ -33,6 +33,10 @@
 //     every repaint is driven synchronously from a host push, inside the
 //     host's own evaluate_script. There is nothing to starve.
 (function () {
+  // This document is the control surface for the authoritative native
+  // simulation process. Any host-mesh bootstrap running on this surface must
+  // advertise the process's ship and local-GM capabilities on the same peer.
+  window.__phoenixNativeTechnicalPeer = true;
   window.__phoenixNativeAudioState = null;
   window.__phoenixHostLobbyAudio = function (json) {
     window.__phoenixNativeAudioState = json;

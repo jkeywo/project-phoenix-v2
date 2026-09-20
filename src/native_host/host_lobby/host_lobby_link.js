@@ -64,6 +64,7 @@ import {
   readInjectedViewscreenPresentation,
   viewscreenPresentationRecordFields,
 } from './gui/viewscreen-presentation.js';
+import { createNativeFleetPeer } from './gui/native-fleet-peer.js';
 
 // The static `data-i18n` markup — "CREW", "CONNECTED", the awaiting-selection
 // badge, the join panel's caption, this surface's QR toggle, the picker's
@@ -189,6 +190,11 @@ function send(record) {
     console.error('[host-lobby] could not send', e);
   }
 }
+
+const nativeFleetPeer = createNativeFleetPeer({ send, log: msg => console.log(msg) });
+window.__phoenixHostFleetConfigure = json => nativeFleetPeer.configure(json);
+window.__phoenixHostFleetUpdate = json => nativeFleetPeer.update(json);
+window.__phoenixHostFleetWire = frame => nativeFleetPeer.receive(frame);
 
 // What the host last told us is locked. Read by `shipStillNeeded` below, and by
 // the auto-resolve latch beside it — both of which need the AUTHORITATIVE

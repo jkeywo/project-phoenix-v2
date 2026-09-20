@@ -823,6 +823,7 @@ pub fn build_native_host_app(
             lobby.bridge.clone(),
         ));
         app.add_plugins(crate::native_host::host_lobby::HostLobbyPlugin);
+        app.add_plugins(crate::native_host::host_lobby::fleet::NativeFleetPlugin);
         app.insert_resource(crate::native_host::native_gm::NativeGmSurface {
             bridge: lobby.gm_bridge.clone(),
             url: format!(

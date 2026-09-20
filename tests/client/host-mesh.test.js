@@ -30,6 +30,7 @@ import {
   ADMISSION_OPEN,
   HOST_ROLE_GM,
   HOST_ROLE_SHIP,
+  HOST_ROLE_SHIP_GM,
   REASON_ADMISSION_CLOSED,
   REASON_FLEET_FULL,
   REASON_RECOVERY_ONLY,
@@ -232,7 +233,7 @@ describe('the envelope', () => {
     // silently fails to agree a tick; refusing an unrecognised `m` is what
     // makes that fail loudly, and this pair of pins is what catches a
     // one-sided bump.
-    expect(HOST_MESH_PROTOCOL).toBe(13);
+    expect(HOST_MESH_PROTOCOL).toBe(14);
     const rust = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/lockstep/frame.rs'),
       'utf8',
@@ -355,6 +356,80 @@ describe('privileged GM host role (issue #1289)', () => {
     expect(roster.gms[0]).not.toHaveProperty('owner');
     expect(roster.gms[0]).not.toHaveProperty('permissions');
     expect(JSON.stringify(roster)).not.toContain('owner-private-capability');
+  });
+
+  it('advertises one native technical peer as both ship and equal GM', () => {
+    const fleet = fleetOf({
+      role: HOST_ROLE_SHIP_GM,
+      name: 'Native bridge',
+      ship: { template_path: 'destroyer.toml' },
+      credentialFactory: credentials('native-private-capability'),
+      ownerOperatorId: 'native-gm',
+    });
+    const roster = rosterOf(fleet);
+    expect(roster.participants).toEqual(['slot-1']);
+    expect(roster.slots).toHaveLength(1);
+    expect(roster.gms).toEqual([{
+      id: 'native-gm', name: 'Native bridge', connected: true, ready: false,
+    }]);
+    expect(simulationRosterOf(roster, 'slot-1')).toEqual({
+      local: 1,
+      owner: 1,
+      participants: [1],
+      ships: [{ host: 1, ship_path: 'destroyer.toml', crew: [] }],
+      gms: [{ host: 1, operator_id: 'native-gm' }],
+    });
+  });
+
+  it('keeps browser ship-only and GM-only peers compatible beside a combined peer', () => {
+    let fleet = fleetOf({
+      role: HOST_ROLE_SHIP_GM,
+      credentialFactory: credentials('native-secret', 'browser-gm-secret'),
+    });
+    fleet = admitHost(fleet, { peer: 'browser-ship' }).fleet;
+    fleet = admitHost(fleet, { peer: 'browser-gm', role: HOST_ROLE_GM }).fleet;
+    const roster = rosterOf(fleet);
+    expect(roster.participants).toEqual(['slot-1', 'slot-2', 'slot-3']);
+    expect(roster.slots.map(row => row.id)).toEqual(['slot-1', 'slot-2']);
+    expect(roster.gm_bindings).toEqual([
+      { host: 'slot-1', operator_id: 'gm-1' },
+      { host: 'slot-3', operator_id: 'gm-2' },
+    ]);
+  });
+
+  it('carries both capabilities and the private recovery identity in one handshake', () => {
+    expect(helloFrame({
+      role: HOST_ROLE_SHIP_GM,
+      ship: { template_path: 'native.toml' },
+      name: 'Native',
+      claim: 'slot-2',
+      reconnectCredential: 'private',
+    }).d).toEqual({
+      role: HOST_ROLE_SHIP_GM,
+      ship: { template_path: 'native.toml' },
+      name: 'Native',
+      claim: 'slot-2',
+      reconnect_credential: 'private',
+    });
+    expect(welcomeFrame('slot-2', {}, {
+      role: HOST_ROLE_SHIP_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'private',
+    }).d).toMatchObject({
+      slot: 'slot-2', role: HOST_ROLE_SHIP_GM,
+      operator_id: 'gm-1', reconnect_credential: 'private',
+    });
+  });
+
+  it('applies one technical validation verdict to both combined capability rows', () => {
+    const fleet = fleetOf({
+      role: HOST_ROLE_SHIP_GM,
+      credentialFactory: credentials('native-private-capability'),
+    });
+    const result = setStartValidation(fleet, 'slot-1', true);
+    expect(result.ok).toBe(true);
+    expect(result.fleet.slots[0].startValidation).toBe(true);
+    expect(result.fleet.gms[0].startValidation).toBe(true);
   });
 
   it('admits equal GM operators without consuming authored ship capacity', () => {
@@ -936,6 +1011,38 @@ describe('claiming a disconnected slot on another machine (issue #1120)', () => 
       // The frozen ship is preserved verbatim: the claim carries no loadout, so a
       // replacement resumes the same ship and cannot change it.
       ship: { template_path: 'cruiser.toml' },
+    });
+  });
+
+  it('recovers a combined peer as one slot only with its matching GM capability', () => {
+    const opened = fleetOf({ credentialFactory: () => 'combined-secret' });
+    const admitted = admitHost(opened, {
+      peer: 'native-old',
+      role: HOST_ROLE_SHIP_GM,
+      ship: { template_path: 'native.toml' },
+    });
+    const dropped = dropHost(freezeFleet(admitted.fleet), 'native-old');
+    expect(rosterOf(dropped).participants).toEqual(['slot-1']);
+    expect(claimSlot(dropped, { peer: 'ship-impostor', slotId: 'slot-2' }).reason)
+      .toBe(REASON_SLOT_TAKEN);
+    const recovered = claimSlot(dropped, {
+      peer: 'native-new',
+      slotId: 'slot-2',
+      role: HOST_ROLE_SHIP_GM,
+      reconnectCredential: admitted.reconnectCredential,
+    });
+    expect(recovered).toMatchObject({
+      ok: true,
+      role: HOST_ROLE_SHIP_GM,
+      operatorId: 'gm-1',
+      slot: { id: 'slot-2', peer: 'native-new', connected: true },
+      gm: { id: 'gm-1', meshSlot: 'slot-2', peer: 'native-new', connected: true },
+    });
+    expect(rosterOf(recovered.fleet).participants).toEqual(['slot-1', 'slot-2']);
+    expect(simulationRosterOf(rosterOf(recovered.fleet), 'slot-2')).toMatchObject({
+      participants: [1, 2],
+      ships: [{ host: 1, ship_path: null, crew: [] }, { host: 2, ship_path: 'native.toml', crew: [] }],
+      gms: [{ host: 2, operator_id: 'gm-1' }],
     });
   });
 

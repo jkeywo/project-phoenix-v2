@@ -723,6 +723,54 @@ fn main() {
             std::process::exit(1);
         }
     };
+    if let (Some(base), Some(_lobby)) = (sim.rendezvous.as_deref(), host_lobby.as_ref()) {
+        let table_path =
+            std::path::Path::new(&bound.content_dir).join("assets/join/join-codes.toml");
+        match native_host::join_codes::JoinCodeTable::read(&table_path) {
+            Ok(table) => {
+                let ship_path = app
+                    .world()
+                    .get_resource::<project_phoenix::lobby::SelectedShipResource>()
+                    .map(|ship| ship.0.clone())
+                    .unwrap_or_default();
+                let fleet_config = native_host::host_lobby::fleet::NativeFleetConfig {
+                    base: base.to_string(),
+                    stamp: project_phoenix::core::codec::encode_delivery_stamp(
+                        &content.manifest.stamp,
+                    ),
+                    max_slots: table.limits.max_fleet_hosts,
+                    max_name_length: table.limits.max_slot_name_length,
+                    max_ship_path_length: table.limits.max_slot_ship_path_length,
+                    ship_path,
+                    ship_name: String::new(),
+                    gm_name: "GM".to_string(),
+                    operator_id: project_phoenix::gm_action::NATIVE_GM_OPERATOR_ID.to_string(),
+                    credentials: native_host::host_lobby::fleet::mint_reconnect_credentials(),
+                };
+                let origin = sim
+                    .origin
+                    .as_deref()
+                    .expect("parse_args refuses --rendezvous without --origin");
+                match native_host::relay_socket::WsRelaySocket::connect(base, origin) {
+                    Ok(socket) => {
+                        app.insert_resource(fleet_config);
+                        app.insert_resource(native_host::host_lobby::fleet::NativeFleetWire(
+                            socket,
+                        ));
+                        eprintln!(
+                            "phoenix-host: native fleet peer registering with {base} as {origin}"
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("phoenix-host: native fleet is off — {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("phoenix-host: native fleet is off — {e}");
+            }
+        }
+    }
     project_phoenix::save_slots_store::install_local_save_store(
         &mut app,
         vellum_save::FileStore::new(&sim.save_dir),

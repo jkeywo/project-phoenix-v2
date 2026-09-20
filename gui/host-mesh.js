@@ -131,8 +131,12 @@
  * readiness ask, and be disconnected as a nonresponder while the revision-13
  * hosts rewound without it — a fleet split with no symptom, which is exactly
  * the class of change a whole-fleet revision refusal exists for.
+ *
+ * `14` adds the combined `ship-gm` capability (issue #1495). An older peer
+ * would collapse that native technical peer to one capability or count it as
+ * two simulations, so mixed revisions must refuse before forming a fleet.
  */
-export const HOST_MESH_PROTOCOL = 13;
+export const HOST_MESH_PROTOCOL = 14;
 
 import { canonicalStationRatings } from './fleet-crew.js';
 export { canonicalStationRatings } from './fleet-crew.js';
@@ -260,6 +264,7 @@ export const ADMISSION_CLOSED = 'closed';
 /** Host roles carried only by the privileged host-mesh hello. */
 export const HOST_ROLE_SHIP = 'ship';
 export const HOST_ROLE_GM = 'gm';
+export const HOST_ROLE_SHIP_GM = 'ship-gm';
 
 // ── The envelope ────────────────────────────────────────────────────────────
 
@@ -400,10 +405,13 @@ function boundedText(value, limit) {
   return value.slice(0, limit);
 }
 
-/** Only the two roles this protocol speaks; absence remains the legacy ship role. */
+/** Capability sets this protocol speaks; absence remains the legacy ship role. */
 function hostRole(value) {
-  return value === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
+  if (value === HOST_ROLE_GM || value === HOST_ROLE_SHIP_GM) return value;
+  return HOST_ROLE_SHIP;
 }
+const roleHasShip = role => hostRole(role) !== HOST_ROLE_GM;
+const roleHasGm = role => hostRole(role) !== HOST_ROLE_SHIP;
 
 /**
  * Mint an opaque reconnect capability. There is deliberately no predictable
@@ -491,6 +499,8 @@ function boundedShip(value, fleet) {
  *   code (AGENTS.md rule 11).
  * @param {number} [opts.maxNameLength] `[limits] max_slot_name_length`
  * @param {number} [opts.maxShipPathLength] `[limits] max_slot_ship_path_length`
+ * @param {string|null} [opts.ownerOperatorId] stable local GM identity for a
+ *   native combined owner; browser owners omit it and retain `gm-N` minting
  */
 export function openFleet({
   ship = null,
@@ -500,6 +510,7 @@ export function openFleet({
   maxNameLength = DEFAULT_MAX_NAME_LENGTH,
   maxShipPathLength = DEFAULT_MAX_SHIP_PATH_LENGTH,
   credentialFactory = secureReconnectCredential,
+  ownerOperatorId = null,
 }) {
   const ownerRole = hostRole(role);
   const fleet = {
@@ -522,9 +533,26 @@ export function openFleet({
     slots: [],
     gms: [],
   };
-  if (ownerRole === HOST_ROLE_GM) {
+  if (roleHasShip(ownerRole)) {
+    fleet.slots.push({
+      id: slotId(1),
+      peer: null,
+      owner: true,
+      connected: true,
+      ready: false,
+      crew: crewReadiness(null, fleet.maxSlots),
+      startValidation: false,
+      name: boundedText(name, maxNameLength),
+      ship: boundedShip(ship, fleet),
+    });
+  }
+  if (roleHasGm(ownerRole)) {
+    const operatorId = ownerOperatorId == null
+      ? gmId(fleet.nextGmSeq)
+      : boundedText(ownerOperatorId, 64);
+    if (!operatorId) throw new Error('GM owner operator id is unusable');
     fleet.gms.push({
-      id: gmId(fleet.nextGmSeq),
+      id: operatorId,
       meshSlot: fleet.owner,
       peer: null,
       connected: true,
@@ -537,21 +565,6 @@ export function openFleet({
       throw new Error('GM reconnect credential factory returned an unusable value');
     }
     fleet.nextGmSeq += 1;
-  } else {
-    fleet.slots.push({
-      id: slotId(1),
-      peer: null,
-      owner: true,
-      connected: true,
-      ready: false,
-      crew: crewReadiness(null, fleet.maxSlots),
-      startValidation: false,
-      // The owner's own fields go through the same bound as a member's. It is
-      // this host's own page filling them in, so nothing hostile is expected —
-      // but one rule for what a slot may hold is easier to keep true than two.
-      name: boundedText(name, maxNameLength),
-      ship: boundedShip(ship, fleet),
-    });
   }
   return fleet;
 }
@@ -599,10 +612,20 @@ export function admitHost(fleet, {
   reconnectCredential = null,
 }) {
   const held = slotForPeer(fleet, peer);
-  if (held) {
-    return { ok: true, fleet, role: HOST_ROLE_SHIP, slot: held, meshSlot: held.id };
-  }
   const heldGm = gmForPeer(fleet, peer);
+  if (held) {
+    const combined = heldGm && heldGm.meshSlot === held.id;
+    return {
+      ok: true,
+      fleet,
+      role: combined ? HOST_ROLE_SHIP_GM : HOST_ROLE_SHIP,
+      slot: held,
+      gm: combined ? heldGm : undefined,
+      meshSlot: held.id,
+      operatorId: combined ? heldGm.id : undefined,
+      reconnectCredential: combined ? heldGm.credential : undefined,
+    };
+  }
   if (heldGm) {
     return {
       ok: true,
@@ -616,7 +639,7 @@ export function admitHost(fleet, {
   }
 
   const nextRole = hostRole(role);
-  if (nextRole === HOST_ROLE_GM) {
+  if (roleHasGm(nextRole)) {
     const claim = reconnectClaim(reconnectCredential);
     if (reconnectCredential != null) {
       // A supplied credential is a recovery attempt, never permission to mint
@@ -642,14 +665,41 @@ export function admitHost(fleet, {
         ready: false,
         startValidation: false,
       };
+      let slots = fleet.slots;
+      let slot = null;
+      if (roleHasShip(nextRole)) {
+        slot = slotById(fleet, known.meshSlot);
+        if (slot?.connected || (!slot && fleet.slots.length >= fleet.maxSlots)) {
+          return { ok: false, reason: REASON_SLOT_TAKEN };
+        }
+        slot = slot
+          ? { ...slot, peer, connected: true, crew: crewReadiness(null, fleet.maxSlots), startValidation: false }
+          : {
+              id: known.meshSlot,
+              peer,
+              owner: false,
+              connected: true,
+              ready: false,
+              crew: crewReadiness(null, fleet.maxSlots),
+              startValidation: false,
+              name: boundedText(name, fleet.maxNameLength),
+              ship: boundedShip(ship, fleet),
+            };
+        slots = fleet.slots.some((candidate) => candidate.id === slot.id)
+          ? fleet.slots.map((candidate) => candidate.id === slot.id ? slot : candidate)
+          : [...fleet.slots, slot].sort((left, right) =>
+            hostSlotOrdinal(left.id) - hostSlotOrdinal(right.id));
+      }
       const nextFleet = {
         ...fleet,
+        slots,
         gms: fleet.gms.map((gm) => (gm.id === known.id ? rebound : gm)),
       };
       return {
         ok: true,
         fleet: nextFleet,
-        role: HOST_ROLE_GM,
+        role: slot ? HOST_ROLE_SHIP_GM : HOST_ROLE_GM,
+        slot,
         gm: rebound,
         meshSlot: rebound.meshSlot,
         operatorId: rebound.id,
@@ -663,7 +713,8 @@ export function admitHost(fleet, {
     if (fleet.admission !== ADMISSION_OPEN) {
       return { ok: false, reason: REASON_ADMISSION_CLOSED };
     }
-    if (fleet.gms.length >= MAX_GM_OPERATORS) {
+    if (fleet.gms.length >= MAX_GM_OPERATORS
+        || (roleHasShip(nextRole) && fleet.slots.length >= fleet.maxSlots)) {
       return { ok: false, reason: REASON_FLEET_FULL };
     }
     const credential = reconnectClaim(fleet.credentialFactory());
@@ -671,9 +722,10 @@ export function admitHost(fleet, {
     if (fleet.gms.some((gm) => gm.credential === credential)) {
       throw new Error('GM reconnect credential factory returned a duplicate value');
     }
+    const meshSlot = slotId(fleet.nextSeq);
     const gm = {
       id: gmId(fleet.nextGmSeq),
-      meshSlot: slotId(fleet.nextSeq),
+      meshSlot,
       peer,
       connected: true,
       ready: false,
@@ -681,9 +733,21 @@ export function admitHost(fleet, {
       name: boundedText(name, fleet.maxNameLength),
       credential,
     };
+    const slot = roleHasShip(nextRole) ? {
+      id: meshSlot,
+      peer,
+      owner: false,
+      connected: true,
+      ready: false,
+      crew: crewReadiness(null, fleet.maxSlots),
+      startValidation: false,
+      name: boundedText(name, fleet.maxNameLength),
+      ship: boundedShip(ship, fleet),
+    } : null;
     return {
       ok: true,
-      role: HOST_ROLE_GM,
+      role: slot ? HOST_ROLE_SHIP_GM : HOST_ROLE_GM,
+      slot,
       gm,
       meshSlot: gm.meshSlot,
       operatorId: gm.id,
@@ -692,6 +756,7 @@ export function admitHost(fleet, {
         ...fleet,
         nextSeq: fleet.nextSeq + 1,
         nextGmSeq: fleet.nextGmSeq + 1,
+        slots: slot ? [...fleet.slots, slot] : fleet.slots,
         gms: [...fleet.gms, gm],
       },
     };
@@ -1011,7 +1076,7 @@ export function setCrewReadiness(fleet, id, tally = {}, stationRatings = []) {
   };
 }
 
-/** Set one connected GM's own ready vote; no ship slot is involved. */
+/** Set one connected GM's own ready vote without changing any ship row. */
 export function setGmReady(fleet, id, ready) {
   const gm = gmById(fleet, id);
   if (!gm || !gm.connected) return { ok: false, reason: 'unknown' };
@@ -1030,28 +1095,22 @@ export function setGmReady(fleet, id, ready) {
 export function setStartValidation(fleet, meshSlot, valid) {
   if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
   const slot = slotById(fleet, meshSlot);
-  if (slot && slot.connected) {
-    const next = { ...slot, startValidation: !!valid };
-    return {
-      ok: true,
-      fleet: {
-        ...fleet,
-        slots: fleet.slots.map((candidate) => candidate.id === meshSlot ? next : candidate),
-      },
-    };
-  }
   const gm = (fleet.gms || []).find((candidate) => candidate.meshSlot === meshSlot);
-  if (gm && gm.connected) {
-    const next = { ...gm, startValidation: !!valid };
-    return {
-      ok: true,
-      fleet: {
-        ...fleet,
-        gms: fleet.gms.map((candidate) => candidate.id === gm.id ? next : candidate),
-      },
-    };
-  }
-  return { ok: false, reason: 'unknown' };
+  if (!(slot?.connected || gm?.connected)) return { ok: false, reason: 'unknown' };
+  return {
+    ok: true,
+    fleet: {
+      ...fleet,
+      slots: slot?.connected
+        ? fleet.slots.map((candidate) => candidate.id === meshSlot
+          ? { ...candidate, startValidation: !!valid } : candidate)
+        : fleet.slots,
+      gms: gm?.connected
+        ? fleet.gms.map((candidate) => candidate.id === gm.id
+          ? { ...candidate, startValidation: !!valid } : candidate)
+        : fleet.gms,
+    },
+  };
 }
 
 /**
@@ -1179,13 +1238,15 @@ export function adjudicateForceStart(fleet, operatorId) {
  */
 export function dropHost(fleet, peer) {
   const gm = gmForPeer(fleet, peer);
+  const slot = slotForPeer(fleet, peer);
+  let next = fleet;
   if (gm) {
-    return {
-      ...fleet,
+    next = {
+      ...next,
       // GM identities survive every transport drop. The opaque credential is
       // the only capability that may bind this public operator id to a new
       // peer, whether ordinary admission is open or closed.
-      gms: fleet.gms.map((candidate) =>
+      gms: next.gms.map((candidate) =>
         candidate.id === gm.id
           ? {
               ...candidate,
@@ -1198,14 +1259,13 @@ export function dropHost(fleet, peer) {
       ),
     };
   }
-  const slot = slotForPeer(fleet, peer);
-  if (!slot || slot.owner) return fleet;
-  if (!fleet.frozen) {
-    return { ...fleet, slots: fleet.slots.filter((s) => s.id !== slot.id) };
+  if (!slot || slot.owner) return next;
+  if (!next.frozen) {
+    return { ...next, slots: next.slots.filter((s) => s.id !== slot.id) };
   }
   return {
-    ...fleet,
-    slots: fleet.slots.map((s) =>
+    ...next,
+    slots: next.slots.map((s) =>
       s.id === slot.id
         ? {
             ...s,
@@ -1245,18 +1305,43 @@ export function dropHost(fleet, peer) {
  * @returns {{ok: true, fleet: object, slot: object}
  *          |{ok: false, reason: string}}
  */
-export function claimSlot(fleet, { peer, slotId }) {
+export function claimSlot(fleet, {
+  peer, slotId, role = HOST_ROLE_SHIP, reconnectCredential = null,
+}) {
   if (!fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
   const slot = slotById(fleet, slotId);
   if (!slot) return { ok: false, reason: 'unknown' };
   // The owner's own slot is never recovered on another machine, and a slot whose
   // host is still connected is never displaced.
   if (slot.owner || slot.connected) return { ok: false, reason: REASON_SLOT_TAKEN };
+  const gm = (fleet.gms || []).find(candidate => candidate.meshSlot === slotId) || null;
+  const nextRole = hostRole(role);
+  if (gm) {
+    if (!roleHasGm(nextRole) || gm.connected
+        || reconnectClaim(reconnectCredential) !== gm.credential) {
+      return { ok: false, reason: REASON_SLOT_TAKEN };
+    }
+  } else if (roleHasGm(nextRole)) {
+    return { ok: false, reason: REASON_SLOT_TAKEN };
+  }
   const next = { ...slot, peer, connected: true };
+  const reboundGm = gm ? {
+    ...gm, peer, connected: true, ready: false, startValidation: false,
+  } : null;
   return {
     ok: true,
+    role: reboundGm ? HOST_ROLE_SHIP_GM : HOST_ROLE_SHIP,
     slot: next,
-    fleet: { ...fleet, slots: fleet.slots.map((s) => (s.id === slotId ? next : s)) },
+    gm: reboundGm,
+    operatorId: reboundGm?.id,
+    reconnectCredential: reboundGm?.credential,
+    fleet: {
+      ...fleet,
+      slots: fleet.slots.map((s) => (s.id === slotId ? next : s)),
+      gms: reboundGm
+        ? fleet.gms.map(candidate => candidate.id === reboundGm.id ? reboundGm : candidate)
+        : fleet.gms,
+    },
   };
 }
 
@@ -1316,9 +1401,11 @@ export function rosterOf(fleet) {
 /**
  * Convert the frozen host roster into the private numeric schema Rust adopts.
  *
- * Technical participants and player ships are separate on purpose: a GM is a
- * full deterministic peer but owns no ship. Only connected rows are present in
- * `roster.participants`, so every emitted ship host is also a participant.
+ * Technical participants, player ships and GM bindings are separate on
+ * purpose. Browser peers advertise one capability; a native peer may appear in
+ * both capability lists while its one slot appears once in `participants`.
+ * Only connected rows are present there, so every emitted capability belongs
+ * to a live participant.
  * Returns `null` rather than inventing a slot when a foreign/malformed roster
  * cannot name this peer or the star owner.
  */
@@ -1382,8 +1469,11 @@ export const helloFrame = ({
   role = HOST_ROLE_SHIP,
   reconnectCredential = null,
 }) => {
-  if (hostRole(role) === HOST_ROLE_GM) {
-    const body = { role: HOST_ROLE_GM, name };
+  const nextRole = hostRole(role);
+  if (roleHasGm(nextRole)) {
+    const body = { role: nextRole, name };
+    if (roleHasShip(nextRole)) body.ship = ship;
+    if (claim) body.claim = claim;
     if (reconnectCredential != null) body.reconnect_credential = reconnectCredential;
     return hostFrame(HOST_FRAME_HELLO, body);
   }
@@ -1398,11 +1488,12 @@ export const welcomeFrame = (slotIdent, roster, {
   operatorId = null,
   reconnectCredential = null,
 } = {}) => {
-  if (hostRole(role) === HOST_ROLE_GM) {
+  const nextRole = hostRole(role);
+  if (roleHasGm(nextRole)) {
     return hostFrame(HOST_FRAME_WELCOME, {
       slot: slotIdent,
       roster,
-      role: HOST_ROLE_GM,
+      role: nextRole,
       operator_id: operatorId,
       reconnect_credential: reconnectCredential,
     });
@@ -1577,6 +1668,7 @@ if (typeof window !== 'undefined') {
     ADMISSION_CLOSED,
     HOST_ROLE_SHIP,
     HOST_ROLE_GM,
+    HOST_ROLE_SHIP_GM,
     MAX_GM_OPERATORS,
     REASON_ADMISSION_CLOSED,
     REASON_FLEET_FULL,

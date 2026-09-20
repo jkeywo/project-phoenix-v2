@@ -94,6 +94,7 @@ import {
   HOST_FRAME_WELCOME,
   HOST_ROLE_GM,
   HOST_ROLE_SHIP,
+  HOST_ROLE_SHIP_GM,
   GM_JOIN_RECONNECT,
   REASON_GM_JOIN_REFUSED,
   admissionFrame,
@@ -224,7 +225,9 @@ function defaultAuthenticateFrame(raw, authSlot) {
  *   the authoritative host-to-host verdict — `wasm_check_host_stamp`.
  * @param {{template_path: string|null, name?: string}|null} [opts.ship]
  * @param {string} [opts.name]
- * @param {'ship'|'gm'} [opts.role] privileged host role; absent remains `ship`
+ * @param {'ship'|'gm'|'ship-gm'} [opts.role] host capabilities; browser callers
+ *   expose the first two and the native technical peer supplies `ship-gm`
+ * @param {string} [opts.ownerOperatorId] stable native local-GM operator id
  * @param {()=>string} [opts.credentialFactory] injectable secure GM credential
  *   mint, used by deterministic tests; production uses Web Crypto
  * @param {(code:object)=>void} [opts.onCode] the issued fleet code; fires again
@@ -267,6 +270,7 @@ export function createFleetOwner(opts) {
     name = '',
     role = HOST_ROLE_SHIP,
     credentialFactory,
+    ownerOperatorId,
     onCode = () => {},
     onRoster = () => {},
     onSimulationRoster = () => {},
@@ -284,6 +288,7 @@ export function createFleetOwner(opts) {
     onError = () => {},
     onLog = () => {},
     authenticateFrame = defaultAuthenticateFrame,
+    transports,
     factories,
   } = opts;
 
@@ -295,6 +300,7 @@ export function createFleetOwner(opts) {
     maxNameLength,
     maxShipPathLength,
     credentialFactory,
+    ownerOperatorId,
   });
   /** rendezvous peer id → the admitted connection adapter. */
   const links = new Map();
@@ -427,6 +433,16 @@ export function createFleetOwner(opts) {
     onForceResult(result);
   };
 
+  const broadcastSimulationFrame = (raw) => {
+    for (const conn of links.values()) conn.send(raw);
+    const frame = decodeHostFrame(raw);
+    if (frame && (frame.t === HOST_FRAME_GM_JOIN
+        || frame.t === HOST_FRAME_SNAPSHOT
+        || frame.t === HOST_FRAME_HOST_LOSS)) {
+      for (const conn of pendingLinks.values()) conn.send(raw);
+    }
+  };
+
   const publishGmJoinRequest = (request) => {
     const raw = encodeHostFrame(gmJoinRequestFrame(request));
     for (const conn of links.values()) conn.send(raw);
@@ -521,7 +537,12 @@ export function createFleetOwner(opts) {
     // rather than on whether a new slot can be created. Only after the freeze — a
     // pre-freeze reconnect is an ordinary join.
     if (fleet.frozen && body.claim) {
-      const result = claimSlot(fleet, { peer: conn.peer, slotId: body.claim });
+      const result = claimSlot(fleet, {
+        peer: conn.peer,
+        slotId: body.claim,
+        role: body.role,
+        reconnectCredential: body.reconnect_credential,
+      });
       if (!result.ok) {
         onLog(`[fleet] refusing claim on ${body.claim}: ${result.reason}`);
         conn.send(encodeHostFrame(refusedFrame(result.reason, { of: HOST_FRAME_HELLO })));
@@ -531,7 +552,11 @@ export function createFleetOwner(opts) {
       fleet = result.fleet;
       links.set(conn.peer, conn);
       connSlots.set(conn.peer, hostSlotOrdinal(result.slot.id));
-      conn.send(encodeHostFrame(welcomeFrame(result.slot.id, rosterOf(fleet))));
+      conn.send(encodeHostFrame(welcomeFrame(result.slot.id, rosterOf(fleet), {
+        role: result.role,
+        operatorId: result.operatorId,
+        reconnectCredential: result.reconnectCredential,
+      })));
       // Broadcast the granted claim to the fleet: the simulation mints one
       // deterministic SlotClaimFrame from it, and every host recovers the same
       // slot. The rebind of the recovered ship's own crew to this host is a
@@ -621,8 +646,8 @@ export function createFleetOwner(opts) {
     let changed = false;
 
     if (slot) {
-      // The authenticated connection decides the role. A ship cannot claim a
-      // GM vote, and member-supplied role/operator fields are never inspected.
+      // The authenticated connection decides its capabilities. A ship-only
+      // peer cannot claim a GM vote, and body role/operator fields are ignored.
       if (Object.prototype.hasOwnProperty.call(body, 'crew')) {
         const result = updateCrewReadiness(fleet, slot.id, body.crew, body.station_ratings);
         if (!result.ok) return;
@@ -631,15 +656,10 @@ export function createFleetOwner(opts) {
           changed = true;
         }
       }
-      if (Object.prototype.hasOwnProperty.call(body, 'validation')) {
-        const result = updateStartValidation(fleet, slot.id, body.validation);
-        if (result.ok) {
-          fleet = result.fleet;
-          changed = true;
-        }
-      }
-    } else if (gm) {
-      // Likewise a GM cannot fabricate a crew tally for the aggregate.
+    }
+    if (gm) {
+      // A GM-only peer has no slot here, while a combined peer updates both
+      // independently stored capability rows through this one connection.
       if (Object.prototype.hasOwnProperty.call(body, 'gm_ready')) {
         const result = updateGmReady(fleet, gm.id, body.gm_ready);
         if (result.ok) {
@@ -647,12 +667,12 @@ export function createFleetOwner(opts) {
           changed = true;
         }
       }
-      if (Object.prototype.hasOwnProperty.call(body, 'validation')) {
-        const result = updateStartValidation(fleet, gm.meshSlot, body.validation);
-        if (result.ok) {
-          fleet = result.fleet;
-          changed = true;
-        }
+    }
+    if ((slot || gm) && Object.prototype.hasOwnProperty.call(body, 'validation')) {
+      const result = updateStartValidation(fleet, slot?.id || gm.meshSlot, body.validation);
+      if (result.ok) {
+        fleet = result.fleet;
+        changed = true;
       }
     }
 
@@ -677,6 +697,7 @@ export function createFleetOwner(opts) {
   host = createRendezvousHost({
     base,
     namespace: NAMESPACE_SERVER,
+    transports,
     iceServers,
     factories,
     checkStamp,
@@ -828,9 +849,12 @@ export function createFleetOwner(opts) {
 
   publish();
   const ownerGm = fleet.gms && fleet.gms.find((gm) => gm.meshSlot === fleet.owner);
+  const ownerShip = fleet.slots.find((slot) => slot.id === fleet.owner);
+  const ownerRole = ownerGm && ownerShip ? HOST_ROLE_SHIP_GM
+    : ownerGm ? HOST_ROLE_GM : HOST_ROLE_SHIP;
   if (ownerGm) {
     onIdentity({
-      role: HOST_ROLE_GM,
+      role: ownerRole,
       operatorId: ownerGm.id,
       reconnectCredential: ownerGm.credential,
       rolePreset: null,
@@ -841,7 +865,7 @@ export function createFleetOwner(opts) {
     get code() { return code; },
     get isOwner() { return true; },
     get slot() { return fleet.owner; },
-    get role() { return ownerGm ? HOST_ROLE_GM : HOST_ROLE_SHIP; },
+    get role() { return ownerRole; },
     get operatorId() { return ownerGm ? ownerGm.id : null; },
     get reconnectCredential() { return ownerGm ? ownerGm.credential : null; },
     get gmJoinCandidate() { return false; },
@@ -966,13 +990,17 @@ export function createFleetOwner(opts) {
      * second place for the two to disagree about the shape.
      */
     broadcast(raw) {
-      for (const conn of links.values()) conn.send(raw);
-      const frame = decodeHostFrame(raw);
-      if (frame && (frame.t === HOST_FRAME_GM_JOIN
-          || frame.t === HOST_FRAME_SNAPSHOT
-          || frame.t === HOST_FRAME_HOST_LOSS)) {
-        for (const conn of pendingLinks.values()) conn.send(raw);
+      if (simulationRosterState === 'delivering' && simulationRosterPromise) {
+        // `publishRoster` registered its emission continuation on this promise
+        // before Rust could produce any frame. Attach behind that exact latch,
+        // rather than guessing how many microtasks its adoption chain takes.
+        simulationRosterPromise.then((accepted) => {
+          if (accepted) broadcastSimulationFrame(raw);
+        });
+        return;
       }
+      if (simulationRosterState === 'refused') return;
+      broadcastSimulationFrame(raw);
     },
 
     /** The owner's own ship/readiness, which follow the same freeze. */
@@ -986,7 +1014,7 @@ export function createFleetOwner(opts) {
 
     /** Replace this ship host's spectator-free connected/ready player tally. */
     setCrewReadiness(tally, stationRatings = []) {
-      if (ownerGm) return false;
+      if (!ownerShip) return false;
       const result = updateCrewReadiness(fleet, fleet.owner, tally, stationRatings);
       if (!result.ok) return false;
       fleet = result.fleet;
@@ -1102,7 +1130,8 @@ export function createFleetMember(opts) {
 
   let mine = null;
   let roster = null;
-  let acceptedRole = role === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
+  let acceptedRole = role === HOST_ROLE_GM || role === HOST_ROLE_SHIP_GM
+    ? role : HOST_ROLE_SHIP;
   let operatorId = null;
   let privateReconnectCredential = reconnectCredential;
   let gmJoinCandidate = false;
@@ -1205,9 +1234,12 @@ export function createFleetMember(opts) {
 
   const sendLocalStartState = () => {
     if (!mine || closed || !joiner) return false;
-    const body = acceptedRole === HOST_ROLE_GM
-      ? { gm_ready: localGmReady, validation: localStartValidation }
-      : { crew: localCrewReadiness, station_ratings: localStationRatings, validation: localStartValidation };
+    const body = { validation: localStartValidation };
+    if (acceptedRole !== HOST_ROLE_GM) {
+      body.crew = localCrewReadiness;
+      body.station_ratings = localStationRatings;
+    }
+    if (acceptedRole !== HOST_ROLE_SHIP) body.gm_ready = localGmReady;
     joiner.sendFrame(encodeHostFrame(startStateFrame(body)));
     return true;
   };
@@ -1233,7 +1265,7 @@ export function createFleetMember(opts) {
       // otherwise the same handle's cached `true` silently votes again. An
       // ordinary duplicate acceptance/Welcome on one live generation leaves
       // the operator's explicit current choice untouched.
-      if (reconnected && acceptedRole === HOST_ROLE_GM) localGmReady = false;
+      if (reconnected && acceptedRole !== HOST_ROLE_SHIP) localGmReady = false;
       if (realGeneration !== null) acceptedTransportGeneration = realGeneration;
       // No stamp travels in the `hello`: the build check already happened on
       // the transport plane, over this very channel, and a second copy of it
@@ -1286,9 +1318,10 @@ export function createFleetMember(opts) {
         gmJoinCandidate = false;
         mine = decoded.d.slot || null;
         roster = decoded.d.roster || null;
-        acceptedRole = decoded.d.role === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
-        operatorId = acceptedRole === HOST_ROLE_GM ? decoded.d.operator_id || null : null;
-        privateReconnectCredential = acceptedRole === HOST_ROLE_GM
+        acceptedRole = decoded.d.role === HOST_ROLE_GM || decoded.d.role === HOST_ROLE_SHIP_GM
+          ? decoded.d.role : HOST_ROLE_SHIP;
+        operatorId = acceptedRole !== HOST_ROLE_SHIP ? decoded.d.operator_id || null : null;
+        privateReconnectCredential = acceptedRole !== HOST_ROLE_SHIP
           ? decoded.d.reconnect_credential || null
           : null;
         onLog(`[fleet] admitted as ${mine}`);
@@ -1299,7 +1332,7 @@ export function createFleetMember(opts) {
           rolePreset: null,
         };
         onWelcome(mine, roster, identity);
-        if (acceptedRole === HOST_ROLE_GM) onIdentity(identity);
+        if (acceptedRole !== HOST_ROLE_SHIP) onIdentity(identity);
         onRoster(roster);
         const simulationRosterAccepted = deliverSimulationRoster(roster);
         if (roster && roster.frozen && !simulationRosterAccepted) return;
@@ -1446,7 +1479,7 @@ export function createFleetMember(opts) {
 
     /** Cache/send this ship host's spectator-free player readiness tally. */
     setCrewReadiness(tally = {}, stationRatings = []) {
-      if (acceptedRole !== HOST_ROLE_SHIP || closed || (roster && roster.frozen)) return false;
+      if (acceptedRole === HOST_ROLE_GM || closed || (roster && roster.frozen)) return false;
       const ratings = canonicalStationRatings(stationRatings);
       if (ratings === null) return false;
       localStationRatings = ratings;
@@ -1462,7 +1495,7 @@ export function createFleetMember(opts) {
 
     /** Cache/send this GM operator's one equal ready vote. */
     setGmReady(ready) {
-      if (acceptedRole !== HOST_ROLE_GM || closed || (roster && roster.frozen)) return false;
+      if (acceptedRole === HOST_ROLE_SHIP || closed || (roster && roster.frozen)) return false;
       localGmReady = !!ready;
       if (mine) sendLocalStartState();
       return true;
@@ -1478,7 +1511,7 @@ export function createFleetMember(opts) {
 
     /** Submit an empty authenticated force request; result arrives by callback. */
     forceStart() {
-      if (closed || acceptedRole !== HOST_ROLE_GM || !mine || !operatorId) return false;
+      if (closed || acceptedRole === HOST_ROLE_SHIP || !mine || !operatorId) return false;
       joiner.sendFrame(encodeHostFrame(startForceFrame()));
       return true;
     },

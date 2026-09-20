@@ -127,9 +127,16 @@ struct Inner {
     last_accepted_layout: Option<String>,
     /// What the page has asked for, awaiting a reader.
     records: VecDeque<String>,
+    /// A reliable fleet overflow is terminal. Once raised, further fleet
+    /// records are refused until this bridge is replaced with the surface.
+    fleet_faulted: bool,
     audio: Option<String>,
     last_accepted_audio: Option<String>,
     hud_reading: Option<String>,
+    fleet_config: Option<String>,
+    fleet_update: Option<String>,
+    /// Ordered reliable rendezvous frames for the native fleet control plane.
+    fleet_wire: VecDeque<String>,
     hud_os_defaults: crate::native_host::panes::os_prefs::OsAccessibilityPrefs,
 }
 
@@ -294,7 +301,10 @@ impl HostLobbyBridge {
     /// asserts on to show that a failed push was kept.
     pub fn has_pending(&self) -> bool {
         let inner = self.lock();
-        inner.payload.is_some()
+        inner.fleet_config.is_some()
+            || inner.fleet_update.is_some()
+            || !inner.fleet_wire.is_empty()
+            || inner.payload.is_some()
             || inner.reveal.is_some()
             || inner.join.is_some()
             || inner.scenario.is_some()
@@ -342,8 +352,33 @@ impl HostLobbyBridge {
 
     fn record(&self, json: &str) {
         let mut inner = self.lock();
+        let incoming_fleet = is_fleet_record(json);
+        if incoming_fleet && inner.fleet_faulted {
+            return;
+        }
         if inner.records.len() >= RECORD_CAP {
-            inner.records.pop_front();
+            // Fleet records are the reliable native control-plane lane. They
+            // may share this typed bridge, but they may not inherit the
+            // operator-button queue's oldest-wins shedding rule: losing one
+            // mesh frame can deadlock a lockstep barrier. Prefer shedding an
+            // ordinary UI record; a queue consisting only of fleet records is
+            // already bounded upstream by the rendezvous reliable budget and
+            // is drained on the next PreUpdate.
+            if let Some(index) = inner.records.iter().position(|raw| !is_fleet_record(raw)) {
+                inner.records.remove(index);
+            } else if incoming_fleet {
+                // Reliable records cannot be shed. Convert the whole doomed
+                // backlog into one explicit terminal fault; the fleet system
+                // closes the Rust socket when it consumes this record.
+                inner.records.clear();
+                inner.fleet_faulted = true;
+                inner.records.push_back(
+                    r#"{"kind":"fleet_fault","reason":"bridge-overflow","detail":"native fleet reliable bridge capacity exceeded"}"#.to_string(),
+                );
+                return;
+            } else if !incoming_fleet {
+                return;
+            }
         }
         inner.records.push_back(json.to_string());
     }
@@ -352,6 +387,9 @@ impl HostLobbyBridge {
     fn take_pending(&self) -> Pending {
         let mut inner = self.lock();
         Pending {
+            fleet_config: inner.fleet_config.take(),
+            fleet_update: inner.fleet_update.take(),
+            fleet_wire: std::mem::take(&mut inner.fleet_wire),
             reveal: inner.reveal.take(),
             join: inner.join.take(),
             scenario: inner.scenario.take(),
@@ -424,6 +462,36 @@ impl HostLobbyBridge {
         inner.last_accepted_audio = Some(json.clone());
         inner.audio = Some(json);
     }
+    pub fn push_fleet_config(&self, json: impl Into<String>) {
+        self.lock().fleet_config = Some(json.into());
+    }
+    pub fn push_fleet_update(&self, json: impl Into<String>) {
+        self.lock().fleet_update = Some(json.into());
+    }
+    pub fn push_fleet_wire(&self, frame: impl Into<String>) {
+        let mut inner = self.lock();
+        if inner.fleet_faulted {
+            return;
+        }
+        if inner.fleet_wire.len() >= RECORD_CAP {
+            inner.fleet_wire.clear();
+            inner.fleet_faulted = true;
+            inner.records.clear();
+            inner.records.push_back(
+                r#"{"kind":"fleet_fault","reason":"bridge-overflow","detail":"native fleet reliable bridge capacity exceeded"}"#.to_string(),
+            );
+            return;
+        }
+        inner.fleet_wire.push_back(frame.into());
+    }
+    pub fn fleet_faulted(&self) -> bool {
+        self.lock().fleet_faulted
+    }
+    fn restore_fleet_wire(&self, mut frames: VecDeque<String>) {
+        let mut inner = self.lock();
+        frames.append(&mut inner.fleet_wire);
+        inner.fleet_wire = frames;
+    }
     pub fn republish_audio(&self) {
         let mut inner = self.lock();
         inner.audio = inner.last_accepted_audio.clone();
@@ -445,8 +513,27 @@ impl HostLobbyBridge {
     }
 }
 
+fn is_fleet_record(json: &str) -> bool {
+    matches!(
+        super::HostLobbyRecord::decode(json),
+        Some(
+            super::HostLobbyRecord::FleetCode { .. }
+                | super::HostLobbyRecord::FleetRoster { .. }
+                | super::HostLobbyRecord::FleetFrame { .. }
+                | super::HostLobbyRecord::FleetStartGrant { .. }
+                | super::HostLobbyRecord::FleetHostLost { .. }
+                | super::HostLobbyRecord::FleetSlotClaimed { .. }
+                | super::HostLobbyRecord::FleetWireSend { .. }
+                | super::HostLobbyRecord::FleetFault { .. }
+        )
+    )
+}
+
 /// One frame's worth of everything waiting to cross.
 struct Pending {
+    fleet_config: Option<String>,
+    fleet_update: Option<String>,
+    fleet_wire: VecDeque<String>,
     audio: Option<String>,
     reveal: Option<bool>,
     join: Option<String>,
@@ -537,14 +624,74 @@ pub fn pump_host_lobby(
     // on the simulation's own thread. Everything after it is deferred instead.
     let mut failed = false;
 
-    if let Some(flag) = pending.reveal {
-        match surface.push(&host_lobby_reveal_script(flag)) {
+    if let Some(json) = pending.fleet_config {
+        match surface.push(&super::document::host_lobby_fleet_config_script(&json)) {
             Ok(()) => report.pushed += 1,
             Err(e) => {
                 report.push_failure = Some(e);
                 report.deferred += 1;
-                bridge.restore_reveal(flag);
+                bridge.push_fleet_config(json);
                 failed = true;
+            }
+        }
+    }
+
+    if let Some(json) = pending.fleet_update {
+        if failed {
+            report.deferred += 1;
+            bridge.push_fleet_update(json);
+        } else {
+            match surface.push(&super::document::host_lobby_fleet_update_script(&json)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.push_fleet_update(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if failed {
+        report.deferred += pending.fleet_wire.len();
+        bridge.restore_fleet_wire(pending.fleet_wire);
+    } else {
+        let mut unsent = VecDeque::new();
+        for frame in pending.fleet_wire {
+            if failed {
+                unsent.push_back(frame);
+                continue;
+            }
+            match surface.push(&super::document::host_lobby_fleet_wire_script(&frame)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    unsent.push_back(frame);
+                    failed = true;
+                }
+            }
+        }
+        if !unsent.is_empty() {
+            report.deferred += unsent.len().saturating_sub(1);
+            bridge.restore_fleet_wire(unsent);
+        }
+    }
+
+    if let Some(flag) = pending.reveal {
+        if failed {
+            report.deferred += 1;
+            bridge.restore_reveal(flag);
+        } else {
+            match surface.push(&host_lobby_reveal_script(flag)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.restore_reveal(flag);
+                    failed = true;
+                }
             }
         }
     }
@@ -701,6 +848,58 @@ mod tests {
     use crate::native_host::panes::RecordingSurface;
 
     const LOBBY: &str = r#"{"phase":"Lobby","crew_count":0}"#;
+
+    #[test]
+    fn fleet_configuration_is_delivered_before_an_early_ready_frame() {
+        let bridge = HostLobbyBridge::new();
+        bridge.push_fleet_wire(r#"{"type":"ready"}"#);
+        bridge.push_fleet_config(r#"{"base":"https://fleet.test"}"#);
+        let mut surface = RecordingSurface::ready();
+
+        let report = pump_host_lobby(&bridge, &mut surface);
+
+        assert_eq!(report.pushed, 2);
+        let pushed = &surface.pushed;
+        assert!(pushed[0].contains("__phoenixHostFleetConfigure"));
+        assert!(pushed[1].contains("__phoenixHostFleetWire"));
+    }
+
+    #[test]
+    fn fleet_record_flood_is_bounded_and_becomes_a_terminal_fault() {
+        let bridge = HostLobbyBridge::new();
+        let frame = r#"{"kind":"fleet_wire_send","frame":"{}"}"#;
+        for _ in 0..=RECORD_CAP {
+            bridge.record(frame);
+        }
+        // Further reliable input after the fault cannot grow the queue again.
+        for _ in 0..RECORD_CAP {
+            bridge.record(frame);
+        }
+
+        let records = bridge.take_records();
+        assert_eq!(records.len(), 1);
+        assert!(matches!(
+            super::super::HostLobbyRecord::decode(&records[0]),
+            Some(super::super::HostLobbyRecord::FleetFault { reason, .. })
+                if reason == "bridge-overflow"
+        ));
+    }
+
+    #[test]
+    fn fleet_wire_flood_is_bounded_and_becomes_a_terminal_fault() {
+        let bridge = HostLobbyBridge::new();
+        for _ in 0..=RECORD_CAP {
+            bridge.push_fleet_wire(r#"{"type":"ready"}"#);
+        }
+
+        assert!(bridge.fleet_faulted());
+        let pending = bridge.take_pending();
+        assert!(pending.fleet_wire.is_empty());
+        let records = bridge.take_records();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].contains("bridge-overflow"));
+    }
+
     const PLAYING: &str = r#"{"phase":"InProgress","crew_count":3}"#;
 
     #[test]

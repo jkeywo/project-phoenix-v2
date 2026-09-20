@@ -2,8 +2,8 @@
 title: Session
 type: entity
 tags: [session, server, identity, reconnect, readiness]
-sources: [src/session_connections.rs, src/session_connections/browser.rs, gui/host-peer-routing.js, server.html, src/native_host/connections.rs, src/lobby/session.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lobby/result_application.rs, src/lobby/result_application_tests.rs, src/gm_roster.rs, src/server/bridge.rs]
-updated: 2026-09-07
+sources: [src/session_connections.rs, src/session_connections/browser.rs, gui/host-peer-routing.js, gui/host-mesh.js, gui/fleet-session.js, gui/native-fleet-peer.js, server.html, src/native_host/connections.rs, src/native_host/host_lobby/fleet.rs, src/lobby/session.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lobby/result_application.rs, src/lobby/result_application_tests.rs, src/gm_roster.rs, src/lockstep/mod.rs, src/server/bridge.rs]
+updated: 2026-09-20
 ---
 
 # Session
@@ -47,9 +47,12 @@ the fleet start policy.
 
 Fleet technical participants are separate again from both records. The frozen
 private fleet roster names the ordered owner and every simulation participant,
-then lists only the participant slots that also own player ships. This is why a
-GM can contribute a lockstep watermark and start vote without becoming a
-`SessionManager` player or consuming a ship.
+then lists ship ownership and GM operator bindings as independent capabilities.
+A native participant may therefore own a fixed player ship and an equal GM
+identity on the same `slot-N`; participant-based barriers, watermarks, digests
+and deterministic NPC work count that process once. Browser peers continue to
+advertise one capability, so browser GM remains stationless and browser ship
+hosts gain no GM authority.
 
 `holder_for_station` returns only a connected direct holder. This distinction
 lets a disconnected player retain the station on their record for restoration

@@ -115,6 +115,22 @@ pub struct RawLimits {
     pub max_relay_queue_snapshot: usize,
     #[serde(default = "default_max_relay_send_buffer_bytes")]
     pub max_relay_send_buffer_bytes: usize,
+    #[serde(default = "default_max_fleet_hosts")]
+    pub max_fleet_hosts: usize,
+    #[serde(default = "default_max_slot_name_length")]
+    pub max_slot_name_length: usize,
+    #[serde(default = "default_max_slot_ship_path_length")]
+    pub max_slot_ship_path_length: usize,
+}
+
+fn default_max_fleet_hosts() -> usize {
+    4
+}
+fn default_max_slot_name_length() -> usize {
+    48
+}
+fn default_max_slot_ship_path_length() -> usize {
+    160
 }
 
 fn default_max_lookups() -> usize {
@@ -153,6 +169,9 @@ impl Default for RawLimits {
             max_relay_queue_reliable: default_max_relay_queue_reliable(),
             max_relay_queue_snapshot: default_max_relay_queue_snapshot(),
             max_relay_send_buffer_bytes: default_max_relay_send_buffer_bytes(),
+            max_fleet_hosts: default_max_fleet_hosts(),
+            max_slot_name_length: default_max_slot_name_length(),
+            max_slot_ship_path_length: default_max_slot_ship_path_length(),
         }
     }
 }

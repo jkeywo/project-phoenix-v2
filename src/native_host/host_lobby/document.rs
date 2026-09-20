@@ -182,6 +182,19 @@ pub fn host_lobby_audio_script(json: &str) -> String {
     vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyAudio", json)
 }
 
+pub fn host_lobby_fleet_config_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostFleetConfigure", json)
+}
+
+pub fn host_lobby_fleet_update_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostFleetUpdate", json)
+}
+
+pub fn host_lobby_fleet_wire_script(frame: &str) -> String {
+    let json = serde_json::to_string(frame).unwrap_or_else(|_| "\"\"".to_string());
+    format!("window.__phoenixHostFleetWire?.({json});")
+}
+
 /// The script that hands the surface one encoded [`JoinInvite`] (issue #1329).
 ///
 /// The crew's join code, the structured code its QR carries, and the address a

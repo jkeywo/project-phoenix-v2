@@ -4160,9 +4160,10 @@
     /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
     let fleetIceServers = [];
     /** Privileged host-mesh role chosen before open/join. Phones never set it. */
-    let fleetRole = window.__phoenixGmPage ? 'gm' : 'ship';
+    const nativeTechnicalPeer = window.__phoenixNativeTechnicalPeer === true;
+    let fleetRole = nativeTechnicalPeer ? 'ship-gm' : (window.__phoenixGmPage ? 'gm' : 'ship');
     /** Distinguishes the default from an operator deliberately choosing ship. */
-    let fleetRoleExplicit = !!window.__phoenixGmPage;
+    let fleetRoleExplicit = nativeTechnicalPeer || !!window.__phoenixGmPage;
     /** Latest owner-computed collective readiness policy, identical on peers. */
     let fleetStartPolicy = null;
     /** Latest local lobby tally; Rust has already excluded spectators. */
@@ -4224,7 +4225,16 @@
     let _fleetBootReady = false;
 
     function normaliseFleetRole(role) {
-      return role === 'gm' ? 'gm' : 'ship';
+      if (role === 'gm' || role === 'ship-gm') return role;
+      return 'ship';
+    }
+
+    function fleetRoleHasShip(role = fleetRole) {
+      return normaliseFleetRole(role) !== 'gm';
+    }
+
+    function fleetRoleHasGm(role = fleetRole) {
+      return normaliseFleetRole(role) !== 'ship';
     }
 
     /**
@@ -4259,7 +4269,7 @@
     function localGm() {
       const standalone = standaloneGm();
       if (standalone) return standalone;
-      if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) !== 'gm'
+      if (!fleetHandle || !fleetRoleHasGm(fleetHandle.role || fleetRole)
           || !fleetHandle.operatorId || fleetHandle.gmJoinCandidate) return null;
       const gms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
       const row = gms.find(gm => gm && gm.id === fleetHandle.operatorId);
@@ -5323,7 +5333,7 @@
     window.__hostFleetRole = function() { return fleetRole; };
     window.__hostSetFleetRole = function(role) {
       const next = normaliseFleetRole(role);
-      if (fleetHandle || (role !== 'ship' && role !== 'gm')) return false;
+      if (nativeTechnicalPeer || fleetHandle || (role !== 'ship' && role !== 'gm')) return false;
 
       // The role is a boot profile, not a mutable label on an already-booted
       // simulation. Keep the role picker discoverable, but make its public UI
@@ -5482,7 +5492,7 @@
      * during scenario selection has to show until the world loads.
      */
     function fleetShip() {
-      if (fleetRole === 'gm') return null;
+      if (!fleetRoleHasShip()) return null;
       if (_selectedHull) return _selectedHull;
       const path = _preSelection && _preSelection.template_path;
       return path ? { template_path: path } : null;
@@ -5507,7 +5517,7 @@
      * inert when there is no fleet, which is the ordinary case.
      */
     function announceFleetSelection() {
-      if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) === 'gm') return;
+      if (!fleetHandle || !fleetRoleHasShip(fleetHandle.role || fleetRole)) return;
       try {
         fleetHandle.update({ ship: fleetShip(), ready: !!_selectedHull });
       } catch (e) {
@@ -5924,7 +5934,7 @@
         maxShipPathLength: data.limits.max_slot_ship_path_length,
         checkStamp: checkHostStamp,
         role: fleetRole,
-        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
+        name: fleetRoleHasGm() ? t('settings.fleet.role_gm') : '',
         ship: fleetShip(),
         onIdentity: (identity) => {
           fleetRole = normaliseFleetRole(identity && identity.role);
@@ -6010,10 +6020,10 @@
       // A stored capability also restores the role on a fragment-driven page
       // reload, which otherwise auto-joins before the operator can reopen the
       // Settings selector and choose GM again.
-      const priorIdentity = (!fleetRoleExplicit || fleetRole === 'gm')
+      const priorIdentity = (!fleetRoleExplicit || fleetRoleHasGm())
         ? storedGmIdentity(identityCode)
         : null;
-      if (priorIdentity) fleetRole = 'gm';
+      if (priorIdentity && !nativeTechnicalPeer) fleetRole = 'gm';
       // Seed the role-preset selector from storage BEFORE the identity even
       // reconnects (issue #1319), and key live switches to this code so a
       // later selection change persists under the same stored identity. Only
@@ -6039,7 +6049,7 @@
         stamp: hostStampField(),
         iceServers: fleetIceServers,
         role: fleetRole,
-        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
+        name: fleetRoleHasGm() ? t('settings.fleet.role_gm') : '',
         reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null,
         ship: fleetShip(),
         onIdentity: (identity) => {

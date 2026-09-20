@@ -21,6 +21,7 @@ import {
   HOST_FRAME_TICK,
   HOST_ROLE_GM,
   HOST_ROLE_SHIP,
+  HOST_ROLE_SHIP_GM,
   asHostFrame,
   encodeHostFrame,
   helloFrame,
@@ -330,6 +331,26 @@ describe('opening a fleet', () => {
     expect(roster.slots[0]).toMatchObject({ id: 'slot-1', owner: true, connected: true });
     expect(roster.admission).toBe(ADMISSION_OPEN);
     expect(roster.frozen).toBe(false);
+  });
+
+  it('opens one native owner as both a ship host and an equal GM operator', async () => {
+    const { lead } = await fleetOf({
+      role: HOST_ROLE_SHIP_GM,
+      ship: { template_path: 'native.toml' },
+      credentialFactory: () => 'native-owner-secret',
+    });
+    expect(lead.fleet.role).toBe(HOST_ROLE_SHIP_GM);
+    expect(lead.fleet.slot).toBe('slot-1');
+    expect(lead.fleet.operatorId).toBe('gm-1');
+    expect(lead.fleet.setCrewReadiness({ connected: 1, ready: 1 })).toBe(true);
+    expect(lead.fleet.setGmReady(true)).toBe(true);
+    expect(lead.fleet.setStartValidation(true)).toBe(true);
+    await settle();
+    expect(lastRoster(lead)).toMatchObject({
+      participants: ['slot-1'],
+      slots: [{ id: 'slot-1', crew: { connected: 1, ready: 1 } }],
+      gms: [{ id: 'gm-1', connected: true, ready: true }],
+    });
   });
 });
 
@@ -869,6 +890,44 @@ describe('collective GM and crew start transport (issue #1290)', () => {
     return () => values[index++];
   };
 
+  it('runs a combined native member beside browser ship-only and GM-only peers as one simulation', async () => {
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+      credentialFactory: credentialSequence('native-secret', 'browser-gm-secret'),
+    });
+    const native = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_SHIP_GM,
+      ship: { template_path: 'native.toml' },
+      name: 'Native bridge',
+    });
+    const browserShip = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'browser.toml' }, name: 'Browser ship',
+    });
+    const browserGm = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM, name: 'Browser GM',
+    });
+
+    expect(native.member.role).toBe(HOST_ROLE_SHIP_GM);
+    expect(native.member.operatorId).toBe('gm-1');
+    expect(native.member.setCrewReadiness({ connected: 1, ready: 1 })).toBe(true);
+    expect(native.member.setGmReady(true)).toBe(true);
+    expect(native.member.setStartValidation(true)).toBe(true);
+    expect(browserShip.member.role).toBe(HOST_ROLE_SHIP);
+    expect(browserGm.member.role).toBe(HOST_ROLE_GM);
+    await settle();
+
+    lead.fleet.freeze();
+    await settle();
+    const topology = lead.simulationRosters.at(-1);
+    expect(topology.participants).toEqual([1, 2, 3, 4]);
+    expect(topology.ships.map(ship => ship.host)).toEqual([1, 2, 3]);
+    expect(topology.gms).toEqual([
+      { host: 2, operator_id: 'gm-1' },
+      { host: 4, operator_id: 'gm-2' },
+    ]);
+    expect(native.simulationRosters.at(-1)).toEqual({ ...topology, local: 2 });
+  });
+
   it('autostarts only after every connected player and equal GM is ready and validated', async () => {
     const { factories, world, lead } = await fleetOf({
       ship: { template_path: 'lead.toml' },
@@ -1039,6 +1098,39 @@ describe('collective GM and crew start transport (issue #1290)', () => {
     expect(member.simulationRosters).toHaveLength(1);
     expect(lastRoster(member).frozen).toBe(true);
     expect(member.policies.at(-1)).toMatchObject({ started: true });
+  });
+
+  it('publishes the accepted frozen roster before an owner frame queued during adoption', async () => {
+    const adoption = deferred();
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+      onSimulationRoster: () => adoption.promise,
+    });
+    const member = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' },
+    });
+    lead.fleet.update({ ready: true });
+    member.member.update({ ready: true });
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 });
+    member.member.setCrewReadiness({ connected: 1, ready: 1 });
+    lead.fleet.setStartValidation(true);
+    member.member.setStartValidation(true);
+    await settle();
+
+    const first = encodeHostFrame(simulationFrame(
+      HOST_FRAME_TICK, { from: 1, watermark: 1, commands: [] }, 1,
+    ));
+    lead.fleet.broadcast(first);
+    expect(member.events.filter(event => event.type === 'simulation-frame')).toEqual([]);
+
+    adoption.resolve(true);
+    await settle();
+    const relevant = member.events.filter(event =>
+      event.type === 'simulation-roster' || event.type === 'simulation-frame');
+    expect(relevant.map(event => event.type)).toEqual([
+      'simulation-roster', 'simulation-frame',
+    ]);
+    expect(relevant[1]).toMatchObject({ raw: first, authSlot: 1 });
   });
 
   it('publishes nothing from a frozen async owner topology that later refuses', async () => {

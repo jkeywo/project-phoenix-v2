@@ -318,7 +318,6 @@ impl FleetRoster {
                 !participants.contains(&gm.host)
                     || gm.operator_id.is_empty()
                     || gm.operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
-                    || ships.iter().any(|ship| ship.host == gm.host)
             })
             || gms.windows(2).any(|pair| {
                 pair[0].host == pair[1].host || pair[0].operator_id == pair[1].operator_id
@@ -347,15 +346,10 @@ impl FleetRoster {
     /// `gm_operator(local)`; without it a game-master-only session could look at
     /// its world but never act on it.
     ///
-    /// Deliberately NOT [`Self::with_participants_and_gms`], which refuses a GM
-    /// bound to a slot that also hosts a ship. That is a MESH rule: in a fleet
-    /// every frame is authenticated per technical slot, so a ship host must never
-    /// be able to claim an operator id it does not own, and a GM peer is a
-    /// stationless second host. A session of ONE has no sibling to authenticate
-    /// against and no second slot to be — it is both halves — so the rule has
-    /// nothing to protect there and refusing would only mean the desk stays
-    /// dead. Anything with more than one participant still goes through the mesh
-    /// constructor and still obeys the rule.
+    /// This remains a convenience for the one-peer landing route. Fleet rosters
+    /// use [`Self::with_participants_and_gms`], which can bind the same technical
+    /// participant to a ship and an equal GM operator without duplicating the
+    /// lockstep wait-set.
     ///
     /// `operator_id` is bounded exactly as a mesh binding is, so an unusable id
     /// fails closed here rather than at the first refused action.
@@ -413,8 +407,8 @@ impl FleetRoster {
         }
     }
 
-    /// The public operator identity authenticated to `host`, if that technical
-    /// participant is a GM rather than a ship host.
+    /// The public operator identity authenticated to `host`, when that technical
+    /// participant advertises GM capability. It may also own a player ship.
     pub fn gm_operator(&self, host: HostSlot) -> Option<&str> {
         self.gms
             .iter()
@@ -2553,7 +2547,7 @@ station = "helm"
     }
 
     #[test]
-    fn private_gm_bindings_are_bounded_unique_and_stationless() {
+    fn private_gm_bindings_are_bounded_unique_and_may_share_a_ship_peer() {
         let roster = FleetRoster::with_participants_and_gms(
             Vec::new(),
             vec![HostSlot(1), HostSlot(2)],
@@ -2578,7 +2572,11 @@ station = "helm"
             HostSlot(2),
             HostSlot(1),
         );
-        assert!(ship_and_gm_same_slot.is_none());
+        let combined =
+            ship_and_gm_same_slot.expect("one technical peer may advertise both capabilities");
+        assert_eq!(combined.participants(), &[HostSlot(1), HostSlot(2)]);
+        assert_eq!(combined.ships().len(), 1);
+        assert_eq!(combined.gm_operator(HostSlot(2)), Some("gm-1"));
 
         let duplicate_operator = FleetRoster::with_participants_and_gms(
             Vec::new(),

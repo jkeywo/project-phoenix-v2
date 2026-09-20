@@ -3,6 +3,7 @@
 pub mod bridge;
 pub mod document;
 pub mod keyboard;
+pub mod preview;
 pub mod test_clock;
 pub mod test_process;
 
@@ -99,7 +100,11 @@ pub fn run(args: &crate::delivery::args::HostArgs) -> Result<(), String> {
         let server = HostServer::bind(&delivery)?;
         let path = document::document_path(&uuid::Uuid::new_v4().to_string());
         server.hosted_documents().publish(path.clone(), html);
-        let worker = bridge::WorkshopWorker::spawn(provider)?;
+        let worker = bridge::WorkshopWorker::spawn_hosted(
+            provider,
+            server.hosted_documents(),
+            format!("http://{}", server.local_addr()),
+        )?;
         let surface = WorkshopSurface {
             bridge: worker.bridge(),
             url: format!("http://{}{}", server.local_addr(), path),

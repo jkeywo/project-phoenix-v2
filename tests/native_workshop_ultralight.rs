@@ -38,10 +38,18 @@ impl Fixture {
             std::env::temp_dir().join(format!("phoenix-workshop-engine-{}", uuid::Uuid::new_v4())),
         );
         fs::create_dir_all(fixture.0.join("project/assets/worlds")).unwrap();
+        fs::create_dir_all(fixture.0.join("project/assets/models")).unwrap();
         fs::write(fixture.0.join("project/assets/scenarios.toml"), "[content]\nid='phoenix-base'\nepoch=1\n[[scenario]]\nid='test'\nworld='assets/worlds/test.toml'\n").unwrap();
         fs::write(
             fixture.0.join("project/assets/worlds/test.toml"),
             b"# Keep\r\n[global]\r\ntitle='Engine Test'\r\n",
+        )
+        .unwrap();
+        fs::copy(
+            "assets/models/alliance_cruiser.glb",
+            fixture
+                .0
+                .join("project/assets/models/native-preview-only.glb"),
         )
         .unwrap();
         fixture
@@ -107,7 +115,7 @@ fn create(runtime: &mut UltralightHost, pane: PaneId, url: &str) -> UltralightPa
 }
 
 #[test]
-#[ignore = "needs the Ultralight SDK and built dist/workshop.html; no physical monitors required"]
+#[ignore = "needs the Ultralight SDK and built dist Workshop/preview targets; no physical monitors required"]
 fn native_workshop_shared_page_saves_exact_source_and_restores_after_view_recreation() {
     eprintln!("{}", stage_sdk().unwrap());
     let fixture = Fixture::new();
@@ -228,6 +236,20 @@ fn native_workshop_shared_page_saves_exact_source_and_restores_after_view_recrea
         },
     ));
     assert_eq!(surface.view_mut().evaluate("String(!document.getElementById('workshop-source').value.includes('# recovered edit'))").unwrap(), "true");
+    // The model exists only under the selected temporary root. The embedded
+    // preview must therefore fetch the host's immutable capture route; a fall
+    // through to the built bundle cannot draw it.
+    surface.view_mut().evaluate("document.querySelector('[data-layout-panel=\"models\"][data-layout-control=\"switcher\"]').click(); var model=document.getElementById('workshop-model'); model.value='assets/models/native-preview-only.glb'; model.dispatchEvent(new Event('change')); document.querySelector('[data-layout-panel=\"model-preview\"][data-layout-control=\"switcher\"]').click(); document.getElementById('workshop-model-preview-refresh').click()").unwrap();
+    wait_for(
+        &mut runtime,
+        &mut surface,
+        &bridge,
+        pane,
+        "/\\d/.test(document.getElementById('workshop-model-preview-stats').textContent) && !!document.querySelector('.workshop-model-preview-frame')",
+    );
+    let rect: serde_json::Value = serde_json::from_str(
+        &surface.view_mut().evaluate("JSON.stringify((()=>{const r=document.querySelector('.workshop-model-preview-frame').getBoundingClientRect();return {x:Math.floor(r.x+r.width*.25),y:Math.floor(r.y+r.height*.25),w:Math.floor(r.width*.5),h:Math.floor(r.height*.5)}})())").unwrap(),
+    ).unwrap();
     let mut pixels = vec![0; 1440 * 1000 * 4];
     runtime.render();
     assert!(surface
@@ -240,5 +262,25 @@ fn native_workshop_shared_page_saves_exact_source_and_restores_after_view_recrea
             .chunks_exact(4)
             .any(|pixel| pixel[0] > 40 && pixel[1] > 40 && pixel[2] > 40),
         "shared UI text rasterizes"
+    );
+    let (x, y, width, height) = (
+        rect["x"].as_u64().unwrap() as usize,
+        rect["y"].as_u64().unwrap() as usize,
+        rect["w"].as_u64().unwrap() as usize,
+        rect["h"].as_u64().unwrap() as usize,
+    );
+    let mut colours = std::collections::BTreeSet::new();
+    for row in y..(y + height).min(1000) {
+        for column in x..(x + width).min(1440) {
+            let offset = (row * 1440 + column) * 4;
+            colours.insert([pixels[offset], pixels[offset + 1], pixels[offset + 2]]);
+            if colours.len() > 8 {
+                break;
+            }
+        }
+    }
+    assert!(
+        colours.len() > 1,
+        "draft-only native preview rendered a flat frame"
     );
 }

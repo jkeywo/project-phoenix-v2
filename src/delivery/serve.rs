@@ -105,21 +105,50 @@ pub fn peer_origin(addr: Option<std::net::SocketAddr>) -> PeerOrigin {
 /// modified.
 #[derive(Clone, Default)]
 pub struct HostedDocuments {
-    documents: Arc<std::sync::RwLock<std::collections::BTreeMap<String, String>>>,
+    documents: Arc<std::sync::RwLock<std::collections::BTreeMap<String, HostedResource>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostedResource {
+    pub body: Arc<[u8]>,
+    pub content_type: String,
+    pub immutable: bool,
 }
 
 impl HostedDocuments {
-    fn read(&self) -> std::sync::RwLockReadGuard<'_, std::collections::BTreeMap<String, String>> {
+    fn read(
+        &self,
+    ) -> std::sync::RwLockReadGuard<'_, std::collections::BTreeMap<String, HostedResource>> {
         self.documents.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Publish `html` at `path` (an absolute request path, e.g.
     /// `/client/pane-0.html`). Replaces whatever was there.
     pub fn publish(&self, path: impl Into<String>, html: String) {
+        self.publish_bytes(path, html.into_bytes(), "text/html; charset=utf-8", false);
+    }
+
+    /// Publish an in-memory binary resource. Workshop preview captures use
+    /// immutable, nonce-scoped paths so large model and texture bytes never
+    /// cross the embedded view's JSON bridge.
+    pub fn publish_bytes(
+        &self,
+        path: impl Into<String>,
+        body: Vec<u8>,
+        content_type: impl Into<String>,
+        immutable: bool,
+    ) {
         self.documents
             .write()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(path.into(), html);
+            .insert(
+                path.into(),
+                HostedResource {
+                    body: Arc::from(body),
+                    content_type: content_type.into(),
+                    immutable,
+                },
+            );
     }
 
     /// Stop publishing `path`.
@@ -132,6 +161,11 @@ impl HostedDocuments {
 
     /// The document published at `path`, if any.
     pub fn get(&self, path: &str) -> Option<String> {
+        let resource = self.read().get(path)?.clone();
+        String::from_utf8(resource.body.to_vec()).ok()
+    }
+
+    pub fn resource(&self, path: &str) -> Option<HostedResource> {
         self.read().get(path).cloned()
     }
 
@@ -365,6 +399,8 @@ pub enum Route {
     },
     /// Serve this in-memory document, published by the host itself.
     Document { body: String },
+    /// Serve a typed in-memory resource at an immutable capture URL.
+    Hosted { resource: HostedResource },
     /// Serve this bundle-relative file.
     Static { rel_path: String },
     /// No bundle is being served, or the path escaped it.
@@ -440,9 +476,22 @@ pub fn route(
             // whatever any unknown path gets, so the refusal does not even
             // confirm the path exists.
             if peer == PeerOrigin::Loopback {
-                if let Some(body) = documents.get(path) {
-                    return Route::Document { body };
+                if let Some(resource) = documents.resource(path) {
+                    if resource.content_type == "text/html; charset=utf-8" && !resource.immutable {
+                        return Route::Document {
+                            body: String::from_utf8(resource.body.to_vec())
+                                .expect("published HTML remains UTF-8"),
+                        };
+                    }
+                    return Route::Hosted { resource };
                 }
+            }
+            // A retired or unknown preview member is absent. Never let its
+            // logical asset path fall through to the static client tree.
+            if path.starts_with("/workshop-preview-capture/") {
+                return Route::NotFound {
+                    detail: "no such member in the captured Workshop preview",
+                };
             }
             match client {
                 ClientSource::Hosted => Route::NotFound {
@@ -1014,6 +1063,30 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
                 &mut stream,
                 &head,
                 if head_only { &[] } else { body.as_bytes() },
+            );
+            on_event(HostEvent::Served {
+                method: req.method.clone(),
+                path: req.path.clone(),
+                status: 200,
+            });
+        }
+        Route::Hosted { resource } => {
+            let head = http::response_head(
+                200,
+                "OK",
+                &resource.content_type,
+                if resource.immutable {
+                    CachePolicy::Immutable
+                } else {
+                    CachePolicy::Revalidate
+                },
+                resource.body.len(),
+                &[],
+            );
+            write_all(
+                &mut stream,
+                &head,
+                if head_only { &[] } else { &resource.body },
             );
             on_event(HostEvent::Served {
                 method: req.method.clone(),
@@ -1697,6 +1770,42 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 PeerOrigin::Loopback,
             ),
             Route::Static { .. }
+        ));
+    }
+
+    #[test]
+    fn retired_workshop_preview_members_never_fall_through_to_bundle_files() {
+        let fx = Fixture::new("preview-capture", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let bundled = ClientSource::Bundled { dir: "dist".into() };
+        let documents = HostedDocuments::default();
+        let path = "/workshop-preview-capture/nonce/0";
+        documents.publish_bytes(path, vec![1, 2, 3], "model/gltf-binary", true);
+        assert!(matches!(
+            route(
+                &request(&format!("GET {path} HTTP/1.1\r\n")),
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Loopback,
+            ),
+            Route::Hosted {
+                resource: HostedResource {
+                    immutable: true,
+                    ..
+                }
+            }
+        ));
+        documents.withdraw(path);
+        assert!(matches!(
+            route(
+                &request(&format!("GET {path} HTTP/1.1\r\n")),
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Loopback,
+            ),
+            Route::NotFound { .. }
         ));
     }
 

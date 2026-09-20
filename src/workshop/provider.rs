@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{document, WorkshopDependencies, WorkshopValidation};
 pub mod assets;
+pub mod preview_snapshot;
 pub mod test_snapshot;
 
 pub type Files = BTreeMap<String, Vec<u8>>;
@@ -141,6 +142,14 @@ pub enum Operation {
     },
     TestStatus,
     TestStop,
+    PreviewStart {
+        files: assets::Sources,
+        selection: crate::workshop::test_protocol::PreviewSelection,
+    },
+    PreviewRelease {
+        capture: String,
+    },
+    PreviewStop,
 }
 
 #[derive(Debug, Serialize)]
@@ -211,6 +220,13 @@ pub enum Response {
     },
     TestCatalog {
         catalog: test_snapshot::TestCatalog,
+    },
+    Preview {
+        capture: String,
+        base_url: String,
+        paths: Vec<String>,
+        revision: String,
+        selection: crate::workshop::test_protocol::PreviewSelection,
     },
     Refused {
         message: String,
@@ -567,8 +583,14 @@ impl NativeWorkshopProvider {
             Operation::TestStart { .. }
             | Operation::TestControl { .. }
             | Operation::TestStatus
-            | Operation::TestStop => {
-                return Err("Disposable Test requires its explicit offline native shell".into());
+            | Operation::TestStop
+            | Operation::PreviewStart { .. }
+            | Operation::PreviewRelease { .. }
+            | Operation::PreviewStop => {
+                return Err(
+                    "Disposable Test and preview require their explicit offline native shell"
+                        .into(),
+                );
             }
         })
     }

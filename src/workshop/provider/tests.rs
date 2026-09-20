@@ -1033,6 +1033,67 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
     assert!(!fixture.recovery.join("test").exists());
 }
 
+#[test]
+fn native_preview_captures_draft_only_models_and_composed_celestial_entities() {
+    use crate::workshop::test_protocol::PreviewSelection;
+    let fixture = Fixture::new();
+    fs::create_dir_all(fixture.root.join("assets/models")).unwrap();
+    fs::create_dir_all(fixture.root.join("assets/entities")).unwrap();
+    fs::write(
+        fixture.root.join("assets/models/preview-only.glb"),
+        include_bytes!("../../../assets/models/alliance_cruiser.glb"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("assets/entities/star-fragment.toml"),
+        include_bytes!("../../../assets/entities/star_sun.toml"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("assets/entities/composed-star.toml"),
+        b"includes=['star-fragment.toml']\nname='Unsaved composed star'\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("assets/entities/preview-planet.toml"),
+        b"name='Unsaved planet'\n[planet]\nradius=12.0\nlongitude_segments=24\nlatitude_segments=12\n",
+    )
+    .unwrap();
+    let provider = fixture.open();
+    let sources = provider.assets.compact(&provider.baseline).unwrap();
+    for selection in [
+        PreviewSelection {
+            model: Some("assets/models/preview-only.glb".into()),
+            ..Default::default()
+        },
+        PreviewSelection {
+            entity: Some("assets/entities/composed-star.toml".into()),
+            ..Default::default()
+        },
+        PreviewSelection {
+            entity: Some("assets/entities/preview-planet.toml".into()),
+            ..Default::default()
+        },
+    ] {
+        let subject = selection.subject().unwrap().to_owned();
+        let snapshot = provider
+            .prepare_preview(sources.clone(), selection)
+            .unwrap();
+        assert!(snapshot.files.contains_key(&subject));
+        assert_eq!(snapshot.selection.subject(), Some(subject.as_str()));
+    }
+    assert!(matches!(
+        provider.prepare_preview(
+            sources,
+            PreviewSelection {
+                model: Some("assets/models/not-captured.glb".into()),
+                ..Default::default()
+            }
+        ),
+        Err(Response::Refused { report: None, .. })
+    ));
+}
+
 const TEST_HULL: &str = "class='lancer'\nname='Test hull'\n\
 [[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
 [[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";

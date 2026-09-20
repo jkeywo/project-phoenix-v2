@@ -24,6 +24,12 @@ enum Job {
         process: Box<super::test_process::TestProcess>,
         ready: mpsc::SyncSender<()>,
     },
+    #[cfg(test)]
+    InstallPreview {
+        epoch: u64,
+        snapshot: crate::workshop::provider::preview_snapshot::PreviewSnapshot,
+        ready: mpsc::SyncSender<()>,
+    },
 }
 #[derive(Default)]
 struct Inner {
@@ -120,12 +126,27 @@ impl WorkshopWorker {
     pub fn spawn(provider: NativeWorkshopProvider) -> Result<Self, String> {
         let mut operators = crate::native_host::panes::operator::NativeOperators::default();
         operators.configure("workshop");
-        Self::spawn_with_operators(provider, operators)
+        Self::spawn_with_operators(provider, operators, None)
+    }
+
+    pub fn spawn_hosted(
+        provider: NativeWorkshopProvider,
+        documents: crate::delivery::serve::HostedDocuments,
+        origin: String,
+    ) -> Result<Self, String> {
+        let mut operators = crate::native_host::panes::operator::NativeOperators::default();
+        operators.configure("workshop");
+        Self::spawn_with_operators(
+            provider,
+            operators,
+            Some(super::preview::PreviewRoutes::new(documents, origin)),
+        )
     }
 
     fn spawn_with_operators(
         mut provider: NativeWorkshopProvider,
         mut operators: crate::native_host::panes::operator::NativeOperators,
+        mut preview: Option<super::preview::PreviewRoutes>,
     ) -> Result<Self, String> {
         super::test_process::retire_abandoned_stages(&provider.test_directory());
         let (requests, input) = mpsc::sync_channel(8);
@@ -151,6 +172,9 @@ impl WorkshopWorker {
                                 let epoch = state.lock().unwrap_or_else(|e| e.into_inner()).epoch;
                                 if epoch != active_epoch {
                                     provider.retire_view();
+                                    if let Some(preview) = preview.as_mut() {
+                                        preview.retire();
+                                    }
                                     test = None;
                                     active_epoch = epoch;
                                 }
@@ -169,6 +193,18 @@ impl WorkshopWorker {
                             let _ = ready.send(());
                             continue;
                         }
+                        #[cfg(test)]
+                        if let Job::InstallPreview {
+                            epoch,
+                            snapshot,
+                            ready,
+                        } = job
+                        {
+                            preview.as_mut().unwrap().publish(snapshot);
+                            active_epoch = epoch;
+                            let _ = ready.send(());
+                            continue;
+                        }
                         let Job::Request {
                             epoch,
                             pane,
@@ -179,6 +215,9 @@ impl WorkshopWorker {
                         };
                         if epoch != active_epoch {
                             provider.retire_view();
+                            if let Some(preview) = preview.as_mut() {
+                                preview.retire();
+                            }
                             // A view crash/replacement retains source recovery, but
                             // cannot leave a detached disposable simulation alive.
                             test = None;
@@ -197,6 +236,9 @@ impl WorkshopWorker {
                                             let id = request.id;
                                             let result = match request.operation {
                                     Operation::TestStart { files, selection } => {
+                                        if let Some(preview) = preview.as_mut() {
+                                            preview.retire();
+                                        }
                                         match provider.prepare_test(files, selection) {
                                             Ok(snapshot) => {
                                                 let started = std::env::current_exe()
@@ -250,6 +292,30 @@ impl WorkshopWorker {
                                     Operation::TestStop => {
                                         test = None;
                                         Response::Test { run: None }
+                                    }
+                                    Operation::PreviewStart { files, selection } => {
+                                        match preview.as_mut() {
+                                            Some(routes) => match provider.prepare_preview(files, selection) {
+                                                Ok(snapshot) => routes.publish(snapshot),
+                                                Err(refusal) => refusal,
+                                            },
+                                            None => Response::Refused {
+                                                message: "Native Workshop preview delivery is unavailable".into(),
+                                                report: None,
+                                            },
+                                        }
+                                    }
+                                    Operation::PreviewRelease { capture } => {
+                                        if let Some(preview) = preview.as_mut() {
+                                            preview.release(&capture);
+                                        }
+                                        Response::Done
+                                    }
+                                    Operation::PreviewStop => {
+                                        if let Some(preview) = preview.as_mut() {
+                                            preview.retire();
+                                        }
+                                        Response::Done
                                     }
                                     operation => {
                                         provider
@@ -351,7 +417,30 @@ mod tests {
             let mut operators = NativeOperators::default();
             operators.configure("workshop");
             operators.root = Some(self.0.join("profiles"));
-            WorkshopWorker::spawn_with_operators(provider, operators).unwrap()
+            WorkshopWorker::spawn_with_operators(provider, operators, None).unwrap()
+        }
+        fn hosted_worker(
+            &self,
+            documents: crate::delivery::serve::HostedDocuments,
+        ) -> WorkshopWorker {
+            let provider = NativeWorkshopProvider::open(
+                WorkspaceKind::Project,
+                self.0.join("project"),
+                self.0.join("private"),
+                WorkshopDependencies::default(),
+            )
+            .unwrap();
+            let mut operators = NativeOperators::default();
+            operators.configure("workshop");
+            WorkshopWorker::spawn_with_operators(
+                provider,
+                operators,
+                Some(super::super::preview::PreviewRoutes::new(
+                    documents,
+                    "http://127.0.0.1:7".into(),
+                )),
+            )
+            .unwrap()
         }
     }
     impl Drop for Fixture {
@@ -517,6 +606,59 @@ mod tests {
                 assert!(
                     Instant::now() < deadline,
                     "orphaned Test stage after document retirement"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+
+    #[test]
+    fn test_start_and_pane_retirement_withdraw_preview_capture_routes() {
+        use crate::workshop::{
+            provider::preview_snapshot::PreviewSnapshot, test_protocol::PreviewSelection,
+        };
+        for action in ["test", "fault", "replace"] {
+            let fixture = Fixture::new();
+            let documents = crate::delivery::serve::HostedDocuments::default();
+            let worker = fixture.hosted_worker(documents.clone());
+            let bridge = worker.bridge();
+            bridge.activate(PaneId(1));
+            let (ready, installed) = mpsc::sync_channel(1);
+            bridge
+                .requests
+                .send(Job::InstallPreview {
+                    epoch: bridge.lock().epoch,
+                    snapshot: PreviewSnapshot {
+                        files: std::collections::BTreeMap::from([(
+                            "assets/models/draft.glb".into(),
+                            vec![1, 2, 3],
+                        )]),
+                        selection: PreviewSelection {
+                            model: Some("assets/models/draft.glb".into()),
+                            ..Default::default()
+                        },
+                        revision: "capture".into(),
+                    },
+                    ready,
+                })
+                .unwrap();
+            installed.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(documents.len(), 1);
+            match action {
+                "test" => {
+                    let mut surface = RecordingSurface::ready();
+                    surface.queue_record(r#"{"id":1,"op":"test-start","files":{},"selection":{"world":"missing","ship":"missing","seed":1}}"#);
+                    bridge.pump(PaneId(1), &mut surface);
+                }
+                "fault" => bridge.fault(),
+                "replace" => bridge.activate(PaneId(2)),
+                _ => unreachable!(),
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !documents.is_empty() {
+                assert!(
+                    Instant::now() < deadline,
+                    "preview routes survived {action}"
                 );
                 thread::sleep(Duration::from_millis(5));
             }

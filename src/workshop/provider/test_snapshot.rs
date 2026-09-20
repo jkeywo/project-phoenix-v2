@@ -25,6 +25,53 @@ pub(crate) fn stage_path(path: &str) -> bool {
 }
 
 impl NativeWorkshopProvider {
+    pub(super) fn prepare_runtime_capture(
+        &self,
+        sources: DraftSources,
+        refusal: &'static str,
+    ) -> Result<Files, Response> {
+        let files = self.assets.materialize(sources).map_err(super::refused)?;
+        self.check_files(&files).map_err(super::refused)?;
+        let report = self.validate(&files);
+        if !report.accepted {
+            return Err(Response::Refused {
+                message: refusal.into(),
+                report: Some(report),
+            });
+        }
+        let mut merged = self.test_support.clone();
+        if self.kind == WorkspaceKind::Mod {
+            merged.extend(
+                self.dependencies
+                    .base_files
+                    .iter()
+                    .map(|(path, text)| (path.clone(), text.as_bytes().to_vec())),
+            );
+            merged.extend(self.dependencies.base_assets.clone());
+            for pack in &self.dependencies.packs {
+                merged.extend(
+                    pack.files
+                        .iter()
+                        .map(|(path, text)| (path.clone(), text.as_bytes().to_vec())),
+                );
+                merged.extend(pack.assets.clone());
+            }
+        }
+        merged.extend(files);
+        let mut folded = std::collections::BTreeSet::new();
+        if merged.len() > super::MAX_FILES
+            || merged.values().map(Vec::len).sum::<usize>() > super::MAX_BYTES
+            || merged
+                .keys()
+                .any(|path| !stage_path(path) || !folded.insert(path.to_ascii_lowercase()))
+        {
+            return Err(super::refused(
+                "Workshop runtime snapshot exceeds the supported content envelope",
+            ));
+        }
+        Ok(merged)
+    }
+
     pub(super) fn capture_test_support(&self) -> Result<Files, String> {
         fn walk(
             provider: &NativeWorkshopProvider,
@@ -100,48 +147,7 @@ impl NativeWorkshopProvider {
         sources: DraftSources,
         selection: TestSelection,
     ) -> Result<TestSnapshot, Response> {
-        let files = self.assets.materialize(sources).map_err(super::refused)?;
-        self.check_files(&files).map_err(super::refused)?;
-        let report = self.validate(&files);
-        if !report.accepted {
-            return Err(Response::Refused {
-                message: "Runtime validation refused Test".into(),
-                report: Some(report),
-            });
-        }
-        let mut merged = self.test_support.clone();
-        if self.kind == WorkspaceKind::Mod {
-            merged.extend(
-                self.dependencies
-                    .base_files
-                    .iter()
-                    .map(|(path, text)| (path.clone(), text.as_bytes().to_vec())),
-            );
-            merged.extend(self.dependencies.base_assets.clone());
-            for pack in &self.dependencies.packs {
-                merged.extend(
-                    pack.files
-                        .iter()
-                        .map(|(path, text)| (path.clone(), text.as_bytes().to_vec())),
-                );
-                merged.extend(pack.assets.clone());
-            }
-        }
-        merged.extend(files);
-        // Every emitted path is still confined to the disposable content root.
-        // The project-shaped envelope admits the base manifest/dependencies;
-        // their bytes cannot grant a wider native filesystem capability.
-        let mut folded = std::collections::BTreeSet::new();
-        if merged.len() > super::MAX_FILES
-            || merged.values().map(Vec::len).sum::<usize>() > super::MAX_BYTES
-            || merged
-                .keys()
-                .any(|path| !stage_path(path) || !folded.insert(path.to_ascii_lowercase()))
-        {
-            return Err(super::refused(
-                "Test source snapshot exceeds the supported content envelope",
-            ));
-        }
+        let merged = self.prepare_runtime_capture(sources, "Runtime validation refused Test")?;
         let text = Sources(
             merged
                 .iter()

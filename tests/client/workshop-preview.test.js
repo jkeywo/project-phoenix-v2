@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createBrowserWorkshopPreview } from '../../editor/workshop-preview.js';
+import { createNativeWorkshopProvider } from '../../editor/workshop-provider.js';
 
 const DRAFT = {
   paths: () => ['assets/models/courier.glb', 'assets/models/courier.toml'],
@@ -83,6 +84,47 @@ describe('createBrowserWorkshopPreview', () => {
   it('refuses to start when the page reports it could not run', async () => {
     const { preview } = harness({ started: { running: false, error: 'boom' } });
     await expect(preview.start({}, { model: 'a.glb' })).rejects.toThrow('boom');
+  });
+});
+
+describe('native Workshop preview producer', () => {
+  it('fetches immutable capture members instead of carrying merged bytes over JSON and retires them', async () => {
+    const requests = [];
+    const request = vi.fn(async value => {
+      requests.push(value);
+      if (value.op === 'preview-start') return {
+        status: 'preview', capture: 'capture-1',
+        base_url: 'http://127.0.0.1:8123/workshop-preview-capture/capture-1/',
+        paths: ['assets/models/draft-only.glb', 'assets/models/draft-only.model.toml'],
+        revision: 'native-revision', selection: value.selection,
+      };
+      return { status: 'done' };
+    });
+    const binary = new Uint8Array([1, 2, 3, 4]);
+    const sidecar = new TextEncoder().encode('[rig]\n');
+    const fetcher = vi.fn(async url => ({ ok: true,
+      arrayBuffer: async () => (String(url).endsWith('/0') ? binary : sidecar).buffer }));
+    const run = { start: vi.fn(async snapshot => ({ running: true, revision: snapshot.revision })),
+      control: vi.fn(), status: vi.fn(async () => ({ running: true })), destroy: vi.fn() };
+    const provider = createNativeWorkshopProvider({ request, fetcher,
+      previewFrame: () => run });
+    provider.modelPreview.mount(document.body, { title: 'Preview' });
+    const compact = { 'assets/models/draft-only.glb': { version: 'abc', length: 4 } };
+    expect(provider.modelPreview.capture({ toNativeSources: () => compact })).toBe(compact);
+    await provider.modelPreview.start(compact, { model: 'assets/models/draft-only.glb', gizmos: true });
+    expect(requests[0]).toEqual({ op: 'preview-start', files: compact,
+      selection: { model: 'assets/models/draft-only.glb', gizmos: true } });
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      'http://127.0.0.1:8123/workshop-preview-capture/capture-1/0',
+      'http://127.0.0.1:8123/workshop-preview-capture/capture-1/1',
+    ]);
+    expect(run.start.mock.calls[0][0]).toMatchObject({ revision: 'native-revision' });
+    expect(run.start.mock.calls[0][0].files['assets/models/draft-only.glb']).toEqual(binary);
+    expect(run.start.mock.calls[0][0].files['assets/models/draft-only.model.toml']).toBe('[rig]\n');
+    await provider.modelPreview.stop();
+    expect(requests.slice(1)).toEqual([
+      { op: 'preview-release', capture: 'capture-1' }, { op: 'preview-stop' },
+    ]);
   });
 });
 

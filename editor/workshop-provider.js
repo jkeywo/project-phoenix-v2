@@ -55,7 +55,8 @@ export function createBrowserWorkshopProvider({ loadedPack = null, dependencies,
   };
 }
 
-export function createNativeWorkshopProvider({ request }) {
+export function createNativeWorkshopProvider({ request, previewFrame = createWorkshopPreviewFrame,
+  fetcher = (...args) => fetch(...args) }) {
   if (typeof request !== 'function') throw new Error('Native Workshop bridge is unavailable');
   let revision = null;
   let kind = null;
@@ -69,6 +70,45 @@ export function createNativeWorkshopProvider({ request }) {
     operation = next.catch(() => {});
     return next;
   };
+  let previewViewport = null, previewTitle = '';
+  const textDecoder = new TextDecoder('utf-8', { fatal: true });
+  const preview = createBrowserWorkshopPreview({
+    async prepare(files, selection) {
+      const value = await call({ op: 'preview-start', files, selection });
+      if (value?.status !== 'preview' || typeof value.capture !== 'string'
+          || typeof value.base_url !== 'string' || typeof value.revision !== 'string'
+          || !Array.isArray(value.paths) || value.paths.some(path => typeof path !== 'string')) {
+        throw new Error('Invalid native Workshop preview capture');
+      }
+      const base = new URL(value.base_url);
+      if (base.protocol !== 'http:' || !['127.0.0.1', '[::1]', 'localhost'].includes(base.hostname)
+          || !base.pathname.startsWith('/workshop-preview-capture/') || !base.pathname.endsWith('/')) {
+        throw new Error('Invalid native Workshop preview route');
+      }
+      try {
+        const entries = await Promise.all(value.paths.map(async (path, index) => {
+          const response = await fetcher(new URL(String(index), base), { cache: 'no-store', credentials: 'omit' });
+          if (!response.ok) throw new Error(`Captured Workshop preview member is unavailable: ${path}`);
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          return [path, /\.(toml|rhai)$/.test(path) ? textDecoder.decode(bytes) : bytes];
+        }));
+        return { files: Object.fromEntries(entries), selection: value.selection,
+          revision: value.revision, nativeCapture: value.capture };
+      } catch (error) {
+        await call({ op: 'preview-release', capture: value.capture }).catch(() => {});
+        throw error;
+      }
+    },
+    frame: () => {
+      if (!previewViewport) throw new Error('Workshop preview viewport is unavailable');
+      return previewFrame({ mount: previewViewport, title: previewTitle });
+    },
+    release(prepared) {
+      return prepared?.nativeCapture
+        ? call({ op: 'preview-release', capture: prepared.nativeCapture }).then(() => {})
+        : Promise.resolve();
+    },
+  });
   return {
     canImport: false, canCreate: false,
     async load() {
@@ -180,6 +220,20 @@ export function createNativeWorkshopProvider({ request }) {
         bytes.set(result.bytes, offset); offset += result.bytes.length;
       }
       return bytes;
+    },
+    modelPreview: {
+      capture(draft) { return draft.toNativeSources(); },
+      start: preview.start,
+      control: preview.control,
+      status: preview.status,
+      async stop() {
+        await preview.stop();
+        await call({ op: 'preview-stop' });
+      },
+      mount(target, label) {
+        previewViewport = target;
+        previewTitle = typeof label === 'string' ? label : label?.title || '';
+      },
     },
     test: {
       async catalog(files) {

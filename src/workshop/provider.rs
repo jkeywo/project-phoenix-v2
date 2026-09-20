@@ -1,5 +1,9 @@
 //! Selected native Authoring roots. The private host creates this capability;
 //! no request can select, expand or replace its filesystem authority.
+// Response is the serialized protocol envelope on both the success and refusal
+// paths. Returning that deliberately rich enum as Err keeps one wire shape.
+#![allow(clippy::result_large_err)]
+
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;

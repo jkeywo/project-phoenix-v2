@@ -4859,7 +4859,7 @@ fn apply_loaded_layer(
     id_mint: Option<&crate::world_id::EntityMint>,
     now_tick: u64,
     root_tick_hz: f32,
-    mut test_trace: Option<&mut crate::workshop::test_trace::TestTrace>,
+    test_trace: Option<&mut crate::workshop::test_trace::TestTrace>,
 ) {
     let crate::world::layers::LoadedLayer {
         mut name_to_uuid_inserts,
@@ -4916,7 +4916,7 @@ fn apply_loaded_layer(
                 root_tick_hz,
                 Some(path),
             );
-            if let Some(trace) = test_trace.as_deref_mut() {
+            if let Some(trace) = test_trace {
                 for callback in &calls {
                     let line = compiled
                         .function_lines

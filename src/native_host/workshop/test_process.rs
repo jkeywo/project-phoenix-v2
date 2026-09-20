@@ -348,7 +348,7 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
         if breakpoint.layer.as_ref().is_some_and(|path| {
             descriptor
                 .parent()
-                .map_or(true, |root| !root.join(path).is_file())
+                .is_none_or(|root| !root.join(path).is_file())
         }) {
             return Err("Test breakpoint layer is absent from the exact draft".into());
         }
@@ -388,6 +388,10 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
     }
     use crate::authoritative::{DeclareState, StateClass};
     app.declare_state::<ChildPipe>(StateClass::Timer, "gm-milestone-integrated-workshop")
+        .declare_state::<crate::workshop::test_trace::TestTrace>(
+            StateClass::TestInfra,
+            "workshop-test-script-trace",
+        )
         .insert_resource(ChildPipe {
             input: Mutex::new(input),
             launch: launch.clone(),

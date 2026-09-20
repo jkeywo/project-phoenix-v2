@@ -241,12 +241,16 @@ impl BillboardCapture {
             }
         };
         let child = active.child.take().unwrap();
+        let output = match child.wait_with_output() {
+            Ok(output) => output,
+            Err(error) => {
+                let message = error.to_string();
+                self.retire();
+                return Err(message);
+            }
+        };
         if !status.success() {
-            let detail = child
-                .wait_with_output()
-                .ok()
-                .and_then(|output| String::from_utf8(output.stderr).ok())
-                .unwrap_or_default();
+            let detail = String::from_utf8(output.stderr).unwrap_or_default();
             self.retire();
             return Err(if detail.trim().is_empty() {
                 format!("Billboard capture failed ({status})")
@@ -335,6 +339,7 @@ fn runtime_model_path(path: &str, suffix: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods, clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;

@@ -323,6 +323,12 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         app
             // Timers / outboxes: wall-clock / transport bookkeeping, not sim state.
             .declare_state::<SimOutbox>(StateClass::Timer, "digest-exclusion-classes")
+            // World systems name this optional resource on every assembled app,
+            // but only the disposable Workshop Test harness inserts it.
+            .declare_state::<crate::workshop::test_trace::TestTrace>(
+                StateClass::TestInfra,
+                "workshop-test-script-trace",
+            )
             // Peer-local asynchronous content delivery and its virtual-clock
             // hold. The exact sidecar bytes and resolved ModelMarkers are the
             // authority; which frame this peer finished loading them on is not.
@@ -758,6 +764,12 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::entities::spawner::EntityName>(
                 StateClass::DeferredFold,
                 "spawned-entity-state",
+            )
+            // Exact authored provenance is retained only for Live inspection;
+            // simulation systems never read it to decide an outcome.
+            .declare_state::<crate::entities::spawner::EntityTemplatePath>(
+                StateClass::Presentation,
+                "workshop-live-active-schema-inspector",
             )
             .declare_state::<crate::entities::spawner::HelmCapabilitySection>(
                 StateClass::DeferredFold,

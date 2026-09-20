@@ -299,8 +299,10 @@ mod tests {
         let mut app = app();
         app.world_mut()
             .insert_resource(crate::world::server::WorldContentRuntime::default());
-        let mut layer = crate::world::server::WorldRuntime::default();
-        layer.is_active = true;
+        let mut layer = crate::world::server::WorldRuntime {
+            is_active: true,
+            ..Default::default()
+        };
         layer.flags.set_flag("layer_arrived");
         let mut layers = crate::world::server::WorldLayerMap::default();
         layers

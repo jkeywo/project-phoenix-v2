@@ -345,6 +345,7 @@ impl Drop for LodGeneration {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;

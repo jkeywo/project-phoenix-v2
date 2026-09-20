@@ -582,39 +582,41 @@ mod tests {
             ActiveStationRatings(HashMap::from([(StationId("helm".into()), "Full".into())]));
         let controls = ControlSourceResolver::default();
         let hull = SystemHull::from_config(&[(SystemId("engine".into()), 100.0)]);
-        let mut authored = EntityConfig::default();
-        authored.hull = Some(crate::entities::config::HullConfig {
-            hull_integrity: 0.0,
-            system_hull: vec![crate::entities::config::SystemHullEntry {
-                system_id: SystemId("engine".into()),
-                display_name: Some("Engine".into()),
-                max_hp: 100.0,
-                damaged_threshold_pct: 0.75,
-                disabled_threshold_pct: 0.25,
-                debuff_magnitude: 0.15,
+        let authored = EntityConfig {
+            hull: Some(crate::entities::config::HullConfig {
+                hull_integrity: 0.0,
+                system_hull: vec![crate::entities::config::SystemHullEntry {
+                    system_id: SystemId("engine".into()),
+                    display_name: Some("Engine".into()),
+                    max_hp: 100.0,
+                    damaged_threshold_pct: 0.75,
+                    disabled_threshold_pct: 0.25,
+                    debuff_magnitude: 0.15,
+                }],
+            }),
+            repair: Some(crate::entities::config::RepairConfig {
+                repair_team_count: 2,
+                ..Default::default()
+            }),
+            captain_console: Some(Default::default()),
+            comms_console: Some(Default::default()),
+            shield_arcs: vec![crate::entities::config::ShieldArcConfig {
+                id: "fore".into(),
+                label: "Fore".into(),
+                center_deg: 0.0,
+                width_deg: 180.0,
+                max_hp: None,
+                regen_per_sec: None,
+                offline_duration: None,
+                hull_max_hp: 50.0,
+                hull_damaged_threshold_pct: 0.75,
+                hull_disabled_threshold_pct: 0.25,
+                hull_debuff_magnitude: 0.15,
+                priority: 1,
+                frequency: 0.5,
             }],
-        });
-        authored.repair = Some(crate::entities::config::RepairConfig {
-            repair_team_count: 2,
             ..Default::default()
-        });
-        authored.captain_console = Some(Default::default());
-        authored.comms_console = Some(Default::default());
-        authored.shield_arcs = vec![crate::entities::config::ShieldArcConfig {
-            id: "fore".into(),
-            label: "Fore".into(),
-            center_deg: 0.0,
-            width_deg: 180.0,
-            max_hp: None,
-            regen_per_sec: None,
-            offline_duration: None,
-            hull_max_hp: 50.0,
-            hull_damaged_threshold_pct: 0.75,
-            hull_disabled_threshold_pct: 0.25,
-            hull_debuff_magnitude: 0.15,
-            priority: 1,
-            frequency: 0.5,
-        }];
+        };
         let projection = projection([ShipInspectorInputs {
             id: "ship",
             label: "Ship",

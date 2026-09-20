@@ -12,7 +12,7 @@ pub enum MeshShape {
 
 impl MeshShape {
     /// Parse the lowercase name TOML uses, or `None` for anything else —
-    /// including the empty string, which is how the model viewer's panel says
+    /// including the empty string, which is how Workshop's preview says
     /// "this level is a GLB, not a shape".
     pub fn parse(name: &str) -> Option<MeshShape> {
         match name {
@@ -130,7 +130,7 @@ pub struct LodLevel {
     /// sphere — and, because the PNG loads long before a multi-MB GLB, it is
     /// also what shows while the near levels are still streaming in. Mutually
     /// exclusive with `model` and `shape`; the atlas is baked by the model
-    /// viewer's capture tool (see `[lod.capture]`).
+    /// Workshop's capture tool (see `[lod.capture]`).
     #[serde(default)]
     pub billboard: Option<String>,
     /// Procedural shape for this band. Used only when `model` is `None`.
@@ -307,9 +307,9 @@ pub struct LodGeneration {
 ///
 /// **Ignored at runtime**, exactly like [`LodGeneration`]: once the atlas is on
 /// disk the renderer only needs the file. It lives in the sidecar so the ladder
-/// *fully* declares how the atlas comes back — the model viewer's capture tool
-/// (`src/viewer/capture.rs`, reached from the LOD panel) is the one reader, and
-/// re-baking needs a GPU + the browser viewer, so like the Blender voxel pre-pass
+/// *fully* declares how the atlas comes back — Workshop's capture tool
+/// (`src/viewer/capture.rs`, reached from the Models panel) is the one reader, and
+/// re-baking needs a GPU, so like the Blender voxel pre-pass
 /// this is a local step. CI only re-hashes it against the separate capture
 /// provenance contract in `scripts/lod-capture-manifest.toml` (#1245); generated
 /// GLB provenance remains independently owned by `scripts/lod-manifest.toml`.

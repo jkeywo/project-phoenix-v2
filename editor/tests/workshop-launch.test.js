@@ -16,6 +16,11 @@ describe('retired shell Workshop links', () => {
     expect(parseWorkshopLaunch(new URL(legacyWorkshopUrl(new URL('https://host/tools/editor.html?file=assets/worlds/demo.toml'), 'editor')).hash.slice(1)).file)
       .toBe('assets/worlds/demo.toml');
     expect(parseWorkshopLaunch('panel=admin&file=../secret&model=C:/secret.glb')).toBeNull();
+    expect(parseWorkshopLaunch('panel=model-preview&model=assets/models/../secret.glb').preview).toBeNull();
+    expect(parseWorkshopLaunch('panel=model-preview&entity=assets%2Fentities%2Fnested%2F..%2Fsecret.toml').preview).toBeNull();
+    const migrated = legacyWorkshopUrl(new URL(
+      'https://host/viewer.html?model=assets%2Fmodels%2Fnested%2F..%2Fsecret.glb'), 'viewer');
+    expect(parseWorkshopLaunch(new URL(migrated).hash.slice(1)).preview).toBeNull();
   });
 
   it('keeps the direct model command on the same strict launch vocabulary', () => {
@@ -39,6 +44,9 @@ describe('retired shell Workshop links', () => {
       expect(() => workshopLaunchQuery(args)).toThrow(/Invalid|Choose|Duplicate/);
     }
     expect(() => workshopLaunchQuery([], 'file=../secret')).toThrow(/Invalid/);
+    expect(() => workshopLaunchQuery(['--model=assets/models/prefix/../secret.glb'])).toThrow(/Invalid/);
+    expect(() => workshopLaunchQuery([],
+      'entity=assets%2Fentities%2Fnested%2F..%2Fsecret.toml')).toThrow(/Invalid/);
   });
 
   it('keeps both batch launchers free of cmd-expanded arguments', async () => {

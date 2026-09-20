@@ -577,7 +577,7 @@ async function writeCaptureManifest(root, allTargets, recorded, observed) {
 
 /**
  * Re-hash and update selected manifest records. Used by `--adopt` and by the
- * model viewer after it has successfully written an atlas and its sidecars.
+ * native Workshop after it has successfully written an atlas and its sidecars.
  */
 export async function refreshCaptureManifest(root = process.cwd(), filters = []) {
   const { targets: allTargets, errors } = collectCaptureTargets(await readCaptureSidecars(root));

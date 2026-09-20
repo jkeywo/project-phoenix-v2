@@ -57,7 +57,7 @@ node scripts/generate-lods.mjs --plan            # print the work, run nothing
 ```
 
 Native Workshop runs the same command over the model it is showing, from the
-same sidecars, with the `--remesh` and `--force` controls — see
+same sidecars, with the optional configured remesh control — see
 [Workshop Model Preview](./model-viewer.md). There is no second code path: the panel edits
 the sidecar and invokes this script, because a ladder that only Workshop
 could produce would be a ladder CI's drift check could not verify.

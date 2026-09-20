@@ -11,8 +11,10 @@ export function parseWorkshopLaunch(value) {
   const params = value instanceof URLSearchParams ? value : new URLSearchParams(value || '');
   const panel = PANELS.has(params.get('panel')) ? params.get('panel') : null;
   const file = cleanPath(params.get('file'));
-  const model = MODEL.test(params.get('model') || '') ? params.get('model') : null;
-  const entity = ENTITY.test(params.get('entity') || '') ? params.get('entity') : null;
+  const modelPath = cleanPath(params.get('model'));
+  const entityPath = cleanPath(params.get('entity'));
+  const model = MODEL.test(modelPath || '') ? modelPath : null;
+  const entity = ENTITY.test(entityPath || '') ? entityPath : null;
   const variant = VARIANT.test(params.get('variant') || '') ? params.get('variant') : null;
   const lighting = ['off', 'ambient', 'directional'].includes(params.get('lighting')) ? params.get('lighting') : null;
   const gizmos = ['0', '1'].includes(params.get('gizmos')) ? params.get('gizmos') === '1' : null;
@@ -30,8 +32,8 @@ export function legacyWorkshopUrl(location, kind) {
     const model = source.searchParams.get('model');
     const entity = source.searchParams.get('entity');
     launch.set('panel', 'model-preview');
-    if (MODEL.test(model || '')) launch.set('model', model);
-    if (ENTITY.test(entity || '')) launch.set('entity', entity);
+    if (cleanPath(model) && MODEL.test(model)) launch.set('model', model);
+    if (cleanPath(entity) && ENTITY.test(entity)) launch.set('entity', entity);
     for (const key of ['variant', 'lighting', 'gizmos']) {
       const value = source.searchParams.get(key); if (value != null) launch.set(key, value);
     }

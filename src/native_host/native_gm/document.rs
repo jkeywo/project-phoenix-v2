@@ -52,6 +52,8 @@ mod tests {
             "gm-ship-fields-list",
             "gm-region-fields-panel",
             "gm-region-fields-occupants",
+            "gm-presentation-fields-panel",
+            "gm-presentation-fields-subject",
         ] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }

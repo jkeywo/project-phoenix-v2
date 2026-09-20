@@ -84,6 +84,7 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   ['entity-fields', 'gm-entity-fields-panel'],
   ['hull-fields', 'gm-ship-fields-panel'],
   ['region-fields', 'gm-region-fields-panel'],
+  ['presentation-fields', 'gm-presentation-fields-panel'],
   ['world-fields', 'gm-world-fields-panel'],
 ]);
 
@@ -216,7 +217,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // authored Objective controls in issue #1513 — the last panel the inspector
   // carried. It is its own reading surface now and nothing else.
   move(root, 'gm-despawn-panel', 'gm-faction-panel', 'gm-objective-panel',
-    'gm-entity-fields-panel', 'gm-ship-fields-panel', 'gm-region-fields-panel');
+    'gm-entity-fields-panel', 'gm-ship-fields-panel', 'gm-region-fields-panel',
+    'gm-presentation-fields-panel');
   // Restore leaves the checkpoint record to become a draft of its own: it
   // combines a selection, a preflight, a consequence preview and a
   // confirmation. The candidate it acts on is still whatever the record has

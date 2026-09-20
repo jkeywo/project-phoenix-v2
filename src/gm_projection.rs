@@ -232,6 +232,12 @@ pub struct GmEntityProjectionPayload {
         skip_serializing_if = "crate::gm_region_inspector::RegionInspectorProjection::is_empty"
     )]
     pub region_inspector: crate::gm_region_inspector::RegionInspectorProjection,
+    /// Loaded Viewscreen presentation and authored sound definitions (#1493).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::gm_presentation_inspector::PresentationInspectorProjection::is_empty"
+    )]
+    pub presentation_inspector: crate::gm_presentation_inspector::PresentationInspectorProjection,
     pub entities: Vec<GmEntityProjection>,
     /// Bounded attributed results of the directed world-effect family (issue
     /// #1310), carried on the entity surface rather than a channel of its own.
@@ -505,6 +511,73 @@ struct GmRegionInspectorSources<'w, 's> {
         With<Ship>,
     >,
     membership: Option<Res<'w, crate::regions::server::RegionMembership>>,
+}
+
+#[derive(SystemParam)]
+struct GmPresentationInspectorSources<'w, 's> {
+    ships: Query<
+        'w,
+        's,
+        (
+            &'static EntityUuid,
+            Option<&'static EntityName>,
+            Option<&'static EntityId>,
+            Option<&'static EntityTemplatePath>,
+            Option<&'static crate::world::server::EntityOriginLayer>,
+            Option<&'static crate::entities::spawner::MeshSection>,
+            Option<&'static crate::entities::model_rig::ModelMarkers>,
+        ),
+        (With<Ship>, With<crate::lockstep::FleetSlotOf>),
+    >,
+    catalog: Option<Res<'w, crate::gm_presentation::sound::LiveSoundCatalog>>,
+    tick: Option<Res<'w, crate::sim_tick::SimTick>>,
+}
+
+fn presentation_inspector_projection(
+    sources: &GmPresentationInspectorSources,
+    authored_names: &BTreeMap<&str, &str>,
+    runtime: Option<&crate::world::server::WorldContentRuntime>,
+    messages: &[crate::gm_presentation::PresentationMessageChoice],
+    inbox: Option<&crate::comms::server::CommsInboxRes>,
+) -> crate::gm_presentation_inspector::PresentationInspectorProjection {
+    let tick = sources.tick.as_deref().map_or(0, |tick| tick.0);
+    let mut readings = BTreeMap::new();
+    for (uuid, name, id, template, layer, mesh, markers) in &sources.ships {
+        let state = runtime.and_then(|runtime| runtime.presentation.get(&uuid.0));
+        let label = authored_names
+            .get(uuid.0.as_str())
+            .copied()
+            .or_else(|| name.map(|name| name.0.as_str()))
+            .or_else(|| id.map(|id| id.0.as_str()))
+            .unwrap_or(uuid.0.as_str());
+        readings.insert(
+            format!("ship:{}", uuid.0),
+            crate::gm_presentation_inspector::ship_reading(
+                crate::gm_presentation_inspector::ShipPresentationInputs {
+                    ship_id: &uuid.0,
+                    label,
+                    template: template.map(|template| template.0.as_str()),
+                    layer: layer.map(|layer| layer.0.as_str()),
+                    model: mesh.and_then(|mesh| mesh.0.model.as_deref()),
+                    variant: mesh.and_then(|mesh| mesh.0.variant.as_deref()),
+                    markers,
+                    state,
+                    tick,
+                    messages,
+                    card: crate::gm_presentation::card_wire(state, tick, &uuid.0, inbox),
+                },
+            ),
+        );
+    }
+    if let Some(catalog) = sources.catalog.as_deref() {
+        readings.extend(crate::gm_presentation_inspector::catalog_readings(
+            &catalog.0,
+        ));
+    }
+    crate::gm_presentation_inspector::PresentationInspectorProjection {
+        fields: crate::gm_presentation_inspector::fields(),
+        readings,
+    }
 }
 
 fn region_inspector_projection(
@@ -854,6 +927,7 @@ fn publish_local_projection(
     ships: GmShipProjectionQuery,
     world_entities: GmWorldProjectionQuery,
     region_inspector_sources: GmRegionInspectorSources,
+    presentation_inspector_sources: GmPresentationInspectorSources,
     all_names: Query<(&EntityUuid, Option<&EntityName>, Option<&EntityId>)>,
     factions: Option<Res<FactionRegistryResource>>,
     world_sources: GmWorldInspectorSources,
@@ -1076,6 +1150,14 @@ fn publish_local_projection(
         &names,
         &inspection_config_cache,
     );
+    let presentation_messages = presentation_control.message_choices();
+    let presentation_inspector = presentation_inspector_projection(
+        &presentation_inspector_sources,
+        &authored_names,
+        world_content.as_deref(),
+        &presentation_messages,
+        presentation_control.inbox.as_deref(),
+    );
     let next = GmEntityProjectionPayload {
         world_inspector: crate::gm_world_inspector::projection(
             world_sources.config.as_deref(),
@@ -1133,7 +1215,7 @@ fn publish_local_projection(
             .as_deref()
             .map(|r| r.presentation.clone())
             .unwrap_or_default(),
-        presentation_messages: presentation_control.message_choices(),
+        presentation_messages,
         presentation_cameras: presentation_control.cameras(),
         presentation_sounds: presentation_control.sound_choices(),
         presentation_results: crate::gm_action::projected_results(
@@ -1177,6 +1259,7 @@ fn publish_local_projection(
         entity_inspector,
         ship_inspector,
         region_inspector,
+        presentation_inspector,
         entities: projected,
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::DirectEffect,

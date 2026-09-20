@@ -89,7 +89,8 @@ it('registers every migrated desk panel in the dock, documents included', () => 
     ['map', 'gm-map-panel'], ['attention', 'gm-attention-panel'], ['workload', 'gm-workload-panel'],
     ['health', 'gm-health-panel'], ['inspector', 'gm-inspector'], ['readiness', 'gm-start-controls'],
     ['join', 'gm-join-controls'], ['manual-save', 'manual-save-panel'],
-    ['region-fields', 'gm-region-fields-panel']]) {
+    ['region-fields', 'gm-region-fields-panel'],
+    ['presentation-fields', 'gm-presentation-fields-panel']]) {
     expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
   }
   // The surfaces this workspace is arranged around.

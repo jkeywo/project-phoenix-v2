@@ -144,6 +144,7 @@ pub mod gm_journal;
 pub mod gm_npc;
 pub mod gm_objective;
 pub mod gm_presentation;
+pub mod gm_presentation_inspector;
 pub mod gm_projection;
 pub mod gm_puppet;
 /// The quiet-time advisory and the crew-activity adapter behind it (issue

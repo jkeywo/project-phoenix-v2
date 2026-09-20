@@ -30,6 +30,18 @@ function setup() {
   return { panel, submit, click, scheduled };
 }
 describe('shared presentation GM controls', () => {
+  it('accepts an Inspector focus link without creating another action route', () => {
+    const { panel, submit } = setup();
+    panel.update({ entities: [{ kind: 'player_ship', entity_id: 'ship-a', name: 'Horizon' }],
+      presentation_cameras: { 'ship-a': ['camera_fore'] }, presentation_sounds: ['weapons'] });
+    expect(panel.focusControls({ ship: 'ship-a', field: 'views.camera[0].name', value: 'camera_fore' })).toBe(true);
+    expect(document.getElementById('gm-presentation-view').value).toBe('camera');
+    expect(document.getElementById('gm-presentation-camera').value).toBe('camera_fore');
+    expect(document.activeElement.id).toBe('gm-presentation-camera');
+    panel.focusControls({ field: 'cue.sound.id', value: 'weapons' });
+    expect(document.getElementById('gm-presentation-sound').value).toBe('weapons');
+    expect(submit).not.toHaveBeenCalled();
+  });
   it('sends one authored cue through the same typed action and retains source selection during refresh', () => {
     const { panel, submit, click } = setup();
     const projection = { entities: [{ kind: 'player_ship', entity_id: 'ship-a', name: 'Horizon' },

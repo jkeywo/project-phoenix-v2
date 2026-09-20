@@ -76,6 +76,7 @@ export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
   'gm-entity-fields-panel': 'gm-inspector',
   'gm-ship-fields-panel': 'gm-inspector',
   'gm-region-fields-panel': 'gm-inspector',
+  'gm-presentation-fields-panel': 'gm-inspector',
 });
 
 /** Quick-action DOM ids this build actually draws. */

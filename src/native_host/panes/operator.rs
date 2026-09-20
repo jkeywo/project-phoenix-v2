@@ -961,9 +961,49 @@ const LIVE_PANELS_V17: &[&str] = &[
     "hull-fields",
     "region-fields",
 ];
+const LIVE_PANELS_V18: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+    "checkpoint",
+    "restore",
+    "contact",
+    "npc",
+    "misclassify",
+    "report-policy",
+    "system",
+    "effect",
+    "despawn",
+    "faction",
+    "objective",
+    "entity-fields",
+    "world-fields",
+    "hull-fields",
+    "region-fields",
+    "presentation-fields",
+];
 const LIVE_ADDED_IN_V15: &[(&str, &str, &str)] = &[("world-fields", "mission", "tab")];
 const LIVE_ADDED_IN_V16: &[(&str, &str, &str)] = &[("hull-fields", "entity-fields", "tab")];
 const LIVE_ADDED_IN_V17: &[(&str, &str, &str)] = &[("region-fields", "entity-fields", "tab")];
+const LIVE_ADDED_IN_V18: &[(&str, &str, &str)] = &[("presentation-fields", "region-fields", "tab")];
 
 /// Panels registered after version 12. The entities/AI Live Inspector reads the
 /// same selection the entity inspector does, so it joins that column as a tab.
@@ -1018,7 +1058,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         14 => LIVE_PANELS_V14,
         15 => LIVE_PANELS_V15,
         16 => LIVE_PANELS_V16,
-        _ => LIVE_PANELS_V17,
+        17 => LIVE_PANELS_V17,
+        _ => LIVE_PANELS_V18,
     }
 }
 
@@ -1070,6 +1111,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 17 {
         added.extend_from_slice(LIVE_ADDED_IN_V17);
+    }
+    if version < 18 {
+        added.extend_from_slice(LIVE_ADDED_IN_V18);
     }
     added
 }
@@ -1171,7 +1215,7 @@ fn default_test_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 17,
+        "version": 18,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
@@ -1182,7 +1226,7 @@ fn default_live_layout() -> Value {
                 {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                     {"type":"tabs", "tabs":["map","station-console"], "active":"map"},
                     {"type":"tabs",
-                        "tabs":["inspector","contact","npc","system","despawn","faction","entity-fields","hull-fields","region-fields"],
+                        "tabs":["inspector","contact","npc","system","despawn","faction","entity-fields","hull-fields","region-fields","presentation-fields"],
                         "active":"inspector"}
                 ]}
             ]},
@@ -1195,7 +1239,7 @@ fn default_live_layout() -> Value {
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=17).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=18).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();

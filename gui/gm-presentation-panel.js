@@ -112,6 +112,25 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
     refreshAdmission(); return true;
   }
   function reset() { if (timer !== null) cancelSchedule(timer); timer = null; pending = null; ships = []; state = {}; messages = []; cameras = {}; sounds = []; sources = []; soundKey = ''; sourceKey = ''; listKey = ''; cameraKey = ''; messageKey = ''; ship.replaceChildren(); camera.replaceChildren(); message.replaceChildren(); sound.replaceChildren(); soundSource.replaceChildren(); feedback('ready'); refreshAdmission(); }
+  function focusControls({ ship: shipId = null, field = '', value = '' } = {}) {
+    if (shipId && [...ship.options].some(option => option.value === shipId)) {
+      ship.value = shipId; ship.dispatchEvent(new doc.defaultView.Event('change'));
+    }
+    let control = duration;
+    if (field.includes('views.camera') || (field.includes('force_view') && value.startsWith('camera_'))) {
+      mode.value = 'camera'; camera.value = value; control = camera;
+    } else if (field.includes('views.mode') || field.includes('force_view.view')) {
+      if ([...mode.options].some(option => option.value === value)) mode.value = value;
+      control = mode;
+    } else if (field.includes('title_card.title')) control = title;
+    else if (field.includes('title_card.subtitle')) control = subtitle;
+    else if (field.includes('incoming_comms.message') || field.includes('comms.available')) {
+      message.value = value; control = message;
+    } else if (field.includes('cue.sound.id') || field === 'sound.id') {
+      sound.value = value; control = sound;
+    } else if (field.includes('cue.sound.source')) control = soundSource;
+    control.scrollIntoView?.({ block: 'nearest' }); control.focus?.({ preventScroll: true }); return true;
+  }
   refreshAdmission();
-  return { update, reset, refreshAdmission, state: () => ({ pending, presentation: state }), destroy() { reset(); root.remove(); } };
+  return { update, reset, refreshAdmission, focusControls, state: () => ({ pending, presentation: state }), destroy() { reset(); root.remove(); } };
 }

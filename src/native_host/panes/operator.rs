@@ -353,7 +353,7 @@ const WORKSHOP_PANELS_V10: &[&str] = &[
     "presets",
     "scripts",
 ];
-const WORKSHOP_TEST_PANELS: &[&str] = &["test-controls", "test-viewscreen"];
+const WORKSHOP_TEST_PANELS: &[&str] = &["test-controls", "test-viewscreen", "test-trace"];
 /// Panels registered after a stored version, with the group each joins on migration.
 const WORKSHOP_ADDED_IN_V3: &[(&str, &str)] = &[
     ("dependencies", "files"),
@@ -1159,10 +1159,11 @@ fn default_authoring_layout() -> Value {
 
 fn default_test_layout() -> Value {
     json!({
-        "version": 1,
-        "root": {"type":"split", "axis":"horizontal", "sizes":[30,70], "children":[
+        "version": 2,
+        "root": {"type":"split", "axis":"horizontal", "sizes":[25,50,25], "children":[
             {"type":"tabs", "tabs":["test-controls"], "active":"test-controls"},
-            {"type":"tabs", "tabs":["test-viewscreen"], "active":"test-viewscreen"}
+            {"type":"tabs", "tabs":["test-viewscreen"], "active":"test-viewscreen"},
+            {"type":"tabs", "tabs":["test-trace"], "active":"test-trace"}
         ]},
         "floats": [], "closed": [], "selected": "test-viewscreen"
     })
@@ -1610,7 +1611,8 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
 }
 
 fn sanitize_test_layout(value: &Value) -> Option<Value> {
-    if value["version"].as_u64()? != 1 {
+    let stored = value["version"].as_u64()?;
+    if !matches!(stored, 1 | 2) {
         return None;
     }
     let allowed = WORKSHOP_TEST_PANELS;
@@ -1672,9 +1674,15 @@ fn sanitize_test_layout(value: &Value) -> Option<Value> {
         .cloned()
         .or_else(|| first_visible(&root, &floats))
         .unwrap_or_else(|| json!("test-controls"));
-    Some(json!({
-        "version": 1, "root": root, "floats": floats, "closed": closed, "selected": selected
-    }))
+    let mut layout = json!({
+        "version": 2, "root": root, "floats": floats, "closed": closed, "selected": selected
+    });
+    if stored == 1 {
+        let selected = layout["selected"].clone();
+        dock_workshop_panel(&mut layout, "test-trace", "test-viewscreen", "right");
+        layout["selected"] = selected;
+    }
+    Some(layout)
 }
 
 fn add_workshop_tab(node: &mut Value, target: &str, panel: &str) -> bool {

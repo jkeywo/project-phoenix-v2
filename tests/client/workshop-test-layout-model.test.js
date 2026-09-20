@@ -16,8 +16,9 @@ describe('Workshop Test layout model', () => {
     }
   });
 
-  it('keeps controls as a tool and the viewscreen as the document', () => {
+  it('keeps controls and trace as tools and the viewscreen as the document', () => {
     expect(workshopTestLayoutModel.kind('test-controls')).toBe('tool');
+    expect(workshopTestLayoutModel.kind('test-trace')).toBe('tool');
     expect(workshopTestLayoutModel.kind('test-viewscreen')).toBe('document');
     expect(defaultWorkshopTestLayout().selected).toBe('test-viewscreen');
   });
@@ -25,7 +26,7 @@ describe('Workshop Test layout model', () => {
   it('supports independent keyboard-equivalent moves, close, reopen and reset transitions', () => {
     const initial = defaultWorkshopTestLayout();
     const tabbed = workshopTestLayoutModel.dock(initial, 'test-controls', 'test-viewscreen', 'tab');
-    expect(tabbed.root).toMatchObject({ type: 'tabs', tabs: ['test-viewscreen', 'test-controls'] });
+    expect(tabbed.root.children[0]).toMatchObject({ type: 'tabs', tabs: ['test-viewscreen', 'test-controls'] });
     const floated = workshopTestLayoutModel.float(tabbed, 'test-controls');
     expect(floated.floats.map(entry => entry.panel)).toEqual(['test-controls']);
     const closed = workshopTestLayoutModel.close(floated, 'test-controls');
@@ -38,15 +39,15 @@ describe('Workshop Test layout model', () => {
     expect(normalizeWorkshopTestLayout({ version: 99, run: { tick: 8 } }))
       .toEqual(defaultWorkshopTestLayout());
     const repaired = normalizeWorkshopTestLayout({
-      version: 1,
+      version: 2,
       root: { type: 'tabs', tabs: ['test-viewscreen', 'unknown'], active: 'unknown', payload: 'stale' },
       floats: [], closed: ['test-controls'], selected: 'unknown',
       selection: { world: 'stale.toml' }, run: { tick: 8 },
     });
     expect(repaired).toEqual({
-      version: 1,
+      version: 2,
       root: { type: 'tabs', tabs: ['test-viewscreen'], active: 'test-viewscreen' },
-      floats: [], closed: ['test-controls'], selected: 'test-viewscreen',
+      floats: [], closed: ['test-controls', 'test-trace'], selected: 'test-viewscreen',
     });
     expect(JSON.stringify(repaired)).not.toMatch(/stale|world|tick|run|selection/);
   });

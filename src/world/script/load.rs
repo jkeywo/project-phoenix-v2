@@ -29,8 +29,8 @@ use vellum_script::ScriptSource;
 
 use crate::world::script::engine::{loading_engine, BuilderState, Registration, ScriptTrigger};
 use crate::world::script::validate::{
-    validate_deadline_handlers, validate_flag_opassign, validate_gm_events, validate_on_pick_fns,
-    validate_registrations, validate_script_triggers,
+    named_function_lines, validate_deadline_handlers, validate_flag_opassign, validate_gm_events,
+    validate_on_pick_fns, validate_registrations, validate_script_triggers,
 };
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
 
@@ -67,6 +67,8 @@ pub struct CompiledScripts {
     /// Every named function defined across all units — the resolution set the
     /// cross-reference pass checks handler names against.
     pub defined_fns: BTreeSet<String>,
+    /// Best-effort named-function definition lines, keyed by exact script path.
+    pub function_lines: BTreeMap<String, BTreeMap<String, usize>>,
     /// Registrations collected while running each unit's top level.
     pub registrations: Vec<Registration>,
     /// Triggers built by the Rhai front-end (`on_destroyed`, …) while running
@@ -230,6 +232,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
 
     let mut asts: BTreeMap<String, AST> = BTreeMap::new();
     let mut defined_fns: BTreeSet<String> = BTreeSet::new();
+    let mut function_lines = BTreeMap::new();
     let mut findings: Vec<WorldFinding> = Vec::new();
 
     for src in &sorted {
@@ -272,6 +275,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
         for f in ast.iter_functions() {
             defined_fns.insert(f.name.to_string());
         }
+        function_lines.insert(src.path.clone(), named_function_lines(&src.source));
         asts.insert(src.path.clone(), ast);
     }
 
@@ -290,6 +294,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
     CompiledScripts {
         asts,
         defined_fns,
+        function_lines,
         registrations,
         script_triggers,
         deadline_handlers,

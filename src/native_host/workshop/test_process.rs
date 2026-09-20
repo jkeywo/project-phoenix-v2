@@ -382,6 +382,7 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
             launch: launch.clone(),
             acknowledged: 0,
         })
+        .insert_resource(crate::workshop::test_trace::TestTrace::default())
         .add_plugins(TestClockPlugin)
         .add_systems(
             First,
@@ -423,6 +424,7 @@ fn publish_status(
     clock: Res<TestClock>,
     tick: Res<crate::sim_tick::SimTick>,
     view: Res<crate::workshop::test_view::TestViewState>,
+    trace: Res<crate::workshop::test_trace::TestTrace>,
 ) {
     let state = TestStatus {
         running: true,
@@ -436,6 +438,7 @@ fn publish_status(
         selection: pipe.launch.selection.clone(),
         view: view.requested.clone(),
         ships: view.ships.clone(),
+        trace: trace.records(),
     };
     write_status(&state);
 }

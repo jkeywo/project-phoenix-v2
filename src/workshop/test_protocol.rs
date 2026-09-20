@@ -61,6 +61,49 @@ pub struct TestShip {
     pub name: String,
 }
 
+/// One ordered observation from the existing scenario-script runtime.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TestTraceSource {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TestTraceKind {
+    HostCall {
+        function: String,
+    },
+    FlagMutation {
+        name: String,
+        before: i64,
+        after: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<String>,
+    },
+    CallbackScheduled {
+        function: String,
+        fire_tick: u64,
+    },
+    CallbackFired {
+        function: String,
+        scheduled_tick: u64,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TestTraceRecord {
+    pub tick: u64,
+    /// Zero-based runtime order within `tick`.
+    pub order: u32,
+    pub source: TestTraceSource,
+    #[serde(flatten)]
+    pub kind: TestTraceKind,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Launch {
@@ -85,6 +128,9 @@ pub struct TestStatus {
     pub view: TestView,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ships: Vec<TestShip>,
+    /// Bounded, oldest-to-newest observations from this disposable run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace: Vec<TestTraceRecord>,
 }
 impl TestStatus {
     pub fn starting(launch: &Launch) -> Self {
@@ -100,7 +146,34 @@ impl TestStatus {
             selection: launch.selection.clone(),
             view: TestView::default(),
             ships: Vec::new(),
+            trace: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flattened_trace_event_round_trips_through_native_status_json() {
+        let record = TestTraceRecord {
+            tick: 7,
+            order: 2,
+            source: TestTraceSource {
+                path: Some("assets/worlds/test.rhai".into()),
+                line: Some(4),
+            },
+            kind: TestTraceKind::CallbackScheduled {
+                function: "later".into(),
+                fire_tick: 12,
+            },
+        };
+        let encoded = serde_json::to_string(&record).expect("encode trace record");
+        assert_eq!(
+            serde_json::from_str::<TestTraceRecord>(&encoded).expect("decode trace record"),
+            record
+        );
     }
 }
 

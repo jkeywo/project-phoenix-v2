@@ -676,6 +676,7 @@ impl RuntimeHost {
         let (delayed, callbacks) = schedule.drain_scoped(clock, path, origin_layer);
         Ok((
             CallEffects {
+                completed: true,
                 commands,
                 delayed,
                 callbacks,

@@ -1,14 +1,15 @@
 {
-  "version": 1,
+  "version": 2,
   "default": {
-    "version": 1,
+    "version": 2,
     "root": {
       "type": "split",
       "axis": "horizontal",
-      "sizes": [30, 70],
+      "sizes": [25, 50, 25],
       "children": [
         { "type": "tabs", "tabs": ["test-controls"], "active": "test-controls" },
-        { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" }
+        { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" },
+        { "type": "tabs", "tabs": ["test-trace"], "active": "test-trace" }
       ]
     },
     "floats": [],
@@ -28,8 +29,14 @@
         "run": { "tick": 99 }
       },
       "expected": {
-        "version": 1,
-        "root": { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" },
+        "version": 2,
+        "root": {
+          "type": "split", "axis": "horizontal", "sizes": [1, 1],
+          "children": [
+            { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" },
+            { "type": "tabs", "tabs": ["test-trace"], "active": "test-trace" }
+          ]
+        },
         "floats": [],
         "closed": ["test-controls"],
         "selected": "test-viewscreen"
@@ -39,14 +46,15 @@
       "name": "obsolete version returns the current default",
       "stored": { "version": 99, "root": { "unsafe": true } },
       "expected": {
-        "version": 1,
+        "version": 2,
         "root": {
           "type": "split",
           "axis": "horizontal",
-          "sizes": [30, 70],
+          "sizes": [25, 50, 25],
           "children": [
             { "type": "tabs", "tabs": ["test-controls"], "active": "test-controls" },
-            { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" }
+            { "type": "tabs", "tabs": ["test-viewscreen"], "active": "test-viewscreen" },
+            { "type": "tabs", "tabs": ["test-trace"], "active": "test-trace" }
           ]
         },
         "floats": [],

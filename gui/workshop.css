@@ -155,6 +155,13 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-test-viewport { width: 100%; }
 .workshop-test-viewscreen { display: block; width: 100%; height: clamp(24rem, 65vh, 55rem); border: 1px solid #8195a8; }
 .workshop-test-viewscreen[data-pending] { position: fixed; inset: 0; width: 100vw; height: 100vh; opacity: 0; pointer-events: none; }
+.workshop-test-trace { min-width: 0; overflow: auto; }
+.workshop-test-trace h2, .workshop-test-trace p { overflow-wrap: anywhere; }
+.workshop-test-trace ol { margin: .5rem 0; padding-inline-start: 1.8rem; }
+.workshop-test-trace li { margin-block: .45rem; overflow-wrap: anywhere; }
+.workshop-test-trace-identity { font-variant-numeric: tabular-nums; font-weight: 700; }
+.workshop-test-trace-event { display: inline; }
+.workshop-test-trace-source { max-width: 100%; overflow-wrap: anywhere; }
 details { margin-top: 1.5rem; }
 :root[data-contrast="more"] { background: #000; color: #fff; }
 :root[data-contrast="more"] :is(button, select, textarea) { background: #000; border-color: #fff; }

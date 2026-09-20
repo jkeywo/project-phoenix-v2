@@ -180,3 +180,28 @@ entities:
         - cargo test --features headless --test gm_presentation_neutrality
         - npx vitest run tests/client/workshop-test-view.test.js
         - npx vitest run editor/tests/workshop-test-child.test.js tests/client/workshop-test-panel.test.js
+
+  - component: workshop-test-script-trace
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Bounded Disposable Test Script Trace
+      summary: "The existing browser iframe and native Test child project successful Rhai handler calls, every applied root/layer Flag mutation, and callback schedule/fire events through the shared TestStatus channel in deterministic tick/order. Records retain relevant values and exact script path plus a named-function line when available; declarative, GM and delayed Flag writes explicitly report location unavailable rather than inventing one. The newest 256 observations remain ordered and render in one keyboard-operable, text-labelled filterable Workshop panel. The trace is a read-only Test-only resource: render frames and observer switches cannot append records, and neither snapshots nor the authoritative digest include it."
+      rationale:
+        - "[ai] Instrumentation sits at apply_script_call and the callback drain, after the bounded runtime admits a call. A raising or refused call therefore records no effects, while a successful malformed Comms return records the effects the runtime really committed."
+        - "[ai] The function-line index is derived while compiling the exact lifted source with the validation lexer. Named functions receive a best-effort line; generated anonymous callback names retain their exact source path and deliberately omit a guessed line."
+        - "[ai] TestStatus is already the private browser/native Test bridge. Adding the bounded projection there gives both runtimes one vocabulary and adds no crew transport, command, save, debugger, locals or stack surface."
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      depends_on: [workshop-rhai-authoring, workshop-test-observer-views]
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/workshop/test_trace.rs, src/workshop/test_protocol.rs, src/workshop/test_browser.rs, src/native_host/workshop/test_process.rs, src/world/server.rs, src/world/script/load.rs, src/world/script/validate.rs, gui/workshop-test-panel.js, gui/workshop-test-layout-model.js, gui/workshop-authoring.js]
+      symbols: [TestTrace, TestTraceRecord, TestTraceKind, named_function_lines, apply_script_call, tick_script_callbacks, mountWorkshopTestPanel]
+      tests:
+        - cargo test --lib workshop::test_trace world::server_tests::scripted_flag_write_chains_a_declarative_on_flag_set world::server_tests::scripted_callback_fires_after_the_delay_not_immediately
+        - npx vitest run tests/client/workshop-test-panel.test.js tests/client/workshop-test-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/operator-profile.test.js

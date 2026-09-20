@@ -989,6 +989,8 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
+    app.world_mut()
+        .insert_resource(crate::workshop::test_trace::TestTrace::default());
 
     app.world_mut()
         .resource_mut::<Messages<AiEntityDestroyed>>()
@@ -997,17 +999,44 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
         });
     app.update();
 
-    let runtime = app.world().resource::<WorldContentRuntime>();
-    assert!(
-        runtime.triggers[0].fired,
-        "a scripted flag write must emit FlagSet so the declarative on_flag_set \
-         trigger chains in the next pass (the apply_script_commands preview)"
-    );
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.triggers[0].fired,
+            "a scripted flag write must emit FlagSet so the declarative on_flag_set \
+             trigger chains in the next pass (the apply_script_commands preview)"
+        );
+        assert_eq!(
+            runtime.flags.counter("armed"),
+            1,
+            "the scripted flag write itself must land on the live store"
+        );
+    }
+    let records = app
+        .world()
+        .resource::<crate::workshop::test_trace::TestTrace>()
+        .records();
+    assert!(matches!(
+        &records[0].kind,
+        crate::workshop::test_protocol::TestTraceKind::HostCall { function }
+            if function == "arm"
+    ));
     assert_eq!(
-        runtime.flags.counter("armed"),
-        1,
-        "the scripted flag write itself must land on the live store"
+        records[0].source.path.as_deref(),
+        Some("fixture/scripted.toml#script.setup")
     );
+    assert_eq!(records[0].source.line, Some(1));
+    assert!(matches!(
+        &records[1].kind,
+        crate::workshop::test_protocol::TestTraceKind::FlagMutation {
+            name,
+            before: 0,
+            after: 1,
+            ..
+        } if name == "armed"
+    ));
+    assert_eq!((records[0].tick, records[0].order), (0, 0));
+    assert_eq!((records[1].tick, records[1].order), (0, 1));
 }
 
 /// Issue #984 (Rhai M6 phase 2a), flag-chaining proof for a CLEARED
@@ -2985,6 +3014,8 @@ fn scripted_callback_fires_after_the_delay_not_immediately() {
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
+    app.world_mut()
+        .insert_resource(crate::workshop::test_trace::TestTrace::default());
     app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
         "obj",
         "hold the line",
@@ -3012,6 +3043,17 @@ fn scripted_callback_fires_after_the_delay_not_immediately() {
         1,
         "the scheduled callback must be queued, not dropped (2a dropped it)"
     );
+    {
+        let records = app
+            .world()
+            .resource::<crate::workshop::test_trace::TestTrace>()
+            .records();
+        assert!(matches!(
+            &records[1].kind,
+            crate::workshop::test_protocol::TestTraceKind::CallbackScheduled { fire_tick: 2, .. }
+        ));
+        assert_eq!((records[1].tick, records[1].order), (0, 1));
+    }
 
     // Tick 1: still before the fire tick — nothing drains.
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
@@ -3035,6 +3077,23 @@ fn scripted_callback_fires_after_the_delay_not_immediately() {
             .is_empty(),
         "the fired callback must be drained out of the queue"
     );
+    let records = app
+        .world()
+        .resource::<crate::workshop::test_trace::TestTrace>()
+        .records();
+    assert!(matches!(
+        &records[2].kind,
+        crate::workshop::test_protocol::TestTraceKind::CallbackFired {
+            scheduled_tick: 2,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &records[3].kind,
+        crate::workshop::test_protocol::TestTraceKind::HostCall { .. }
+    ));
+    assert_eq!((records[2].tick, records[2].order), (2, 0));
+    assert_eq!((records[3].tick, records[3].order), (2, 1));
 }
 
 /// Issue #984 (Rhai M6 phase 2b), re-queue proof: a callback that itself calls
@@ -3921,6 +3980,8 @@ fn when_predicate_suppresses_the_fire_but_keeps_the_trigger_live() {
 #[test]
 fn delayed_set_flag_action_fires_on_flag_set_trigger_on_the_next_tick() {
     let mut app = ai_trigger_test_app();
+    app.world_mut()
+        .insert_resource(crate::workshop::test_trace::TestTrace::default());
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.triggers.replace_declarative(vec![TriggerState {
@@ -3957,6 +4018,20 @@ fn delayed_set_flag_action_fires_on_flag_set_trigger_on_the_next_tick() {
              chained yet"
         );
     }
+    let records = app
+        .world()
+        .resource::<crate::workshop::test_trace::TestTrace>()
+        .records();
+    assert!(matches!(
+        &records[0].kind,
+        crate::workshop::test_protocol::TestTraceKind::FlagMutation {
+            name,
+            before: 0,
+            after: 1,
+            layer: None,
+        } if name == "a"
+    ));
+    assert_eq!(records[0].source.path, None);
 
     // Next tick: `collect_world_events` drains the queued `FlagSet` into the
     // buffer and the watcher fires.

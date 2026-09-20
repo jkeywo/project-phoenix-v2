@@ -153,13 +153,15 @@ describe('private operator profile schema', () => {
     const profile = createDefaultOperatorProfile(registry);
     const authoring = profile.authoringLayout;
     profile.testLayout = { version: 1, root: { type: 'tabs', tabs: ['test-viewscreen'], active: 'test-viewscreen' },
-      floats: [], closed: ['test-controls'], selected: 'test-viewscreen',
+      floats: [], closed: ['test-controls', 'test-trace'], selected: 'test-viewscreen',
       selection: { world: 'old.toml', ship: 'old-hull.toml', seed: 4 }, run: { tick: 99 } };
     const result = prepareOperatorProfileImport(JSON.stringify(profile), { registry });
     expect(result.profile.authoringLayout).toEqual(authoring);
-    expect(result.profile.testLayout).toEqual({ version: 1,
-      root: { type: 'tabs', tabs: ['test-viewscreen'], active: 'test-viewscreen' },
-      floats: [], closed: ['test-controls'], selected: 'test-viewscreen' });
+    expect(result.profile.testLayout).toEqual({ version: 2,
+      root: { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
+        { type: 'tabs', tabs: ['test-viewscreen'], active: 'test-viewscreen' },
+        { type: 'tabs', tabs: ['test-trace'], active: 'test-trace' },
+      ] }, floats: [], closed: ['test-controls'], selected: 'test-viewscreen' });
     expect(JSON.stringify(result.profile.testLayout)).not.toMatch(/old|seed|tick|run|selection/);
   });
 

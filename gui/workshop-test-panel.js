@@ -3,14 +3,16 @@ import { t } from './strings.js';
 
 /** Shared offline controls over the native child/browser iframe capability. */
 export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: isBusy,
-  changed = () => {}, leave = () => {}, win = root.ownerDocument.defaultView }) {
-  if (!provider?.test) return { node: null, viewNode: null, refresh() {}, held: () => false,
+  changed = () => {}, leave = () => {}, openSource = () => {}, win = root.ownerDocument.defaultView }) {
+  if (!provider?.test) return { node: null, viewNode: null, traceNode: null, refresh() {}, held: () => false,
     testing: () => false, dispose() {} };
   const doc = root.ownerDocument;
   const panel = doc.createElement('section');
   panel.className = 'workshop-test';
   const viewPanel = doc.createElement('section');
   viewPanel.className = 'workshop-test-document';
+  const tracePanel = doc.createElement('section');
+  tracePanel.className = 'workshop-test-trace';
   const make = (tag, id, textId) => {
     const node = doc.createElement(tag); node.id = `workshop-test-${id}`;
     if (textId) node.textContent = t(textId);
@@ -84,6 +86,63 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     viewPanel.append(unavailable);
   }
   root.append(viewPanel);
+  const traceHeading = make('h2', 'trace-heading', 'workshop.test_trace');
+  const traceScope = make('p', 'trace-scope', 'workshop.test_trace_scope');
+  const traceFilter = make('select', 'trace-filter');
+  for (const [value, id] of [
+    ['all', 'workshop.test_trace_all'], ['host-call', 'workshop.test_trace_calls'],
+    ['flag-mutation', 'workshop.test_trace_flags'], ['callback', 'workshop.test_trace_callbacks'],
+  ]) {
+    const option = doc.createElement('option'); option.value = value; option.textContent = t(id); traceFilter.append(option);
+  }
+  const traceLabel = doc.createElement('label'); traceLabel.htmlFor = traceFilter.id;
+  traceLabel.textContent = t('workshop.test_trace_filter');
+  const traceStatus = make('p', 'trace-status'); traceStatus.setAttribute('role', 'status');
+  const traceList = make('ol', 'trace-list');
+  traceList.setAttribute('aria-label', t('workshop.test_trace'));
+  tracePanel.append(traceHeading, traceScope, traceLabel, traceFilter, traceStatus, traceList);
+  root.append(tracePanel);
+  let traceSignature = '';
+  const callbackKind = kind => kind === 'callback-scheduled' || kind === 'callback-fired';
+  function paintTrace(run) {
+    const records = Array.isArray(run?.trace) ? run.trace : [];
+    const filter = traceFilter.value;
+    const visible = records.filter(record => filter === 'all' || record.kind === filter
+      || (filter === 'callback' && callbackKind(record.kind)));
+    const signature = JSON.stringify([filter, visible]);
+    if (signature === traceSignature) return;
+    traceSignature = signature;
+    traceList.replaceChildren(...visible.map(record => {
+      const row = doc.createElement('li'); row.dataset.kind = record.kind;
+      const identity = doc.createElement('span'); identity.className = 'workshop-test-trace-identity';
+      identity.textContent = t('workshop.test_trace_identity', { tick: String(record.tick), order: String(record.order) });
+      const event = doc.createElement('span'); event.className = 'workshop-test-trace-event';
+      if (record.kind === 'host-call') event.textContent = t('workshop.test_trace_call', { function: record.function });
+      else if (record.kind === 'flag-mutation') event.textContent = t('workshop.test_trace_flag', {
+        name: record.name, before: String(record.before), after: String(record.after),
+        scope: record.layer ? t('workshop.test_trace_layer', { layer: record.layer }) : t('workshop.test_trace_root'),
+      });
+      else if (record.kind === 'callback-scheduled') event.textContent = t('workshop.test_trace_scheduled', {
+        function: record.function, tick: String(record.fire_tick),
+      });
+      else event.textContent = t('workshop.test_trace_fired', {
+        function: record.function, tick: String(record.scheduled_tick),
+      });
+      const location = `${record.source?.path || ''}${record.source?.line ? `:${record.source.line}` : ''}`;
+      const source = doc.createElement('button'); source.type = 'button'; source.className = 'workshop-test-trace-source';
+      source.textContent = location || t('workshop.test_trace_source_unavailable');
+      source.disabled = !record.source?.path;
+      source.addEventListener('click', () => {
+        void session.authoring()
+          .then(() => openSource(record.source.path, record.source.line))
+          .catch(error => { localError = error; render(); });
+      });
+      row.append(identity, doc.createTextNode(' '), event, doc.createTextNode(' '), source);
+      return row;
+    }));
+    traceStatus.textContent = t('workshop.test_trace_count', { shown: String(visible.length), total: String(records.length) });
+  }
+  traceFilter.addEventListener('change', () => { traceSignature = ''; paintTrace(session?.state().run); });
   /** Offer the omniscient desk and every simulated player ship this run has.
    *
    * Rebuilt only when the offer actually changes, so a selector the operator is
@@ -128,6 +187,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     speed.disabled = busy || !testing || state.run?.starting;
     view.disabled = speed.disabled;
     paintViews(state.run);
+    paintTrace(state.run);
     // A browser boot can wait on large captured assets or a GPU. Its explicit
     // cancellation retires an in-flight frame before the serialized Stop.
     const cancellable = state.busy && typeof provider.test.cancelStart === 'function';
@@ -187,8 +247,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   }
   const timer = win.setInterval(() => { void session.poll().catch(() => {}); }, 500);
   refresh();
-  return { node: panel, viewNode: viewPanel, refresh, enter: () => session.test(),
+  return { node: panel, viewNode: viewPanel, traceNode: tracePanel, refresh, enter: () => session.test(),
     held: () => session.state().busy || session.state().mode === 'test', testing: () => session.state().mode === 'test',
     dispose() { disposed = true; win.clearInterval(timer); if (catalogTimer !== null) win.clearTimeout(catalogTimer);
-      void session.dispose().catch(() => {}); panel.remove(); viewPanel.remove(); } };
+      void session.dispose().catch(() => {}); panel.remove(); viewPanel.remove(); tracePanel.remove(); } };
 }

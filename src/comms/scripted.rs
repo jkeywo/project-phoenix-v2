@@ -378,6 +378,8 @@ pub(crate) fn open_scripted_comms_threads(
                 mission_clock_anchored: elapsed_secs.is_some(),
                 origin_layer: req.origin_layer.clone(),
                 entity_name: Some(req.from.clone()),
+                script_path: &req.script_path,
+                function: &req.root_fn,
             },
             ScriptEventTarget::Pending,
             sr,

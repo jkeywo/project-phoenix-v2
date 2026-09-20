@@ -919,6 +919,7 @@ fn empty_script_runtime() -> WorldScriptRuntime {
         host: crate::world::script::engine::RuntimeHost::new(),
         asts: std::collections::BTreeMap::new(),
         ast_owners: std::collections::BTreeMap::new(),
+        function_lines: std::collections::BTreeMap::new(),
         triggers: Vec::new(),
         budget: TickBudget::new(),
         budget_tick: 0,

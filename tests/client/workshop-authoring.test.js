@@ -324,7 +324,7 @@ describe('Workshop Authoring browser surface', () => {
     await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(true));
     expect(document.querySelector('.workshop-test-layout').hidden).toBe(false);
     expect([...document.querySelectorAll('.workshop-test-layout .workshop-dock-panel')]
-      .map(node => node.dataset.panel)).toEqual(['test-controls', 'test-viewscreen']);
+      .map(node => node.dataset.panel)).toEqual(['test-controls', 'test-viewscreen', 'test-trace']);
     expect(document.querySelector('.workshop-test-layout [data-panel="test-controls"]')
       .dataset.panelKind).toBe('tool');
     expect(document.querySelector('.workshop-test-layout [data-panel="test-viewscreen"]')
@@ -339,7 +339,7 @@ describe('Workshop Authoring browser surface', () => {
     }));
     const storedLayouts = JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY));
     expect(storedLayouts.authoringLayout).toEqual(authoringBefore);
-    expect(storedLayouts.testLayout.version).toBe(1);
+    expect(storedLayouts.testLayout.version).toBe(2);
     expect(JSON.stringify(storedLayouts.testLayout)).not.toMatch(/world|ship|seed|tick|run|paused/);
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
     window.dispatchEvent(new Event('resize'));
@@ -348,7 +348,7 @@ describe('Workshop Authoring browser surface', () => {
     expect(document.querySelectorAll('.workshop-test-layout .workshop-dock-panel')).toHaveLength(1);
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     window.dispatchEvent(new Event('resize'));
-    expect(document.querySelectorAll('.workshop-test-layout .workshop-dock-panel')).toHaveLength(2);
+    expect(document.querySelectorAll('.workshop-test-layout .workshop-dock-panel')).toHaveLength(3);
     document.querySelector('.workshop-test-layout .workshop-layout-reset').click();
     expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).testLayout.root.type).toBe('split');
     expect(document.querySelector('#root > .workshop-toolbar').hidden).toBe(true);

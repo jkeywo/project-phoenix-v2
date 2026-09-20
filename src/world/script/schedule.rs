@@ -63,6 +63,9 @@ use crate::world::script::{MAX_CALLS_PER_TICK, MAX_OPS_PER_TICK};
 /// care about.
 #[derive(Debug, Default, Clone)]
 pub struct CallEffects {
+    /// True only when the bounded host actually completed this call. A refused
+    /// or failed call returns `Default` and must not be projected as execution.
+    pub completed: bool,
     /// Immediate effects + flag writes, in authored order. Each is a
     /// [`BufferedEffect`]: a resolved command, or a name-resolving action the
     /// applier dispatches (issue #984, M6).

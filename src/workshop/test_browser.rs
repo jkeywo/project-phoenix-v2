@@ -98,6 +98,7 @@ pub(crate) fn install(app: &mut App, launch: Launch) {
             launch,
             acknowledged: 0,
         })
+        .insert_resource(super::test_trace::TestTrace::default())
         .add_plugins(TestClockPlugin)
         .insert_resource(crate::server::bridge::PendingForceStart(true))
         .add_systems(
@@ -122,6 +123,7 @@ fn publish_status(
     tick: Res<crate::sim_tick::SimTick>,
     phase: Res<State<crate::core::messages::GamePhase>>,
     view: Res<super::test_view::TestViewState>,
+    trace: Res<super::test_trace::TestTrace>,
 ) {
     use crate::core::messages::GamePhase;
     EDGE.with(|edge| {
@@ -137,6 +139,7 @@ fn publish_status(
             selection: run.launch.selection.clone(),
             view: view.requested.clone(),
             ships: view.ships.clone(),
+            trace: trace.records(),
         })
     });
 }

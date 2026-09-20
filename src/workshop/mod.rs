@@ -43,6 +43,7 @@ pub(crate) mod test_browser;
 pub mod test_clock;
 pub mod test_protocol;
 pub mod test_source;
+pub mod test_trace;
 /// Which observer a disposable Test draws for (issue #1472).
 pub mod test_view;
 

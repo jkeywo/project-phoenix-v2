@@ -625,6 +625,8 @@ pub struct WorldScriptRuntime {
     /// Owners retaining each AST unit. `None` denotes the root world; layer
     /// paths are explicit so shared sibling scripts survive either unload.
     pub ast_owners: BTreeMap<String, BTreeSet<Option<String>>>,
+    /// Named-function definition lines derived from the exact compiled source.
+    pub function_lines: BTreeMap<String, BTreeMap<String, usize>>,
     /// Compiled registrations consumed by the trigger registry at activation.
     pub triggers: Vec<ScriptTrigger>,
     /// The per-tick operation/call budget, shared across every script call in a
@@ -689,6 +691,7 @@ impl WorldScriptRuntime {
             host: RuntimeHost::new(),
             asts: compiled.asts,
             ast_owners,
+            function_lines: compiled.function_lines,
             triggers: compiled.script_triggers,
             budget: TickBudget::new(),
             budget_tick: 0,
@@ -717,6 +720,7 @@ impl WorldScriptRuntime {
             host: RuntimeHost::new(),
             asts: BTreeMap::new(),
             ast_owners: BTreeMap::new(),
+            function_lines: BTreeMap::new(),
             triggers: Vec::new(),
             budget: TickBudget::new(),
             budget_tick: 0,
@@ -1779,6 +1783,12 @@ pub(crate) fn merge_layer_scripts(
     runtime: &mut WorldContentRuntime,
     script_runtime: &mut WorldScriptRuntime,
 ) -> Vec<String> {
+    for (path, lines) in &compiled.function_lines {
+        script_runtime
+            .function_lines
+            .entry(path.clone())
+            .or_insert_with(|| lines.clone());
+    }
     let mut referenced_units: Vec<String> = Vec::new();
     for (unit_path, ast) in compiled.asts {
         referenced_units.push(unit_path.clone());
@@ -1991,6 +2001,7 @@ pub(crate) fn arm_mission_deadlines(
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut script: Option<ResMut<WorldScriptRuntime>>,
+    mut test_trace: Option<ResMut<crate::workshop::test_trace::TestTrace>>,
 ) {
     // Immutable reads only on the already-armed path, so an armed mission does
     // not mark `WorldContentRuntime` changed every tick.
@@ -2013,6 +2024,24 @@ pub(crate) fn arm_mission_deadlines(
         now_tick,
         world_config.global.sim_tick_hz,
     );
+    if let Some(trace) = test_trace.as_deref_mut() {
+        for callback in &queued {
+            let line = script
+                .function_lines
+                .get(&callback.script_path)
+                .and_then(|lines| lines.get(&callback.fn_name))
+                .copied();
+            trace.push(
+                now_tick,
+                Some(&callback.script_path),
+                line,
+                crate::workshop::test_protocol::TestTraceKind::CallbackScheduled {
+                    function: callback.fn_name.clone(),
+                    fire_tick: callback.fire_tick,
+                },
+            );
+        }
+    }
     // THE reuse, in one line: a deadline's firing is an entry on the EXISTING
     // deferred-callback queue.
     script.pending_callbacks.extend(queued);
@@ -2079,7 +2108,8 @@ fn apply_deadline_changes(
     pending_callbacks: &mut PendingCallbacks,
     now_tick: u64,
     tick_hz: f32,
-) {
+) -> Vec<crate::world::script::schedule::ScheduledCall> {
+    let mut scheduled = Vec::new();
     for change in changes {
         let Some(edit) = deadlines.apply(change, now_tick, tick_hz) else {
             continue;
@@ -2088,9 +2118,11 @@ fn apply_deadline_changes(
             pending_callbacks.retract(&stale);
         }
         if let Some(fresh) = edit.push {
+            scheduled.push(fresh.clone());
             pending_callbacks.push(fresh);
         }
     }
+    scheduled
 }
 
 /// Replay a script call's buffered `ctx.commitments.record(…)` / `.keep(…)` /
@@ -2439,6 +2471,9 @@ pub(crate) fn tick_trigger_pipeline(
             &mut faction_dispatch,
             &mut ai_query,
             balance_events.as_deref_mut(),
+            now_tick,
+            None,
+            None,
             &mut effect_queues.out(),
         );
     }
@@ -2518,6 +2553,9 @@ pub(crate) fn tick_trigger_pipeline(
                 &mut faction_dispatch,
                 &mut ai_query,
                 balance_events.as_deref_mut(),
+                now_tick,
+                None,
+                None,
                 &mut effect_queues.out(),
             );
         }
@@ -2704,6 +2742,8 @@ pub(crate) fn tick_trigger_pipeline(
                                 mission_clock_anchored: elapsed_secs.is_some(),
                                 origin_layer: ft.origin_layer.clone(),
                                 entity_name: ft.entity_name.clone(),
+                                script_path: &h.script_path,
+                                function: &h.fn_name,
                             },
                             ScriptEventTarget::TriggerChain(&mut next_events),
                             sr,
@@ -2894,6 +2934,8 @@ pub(crate) struct ScriptCallContext<'a> {
     pub mission_clock_anchored: bool,
     pub origin_layer: Option<String>,
     pub entity_name: Option<String>,
+    pub script_path: &'a str,
+    pub function: &'a str,
 }
 
 /// Where a completed call's World events next become eligible. Only a trigger
@@ -2946,6 +2988,7 @@ pub(crate) fn apply_script_call(
     effect_queues: &mut EffectQueuesOut,
 ) {
     let CallEffects {
+        completed,
         commands: immediate,
         delayed,
         callbacks,
@@ -2953,6 +2996,23 @@ pub(crate) fn apply_script_call(
         deadline_changes,
         commitment_changes,
     } = call;
+    let source_line = script_runtime
+        .function_lines
+        .get(context.script_path)
+        .and_then(|lines| lines.get(context.function))
+        .copied();
+    if completed {
+        if let Some(trace) = effect_queues.test_trace.as_deref_mut() {
+            trace.push(
+                context.clock.tick,
+                Some(context.script_path),
+                source_line,
+                crate::workshop::test_protocol::TestTraceKind::HostCall {
+                    function: context.function.to_string(),
+                },
+            );
+        }
+    }
     let queue_events = matches!(&event_target, ScriptEventTarget::Pending);
     let mut pending_events = Vec::new();
     let events_out = match event_target {
@@ -2981,6 +3041,9 @@ pub(crate) fn apply_script_call(
         context.origin_layer,
         context.entity_name,
         effect_queues,
+        context.clock.tick,
+        context.script_path,
+        source_line,
     );
     if queue_events {
         runtime.pending_world_events.extend(pending_events);
@@ -2988,15 +3051,51 @@ pub(crate) fn apply_script_call(
     if context.mission_clock_anchored {
         runtime.pending_delayed_actions.extend(delayed);
     }
+    if let Some(trace) = effect_queues.test_trace.as_deref_mut() {
+        for callback in &callbacks {
+            let line = script_runtime
+                .function_lines
+                .get(&callback.script_path)
+                .and_then(|lines| lines.get(&callback.fn_name))
+                .copied();
+            trace.push(
+                context.clock.tick,
+                Some(&callback.script_path),
+                line,
+                crate::workshop::test_protocol::TestTraceKind::CallbackScheduled {
+                    function: callback.fn_name.clone(),
+                    fire_tick: callback.fire_tick,
+                },
+            );
+        }
+    }
     script_runtime.pending_callbacks.extend(callbacks);
     script_runtime.pending_comms_opens.extend(comms_opens);
-    apply_deadline_changes(
+    let deadline_callbacks = apply_deadline_changes(
         &deadline_changes,
         &mut runtime.deadlines,
         &mut script_runtime.pending_callbacks,
         context.clock.tick,
         context.clock.tick_hz,
     );
+    if let Some(trace) = effect_queues.test_trace.as_deref_mut() {
+        for callback in deadline_callbacks {
+            let line = script_runtime
+                .function_lines
+                .get(&callback.script_path)
+                .and_then(|lines| lines.get(&callback.fn_name))
+                .copied();
+            trace.push(
+                context.clock.tick,
+                Some(&callback.script_path),
+                line,
+                crate::workshop::test_protocol::TestTraceKind::CallbackScheduled {
+                    function: callback.fn_name,
+                    fire_tick: callback.fire_tick,
+                },
+            );
+        }
+    }
     apply_commitment_changes(
         &commitment_changes,
         &mut runtime.commitments,
@@ -3063,6 +3162,9 @@ fn apply_script_commands(
     // The per-owner effect queues (issue #1223), threaded through to the shared
     // `apply_dispatch_result` below unchanged.
     effects: &mut EffectQueuesOut,
+    trace_tick: u64,
+    script_path: &str,
+    source_line: Option<usize>,
 ) {
     for eff in commands_in {
         match eff {
@@ -3143,6 +3245,9 @@ fn apply_script_commands(
                     faction_dispatch,
                     ai_query,
                     balance_events.as_deref_mut(),
+                    trace_tick,
+                    Some(script_path),
+                    source_line,
                     effects,
                 );
             }
@@ -3190,6 +3295,9 @@ fn apply_script_commands(
                     faction_dispatch,
                     ai_query,
                     balance_events.as_deref_mut(),
+                    trace_tick,
+                    Some(script_path),
+                    source_line,
                     effects,
                 );
             }
@@ -3229,6 +3337,8 @@ pub(crate) struct EffectQueuesOut<'a> {
     /// post-mission report rows a script wrote this tick, on their way to the
     /// `MissionReport` accumulator.
     pub report_rows: &'a mut Vec<crate::core::report::ReportRow>,
+    /// Test-only observation sink; absent from ordinary browser/native play.
+    pub test_trace: Option<&'a mut crate::workshop::test_trace::TestTrace>,
 }
 
 /// The per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
@@ -3254,6 +3364,8 @@ pub(crate) struct EffectQueues<'w, 's> {
     computer_message:
         Option<ResMut<'w, EffectQueue<crate::core::computer_message::ComputerMessageRequest>>>,
     report_rows: Option<ResMut<'w, EffectQueue<crate::core::report::ReportRow>>>,
+    test_trace: Option<ResMut<'w, crate::workshop::test_trace::TestTrace>>,
+    sim_tick: Option<Res<'w, crate::sim_tick::SimTick>>,
     condition_fallback: Local<'s, Vec<crate::infrastructure::ConditionAdjustment>>,
     capacity_fallback: Local<'s, Vec<crate::infrastructure::CapacityAdjustment>>,
     civilian_orders_fallback: Local<'s, Vec<crate::civilian::PendingCivilianOrder>>,
@@ -3297,6 +3409,7 @@ impl EffectQueues<'_, '_> {
                 Some(q) => &mut q.0,
                 None => &mut self.report_rows_fallback,
             },
+            test_trace: self.test_trace.as_deref_mut(),
         }
     }
 }
@@ -3348,6 +3461,9 @@ pub(crate) fn apply_dispatch_result(
     mut balance_events: Option<
         &mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>,
     >,
+    trace_tick: u64,
+    trace_source_path: Option<&str>,
+    trace_source_line: Option<usize>,
     // The transient effect queues a name-resolved command lands on (issue
     // #1223): condition/capacity adjustments, civilian orders and scripted power
     // orders used to be `pending_*` fields on `runtime`; each is now its owning plugin's
@@ -3775,6 +3891,21 @@ pub(crate) fn apply_dispatch_result(
                     );
                     continue;
                 };
+                let (before, after) =
+                    crate::world::dispatch::preview_mutation(store, &name, &mutation);
+                if let Some(trace) = effects.test_trace.as_deref_mut() {
+                    trace.push(
+                        trace_tick,
+                        trace_source_path,
+                        trace_source_line,
+                        crate::workshop::test_protocol::TestTraceKind::FlagMutation {
+                            name: name.clone(),
+                            before,
+                            after,
+                            layer: target_layer.clone(),
+                        },
+                    );
+                }
                 match mutation {
                     crate::world::dispatch::FlagMutation::Set => store.set_flag(&name),
                     crate::world::dispatch::FlagMutation::Clear => store.clear_flag(&name),
@@ -4078,6 +4209,7 @@ pub(crate) fn tick_delayed_actions(
     let schedule = partition_delayed_actions(queued, elapsed);
     runtime.pending_delayed_actions = schedule.still_pending;
 
+    let trace_tick = effect_queues.sim_tick.as_deref().map_or(0, |tick| tick.0);
     let mut effects_out = effect_queues.out();
     for pda in schedule.ready {
         // Same live-store rule as `tick_trigger_pipeline`: re-project per action so
@@ -4122,6 +4254,9 @@ pub(crate) fn tick_delayed_actions(
             &mut faction_dispatch,
             &mut ai_query,
             balance_events.as_deref_mut(),
+            trace_tick,
+            None,
+            None,
             &mut effects_out,
         );
         runtime.pending_world_events.extend(out_events);
@@ -4274,6 +4409,22 @@ pub(crate) fn tick_script_callbacks(
 
     for call in due {
         let callback_origin = call.origin_layer.clone();
+        if let Some(trace) = effect_queues.test_trace.as_deref_mut() {
+            let line = sr
+                .function_lines
+                .get(&call.script_path)
+                .and_then(|lines| lines.get(&call.fn_name))
+                .copied();
+            trace.push(
+                now_tick,
+                Some(&call.script_path),
+                line,
+                crate::workshop::test_protocol::TestTraceKind::CallbackFired {
+                    function: call.fn_name.clone(),
+                    scheduled_tick: call.fire_tick,
+                },
+            );
+        }
         let callback_flag_chain: Vec<crate::world::flags::FlagStore> = layered_flag_chain(
             callback_origin.as_deref(),
             &runtime.flags,
@@ -4332,6 +4483,8 @@ pub(crate) fn tick_script_callbacks(
                 mission_clock_anchored: elapsed_secs.is_some(),
                 origin_layer: callback_origin.clone(),
                 entity_name: None,
+                script_path: &call.script_path,
+                function: &call.fn_name,
             },
             ScriptEventTarget::Pending,
             sr,
@@ -4706,6 +4859,7 @@ fn apply_loaded_layer(
     id_mint: Option<&crate::world_id::EntityMint>,
     now_tick: u64,
     root_tick_hz: f32,
+    mut test_trace: Option<&mut crate::workshop::test_trace::TestTrace>,
 ) {
     let crate::world::layers::LoadedLayer {
         mut name_to_uuid_inserts,
@@ -4762,6 +4916,24 @@ fn apply_loaded_layer(
                 root_tick_hz,
                 Some(path),
             );
+            if let Some(trace) = test_trace.as_deref_mut() {
+                for callback in &calls {
+                    let line = compiled
+                        .function_lines
+                        .get(&callback.script_path)
+                        .and_then(|lines| lines.get(&callback.fn_name))
+                        .copied();
+                    trace.push(
+                        now_tick,
+                        Some(&callback.script_path),
+                        line,
+                        crate::workshop::test_protocol::TestTraceKind::CallbackScheduled {
+                            function: callback.fn_name.clone(),
+                            fire_tick: callback.fire_tick,
+                        },
+                    );
+                }
+            }
             sr.pending_callbacks.extend(calls);
             merge_layer_scripts(path, compiled, runtime, sr)
         }
@@ -4948,6 +5120,7 @@ fn apply_world_layer_changes(
     mut comms_runtime: Option<ResMut<crate::comms::server::CommsRuntime>>,
     mut comms_inbox: Option<ResMut<crate::comms::server::CommsInboxRes>>,
     mut on_screen_message: Option<ResMut<crate::comms::server::OnScreenMessage>>,
+    mut test_trace: Option<ResMut<crate::workshop::test_trace::TestTrace>>,
 ) {
     if pending.0.is_empty() {
         return;
@@ -5136,6 +5309,7 @@ fn apply_world_layer_changes(
                             id_mint.as_deref(),
                             now_tick,
                             root_tick_hz,
+                            test_trace.as_deref_mut(),
                         );
                     }
                 }
@@ -5224,6 +5398,7 @@ fn apply_world_layer_changes(
                                             id_mint.as_deref(),
                                             now_tick,
                                             root_tick_hz,
+                                            test_trace.as_deref_mut(),
                                         );
                                     }
                                 }
@@ -5264,6 +5439,7 @@ fn apply_world_layer_changes(
                     id_mint.as_deref(),
                     now_tick,
                     root_tick_hz,
+                    test_trace.as_deref_mut(),
                 );
             }
             WorldLayerChange::Unload(path) => {
@@ -5336,6 +5512,7 @@ fn apply_world_layer_changes(
                         if remove_unit {
                             sr.ast_owners.remove(unit);
                             sr.asts.remove(unit);
+                            sr.function_lines.remove(unit);
                         }
                     }
                     // Every callback still waiting on its fire tick has already

@@ -14,7 +14,7 @@
 //! never referenced by name — and the M0 spike's cross-file collision caveat
 //! does not apply to named handlers.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use vellum_script::ScriptSource;
 
@@ -565,6 +565,34 @@ fn lex_significant(source: &str) -> Vec<Token> {
     tokens
 }
 
+/// Best-effort 1-based definition lines for named Rhai functions.
+///
+/// This shares the validation lexer so comments and every supported string
+/// form cannot masquerade as code. Anonymous callbacks intentionally have no
+/// definition line; callers still retain their exact script path.
+pub(crate) fn named_function_lines(source: &str) -> BTreeMap<String, usize> {
+    let tokens = lex_significant(source);
+    let mut lines = BTreeMap::new();
+    for window in tokens.windows(3) {
+        if let [Token {
+            kind: Tok::Ident(keyword),
+            ..
+        }, Token {
+            kind: Tok::Ident(name),
+            line,
+        }, Token {
+            kind: Tok::Other('('),
+            ..
+        }] = window
+        {
+            if keyword == "fn" {
+                lines.entry(name.clone()).or_insert(*line);
+            }
+        }
+    }
+    lines
+}
+
 /// Scan one script source for compound assignments on the `flags` accessor.
 /// Returns `(reference, line)` for each hit, where `reference` is the offending
 /// target as authored (`flags.<name>` or `flags[…]`).
@@ -1030,6 +1058,15 @@ mod tests {
             path: path.to_string(),
             source: source.to_string(),
         }
+    }
+
+    #[test]
+    fn named_function_lines_ignore_comments_and_strings() {
+        let source = "// fn phantom(ctx) {}\nlet text = `fn nope(ctx) {}`;\n\nprivate fn actual(ctx) {\n  ctx.flags.ready = 1;\n}\n";
+        assert_eq!(
+            named_function_lines(source),
+            BTreeMap::from([("actual".to_string(), 4)])
+        );
     }
 
     #[test]

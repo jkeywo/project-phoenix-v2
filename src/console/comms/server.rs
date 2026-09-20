@@ -780,6 +780,8 @@ pub(crate) fn handle_respond_to_message(
                 mission_clock_anchored: elapsed_secs.is_some(),
                 origin_layer: origin_layer.clone(),
                 entity_name: sender_entity_name.clone(),
+                script_path: &sd.script_path,
+                function: &on_pick_fn,
             },
             crate::world::server::ScriptEventTarget::Pending,
             sr,

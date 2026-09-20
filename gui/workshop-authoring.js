@@ -18,6 +18,7 @@ import { mountWorkshopPresets } from './workshop-presets-panel.js';
 import { mountWorkshopShipAuthoring } from './workshop-ship-authoring-panel.js';
 import { mountWorkshopScripts } from './workshop-scripts-panel.js';
 import { mountWorkshopSpatial } from './workshop-spatial-panel.js';
+import { inlineBlockBaseLine } from '../editor/script-editor.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -902,11 +903,26 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       else if (testHadRun) { testHadRun = false; testWorkspace = false; }
       refresh();
     },
-    leave() { testWorkspace = false; refresh(); }, win });
-  if (testPanel.node && testPanel.viewNode) {
+    leave() { testWorkspace = false; refresh(); },
+    openSource(path, line) {
+      const inline = path.match(/^(.*\.toml)#script\.(.+)$/);
+      const documentPath = inline ? inline[1] : path;
+      if (!draft?.paths().includes(documentPath)) return;
+      const documentLine = inline
+        ? inlineBlockBaseLine(draft.read(documentPath), inline[2]) + (line || 1) : line;
+      testWorkspace = false; selected = documentPath; refresh({ selection: true });
+      layoutMount.reveal('source', { focus: '#workshop-source' });
+      source.focus();
+      const lines = source.value.split('\n');
+      const index = Math.max(0, Math.min(lines.length - 1, (documentLine || 1) - 1));
+      const start = lines.slice(0, index).reduce((total, part) => total + part.length + 1, 0);
+      source.setSelectionRange(start, start + lines[index].length);
+    }, win });
+  if (testPanel.node && testPanel.viewNode && testPanel.traceNode) {
     testLayoutMount = mountWorkshopLayout({
       root, surface: testLayout, model: workshopTestLayoutModel,
-      panels: { 'test-controls': testPanel.node, 'test-viewscreen': testPanel.viewNode },
+      panels: { 'test-controls': testPanel.node, 'test-viewscreen': testPanel.viewNode,
+        'test-trace': testPanel.traceNode },
       labels: {
         switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
         float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -918,6 +934,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         panels: {
           'test-controls': translate('workshop.test_heading'),
           'test-viewscreen': translate('workshop.test_view'),
+          'test-trace': translate('workshop.test_trace'),
         },
       },
       initial: profile.testLayout, doc, win,

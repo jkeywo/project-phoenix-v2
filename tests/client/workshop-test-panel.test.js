@@ -57,3 +57,55 @@ it('lets Stop retire a browser boot before its slow launch promise settles', asy
   await vi.waitFor(() => expect(document.querySelector('.workshop-test').getAttribute('aria-busy')).toBe('false'));
   expect(document.getElementById('workshop-test-status').textContent).not.toContain(t('workshop.test_starting'));
 });
+
+it('renders bounded runtime order as filtered non-colour records with source navigation', async () => {
+  const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: WORKSHOP_MANIFEST },
+    { path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT }]));
+  const trace = [
+    { tick: 7, order: 0, kind: 'host-call', function: 'arrive', source: { path: WORKSHOP_WORLD, line: 4 } },
+    { tick: 7, order: 1, kind: 'flag-mutation', name: 'arrived', before: 0, after: 1,
+      layer: 'assets/worlds/arrival.toml',
+      source: { path: WORKSHOP_WORLD, line: 5 } },
+    { tick: 7, order: 2, kind: 'callback-scheduled', function: 'anon$1', fire_tick: 12,
+      source: { path: `${WORKSHOP_WORLD}#script.main` } },
+    { tick: 7, order: 3, kind: 'flag-mutation', name: 'fleet_ready', before: 0, after: 1,
+      source: {} },
+  ];
+  const run = { running: true, starting: false, paused: false, tick: 7, multiplier: 1,
+    ships: [{ entity: 'ship-2', name: 'Second ship' }], view: { view: 'ship', entity: null }, trace };
+  const openSource = vi.fn();
+  const provider = { test: { catalog: async () => ({ worlds: [WORKSHOP_WORLD], ships: ['assets/entities/hull.toml'] }),
+    capture: () => ({}), start: async () => run, status: async () => run,
+    control: vi.fn(async () => run), stop: async () => {} } };
+  panel = mountWorkshopTestPanel({ root: document.body, provider, draft: () => draft,
+    busy: () => false, openSource });
+  await vi.waitFor(() => expect(document.getElementById('workshop-test-start').disabled).toBe(false));
+  document.getElementById('workshop-test-start').click();
+  await vi.waitFor(() => expect(document.querySelectorAll('#workshop-test-trace-list li')).toHaveLength(4));
+  expect([...document.querySelectorAll('.workshop-test-trace-identity')].map(node => node.textContent))
+    .toEqual([t('workshop.test_trace_identity', { tick: '7', order: '0' }),
+      t('workshop.test_trace_identity', { tick: '7', order: '1' }),
+      t('workshop.test_trace_identity', { tick: '7', order: '2' }),
+      t('workshop.test_trace_identity', { tick: '7', order: '3' })]);
+  const flagEvents = [...document.querySelectorAll('[data-kind="flag-mutation"] .workshop-test-trace-event')]
+    .map(node => node.textContent);
+  expect(flagEvents[0])
+    .toContain(t('workshop.test_trace_layer', { layer: 'assets/worlds/arrival.toml' }));
+  expect(flagEvents[1]).toContain(t('workshop.test_trace_root'));
+  expect(document.querySelectorAll('.workshop-test-trace-source')[3].textContent)
+    .toBe(t('workshop.test_trace_source_unavailable'));
+  const filter = document.getElementById('workshop-test-trace-filter');
+  filter.value = 'callback'; filter.dispatchEvent(new Event('change'));
+  expect([...document.querySelectorAll('#workshop-test-trace-list li')].map(node => node.dataset.kind))
+    .toEqual(['callback-scheduled']);
+  expect(document.getElementById('workshop-test-trace-status').getAttribute('role')).toBe('status');
+  filter.value = 'all'; filter.dispatchEvent(new Event('change'));
+  const view = document.getElementById('workshop-test-view'); view.value = 'ship-2';
+  view.dispatchEvent(new Event('change'));
+  await vi.waitFor(() => expect(provider.test.control).toHaveBeenCalled());
+  panel.refresh();
+  expect(document.querySelectorAll('#workshop-test-trace-list li')).toHaveLength(4);
+  filter.value = 'callback'; filter.dispatchEvent(new Event('change'));
+  document.querySelector('.workshop-test-trace-source').click();
+  await vi.waitFor(() => expect(openSource).toHaveBeenCalledWith(`${WORKSHOP_WORLD}#script.main`, undefined));
+});

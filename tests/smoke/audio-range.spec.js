@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-function wave() {
-  const rate=24000, frames=rate*5, bytes=Buffer.alloc(44+frames*4);
+function wave(seconds=5) {
+  const rate=24000, frames=rate*seconds, bytes=Buffer.alloc(44+frames*4);
   bytes.write('RIFF');bytes.writeUInt32LE(bytes.length-8,4);bytes.write('WAVEfmt ',8);
   bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(2,22);
   bytes.writeUInt32LE(rate,24);bytes.writeUInt32LE(rate*4,28);bytes.writeUInt16LE(4,32);bytes.writeUInt16LE(16,34);
@@ -13,6 +13,10 @@ function wave() {
   return bytes;
 }
 const WAVE=wave();
+// Keep the real-time source alive for the whole assertion timeout. A short cue
+// can finish while a contended CI browser is descheduled, leaving the analyser
+// at zero before the test gets its first sample.
+const CONTROL_WAVE=wave(60);
 const PULSE=Buffer.from(WAVE.subarray(0,44+128*4));
 PULSE.writeUInt32LE(PULSE.length-8,4);PULSE.writeUInt32LE(PULSE.length-44,40);
 const OFFLINE=`<!doctype html><script type='module'>
@@ -100,7 +104,7 @@ window.start=async()=>{await audio.ready;await audio.enable();${mode==='room'?'a
 for(const mode of ['room','private'])test(`${mode} range control processes current sources without restart and persists the local choice`,{tag:'@core'},async({page})=>{
   const errors=[];page.on('pageerror',error=>errors.push(String(error)));
   await page.route('**/range-control',route=>route.fulfill({contentType:'text/html',body:PAGE(mode)}));
-  await page.route('**/range.wav',route=>route.fulfill({contentType:'audio/wav',body:WAVE}));
+  await page.route('**/range.wav',route=>route.fulfill({contentType:'audio/wav',body:CONTROL_WAVE}));
   await page.goto('/range-control');const range=page.locator('[data-audio-range]');
   await expect(range).toBeEnabled();await expect(range).not.toBeChecked();
   await page.evaluate(()=>window.start());

@@ -97,7 +97,7 @@ const POSE_QUAD_SEPARATION: f32 = 0.001;
 /// itself — what the renderer has always done for an unsized billboard.
 ///
 /// Lives here, next to the spawn it feeds, because the game's LOD swap and the
-/// standalone model viewer both need the answer and a second copy of this rule
+/// Workshop model preview both need the answer and a second copy of this rule
 /// in the viewer is exactly how the viewer came to show a size the game did not
 /// (see [`crate::entities::glb_visual::tier_parent_scale`]).
 pub fn billboard_quad_size(level_scale: Option<[f32; 3]>, tier_parent_scale: Vec3) -> [f32; 2] {

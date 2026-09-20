@@ -1,258 +1,65 @@
 ---
-title: Model Viewer
+title: Workshop Model Preview
 type: concept
-tags: [tooling, rendering, shaders, wasm, trunk]
-sources: [src/entities/planet_texture.rs, assets/texture-codecs/README.md, viewer.html, viewer-trunk.toml, workshop-preview.html, workshop-preview-trunk.toml, src/viewer/preview.rs, editor/workshop-model-structure.js, gui/workshop-models-panel.js, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
+tags: [tooling, rendering, shaders, workshop, native]
+sources: [workshop.html, editor/workshop-launch.js, editor/workshop-model-preview.js, editor/workshop-model-structure.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, scripts/dev-workshop.mjs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, src/viewer/preview.rs, src/viewer/lod.rs, src/viewer/stats.rs, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
 updated: 2026-09-20
 ---
 
-# Model Viewer
+# Workshop Model Preview
 
-A second Trunk target (`viewer.html`, port 8081) that renders **one** subject —
-a GLB model, or a star/planet from an entity TOML — through the game's own
-render path, with lighting switchable between off / ambient / directional.
+Workshop is the only supported model, rig and entity preview surface. Its Models
+document previews a GLB, one named sidecar variant, or a composed entity such as
+a ship, star or planet. Preview input is an immutable capture of the selected
+draft revision; source changes mark that picture stale until the author refreshes.
 
-It provides a short feedback loop for tuning lighting, rigs, LODs, textures,
-and WGSL without starting a scenario and flying to the subject.
-
-The browser viewer and game share the Gas Giant, Ice Moon and Ecumenopolis
-UASTC base texture loader in
-`src/entities/planet_texture.rs`. It selects from Bevy's enabled GPU formats,
-transcodes in a local worker, and loads the original into the same handle on
-failure. Native keeps the original. See `assets/texture-codecs/README.md` for
-the bounded format contract and verification commands.
-
-Combat Test and Falling Skyway's recreated ship/station assets are authored by
-`scripts/art/recreate-fleet.py`, with concept mappings and reproduction commands
-in `scripts/art/README.md`. Their `_recreated` GLBs embed the original rendered
-size and orientation; identity sidecars preserve gameplay markers and target
-points. The courier docking variant has a separate fitted GLB because its
-original rig used a different scale. The same standard LOD and billboard tools
-generate their ladders; the simpler mesh sources live outside the shipped bundle
-under `scripts/art/lod-sources/`.
-The fleet recipe also supplies the Dynasty Destroyer used by the Harrow
-destroyer entity; its concept is `raw/models/PPDynastyDestroyer.png`.
+`src/viewer/` remains the shared renderer plugin. It is used by the Workshop
+preview and by render-parity tests, but no longer owns an independent HTML shell,
+history, project state or filesystem API. `viewer.html` is a small compatibility
+redirect which translates safe legacy query parameters into the versioned
+Workshop launch fragment. The old `editor.html` URL does the same for a selected
+source file. Invalid or unavailable selections are reported in Workshop and do
+not broaden filesystem authority.
 
 ```bash
-npm run dev:viewer     # → :8081
-start-viewer.bat       # Windows: same, plus a compile check and opens the browser
+npm run dev:viewer
+start-viewer.bat
 ```
 
-| URL parameter | Effect |
-|---|---|
-| `model=assets/models/alliance_cruiser.glb` | GLB to render (default) |
-| `variant=large` | rig sidecar variant (`large`, `small`, `cosmetic`, `lod1`…) |
-| `entity=assets/entities/star_sun.toml` | render that config's `[star]`, `[planet]` or `[mesh]` |
-| `lighting=off\|ambient\|directional` | initial lighting mode (default `ambient`) |
-| `gizmos=1` | overlay rig markers, target points and the extents box |
+Both commands build and open native Workshop directly on the current project
+with the Models panel selected. The npm command accepts the retained selection
+vocabulary: `--model=assets/models/...glb`, `--variant=name`,
+`--entity=assets/entities/...toml`, `--lighting=off|ambient|directional` and
+`--gizmos=0|1`; unknown, duplicate or invalid selectors refuse. Windows batch
+launchers deliberately interpolate no command-line arguments. Their optional
+selection is the `PHOENIX_WORKSHOP_OPEN` URL query environment variable, read
+and validated directly by Node (for example `model=assets/models/ship.glb&gizmos=1`,
+or `file=assets/worlds/demo.toml` for `start-editor.bat`). Native Workshop owns
+project writes and external model tools; browser Workshop remains archive-only.
 
-An HTML control panel drives the same settings live (`viewer_set_lighting`,
-`viewer_set_ambient`, `viewer_set_directional`, `viewer_set_skybox_brightness`,
-`viewer_set_gizmos`, `viewer_load_model`, `viewer_load_entity`, `viewer_set_lod_mode`,
-`viewer_set_camera_distance`, `viewer_stats` — all `#[wasm_bindgen]` in
-`src/viewer/mod.rs`). The panel lives in JS so tweaking a slider costs an HTML
-edit rather than a wasm rebuild.
+The model preview uses the game's render path rather than a copied scene:
 
-The **Subject** selector switches between the model/variant workflow and an
-entity picker generated from top-level `assets/entities/*.toml` files. Entity
-mode uses the authored `[star]`, `[planet]`, or `[mesh]` visual and deliberately
-disables model-LOD authoring; the existing model picker, variants and LOD tools
-are otherwise unchanged.
+- `render_setup` owns skybox, camera optics and default ambient light.
+- `glb_visual` loads GLB scenes and applies model-rig sidecars.
+- `celestial_visual` draws authored star and planet materials.
+- `viewer::lod` uses the runtime LOD selector and hysteresis.
+- `viewer::stats` uses the same mesh and texture accounting as performance
+  baselines.
 
-## The LOD panel
+The structured Models panel edits markers, target points, named variants, LOD
+records and capture metadata as exact-source grouped transactions. Preview,
+LOD generation/remesh and billboard capture all operate on a selected captured
+revision. Adoption validates one candidate and lands its sidecars and generated
+assets as one undoable transaction. Cancellation, selection changes, stale
+revisions, Test entry, pane failure and Workshop exit retire any native job and
+leave the draft unchanged.
 
-The viewer is where a decimated model is judged, so it also authors and
-regenerates the ladder. Three parts:
+Lighting and camera controls are presentation-only. Gizmos show authored rig
+markers, target points and extents. Auto, Base and fixed LOD modes all drive the
+same retained renderer state. The browser omits native generation and capture
+capabilities while still rendering packaged preview inputs.
 
-**Showing a level** (`src/viewer/lod.rs`). *Base* renders the selected `.glb`.
-*Hold* pins one level at any distance — the mode for orbiting a decimated hull.
-*Auto* is the game's own behaviour: distance runs through
-`entity_config::select_lod`, hysteresis and all, so "does it pop" is answered by
-the function that decides it in play. Drag the **camera distance** slider in
-Auto and the ladder walks its real thresholds. A far level declared as
-`shape = "sphere"` is built through `server_app::procedural_mesh_material`, the
-same constructor `update_mesh_lod` uses. **range** puts the camera at a band's
-far edge.
-
-Every GLB level is requested up front and its handle held on `LadderState`
-(`preload_levels`), so a swap is a handle change rather than a fetch — matching
-the game, which preloads a whole ladder the frame the sidecar lands
-(`discover_sidecar_lod_assets`).
-
-The panel edits a *working copy* and pushes it into the engine on every
-keystroke (`viewer_ladder_begin`/`_push`/`_commit`), so a switch distance can be
-dragged and judged in Auto before it is saved. The sidecar stays the authority;
-the push only survives until the model changes.
-
-**Costing it** (`src/viewer/stats.rs`). Triangles and texture pixels of what is
-on screen, counted with `entities::mesh_stats` — the same two functions the perf
-baselines use (issue #905), so a number here and a number in `assets-mesh.ron`
-mean the same thing. File bytes come from the dev server, which can `stat` them.
-
-**Editing and generating** (`scripts/viewer-lods.mjs`, `/api/` in
-`scripts/dev-viewer.mjs`). The panel writes `[[lod]]` and `[lod.generate]` back
-into *every* rig sidecar of the model — the variants share the generated files
-and are required to agree about them — and runs `scripts/generate-lods.mjs` over
-it, streaming the transcript back. See [LOD Generation](./lod-generation.md).
-
-Two rules the panel does not own: the ladder's shape rules live in
-`viewer-lods.mjs` and the decimation parameter rules in the generator's own
-`collectTargets`, which is run over the *proposed* sidecar text before anything
-is written. A save that the generator would refuse is refused here instead, with
-the tree untouched.
-
-`Copy ladder from` rebuilds an existing model's ladder for the current one:
-same ratios and texture sizes, switch distances scaled by the extents ratio. It
-lands in the editor as a proposal to check, not a saved file — the precedent
-lives in the sidecars rather than in a table inside the tool.
-
-Capturing a far-level billboard writes the PNG and `[lod.capture]` declaration,
-then refreshes that output's record in `scripts/lod-capture-manifest.toml`.
-Manifest failures are returned to the panel as capture errors; a green result
-therefore means the browser-authored atlas is also ready for the CI currency
-check, not merely that the PNG reached disk.
-
-## Render parity is structural, not copied
-
-The viewer would be worthless as a reference if it reimplemented the render
-setup, so the shared pieces were extracted and both callers now use them:
-
-| Module | Owns | Used by |
-|---|---|---|
-| `src/render_setup.rs` | space skybox + cubemap conversion, camera optics (`far = 5000`), default ambient fill | `RendererPlugin`, viewer |
-| `src/entities/glb_visual.rs` | GLB scene load + `.model.toml` base-rig composition, sidecar resolution | `render_spawned_entities`, `update_mesh_lod`, viewer |
-| `src/entities/celestial_visual.rs` | star surface + halo, planet surface + cloud shell (all custom WGSL) | `render_spawned_entities`, viewer |
-
-`spawn_glb_visual` is deliberately ignorant of the simulation: it returns the
-`SceneRoot` child it spawned, and callers decorate it. The game's local ship
-adds `Visibility::Hidden` + `NoFrustumCulling` that way
-(`decorate_local_ship_model` in `src/server_app_render.rs`).
-
-## Lighting modes
-
-- **Off** — no scene lights; only the skybox reaches the surface. Shows raw
-  albedo and emissive.
-- **Ambient** — `render_setup::default_ambient_light()`, i.e. what a world
-  without an `[ambient_light]` block actually renders with. The mode to judge
-  "does this look right in game".
-- **Directional** — ambient plus a steerable key light, for normal maps,
-  specular response and self-shadowing.
-
-The planet materials do their star-relative lighting in custom WGSL rather
-than through Bevy's scene lights. In the viewer, `PlanetLightingOverride`
-therefore receives the same off/ambient/directional controls so the buttons and
-sliders drive both GLB materials and celestial materials.
-
-Planet maps are authored as periodic equirectangular textures. The checked-in
-maps have their generator-feathered vertical border removed and a clean periodic
-join rebuilt by `scripts/stitch-planet-textures.mjs`; every aligned map in a
-texture set (surface, clouds, normal, roughness, emissive and masks) receives the
-same longitude remap. Normal vectors are renormalised after resampling.
-
-The ecumenopolis uses `scripts/planets/bake-ecumenopolis.mjs` instead: it reads
-the raw PNG sources once, repairs every aligned longitude, and generates city
-materials with complete KTX2 mip chains. Its configured `albedoSource` supplies
-enhanced base-colour artwork while the other layers retain their source maps.
-Base colour and light masks remain 4K; secondary maps use smaller resolutions,
-with haze and smog opacity stored as R8. The optional skyglow map is omitted
-for this planet. KTX2 uses lossless Zstd without a Basis/UASTC transcoder.
-`scripts/planets/README.md` describes
-channels, reproduction, texture memory and capture commands. Do not run the
-legacy WebP stitcher on these generated outputs. Optional `surface.city`,
-`clouds.smog` and `atmosphere.scattering` settings drive the richer layers;
-other planet templates retain their ordinary maps and surface rim. The surface
-and shell shaders share the star direction. Smog drifts over stationary city
-glow; its shadow intersects the light ray with the shell. Material-map alpha
-selects sparse daytime lights at reduced intensity. A second shell
-integrates single scattering and samples a baked solar optical-depth table.
-Viewer texture statistics include both celestial material types and deduplicate
-their shared images. `scripts/capture-planet.mjs` and the native
-`examples/capture_planet.rs` use matching camera and light poses.
-Both capture tools accept `PLANET_ENTITY` and scale camera poses by body radius.
-Gas Giant and Ice Moon use `surface.natural` and `clouds.dynamics` for their own
-packed material/effect channels, cloud motion, and ice scattering. Their baker,
-format checks and research references are documented in `scripts/planets/NATURAL.md`.
-
-## Notes
-
-- The viewer ships as `--no-default-features --features viewer`; the `viewer`
-  feature does not imply the presentation `server` feature. CI's `boundary`
-  job compiles that exact feature set, while `viewer-test` executes its tests
-  with the default feature set also present. Shared visual constructors live
-  outside `crate::server`, so the viewer can exercise the real asset/material
-  path without carrying the browser-host bridge or viewscreen renderer.
-  Its `viewer_set_world_fetch_callback` and `viewer_push_sidecar_toml` WASM
-  exports forward to the shared content cache directly; `viewer.html` uses
-  those bindings because the server bridge exports are absent in this build.
-- Bevy asset hot-reload does not work on wasm. Editing a `.wgsl` triggers a
-  Trunk rebuild and page reload — that reload *is* the iteration loop.
-- The model dropdown reads the gitignored index generated on every
-  build by `scripts/generate-model-index.mjs` (a Trunk `pre_build` hook), so it
-  cannot go stale. `dev-viewer.mjs` also writes it
-  once *before* starting Trunk: the file is on Trunk's `[watch] ignore` list,
-  and Trunk canonicalises those paths at startup, so in a fresh checkout the
-  hook that creates it never got to run.
-- `assets/models/` is deliberately outside Trunk's `watch_path`. It was inside
-  it, and every Save (three sidecars) and every generated level cost a full wasm
-  rebuild and a page reload — the tool reloading the page underneath its own
-  edits. The panel owns that refresh instead: a finished run calls
-  `viewer_reload_assets`, which re-fetches through `AssetServer::reload` and
-  rebuilds the subject when the new bytes land (`respawn_on_asset_reload` waits
-  for `AssetEvent::Modified`, because the old value stays in `Assets<Scene>`
-  until the new one arrives). Hand-editing a sidecar now needs a manual browser
-  reload; editing a `.wgsl` still reloads on its own.
-- The panel keeps its subject kind, model/entity, variant, LOD mode, complete
-  orbit camera state, lighting controls, skybox brightness and gizmo toggle in
-  `sessionStorage`, and picks a running generator's transcript back up if the
-  page does reload.
-- `start-viewer.bat` waits for port 8081 to accept a connection before opening
-  the browser. Trunk does not bind it until the first wasm build finishes,
-  which is minutes from cold.
-
-## The Workshop's model preview is this same viewer (issue #1470)
-
-`workshop-preview.html` is a THIRD Trunk target, built
-`--no-default-features --features viewer` exactly as `viewer.html` is. It boots
-the same `ViewerPlugin`: the same subject dispatch for GLB, star, planet and
-mesh, the same LOD ladder, the same lighting, and the same `src/viewer/stats.rs`
-measurements. That sameness is the point — a Workshop-only approximation would
-make a previewed model something other than the model the game draws.
-
-It differs in exactly one respect: where its bytes come from. The standalone
-viewer fetches assets from the dev server through
-`viewer_set_world_fetch_callback`. A preview may read nothing but the draft it
-was handed, so `viewer_workshop_preview_init` calls `register_snapshot` before
-`DefaultPlugins` adds `AssetPlugin`, and that reader answers `NotFound` for
-every path outside the capture. An uncaptured project file is not a slower path;
-it is absent. The page therefore declares no `copy-dir` and no proxy.
-
-Why a third target rather than adding `viewer` to the server build: the Workshop
-page loads the SERVER artifact, built with default features, where the plugin is
-not compiled in. Enabling `viewer` there would ship viewer code to every
-player's host page for a surface only an author ever opens.
-
-Trunk names the built page `index.html` whatever the source page was called, so
-the artifact lands at `dist/preview/index.html` (placed by
-`scripts/copy-workshop-preview.mjs`) and the Workshop frame opens that
-directory, not the authored filename.
-
-The preview reuses the disposable Test's iframe, private `MessagePort`,
-transferable-snapshot guards and dependency merger, and captures a draft by the
-identical path/byte rule — a second capture path would be a second, quietly
-different definition of "captured". Its child accepts only local renderer
-commands (lod, lighting, gizmos, distance, camera) over its own
-`phoenix-workshop-preview-connect` type, so a Test port cannot drive a preview
-or the reverse.
-
-Native publishes the same immutable capture through a nonce-scoped loopback
-route. The JSON bridge carries only authored references and the route
-capability; model bytes never cross it, and retired or unknown capture routes
-cannot fall through to project or delivery files.
-
-The Workshop model panel also owns structural source editing for rig markers,
-target points, variants and LOD rungs. It patches only the selected TOML spans,
-shows file-and-line ownership beside textual vector controls, validates a
-captured candidate through the normal runtime, and records one grouped history
-entry. Variant selection, Auto/fixed LOD, marker gizmos and renderer statistics
-continue through this captured ViewerPlugin preview, so structural source and
-the picture being judged use the same draft revision.
+CI keeps the `viewer` Rust feature as an architectural boundary test: it must
+compile without the server feature, its focused tests must run, and the shared
+preview plugin must continue to render non-flat models through Workshop. This
+feature name describes the renderer, not a standalone application.

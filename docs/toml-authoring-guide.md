@@ -160,7 +160,7 @@ where the render backend can draw it, gated by
 | Target | Backend | Bloom |
 |---|---|---|
 | `server.html` — the game host | WebGL2 | **no** — upstream limitation |
-| `viewer.html` — `npm run dev:viewer` | WebGL2 | **no** — same, and deliberately so: the viewer must show the picture the viewscreen shows |
+| Workshop model preview — `npm run dev:viewer` | WebGL2 | **no** — same, and deliberately so: preview must show the picture the viewscreen shows |
 | `capture-billboard`, `tune-lods` | native wgpu | **no** — by design; these bake atlases and never apply a `[render]` block at all |
 | a native host, or a WebGPU build | full wgpu | **yes** |
 

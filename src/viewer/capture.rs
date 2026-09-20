@@ -18,7 +18,7 @@
 //!
 //! After the last view the tiles are packed left→right into one RGBA atlas and
 //! parked in [`CaptureState::result`], which the JS panel polls, PNG-encodes on
-//! a canvas, and POSTs to `dev-viewer.mjs` (`/api/lod/capture`).
+//! a canvas. Native Workshop owns the production capture/adoption workflow.
 //!
 //! The offscreen camera carries NO skybox and clears to a fully transparent
 //! colour, so the atlas has a clean alpha cutout of the hull. It reuses the
@@ -325,25 +325,25 @@ pub(crate) fn publish_capture(mut state: ResMut<CaptureState>) {
 }
 
 /// True once a baked atlas is waiting to be read.
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // retained wasm preview capture API
 pub fn capture_ready() -> bool {
     CAPTURE_META.with(|c| !c.borrow().is_empty())
 }
 
 /// The finished atlas metadata as JSON.
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // retained wasm preview capture API
 pub fn capture_meta() -> String {
     CAPTURE_META.with(|c| c.borrow().clone())
 }
 
 /// Take the finished atlas RGBA bytes (row-major, `width`×`height`×4).
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // retained wasm preview capture API
 pub fn capture_take_rgba() -> Vec<u8> {
     CAPTURE_RGBA.with(|c| c.borrow_mut().take().unwrap_or_default())
 }
 
 /// Clear the parked result after the panel has consumed it.
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // retained wasm preview capture API
 pub fn capture_clear() {
     CAPTURE_RGBA.with(|c| *c.borrow_mut() = None);
     CAPTURE_META.with(|c| c.borrow_mut().clear());

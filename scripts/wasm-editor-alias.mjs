@@ -1,8 +1,7 @@
 // Trunk post_build hook (see Trunk.toml) — issue #995.
 //
-// The world editor's script mode (host-fn autocomplete + Rhai diagnostics)
-// loads the real phoenix wasm-bindgen module through `editor/script-wasm.js`,
-// whose `DEFAULT_MODULE_URL` is the STABLE `../dist/phoenix.js`. But
+// Workshop's browser runtime loads the real wasm-bindgen module through the
+// stable `phoenix.js` name. Trunk, however,
 // `trunk build` emits a CONTENT-HASHED glue (`project-phoenix-<hash>.js` +
 // `_bg.wasm`) whose name changes every build, so the editor cannot import it
 // under a fixed name. This hook writes a tiny stable `phoenix.js` alias next to
@@ -10,15 +9,14 @@
 // content-hash churn without an importmap or a copy of the 50 MB wasm.
 //
 // Runs on BOTH dev and release builds (unlike `wasm-opt-fixup`, which is
-// release-only): the editor needs the alias whatever the build profile.
+// release-only): Workshop needs the alias whatever the build profile.
 //
 // Decision (issue #995 Q1 — slim vs. full WASM): the alias re-exports the FULL
 // game glue as-is rather than building a dedicated slim target. That glue IS
 // the authoritative host — `wasm_get_script_host_fns` / `wasm_script_diagnostics`
 // are defined against the real loading engine, so enumerating signatures and
-// compiling a Rhai snippet against it is by design. `script-wasm.js` loads it
-// LAZILY (only when a script unit is opened), so the ~50 MB wasm never touches
-// the editor's base page load. A slim `wasm-bindgen` target exposing only the
+// compiling a Rhai snippet against it is by design. Workshop loads it lazily,
+// so the ~50 MB wasm never touches the base page load. A slim `wasm-bindgen` target exposing only the
 // two exports would cut that download dramatically and is a reasonable future
 // optimisation, but is out of scope here.
 
@@ -47,7 +45,7 @@ export function findHashedGlue(distDir, readdir = readdirSync, stat = statSync) 
 }
 
 /**
- * Build the source of the stable `dist/phoenix.js` editor alias for a given
+ * Build the source of the stable `dist/phoenix.js` Workshop alias for a given
  * hashed glue filename.
  *
  * `export *` re-exports the glue's NAMED exports (`wasm_get_script_host_fns`,
@@ -55,8 +53,8 @@ export function findHashedGlue(distDir, readdir = readdirSync, stat = statSync) 
  * default is re-exported explicitly — AND bound to the hashed `_bg.wasm` path,
  * because wasm-bindgen's argument-less `init()` otherwise fetches the UN-hashed
  * `project-phoenix_bg.wasm` (resolved against the glue's own URL), which trunk
- * never emits. Binding the path here keeps `script-wasm.js`'s plain
- * `mod.default()` call correct without it having to know the content hash.
+ * never emits. Binding the path here keeps Workshop's plain `mod.default()`
+ * call correct without it having to know the content hash.
  *
  * @param {string} hashedJs  e.g. `project-phoenix-9b074c85c4a6a2d7.js`
  * @returns {string} module source for `phoenix.js`

@@ -21,4 +21,4 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/planet.rs, src/entities/planet_texture.rs, src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_gas_giant.toml, assets/entities/moon_ice.toml, scripts/planets/bake-natural.mjs, scripts/planets/bake-uastc.mjs, assets/texture-codecs/]
-      tests: [node scripts/planets/check-natural.mjs, cargo test --lib entities::planet::tests, cargo test --lib entities::planet_texture::tests, node scripts/planets/check-uastc-browser.mjs, npx vitest run tests/client/uastc.test.js]
+      tests: [node scripts/planets/check-natural.mjs, cargo test --lib entities::planet::tests, cargo test --lib entities::planet_texture::tests, npx playwright test tests/smoke/viewscreen.render.spec.js, npx playwright test tests/smoke/workshop-preview.render.spec.js, npx vitest run tests/client/uastc.test.js]

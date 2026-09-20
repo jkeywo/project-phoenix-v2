@@ -1,4 +1,4 @@
-//! Offscreen native counterpart to scripts/capture-planet.mjs.
+//! Offscreen native planet capture using the shared Workshop/game materials.
 //! cargo run --features capture --example capture_planet -- target/planet-native
 #![allow(clippy::disallowed_methods)]
 use bevy::{

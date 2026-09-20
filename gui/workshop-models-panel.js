@@ -397,8 +397,7 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   if (typeof runtime.dependencies === 'function') loadDependencies();
   refresh();
   if (typeof runtime.dependencies !== 'function') renderStructure();
-  preview = mountWorkshopModelPreview({ root: section, attach, provider, draft, busy,
-    selection: () => {
+  const previewSelection = () => {
       // An entity subject is previewed as a composed template; anything else
       // falls back to the model form's own selection, which is what the panel
       // was doing before entity subjects existed.
@@ -406,8 +405,32 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       return { model: model.value,
         variant: modelDocuments(draft()?.paths() || []).find(entry => entry.model === model.value)?.variants
           .find(entry => entry.path === variant.value)?.name || null };
-    } });
+    };
+  preview = mountWorkshopModelPreview({ root: section, attach, provider, draft, busy,
+    selection: previewSelection });
   return { refresh, node: section, previewNode: preview.node,
+    applyLaunch(selection, controls = {}) {
+      if (!selection) return true;
+      refresh();
+      if (selection.entity) {
+        if (![...subject.options].some(item => item.value === selection.entity)) return false;
+        subject.value = selection.entity;
+      } else if (selection.model) {
+        if (![...model.options].some(item => item.value === selection.model)) return false;
+        model.value = selection.model; refreshVariants();
+        if (selection.variant) {
+          const entry = modelDocuments(draft()?.paths() || []).find(item => item.model === selection.model);
+          const chosen = entry?.variants.find(item => item.name === selection.variant);
+          if (!chosen) return false;
+          variant.value = chosen.path;
+        }
+        subject.value = '';
+      }
+      renderStructure(); refresh();
+      preview.applyLaunch?.(controls);
+      void preview.review(draft(), previewSelection());
+      return true;
+    },
     setPreviewVisible(value) {
       if (previewVisible === value) return;
       previewVisible = value; refresh();

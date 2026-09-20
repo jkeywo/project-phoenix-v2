@@ -51,7 +51,7 @@ const NATIVE_COPY = {
   'workshop.recovery_invalid': 'workshop.native_recovery_invalid',
 };
 
-export function mountWorkshopAuthoring({ root, win = window, download = downloadZip, provider = null,
+export function mountWorkshopAuthoring({ root, win = window, download = downloadZip, provider = null, launch = null,
   runtime = provider?.runtime || createWorkshopRuntime(), recovery = provider?.recovery || createWorkshopRecovery({ indexedDB: win.indexedDB }) } = {}) {
   const doc = root.ownerDocument;
   const translate = (id, params) => t(provider?.save ? (NATIVE_COPY[id] || id) : id, params);
@@ -463,6 +463,23 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     dirty.textContent = translate(!draft ? 'workshop.empty' : draft.isDirty() ? 'workshop.dirty' : 'workshop.saved');
     testPanel?.refresh();
   }
+  function applyLaunch() {
+    // Browser bookmark migration reaches an empty archive workspace first.
+    // Keep the descriptor until import/new/restore supplies a real candidate;
+    // consuming it here would silently lose the requested source or preview.
+    if (!launch || !draft) return !launch;
+    let accepted = true;
+    if (launch.file) {
+      if (draft?.paths().includes(launch.file)) selected = launch.file;
+      else accepted = false;
+    }
+    if (launch.panel) layoutMount.reveal(launch.panel, { focus: false, notify: false });
+    if (launch.preview && !modelPanel?.applyLaunch(launch.preview, launch.controls)) accepted = false;
+    refresh({ selection: true });
+    if (!accepted) show('workshop.legacy_selection_unavailable', [], true);
+    launch = null;
+    return accepted;
+  }
   function travel(redo) {
     if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
     const path = redo ? draft?.redo() : draft?.undo();
@@ -603,13 +620,17 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held() || provider?.canCreate === false) return;
     if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return;
     pendingValidation = true; refresh();
+    let created = false;
     try {
       const replacement = newWorkshopPack(await runtime.dependencies());
       if (disposed) return;
-      draft = replacement; selected = draft.paths()[0];
+      draft = replacement; selected = draft.paths()[0]; created = true;
       show('workshop.created'); persistDraft();
     } catch (error) { if (!disposed) show('workshop.runtime_unavailable', [errorText(error)], true); }
-    finally { pendingValidation = false; if (!disposed) refresh({ selection: true }); }
+    finally {
+      pendingValidation = false;
+      if (!disposed) { refresh({ selection: true }); if (created) applyLaunch(); }
+    }
   }
   async function saveNative() {
     if (!provider?.save || !draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
@@ -799,12 +820,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     const pending = pendingImport;
     if (!file || !pending) { cancelImport(); return; }
     refresh();
+    let imported = false;
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (disposed) return;
       const replacement = new WorkshopDocument(bytes);
       draft = replacement;
       selected = draft.paths()[0];
+      imported = true;
       show('workshop.imported', [], false, MOD_IMPORT_ACTION_ID, pending.correlation, { reveal: true });
       persistDraft();
       pending.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
@@ -816,7 +839,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     } finally {
       pendingImport = null;
       fileInput.value = '';
-      if (!disposed) refresh({ selection: true });
+      if (!disposed) { refresh({ selection: true }); if (imported) applyLaunch(); }
     }
   });
   function cancelImport() {
@@ -861,6 +884,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     restoreButton.hidden = discardButton.hidden = true;
     recoveryStatus.textContent = translate('workshop.recovery_restored');
     refresh({ selection: true });
+    applyLaunch();
     source.focus();
   }
   async function discardRecovery() {
@@ -873,6 +897,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       restoreButton.hidden = discardButton.hidden = true;
       recoveryStatus.textContent = translate('workshop.recovery_discarded');
       refresh();
+      applyLaunch();
       importButton.focus();
     } catch {
       if (!disposed) recoveryStatus.textContent = translate('workshop.recovery_failed');
@@ -971,7 +996,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       try {
         const loaded = await provider.load();
         if (disposed) return;
-        if (loaded) { draft = loaded; selected = draft.paths()[0]; refresh({ selection: true }); }
+        if (loaded) { draft = loaded; selected = draft.paths()[0]; refresh({ selection: true }); applyLaunch(); }
       } catch (error) {
         if (!disposed) { pendingRecovery = false; show('workshop.native_load_refused', [errorText(error)], true); refresh(); }
         return;
@@ -991,6 +1016,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       pendingRecovery = false;
       recoveryStatus.textContent = translate('workshop.recovery_empty');
       refresh();
+      applyLaunch();
       return;
     }
     discardButton.hidden = false;

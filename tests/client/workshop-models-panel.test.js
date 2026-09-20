@@ -109,6 +109,16 @@ it('stops showing the captured preview when its own panel stops being shown', ()
   expect(preview().hidden).toBe(true);
 });
 
+it('applies a migrated model selection through the ordinary Models controls', () => {
+  expect(panel.applyLaunch({ model: 'assets/models/ship.glb', variant: 'model' },
+    { lighting: 'ambient', gizmos: false })).toBe(true);
+  expect(document.getElementById('workshop-model').value).toBe('assets/models/ship.glb');
+  expect(byId('variant').value).toBe(path);
+  expect(document.getElementById('workshop-model-preview-lighting').value).toBe('ambient');
+  expect(document.getElementById('workshop-model-preview-gizmos').checked).toBe(false);
+  expect(panel.applyLaunch({ model: 'assets/models/missing.glb' })).toBe(false);
+});
+
 it('cancels a native capture immediately when the selected variant changes', async () => {
   panel.dispose();
   const captureSource = '[[lod]]\nmodel="assets/models/ship.glb"\nmax_distance=10\n[[lod]]\nbillboard="assets/models/ship.png"\n[lod.capture]\nsource="assets/models/ship.glb"\nyaw_views=8\nresolution=64\npitch=20\n';

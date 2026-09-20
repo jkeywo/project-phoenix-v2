@@ -4,6 +4,7 @@ import { mountWorkshopAuthoring } from './workshop-authoring.js';
 import { createBrowserWorkshopProvider } from '../editor/workshop-provider.js';
 import { createWorkshopHandoffStore } from '../editor/workshop-handoff.js';
 import { workshopSourceProvider } from '../editor/workshop-source-provider.js';
+import { parseWorkshopLaunch } from '../editor/workshop-launch.js';
 
 applyToDom(document);
 async function openWorkshop() {
@@ -11,6 +12,7 @@ async function openWorkshop() {
   const url = new URL(window.location.href);
   const fragment = new URLSearchParams(url.hash.slice(1));
   const token = fragment.get('source');
+  const launch = parseWorkshopLaunch(fragment);
   let provider, failed = false;
   if (token) {
     fragment.delete('source');
@@ -22,7 +24,7 @@ async function openWorkshop() {
       provider = workshopSourceProvider(source);
     } catch { failed = true; }
   }
-  mountWorkshopAuthoring({ root, provider: provider || createBrowserWorkshopProvider() });
+  mountWorkshopAuthoring({ root, provider: provider || createBrowserWorkshopProvider(), launch });
   if (failed) {
     const message = document.createElement('p');
     message.setAttribute('role', 'alert'); message.dataset.i18n = 'workshop.source_failed';

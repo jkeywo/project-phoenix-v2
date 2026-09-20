@@ -2,7 +2,7 @@
 title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
-sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, src/native_host/workshop/lod_generation.rs, editor/workshop-billboard-capture.js, editor/workshop-lod-generation.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
+sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, src/native_host/workshop/lod_generation.rs, editor/workshop-billboard-capture.js, editor/workshop-lod-generation.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
 updated: 2026-09-20
 ---
 
@@ -56,10 +56,10 @@ node scripts/generate-lods.mjs asteroid_common_1 # one model
 node scripts/generate-lods.mjs --plan            # print the work, run nothing
 ```
 
-The model viewer runs the same command over the model it is showing, from the
-same sidecars, with the `--remesh` and `--force` flags as checkboxes — see
-[Model Viewer](./model-viewer.md). There is no second code path: the panel edits
-the sidecar and shells out to this script, because a ladder that only the viewer
+Native Workshop runs the same command over the model it is showing, from the
+same sidecars, with the `--remesh` and `--force` controls — see
+[Workshop Model Preview](./model-viewer.md). There is no second code path: the panel edits
+the sidecar and invokes this script, because a ladder that only Workshop
 could produce would be a ladder CI's drift check could not verify.
 
 Native Workshop runs that same script for the exact selected sidecar against a
@@ -106,8 +106,8 @@ variant billboard scales are not part of the shared atlas recipe.
 or capture binary. `node scripts/capture-billboards.mjs --adopt <model>` records
 an already-reviewed committed PNG, while the default command performs a real
 recapture and forwards all three authored parameters to the renderer. A
-successful capture from the model viewer refreshes the same manifest record,
-so browser and batch authoring cannot leave different provenance behind.
+successful capture from Workshop refreshes the same manifest record as the
+batch command, so the two paths cannot leave different provenance behind.
 
 Native Workshop runs the production selected-target capture workflow for one
 selected draft sidecar. It stages the exact draft in private temporary storage
@@ -133,7 +133,7 @@ ladder falls back to the entity's flat `[mesh] model`, matching rendering.
 
 `generate-lods.mjs` filters targets on any substring of their output, source or
 sidecar paths, so a level's own output path selects exactly that level. That is
-how the viewer's per-LOD **Generate** button works — one decimation at a time
+how Workshop's per-LOD **Generate** button works — one decimation at a time
 while it is being tuned, rather than a whole-model run:
 
 ```bash

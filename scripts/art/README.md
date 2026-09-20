@@ -59,7 +59,6 @@ are larger than the old mesh's actual rendered bounds. Regenerate with:
 node scripts/art/prepare-destroyer-lods.mjs
 node scripts/generate-lods.mjs alliance_destroyer_recreated --remesh
 node scripts/capture-billboards.mjs alliance_destroyer_recreated
-node scripts/generate-model-index.mjs
 ```
 
 The near mesh retains all details. Distant meshes use the existing voxel pre-pass
@@ -90,7 +89,6 @@ node scripts/generate-lods.mjs alliance_cruiser_recreated
 node scripts/capture-billboards.mjs alliance_cruiser_recreated
 node scripts/art/check-fleet.mjs
 node scripts/art/integrate-fleet.mjs
-node scripts/generate-model-index.mjs
 npm run lods:check
 npm run lod-captures:check
 ```

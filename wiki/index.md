@@ -77,6 +77,6 @@ Current implementation orientation only. For intended design use
 - [Peer-Local Save Catalogues](./concepts/save-catalogues.md) — deterministic fixed-tick capture, private browser/native stores, and fresh-session restore
 - [Testing Strategy](./concepts/testing-strategy.md)
 - [Performance Measurement](./concepts/performance-measurement.md)
-- [Model Viewer](./concepts/model-viewer.md)
+- [Workshop Model Preview](./concepts/model-viewer.md)
 - [Native Lighting Lab](./concepts/native-lighting-lab.md)
 - [LOD Generation](./concepts/lod-generation.md)

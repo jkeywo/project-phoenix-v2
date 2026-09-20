@@ -68,6 +68,9 @@ pub struct HostArgs {
 pub struct WorkshopArgs {
     pub root: String,
     pub project: bool,
+    /// Presentation-only initial Workshop location. It never expands the
+    /// selected root or grants filesystem authority.
+    pub open: Option<String>,
 }
 
 /// The authoritative simulation's arguments, present when `--world` (issue
@@ -201,7 +204,9 @@ WORKSHOP
                           Workshop UI. Requires --client-dir and an Ultralight
                           build. Delivery binds loopback only; no live session.
     --workshop-mod <DIR>   Open an offline editable mod workspace instead.
-                          --content-dir supplies its read-only base content.
+                           --content-dir supplies its read-only base content.
+    --workshop-open <QUERY> Initial Workshop panel/source/preview selection.
+                           Valid only with one of the two Workshop roots.
 
 SIMULATION
     --world <PATH>        Run the authoritative simulation for this world,
@@ -384,6 +389,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut profile: Option<String> = None;
     let mut lobby = false;
     let mut workshop: Option<WorkshopArgs> = None;
+    let mut workshop_open: Option<String> = None;
 
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -410,7 +416,15 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                 workshop = Some(WorkshopArgs {
                     root: value_for(&arg, &mut it)?,
                     project: arg == "--workshop-project",
+                    open: None,
                 });
+            }
+            "--workshop-open" => {
+                let value = value_for(&arg, &mut it)?;
+                if value.len() > 2048 || value.contains(['\r', '\n', '#']) {
+                    return Err("--workshop-open needs one bounded URL query".into());
+                }
+                workshop_open = Some(value);
             }
             "--lobby" => lobby = true,
             "--ship" => ship = Some(value_for(&arg, &mut it)?),
@@ -455,7 +469,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         }
     }
 
-    if workshop.is_some() {
+    if let Some(selected) = workshop.as_mut() {
+        selected.open = workshop_open.take();
         if addr_given {
             return Err(
                 "Workshop owns a loopback-only delivery endpoint; --addr is not a Workshop option"
@@ -492,6 +507,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         // The ordinary CLI default is LAN delivery. An offline Workshop never
         // inherits that default, and cannot expose an authored root over LAN.
         addr = "127.0.0.1:0".into();
+    } else if workshop_open.is_some() {
+        return Err("--workshop-open requires --workshop-project or --workshop-mod".into());
     }
     let has_delete = save_actions
         .iter()
@@ -752,13 +769,40 @@ mod tests {
                 args.workshop,
                 Some(WorkshopArgs {
                     root: "chosen root".into(),
-                    project
+                    project,
+                    open: None,
                 })
             );
             assert_eq!(args.addr, "127.0.0.1:0");
             assert!(args.sim.is_none());
             assert!(!args.setup);
         }
+    }
+
+    #[test]
+    fn workshop_open_is_presentation_only_and_requires_a_workshop_root() {
+        let args = run(&[
+            "--workshop-project",
+            ".",
+            "--client-dir",
+            "dist",
+            "--workshop-open",
+            "panel=models&model=assets%2Fmodels%2Fship.glb",
+        ]);
+        assert_eq!(
+            args.workshop.unwrap().open.as_deref(),
+            Some("panel=models&model=assets%2Fmodels%2Fship.glb")
+        );
+        assert!(err(&["--workshop-open", "panel=models"]).contains("requires"));
+        assert!(err(&[
+            "--workshop-project",
+            ".",
+            "--client-dir",
+            "dist",
+            "--workshop-open",
+            "bad\nvalue"
+        ])
+        .contains("bounded URL query"));
     }
 
     #[test]

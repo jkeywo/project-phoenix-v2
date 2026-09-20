@@ -63,17 +63,10 @@ so the planet loader's longitude wrap cannot cross the LUT boundary.
 ## Visual verification
 
 ```powershell
-# Build the real browser viewer, then capture it without modifying the page.
-$env:NO_COLOR = 'true'
-trunk build --config viewer-trunk.toml
-node scripts/capture-planet.mjs dist-viewer target/planet-browser
-
-# Same camera/light poses through native Bevy and the shared material builders.
+# Capture the shared native material builders at the standard camera/light poses.
 cargo run --features capture --example capture_planet -- target/planet-native
 ```
 
-The browser capture uses Playwright from `tests/smoke/node_modules`; set
-`PLAYWRIGHT_PACKAGE_ROOT` to another installed package root when necessary.
 Set `PLANET_ENTITY` to an existing entity path to check a legacy planet.
 Compare day, terminator, night, close and pole images, then rotate the planet
 interactively to inspect seams and shimmer. The native timing includes startup,

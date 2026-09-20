@@ -261,8 +261,8 @@ jobs:
       # boundary is enforced, so the viewer compiles without the presentation
       # stack). This invocation does not pass `--no-default-features`, so it is the
       # default feature set plus the viewer plugin — server included — which is what
-      # exercises the viewer's own tests. The server-OFF viewer build (the one
-      # `viewer.html` actually ships, `--no-default-features --features viewer`) is
+      # exercises the Workshop preview renderer's own tests. Its server-OFF build
+      # (`--no-default-features --features viewer`) is
       # covered by the `boundary` job below, which builds exactly that feature set.
       - name: Run the viewer test suite
         run: |
@@ -295,7 +295,7 @@ jobs:
   # It is a SEPARATE JOB for the same reason `viewer-test` is: `--no-default-
   # features` is its own feature set and its own codegen, so folding it into `test`
   # would serialise a full check behind that job rather than running concurrently
-  # here. It also builds the exact feature set `viewer.html` ships
+  # here. It also builds the exact isolated Workshop preview feature set
   # (`--no-default-features --features viewer`), closing the gap that `viewer-test`
   # (which keeps the default `server` on) cannot see.
   #
@@ -318,8 +318,8 @@ jobs:
       - name: Check the sim builds without the presentation feature
         run: cargo check --no-default-features
 
-      # The server-OFF viewer build that `viewer.html` actually ships.
-      - name: Check the standalone viewer builds without the presentation feature
+      # The server-OFF Workshop preview renderer remains an import boundary.
+      - name: Check the Workshop preview builds without the presentation feature
         run: cargo check --no-default-features --features viewer
 
   # ── WASM build ────────────────────────────────────────────────────────────────

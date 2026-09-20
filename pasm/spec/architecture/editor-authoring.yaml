@@ -3,8 +3,8 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Editor Mode Shell
-      summary: Separate browser-local authoring shell with World, Entity, and Definitions modes, per-file dirty tracking, and undo/redo history.
+      title: Workshop Authoring Shell
+      summary: The single browser/native Workshop shell owns exact-source authoring panels, per-file dirty state and one grouped undo/redo history. The retired editor.html URL is only a bookmark migration route.
     architecture:
       kind: authoring-interface
       authority: local
@@ -13,7 +13,7 @@ entities:
       depends_on: [editor-file-system-boundary, editor-model-marker-inspector, editor-runtime-reload-boundary]
     implementation:
       status: declared
-      paths: [editor.html, editor/app-v2.js, editor/mode-shell.js, editor/undo-controller.js]
+      paths: [workshop.html, gui/workshop-authoring.js, editor/workshop-document.js, editor/workshop-launch.js]
       tests: [npm run test:editor]
 
   - state: editor-draft-state
@@ -28,14 +28,14 @@ entities:
       writers: [editor-mode-shell]
     implementation:
       status: declared
-      paths: [editor/mode-shell.js, editor/undo-stack.js]
+      paths: [editor/workshop-document.js, editor/undo-stack.js]
 
   - component: editor-file-system-boundary
     core:
       status: implemented
       confidence: confirmed
-      title: Editor File System Boundary
-      summary: Chromium File System Access boundary that obtains a user-granted project directory handle, persists it in IndexedDB, and reads or writes only within that selected root.
+      title: Workshop File System Boundary
+      summary: Native Workshop opens one explicit project or mod root; browser Workshop remains archive-only. Both expose the same bounded document/provider contract to the authoring shell.
     architecture:
       kind: local-storage-boundary
       authority: local
@@ -43,15 +43,15 @@ entities:
       persists: [editor-draft-state]
     implementation:
       status: declared
-      paths: [editor/project-root.js, editor/save-flow.js]
-      tests: [npm run test:editor]
+      paths: [src/native_host/workshop/document.rs, editor/workshop-provider.js, editor/workshop-source-provider.js]
+      tests: [cargo test, npm run test:editor]
 
   - component: editor-validation-service
     core:
       status: implemented
       confidence: confirmed
-      title: Editor Validation Service
-      summary: Runs local TOML, component, station, marker, weapon-pattern, and behavior checks and surfaces inline errors and warnings. The save gate blocks definite errors while keeping warnings non-blocking. The trigger-action schema and entity cross-reference passes went with the declarative scenario front-end (issue #985); a scripted world's references are checked by the script diagnostics instead.
+      title: Workshop Validation Service
+      summary: Validates the exact candidate through the ordinary runtime parsers, composition and script compiler before save, export, preview or Test; refused operations leave the draft unchanged.
     architecture:
       kind: authoring-validator
       authority: local
@@ -60,15 +60,15 @@ entities:
       produces: [editor-validation-state]
     implementation:
       status: declared
-      paths: [editor/validation.js, editor/stations-validate.js, editor/marker-validate.js, editor/validation-badge.js]
-      tests: [npm run test:editor]
+      paths: [editor/workshop-runtime.js, src/workshop/mod.rs, editor/validation.js]
+      tests: [cargo test, npm run test:editor]
 
   - component: editor-save-admission
     core:
       status: implemented
       confidence: confirmed
-      title: Editor Save Admission
-      summary: Local save gate that prevents writing authored TOML when validation reports definite errors, while allowing warnings and clearly presenting them to the author.
+      title: Workshop Save Admission
+      summary: One candidate validation boundary refuses invalid save/export operations and reports source-linked findings; warnings remain visible and non-blocking.
     architecture:
       kind: authoring-validator
       authority: local
@@ -76,14 +76,14 @@ entities:
       validates: [editor-draft-state]
     implementation:
       status: declared
-      paths: [editor/save-flow.js, editor/validation.js]
-      tests: [npm run test:editor]
+      paths: [gui/workshop-authoring.js, editor/workshop-runtime.js, editor/validation.js]
+      tests: [cargo test, npm run test:editor]
 
   - component: editor-mod-pack-exporter
     core:
       status: implemented
       confidence: confirmed
-      title: Editor Mod Pack Exporter
+      title: Workshop Mod Pack Exporter
       summary: Builds a TOML-only ZIP and required manifest from selected validated authored files for use by a server-page mod upload.
     architecture:
       kind: authoring-exporter
@@ -259,14 +259,14 @@ entities:
       writers: [editor-validation-service]
     implementation:
       status: declared
-      paths: [editor/validation.js, editor/validation-badge.js, editor/marker-validate.js]
+      paths: [editor/validation.js, editor/workshop-runtime.js, editor/marker-validate.js]
 
   - component: editor-model-marker-inspector
     core:
       status: implemented
       confidence: confirmed
-      title: Editor Model and Marker Inspector
-      summary: Local Models and Entity previews inspect model-rig sidecars, extents, marker points, entity shapes, and component configuration for authored templates, and resolve every authored marker reference against the selected rig before an attachment is created or saved.
+      title: Workshop Model and Marker Inspector
+      summary: Workshop's structured model panel edits rig sidecars through exact-source grouped transactions and previews captured immutable candidates with the shared ViewerPlugin renderer.
     architecture:
       kind: authoring-inspector
       authority: local
@@ -276,11 +276,11 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - editor/models-rig.js
-        - editor/models-mode-view.js
+        - editor/workshop-models.js
+        - editor/workshop-model-structure.js
         - editor/marker-validate.js
-        - editor/entity-preview.js
-        - editor/entity-preview-view.js
+        - gui/workshop-models-panel.js
+        - gui/workshop-model-preview-panel.js
       tests: [npm run test:editor]
     evidence:
       - kind: test
@@ -303,8 +303,8 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Editor Runtime Reload Boundary
-      summary: Saves authored TOML and locally invalidates editor caches, but does not hot-reload an already-running host simulation; a new runtime load consumes the saved authored files.
+      title: Workshop Runtime Candidate Boundary
+      summary: Preview and Test consume immutable exact draft captures; save/export persist only an accepted candidate and never hot-reload a running game.
     architecture:
       kind: authoring-lifecycle
       authority: local
@@ -313,8 +313,8 @@ entities:
       depends_on: [editor-file-system-boundary]
     implementation:
       status: declared
-      paths: [editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js]
-      tests: [npm run test:editor]
+      paths: [editor/workshop-preview.js, editor/workshop-test.js, gui/workshop-authoring.js]
+      tests: [cargo test, npm run test:editor]
 
   - component: mod-pack-manifest-schema
     core:
@@ -386,8 +386,8 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Editor MOD Mode Workspace
-      summary: "Issue #989. A dedicated editor MOD mode for assembling and inspecting a mod pack — selecting the authored files a pack carries and the root scenarios its manifest names — as a first-class editor workspace alongside World/Entity/Definitions modes, feeding the existing mod-pack exporter."
+      title: Workshop Mod Workspace
+      summary: Workshop imports, repairs, validates and exports an exact mod archive through the shared document and mod-pack exporter.
     architecture:
       kind: authoring-interface
       authority: local
@@ -396,16 +396,16 @@ entities:
     implementation:
       status: declared
       paths:
-        - editor/mod-mode-view.js
         - editor/mod-pack-workspace.js
+        - gui/workshop-authoring.js
       tests: [npm run test:editor]
 
   - component: editor-scenario-script-authoring
     core:
       status: implemented
       confidence: confirmed
-      title: Editor Scenario Script Authoring
-      summary: "Issues #983 and #995. The editor scenario mode is rebuilt as a `.rhai` SCRIPT editor — the previous declarative card views are deleted. It edits sibling scripts and inline `[script.*]` blocks with host-fn autocomplete and live compile diagnostics, driven by the phoenix wasm exports `wasm_get_script_host_fns` / `wasm_script_diagnostics` (the host registry is recorded as scenario-script-editor-host). `editor/script-wasm.js` lazily instantiates the same wasm-bindgen module `trunk build` emits for server.html; issue #995's `scripts/wasm-editor-alias.mjs` post-build hook writes a stable `dist/phoenix.js` so the URL survives content-hash churn, and the adapter degrades closed (declaring live checks unavailable) when `dist/` is unbuilt."
+      title: Workshop Scenario Script Authoring
+      summary: Workshop edits sibling and inline Rhai against the runtime-derived host-function registry and ordinary compiler, with revision-bound source diagnostics.
     architecture:
       kind: authoring-interface
       authority: local
@@ -415,8 +415,8 @@ entities:
     implementation:
       status: declared
       paths:
-        - editor/scenario-mode.js
+        - editor/workshop-scripts.js
         - editor/script-editor.js
         - editor/script-editor-view.js
-        - editor/script-wasm.js
+        - gui/workshop-scripts-panel.js
       tests: [npm run test:editor]

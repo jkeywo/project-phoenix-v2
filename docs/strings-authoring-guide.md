@@ -261,7 +261,7 @@ The gate reports the tag itself; write `${t('id')}` in the template.
 - **A `.textContent` right-hand side containing a `;`** — the capture stops at
   the first one, so a callback body or a semicolon inside the string itself
   hides the rest. Pinned in `tests/client/strings-literals.test.js`.
-- **`editor.html` and `editor/`.** The world editor is a designer tool, not a
+- **`workshop.html` and `editor/`.** Workshop is a designer tool, not a
   player surface, and is outside the scanned file set.
 - **Files listed in `UNLOCALISED_FILES`** in the checker — currently just
   `gui/lobby-client.html`, a redirect stub whose `<title>` shows for the length

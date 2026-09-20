@@ -1,11 +1,11 @@
 //! The Workshop's disposable model preview: the ordinary viewer, bound to one
 //! captured draft.
 //!
-//! This is the SAME `ViewerPlugin` the standalone viewer runs — the same
+//! This is the SAME `ViewerPlugin` retained from the old viewer — the same
 //! subject dispatch, the same LOD ladder, the same lighting, the same measured
 //! statistics — so a previewed model is the model the game draws rather than a
 //! Workshop-only approximation. What differs is where its bytes come from: the
-//! standalone viewer fetches them from a dev server, and a preview may read
+//! the old shell fetched them from a dev server, and a preview may read
 //! nothing but the draft it was handed. `register_snapshot` binds this App to
 //! exactly those bytes, and its reader answers `NotFound` for anything else, so
 //! an uncaptured project file is not a slower path — it is absent.

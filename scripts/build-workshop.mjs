@@ -15,7 +15,7 @@ const out = path.resolve(root, process.argv[2] || 'dist');
 const editorModules = [
   'asset-dependencies', 'crc32', 'workshop-assets', 'workshop-handoff', 'workshop-source-provider',
   'workshop-models', 'workshop-model-structure', 'workshop-model-preview', 'workshop-entity-composition', 'workshop-ship-authoring', 'workshop-spatial', 'workshop-preview', 'workshop-preview-runtime',
-  'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-billboard-capture', 'workshop-lod-generation', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
+  'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-launch', 'workshop-billboard-capture', 'workshop-lod-generation', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'workshop-migration', 'workshop-diff', 'workshop-definitions', 'workshop-composition', 'workshop-entity',
   'workshop-presets', 'workshop-scripts', 'script-editor', 'script-editor-view',
   'undo-stack', 'validation', 'entity-includes', 'component-schema', 'component-templates', 'world-toml', 'entity-toml',
@@ -29,6 +29,8 @@ await writeFile(path.join(root,SOUND_CUE_INVENTORY),await soundCueInventoryJs(ro
 await cp(path.join(root,'assets/audio'),path.join(out,'assets/audio'),{recursive:true});
 await cp(path.join(root,'assets/sounds'),path.join(out,'assets/sounds'),{recursive:true});
 await copyFile(path.join(root, 'workshop.html'), path.join(out, 'workshop.html'));
+await copyFile(path.join(root, 'editor.html'), path.join(out, 'editor.html'));
+await copyFile(path.join(root, 'viewer.html'), path.join(out, 'viewer.html'));
 // The disposable Test carries the REAL GM console markup, injected here rather
 // than written a second time. Its omniscient view mounts the ordinary
 // gm-workspace over the ordinary markup (issue #1472); a Workshop-only

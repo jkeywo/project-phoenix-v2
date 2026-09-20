@@ -306,7 +306,7 @@ pub mod debug_overlay;
 pub mod debug;
 
 /// Shared 3D render setup (skybox, camera optics, ambient fill) — used by both
-/// the game renderer and the standalone model viewer.
+/// the game renderer and the Workshop model preview.
 pub mod render_setup;
 
 /// Shared native headless-render core (offscreen RGBA target + render-graph
@@ -321,8 +321,8 @@ pub mod render_capture;
 /// `phoenix-math` workspace crate (issue #1184).
 pub use phoenix_math::lod_tune;
 
-/// Standalone model/shader viewer (`viewer.html`), a dev tool built as its own
-/// Trunk target. Not part of the game binary.
+/// Shared Workshop model/shader preview, isolated behind its own feature.
+/// Not part of the game binary.
 #[cfg(feature = "viewer")]
 pub mod viewer;
 

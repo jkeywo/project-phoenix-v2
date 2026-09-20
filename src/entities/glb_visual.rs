@@ -3,7 +3,7 @@
 //! This is the single implementation of "turn a model path into something on
 //! screen". The game's flat renderer (`render_spawned_entities`) and LOD swapper
 //! (`update_mesh_lod`) both go through [`spawn_glb_visual`], as does the
-//! standalone model viewer, so all three share identical async loading and
+//! Workshop model preview, so all three share identical async loading and
 //! rig-composition behaviour.
 
 use bevy::prelude::*;
@@ -58,7 +58,7 @@ pub struct PendingSceneHandle(pub Handle<bevy::scene::Scene>);
 /// Lives here, beside [`resolve_sidecar_rig`], because it is a fact about how a
 /// model's rig composes across its ladder — not about either of the two things
 /// that need the answer. `update_mesh_lod` (the game) and `super::super::viewer`
-/// (the standalone model viewer) both build a tier's transform, and a second
+/// (the Workshop model preview) both build a tier's transform, and a second
 /// copy of this reasoning in the viewer is exactly how the viewer came to be
 /// showing a size the game did not.
 pub fn tier_parent_scale(base_scale: [f32; 3], generated_child_scale: [f32; 3]) -> Vec3 {
@@ -165,7 +165,7 @@ pub fn declared_tier_rig(
 /// The near tier (index 0) IS the primary GLB, so its child already carries the
 /// whole `[base].scale` from the primary sidecar and needs no extra scale;
 /// every other tier takes [`resolve_tier_parent_scale`]'s answer. The game puts
-/// this on a presentation-only visual root, while the standalone viewer may put
+/// this on a presentation-only visual root, while Workshop preview may put
 /// it on its preview subject. Both ask the same composition question here.
 pub fn tier_parent_scale_at(index: usize, ladder_tier_scale: Vec3) -> Vec3 {
     if index == 0 {

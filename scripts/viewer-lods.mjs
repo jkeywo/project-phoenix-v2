@@ -1,9 +1,9 @@
 // viewer-lods.mjs — reading and rewriting a model's `[[lod]]` ladder.
 //
-// The pure half of the model viewer's LOD panel: everything here is a function
+// The pure half of Workshop's model LOD panel: everything here is a function
 // over strings and plain objects, so the authoring rules are unit-tested
 // (tests/client/viewer-lods.test.js) without a server, a browser or a file.
-// scripts/dev-viewer.mjs is the only caller that touches disk.
+// Native Workshop and the generation/capture commands own disk access.
 //
 // ── Why the viewer writes sidecars at all ───────────────────────────────────
 //

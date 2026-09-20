@@ -1,7 +1,7 @@
 @echo off
-echo Starting editor server on http://localhost:3000
+setlocal
 cd /d "%~dp0"
-start "" http://localhost:3000/editor.html
-start /B npx --yes serve . -l 3000 > NUL 2>&1
-echo Press Ctrl+C to stop the server.
-pause
+echo The World Editor has moved to the native Workshop project workspace.
+rem Set PHOENIX_WORKSHOP_OPEN=file=assets/worlds/name.toml for a bounded
+rem selection. It is read directly by Node and never expanded by cmd.exe.
+node scripts\dev-workshop.mjs

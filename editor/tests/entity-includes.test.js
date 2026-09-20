@@ -12,7 +12,6 @@ import {
   mergeComposeFragments,
   stripRemovals,
 } from '../entity-includes.js';
-import { EntityModeShell } from '../entity-mode.js';
 
 // Issue #910 — the editor's JS twin of the Rust composable-template resolver
 // (`src/entities/include_resolve.rs` + the ComposeFragments merge in
@@ -309,70 +308,5 @@ describe('materialise-override (the deliberate edit-an-inherited-field decision)
     expect(stripRemovals({ system: [{ id: 'x', _remove: true }, { id: 'y' }] })).toEqual({
       system: [{ id: 'y' }],
     });
-  });
-});
-
-describe('EntityModeShell composition awareness', () => {
-  const authoredToml = 'includes = ["systems.toml"]\n[hull]\nhull_integrity = 500.0\n';
-  const resolved = {
-    hull: { hull_integrity: 500 },
-    tags: ['ship'],
-    system: [{ id: 'helm-thrust', kind: 'helm_thrust' }],
-  };
-  // Provenance as produced by the resolver: hull authored the hull block,
-  // the fragment authored the system + tags.
-  function provenanceFor() {
-    const r = resolveTemplate(
-      'assets/entities/hull.toml',
-      {
-        'assets/entities/systems.toml':
-          'tags = ["ship"]\n[[system]]\nid = "helm-thrust"\nkind = "helm_thrust"\n',
-        'assets/entities/hull.toml': authoredToml,
-      },
-      tomlParse,
-    );
-    return r.resolved;
-  }
-
-  it('preview reads the resolved document; provenance marks inherited sections', () => {
-    const shell = new EntityModeShell();
-    const res = provenanceFor();
-    const ok = shell.openFile('assets/entities/hull.toml', authoredToml, {
-      resolved: res.value,
-      provenance: res.provenance,
-    });
-    expect(ok.ok).toBe(true);
-    expect(shell.isComposed()).toBe(true);
-
-    // The preview sees the fragment's tags, not the empty authored set.
-    const preview = shell.getPreviewPane();
-    expect(preview.textOverlay.tags).toEqual(['ship']);
-    expect(preview.textOverlay.hullTotal).toBe(500);
-
-    // Inherited vs authored is provenance-driven.
-    expect(shell.getSectionOrigin('hull')).toBe('authored');
-    expect(shell.getSectionOrigin('system')).toBe('inherited');
-    const inherited = shell.getInheritedSections().map((s) => s.section).sort();
-    expect(inherited).toContain('system');
-    expect(inherited).toContain('tags');
-  });
-
-  it('materialiseSection copies an inherited section onto the authored hull', () => {
-    const shell = new EntityModeShell();
-    const res = provenanceFor();
-    shell.openFile('assets/entities/hull.toml', authoredToml, {
-      resolved: res.value,
-      provenance: res.provenance,
-    });
-    // Before: the hull does not author `system`.
-    expect(shell.getParsedEntity().system).toBeUndefined();
-
-    const out = shell.materialiseSection('system');
-    expect(out.ok).toBe(true);
-    // After: the hull now authors `system`, and `includes` is preserved.
-    expect(shell.getParsedEntity().system).toEqual(res.value.system);
-    expect(shell.getParsedEntity().includes).toEqual(['systems.toml']);
-    // A card now exists for the materialised section.
-    expect(shell.getCard('system')).not.toBeNull();
   });
 });

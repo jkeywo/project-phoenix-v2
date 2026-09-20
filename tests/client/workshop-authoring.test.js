@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountWorkshopAuthoring } from '../../gui/workshop-authoring.js';
 import { readStoreZip, createStoreZip } from '../../editor/mod-pack-export.js';
-import { workshopPack, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
+import { workshopPack, WORKSHOP_MANIFEST, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { OPERATOR_PROFILE_KEY, createOperatorProfileSnapshot } from '../../gui/operator-profile.js';
 import { t } from '../../gui/strings.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
@@ -44,6 +44,47 @@ afterEach(() => {
 });
 
 describe('Workshop Authoring browser surface', () => {
+  it('retains an empty legacy launch until import resolves exact file, model, star or planet selections', async () => {
+    const model = 'assets/models/migrated.glb';
+    const sidecar = 'assets/models/migrated.model.toml';
+    const star = 'assets/entities/star_migrated.toml';
+    const planet = 'assets/entities/planet_migrated.toml';
+    const pack = createStoreZip([
+      { path: 'scenarios.toml', text: WORKSHOP_MANIFEST },
+      { path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT },
+      { path: model, bytes: new Uint8Array([1, 2, 3]) },
+      { path: sidecar, text: '[base]\noffset = [0, 0, 0]\n' },
+      { path: star, text: '[star]\nradius = 10\n' },
+      { path: planet, text: '[planet]\nradius = 5\n' },
+    ]);
+    const recovery = { load: async () => null, save: async () => {}, clear: async () => {} };
+    const cases = [
+      [{ version: 1, panel: 'files', file: WORKSHOP_WORLD, preview: null, controls: {} },
+        () => expect(byId('files').value).toBe(WORKSHOP_WORLD)],
+      [{ version: 1, panel: 'model-preview', file: null, preview: { model, variant: 'model' },
+        controls: { lighting: 'directional', gizmos: true } }, () => {
+        expect(document.getElementById('workshop-model').value).toBe(model);
+        expect(document.getElementById('workshop-model-preview-lighting').value).toBe('directional');
+        expect(document.getElementById('workshop-model-preview-gizmos').checked).toBe(true);
+      }],
+      [{ version: 1, panel: 'model-preview', file: null, preview: { entity: star }, controls: {} },
+        () => expect(document.getElementById('workshop-preview-subject').value).toBe(star)],
+      [{ version: 1, panel: 'model-preview', file: null, preview: { entity: planet }, controls: {} },
+        () => expect(document.getElementById('workshop-preview-subject').value).toBe(planet)],
+    ];
+    for (const [launch, assertSelection] of cases) {
+      mounted.dispose(); document.body.innerHTML = '<main id="root"></main>'; localStorage.clear();
+      mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), provider: {}, runtime, recovery, launch });
+      await mounted.ready;
+      expect(byId('files').options).toHaveLength(0);
+      await importBytes(pack);
+      assertSelection();
+      if (launch.panel === 'model-preview') {
+        expect(document.querySelector('[data-panel="model-preview"]').hidden).toBe(false);
+      }
+    }
+  });
+
   it('mounts the docked workflow, persists keyboard moves, restores focus and repairs a reopened layout', async () => {
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-layout .workshop-dock-panel')].map(node => node.dataset.panel))

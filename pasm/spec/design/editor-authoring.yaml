@@ -4,7 +4,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Scenario Author
-      summary: Local editor user who creates, validates, saves, and exports authored world, entity, faction, and complexity content.
+      summary: Local Workshop user who creates, validates, saves, previews, tests and exports exact authored project or mod content.
     game_design:
       architecture_links: [editor-mode-shell, editor-validation-service, editor-save-admission, editor-mod-pack-exporter]
       responsibilities: [author content, resolve definite validation errors, export a mod pack]
@@ -152,7 +152,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Authored Scenario Scripting
-      summary: "The editor scenario mode is a `.rhai` script editor (issues #983/#995): the previous declarative card views are gone, and an author edits sibling scripts and inline `[script.*]` blocks with host-fn autocomplete and live compile diagnostics served by the phoenix wasm exports. The script seam itself is delivered but DORMANT — no scenario activation runs authored script yet (roadmap-scenario-scripting, deferred to band B) — so this contract covers AUTHORING, not live execution."
+      summary: "Workshop's Rhai panel edits sibling scripts and inline `[script.*]` blocks with runtime-registry completion, compile diagnostics and bounded disposable-Test evidence."
     game_design:
       architecture_links: [editor-scenario-script-authoring, scenario-script-editor-host]
       participating_roles: [scenario-author]
@@ -161,16 +161,16 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - editor/scenario-mode.js
-        - editor/script-wasm.js
+        - editor/workshop-scripts.js
+        - gui/workshop-scripts-panel.js
       tests: [npm run test:editor]
 
   - mechanic: editor-mod-assembly
     core:
       status: implemented
       confidence: confirmed
-      title: Editor MOD Mode Assembly
-      summary: "A dedicated editor MOD mode (issue #989) for assembling and inspecting a mod pack — selecting the authored files it carries and the root scenarios its manifest names — as a first-class workspace that feeds the existing mod-pack exporter."
+      title: Workshop Mod Assembly
+      summary: Workshop assembles and inspects exact mod members and root scenarios through the shared document, validation and export boundary.
     game_design:
       architecture_links: [editor-mod-workspace, editor-mod-pack-exporter]
       participating_roles: [scenario-author]
@@ -179,6 +179,6 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - editor/mod-mode-view.js
         - editor/mod-pack-workspace.js
+        - gui/workshop-authoring.js
       tests: [npm run test:editor]

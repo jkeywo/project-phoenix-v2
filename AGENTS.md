@@ -593,13 +593,16 @@ node scripts/capture-billboards.mjs --adopt alliance_cruiser
 
 # Model / shader viewer — one model, real render path, switchable lighting.
 # Use this to iterate on how things LOOK instead of booting a whole scenario.
-npm run dev:viewer                             # → http://localhost:8081
-#   (Windows: start-viewer.bat does the same and opens the browser)
-#   ?model=assets/models/alliance_cruiser.glb  which GLB to show
-#   ?variant=large                             which .model.toml rig variant
-#   ?entity=assets/entities/sol.toml           render a [star]/[planet]/[mesh] instead
-#   ?lighting=off|ambient|directional          ambient = the game's own default
-#   ?gizmos=1                                  overlay rig markers + extents
+npm run dev:viewer                             # → native Workshop Models on the current project
+#   npm selectors use exact arguments; unknown/duplicate/invalid values refuse:
+#   --model=assets/models/alliance_cruiser.glb which GLB to show
+#   --variant=large                            which .model.toml rig variant
+#   --entity=assets/entities/sol.toml          render a [star]/[planet]/[mesh] instead
+#   --lighting=off|ambient|directional         ambient = the game's own default
+#   --gizmos=1                                 overlay rig markers + extents
+#   Windows batch launchers do not expand arguments. Set PHOENIX_WORKSHOP_OPEN
+#   to the same URL query (for example model=assets/models/ship.glb&gizmos=1)
+#   before start-viewer.bat, or file=assets/worlds/demo.toml before start-editor.bat.
 
 # Production build (TRUNK_BUILD_RELEASE gates the wasm-opt-fixup post_build
 # hook in Trunk.toml — see scripts/wasm-opt-fixup.mjs; requires `npm install`)

@@ -44,7 +44,7 @@ pub const GAME_CAMERA_FAR: f32 = 5000.0;
 /// registration in `crate::server_app` both name it from always-compiled code
 /// that must still build with the `server` feature off. Keeping it beside
 /// [`GAME_CAMERA_FAR`] and [`RenderTuning`], the camera's other always-compiled
-/// render properties, also lets the standalone viewer share it (`--features
+/// render properties, also lets the Workshop preview share it (`--features
 /// viewer` no longer pulls in `server`).
 #[derive(Component)]
 pub struct GameCamera;

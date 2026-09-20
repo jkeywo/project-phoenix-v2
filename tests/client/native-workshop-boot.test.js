@@ -5,11 +5,14 @@ import { mountWorkshopAuthoring } from '../../gui/workshop-authoring.js';
 import { createNativeWorkshopProvider } from '../../editor/workshop-provider.js';
 import { t } from '../../gui/strings.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
+import { parseWorkshopLaunch } from '../../editor/workshop-launch.js';
 
 const queue = readFileSync('src/native_host/workshop/queue.js', 'utf8');
 const boot = readFileSync('src/native_host/workshop/boot.js', 'utf8');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-const runBoot = new AsyncFunction('window', 'document', 'mountNativeWorkshop', 'applyToDom', boot.replace(/^import .*;\r?\n/gm, ''));
+const bootFunction = new AsyncFunction('window', 'document', 'mountNativeWorkshop', 'applyToDom',
+  'parseWorkshopLaunch', boot.replace(/^import .*;\r?\n/gm, ''));
+const runBoot = (window, document, mount, apply) => bootFunction(window, document, mount, apply, parseWorkshopLaunch);
 let dispose;
 const drain = () => window.__phoenixNativeWorkshopDrain().split('\n').filter(Boolean);
 afterEach(() => {
@@ -246,6 +249,7 @@ describe('native Workshop shared boot', () => {
       const bytes = Uint8Array.of(0, 255, 13, 10);
       Object.defineProperty(assetInput, 'files', { configurable: true, value: [{
         size: bytes.length,
+        arrayBuffer: async () => bytes.slice().buffer,
         slice(start, end) { return { arrayBuffer: async () => bytes.slice(start, end).buffer }; },
       }] });
       assetInput.dispatchEvent(new Event('change'));

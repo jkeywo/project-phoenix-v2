@@ -1,4 +1,5 @@
 import { mountNativeWorkshop } from './gui/native-workshop.js';
+import { parseWorkshopLaunch } from './editor/workshop-launch.js';
 import './gui/strings-boot.js';
 import { applyToDom } from './gui/strings.js';
 window.__phoenixNativeWorkshopKey = record => {
@@ -28,7 +29,8 @@ window.PhoenixOperatorStorage = {
 window.__phoenixNativeWorkshopSend(JSON.stringify({ type: 'NativeOperator', operation: 'load' }));
 await loaded;
 applyToDom(document);
-const workspace = mountNativeWorkshop({ root: document.getElementById('workshop'), send: window.__phoenixNativeWorkshopSend });
+const workspace = mountNativeWorkshop({ root: document.getElementById('workshop'), send: window.__phoenixNativeWorkshopSend,
+  launch: parseWorkshopLaunch(new URLSearchParams(window.location.hash.slice(1))) });
 window.__phoenixNativeWorkshopReply = response => workspace.receive(response);
 window.addEventListener('pagehide', () => workspace.dispose(), { once: true });
 await workspace.ready;

@@ -1,5 +1,6 @@
 //! Native host-mesh control plane carried by the retained lobby surface.
 
+#[cfg(feature = "host")]
 use crate::native_host::relay_transport::RelaySocket;
 use bevy::prelude::*;
 use serde::Serialize;
@@ -214,11 +215,15 @@ fn apply_events(world: &mut World) {
                     .push(frame);
             }
             NativeFleetEvent::WireSend(frame) => {
+                #[cfg(feature = "host")]
                 if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
                     wire.0.send(frame);
                 }
+                #[cfg(not(feature = "host"))]
+                let _ = frame;
             }
             NativeFleetEvent::Fault { reason, detail } => {
+                #[cfg(feature = "host")]
                 if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
                     wire.0.close();
                 }
@@ -228,6 +233,7 @@ fn apply_events(world: &mut World) {
     }
 }
 
+#[cfg(feature = "host")]
 fn poll_wire(world: &mut World) {
     // The Rust socket may receive its initial `ready` immediately. Leave it in
     // the socket queue until the configuration has been published; otherwise
@@ -253,6 +259,9 @@ fn poll_wire(world: &mut World) {
         world.resource_mut::<NativeFleetWire>().0.close();
     }
 }
+
+#[cfg(not(feature = "host"))]
+fn poll_wire(_world: &mut World) {}
 
 fn publish_state(world: &mut World) {
     let Some(bridge) = world.get_resource::<HostLobbyBridgeResource>().cloned() else {

@@ -2,18 +2,17 @@
  * mod-pack-workspace.js — PURE mod-pack authoring workspace (issue #989).
  *
  * No DOM, no file IO — the same discipline as `mod-pack-export.js`. This module
- * is the model behind MOD mode: it holds the pack's `[pack]` identity metadata,
+ * is the archive model behind `WorkshopDocument`: it holds the pack's `[pack]` identity metadata,
  * its `[[scenario]]` manifest entries, and its member set, and it classifies
  * each member as `new` or `patch` against a supplied base-file map (the
  * project's on-disk files), recording the base file's digest at add-time so a
  * later export can WARN (never block) when the base drifted since it was added.
  *
- * The view (`mod-mode-view.js`) owns all IO: it reads the on-disk base files to
- * build the base-file map this workspace classifies against, resolves a composed
- * hull's fragment closure into extra members (#910), reads back an imported ZIP,
- * and drives export/import through `mod-pack-export.js`. Imported workspaces also
- * retain immutable raw archive/entry provenance while the semantic model is
- * repaired. Every method remains synchronous and side-effect-free.
+ * Workshop providers supply the immutable dependency map and imported ZIP;
+ * `WorkshopDocument` drives source/history while `mod-pack-export.js` validates
+ * the archive boundary. Imported workspaces retain immutable raw archive/entry
+ * provenance while the semantic model is repaired. Every method here remains
+ * synchronous and side-effect-free.
  */
 
 import { parse as tomlParse } from 'smol-toml';

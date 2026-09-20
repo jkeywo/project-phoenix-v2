@@ -771,6 +771,7 @@ workshop.recovery_empty,No stored browser draft exists,[A recovery copy will be 
 workshop.recovery_available,Offer explicit recovery before replacing stored data,[A browser draft is available. Restore it or discard it before importing another pack.]
 workshop.recovery_invalid,Refuse corrupt recovery data without silently overwriting it,[The saved browser draft cannot be read. Discard it to start another pack.]
 workshop.start,Empty Workshop instruction,[Import a mod ZIP to begin. Only this pack is editable.]
+workshop.legacy_selection_unavailable,Retired editor or viewer bookmark could not be restored,"[This bookmark now opens Workshop, but its selected source is not in the editable workspace. Open or import the project or mod, then choose the source in Workshop.]"
 workshop.missing_manifest,Import refusal for an archive without its required manifest,[The pack is missing scenarios.toml.]
 server.gm.return_to_host_lobby,Native prelaunch recovery button when only the saved GM monitor remains. Disables the GM role through host layout and restores the host lobby on the freed monitor,[Return to host lobby]
 settings.gm.confirmation.station,GM takeover or release; {action} {ship} {station},[{action}: {ship} / {station}]

@@ -3,7 +3,7 @@
 //! These are the only entities using hand-written WGSL
 //! (`assets/shaders/star_surface.wgsl`, `star_halo.wgsl`,
 //! `planet_surface.wgsl`, `planet_clouds.wgsl`), so keeping the construction
-//! in one place means the standalone model viewer exercises exactly the
+//! in one place means the Workshop model preview exercises exactly the
 //! material setup the game does.
 
 use bevy::prelude::*;

@@ -74,6 +74,6 @@ The host and client pages read `data.fraction`. Codec and smoke tests pin the ex
 ## Related
 
 - [Game Phases](./game-phases.md)
-- [Model Viewer](./model-viewer.md)
+- [Workshop Model Preview](./model-viewer.md)
 - [LOD Generation](./lod-generation.md)
 - [Build & Deployment](./build-and-deployment.md)

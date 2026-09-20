@@ -1,7 +1,7 @@
 # Browser planet textures
 
 The Gas Giant, Ice Moon and Ecumenopolis 4096×2048 opaque sRGB base maps use
-UASTC in browser hosts and the model viewer. Other maps keep their formats.
+UASTC in browser hosts and the Workshop preview. Other maps keep their formats.
 Native rendering keeps the originals. Entity files still name those originals,
 preserving native capture and baking.
 
@@ -36,12 +36,11 @@ shared shape/format, independent of pixel content. The map list lives in
 - `npx vitest run tests/client/uastc.test.js`: lifecycle and hashes.
 - `node scripts/planets/measure-uastc.mjs`: RGB error/PSNR against originals,
   independent of animated layers; writes decoded comparisons under `target/`.
-- Build viewer, then `node scripts/planets/check-uastc-browser.mjs`: real
-  Bevy/WebGL uploads, compression, no-compression hardware, missing worker,
-  missing variant, bad template, invalid worker output, site subdirectory.
-- Combat Test and Falling Skyway render smoke tests exercise in-game loading
-  and fallback for all three bases. The viewer check covers every listed map;
-  `UASTC_ENTITIES=moon_ice,planet_ecumenopolis` selects just those two.
+- `npx playwright test tests/smoke/viewscreen.render.spec.js`: real Bevy/WebGL
+  uploads and fallback in the production host for every listed map.
+- `npx playwright test tests/smoke/workshop-preview.render.spec.js`: the
+  captured Workshop preview draws through the shared ViewerPlugin without
+  consulting mutable project assets.
 
 `basis/` vendors `three@0.180.0`'s `examples/jsm/libs/basis/` runtime.
 The manifest pins hashes. Basis is Apache-2.0 (`basis/LICENSE`); Three's MIT

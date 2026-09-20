@@ -107,9 +107,14 @@ pub fn run(args: &crate::delivery::args::HostArgs) -> Result<(), String> {
             server.hosted_documents(),
             format!("http://{}", server.local_addr()),
         )?;
+        let suffix = selected
+            .open
+            .as_deref()
+            .map(|query| format!("#{query}"))
+            .unwrap_or_default();
         let surface = WorkshopSurface {
             bridge: worker.bridge(),
-            url: format!("http://{}{}", server.local_addr(), path),
+            url: format!("http://{}{}{}", server.local_addr(), path, suffix),
         };
         let mut app =
             build_shell(crate::boot::NativeRenderSurface::Window).map_err(|e| e.to_string())?;

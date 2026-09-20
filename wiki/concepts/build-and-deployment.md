@@ -3,7 +3,7 @@ title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
 sources: [Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-09-01
+updated: 2026-09-20
 ---
 
 # Build & Deployment
@@ -49,8 +49,8 @@ build enforce that the committed `gui/debug-surfaces.generated.js` agrees.
 - `pasm` validates/scans the design model and uploads traceability reports.
   `test` owns formatting, workspace Clippy, the headless-enabled native suite,
   demo-build gates, and native feature-binary compile checks. `viewer-test`
-  executes the viewer feature suite, while `boundary` proves the simulation
-  and standalone viewer compile without the presentation feature.
+  executes the shared Workshop preview renderer suite, while `boundary` proves
+  the simulation and isolated preview renderer compile without the presentation feature.
 - `build` produces the release WASM and pure-JS client artifact independently
   of `test`; `smoke` consumes that artifact. `native-build` produces the shared
   release binaries consumed by the warnings-only `perf` report and the balance

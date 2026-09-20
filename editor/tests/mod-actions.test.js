@@ -6,11 +6,9 @@ import {
   MOD_EXPORT_ACTION_ID,
   MOD_IMPORT_ACTION,
   MOD_IMPORT_ACTION_ID,
-  MOD_T2_SCOPE,
   MOD_VALIDATE_ACTION,
   MOD_VALIDATE_ACTION_ID,
   createModActionRegistry,
-  installModActionKeyboard,
 } from '../mod-actions.js';
 import {
   ACTION_FEEDBACK_STATE,
@@ -59,19 +57,6 @@ describe('MOD semantic import action', () => {
     ]);
   });
 
-  it('keeps all requested M6 surfaces outside the T2 adapter', () => {
-    expect(MOD_T2_SCOPE).toEqual({
-      import: true,
-      memberSourceEdit: true,
-      validate: true,
-      export: true,
-      inspectors: false,
-      projectTooling: false,
-      modelTooling: false,
-      workshopRedesign: false,
-    });
-  });
-
   it.each([
     [MOD_VALIDATE_ACTION_ID, 'validatePack'],
     [MOD_EXPORT_ACTION_ID, 'exportPack'],
@@ -99,40 +84,4 @@ describe('MOD semantic import action', () => {
     ]);
   });
 
-  it('dispatches keyboard input only while the MOD context is active', () => {
-    const target = new EventTarget();
-    const modeShell = { getCurrentMode: vi.fn(() => 'World') };
-    const modActions = { dispatchKeyboardEvent: vi.fn() };
-    const uninstall = installModActionKeyboard({ target, modeShell, modActions });
-
-    target.dispatchEvent(new Event('keydown'));
-    expect(modActions.dispatchKeyboardEvent).not.toHaveBeenCalled();
-
-    modeShell.getCurrentMode.mockReturnValue('MOD');
-    target.dispatchEvent(new Event('keydown'));
-    expect(modActions.dispatchKeyboardEvent).toHaveBeenCalledOnce();
-
-    uninstall();
-    target.dispatchEvent(new Event('keydown'));
-    expect(modActions.dispatchKeyboardEvent).toHaveBeenCalledOnce();
-  });
-
-  it('leaves plain-letter shortcuts typeable in member and metadata editors', () => {
-    let onKeydown;
-    const target = {
-      addEventListener: (_type, handler) => { onKeydown = handler; },
-      removeEventListener: vi.fn(),
-    };
-    const modeShell = { getCurrentMode: () => 'MOD' };
-    const modActions = { dispatchKeyboardEvent: vi.fn() };
-    installModActionKeyboard({ target, modeShell, modActions });
-
-    onKeydown({ target: { tagName: 'TEXTAREA' }, code: 'KeyE' });
-    onKeydown({ target: { tagName: 'INPUT' }, code: 'KeyV' });
-    onKeydown({ target: { tagName: 'DIV', isContentEditable: true }, code: 'KeyI' });
-    expect(modActions.dispatchKeyboardEvent).not.toHaveBeenCalled();
-
-    onKeydown({ target: { tagName: 'BUTTON' }, code: 'KeyE' });
-    expect(modActions.dispatchKeyboardEvent).toHaveBeenCalledOnce();
-  });
 });

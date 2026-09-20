@@ -283,7 +283,7 @@ pub enum TonemapChoice {
 /// | Target | Backend | Bloom |
 /// |---|---|---|
 /// | `server.html` (the game host) | WebGL2 | no — upstream |
-/// | `viewer.html` (`--features viewer`) | WebGL2 | no — upstream |
+/// | Workshop preview (`--features viewer`) | WebGL2 | no — upstream |
 /// | `capture-billboard`, `tune-lods` | native wgpu | no — by design |
 /// | a future native host, or a WebGPU build | full wgpu | yes |
 ///

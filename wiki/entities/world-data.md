@@ -275,12 +275,12 @@ author bumping a priority would silently "rename" a rule and get an append
 instead of an edit. **A fragment contributing an AI policy contributes it
 whole** — that is the intended granularity.
 
-### Browser override preview
+### Workshop composition preview
 
-`editor/override-editor.js` has an independent `deepMerge` used for browser
-preview and does not implement Rust's keyed array reconciliation. The
-authoritative result is the Rust resolver and its validation; do not use the
-browser preview to infer exact composed-array behavior.
+Workshop's `editor/entity-includes.js` mirrors the runtime's keyed-array merge
+and reports per-field provenance. Every structured edit is still accepted only
+after the ordinary Rust resolver validates the exact candidate, so preview and
+runtime composition cannot establish separate authoring rules.
 
 Resolution is pure and lives in `src/entities/include_resolve.rs`. It returns one
 resolved TOML document plus **provenance** — which template authored each dotted

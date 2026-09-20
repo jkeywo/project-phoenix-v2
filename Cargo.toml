@@ -171,7 +171,7 @@ default = ["server"]
 # `bridge.rs`.
 server = []
 # Viewer feature: builds the standalone model/shader viewer (Trunk →
-# viewer.html), a dev tool for iterating on model appearance, lighting and
+# Workshop model preview, a tool for iterating on model appearance, lighting and
 # WGSL without booting the game.
 #
 # No longer depends on `server` (issue #1194): once the sim→presentation boundary

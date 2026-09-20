@@ -1,6 +1,6 @@
 # Trunk config for the Workshop's disposable model preview (workshop-preview.html).
 #
-# A THIRD target, deliberately. The preview renders through the shared
+# A private target, deliberately. The preview renders through the shared
 # `ViewerPlugin`, which lives behind the `viewer` cargo feature, and the
 # Workshop's own page loads the SERVER artifact — built with default features,
 # where that plugin is not compiled in. The alternatives were both worse: adding
@@ -10,7 +10,7 @@
 # model a Workshop-only approximation of the model the game draws, which is the
 # one thing a preview may not be.
 #
-# Unlike viewer.html this page has NO asset proxy and NO copy-dir, because it
+# This page has NO asset proxy and NO copy-dir, because it
 # must not be able to read the project at all: it renders exactly the bytes the
 # Workshop captured and handed it, through `register_snapshot`, whose reader
 # answers NotFound for everything else (see src/viewer/preview.rs).

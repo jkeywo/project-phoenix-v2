@@ -68,6 +68,7 @@ test('a running browser Test consults the draft\'s factions, not the shipped reg
     const chooser = page.waitForEvent('filechooser');
     await page.locator('#workshop-import').click();
     await (await chooser).setFiles({ name: 'draft-factions.zip', mimeType: 'application/zip', buffer: Buffer.from(sourcePack()) });
+    await page.locator('#workshop-open-test').click();
     await page.locator('#workshop-test-world').selectOption(WORLD);
     await page.locator('#workshop-test-ship').selectOption(SHIP);
     await page.locator('#workshop-test-seed').fill('3');

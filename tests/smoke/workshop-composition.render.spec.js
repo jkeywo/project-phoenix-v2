@@ -146,6 +146,7 @@ test('the composition panel composes a child world through the real runtime and 
     // Now run it. The child world is composed only by this unsaved draft and
     // exists nowhere else, so a hull it spawns is the exact composition living
     // in the simulation rather than in a reading of the source.
+    await page.locator('#workshop-open-test').click();
     await page.locator('#workshop-test-world').selectOption(WORLD);
     await page.locator('#workshop-test-ship').selectOption(SHIP);
     await page.locator('#workshop-test-seed').fill('5');

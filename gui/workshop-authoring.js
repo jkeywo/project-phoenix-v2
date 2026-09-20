@@ -79,11 +79,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const saveButton = button('workshop.save', 'workshop-save', () => saveNative());
   let testWorkspace = false;
   let testHadRun = false;
-  const openTestButton = button('workshop.test_heading', 'workshop-open-test', () => {
+  const enterTestWorkspace = () => {
     testWorkspace = true;
     refresh();
+    testLayoutMount?.reveal('test-controls', { focus: false });
     void testPanel?.enter().catch(() => {}).finally(refresh);
-  });
+  };
+  const openTestButton = button('workshop.test_heading', 'workshop-open-test', enterTestWorkspace);
   openTestButton.hidden = !provider?.test;
   saveButton.hidden = !provider?.save;
   newButton.hidden = provider?.canCreate === false;
@@ -328,6 +330,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (!ship || ![...ship.options].some(option => option.value === path && !option.disabled)) return false;
     ship.value = path;
     ship.dispatchEvent(new win.Event('change'));
+    enterTestWorkspace();
     ship.focus();
     return true;
   }

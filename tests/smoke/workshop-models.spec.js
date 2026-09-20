@@ -16,7 +16,7 @@ const RIG_SOURCE = '# 原型 — keep the authored rig\r\n'
   + 'rotation = [0, 0, 0]\r\nscale = [1, 1, 1]\r\n'
   + '[markers.fore]\nposition = [0, 0, -1]\r\ndirection = [0, 0, -1]\r\n'
   + '[[target_points]]\r\nposition = [0, 0, 0]\n'
-  + '[[lod]] # fallback\r\nshape = "sphere"\r\n'
+  + '[[lod]] # generated model level\r\nmodel = "assets/models/workshop-rig.glb"\r\n'
   + '[lod.generate]\r\ntexture_size = 256 # unsigned runtime field\r\n';
 const normaliseTextarea = source => source.replace(/\r\n?/g, '\n');
 

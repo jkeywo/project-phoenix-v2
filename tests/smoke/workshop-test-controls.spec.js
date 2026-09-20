@@ -29,7 +29,9 @@ test('built Workshop Test controls keep Authoring exclusive and fit 200% text', 
       let response = { status: 'done' };
       if (request.op === 'load-sources') response = { status: 'sources', kind: 'mod', revision: 'fixture', files };
       if (request.op === 'recovery-load') response = { status: 'recovery', recovery: null };
-      if (request.op === 'test-catalog') response = { status: 'test-catalog', catalog: { worlds: [world], ships: ['assets/entities/read-only-base-hull.toml'] } };
+      if (request.op === 'test-catalog') response = { status: 'test-catalog', catalog: {
+        worlds: [world], ships: ['assets/entities/read-only-base-hull.toml'], layers: { [world]: [] },
+      } };
       if (request.op === 'test-start') {
         run = { running: true, starting: false, paused: false, tick: 0, multiplier: 1, selection: request.selection };
         response = { status: 'test', run };

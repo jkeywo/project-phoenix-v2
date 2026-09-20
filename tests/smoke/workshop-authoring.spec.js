@@ -28,7 +28,7 @@ test('offline Workshop imports, edits, undoes and exports one source-preserving 
   await expect(page.locator('#workshop-export')).toBeDisabled();
   // Every registered panel is rendered, counted from the registry rather than
   // restated: the claim is "the dock renders them all", not "there are nine".
-  await expect(page.locator('.workshop-dock-panel')).toHaveCount(WORKSHOP_PANELS.length);
+  await expect(page.locator('.workshop-layout .workshop-dock-panel')).toHaveCount(WORKSHOP_PANELS.length);
   const draggedTab = page.locator('[data-panel="files"] .workshop-panel-tab');
   const start = await draggedTab.boundingBox();
   expect(start).not.toBeNull();
@@ -50,7 +50,7 @@ test('offline Workshop imports, edits, undoes and exports one source-preserving 
   await expect(page.locator('[data-panel="inspector"]')).toHaveCount(0);
   await page.getByRole('button', { name: ts('workshop.inspector'), exact: true }).click();
   await expect(page.locator('[data-panel="inspector"]')).toHaveCount(1);
-  await page.locator('.workshop-layout-reset').click();
+  await page.locator('.workshop-layout .workshop-layout-reset').click();
   const chooser = page.waitForEvent('filechooser');
   await page.locator('#workshop-import').click();
   await (await chooser).setFiles({ name: 'workshop.zip', mimeType: 'application/zip', buffer: Buffer.from(workshopPack()) });

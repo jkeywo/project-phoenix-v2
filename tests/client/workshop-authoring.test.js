@@ -210,10 +210,15 @@ describe('Workshop Authoring browser surface', () => {
     await vi.waitFor(() => expect([...byId('test-ship').options].map(option => option.value)).toContain(template));
     byId('entity-test').click();
     expect(byId('test-ship').value).toBe(template);
+    expect(document.querySelector('.workshop-test-layout').hidden).toBe(false);
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).testLayout.selected).toBe('test-controls');
     expect(byId('entity-status').textContent).toBe(t('workshop.entity.testing', { path: template }));
 
     // A surface that cannot take the template says so instead of appearing to
     // work: a dependency template is readable but is in neither offer.
+    await vi.waitFor(() => expect(byId('test-authoring').disabled).toBe(false));
+    byId('test-authoring').click();
+    await vi.waitFor(() => expect(document.querySelector('.workshop-layout').hidden).toBe(false));
     const beneath = 'assets/entities/alliance_cruiser.toml';
     request.mockImplementation(async value => {
       if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'initial', files };
@@ -363,6 +368,7 @@ describe('Workshop Authoring browser surface', () => {
     select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# unsaved first\n`);
     byId('open-test').click();
     expect(document.querySelector('.workshop-test-layout').hidden).toBe(false);
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).testLayout.selected).toBe('test-controls');
     await vi.waitFor(() => expect(byId('test-start').disabled).toBe(false));
     expect([...byId('files').options].some(option => option.value === baseHull)).toBe(false);
     expect(byId('test-ship').value).toBe(baseHull);

@@ -309,7 +309,9 @@ fn terminate_tree(child: &mut Child) {
     #[cfg(unix)]
     {
         if let Ok(mut killer) = Command::new("kill")
-            .args(["-KILL", &format!("-{}", child.id())])
+            // `--` keeps the negative process-group id from being parsed as
+            // another option by the external Unix `kill` command.
+            .args(["-KILL", "--", &format!("-{}", child.id())])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

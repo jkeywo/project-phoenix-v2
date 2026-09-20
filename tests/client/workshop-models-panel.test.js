@@ -108,3 +108,29 @@ it('stops showing the captured preview when its own panel stops being shown', ()
   held = true; panel.refresh({ hidden: true });
   expect(preview().hidden).toBe(true);
 });
+
+it('cancels a native capture immediately when the selected variant changes', async () => {
+  panel.dispose();
+  const captureSource = '[[lod]]\nmodel="assets/models/ship.glb"\nmax_distance=10\n[[lod]]\nbillboard="assets/models/ship.png"\n[lod.capture]\nsource="assets/models/ship.glb"\nyaw_views=8\nresolution=64\npitch=20\n';
+  draft = WorkshopDocument.fromNativeFiles({
+    [path]: captureSource,
+    'assets/models/ship.alt.toml': captureSource,
+    'assets/models/ship.glb': { asset: '0000000000000001-3', length: 3 },
+  }, { kind: 'project' });
+  const billboardCapture = {
+    active: null,
+    start: vi.fn(async () => {
+      billboardCapture.active = { state: 'running', sidecar: path, lod: 1 };
+      return billboardCapture.active;
+    }),
+    cancel: vi.fn(async () => { billboardCapture.active = null; }),
+  };
+  panel = mountWorkshopModels({ root: document.getElementById('root'), provider: { billboardCapture }, runtime,
+    draft: () => draft, busy: () => held, setBusy(value) { held = value; panel?.refresh(); }, changed });
+  await vi.waitFor(() => expect(document.getElementById('workshop-model-capture-start-1')).not.toBeNull());
+  document.getElementById('workshop-model-capture-start-1').click();
+  await vi.waitFor(() => expect(billboardCapture.start).toHaveBeenCalled());
+  const variants = byId('variant'); variants.value = 'assets/models/ship.alt.toml';
+  variants.dispatchEvent(new Event('change'));
+  await vi.waitFor(() => expect(billboardCapture.cancel).toHaveBeenCalled());
+});

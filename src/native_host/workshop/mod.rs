@@ -1,5 +1,6 @@
 //! Explicit offline native Workshop. Shares the boot core and pane renderer,
 //! but owns no live world, crew transport, join code or Game Master identity.
+pub mod billboard_capture;
 pub mod bridge;
 pub mod document;
 pub mod keyboard;

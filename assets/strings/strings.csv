@@ -16,6 +16,20 @@ workshop.models.rename_variant,Rename selected model rig variant,[Rename variant
 workshop.models.structure.markers,Structural model marker list,[Markers]
 workshop.models.structure.targets,Structural model target point list,[Target points]
 workshop.models.structure.lod,Structural model level-of-detail list,[Level of detail]
+workshop.models.capture.heading,Native reviewed billboard capture tools,[Billboard capture]
+workshop.models.capture.authored,Authored billboard recipe summary,"[Output {output} from {source}; {views} views at {resolution}px, pitch {pitch}°.]"
+workshop.models.capture.start,Start native billboard capture,[Capture]
+workshop.models.capture.status,Refresh native billboard capture state,[Check capture]
+workshop.models.capture.adopt,Adopt reviewed billboard PNG into draft,[Adopt image]
+workshop.models.capture.cancel,Cancel native billboard capture,[Cancel capture]
+workshop.models.capture.running,Native billboard capture running,[Billboard capture is running.]
+workshop.models.capture.ready,Native billboard capture ready for review,[Review the captured image and provenance before adopting it.]
+workshop.models.capture.adopted,Native billboard capture adopted,[Captured image adopted as one undoable draft change.]
+workshop.models.capture.cancelled,Native billboard capture cancelled,[Billboard capture cancelled; the draft was not changed.]
+workshop.models.capture.failed,Native billboard capture failed,[Billboard capture failed; the draft was not changed.]
+workshop.models.capture.preview_alt,Native billboard preview image,[Captured preview for {output}]
+workshop.models.capture.provenance,Native billboard preview provenance,"[Draft revision {revision}; source {source}; {views} views at {resolution}px, pitch {pitch}°.]"
+workshop.billboard.stale,Native billboard result is stale,[The draft changed after capture started. Capture again before adopting.]
 workshop.models.owner,Exact model source ownership,"[Source: {file}, line {line}]"
 workshop.models.name,Structural model item name,[Name]
 workshop.models.position,Raw model-space vector position,"[Position (x, y, z)]"

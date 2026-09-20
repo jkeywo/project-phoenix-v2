@@ -648,6 +648,14 @@ fn project_binary_members_are_exact() {
         WorkspaceKind::Project,
         "assets/worlds/data.bin"
     ));
+    assert!(allowed_path(
+        WorkspaceKind::Project,
+        "scripts/lod-capture-manifest.toml"
+    ));
+    assert!(!allowed_path(
+        WorkspaceKind::Mod,
+        "scripts/lod-capture-manifest.toml"
+    ));
 }
 
 #[test]

@@ -18,6 +18,7 @@ import {
   parseCaptureManifest,
   pngDimensions,
   readCaptureSidecars,
+  selectCaptureTargets,
   sha256,
   updateCaptureManifestEntries,
 } from '../../scripts/capture-billboards.mjs';
@@ -28,6 +29,11 @@ const HASH_B = sha256('b');
 const HASH_C = sha256('c');
 
 const sidecar = (path, text) => ({ path, doc: parseToml(text) });
+
+it('selects the native reviewed output exactly instead of by substring', () => {
+  const targets = [{ output: 'assets/models/ship.png' }, { output: 'assets/models/ship.png.backup.png' }];
+  expect(selectCaptureTargets(targets, [], 'assets/models/ship.png')).toEqual([targets[0]]);
+});
 
 function shipSidecar({
   path = 'assets/models/ship.model.toml',

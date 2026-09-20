@@ -196,7 +196,7 @@ function inventoryPaths(draft, dependencies) {
   return paths;
 }
 
-export function validateModelStructure(path, source, draft, dependencies = {}) {
+export function validateModelStructure(path, source, draft, dependencies = {}, { allowMissingCapturedOutput = false } = {}) {
   let rig;
   try { rig = parse(source); } catch (error) { throw refusal(path, source, '', error.message); }
   for (const [name, marker] of Object.entries(rig.markers || {})) {
@@ -226,7 +226,18 @@ export function validateModelStructure(path, source, draft, dependencies = {}) {
     if (level.billboard && (!level.billboard.startsWith('assets/models/') || !level.billboard.endsWith('.png'))) {
       throw refusal(path, source, String(level.billboard), `LOD ${index + 1} billboard must name a runtime PNG asset.`);
     }
-    if (level.billboard && !paths.has(level.billboard)) throw refusal(path, source, String(level.billboard), `LOD ${index + 1} names a billboard outside the captured source: ${level.billboard}`);
+    if (level.billboard && !paths.has(level.billboard) && !(allowMissingCapturedOutput && level.capture)) {
+      throw refusal(path, source, String(level.billboard), `LOD ${index + 1} names a billboard outside the captured source: ${level.billboard}`);
+    }
+    if (level.capture) {
+      const capture = level.capture;
+      if (!level.billboard || typeof capture.source !== 'string' || !capture.source.startsWith('assets/models/')
+          || !capture.source.endsWith('.glb') || !paths.has(capture.source)
+          || !Number.isInteger(capture.yaw_views) || capture.yaw_views <= 0
+          || !Number.isInteger(capture.resolution) || capture.resolution <= 0 || !Number.isFinite(capture.pitch)) {
+        throw refusal(path, source, '[lod.capture]', `LOD ${index + 1} has invalid or uncaptured billboard capture metadata.`);
+      }
+    }
     if (level.variant != null) {
       if (!VARIANT.test(level.variant) || !level.model) throw refusal(path, source, String(level.variant), `LOD ${index + 1} has an invalid model variant reference.`);
       const sidecar = `${level.model.slice(0, -4)}.${level.variant}.toml`;
@@ -239,7 +250,8 @@ export function validateModelStructure(path, source, draft, dependencies = {}) {
 export function inspectModelStructure(draft, model, path, dependencies = {}) {
   const entry = modelDocuments(draft.paths()).find(candidate => candidate.model === model);
   if (!entry?.variants.some(variant => variant.path === path)) throw new Error('model-structure-stale');
-  const source = draft.read(path), rig = validateModelStructure(path, source, draft, dependencies);
+  const source = draft.read(path), rig = validateModelStructure(path, source, draft, dependencies,
+    { allowMissingCapturedOutput: true });
   const markerSpans = markerBlocks(source), targetSpans = arrayBlocks(source, 'target_points'), lodSpans = arrayBlocks(source, 'lod');
   return {
     path, source, variants: entry.variants.map(variant => ({ ...variant, owner: variant.path })),

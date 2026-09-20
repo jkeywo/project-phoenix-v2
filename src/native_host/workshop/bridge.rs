@@ -126,7 +126,7 @@ impl WorkshopWorker {
     pub fn spawn(provider: NativeWorkshopProvider) -> Result<Self, String> {
         let mut operators = crate::native_host::panes::operator::NativeOperators::default();
         operators.configure("workshop");
-        Self::spawn_with_operators(provider, operators, None)
+        Self::spawn_with_operators(provider, operators, None, None)
     }
 
     pub fn spawn_hosted(
@@ -136,10 +136,18 @@ impl WorkshopWorker {
     ) -> Result<Self, String> {
         let mut operators = crate::native_host::panes::operator::NativeOperators::default();
         operators.configure("workshop");
+        let (tool_root, capture_directory) = provider.capture_paths();
+        let capture = super::billboard_capture::BillboardCapture::new(
+            documents.clone(),
+            origin.clone(),
+            tool_root,
+            capture_directory,
+        )?;
         Self::spawn_with_operators(
             provider,
             operators,
             Some(super::preview::PreviewRoutes::new(documents, origin)),
+            Some(capture),
         )
     }
 
@@ -147,6 +155,7 @@ impl WorkshopWorker {
         mut provider: NativeWorkshopProvider,
         mut operators: crate::native_host::panes::operator::NativeOperators,
         mut preview: Option<super::preview::PreviewRoutes>,
+        mut billboard: Option<super::billboard_capture::BillboardCapture>,
     ) -> Result<Self, String> {
         super::test_process::retire_abandoned_stages(&provider.test_directory());
         let (requests, input) = mpsc::sync_channel(8);
@@ -175,6 +184,7 @@ impl WorkshopWorker {
                                     if let Some(preview) = preview.as_mut() {
                                         preview.retire();
                                     }
+                                    if let Some(capture) = billboard.as_mut() { capture.retire(); }
                                     test = None;
                                     active_epoch = epoch;
                                 }
@@ -218,6 +228,7 @@ impl WorkshopWorker {
                             if let Some(preview) = preview.as_mut() {
                                 preview.retire();
                             }
+                            if let Some(capture) = billboard.as_mut() { capture.retire(); }
                             // A view crash/replacement retains source recovery, but
                             // cannot leave a detached disposable simulation alive.
                             test = None;
@@ -239,6 +250,7 @@ impl WorkshopWorker {
                                         if let Some(preview) = preview.as_mut() {
                                             preview.retire();
                                         }
+                                        if let Some(capture) = billboard.as_mut() { capture.retire(); }
                                         match provider.prepare_test(files, selection, breakpoint) {
                                             Ok(snapshot) => {
                                                 let started = std::env::current_exe()
@@ -317,6 +329,24 @@ impl WorkshopWorker {
                                         }
                                         Response::Done
                                     }
+                                    Operation::BillboardCaptureStart { files, sidecar, lod, source_revision } => {
+                                        match billboard.as_mut() {
+                                            Some(capture) => match provider.prepare_billboard_capture(files) {
+                                                Ok(files) => capture.start(files, sidecar, lod, source_revision)
+                                                    .unwrap_or_else(|message| Response::Refused { message, report: None }),
+                                                Err(response) => response,
+                                            },
+                                            None => Response::Refused { message: "Native billboard capture is unavailable".into(), report: None },
+                                        }
+                                    }
+                                    Operation::BillboardCaptureStatus => match billboard.as_mut() {
+                                        Some(capture) => capture.status().unwrap_or_else(|message| Response::Refused { message, report: None }),
+                                        None => Response::Refused { message: "Native billboard capture is unavailable".into(), report: None },
+                                    },
+                                    Operation::BillboardCaptureCancel => match billboard.as_mut() {
+                                        Some(capture) => capture.cancel(),
+                                        None => Response::Done,
+                                    },
                                     operation => {
                                         provider
                                             .handle(crate::workshop::provider::WorkshopRequest {
@@ -417,7 +447,7 @@ mod tests {
             let mut operators = NativeOperators::default();
             operators.configure("workshop");
             operators.root = Some(self.0.join("profiles"));
-            WorkshopWorker::spawn_with_operators(provider, operators, None).unwrap()
+            WorkshopWorker::spawn_with_operators(provider, operators, None, None).unwrap()
         }
         fn hosted_worker(
             &self,
@@ -439,6 +469,7 @@ mod tests {
                     documents,
                     "http://127.0.0.1:7".into(),
                 )),
+                None,
             )
             .unwrap()
         }

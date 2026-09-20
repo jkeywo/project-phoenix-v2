@@ -43,6 +43,7 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   if (attach) root.append(section);
   let disposed = false, snapshot = null, rows = [], previousDraft = null, previousPaths = '', preview = null;
   let dependencies = null, dependencyLoad = null, structureSnapshot = null;
+  let billboardResult = null;
   let previewVisible = true, testHidden = false;
   const option = (value, label) => { const item = node('option', null, { value }); item.textContent = label; return item; };
   const show = (id, error = false) => {
@@ -174,6 +175,52 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       action('workshop-model-lod-add', 'workshop.models.add', () => commitStructure({ type: 'lod-add', path: selected,
         index: view.lod.at(-1)?.max_distance == null ? Math.max(0, view.lod.length - 1) : view.lod.length,
         level: { [kind.value]: reference.value, ...(distance.value ? { max_distance: Number(distance.value) } : {}) } })));
+    const captures = view.lod.map((level, index) => ({ level, index })).filter(({ level }) => level.capture && level.billboard);
+    if (captures.length) {
+      const captureGroup = group('workshop.models.capture.heading', 'workshop-model-captures');
+      for (const { level, index } of captures) {
+        const row = node('div', null, { class: 'workshop-model-capture' });
+        const description = node('p');
+        description.textContent = t('workshop.models.capture.authored', { output: level.billboard,
+          source: level.capture.source, views: String(level.capture.yaw_views), resolution: String(level.capture.resolution),
+          pitch: String(level.capture.pitch) });
+        row.append(description);
+        if (provider.billboardCapture) {
+          const run = async work => {
+            if (busy()) return;
+            setBusy(true);
+            try { await work(); }
+            catch (error) { billboardResult = provider.billboardCapture.active;
+              if (!disposed) show(error.message === 'workshop.billboard.stale' ? error.message : 'workshop.models.capture.failed', true); }
+            finally { if (!disposed) { setBusy(false); renderStructure(); refresh(); } }
+          };
+          const start = action(`workshop-model-capture-start-${index}`, 'workshop.models.capture.start', () => run(async () => {
+            billboardResult = await provider.billboardCapture.start(current, selected, index); show('workshop.models.capture.running');
+          }));
+          const poll = action(`workshop-model-capture-status-${index}`, 'workshop.models.capture.status', () => run(async () => {
+            billboardResult = await provider.billboardCapture.status(current, selected, index);
+            show(billboardResult?.state === 'ready' ? 'workshop.models.capture.ready' : 'workshop.models.capture.running');
+          }), billboardResult?.sidecar !== selected || billboardResult?.lod !== index);
+          const adopt = action(`workshop-model-capture-adopt-${index}`, 'workshop.models.capture.adopt', () => run(async () => {
+            const adopted = await provider.billboardCapture.adopt(current, selected, index); billboardResult = null; changed(adopted.path);
+            show('workshop.models.capture.adopted');
+          }), billboardResult?.state !== 'ready' || billboardResult?.sidecar !== selected || billboardResult?.lod !== index);
+          const cancel = action(`workshop-model-capture-cancel-${index}`, 'workshop.models.capture.cancel', () => run(async () => {
+            await provider.billboardCapture.cancel(); billboardResult = null; show('workshop.models.capture.cancelled');
+          }), billboardResult?.sidecar !== selected || billboardResult?.lod !== index);
+          row.append(start, poll, adopt, cancel);
+          if (billboardResult?.state === 'ready' && billboardResult.sidecar === selected && billboardResult.lod === index) {
+            const image = node('img', null, { src: billboardResult.image_url, alt: t('workshop.models.capture.preview_alt', { output: level.billboard }) });
+            const provenance = node('p', null, { class: 'workshop-model-owner' });
+            provenance.textContent = t('workshop.models.capture.provenance', { revision: String(billboardResult.source_revision),
+              source: billboardResult.source, views: String(billboardResult.yaw_views), resolution: String(billboardResult.resolution),
+              pitch: String(billboardResult.pitch) });
+            row.append(image, provenance);
+          }
+        }
+        captureGroup.append(row);
+      }
+    }
     for (const control of structure.querySelectorAll('button,input,select')) control.disabled = busy() || control.dataset.boundary === 'true';
   }
   function refreshVariants() {
@@ -187,6 +234,9 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     section.hidden = hidden;
     const current = draft(), paths = current?.paths().join('\n') || '';
     if (current !== previousDraft || paths !== previousPaths) {
+      if (previousDraft && current !== previousDraft && provider?.billboardCapture) {
+        billboardResult = null; provider.billboardCapture.cancel().catch(() => {});
+      }
       const old = model.value;
       const entries = modelDocuments(current?.paths() || []);
       model.replaceChildren(...entries.map(entry => option(entry.model, entry.model)));
@@ -291,9 +341,13 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     newName.value = ''; inspect.focus();
   });
   removeVariant.addEventListener('click', () => commitStructure({ type: 'variant-remove', path: variant.value, model: model.value }));
-  model.addEventListener('change', () => { refreshVariants(); renderStructure(); refresh(); });
+  const cancelCaptureSelection = () => {
+    if (!billboardResult || !provider?.billboardCapture) return;
+    billboardResult = null; provider.billboardCapture.cancel().catch(() => {});
+  };
+  model.addEventListener('change', () => { cancelCaptureSelection(); refreshVariants(); renderStructure(); refresh(); });
   subject.addEventListener('change', () => refresh());
-  variant.addEventListener('change', () => { renderStructure(); refresh(); });
+  variant.addEventListener('change', () => { cancelCaptureSelection(); renderStructure(); refresh(); });
   if (typeof runtime.dependencies === 'function') loadDependencies();
   refresh();
   if (typeof runtime.dependencies !== 'function') renderStructure();
@@ -312,5 +366,5 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       if (previewVisible === value) return;
       previewVisible = value; refresh();
     },
-    dispose() { disposed = true; preview.dispose(); section.remove(); } };
+    dispose() { disposed = true; provider?.billboardCapture?.cancel().catch(() => {}); preview.dispose(); section.remove(); } };
 }

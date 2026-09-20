@@ -23,6 +23,7 @@ describe('explicit Workshop capability providers', () => {
     snapshot.packs.length = 0;
     expect((await provider.runtime.dependencies()).packs).toHaveLength(1);
     expect(provider.save).toBeUndefined();
+    expect(provider.billboardCapture).toBeUndefined();
   });
 
   it('keeps supplied binary dependencies compact and immutable through the browser provider', async () => {
@@ -57,6 +58,7 @@ describe('explicit Workshop capability providers', () => {
     expect(stored.expected_revision).toBe('saved');
     expect(JSON.parse(stored.record).draft.sourceFiles).toEqual(draft.snapshot().sourceFiles);
     expect(provider.canImport).toBe(false);
+    expect(provider.billboardCapture).toBeDefined();
   });
 
   it('reports an invalid native dependency response with a presenter-localizable code', async () => {

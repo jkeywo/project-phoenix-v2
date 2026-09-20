@@ -7,6 +7,7 @@ import { createStoreZip } from './mod-pack-export.js';
 import { createBrowserWorkshopTest, createWorkshopTestFrame } from './workshop-test-frame.js';
 import { createWorkshopTestPreparation } from './workshop-test-snapshot.js';
 import { createBrowserWorkshopPreview, createWorkshopPreviewFrame } from './workshop-preview.js';
+import { createWorkshopBillboardCapture } from './workshop-billboard-capture.js';
 
 export function newWorkshopPack(dependencies) {
   const content = parse(dependencies.base_files['assets/scenarios.toml']).content;
@@ -109,6 +110,24 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
         : Promise.resolve();
     },
   });
+  const uploadBytes = async bytes => {
+    const begin = await call({ op: 'asset-begin', length: bytes.length });
+    if (begin?.status !== 'asset-upload' || typeof begin.token !== 'string') throw new Error('Invalid native asset upload');
+    let finished = false;
+    try {
+      for (let offset = 0; offset < bytes.length; offset += 65536) await call({ op: 'asset-chunk', token: begin.token,
+        offset, bytes: Array.from(bytes.slice(offset, offset + 65536)) });
+      const result = await call({ op: 'asset-finish', token: begin.token });
+      if (result?.status !== 'asset-stored' || !isNativeAssetReference(result.reference)
+          || result.reference.length !== bytes.length) throw new Error('Invalid native asset version');
+      finished = true; return result.reference;
+    } finally { if (!finished) await call({ op: 'asset-cancel', token: begin.token }).catch(() => {}); }
+  };
+  const nativeRuntime = {
+    async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
+  };
+  const billboardCapture = createWorkshopBillboardCapture({ call, fetcher, upload: uploadBytes,
+    runtime: nativeRuntime, restoreDocument: snapshot => WorkshopDocument.restore(snapshot, { native: true }) });
   return {
     canImport: false, canCreate: false,
     async load() {
@@ -138,7 +157,7 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
         }
         return { base_files: value.base_files, packs: value.packs };
       },
-      async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
+      ...nativeRuntime,
       async inspect(source, document_path) { return (await call({ op: 'inspect', source, document_path })).fields; },
       async patch(source, patch) { return (await call({ op: 'patch', source, patch })).source; },
       // The native provider builds the dependency bundle itself, the way the
@@ -206,21 +225,7 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
     },
     restoreDocument(snapshot) { return WorkshopDocument.restore(snapshot, { native: true }); },
     async importAsset(file) {
-      const begin = await call({ op: 'asset-begin', length: file.size });
-      if (begin?.status !== 'asset-upload' || typeof begin.token !== 'string') throw new Error('Invalid native asset upload');
-      let finished = false;
-      try {
-        for (let offset = 0; offset < file.size; offset += 65536) {
-          const bytes = new Uint8Array(await file.slice(offset, offset + 65536).arrayBuffer());
-          await call({ op: 'asset-chunk', token: begin.token, offset, bytes: Array.from(bytes) });
-        }
-        const result = await call({ op: 'asset-finish', token: begin.token });
-        if (result?.status !== 'asset-stored' || !isNativeAssetReference(result.reference) || result.reference.length !== file.size) throw new Error('Invalid native asset version');
-        finished = true;
-        return result.reference;
-      } finally {
-        if (!finished) await call({ op: 'asset-cancel', token: begin.token }).catch(() => {});
-      }
+      return uploadBytes(new Uint8Array(await file.arrayBuffer()));
     },
     async readAsset(reference) {
       if (!isNativeAssetReference(reference)) throw new Error('Invalid native asset reference');
@@ -252,6 +257,7 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
         previewTitle = typeof label === 'string' ? label : label?.title || '';
       },
     },
+    billboardCapture,
     test: {
       async catalog(files) {
         const response = await call({ op: 'test-catalog', files });

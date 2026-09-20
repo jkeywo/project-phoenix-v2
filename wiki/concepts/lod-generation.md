@@ -2,8 +2,8 @@
 title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
-sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
-updated: 2026-09-01
+sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, editor/workshop-billboard-capture.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
+updated: 2026-09-20
 ---
 
 # LOD Generation
@@ -98,6 +98,18 @@ an already-reviewed committed PNG, while the default command performs a real
 recapture and forwards all three authored parameters to the renderer. A
 successful capture from the model viewer refreshes the same manifest record,
 so browser and batch authoring cannot leave different provenance behind.
+
+Native Workshop runs the production selected-target capture workflow for one
+selected draft sidecar. It stages the exact draft in private temporary storage
+and serves a nonce-bearing loopback review containing the PNG, every declaring
+sidecar's exact dimension patch, and the refreshed capture manifest. The image
+and its source revision, sidecar, LOD index and authored recipe are shown before
+adoption. Adoption validates that complete candidate and lands every member as
+one undoable draft transaction, so `lod-captures:check` reads the same metadata
+as batch capture. Cancellation, a changed selection or draft, a replaced
+surface, Test start, process failure or exit kills the process tree and removes
+the temporary files and routes. Browser Workshop has no capture capability; its
+ordinary model preview still renders packaged billboard levels.
 
 The mesh-interior pass follows the runtime graph from top-level entity
 templates into the selected model+variant sidecar. It loads every GLB named by

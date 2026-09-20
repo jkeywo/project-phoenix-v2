@@ -19,6 +19,23 @@ const runtime = () => ({
 });
 
 describe('Workshop structural model authoring', () => {
+  it('accepts a captured PNG with complete authored production capture metadata', () => {
+    const draft = makeDraft();
+    draft.put('assets/models/ship.png', Uint8Array.of(0x89, 0x50, 0x4e, 0x47));
+    const exact = draft.read(path).replace('shape = "sphere"', `billboard = 'assets/models/ship.png'\n[lod.capture]\nsource = 'assets/models/ship.glb'\nyaw_views = 8\nresolution = 256\npitch = 20.0`);
+    draft.edit(path, exact);
+    expect(validateModelStructure(path, exact, draft).lod.at(-1).capture).toEqual({
+      source: 'assets/models/ship.glb', yaw_views: 8, resolution: 256, pitch: 20,
+    });
+  });
+
+  it('can inspect a complete capture recipe before its generated PNG exists without accepting it for save', () => {
+    const draft = makeDraft();
+    const exact = draft.read(path).replace('shape = "sphere"', `billboard = 'assets/models/future.png'\n[lod.capture]\nsource = 'assets/models/ship.glb'\nyaw_views = 8\nresolution = 256\npitch = 20.0`);
+    draft.edit(path, exact);
+    expect(inspectModelStructure(draft, model, path).lod.at(-1).capture.yaw_views).toBe(8);
+    expect(() => validateModelStructure(path, exact, draft)).toThrow('outside the captured source');
+  });
   it('creates the first identity variant for a captured model with no sidecar', async () => {
     const draft = new WorkshopDocument(createStoreZip([
       { path: model, bytes: new Uint8Array([1, 2, 3]) },

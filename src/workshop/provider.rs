@@ -158,6 +158,14 @@ pub enum Operation {
         capture: String,
     },
     PreviewStop,
+    BillboardCaptureStart {
+        files: assets::Sources,
+        sidecar: String,
+        lod: usize,
+        source_revision: u64,
+    },
+    BillboardCaptureStatus,
+    BillboardCaptureCancel,
 }
 
 #[derive(Debug, Serialize)]
@@ -245,6 +253,31 @@ pub enum Response {
         revision: String,
         selection: crate::workshop::test_protocol::PreviewSelection,
     },
+    BillboardCapture {
+        capture: String,
+        state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        image_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sidecar: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        lod: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_revision: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        yaw_views: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resolution: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pitch: Option<f32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        base_url: Option<String>,
+        paths: Vec<String>,
+    },
     Refused {
         message: String,
         report: Option<WorkshopValidation>,
@@ -288,6 +321,35 @@ pub struct NativeWorkshopProvider {
 }
 
 impl NativeWorkshopProvider {
+    pub(crate) fn prepare_billboard_capture(
+        &mut self,
+        sources: assets::Sources,
+    ) -> Result<Files, Response> {
+        if self.kind != WorkspaceKind::Project {
+            return Err(Response::Refused {
+                message: "Native billboard capture requires a selected project root".into(),
+                report: None,
+            });
+        }
+        let files = self
+            .assets
+            .materialize(sources)
+            .map_err(|message| Response::Refused {
+                message,
+                report: None,
+            })?;
+        self.check_files(&files)
+            .map_err(|message| Response::Refused {
+                message,
+                report: None,
+            })?;
+        Ok(files)
+    }
+
+    #[cfg(feature = "server")]
+    pub(crate) fn capture_paths(&self) -> (PathBuf, PathBuf) {
+        (self.root.clone(), self.private.join("billboard-captures"))
+    }
     /// Host-only document lifecycle boundary. Completed immutable versions and
     /// accepted writes survive; an abandoned upload cannot block the next view.
     pub(crate) fn retire_view(&mut self) {
@@ -618,7 +680,10 @@ impl NativeWorkshopProvider {
             | Operation::TestStop
             | Operation::PreviewStart { .. }
             | Operation::PreviewRelease { .. }
-            | Operation::PreviewStop => {
+            | Operation::PreviewStop
+            | Operation::BillboardCaptureStart { .. }
+            | Operation::BillboardCaptureStatus
+            | Operation::BillboardCaptureCancel => {
                 return Err(
                     "Disposable Test and preview require their explicit offline native shell"
                         .into(),
@@ -678,6 +743,22 @@ impl NativeWorkshopProvider {
     fn read_files(&self) -> Result<Files, String> {
         let mut files = Files::new();
         self.walk(&self.root, &mut files)?;
+        if self.kind == WorkspaceKind::Project {
+            let manifest = "scripts/lod-capture-manifest.toml";
+            let path = self
+                .root
+                .join(manifest.replace('/', std::path::MAIN_SEPARATOR_STR));
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                    return Err("Linked Workshop paths are not supported: scripts/lod-capture-manifest.toml".into());
+                }
+                Ok(_) => {
+                    files.insert(manifest.into(), fs::read(path).map_err(io_error)?);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error(error)),
+            }
+        }
         self.check_files(&files)?;
         Ok(files)
     }
@@ -824,7 +905,8 @@ pub fn safe_path(path: &str) -> bool {
 
 pub fn allowed_path(kind: WorkspaceKind, path: &str) -> bool {
     safe_path(path)
-        && (crate::world::mod_pack::is_allowed_content_path(path)
+        && ((kind == WorkspaceKind::Project && path == "scripts/lod-capture-manifest.toml")
+            || crate::world::mod_pack::is_allowed_content_path(path)
             || (path.starts_with("assets/")
                 && ((kind == WorkspaceKind::Project
                     && [".toml", ".rhai"]

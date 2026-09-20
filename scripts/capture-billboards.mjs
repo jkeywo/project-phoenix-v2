@@ -210,6 +210,14 @@ export function matchesCaptureFilter(target, filters) {
   return filters.some((filter) => haystack.includes(filter));
 }
 
+/** Native Workshop pins the selected authored output exactly; the CLI keeps
+ * its established convenient substring filters. */
+export function selectCaptureTargets(targets, filters, exactOutput = null) {
+  return exactOutput
+    ? targets.filter((target) => target.output === exactOutput)
+    : targets.filter((target) => matchesCaptureFilter(target, filters));
+}
+
 /** Deterministic native-render invocation for one authored capture target. */
 export function captureCommand(target, bin = BIN) {
   return {
@@ -662,7 +670,8 @@ async function main() {
     for (const error of errors) console.error(`  ${error}`);
     process.exit(1);
   }
-  const selected = allTargets.filter((target) => matchesCaptureFilter(target, cli.filters));
+  const exactOutput = process.env.PHOENIX_CAPTURE_OUTPUT;
+  const selected = selectCaptureTargets(allTargets, cli.filters, exactOutput);
   if (!selected.length) {
     console.error(`[capture-billboards] no declared capture output matches ${cli.filters.join(' ')}`);
     process.exit(1);
@@ -695,7 +704,8 @@ async function main() {
     return;
   }
 
-  if (!existsSync(path.join(root, BIN))) {
+  const captureBinary = path.isAbsolute(BIN) ? BIN : path.join(root, BIN);
+  if (!existsSync(captureBinary)) {
     console.error(
       `[capture-billboards] ${BIN} not found - build it first:\n` +
         '  cargo build --features capture --bin capture-billboard',

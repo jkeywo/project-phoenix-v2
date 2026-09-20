@@ -20,6 +20,7 @@ import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmEntityInspectorPanel } from './gm-entity-inspector-panel.js';
 import { createGmWorldInspectorPanel } from './gm-world-inspector-panel.js';
 import { createGmShipInspectorPanel } from './gm-ship-inspector-panel.js';
+import { createGmRegionInspectorPanel } from './gm-region-inspector-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
 import { createGmAttentionPanel } from './gm-attention-panel.js';
@@ -107,6 +108,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let gmNpc = null;
   let gmEntityFields = null;
   let gmShipFields = null;
+  let gmRegionFields = null;
   let gmObjectivePanel = null;
   const gmProjection = createGmLocalProjection({
     doc: doc,
@@ -124,6 +126,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       // The entities/AI Live Inspector reads the same selection (issue #1489).
       if (gmEntityFields) gmEntityFields.select(entity);
       if (gmShipFields) gmShipFields.select(entity);
+      if (gmRegionFields) gmRegionFields.select(entity);
     },
   });
   const gmActivity = createGmActivityFeed({
@@ -631,9 +634,11 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     },
   });
   win.__hostGmShipFieldsState = gmShipFields.state;
+  gmRegionFields = createGmRegionInspectorPanel({ doc, t });
+  win.__hostGmRegionFieldsState = gmRegionFields.state;
   win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); gmRegionFields.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -650,6 +655,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmEntityFields.update(p);
       gmWorldFields.update(p);
       gmShipFields.update(p);
+      gmRegionFields.update(p);
       if (gmProjection.update(p)) {
         gmActivity.reconcileAvailability();
         gmKnowledgeCompare.updateTruth(gmProjection.state().entities);

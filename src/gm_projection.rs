@@ -198,7 +198,10 @@ pub struct GmEntityProjection {
 /// state when every selectable ship has left the world.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct GmEntityProjectionPayload {
-    #[serde(default)]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::gm_world_inspector::WorldInspectorProjection::is_empty"
+    )]
     pub world_inspector: crate::gm_world_inspector::WorldInspectorProjection,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub system_controls: BTreeMap<String, Vec<GmSystemControlStatus>>,
@@ -223,6 +226,12 @@ pub struct GmEntityProjectionPayload {
         skip_serializing_if = "crate::gm_ship_inspector::ShipInspectorProjection::is_empty"
     )]
     pub ship_inspector: crate::gm_ship_inspector::ShipInspectorProjection,
+    /// Active Region schema, public occupancy and effective consequences (#1492).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::gm_region_inspector::RegionInspectorProjection::is_empty"
+    )]
+    pub region_inspector: crate::gm_region_inspector::RegionInspectorProjection,
     pub entities: Vec<GmEntityProjection>,
     /// Bounded attributed results of the directed world-effect family (issue
     /// #1310), carried on the entity surface rather than a channel of its own.
@@ -464,6 +473,102 @@ pub type GmInspectorSourceQuery<'w, 's> = Query<
         ),
     ),
 >;
+
+#[derive(SystemParam)]
+struct GmRegionInspectorSources<'w, 's> {
+    regions: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static EntityUuid,
+            Option<&'static EntityName>,
+            Option<&'static EntityId>,
+            Option<&'static EntityTemplatePath>,
+            Option<&'static crate::world::server::EntityOriginLayer>,
+            Option<&'static EntityTagsSection>,
+            &'static Transform,
+            &'static RegionShapeSection,
+            Option<&'static RegionEffectsSection>,
+            Option<&'static RadarAppearanceSection>,
+        ),
+    >,
+    ships: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static EntityUuid,
+            Option<&'static EntityName>,
+            Option<&'static EntityId>,
+        ),
+        With<Ship>,
+    >,
+    membership: Option<Res<'w, crate::regions::server::RegionMembership>>,
+}
+
+fn region_inspector_projection(
+    sources: &GmRegionInspectorSources,
+    authored_display_names: &BTreeMap<&str, &str>,
+    public_names: &BTreeMap<String, String>,
+    config_cache: &crate::entities::config_cache::ConfigCache,
+) -> crate::gm_region_inspector::RegionInspectorProjection {
+    let mut readings = BTreeMap::new();
+    for (entity, uuid, name, id, template, layer, tags, transform, shape, effects, radar) in
+        sources.regions.iter()
+    {
+        let mut occupants = sources
+            .ships
+            .iter()
+            .filter(|(ship, _, _, _)| {
+                sources.membership.as_deref().is_some_and(|membership| {
+                    membership
+                        .inside
+                        .get(ship)
+                        .is_some_and(|regions| regions.contains(&entity))
+                })
+            })
+            .map(|(_, uuid, name, id)| {
+                let label = public_names
+                    .get(&uuid.0)
+                    .cloned()
+                    .or_else(|| name.map(|name| name.0.clone()))
+                    .or_else(|| id.map(|id| id.0.clone()))
+                    .unwrap_or_else(|| uuid.0.clone());
+                (uuid, label)
+            })
+            .collect::<Vec<_>>();
+        occupants.sort_by(|(left_uuid, _), (right_uuid, _)| left_uuid.0.cmp(&right_uuid.0));
+        readings.insert(
+            uuid.0.clone(),
+            crate::gm_region_inspector::reading(crate::gm_region_inspector::RegionReadingInputs {
+                uuid,
+                name,
+                display_name: authored_display_names
+                    .get(uuid.0.as_str())
+                    .copied()
+                    .or_else(|| {
+                        template
+                            .and_then(|template| config_cache.get(&template.0))
+                            .and_then(|config| config.display_name.as_deref())
+                    }),
+                id,
+                template,
+                layer,
+                tags,
+                transform,
+                shape,
+                effects,
+                radar,
+                occupants,
+            }),
+        );
+    }
+    crate::gm_region_inspector::RegionInspectorProjection {
+        fields: crate::gm_region_inspector::fields(),
+        readings,
+    }
+}
 
 /// Build the entities/AI inspector domain from the live world.
 ///
@@ -748,6 +853,7 @@ fn publish_local_projection(
     )>,
     ships: GmShipProjectionQuery,
     world_entities: GmWorldProjectionQuery,
+    region_inspector_sources: GmRegionInspectorSources,
     all_names: Query<(&EntityUuid, Option<&EntityName>, Option<&EntityId>)>,
     factions: Option<Res<FactionRegistryResource>>,
     world_sources: GmWorldInspectorSources,
@@ -964,6 +1070,12 @@ fn publish_local_projection(
             }
         },
     ));
+    let region_inspector = region_inspector_projection(
+        &region_inspector_sources,
+        &authored_names,
+        &names,
+        &inspection_config_cache,
+    );
     let next = GmEntityProjectionPayload {
         world_inspector: crate::gm_world_inspector::projection(
             world_sources.config.as_deref(),
@@ -1064,6 +1176,7 @@ fn publish_local_projection(
         ),
         entity_inspector,
         ship_inspector,
+        region_inspector,
         entities: projected,
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::DirectEffect,
@@ -1633,20 +1746,23 @@ mod tests {
             }),
             EntityOriginLayer("assets/worlds/layer-station.toml".into()),
         ));
-        app.world_mut().spawn((
-            EntityUuid(HAZARD_ID.into()),
-            EntityName("region.storm.display_name".into()),
-            Transform::from_xyz(100.0, 2.0, 50.0),
-            EntityTagsSection(vec![EntityTag::Region.as_str().into()]),
-            RegionShapeSection(RegionShape::Sphere { radius: 40.0 }),
-            RegionEffectsSection(vec![RegionEffectKind::BlocksImpulse]),
-            RadarAppearanceSection(RadarAppearanceConfig {
-                icon: None,
-                colour: None,
-                size: None,
-                region_colour: Some(vec![0.9, 0.2, 0.1]),
-            }),
-        ));
+        let hazard_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(HAZARD_ID.into()),
+                EntityName("region.storm.display_name".into()),
+                Transform::from_xyz(100.0, 2.0, 50.0),
+                EntityTagsSection(vec![EntityTag::Region.as_str().into()]),
+                RegionShapeSection(RegionShape::Sphere { radius: 40.0 }),
+                RegionEffectsSection(vec![RegionEffectKind::BlocksImpulse]),
+                RadarAppearanceSection(RadarAppearanceConfig {
+                    icon: None,
+                    colour: None,
+                    size: None,
+                    region_colour: Some(vec![0.9, 0.2, 0.1]),
+                }),
+            ))
+            .id();
         app.world_mut().spawn((
             EntityUuid(REGION_ID.into()),
             EntityName("region.safe_harbour.display_name".into()),
@@ -1663,6 +1779,27 @@ mod tests {
                 region_colour: Some(vec![0.1, 0.7, 0.5]),
             }),
         ));
+        let occupant = app
+            .world_mut()
+            .spawn((
+                Ship,
+                EntityUuid("00000000-0000-4000-8000-000000000014".into()),
+                EntityName("Scout".into()),
+            ))
+            .id();
+        let mut membership = crate::regions::server::RegionMembership::default();
+        membership
+            .inside
+            .insert(occupant, [hazard_entity].into_iter().collect());
+        app.insert_resource(membership);
+        app.insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities: vec![crate::core::messages::EntitySnapshot {
+                uuid: HAZARD_ID.into(),
+                name: Some("Storm front".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
         app.world_mut().spawn((
             EntityUuid(FIELD_ID.into()),
             EntityId("entity.belt.delta.display_name".into()),
@@ -1728,6 +1865,32 @@ mod tests {
         assert_eq!(structure.radar.icon.as_deref(), Some("station"));
         assert_eq!(structure.radar.colour, Some([0.2, 0.4, 0.8]));
         assert_eq!(structure.radar.size, Some(12.0));
+
+        assert_eq!(payload.region_inspector.readings.len(), 2);
+        let hazard_reading = &payload.region_inspector.readings[HAZARD_ID];
+        assert_eq!(hazard_reading.values["identity.kind"], "hazard");
+        assert_eq!(
+            hazard_reading.values["identity.display_name"],
+            "Storm front"
+        );
+        assert_eq!(hazard_reading.label, "Storm front");
+        assert_eq!(
+            hazard_reading.values["effects.blocks_impulse.present"],
+            "true"
+        );
+        assert_eq!(hazard_reading.occupants.len(), 1);
+        assert_eq!(hazard_reading.occupants[0].label, "Scout");
+        assert_eq!(
+            hazard_reading.occupants[0].consequences[0].kind,
+            "blocks-impulse"
+        );
+        let region_reading = &payload.region_inspector.readings[REGION_ID];
+        assert_eq!(region_reading.values["identity.kind"], "region");
+        assert_eq!(region_reading.values["shape.box.yaw"], "0.25");
+        assert_eq!(
+            region_reading.values["presentation.radar.region_colour.g"],
+            "0.7"
+        );
     }
 
     #[test]

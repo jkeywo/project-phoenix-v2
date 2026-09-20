@@ -50,6 +50,8 @@ mod tests {
             "gm-entity-fields-list",
             "gm-ship-fields-panel",
             "gm-ship-fields-list",
+            "gm-region-fields-panel",
+            "gm-region-fields-occupants",
         ] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }

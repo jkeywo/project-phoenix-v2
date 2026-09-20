@@ -32,6 +32,12 @@ pub struct WorldInspectorProjection {
     pub readings: BTreeMap<String, WorldInspection>,
 }
 
+impl WorldInspectorProjection {
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty() && self.readings.is_empty()
+    }
+}
+
 fn field(
     id: &str,
     group: &str,

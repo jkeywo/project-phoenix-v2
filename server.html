@@ -2275,6 +2275,22 @@
             <div id="gm-ship-fields-list"></div>
           </article>
         </section>
+        <section id="gm-region-fields-panel" role="region" aria-labelledby="gm-region-fields-heading">
+          <h2 id="gm-region-fields-heading" data-i18n="inspector.region.heading"></h2>
+          <div role="group" aria-labelledby="gm-region-fields-heading">
+            <button id="gm-region-fields-back" type="button" disabled data-i18n="inspector.entity.back"></button>
+            <button id="gm-region-fields-forward" type="button" disabled data-i18n="inspector.entity.forward"></button>
+          </div>
+          <p id="gm-region-fields-empty" data-i18n="inspector.region.empty"></p>
+          <article id="gm-region-fields-card" hidden>
+            <p id="gm-region-fields-status" role="status" aria-live="polite" tabindex="-1"></p>
+            <div id="gm-region-fields-list"></div>
+            <section aria-labelledby="gm-region-fields-occupants-heading">
+              <h3 id="gm-region-fields-occupants-heading" data-i18n="inspector.region.occupants"></h3>
+              <ul id="gm-region-fields-occupants"></ul>
+            </section>
+          </article>
+        </section>
         <section id="gm-world-fields-panel" role="region" aria-labelledby="gm-world-fields-heading">
           <h2 id="gm-world-fields-heading" data-i18n="inspector.world.heading"></h2>
           <label for="gm-world-fields-layer" data-i18n="inspector.world.layer"></label>

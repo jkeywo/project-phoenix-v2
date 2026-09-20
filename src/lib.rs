@@ -150,6 +150,7 @@ pub mod gm_puppet;
 /// #1436): three existing result/command/progress sources, one Background row,
 /// no keystroke telemetry.
 pub mod gm_quiet;
+pub mod gm_region_inspector;
 /// Single-simulation-peer live restore (issue #1446): the typed attributed
 /// request, the recovery checkpoint, the gated load and the protocol fence,
 /// all assembled from #1118/#1119/#1445 rather than a second protocol.

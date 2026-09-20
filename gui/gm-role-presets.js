@@ -75,6 +75,7 @@ export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
   // preset that puts the inspector away puts its readings away too (#1489).
   'gm-entity-fields-panel': 'gm-inspector',
   'gm-ship-fields-panel': 'gm-inspector',
+  'gm-region-fields-panel': 'gm-inspector',
 });
 
 /** Quick-action DOM ids this build actually draws. */

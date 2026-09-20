@@ -994,6 +994,7 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
         world_inspector: Default::default(),
         entity_inspector: Default::default(),
         ship_inspector: Default::default(),
+        region_inspector: Default::default(),
         presentation: Default::default(),
         presentation_results: Vec::new(),
         presentation_messages: Vec::new(),

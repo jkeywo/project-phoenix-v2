@@ -64,3 +64,142 @@ entities:
         - npx vitest run editor/tests/workshop-document.test.js editor/tests/workshop-diff.test.js editor/tests/workshop-migration.test.js
         - npx vitest run tests/client/workshop-authoring.test.js tests/client/workshop-layout-model.test.js
         - cargo test --lib native_host::panes::operator
+  - component: workshop-world-composition-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Workshop World Composition Authoring
+      summary: "Workshop exposes structured controls for a selected world's exact `extra_worlds` declaration and for root scenarios in the selected manifest. The same view inventories script-driven load and unload references and labels every world by its editable draft, immutable base-content or immutable retained-pack origin. A proposed operation is applied to a private candidate copy, checked against the effective dependency catalogue and passed through the ordinary runtime validator before one grouped history entry reaches the draft. Missing, cyclic, duplicate or disallowed references and stale asynchronous results leave the source and history unchanged. Browser export, native save and Test therefore consume the same accepted exact-source catalogue the author reviewed."
+      rationale:
+        - "[ai] Composition controls patch only the top-level array or one scenario block. They do not reserialize a world or manifest, so comments, unknown fields, key order, BOMs and unchanged line endings retain their exact bytes."
+        - "[ai] Dependency origins are evidence, not editing capabilities. Base-content and retained-pack worlds are selectable references and visible catalogue members, but the controls never copy them into the draft or offer their source for mutation."
+        - "[ai] Candidate validation precedes the sole grouped history write. The operation also carries its source revision and before bytes across the asynchronous runtime call, so an accepted result for an older draft cannot overwrite newer authoring."
+    architecture:
+      kind: authoring-presentation
+      authority: local
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+      depends_on: [workshop-source-member-lifecycle, workshop-runtime-asset-reader]
+    implementation:
+      status: declared
+      paths:
+        - editor/workshop-composition.js
+        - gui/workshop-composition-panel.js
+        - gui/workshop-authoring.js
+        - gui/workshop-layout-model.js
+        - src/native_host/panes/operator.rs
+      symbols:
+        - compositionInventory
+        - inspectComposition
+        - prepareCompositionOperation
+        - applyCompositionOperation
+        - mountWorkshopComposition
+      tests:
+        - npx vitest run editor/tests/workshop-composition.test.js tests/client/workshop-composition-panel.test.js
+        - npx vitest run tests/client/workshop-authoring.test.js tests/client/workshop-layout-model.test.js tests/client/operator-profile.test.js
+        - cargo test --lib native_host::panes::operator
+  - component: workshop-entity-composition-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Workshop Entity Composition Authoring
+      summary: "Workshop resolves each editable entity template through the shared include-fragment rules and presents the effective component set, field values and source owner beside exact-source controls. Authors can add or remove local supported components and include declarations. Inherited fields remain read-only until an explicit materialise action writes the effective value as a local override. Every action first changes a private document copy, resolves the complete include closure and passes the ordinary runtime validator; missing or cyclic fragments, invalid removals, incompatible component combinations and stale results leave draft bytes and history unchanged. The accepted unsaved source remains the one browser export, native save, preview and Test capture."
+      rationale:
+        - "[ai] Exact-source entity transactions replace one top-level `includes` array, append one new component or field override, or remove only the local component's source spans. No operation serializes the existing template or any fragment, so unknown fields, comments, ordering and untouched include declarations retain their bytes."
+        - "[ai] Dependency fragments are composition inputs rather than editing capabilities. Provenance names their owner, but only a deliberate materialisation copies an effective value into the selected draft template."
+        - "[ai] The component schema defines what can be added and the include resolver defines what the candidate means. Runtime validation remains final authority over required values and component compatibility."
+    architecture:
+      kind: authoring-presentation
+      authority: local
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+      depends_on: [workshop-source-member-lifecycle, workshop-runtime-asset-reader]
+    implementation:
+      status: declared
+      paths:
+        - editor/workshop-entity-composition.js
+        - editor/entity-includes.js
+        - editor/component-schema.js
+        - gui/workshop-entity-composition-panel.js
+        - gui/workshop-authoring.js
+      symbols:
+        - entityInventory
+        - inspectEntityComposition
+        - prepareEntityOperation
+        - applyEntityOperation
+        - mountWorkshopEntityComposition
+      tests:
+        - npx vitest run editor/tests/workshop-entity-composition.test.js tests/client/workshop-entity-composition-panel.test.js
+        - npx vitest run tests/client/workshop-authoring.test.js
+  - component: workshop-gm-role-preset-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Workshop GM Role Preset Authoring
+      summary: "Workshop exposes keyboard-native forms for the existing presentation-only GM role-preset schema: preset ordering, panel, quick-action and contact assignments, and typed attention, workload, actions and note widgets. The controls use the ordinary GM vocabulary and world entity references. Each operation patches or moves only the selected exact-source TOML block on a private candidate, then passes ordinary runtime validation before one grouped history entry reaches the draft. Unknown kinds, invalid references, malformed type-specific options, runtime refusals and stale results leave source and history unchanged."
+      rationale:
+        - "[ai] The authoring surface imports the GM console's panel, action, widget, attention-band and attention-category registries. It cannot invent a fifth widget surface or a new action path."
+        - "[ai] Presets are presentation composition only. Authored widgets repeat existing controls and never enter authority, admission or simulation state."
+        - "[ai] Exact-source transactions retain comments, unknown fields and unrelated tables. Shared undo, recovery, browser export, native save and Test continue to consume WorkshopDocument bytes."
+    architecture:
+      kind: authoring-presentation
+      authority: local
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+      depends_on: [workshop-source-member-lifecycle, gm-t2-role-presets, gm-t3-authored-gm-widgets, gm-t3-attention-queue]
+    implementation:
+      status: declared
+      paths:
+        - editor/workshop-role-presets.js
+        - gui/workshop-role-presets-panel.js
+        - gui/gm-role-presets.js
+        - gui/workshop-authoring.js
+      symbols:
+        - rolePresetInventory
+        - inspectRolePresets
+        - prepareRolePresetOperation
+        - applyRolePresetOperation
+        - mountWorkshopRolePresets
+      tests:
+        - npx vitest run editor/tests/workshop-role-presets.test.js tests/client/workshop-role-presets-panel.test.js
+        - npx vitest run tests/client/workshop-authoring.test.js
+  - component: workshop-playable-ship-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Workshop Playable Ship Authoring
+      summary: "Workshop extends exact-source composed Entity authoring with keyboard-native forms for local Stations, Systems, each Station rating's automated-System references and supported AI doctrine definitions. Effective included rows retain their source owner and remain read-only until materialised. System kinds and Directive kinds come from the runtime registries; candidate membership, ownership, capability and typed behaviour constraints pass both source-linked form checks and the ordinary runtime validator before one grouped history write. Test receives the same exact unsaved hull, selects it explicitly, and starts the disposable solo runtime whose empty crew leaves every authored Station on Backfill, preserving the hull's authored consoles and AI configuration."
+      rationale:
+        - "[ai] A Station owns Systems by stable runtime id; a rating may automate only Systems that exist and name that Station. Offering registry kinds and checking the complete effective include result prevents the form from inventing a second topology vocabulary."
+        - "[ai] Updates replace one scalar, one reference array or one complete local array-table block. Existing blocks are never serialised, so comments, unknown fields, order and untouched line endings remain source bytes. Candidate validation and stale-result rejection precede the single grouped undo entry."
+        - "[ai] Test already owns the truthful integration proof: its captured source shadows dependencies, native launch sets the selected hull and solo mode, browser launch force-starts with no participant, and both production boot paths derive Stations, consoles and AI from that composed selected hull."
+    architecture:
+      kind: authoring-presentation
+      authority: local
+      coordinates: [gm-milestone-integrated-workshop, ship-station-system-topology-state, fine-system-ai-policy-state]
+      runs_in: [host-browser-runtime, native-host-runtime]
+      depends_on: [workshop-entity-composition-authoring, workshop-source-member-lifecycle]
+    implementation:
+      status: declared
+      paths:
+        - editor/workshop-ship-authoring.js
+        - gui/workshop-ship-authoring-panel.js
+        - src/workshop/mod.rs
+        - src/workshop/wasm.rs
+        - src/workshop/provider.rs
+        - editor/workshop-runtime.js
+        - editor/workshop-provider.js
+        - gui/workshop-authoring.js
+      symbols:
+        - ship_schema
+        - inspectShipAuthoring
+        - prepareShipOperation
+        - applyShipOperation
+        - mountWorkshopShipAuthoring
+      tests:
+        - "npx vitest run editor/tests/workshop-ship-authoring.test.js tests/client/workshop-ship-authoring-panel.test.js editor/tests/workshop-provider.test.js tests/client/workshop-authoring.test.js"
+        - "cargo test --lib --features host workshop::"

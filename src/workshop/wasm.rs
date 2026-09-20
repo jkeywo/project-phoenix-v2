@@ -3,6 +3,12 @@
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
+pub fn wasm_workshop_ship_schema() -> Result<String, JsValue> {
+    serde_json::to_string(&super::ship_schema())
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
 pub fn wasm_workshop_asset_dependencies(bytes: &[u8]) -> Vec<String> {
     let Ok(members) = crate::world::mod_pack::read_store_zip_bytes(bytes) else {
         return Vec::new();

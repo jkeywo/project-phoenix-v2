@@ -91,6 +91,15 @@ describe('explicit Workshop capability providers', () => {
     expect(request.mock.calls.at(-1)[0]).toEqual({ op: 'script-diagnostics', source: 'fn broken( {', line_offset: 8 });
   });
 
+  it('reads native ship authoring choices from the runtime-owned schema endpoint', async () => {
+    const request = vi.fn(async value => value.op === 'ship-schema'
+      ? { status: 'ship-schema', schema: { system_kinds: ['helm_thrust'], directive_kinds: ['None', 'Destroy'] } }
+      : { status: 'done' });
+    const provider = createNativeWorkshopProvider({ request });
+    await expect(provider.runtime.shipSchema()).resolves.toEqual({ system_kinds: ['helm_thrust'], directive_kinds: ['None', 'Destroy'] });
+    expect(request).toHaveBeenCalledWith({ op: 'ship-schema' });
+  });
+
   it('retains recovered old revisions so stale draft saves reach the native conflict gate', async () => {
     const draft = new WorkshopDocument(workshopPack());
     const saved = { version: 1, selected: WORKSHOP_WORLD, draft: draft.snapshot() };

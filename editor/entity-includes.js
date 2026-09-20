@@ -575,7 +575,7 @@ export function resolveTemplate(rootPath, source, parse) {
  * `[key=val]` / `[index]` array addressing. `station[id=bridge].rating[name=x]`
  * → `[{name:'station', selector:{key:'id',val:'bridge'}}, {name:'rating', …}]`.
  */
-function parseFieldPath(path) {
+export function parseFieldPath(path) {
   const segments = [];
   let i = 0;
   const n = path.length;

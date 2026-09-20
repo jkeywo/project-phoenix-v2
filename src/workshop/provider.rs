@@ -32,6 +32,7 @@ pub struct WorkshopRequest {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Operation {
+    ShipSchema,
     Load,
     LoadSources,
     LoadDependencies,
@@ -167,6 +168,9 @@ pub struct WorkshopResponse {
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
 pub enum Response {
+    ShipSchema {
+        schema: super::WorkshopShipSchema,
+    },
     Sources {
         kind: WorkspaceKind,
         revision: String,
@@ -366,6 +370,9 @@ impl NativeWorkshopProvider {
 
     fn apply(&mut self, operation: Operation) -> Result<Response, String> {
         Ok(match operation {
+            Operation::ShipSchema => Response::ShipSchema {
+                schema: super::ship_schema(),
+            },
             Operation::LoadSources => Response::Sources {
                 kind: self.kind,
                 revision: self.revision.clone(),

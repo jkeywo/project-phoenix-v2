@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, models, mod]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/provider/preview_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, src/native_host/workshop/preview.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, src/delivery/serve.rs, editor/workshop-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-scripts.js, editor/script-editor.js, editor/script-editor-view.js, src/world/script/authoring.rs, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-scripts-panel.js, gui/workshop-layout-model.js, gui/workshop-test-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, tests/smoke/workshop-preview.render.spec.js, tests/native_workshop_ultralight.rs, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs, src/workshop/composition.rs, src/workshop/source_spans.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js, src/workshop/entity.rs, editor/workshop-entity.js, gui/workshop-entity-panel.js, src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config.rs, tests/smoke/workshop-entity.render.spec.js, src/workshop/presets.rs, editor/workshop-presets.js, gui/workshop-presets-panel.js, gui/gm-role-presets.js, tests/gm_role_preset_digest_neutrality.rs]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/world-toml.js, editor/entity-toml.js, editor/models-mode-view.js, editor/mod-mode-view.js, editor/mod-actions.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/editor-mod-actions.js, gui/client-semantic-actions.js, gui/operator-profile.js, gui/semantic-controls-remapper.js, workshop.html, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/workshop/provider/assets.rs, src/workshop/provider/test_snapshot.rs, src/workshop/provider/preview_snapshot.rs, src/workshop/test_protocol.rs, src/native_host/workshop/test_clock.rs, src/native_host/workshop/test_process.rs, src/native_host/workshop/preview.rs, editor/workshop-test.js, gui/workshop-test-panel.js, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/keyboard.rs, src/boot/mod.rs, src/delivery/args.rs, src/delivery/serve.rs, editor/workshop-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-scripts.js, editor/script-editor.js, editor/script-editor-view.js, editor/workshop-ship-authoring.js, src/world/script/authoring.rs, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-scripts-panel.js, gui/workshop-ship-authoring-panel.js, gui/workshop-layout-model.js, gui/workshop-test-layout-model.js, gui/workshop-layout-renderer.js, scripts/build-workshop.mjs, run-workshop.bat, scripts/serve-workshop.mjs, assets/audio/sound-cues.toml, src/sound_cues.rs, gui/sound-audition-panel.js, editor/workshop-sound-cues.js, src/world/pack_asset_validation.rs, src/audio_decode.rs, src/entities/pack_assets.rs, src/entities/pack_assets/versioned.rs, editor/asset-dependencies.js, editor/workshop-assets.js, pasm/spec/architecture/workshop-runtime-assets.yaml, editor/workshop-handoff.js, editor/workshop-source-provider.js, gui/workshop-source-link.js, pasm/spec/architecture/workshop-source-handoff.yaml, src/workshop/test_clock.rs, src/workshop/test_source.rs, src/workshop/test_browser.rs, workshop-test.html, editor/workshop-test-frame.js, editor/workshop-test-child.js, editor/workshop-test-runtime.js, editor/workshop-test-snapshot.js, gui/workshop-test-boot.js, tests/smoke/workshop-test-runtime.render.spec.js, tests/smoke/workshop-preview.render.spec.js, tests/native_workshop_ultralight.rs, src/entities/pack_assets/snapshot.rs, editor/workshop-models.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, pasm/spec/architecture/workshop-model-authoring.yaml, src/workshop/model_fields.rs, src/inspector.rs, gui/inspector-field.js, pasm/spec/architecture/workshop-live-inspector.yaml, src/workshop/definitions.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, src/entities/config_cache.rs, pasm/spec/architecture/workshop-definition-authoring.yaml, src/headless/app.rs, src/workshop/composition.rs, src/workshop/source_spans.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js, src/workshop/entity.rs, editor/workshop-entity.js, gui/workshop-entity-panel.js, src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config.rs, tests/smoke/workshop-entity.render.spec.js, src/workshop/presets.rs, editor/workshop-presets.js, gui/workshop-presets-panel.js, gui/gm-role-presets.js, tests/gm_role_preset_digest_neutrality.rs]
 updated: 2026-09-20
 ---
 
@@ -174,6 +174,50 @@ until the runtime asset overlay is implemented. A loaded pack can enter through
 `createBrowserWorkshopProvider` as an immutable source archive with separately
 snapshotted dependencies; the selected pack is removed from the other-pack list.
 The dependency viewer is read-only and never adds those files to the editable pack.
+
+The Composition tool patches a selected world's top-level `extra_worlds` array
+and the selected manifest's root scenario blocks without reserializing either
+file. It inventories Rhai and TOML load/unload references and labels each world
+as editable draft, immutable base content or immutable retained-pack content.
+Each add or remove is first applied to a private candidate copy, checked for
+missing, cyclic, duplicate and disallowed references, and passed through the
+same runtime validator used by Test, browser export and native save. Only an
+accepted, still-current candidate becomes one undo entry; refusal or a stale
+asynchronous result leaves the exact draft bytes and history unchanged.
+
+The same Composition panel resolves editable entity templates through
+`entity-includes.js` and presents their effective components and field source
+owners. Base and retained-pack fragments remain read-only. Adding or removing a
+local component or include, and deliberately materialising an inherited field
+as a local override, changes only the selected template's exact source. Each
+candidate resolves its complete include closure and passes ordinary runtime
+validation before one history entry is recorded. Preview, Test, browser export
+and native save therefore consume the same unsaved composed entity the author
+reviewed; recovery retains that authored source and grouped undo entry.
+
+Playable-ship authoring builds on that exact composed view. It lists effective
+Stations and Systems with local or included source ownership, while edits stay
+limited to local array-table blocks. Station fields, System membership and
+runtime kind, each rating's automated-System references, and typed doctrine
+kinds and target fields use ordinary form controls backed by the Rust
+System/Directive registries. A candidate topology
+must pass source-linked ownership and reference checks plus the ordinary runtime
+validator before one undo entry is written. Test captures that same unsaved
+selected hull; its participant-free start leaves every authored Station on
+Backfill and therefore exercises the authored consoles and AI policies rather
+than a separate Workshop mock.
+
+The Composition panel also authors the runtime's existing presentation-only GM
+role-preset schema. Native form controls create, edit, order and remove presets,
+their panel, quick-action and contact assignments, and typed attention, workload,
+actions and note widgets. The form draws its choices from the ordinary GM panel,
+action, attention-band and attention-category vocabularies and world entity names;
+unknown kinds, invalid references and options that do not belong to the selected
+widget type are source-linked refusals. Mutations patch or move only the selected
+TOML block, preserving comments, unknown fields, order and unrelated tables. The
+ordinary candidate validator runs before the shared history write, so recovery,
+save, export and Test all consume the same unsaved accepted source. These controls
+compose no new action and do not change GM authority or admission.
 
 `NativeWorkshopProvider` is an offline selected-project or selected-mod-directory
 capability constructed by native code. Its JSON request vocabulary cannot select

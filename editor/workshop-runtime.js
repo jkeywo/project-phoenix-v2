@@ -36,6 +36,14 @@ export function createWorkshopRuntime({
     return pending;
   }
   return {
+    async shipSchema() {
+      const { runtime } = await ready();
+      const schema = JSON.parse(runtime.wasm_workshop_ship_schema());
+      if (!Array.isArray(schema?.system_kinds) || !Array.isArray(schema?.directive_kinds)) {
+        throw new Error('Workshop runtime returned an invalid ship schema');
+      }
+      return schema;
+    },
     async dependencies() { return structuredClone((await ready()).dependencies); },
     async testDependencies() { return (await ready()).assets.captureAllBuffers(); },
     async testCatalog(files) {

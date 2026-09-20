@@ -15,6 +15,7 @@ import { mountWorkshopDefinitions } from './workshop-definitions-panel.js';
 import { mountWorkshopComposition } from './workshop-composition-panel.js';
 import { mountWorkshopEntity } from './workshop-entity-panel.js';
 import { mountWorkshopPresets } from './workshop-presets-panel.js';
+import { mountWorkshopShipAuthoring } from './workshop-ship-authoring-panel.js';
 import { mountWorkshopScripts } from './workshop-scripts-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
@@ -180,6 +181,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let compositionPanel = null;
   let entityPanel = null;
   let presetsPanel = null;
+  let shipAuthoringPanel = null;
   let scriptsPanel = null;
   let layoutMount = null;
   let testLayoutMount = null;
@@ -248,16 +250,22 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  shipAuthoringPanel = mountWorkshopShipAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   scriptsPanel = mountWorkshopScripts({ root, attach: false, provider, runtime, draft: () => draft,
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
+  compositionTools.append(compositionPanel.node, shipAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
       findings, feedback, dependencies, settings,
       models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node,
-      changes: changesPanel, definitions: definitionsPanel.node, composition: compositionPanel.node,
+      changes: changesPanel, definitions: definitionsPanel.node, composition: compositionTools,
       entity: entityPanel.node, presets: presetsPanel.node, scripts: scriptsPanel.node },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
@@ -413,6 +421,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     compositionPanel?.refresh({ hidden: testing });
     entityPanel?.refresh({ hidden: testing });
     presetsPanel?.refresh({ hidden: testing });
+    shipAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     testLayout.hidden = !testing;
@@ -979,6 +988,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     compositionPanel?.dispose();
     entityPanel?.dispose();
     presetsPanel?.dispose();
+    shipAuthoringPanel?.dispose();
     scriptsPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();

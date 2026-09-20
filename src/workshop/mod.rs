@@ -106,6 +106,29 @@ pub struct WorkshopValidation {
     pub catalogue: Vec<composition::CatalogueEntry>,
 }
 
+/// Runtime-owned vocabulary used by Workshop's ship authoring controls.
+/// Keeping this beside the validators means the browser and native surfaces
+/// cannot drift into offering a System or Directive spelling the build rejects.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WorkshopShipSchema {
+    pub system_kinds: Vec<String>,
+    pub directive_kinds: Vec<String>,
+}
+
+pub fn ship_schema() -> WorkshopShipSchema {
+    let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+        .expect("the built-in System registry is valid");
+    let mut system_kinds = registry.kinds().map(str::to_owned).collect::<Vec<_>>();
+    system_kinds.sort();
+    WorkshopShipSchema {
+        system_kinds,
+        directive_kinds: crate::objectives::directive::DirectiveKind::ALL
+            .into_iter()
+            .map(|kind| kind.name().to_owned())
+            .collect(),
+    }
+}
+
 impl WorkshopValidation {
     fn error(&mut self, category: &str, file: &str, message: String) {
         self.findings.push(WorkshopFinding {

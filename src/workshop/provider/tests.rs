@@ -993,6 +993,14 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         "assets/worlds/test.toml".into(),
         assets::Source::Text(authored.into()),
     );
+    let authored_hull = "# exact unsaved playable hull\r\nclass='lancer'\r\nname='Unsaved hull'\r\n\
+[[station]]\r\nid='flight'\r\nname='Flight'\r\ndescription='Fly'\r\nrank='Lt.'\r\nconsole='gui/custom-flight.html'\r\n\
+[[station.rating]]\r\nname='Assisted'\r\nautomated_systems=['draft-drive']\r\n\
+[[system]]\r\nid='draft-drive'\r\nkind='helm_thrust'\r\nstation='flight'\r\n";
+    sources.insert(
+        "assets/entities/test.toml".into(),
+        assets::Source::Text(authored_hull.into()),
+    );
     // Later disk edits are irrelevant to the immutable draft supplied to Test.
     fs::write(
         fixture.root.join("assets/models/test.png"),
@@ -1008,6 +1016,40 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         .prepare_test(sources.clone(), selection.clone())
         .unwrap();
     assert_eq!(snapshot.files[&selection.world], authored.as_bytes());
+    assert_eq!(snapshot.files[&selection.ship], authored_hull.as_bytes());
+    let selected = crate::entities::config::EntityConfig::from_toml(
+        std::str::from_utf8(&snapshot.files[&selection.ship]).unwrap(),
+    )
+    .unwrap();
+    let selected_ship = selected.ship_config.unwrap();
+    assert_eq!(selected_ship.stations[0].id.0, "flight");
+    assert_eq!(
+        selected_ship.stations[0].console.as_deref(),
+        Some("gui/custom-flight.html")
+    );
+    assert_eq!(
+        selected_ship.stations[0].ratings[0].automated_systems[0].0,
+        "draft-drive"
+    );
+    assert_eq!(selected_ship.systems[0].id.0, "draft-drive");
+    // Both disposable launch adapters start without a participant: native sets
+    // `NativeHostConfig::solo`, while browser inserts `PendingForceStart(true)`.
+    // This is the ordinary world-setup seed they reach, proved against the
+    // exact selected hull above rather than a canned Workshop topology.
+    let (control_sources, ratings) = crate::ship::rating::seed_boot_ratings(&selected_ship, |_| {
+        crate::ship::rating::BACKFILL_RATING.to_owned()
+    });
+    assert_eq!(
+        ratings,
+        std::collections::HashMap::from([(
+            crate::core::messages::StationId("flight".into()),
+            crate::ship::rating::BACKFILL_RATING.to_owned()
+        )])
+    );
+    assert_eq!(
+        control_sources.source_for(&crate::core::messages::SystemId("draft-drive".into())),
+        crate::ship::control_source::ControlSource::Ai
+    );
     assert_eq!(snapshot.files["assets/models/test.png"], model);
     assert_eq!(
         snapshot.files["assets/shaders/test.wgsl"],

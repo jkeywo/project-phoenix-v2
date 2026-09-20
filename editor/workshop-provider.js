@@ -118,6 +118,13 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
       return WorkshopDocument.fromNativeFiles(value.files, { kind });
     },
     runtime: {
+      async shipSchema() {
+        const response = await call({ op: 'ship-schema' });
+        const schema = response?.schema;
+        if (response?.status !== 'ship-schema' || !Array.isArray(schema?.system_kinds)
+            || !Array.isArray(schema?.directive_kinds)) throw new Error('Invalid native Workshop ship schema');
+        return schema;
+      },
       async dependencies() {
         const value = await call({ op: 'load-dependencies' });
         const textFiles = files => files && typeof files === 'object' && !Array.isArray(files)

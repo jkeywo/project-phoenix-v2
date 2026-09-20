@@ -875,3 +875,21 @@ fn a_project_world_whose_presets_break_the_rules_is_refused_at_the_offending_lin
     assert!(!pack.accepted);
     assert_eq!(located(&pack), expected, "{:?}", pack.findings);
 }
+
+#[test]
+fn ship_authoring_schema_is_the_runtime_registry_and_directive_vocabulary() {
+    let schema = super::ship_schema();
+    let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems().unwrap();
+    assert_eq!(schema.system_kinds, {
+        let mut kinds = registry.kinds().map(str::to_owned).collect::<Vec<_>>();
+        kinds.sort();
+        kinds
+    });
+    assert_eq!(
+        schema.directive_kinds,
+        crate::objectives::directive::DirectiveKind::ALL
+            .into_iter()
+            .map(|kind| kind.name().to_owned())
+            .collect::<Vec<_>>()
+    );
+}

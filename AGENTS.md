@@ -92,7 +92,7 @@ cargo clippy --workspace --all-targets \
 # pre-change/local-main commit (PowerShell: $env:PHOENIX_AMBIGUITY_BASE_REF = '<sha>').
 # The ambiguity ratchet has no implicit HEAD/self-comparison fallback. CI sets
 # the PR base/push-before SHA; first ledger introduction needs full local history.
-cargo test --workspace --features headless     # CI: test job, step 3
+cargo test --workspace --features headless     # CI: test + native-integration-test jobs
 npm run debug-surfaces:check                   # CI: editor-test job (Rust -> JS drift)
 npm run live-layout:check                      # CI: editor-test job (Live dock JS -> Rust drift)
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)

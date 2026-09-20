@@ -70,7 +70,7 @@ jobs:
           path: target/pasm/
           retention-days: 14
 
-  # ── Unit tests (native — the suite `deploy`, `perf` and `balance` gate on) ────
+  # ── Unit tests (native — `deploy`, `perf` and `balance` gate on both halves) ─
   test:
     runs-on: ubuntu-latest
 
@@ -150,11 +150,11 @@ jobs:
       - name: Clippy (deny warnings)
         run: cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings
 
-      # One invocation, one feature set, one compile of the crate and of every
-      # integration-test binary. This previously ran as four steps across two
-      # feature sets (bare `cargo test`, then `--features headless --test
-      # <file>` three times), which built the crate and the test binaries
-      # roughly twice.
+      # Keep the library/unit half separate from the integration binaries. The
+      # former combined invocation repeatedly outlived its hosted runner after
+      # about an hour, leaving GitHub with no completed step or retrievable log.
+      # Both jobs use the same feature set and together preserve the exact
+      # `cargo test --workspace --features headless` selection.
       #
       # `--features headless` is what makes the headless scenario suite
       # (issue #912), the seeded-RNG determinism guard (#837) and the
@@ -166,13 +166,6 @@ jobs:
       # authoritative_state_enumeration, cross_target_probe, ...) was compiled
       # empty by the bare invocation and never named, so none of them had ever
       # run in CI. This runs all of them.
-      #
-      # The process isolation the old per-file steps guaranteed is UNCHANGED
-      # and was never this workflow's to provide: cargo gives every integration
-      # test file its own binary and runs them one process at a time.
-      # headless_runner.rs's process-global native template cache, and the two
-      # determinism files' need to claim Bevy's process-global task pool first,
-      # are satisfied exactly as before — see those files' headers.
       #
       # Debug (well, [profile.dev] — deps at opt-level 3) is correct: the
       # runner is deterministic and asserts on end state, never wall-clock.
@@ -192,8 +185,51 @@ jobs:
       #     --test headless_runner falling_skyway_
       # The 14 narrow probe-world tests interleaved with that scenario remain
       # ordinary CI coverage.
-      - name: Run the native test suite
-        run: cargo test --workspace --features headless
+      - name: Run native library, binary and example tests
+        run: cargo test --workspace --features headless --lib --bins --examples
+
+      - name: Run native documentation tests
+        run: cargo test --workspace --features headless --doc
+
+  # Integration binaries get a fresh hosted runner so neither half crosses the
+  # runner-loss window. Cargo still gives each integration-test file its own
+  # process and runs the binaries one at a time, preserving the process-global
+  # cache and Bevy task-pool assumptions documented in those files.
+  native-integration-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select trusted ambiguity baseline
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$PR_BASE" ]; then
+            base="$PR_BASE"
+          elif [[ -n "$PUSH_BEFORE" && ! "$PUSH_BEFORE" =~ ^0+$ ]]; then
+            base="$PUSH_BEFORE"
+          else
+            base="$(git rev-parse --verify HEAD^)"
+          fi
+          if ! git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "$base"
+          fi
+          git rev-parse --verify "${base}^{commit}" >/dev/null
+          echo "PHOENIX_AMBIGUITY_BASE_REF=$base" >> "$GITHUB_ENV"
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@606b0c06a6e6419a5b2a8c4f5bfb255146f87814
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      - name: Run native integration tests
+        run: cargo test --workspace --features headless --test '*'
 
   # Separate configurations run independently and remain deployment gates.
   # Each job has its own Rust cache; the first run must warm the new caches.
@@ -757,7 +793,7 @@ jobs:
   #
   # Still not in `deploy`'s `needs`.
   perf:
-    needs: [test, smoke, native-build]
+    needs: [test, native-integration-test, smoke, native-build]
     # NIGHTLY ONLY (see the schedule at the top of this file). This job is not
     # on the critical path of a run — it finishes long before deploy does — so
     # skipping it on branches and PRs buys no wall clock, only runner minutes.
@@ -986,7 +1022,7 @@ jobs:
   # same four enemy classes with fixed seeds and fails this job if a regression
   # threshold is missed; its source AARs are uploaded with the report.
   balance:
-    needs: [test, native-build]
+    needs: [test, native-integration-test, native-build]
     # NIGHTLY ONLY (see the schedule at the top of this file). This job is not
     # on the critical path of a run — it finishes long before deploy does — so
     # skipping it on branches and PRs buys no wall clock, only runner minutes.
@@ -1057,7 +1093,7 @@ jobs:
 
   # ── Deploy (main branch only, requires both test + smoke to pass) ─────────────
   deploy:
-    needs: [test, build, editor-test, smoke, viewer-test, demo-test, tooling-build, boundary]
+    needs: [test, native-integration-test, build, editor-test, smoke, viewer-test, demo-test, tooling-build, boundary]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

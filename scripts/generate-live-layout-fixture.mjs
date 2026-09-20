@@ -164,6 +164,12 @@ const CASES = [
       'effect', 'despawn', 'faction', 'objective', 'entity-fields'],
     selected: 'ghost',
   }],
+  ['a version 14 layout before world fields registered', {
+    version: 14, root: group(['roster', 'mission'], 'mission'), floats: [],
+    closed: LIVE_PANELS.filter(panel => panel !== 'world-fields'
+      && !['roster', 'mission'].includes(panel)),
+    selected: 'mission',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

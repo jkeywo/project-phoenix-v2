@@ -249,12 +249,25 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     timer = null; pending = null; projection = { palette: [], objectives: [], results: [] };
     closePreview(); feedback(''); renderRows(); renderResults();
   }
+  function focusObjective(objectiveId) {
+    if (!nonempty(objectiveId) || !el('list')) return false;
+    const row = [...el('list').querySelectorAll('li[data-objective]')]
+      .find((candidate) => candidate.dataset.objective === objectiveId);
+    if (!row) return false;
+    for (const other of el('list').querySelectorAll('li[data-opened]')) delete other.dataset.opened;
+    row.dataset.opened = 'true';
+    if (typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+    const control = [...row.querySelectorAll('button[data-verb]')].find((button) => !button.disabled);
+    if (!control) return false;
+    control.focus({ preventScroll: true });
+    return true;
+  }
   el('confirm')?.addEventListener('click', confirm);
   el('cancel')?.addEventListener('click', () => closePreview(true));
   el('confirmation')?.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { event.preventDefault(); closePreview(true); }
   });
   renderRows();
-  return { update, confirm, reset, refreshAdmission, select,
+  return { update, confirm, reset, refreshAdmission, select, focusObjective,
     state: () => ({ ...projection, preview, pending, scope: scopeShip ? scopeShip.id : null }) };
 }

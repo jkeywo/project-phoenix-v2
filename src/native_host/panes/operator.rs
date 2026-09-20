@@ -825,6 +825,43 @@ const LIVE_PANELS_V14: &[&str] = &[
     "entity-fields",
 ];
 const LIVE_ADDED_IN_V14: &[(&str, &str, &str)] = &[];
+const LIVE_PANELS_V15: &[&str] = &[
+    "roster",
+    "readiness",
+    "join",
+    "manual-save",
+    "mission",
+    "comms",
+    "activity",
+    "journal",
+    "session-history",
+    "map",
+    "attention",
+    "workload",
+    "widgets",
+    "health",
+    "station",
+    "station-console",
+    "presentation",
+    "audition",
+    "source-link",
+    "spawn",
+    "inspector",
+    "checkpoint",
+    "restore",
+    "contact",
+    "npc",
+    "misclassify",
+    "report-policy",
+    "system",
+    "effect",
+    "despawn",
+    "faction",
+    "objective",
+    "entity-fields",
+    "world-fields",
+];
+const LIVE_ADDED_IN_V15: &[(&str, &str, &str)] = &[("world-fields", "mission", "tab")];
 
 /// Panels registered after version 12. The entities/AI Live Inspector reads the
 /// same selection the entity inspector does, so it joins that column as a tab.
@@ -876,7 +913,8 @@ fn live_panels_for(version: u64) -> &'static [&'static str] {
         11 => LIVE_PANELS_V11,
         12 => LIVE_PANELS_V12,
         13 => LIVE_PANELS_V13,
-        _ => LIVE_PANELS_V14,
+        14 => LIVE_PANELS_V14,
+        _ => LIVE_PANELS_V15,
     }
 }
 
@@ -919,6 +957,9 @@ fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'s
     }
     if version < 14 {
         added.extend_from_slice(LIVE_ADDED_IN_V14);
+    }
+    if version < 15 {
+        added.extend_from_slice(LIVE_ADDED_IN_V15);
     }
     added
 }
@@ -1019,12 +1060,12 @@ fn default_test_layout() -> Value {
 
 fn default_live_layout() -> Value {
     json!({
-        "version": 14,
+        "version": 15,
         "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
             {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
                 {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
                     {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission",
-                        "attention","workload","widgets","station","objective"], "active":"roster"},
+                        "attention","workload","widgets","station","objective","world-fields"], "active":"roster"},
                     {"type":"tabs", "tabs":["presentation","audition","source-link"], "active":"presentation"}
                 ]},
                 {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
@@ -1043,7 +1084,7 @@ fn default_live_layout() -> Value {
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=14).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=15).contains(v))?;
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -1108,9 +1149,6 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
         .or_else(|| first_visible(&root, &floats))
         .unwrap_or_else(|| json!("roster"));
     let mut layout = json!({"version":stored, "root":root, "floats":floats, "closed":closed, "selected":selected});
-    if !added.is_empty() {
-        layout = migrate_live_layout(layout, &added);
-    }
     // A version that registered only a temporary panel places nothing, so the
     // stamp is written here rather than inside the placement pass.
     layout["version"] = default_live_layout()["version"].clone();
@@ -1119,6 +1157,13 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
     // only then puts a pinned panel back into the first group. Repairing first
     // would land the pinned panels in a group about to be emptied and keep it.
     retire_unregistered_live_panels(&mut layout);
+    if !added.is_empty() {
+        // Browser migration settles the tree against the current vocabulary
+        // before it places newly registered panels. In particular, if the old
+        // active tab was retired, the repaired survivor stays active instead
+        // of the new panel stealing the view.
+        layout = migrate_live_layout(layout, &added);
+    }
     repair_pinned_live_panels(&mut layout);
     record_unplaced_live_panels(&mut layout);
     Some(layout)

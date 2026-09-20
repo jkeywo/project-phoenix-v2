@@ -3,7 +3,7 @@ title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
 sources: [src/gm_information/reports.rs, gui/sensor-report.js, gui/components/ph-sensor-panel.js, src/server/viewscreen_border.rs, src/gm_information.rs, src/gm_presentation.rs, gui/gm-presentation-panel.js, gui/presentation-card.js, pasm/spec/design/t4-presentation.yaml, tests/gm_presentation.rs, src/gm_contact.rs, gui/gm-contact-panel.js, pasm/spec/design/t4-information-control.yaml, src/gm_solo.rs, src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html, src/gm_presentation/sound.rs, gui/host-content-fetch.js, tests/client/live-authored-audio.test.js]
-updated: 2026-09-15
+updated: 2026-09-20
 ---
 
 # GM Operator
@@ -139,6 +139,17 @@ during Authoring and dropped before spawn — `config_cache` keeps the parsed
 name the include layer a field won in and reports its location unavailable
 instead of inferring one. And "layer" in a Live descriptor means the authored
 sub-world layer the runtime does retain, never the include chain.
+
+Issue #1490 adds the world/scenario domain on the same reading contract. The
+root reading combines effective parsed `[global]` values with the mission
+event, Objective, deadline and scenario-state owners already used elsewhere on
+the desk. Each active supporting layer retains the effective definition used
+to load it and receives its own origin-tagged runtime records. Scenario Flags
+are derived values only. Fire/Pause/Skip, Objective and
+session rows point to their existing dock panels, so the Inspector adds no
+second action lifecycle and no generic field setter. Supporting-world paths are
+stable selectable identities; unloading the selected layer leaves its final
+reading visibly gone and disables its links until the operator moves elsewhere.
 
 A field the entity never authored is absent rather than blank: "not authored"
 and "authored empty" are different facts. A despawned entity keeps its final

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use bevy::prelude::*;
+use bevy::{ecs::system::SystemParam, prelude::*};
 use serde::{Deserialize, Serialize};
 
 use crate::console::weapons::TacticalRadarSelection;
@@ -35,6 +35,15 @@ use crate::ship::components::{
 };
 use crate::ship::state::ShipPhysics;
 use crate::world::server::WorldContentRuntime;
+
+#[derive(SystemParam)]
+struct GmWorldInspectorSources<'w> {
+    runtime: Option<Res<'w, WorldContentRuntime>>,
+    config: Option<Res<'w, crate::world::config::WorldConfig>>,
+    objectives: Option<Res<'w, crate::world::server::ObjectiveManagerRes>>,
+    layers: Option<Res<'w, crate::world::server::WorldLayerMap>>,
+    paused: Option<Res<'w, crate::gm_action::SimulationPaused>>,
+}
 
 /// Marks the explicit production rendererless browser GM peer.
 ///
@@ -189,6 +198,8 @@ pub struct GmEntityProjection {
 /// state when every selectable ship has left the world.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct GmEntityProjectionPayload {
+    #[serde(default)]
+    pub world_inspector: crate::gm_world_inspector::WorldInspectorProjection,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub system_controls: BTreeMap<String, Vec<GmSystemControlStatus>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -728,7 +739,7 @@ fn publish_local_projection(
     world_entities: GmWorldProjectionQuery,
     all_names: Query<(&EntityUuid, Option<&EntityName>, Option<&EntityId>)>,
     factions: Option<Res<FactionRegistryResource>>,
-    world_content: Option<Res<WorldContentRuntime>>,
+    world_sources: GmWorldInspectorSources,
     world_setup: Option<Res<WorldResource>>,
     action_log: Res<GmActionLog>,
     local_refusals: Res<LocalGmActionRefusals>,
@@ -737,6 +748,7 @@ fn publish_local_projection(
     removal_targets: crate::gm_despawn::RemovalQuery,
     presentation_control: crate::gm_presentation::PresentationControl,
 ) {
+    let world_content = &world_sources.runtime;
     // Resolve names in a separate deterministic lookup so target links never
     // leak a Bevy `Entity` and remain useful after a projection refresh.
     let authored_names: BTreeMap<&str, &str> = world_setup
@@ -925,6 +937,16 @@ fn publish_local_projection(
         &inspector_targets,
     );
     let next = GmEntityProjectionPayload {
+        world_inspector: crate::gm_world_inspector::projection(
+            world_sources.config.as_deref(),
+            world_content.as_deref(),
+            world_sources
+                .objectives
+                .as_deref()
+                .map(|objectives| &objectives.0),
+            world_sources.layers.as_deref(),
+            world_sources.paused.as_deref().map(|paused| paused.0),
+        ),
         system_controls: system_sources
             .iter()
             .map(|(uuid, config, sources)| {

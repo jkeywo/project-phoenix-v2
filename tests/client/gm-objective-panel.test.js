@@ -61,6 +61,15 @@ it('shows authored text and intended ships, with preview/cancel and no optimisti
   expect(panel.confirm()).toBe(false); expect(submit).toHaveBeenCalledOnce();
 });
 
+it('focuses the matching established Objective control without invoking it', () => {
+  const { panel, submit } = mount();
+  panel.update(payload());
+  expect(panel.focusObjective('rescue')).toBe(true);
+  expect(document.activeElement).toBe(button('activate'));
+  expect(document.querySelector('[data-objective="rescue"]').dataset.opened).toBe('true');
+  expect(submit).not.toHaveBeenCalled();
+});
+
 it.each(['complete', 'fail'])('allows %s only on an active record and never reopens a terminal record', (verb) => {
   const { panel, submit } = mount();
   panel.update(payload({ objective_palette: [authored({ status: 'Active' })], objectives: [authored({ status: 'Active' })] }));

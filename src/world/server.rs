@@ -285,6 +285,10 @@ pub struct PendingScenarioLoad(pub Vec<String>);
 /// [`crate::world::trigger_registry::WorldTriggerRegistry::remove_layer`] matches on at unload.
 #[derive(Clone, Debug, Default)]
 pub struct WorldRuntime {
+    /// Parsed effective definition retained for read-only Live inspection.
+    /// Runtime authority continues to live in the specialised fields below;
+    /// this copy is never read by simulation systems.
+    pub inspection_config: Option<Box<crate::world::config::WorldConfig>>,
     /// `true` only after a layer completed atomic activation. Failed-load
     /// sentinels deliberately remain `false`: they occupy the path to suppress
     /// retry loops, but are not part of the active composition a snapshot must
@@ -4803,6 +4807,7 @@ fn apply_loaded_layer(
     layer_map.0.insert(
         path.to_string(),
         WorldRuntime {
+            inspection_config: Some(Box::new(scenario_config.clone())),
             is_active: true,
             activation_order,
             spawned_entities,

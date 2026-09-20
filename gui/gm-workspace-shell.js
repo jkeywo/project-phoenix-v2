@@ -82,6 +82,7 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // The entities/AI domain of the Live Inspector (issue #1489): a reading
   // surface beside the selection it reads, never a second action route.
   ['entity-fields', 'gm-entity-fields-panel'],
+  ['world-fields', 'gm-world-fields-panel'],
 ]);
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {

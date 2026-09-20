@@ -92,6 +92,11 @@ button:not(:disabled) { cursor: pointer; }
    it easier to scan, and the severity below is a word too. */
 .workshop-presets-undrawn label { font-weight: 700; }
 .workshop-presets-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-model-structure { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr)); gap: 1rem; }
+.workshop-model-structure fieldset { min-width: 0; }
+.workshop-model-structure-row { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; margin: .6rem 0; }
+.workshop-model-structure-row :is(input, select) { flex: 1 1 9rem; min-width: 0; min-height: 2.75rem; }
+.workshop-model-structure-row small { flex-basis: 100%; }
 .workshop-model-preview :is(input, select) { max-width: 100%; }
 .workshop-model-preview-viewport { width: 100%; }
 .workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }

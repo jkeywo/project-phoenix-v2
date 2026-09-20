@@ -2,8 +2,8 @@
 title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
-sources: [src/entities/planet_texture.rs, assets/texture-codecs/README.md, viewer.html, viewer-trunk.toml, workshop-preview.html, workshop-preview-trunk.toml, src/viewer/preview.rs, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
-updated: 2026-09-10
+sources: [src/entities/planet_texture.rs, assets/texture-codecs/README.md, viewer.html, viewer-trunk.toml, workshop-preview.html, workshop-preview-trunk.toml, src/viewer/preview.rs, editor/workshop-model-structure.js, gui/workshop-models-panel.js, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
+updated: 2026-09-20
 ---
 
 # Model Viewer
@@ -244,9 +244,15 @@ commands (lod, lighting, gizmos, distance, camera) over its own
 `phoenix-workshop-preview-connect` type, so a Test port cannot drive a preview
 or the reverse.
 
-The NATIVE preview is not built. Native Test keeps merged dependencies
-in-process and spawns a separate process, so nothing large crosses its JSON
-bridge; a native preview renders inside the embedded webview and so needs a
-host-served route for one captured snapshot. That is native-host work in its own
-right and was left unbuilt rather than approximated with a bridge op that would
-serialise a merged asset tree.
+Native publishes the same immutable capture through a nonce-scoped loopback
+route. The JSON bridge carries only authored references and the route
+capability; model bytes never cross it, and retired or unknown capture routes
+cannot fall through to project or delivery files.
+
+The Workshop model panel also owns structural source editing for rig markers,
+target points, variants and LOD rungs. It patches only the selected TOML spans,
+shows file-and-line ownership beside textual vector controls, validates a
+captured candidate through the normal runtime, and records one grouped history
+entry. Variant selection, Auto/fixed LOD, marker gizmos and renderer statistics
+continue through this captured ViewerPlugin preview, so structural source and
+the picture being judged use the same draft revision.

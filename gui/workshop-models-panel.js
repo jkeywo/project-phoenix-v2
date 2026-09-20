@@ -1,4 +1,5 @@
-import { modelDocuments, entityDocuments, modelFieldGroup, createModelVariant, patchModelFields } from '../editor/workshop-models.js';
+import { modelDocuments, entityDocuments, modelFieldGroup, patchModelFields } from '../editor/workshop-models.js';
+import { applyModelStructureOperation, inspectModelStructure } from '../editor/workshop-model-structure.js';
 import { t } from './strings.js';
 import { validInspectorDescriptor, renderInspectorMetadata } from './inspector-field.js';
 import { mountWorkshopModelPreview } from './workshop-model-preview-panel.js';
@@ -20,6 +21,8 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   const inspect = node('button', 'workshop.inspect', { type: 'button', id: 'workshop-model-inspect' });
   const newName = node('input', null, { type: 'text', maxlength: '64', id: 'workshop-model-new-variant' });
   const clone = node('button', 'workshop.models.clone', { type: 'button', id: 'workshop-model-clone' });
+  const renameVariant = node('button', 'workshop.models.rename_variant', { type: 'button', id: 'workshop-model-rename-variant' });
+  const removeVariant = node('button', 'workshop.models.remove_variant', { type: 'button', id: 'workshop-model-remove-variant' });
   // What the preview shows. A model is its GLB and rig; an entity template is
   // its composed visual, which is how a star and a planet become previewable —
   // the shared viewer dispatches [star], [planet] and [mesh] itself, so there is
@@ -27,17 +30,19 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   const subject = node('select', null, { id: 'workshop-preview-subject' });
   const status = node('p', null, { role: 'status', tabindex: '-1', id: 'workshop-model-status' });
   const form = node('div', null, { class: 'workshop-model-fields' });
+  const structure = node('div', null, { class: 'workshop-model-structure', id: 'workshop-model-structure' });
   const apply = node('button', 'workshop.models.apply', { type: 'button', id: 'workshop-model-apply' });
   section.append(node('p', 'workshop.models.source_scope'), node('label', 'workshop.models.model', { for: model.id }), model,
     node('label', 'workshop.models.variant', { for: variant.id }), variant, inspect,
-    node('label', 'workshop.models.new_variant', { for: newName.id }), newName, clone,
+    node('label', 'workshop.models.new_variant', { for: newName.id }), newName, clone, renameVariant, removeVariant,
     node('label', 'workshop.models.preview_subject', { for: subject.id }), subject,
-    status, form, apply);
+    status, structure, form, apply);
   // A docked panel is placed by the renderer, which moves the node into its frame.
   // Attaching here as well would strand the node in `root` whenever the stored
   // layout has the panel closed, because a closed panel is never framed.
   if (attach) root.append(section);
   let disposed = false, snapshot = null, rows = [], previousDraft = null, previousPaths = '', preview = null;
+  let dependencies = null, dependencyLoad = null, structureSnapshot = null;
   let previewVisible = true, testHidden = false;
   const option = (value, label) => { const item = node('option', null, { value }); item.textContent = label; return item; };
   const show = (id, error = false) => {
@@ -45,6 +50,132 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     status.setAttribute('role', error ? 'alert' : 'status');
     if (error) status.focus();
   };
+  const vector = input => {
+    const result = input.value.split(',').map(value => Number(value.trim()));
+    if (result.length !== 3 || result.some(value => !Number.isFinite(value))) throw new Error('model-structure-vector');
+    return result;
+  };
+  const vectorInput = (id, value, labelId) => {
+    const input = node('input', null, { type: 'text', id, value: (value || [0, 0, 0]).join(', '), spellcheck: 'false' });
+    input.value = (value || [0, 0, 0]).join(', ');
+    return [node('label', labelId, { for: id }), input];
+  };
+  const action = (id, label, invoke, boundary = false) => {
+    const button = node('button', label, { type: 'button', id });
+    if (boundary) button.dataset.boundary = 'true';
+    button.addEventListener('click', () => { try { invoke(); } catch { show('workshop.inspector_refused', true); } }); return button;
+  };
+  async function loadDependencies() {
+    if (dependencies || dependencyLoad || typeof runtime.dependencies !== 'function') return dependencyLoad;
+    dependencyLoad = runtime.dependencies();
+    try { dependencies = await dependencyLoad; } catch { dependencies = {}; }
+    finally { dependencyLoad = null; if (!disposed) { renderStructure(); refresh(); } }
+    return dependencies;
+  }
+  async function commitStructure(operation) {
+    if (busy()) return;
+    const candidate = draft(), selected = variant.value;
+    setBusy(true);
+    try {
+      const result = await applyModelStructureOperation({ draft: candidate, provider, runtime,
+        dependencies: dependencies || {}, operation,
+        current: () => !disposed && draft() === candidate && variant.value === selected });
+      snapshot = null; form.replaceChildren(); rows = []; changed(result.selected || operation.path);
+      refreshVariants();
+      if (result.selected) variant.value = result.selected;
+      else if (variant.options.length) variant.selectedIndex = 0;
+      show('workshop.changed'); renderStructure();
+    } catch (error) {
+      if (!disposed) {
+        const finding = error.report?.findings?.[0];
+        status.textContent = finding ? `${finding.file}:${finding.line} ${finding.message}` : t('workshop.inspector_refused');
+        status.setAttribute('role', 'alert'); status.focus();
+      }
+    } finally { if (!disposed) { setBusy(false); refresh(); } }
+  }
+  function provenance(row) {
+    const value = node('small', null, { class: 'workshop-model-owner' });
+    value.textContent = t('workshop.models.owner', { file: row.owner, line: String(row.line) }); return value;
+  }
+  function renderStructure() {
+    structure.replaceChildren(); structureSnapshot = null;
+    const current = draft(), selected = variant.value;
+    if (!current || !model.value || !selected) return;
+    let view;
+    try { view = inspectModelStructure(current, model.value, selected, dependencies || {}); }
+    catch { return; }
+    structureSnapshot = { draft: current, path: selected, source: current.read(selected) };
+    const group = (legend, id) => { const fieldset = node('fieldset', null, { id }); fieldset.append(node('legend', legend)); structure.append(fieldset); return fieldset; };
+    const markers = group('workshop.models.structure.markers', 'workshop-model-markers');
+    view.markers.forEach((marker, index) => {
+      const row = node('div', null, { class: 'workshop-model-structure-row' });
+      const name = node('input', null, { type: 'text', id: `workshop-model-marker-name-${index}`, maxlength: '64' }); name.value = marker.name;
+      const [positionLabel, position] = vectorInput(`workshop-model-marker-position-${index}`, marker.position, 'workshop.models.position');
+      const [directionLabel, direction] = vectorInput(`workshop-model-marker-direction-${index}`, marker.direction, 'workshop.models.direction');
+      row.append(node('label', 'workshop.models.name', { for: name.id }), name, positionLabel, position, directionLabel, direction,
+        provenance(marker),
+        action(`workshop-model-marker-save-${index}`, 'workshop.models.save', () => commitStructure({ type: 'marker-set', path: selected,
+          name: marker.name, newName: name.value, position: vector(position), direction: vector(direction) })),
+        action(`workshop-model-marker-up-${index}`, 'workshop.models.up', () => commitStructure({ type: 'marker-move', path: selected, name: marker.name, direction: -1 }), index === 0),
+        action(`workshop-model-marker-down-${index}`, 'workshop.models.down', () => commitStructure({ type: 'marker-move', path: selected, name: marker.name, direction: 1 }), index === view.markers.length - 1),
+        action(`workshop-model-marker-remove-${index}`, 'workshop.models.remove', () => commitStructure({ type: 'marker-remove', path: selected, name: marker.name })));
+      markers.append(row);
+    });
+    const markerName = node('input', null, { type: 'text', id: 'workshop-model-marker-new-name', maxlength: '64' });
+    const [markerPositionLabel, markerPosition] = vectorInput('workshop-model-marker-new-position', [0, 0, 0], 'workshop.models.position');
+    const [markerDirectionLabel, markerDirection] = vectorInput('workshop-model-marker-new-direction', [0, 0, 1], 'workshop.models.direction');
+    markers.append(node('label', 'workshop.models.new_marker', { for: markerName.id }), markerName, markerPositionLabel, markerPosition,
+      markerDirectionLabel, markerDirection, action('workshop-model-marker-add', 'workshop.models.add', () => commitStructure({
+        type: 'marker-add', path: selected, name: markerName.value, position: vector(markerPosition), direction: vector(markerDirection) })));
+
+    const targets = group('workshop.models.structure.targets', 'workshop-model-targets');
+    view.target_points.forEach((target, index) => {
+      const row = node('div', null, { class: 'workshop-model-structure-row' });
+      const [label, position] = vectorInput(`workshop-model-target-position-${index}`, target.position, 'workshop.models.position');
+      row.append(label, position, provenance(target),
+        action(`workshop-model-target-save-${index}`, 'workshop.models.save', () => commitStructure({ type: 'target-set', path: selected, index, position: vector(position) })),
+        action(`workshop-model-target-up-${index}`, 'workshop.models.up', () => commitStructure({ type: 'target-move', path: selected, index, direction: -1 }), index === 0),
+        action(`workshop-model-target-down-${index}`, 'workshop.models.down', () => commitStructure({ type: 'target-move', path: selected, index, direction: 1 }), index === view.target_points.length - 1),
+        action(`workshop-model-target-remove-${index}`, 'workshop.models.remove', () => commitStructure({ type: 'target-remove', path: selected, index })));
+      targets.append(row);
+    });
+    const [targetLabel, targetPosition] = vectorInput('workshop-model-target-new-position', [0, 0, 0], 'workshop.models.position');
+    targets.append(targetLabel, targetPosition, action('workshop-model-target-add', 'workshop.models.add', () => commitStructure({
+      type: 'target-add', path: selected, position: vector(targetPosition) })));
+
+    const lods = group('workshop.models.structure.lod', 'workshop-model-lods');
+    view.lod.forEach((level, index) => {
+      const row = node('div', null, { class: 'workshop-model-structure-row' });
+      const kind = node('select', null, { id: `workshop-model-lod-kind-${index}` });
+      for (const value of ['model', 'billboard', 'shape']) kind.append(option(value, t(`workshop.models.lod.${value}`)));
+      kind.value = level.model ? 'model' : level.billboard ? 'billboard' : 'shape';
+      const reference = node('input', null, { type: 'text', id: `workshop-model-lod-reference-${index}` }); reference.value = level[kind.value] || '';
+      const lodVariant = node('input', null, { type: 'text', id: `workshop-model-lod-variant-${index}` }); lodVariant.value = level.variant || '';
+      const distance = node('input', null, { type: 'number', min: '0', step: 'any', id: `workshop-model-lod-distance-${index}` }); distance.value = level.max_distance ?? '';
+      const levelValue = () => ({ [kind.value]: reference.value, ...(lodVariant.value ? { variant: lodVariant.value } : {}),
+        ...(distance.value ? { max_distance: Number(distance.value) } : {}) });
+      row.append(node('label', 'workshop.models.renderer', { for: kind.id }), kind,
+        node('label', 'workshop.models.reference', { for: reference.id }), reference,
+        node('label', 'workshop.models.lod_variant', { for: lodVariant.id }), lodVariant,
+        node('label', 'workshop.models.max_distance', { for: distance.id }), distance, provenance(level),
+        action(`workshop-model-lod-save-${index}`, 'workshop.models.save', () => commitStructure({ type: 'lod-set', path: selected, index, level: levelValue() })),
+        action(`workshop-model-lod-up-${index}`, 'workshop.models.up', () => commitStructure({ type: 'lod-move', path: selected, index, direction: -1 }), index === 0),
+        action(`workshop-model-lod-down-${index}`, 'workshop.models.down', () => commitStructure({ type: 'lod-move', path: selected, index, direction: 1 }), index === view.lod.length - 1),
+        action(`workshop-model-lod-remove-${index}`, 'workshop.models.remove', () => commitStructure({ type: 'lod-remove', path: selected, index })));
+      lods.append(row);
+    });
+    const kind = node('select', null, { id: 'workshop-model-lod-new-kind' });
+    for (const value of ['model', 'billboard', 'shape']) kind.append(option(value, t(`workshop.models.lod.${value}`)));
+    const reference = node('input', null, { type: 'text', id: 'workshop-model-lod-new-reference' }); reference.value = model.value;
+    const distance = node('input', null, { type: 'number', min: '0', step: 'any', id: 'workshop-model-lod-new-distance' });
+    lods.append(node('label', 'workshop.models.renderer', { for: kind.id }), kind,
+      node('label', 'workshop.models.reference', { for: reference.id }), reference,
+      node('label', 'workshop.models.max_distance', { for: distance.id }), distance,
+      action('workshop-model-lod-add', 'workshop.models.add', () => commitStructure({ type: 'lod-add', path: selected,
+        index: view.lod.at(-1)?.max_distance == null ? Math.max(0, view.lod.length - 1) : view.lod.length,
+        level: { [kind.value]: reference.value, ...(distance.value ? { max_distance: Number(distance.value) } : {}) } })));
+    for (const control of structure.querySelectorAll('button,input,select')) control.disabled = busy() || control.dataset.boundary === 'true';
+  }
   function refreshVariants() {
     const old = variant.value;
     const entry = modelDocuments(draft()?.paths() || []).find(entry => entry.model === model.value);
@@ -70,12 +201,18 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     model.disabled = variant.disabled = newName.disabled = held || !model.value;
     inspect.disabled = held || !variant.value;
     clone.disabled = held || !model.value;
+    renameVariant.disabled = held || !variant.value;
+    removeVariant.disabled = held || !variant.value;
     const fresh = snapshot && snapshot.draft === current && snapshot.path === variant.value
       && snapshot.source === current?.read(snapshot.path);
     apply.disabled = held || !fresh || !rows.length;
     for (const row of rows) row.input.disabled = held || !fresh;
     if (snapshot && !fresh) show('workshop.inspector_stale');
     if (!current || !model.value) show('workshop.models.empty');
+    if (!dependencyLoad && variant.value && (!structureSnapshot || structureSnapshot.draft !== current
+      || structureSnapshot.path !== variant.value || structureSnapshot.source !== current?.read(variant.value))) renderStructure();
+    for (const control of structure.querySelectorAll('button,input,select')) control.disabled = held || Boolean(dependencyLoad)
+      || control.dataset.boundary === 'true';
     // The captured picture stops whenever its own panel stops being shown, not
     // only in Test mode: a closed, unselected or narrow-projected-away panel is
     // as invisible as a hidden one, and holding a render session open then keeps
@@ -135,21 +272,31 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       if (!disposed) show(error.message === 'workshop.inspector_stale' ? error.message : 'workshop.inspector_refused', true);
     } finally { if (!disposed) { setBusy(false); refresh(); } }
   });
-  clone.addEventListener('click', () => {
+  clone.addEventListener('click', async () => {
     if (busy() || clone.disabled) return;
-    try {
-      const path = createModelVariant(draft(), model.value, newName.value, variant.value || null);
-      refresh(); variant.value = path; newName.value = ''; snapshot = null; form.replaceChildren(); rows = [];
-      changed(path); show('workshop.changed'); refresh(); inspect.focus();
-    } catch (error) {
-      show(['workshop.models.invalid_variant', 'workshop.models.variant_exists'].includes(error.message)
-        ? error.message : 'workshop.inspector_refused', true);
+    const name = newName.value;
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) { show('workshop.models.invalid_variant', true); return; }
+    if (modelDocuments(draft().paths()).find(entry => entry.model === model.value)?.variants.some(item => item.name === name)) {
+      show('workshop.models.variant_exists', true); return;
     }
+    await commitStructure({ type: 'variant-add', path: variant.value || null, model: model.value, name,
+      clone: Boolean(variant.value) });
+    newName.value = ''; inspect.focus();
   });
-  model.addEventListener('change', () => { refreshVariants(); refresh(); });
+  renameVariant.addEventListener('click', async () => {
+    if (busy() || renameVariant.disabled) return;
+    const name = newName.value;
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) { show('workshop.models.invalid_variant', true); return; }
+    await commitStructure({ type: 'variant-rename', path: variant.value, model: model.value, name });
+    newName.value = ''; inspect.focus();
+  });
+  removeVariant.addEventListener('click', () => commitStructure({ type: 'variant-remove', path: variant.value, model: model.value }));
+  model.addEventListener('change', () => { refreshVariants(); renderStructure(); refresh(); });
   subject.addEventListener('change', () => refresh());
-  variant.addEventListener('change', () => refresh());
+  variant.addEventListener('change', () => { renderStructure(); refresh(); });
+  if (typeof runtime.dependencies === 'function') loadDependencies();
   refresh();
+  if (typeof runtime.dependencies !== 'function') renderStructure();
   preview = mountWorkshopModelPreview({ root: section, attach, provider, draft, busy,
     selection: () => {
       // An entity subject is previewed as a composed template; anything else

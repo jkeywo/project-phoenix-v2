@@ -2597,6 +2597,11 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   expect(authoredConfig.helmTutorials).toBeGreaterThan(0);
   expect(authoredConfig.helmAssistRatings.length).toBeGreaterThan(0);
 
+  // This is the first real visit to the embedded Helm console, so its
+  // authored tutorial cards are intentionally above the controls. Clear them
+  // through their ordinary buttons before proving the console interaction.
+  await dismissTutorialCards(gm, '#gm-station-frame');
+
   // Capture the iframe's own correlated semantic actions at the parent seam.
   // The assertions below compare those opaque identities to canonical Rust
   // results, then read the authentic iframe's ordinary feedback surface.
@@ -2677,6 +2682,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   const loadedTorpedoFire = torpedoControls.locator('.tube-row .btn.armed').first();
   await expect(torpedoControls).toBeVisible({ timeout: 20_000 });
   await expect(loadedTorpedoFire).toBeEnabled({ timeout: 30_000 });
+  await dismissTutorialCards(gm, '#gm-station-frame');
 
   await revealGmPanel(gm, 'station');
   await takeover.scrollIntoViewIfNeeded();

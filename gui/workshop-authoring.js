@@ -17,6 +17,7 @@ import { mountWorkshopEntity } from './workshop-entity-panel.js';
 import { mountWorkshopPresets } from './workshop-presets-panel.js';
 import { mountWorkshopShipAuthoring } from './workshop-ship-authoring-panel.js';
 import { mountWorkshopScripts } from './workshop-scripts-panel.js';
+import { mountWorkshopSpatial } from './workshop-spatial-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -183,6 +184,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let presetsPanel = null;
   let shipAuthoringPanel = null;
   let scriptsPanel = null;
+  let spatialPanel = null;
   let layoutMount = null;
   let testLayoutMount = null;
   const feedbackRows = new Map();
@@ -258,8 +260,12 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  spatialPanel = mountWorkshopSpatial({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
-  compositionTools.append(compositionPanel.node, shipAuthoringPanel.node);
+  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
@@ -423,6 +429,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     presetsPanel?.refresh({ hidden: testing });
     shipAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
+    spatialPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     testLayout.hidden = !testing;
     sourceScope.hidden = testing;
@@ -990,6 +997,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     presetsPanel?.dispose();
     shipAuthoringPanel?.dispose();
     scriptsPanel?.dispose();
+    spatialPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);

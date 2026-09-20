@@ -988,7 +988,7 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         b"// later external edit",
     )
     .unwrap();
-    let authored = "# unsaved exact comment\r\n[global]\r\ntitle='Unsaved Test'\r\n";
+    let authored = "# unsaved exact comment\r\n[global]\r\ntitle='Unsaved Test'\r\n\r\n[[entity]]\r\ntemplate_path='assets/entities/test.toml'\r\nid='placed-by-workshop'\r\ntransform={position=[37.0,2.0,-19.0],rotation=[0.0,1.25,0.0]} # exact placement\r\n";
     sources.insert(
         "assets/worlds/test.toml".into(),
         assets::Source::Text(authored.into()),
@@ -1056,6 +1056,39 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         b"// captured shader\r\n"
     );
     assert_eq!(snapshot.selection.seed, 42);
+    // Test consumes the immutable unsaved bytes through the ordinary world
+    // loader. This is the same WorldConfig the disposable child will spawn,
+    // and therefore the observation boundary for the placement canvas.
+    let text_sources = snapshot
+        .files
+        .iter()
+        .filter_map(|(path, bytes)| {
+            (path.ends_with(".toml") || path.ends_with(".rhai"))
+                .then(|| {
+                    String::from_utf8(bytes.clone())
+                        .ok()
+                        .map(|text| (path.clone(), text))
+                })
+                .flatten()
+        })
+        .collect();
+    let exact = crate::workshop::Sources(text_sources);
+    let loaded = crate::world::load::load(crate::world::load::LoadRequest::new(
+        selection.world.clone(),
+        &exact,
+        &exact,
+        crate::world::load::LoadPolicy::Inspect,
+    ))
+    .unwrap();
+    let placed = loaded
+        .config
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_deref() == Some("placed-by-workshop"))
+        .unwrap();
+    let transform = placed.transform.as_ref().unwrap();
+    assert_eq!(transform.position, Some([37.0, 2.0, -19.0]));
+    assert_eq!(transform.rotation, Some([0.0, 1.25, 0.0]));
     assert_eq!(
         fs::read(fixture.root.join(&selection.world)).unwrap(),
         provider.baseline[&selection.world]

@@ -24,6 +24,49 @@ function refusal(id, detail = '') {
 const trimmed = value => String(value ?? '').trim();
 const stringArray = values => `[${values.map(tomlBasicString).join(', ')}]`;
 
+function topLevelValueSpan(source, key) {
+  let offset = 0;
+  for (const line of source.match(/.*(?:\r\n|\n|$)/g) || []) {
+    if (/^\s*\[/.test(line)) return null;
+    const match = new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*`).exec(line);
+    if (!match) { offset += line.length; continue; }
+    const start = offset + match[0].length;
+    let index = start, quote = null, escaped = false, comment = false, square = 0, curly = 0;
+    while (index < source.length) {
+      const character = source[index];
+      if (comment) { if (character === '\r' || character === '\n') comment = false; }
+      else if (quote) {
+        if (escaped) escaped = false;
+        else if (character === '\\' && quote === '"') escaped = true;
+        else if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") quote = character;
+      else if (character === '#') { if (square === 0 && curly === 0) break; comment = true; }
+      else if (character === '[') square += 1;
+      else if (character === ']') square -= 1;
+      else if (character === '{') curly += 1;
+      else if (character === '}') curly -= 1;
+      else if ((character === '\r' || character === '\n') && square === 0 && curly === 0) break;
+      index += 1;
+    }
+    while (index > start && /\s/.test(source[index - 1])) index -= 1;
+    return { start, end: index };
+  }
+  return null;
+}
+
+/** Exact-source compatibility used by the spatial authoring transaction. */
+export function setExtraWorlds(source, values) {
+  if (!Array.isArray(values) || values.some(value => !WORLD_PATH.test(value)) || new Set(values).size !== values.length) {
+    throw new Error('invalid-composition-reference');
+  }
+  const replacement = stringArray(values);
+  const span = topLevelValueSpan(source, 'extra_worlds');
+  if (span) return source.slice(0, span.start) + replacement + source.slice(span.end);
+  const newline = source.includes('\r\n') ? '\r\n' : '\n';
+  const prefix = `extra_worlds = ${replacement}${newline}`;
+  return source.startsWith('\uFEFF') ? `\uFEFF${prefix}${source.slice(1)}` : prefix + source;
+}
+
 /** The edits that turn `before` into `after` inside an array of strings:
  * removals first, by descending index so each one still names the element it
  * meant, then appends. An empty reading is written as a whole array through

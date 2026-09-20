@@ -92,6 +92,36 @@ button:not(:disabled) { cursor: pointer; }
    it easier to scan, and the severity below is a word too. */
 .workshop-presets-undrawn label { font-weight: 700; }
 .workshop-presets-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-model-preview :is(input, select) { max-width: 100%; }
+.workshop-model-preview-viewport { width: 100%; }
+.workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }
+.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.workshop-composition { display: grid; align-content: start; gap: .5rem; }
+.workshop-composition :is(select, input) { width: 100%; }
+.workshop-composition :is(p, label, li) { overflow-wrap: anywhere; }
+.workshop-composition ul { margin: 0; padding-inline-start: 1.5rem; }
+.workshop-composition-tools { display: grid; gap: 1.25rem; }
+.workshop-entity-composition { display: grid; align-content: start; gap: .5rem; border-top: 1px solid #8195a8; padding-top: 1rem; }
+.workshop-entity-composition :is(select, button, pre) { max-width: 100%; }
+.workshop-entity-composition select { width: 100%; }
+.workshop-entity-composition pre { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workshop-spatial { display: grid; align-content: start; gap: .5rem; border-top: 1px solid #8195a8; padding-top: 1rem; }
+.workshop-spatial :is(select, input, button) { max-width: 100%; }
+.workshop-spatial select { width: 100%; }
+.workshop-spatial-map { position: relative; min-height: 14rem; overflow: hidden; border: 1px solid #8195a8;
+  background: linear-gradient(#18202a99 1px, transparent 1px), linear-gradient(90deg, #18202a99 1px, transparent 1px);
+  background-size: 1.5rem 1.5rem; }
+.workshop-spatial-marker { position: absolute; translate: -50% -50%; min-width: 2rem; min-height: 2rem;
+  border: 2px solid currentColor; border-radius: 50%; color: #d8e8f8; background: #203349; }
+.workshop-spatial-marker[data-kind="anchor"] { border-radius: 0; color: #fff071; }
+.workshop-spatial-marker[data-kind="region"] { color: #72f08d; }
+.workshop-spatial-marker[aria-pressed="true"] { outline: 3px solid #fff; outline-offset: 2px; }
+.workshop-role-presets { display: grid; align-content: start; gap: .5rem; border-top: 1px solid #8195a8; padding-top: 1rem; }
+.workshop-role-presets :is(select, input, button) { max-width: 100%; }
+.workshop-role-presets > :is(select, input) { width: 100%; }
+.workshop-role-presets fieldset { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .35rem .55rem; }
+.workshop-role-presets fieldset legend { grid-column: 1 / -1; }
+.workshop-role-presets :is(p, label, legend) { overflow-wrap: anywhere; }
 .workshop-scripts { display: flex; flex-direction: column; min-height: 28rem; gap: .5rem; }
 .workshop-scripts > select { width: 100%; }
 .script-list-row { padding: .35rem; cursor: pointer; border: 1px solid transparent; }

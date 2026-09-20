@@ -89,9 +89,12 @@ test('real GM presentation admission reaches the host card and crew view while r
   await panel.locator('#gm-presentation-sound').selectOption('red-alert');
   await button('play_sound').click();
   await expect(panel.locator('[role=status]')).toHaveAttribute('data-state', 'applied');
+  // The accessibility equivalent is deliberately a two-second live cue. Read
+  // it before the independent analyser poll, which can be descheduled beyond
+  // that window on a contended CI renderer even though the sound did play.
+  await expect(host.locator('[data-audio-equivalent="authored"]')).toContainText('Ship computer');
   await expect.poll(() => host.evaluate(() => window.__authoredSoundProof.peak)).toBeGreaterThan(0.00001);
   expect(await host.evaluate(() => window.__authoredSoundProof.count)).toBe(1);
-  await expect(host.locator('[data-audio-equivalent="authored"]')).toContainText('Ship computer');
   expect(await gm.evaluate(() => window.__audioDebug().output.active.some(voice => voice.id === 'authored_red-alert'))).toBe(false);
   await host.evaluate(() => clearInterval(window.__authoredSoundSampler));
   await host.locator('#server-settings-btn').click();

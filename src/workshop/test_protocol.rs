@@ -10,6 +10,96 @@ pub struct TestSelection {
     pub seed: u64,
 }
 
+/// One Test-local condition over the scenario Flag store. The boolean and
+/// integer views are the runtime's existing `flag(name)` / `counter(name)`
+/// vocabulary; no Rhai expression or debugger state crosses this boundary.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TestBreakpointCondition {
+    Flag {
+        name: String,
+        value: bool,
+    },
+    Counter {
+        name: String,
+        comparison: TestBreakpointComparison,
+        value: i64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TestBreakpointComparison {
+    Eq,
+    Ne,
+    Ge,
+    Gt,
+    Le,
+    Lt,
+}
+
+impl TestBreakpointComparison {
+    pub fn matches(self, current: i64, expected: i64) -> bool {
+        match self {
+            Self::Eq => current == expected,
+            Self::Ne => current != expected,
+            Self::Ge => current >= expected,
+            Self::Gt => current > expected,
+            Self::Le => current <= expected,
+            Self::Lt => current < expected,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TestBreakpoint {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
+    pub condition: TestBreakpointCondition,
+}
+
+impl TestBreakpoint {
+    pub fn name(&self) -> &str {
+        match &self.condition {
+            TestBreakpointCondition::Flag { name, .. }
+            | TestBreakpointCondition::Counter { name, .. } => name,
+        }
+    }
+    pub fn matches(&self, current: i64) -> bool {
+        match self.condition {
+            TestBreakpointCondition::Flag { value, .. } => (current != 0) == value,
+            TestBreakpointCondition::Counter {
+                comparison, value, ..
+            } => comparison.matches(current, value),
+        }
+    }
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let name = self.name().as_bytes();
+        if name.is_empty()
+            || name.len() > 128
+            || !(name[0].is_ascii_alphabetic() || name[0] == b'_')
+            || !name
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b':' | b'-'))
+        {
+            return Err("Invalid Test breakpoint Flag name");
+        }
+        if self.layer.as_deref().is_some_and(|path| {
+            !path.starts_with("assets/worlds/")
+                || !path.ends_with(".toml")
+                || path.contains('\\')
+                || path.contains('\0')
+                || path
+                    .split('/')
+                    .any(|part| part.is_empty() || matches!(part, "." | ".."))
+        }) {
+            return Err("Invalid Test breakpoint layer");
+        }
+        Ok(())
+    }
+}
+
 /// Which observer a disposable Test is drawing for.
 ///
 /// PRESENTATION ONLY. The omniscient view publishes the ordinary GM projections
@@ -104,11 +194,25 @@ pub struct TestTraceRecord {
     pub kind: TestTraceKind,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TestBreakpointHit {
+    pub breakpoint: TestBreakpoint,
+    pub current: i64,
+    /// Number of completed fixed ticks at the exact held boundary.
+    pub tick: u64,
+    pub source: TestTraceSource,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adjacent_trace: Vec<TestTraceRecord>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Launch {
     pub selection: TestSelection,
     pub revision: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoint: Option<TestBreakpoint>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -131,6 +235,10 @@ pub struct TestStatus {
     /// Bounded, oldest-to-newest observations from this disposable run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trace: Vec<TestTraceRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoint: Option<TestBreakpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoint_hit: Option<TestBreakpointHit>,
 }
 impl TestStatus {
     pub fn starting(launch: &Launch) -> Self {
@@ -147,6 +255,8 @@ impl TestStatus {
             view: TestView::default(),
             ships: Vec::new(),
             trace: Vec::new(),
+            breakpoint: launch.breakpoint.clone(),
+            breakpoint_hit: None,
         }
     }
 }
@@ -174,6 +284,38 @@ mod tests {
             serde_json::from_str::<TestTraceRecord>(&encoded).expect("decode trace record"),
             record
         );
+    }
+
+    #[test]
+    fn typed_breakpoints_refuse_paths_and_expression_shaped_fields() {
+        let breakpoint = TestBreakpoint {
+            layer: Some("assets/worlds/arrival.toml".into()),
+            condition: TestBreakpointCondition::Counter {
+                name: "arrivals".into(),
+                comparison: TestBreakpointComparison::Ge,
+                value: 2,
+            },
+        };
+        assert!(breakpoint.validate().is_ok());
+        assert!(breakpoint.matches(2));
+        let encoded = serde_json::to_string(&breakpoint).unwrap();
+        assert_eq!(
+            serde_json::from_str::<TestBreakpoint>(&encoded).unwrap(),
+            breakpoint
+        );
+        assert!(serde_json::from_str::<TestBreakpoint>(
+            r#"{"condition":{"kind":"flag","name":"ready","value":true,"expression":"debug()"}}"#,
+        )
+        .is_err());
+        assert!(TestBreakpoint {
+            layer: Some("assets/worlds/../private.toml".into()),
+            condition: TestBreakpointCondition::Flag {
+                name: "ready".into(),
+                value: true
+            },
+        }
+        .validate()
+        .is_err());
     }
 }
 

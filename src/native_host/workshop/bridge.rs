@@ -235,11 +235,11 @@ impl WorkshopWorker {
                                             };
                                             let id = request.id;
                                             let result = match request.operation {
-                                    Operation::TestStart { files, selection } => {
+                                    Operation::TestStart { files, selection, breakpoint } => {
                                         if let Some(preview) = preview.as_mut() {
                                             preview.retire();
                                         }
-                                        match provider.prepare_test(files, selection) {
+                                        match provider.prepare_test(files, selection, breakpoint) {
                                             Ok(snapshot) => {
                                                 let started = std::env::current_exe()
                                                     .map_err(|e| e.to_string())

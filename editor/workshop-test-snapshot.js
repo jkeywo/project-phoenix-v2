@@ -1,4 +1,5 @@
 import { createStoreZip, crc32 } from './mod-pack-export.js';
+import { validateTestBreakpoint } from './workshop-test-breakpoint.js';
 
 /** The adapter supplies captured dependencies, including all render support.
  * It must refuse missing declared bytes; this merger has no fetch fallback. */
@@ -25,10 +26,15 @@ export function createWorkshopTestPreparation({ runtime, dependencies }) {
       return runtime.testCatalog(textFiles(merge(source, files)));
     },
     async prepare(files, selection) {
-      return capture(files, selection, async captured => {
-        const selected = await runtime.checkTestSelection(textFiles(captured), selection);
+      const { breakpoint = null, ...runtimeSelection } = selection;
+      const snapshot = await capture(files, runtimeSelection, async captured => {
+        const text = textFiles(captured);
+        const selected = await runtime.checkTestSelection(text, runtimeSelection);
         if (!selected.accepted) refused(selected);
+        const catalog = await runtime.testCatalog(text);
+        validateTestBreakpoint(breakpoint, catalog.layers?.[runtimeSelection.world] || []);
       });
+      return { ...snapshot, breakpoint };
     },
     /** The same capture, for a surface whose selection is not a Test launch.
      *

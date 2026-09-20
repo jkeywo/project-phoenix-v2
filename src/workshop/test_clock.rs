@@ -23,8 +23,8 @@ pub struct DisposableTest;
 pub struct TestClock {
     pub paused: bool,
     pub multiplier: u8,
-    steps: u8,
-    stepping: bool,
+    pub(crate) steps: u8,
+    pub(crate) stepping: bool,
     last_frame: Option<bevy::platform::time::Instant>,
 }
 impl Default for TestClock {
@@ -52,12 +52,19 @@ impl Plugin for TestClockPlugin {
             .insert_resource(DisposableTest)
             .init_resource::<TestControls>()
             .init_resource::<TestClock>()
+            .init_resource::<super::test_breakpoint::TestBreakpointState>()
+            .init_resource::<super::test_trace::TestTrace>()
             .init_resource::<crate::gm_action::SimulationPaused>()
             .add_systems(
                 First,
                 apply_controls
                     .after(crate::sim_tick::reconcile_fixed_timestep)
                     .before(TimeSystems),
+            )
+            .add_systems(
+                FixedLast,
+                super::test_breakpoint::evaluate_breakpoint
+                    .after(crate::sim_tick::advance_sim_tick),
             )
             .add_systems(Last, finish_step);
         super::test_view::install(app);
@@ -74,6 +81,7 @@ pub(crate) fn apply_controls(
     mut exit: MessageWriter<AppExit>,
     mut windows: Query<&mut Window>,
     mut requested_view: ResMut<super::test_view::TestViewState>,
+    mut breakpoint: ResMut<super::test_breakpoint::TestBreakpointState>,
 ) {
     // Keep this local wall-clock cursor moving while held. Always feed manual
     // durations: switching a manually stepped Real clock back to Automatic
@@ -94,9 +102,11 @@ pub(crate) fn apply_controls(
             TestControl::Resume {} => {
                 clock.paused = false;
                 clock.steps = 0;
+                breakpoint.release();
             }
             TestControl::Step {} if clock.paused => {
                 clock.steps = clock.steps.saturating_add(1).min(8);
+                breakpoint.release();
             }
             TestControl::Rate { multiplier } if matches!(multiplier, 1 | 2 | 4 | 8) => {
                 clock.multiplier = multiplier;
@@ -240,6 +250,85 @@ mod tests {
         assert_eq!(
             app.world().resource::<Time<Virtual>>().relative_speed(),
             4.0
+        );
+    }
+
+    #[test]
+    fn state_breakpoint_holds_at_the_completed_tick_and_step_does_not_retrigger() {
+        use crate::workshop::test_protocol::{TestBreakpoint, TestBreakpointCondition};
+        let mut app = app();
+        app.world_mut()
+            .insert_resource(crate::world::server::WorldContentRuntime::default());
+        app.world_mut()
+            .resource_mut::<super::super::test_breakpoint::TestBreakpointState>()
+            .configured = Some(TestBreakpoint {
+            layer: None,
+            condition: TestBreakpointCondition::Flag {
+                name: "arrived".into(),
+                value: true,
+            },
+        });
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("arrived");
+        app.world_mut().run_schedule(FixedLast);
+        assert_eq!(app.world().resource::<crate::sim_tick::SimTick>().0, 1);
+        assert!(app.world().resource::<TestClock>().paused);
+        assert_eq!(
+            app.world()
+                .resource::<super::super::test_breakpoint::TestBreakpointState>()
+                .hit
+                .as_ref()
+                .unwrap()
+                .tick,
+            1
+        );
+        request(&mut app, TestControl::Step {});
+        assert_eq!(app.world().resource::<crate::sim_tick::SimTick>().0, 2);
+        assert!(app
+            .world()
+            .resource::<super::super::test_breakpoint::TestBreakpointState>()
+            .hit
+            .is_none());
+    }
+
+    #[test]
+    fn composed_extra_world_breakpoint_reads_the_loaded_layer_store() {
+        use crate::workshop::test_protocol::{TestBreakpoint, TestBreakpointCondition};
+        let mut app = app();
+        app.world_mut()
+            .insert_resource(crate::world::server::WorldContentRuntime::default());
+        let mut layer = crate::world::server::WorldRuntime::default();
+        layer.is_active = true;
+        layer.flags.set_flag("layer_arrived");
+        let mut layers = crate::world::server::WorldLayerMap::default();
+        layers
+            .0
+            .insert("assets/worlds/test-layer.toml".into(), layer);
+        app.world_mut().insert_resource(layers);
+        app.world_mut()
+            .resource_mut::<super::super::test_breakpoint::TestBreakpointState>()
+            .configured = Some(TestBreakpoint {
+            layer: Some("assets/worlds/test-layer.toml".into()),
+            condition: TestBreakpointCondition::Flag {
+                name: "layer_arrived".into(),
+                value: true,
+            },
+        });
+
+        app.world_mut().run_schedule(FixedLast);
+
+        let hit = app
+            .world()
+            .resource::<super::super::test_breakpoint::TestBreakpointState>()
+            .hit
+            .as_ref()
+            .expect("the loaded extra-world Flag holds Test");
+        assert_eq!(hit.tick, 1);
+        assert_eq!(
+            hit.breakpoint.layer.as_deref(),
+            Some("assets/worlds/test-layer.toml")
         );
     }
 }

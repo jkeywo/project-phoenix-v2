@@ -755,7 +755,7 @@ fn main() {
                     Ok(socket) => {
                         app.insert_resource(fleet_config);
                         app.insert_resource(native_host::host_lobby::fleet::NativeFleetWire(
-                            socket,
+                            Box::new(socket),
                         ));
                         eprintln!(
                             "phoenix-host: native fleet peer registering with {base} as {origin}"

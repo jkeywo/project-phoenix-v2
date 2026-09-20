@@ -988,10 +988,18 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         b"// later external edit",
     )
     .unwrap();
-    let authored = "# unsaved exact comment\r\n[global]\r\ntitle='Unsaved Test'\r\n\r\n[[entity]]\r\ntemplate_path='assets/entities/test.toml'\r\nid='placed-by-workshop'\r\ntransform={position=[37.0,2.0,-19.0],rotation=[0.0,1.25,0.0]} # exact placement\r\n";
+    let authored = "# unsaved exact comment\r\nextra_worlds=['assets/worlds/test-layer.toml']\r\n[global]\r\ntitle='Unsaved Test'\r\n\r\n[[entity]]\r\ntemplate_path='assets/entities/test.toml'\r\nid='placed-by-workshop'\r\ntransform={position=[37.0,2.0,-19.0],rotation=[0.0,1.25,0.0]} # exact placement\r\n";
     sources.insert(
         "assets/worlds/test.toml".into(),
         assets::Source::Text(authored.into()),
+    );
+    sources.insert(
+        "assets/worlds/test-layer.toml".into(),
+        assets::Source::Text("[global]\ntitle='Loaded layer'\n".into()),
+    );
+    sources.insert(
+        "assets/worlds/unrelated.toml".into(),
+        assets::Source::Text("[global]\ntitle='Unrelated root'\n".into()),
     );
     let authored_hull = "# exact unsaved playable hull\r\nclass='lancer'\r\nname='Unsaved hull'\r\n\
 [[station]]\r\nid='flight'\r\nname='Flight'\r\ndescription='Fly'\r\nrank='Lt.'\r\nconsole='gui/custom-flight.html'\r\n\
@@ -1013,7 +1021,7 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         seed: 42,
     };
     let snapshot = provider
-        .prepare_test(sources.clone(), selection.clone())
+        .prepare_test(sources.clone(), selection.clone(), None)
         .unwrap();
     assert_eq!(snapshot.files[&selection.world], authored.as_bytes());
     assert_eq!(snapshot.files[&selection.ship], authored_hull.as_bytes());
@@ -1098,9 +1106,51 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         b"external replacement"
     );
     let repeated = provider
-        .prepare_test(sources.clone(), selection.clone())
+        .prepare_test(sources.clone(), selection.clone(), None)
         .unwrap();
     assert_eq!(snapshot.revision, repeated.revision);
+    let breakpoint = crate::workshop::test_protocol::TestBreakpoint {
+        layer: Some("assets/worlds/test-layer.toml".into()),
+        condition: crate::workshop::test_protocol::TestBreakpointCondition::Flag {
+            name: "draft_ready".into(),
+            value: true,
+        },
+    };
+    assert_eq!(
+        provider
+            .prepare_test(sources.clone(), selection.clone(), Some(breakpoint.clone()))
+            .unwrap()
+            .breakpoint,
+        Some(breakpoint)
+    );
+    assert!(matches!(
+        provider.prepare_test(
+            sources.clone(),
+            selection.clone(),
+            Some(crate::workshop::test_protocol::TestBreakpoint {
+                layer: Some("assets/worlds/unrelated.toml".into()),
+                condition: crate::workshop::test_protocol::TestBreakpointCondition::Flag {
+                    name: "draft_ready".into(),
+                    value: true,
+                },
+            }),
+        ),
+        Err(Response::Refused { report: None, .. })
+    ));
+    assert!(matches!(
+        provider.prepare_test(
+            sources.clone(),
+            selection.clone(),
+            Some(crate::workshop::test_protocol::TestBreakpoint {
+                layer: Some(selection.world.clone()),
+                condition: crate::workshop::test_protocol::TestBreakpointCondition::Flag {
+                    name: "draft_ready".into(),
+                    value: true,
+                },
+            }),
+        ),
+        Err(Response::Refused { report: None, .. })
+    ));
     // This is a valid NPC entity but both native and browser player boot need
     // a ship configuration. Refuse it before creating any disposable child.
     let mut no_ship_config = sources.clone();
@@ -1111,7 +1161,7 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
     let Err(Response::Refused {
         report: Some(report),
         ..
-    }) = provider.prepare_test(no_ship_config, selection.clone())
+    }) = provider.prepare_test(no_ship_config, selection.clone(), None)
     else {
         panic!("Test must refuse a hull the runtime cannot select")
     };
@@ -1125,7 +1175,7 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         assets::Source::Text("[global\n".into()),
     );
     assert!(matches!(
-        provider.prepare_test(sources, selection),
+        provider.prepare_test(sources, selection, None),
         Err(Response::Refused {
             report: Some(_),
             ..
@@ -1230,7 +1280,10 @@ fn test_catalog_resolves_read_only_hulls_and_unsaved_include_edits_without_binar
             "assets/entities/authored.toml".into(),
             "includes=['base.toml']\nname='Unsaved'\n".into(),
         ),
-        ("assets/worlds/authored.toml".into(), "[global]\n".into()),
+        (
+            "assets/worlds/authored.toml".into(),
+            "extra_worlds=['assets/worlds/base.toml']\n[global]\n".into(),
+        ),
     ]);
     let catalog = provider.test_catalog(draft.clone()).unwrap();
     assert_eq!(
@@ -1241,6 +1294,11 @@ fn test_catalog_resolves_read_only_hulls_and_unsaved_include_edits_without_binar
         catalog.ships,
         ["assets/entities/authored.toml", "assets/entities/base.toml"]
     );
+    assert_eq!(
+        catalog.layers["assets/worlds/authored.toml"],
+        ["assets/worlds/base.toml"]
+    );
+    assert!(catalog.layers["assets/worlds/base.toml"].is_empty());
     // An invalid replacement shadows the base; it must not silently offer the
     // old cached hull or an includer which cannot compose from this draft.
     draft.insert("assets/entities/base.toml".into(), "[invalid".into());

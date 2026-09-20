@@ -98,7 +98,8 @@ export async function launchWorkshopTest(snapshot, {
   try {
     // Winit deliberately unwinds JS when handing control to the browser loop.
     // A genuine boot/renderer exception must still refuse this replacement.
-    try { runtime.wasm_workshop_test_init(JSON.stringify({ selection, revision: snapshot.revision }), files); }
+    try { runtime.wasm_workshop_test_init(JSON.stringify({ selection, revision: snapshot.revision,
+      ...(snapshot.breakpoint ? { breakpoint: snapshot.breakpoint } : {}) }), files); }
     catch (error) { if (!String(error?.message || error).includes('Using exceptions for control flow')) throw error; }
     await waitFor(status => !status.starting, 90000);
   } catch (error) { dispose(); throw error; }

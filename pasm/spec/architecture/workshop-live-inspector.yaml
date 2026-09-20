@@ -208,3 +208,28 @@ entities:
       tests:
         - cargo test --lib workshop::test_trace world::server_tests::scripted_flag_write_chains_a_declarative_on_flag_set world::server_tests::scripted_callback_fires_after_the_delay_not_immediately
         - npx vitest run tests/client/workshop-test-panel.test.js tests/client/workshop-test-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/operator-profile.test.js
+
+  - component: workshop-test-state-breakpoint
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Deterministic Disposable Test State Breakpoint
+      summary: "A Workshop author may configure one typed root/layer Flag or integer-counter condition before launching an exact captured draft. Browser and native Test install the same local observer and evaluate it after each completed fixed tick; the first false-to-true boundary holds the disposable clock before another tick can run. TestStatus reports the condition, current value, completed tick, best matching source and bounded adjacent trace. Resume and Step clear the hit while retaining ordinary clock semantics; Restart creates a fresh run with the configured condition."
+      rationale:
+        - "[ai] The breakpoint is launch configuration and local Timer/Derived observer state. It never enters authoritative snapshots, digests, save/export source or Rhai host vocabulary."
+        - "[ai] FixedLast after SimTick advancement is the shared browser/native boundary: all work for the reported tick is applied, and discarding fixed overstep prevents later queued ticks from being presented before the hold."
+        - "[ai] The vocabulary is deliberately only Flag boolean and counter comparison with optional exact world-layer identity. Expressions, script locals, call stacks and source stepping remain outside M6."
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      depends_on: [workshop-test-script-trace]
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/workshop/test_breakpoint.rs, src/workshop/test_clock.rs, src/workshop/test_protocol.rs, src/workshop/test_browser.rs, src/native_host/workshop/test_process.rs, editor/workshop-test-breakpoint.js, gui/workshop-test-panel.js]
+      symbols: [TestBreakpoint, TestBreakpointCondition, TestBreakpointState, TestBreakpointHit, evaluate_breakpoint, validateTestBreakpoint]
+      tests:
+        - cargo test --lib workshop::test_clock workshop::test_breakpoint workshop::test_protocol
+        - npx vitest run editor/tests/workshop-test-breakpoint.test.js tests/client/workshop-test-panel.test.js editor/tests/workshop-test-frame.test.js editor/tests/workshop-test-snapshot.test.js

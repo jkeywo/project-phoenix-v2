@@ -145,6 +145,7 @@ fn actual_test_host_starts_unsaved_source_steps_and_retires_its_stage() {
                 ship: "assets/entities/alliance_cruiser.toml".into(),
                 seed: 41,
             },
+            None,
         )
         .unwrap();
     assert_eq!(snapshot.files[world], authored.as_bytes());

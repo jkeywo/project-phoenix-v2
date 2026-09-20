@@ -43,6 +43,7 @@ impl Stage {
         let launch = Launch {
             selection: snapshot.selection,
             revision: snapshot.revision,
+            breakpoint: snapshot.breakpoint,
         };
         fs::write(
             stage.path.join("workshop-test.json"),
@@ -342,6 +343,16 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
     {
         return Err("Invalid Test selection".into());
     }
+    if let Some(breakpoint) = launch.breakpoint.as_ref() {
+        breakpoint.validate().map_err(str::to_owned)?;
+        if breakpoint.layer.as_ref().is_some_and(|path| {
+            descriptor
+                .parent()
+                .map_or(true, |root| !root.join(path).is_file())
+        }) {
+            return Err("Test breakpoint layer is absent from the exact draft".into());
+        }
+    }
     let (send, input) = std::sync::mpsc::sync_channel(8);
     std::thread::Builder::new()
         .name("phoenix-workshop-test-input".into())
@@ -383,6 +394,11 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
             acknowledged: 0,
         })
         .insert_resource(crate::workshop::test_trace::TestTrace::default())
+        .insert_resource(
+            crate::workshop::test_breakpoint::TestBreakpointState::configured(
+                launch.breakpoint.clone(),
+            ),
+        )
         .add_plugins(TestClockPlugin)
         .add_systems(
             First,
@@ -425,6 +441,7 @@ fn publish_status(
     tick: Res<crate::sim_tick::SimTick>,
     view: Res<crate::workshop::test_view::TestViewState>,
     trace: Res<crate::workshop::test_trace::TestTrace>,
+    breakpoint: Res<crate::workshop::test_breakpoint::TestBreakpointState>,
 ) {
     let state = TestStatus {
         running: true,
@@ -439,6 +456,8 @@ fn publish_status(
         view: view.requested.clone(),
         ships: view.ships.clone(),
         trace: trace.records(),
+        breakpoint: breakpoint.configured.clone(),
+        breakpoint_hit: breakpoint.hit.clone(),
     };
     write_status(&state);
 }
@@ -479,6 +498,7 @@ mod tests {
                 seed: 1,
             },
             revision: "fixture".into(),
+            breakpoint: None,
         }
     }
     struct Fixture(PathBuf);

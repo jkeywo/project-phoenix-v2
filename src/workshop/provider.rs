@@ -139,6 +139,8 @@ pub enum Operation {
     TestStart {
         files: assets::Sources,
         selection: test_snapshot::TestSelection,
+        #[serde(default)]
+        breakpoint: Option<crate::workshop::test_protocol::TestBreakpoint>,
     },
     TestCatalog {
         files: BTreeMap<String, String>,

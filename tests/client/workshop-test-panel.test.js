@@ -109,3 +109,42 @@ it('renders bounded runtime order as filtered non-colour records with source nav
   document.querySelector('.workshop-test-trace-source').click();
   await vi.waitFor(() => expect(openSource).toHaveBeenCalledWith(`${WORKSHOP_WORLD}#script.main`, undefined));
 });
+
+it('launches a typed state breakpoint and renders its exact held boundary with adjacent trace', async () => {
+  const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: WORKSHOP_MANIFEST },
+    { path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT }]));
+  const hit = {
+    breakpoint: { condition: { kind: 'counter', name: 'arrivals', comparison: 'ge', value: 2 } },
+    current: 2, tick: 9, source: { path: WORKSHOP_WORLD, line: 12 },
+    adjacent_trace: [{ tick: 8, order: 1, kind: 'flag-mutation', name: 'arrivals', before: 1, after: 2, source: {} }],
+  };
+  const run = { running: true, starting: false, paused: true, tick: 9, multiplier: 1,
+    view: { view: 'ship', entity: null }, trace: [], breakpoint_hit: hit };
+  const start = vi.fn(async () => run), openSource = vi.fn();
+  panel = mountWorkshopTestPanel({ root: document.body, draft: () => draft, busy: () => false, openSource,
+    provider: { test: { catalog: async () => ({
+      worlds: [WORKSHOP_WORLD, 'assets/worlds/arrival.toml', 'assets/worlds/unrelated.toml'],
+      ships: ['assets/entities/hull.toml'], layers: { [WORKSHOP_WORLD]: ['assets/worlds/arrival.toml'] },
+    }),
+      capture: () => ({}), start, status: async () => run, control: async () => run, stop: async () => {} } } });
+  await vi.waitFor(() => expect(document.getElementById('workshop-test-start').disabled).toBe(false));
+  expect([...document.getElementById('workshop-test-breakpoint-layer').options].map(option => option.value))
+    .toEqual(['', 'assets/worlds/arrival.toml']);
+  document.getElementById('workshop-test-breakpoint-enabled').click();
+  document.getElementById('workshop-test-breakpoint-kind').value = 'counter';
+  document.getElementById('workshop-test-breakpoint-kind').dispatchEvent(new Event('change'));
+  const name = document.getElementById('workshop-test-breakpoint-name'); name.value = 'arrivals';
+  name.dispatchEvent(new Event('input'));
+  document.getElementById('workshop-test-breakpoint-comparison').value = 'ge';
+  document.getElementById('workshop-test-start').click();
+  await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+  expect(start.mock.calls[0][1].breakpoint).toEqual({ condition: {
+    kind: 'counter', name: 'arrivals', comparison: 'ge', value: 1,
+  } });
+  expect(document.getElementById('workshop-test-breakpoint-hit').hidden).toBe(false);
+  expect(document.getElementById('workshop-test-breakpoint-hit-condition').textContent).toContain('arrivals');
+  expect(document.querySelectorAll('#workshop-test-breakpoint-hit-trace li')).toHaveLength(1);
+  expect(document.getElementById('workshop-test-breakpoint-hit-trace').textContent).toContain('arrivals');
+  document.getElementById('workshop-test-breakpoint-hit-source').click();
+  await vi.waitFor(() => expect(openSource).toHaveBeenCalledWith(WORKSHOP_WORLD, 12));
+});

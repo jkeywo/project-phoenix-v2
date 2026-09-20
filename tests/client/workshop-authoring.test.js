@@ -143,7 +143,9 @@ describe('Workshop Authoring browser surface', () => {
     const request = vi.fn(async value => {
       if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'initial', files };
       if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
-      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: { worlds: [WORKSHOP_WORLD], ships: [template] } };
+      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: {
+        worlds: [WORKSHOP_WORLD], ships: [template], layers: { [WORKSHOP_WORLD]: [] },
+      } };
       if (value.op === 'entity') return { status: 'entity', composition };
       return { status: 'done' };
     });
@@ -175,7 +177,9 @@ describe('Workshop Authoring browser surface', () => {
     request.mockImplementation(async value => {
       if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'initial', files };
       if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
-      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: { worlds: [WORKSHOP_WORLD], ships: [template] } };
+      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: {
+        worlds: [WORKSHOP_WORLD], ships: [template], layers: { [WORKSHOP_WORLD]: [] },
+      } };
       if (value.op === 'entity') return { status: 'entity', composition: { ...composition, path: beneath, origin: 'base' } };
       return { status: 'done' };
     });
@@ -297,7 +301,9 @@ describe('Workshop Authoring browser surface', () => {
     const request = vi.fn(async value => {
       if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'initial', files };
       if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
-      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: { worlds: [WORKSHOP_WORLD], ships: [baseHull] } };
+      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: {
+        worlds: [WORKSHOP_WORLD], ships: [baseHull], layers: { [WORKSHOP_WORLD]: [] },
+      } };
       if (value.op === 'test-start') {
         run = { running: true, paused: false, tick: 0, multiplier: 1, selection: value.selection };
         return { status: 'test', run };
@@ -406,7 +412,9 @@ describe('Workshop Authoring browser surface', () => {
     const request = vi.fn(async value => {
       if (value.op === 'load-sources') return { status: 'sources', kind: 'mod', revision: 'initial', files };
       if (value.op === 'recovery-load') return { status: 'recovery', recovery: null };
-      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: { worlds: [WORKSHOP_WORLD], ships } };
+      if (value.op === 'test-catalog') return { status: 'test-catalog', catalog: {
+        worlds: [WORKSHOP_WORLD], ships, layers: { [WORKSHOP_WORLD]: [] },
+      } };
       if (value.op === 'test-stop') return { status: 'test', run: null };
       return { status: 'done' };
     });

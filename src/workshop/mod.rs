@@ -38,6 +38,7 @@ pub mod presets;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
 mod source_spans;
+pub mod test_breakpoint;
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
 pub(crate) mod test_browser;
 pub mod test_clock;

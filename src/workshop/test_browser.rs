@@ -41,6 +41,17 @@ impl BrowserTest {
                 );
             }
         }
+        let breakpoint_layer_present = launch
+            .breakpoint
+            .as_ref()
+            .and_then(|breakpoint| breakpoint.layer.as_ref())
+            .map_or(true, |path| {
+                super::test_source::breakpoint_layers(
+                    &super::Sources(text.clone()),
+                    &launch.selection.world,
+                )
+                .contains(path)
+            });
         let report = super::test_source::validate_selection(text, &launch.selection);
         if !report.accepted {
             return Err(fail(
@@ -49,6 +60,12 @@ impl BrowserTest {
             ));
         }
         crate::entities::config_cache::replace_faction_registry(factions);
+        if let Some(breakpoint) = launch.breakpoint.as_ref() {
+            breakpoint.validate().map_err(|message| fail(message))?;
+            if !breakpoint_layer_present {
+                return Err(fail("Test breakpoint layer is absent from the exact draft"));
+            }
+        }
         Ok(Self {
             launch,
             assets: Arc::new(assets),
@@ -94,6 +111,9 @@ pub(crate) fn install(app: &mut App, launch: Launch) {
     );
     EDGE.with(|edge| edge.borrow_mut().status = Some(TestStatus::starting(&launch)));
     app.declare_state::<BrowserTestRun>(StateClass::Timer, "gm-milestone-integrated-workshop")
+        .insert_resource(super::test_breakpoint::TestBreakpointState::configured(
+            launch.breakpoint.clone(),
+        ))
         .insert_resource(BrowserTestRun {
             launch,
             acknowledged: 0,
@@ -124,6 +144,7 @@ fn publish_status(
     phase: Res<State<crate::core::messages::GamePhase>>,
     view: Res<super::test_view::TestViewState>,
     trace: Res<super::test_trace::TestTrace>,
+    breakpoint: Res<super::test_breakpoint::TestBreakpointState>,
 ) {
     use crate::core::messages::GamePhase;
     EDGE.with(|edge| {
@@ -140,6 +161,8 @@ fn publish_status(
             view: view.requested.clone(),
             ships: view.ships.clone(),
             trace: trace.records(),
+            breakpoint: breakpoint.configured.clone(),
+            breakpoint_hit: breakpoint.hit.clone(),
         })
     });
 }

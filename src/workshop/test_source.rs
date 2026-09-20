@@ -9,17 +9,26 @@ use std::collections::BTreeMap;
 pub struct TestCatalog {
     pub worlds: Vec<String>,
     pub ships: Vec<String>,
+    /// Exact authored child layers loaded with each selectable root. The root
+    /// itself is represented by the breakpoint's absent `layer`, never by a
+    /// `WorldLayerMap` key.
+    pub layers: BTreeMap<String, Vec<String>>,
 }
 
 pub fn catalog(files: BTreeMap<String, String>) -> TestCatalog {
     let source = Sources(files);
+    let worlds = source
+        .0
+        .keys()
+        .filter(|path| path.starts_with("assets/worlds/") && path.ends_with(".toml"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let layers = worlds
+        .iter()
+        .map(|world| (world.clone(), breakpoint_layers(&source, world)))
+        .collect();
     TestCatalog {
-        worlds: source
-            .0
-            .keys()
-            .filter(|path| path.starts_with("assets/worlds/") && path.ends_with(".toml"))
-            .cloned()
-            .collect(),
+        worlds,
         ships: source
             .0
             .keys()
@@ -32,7 +41,20 @@ pub fn catalog(files: BTreeMap<String, String>) -> TestCatalog {
             })
             .cloned()
             .collect(),
+        layers,
     }
+}
+
+/// The layers which the ordinary world loader installs beside `root`.
+pub(super) fn breakpoint_layers(source: &Sources, root: &str) -> Vec<String> {
+    crate::world::load::load(crate::world::load::LoadRequest::new(
+        root,
+        source,
+        source,
+        crate::world::load::LoadPolicy::Inspect,
+    ))
+    .map(|loaded| loaded.config.extra_worlds)
+    .unwrap_or_default()
 }
 
 pub fn validate_selection(

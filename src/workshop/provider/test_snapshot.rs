@@ -12,6 +12,7 @@ pub struct TestSnapshot {
     pub files: Files,
     pub selection: TestSelection,
     pub revision: String,
+    pub breakpoint: Option<crate::workshop::test_protocol::TestBreakpoint>,
 }
 
 /// Runtime-owned render support is captured read-only. This does not widen the
@@ -146,6 +147,7 @@ impl NativeWorkshopProvider {
         &self,
         sources: DraftSources,
         selection: TestSelection,
+        breakpoint: Option<crate::workshop::test_protocol::TestBreakpoint>,
     ) -> Result<TestSnapshot, Response> {
         let merged = self.prepare_runtime_capture(sources, "Runtime validation refused Test")?;
         let text = Sources(
@@ -162,17 +164,31 @@ impl NativeWorkshopProvider {
                 })
                 .collect(),
         );
-        let report = crate::workshop::test_source::validate_selection(text.0, &selection);
+        let report = crate::workshop::test_source::validate_selection(text.0.clone(), &selection);
         if !report.accepted {
             return Err(Response::Refused {
                 message: "Runtime validation refused the Test selection".into(),
                 report: Some(report),
             });
         }
+        if let Some(candidate) = breakpoint.as_ref() {
+            candidate.validate().map_err(super::refused)?;
+            let layers = crate::workshop::test_source::breakpoint_layers(&text, &selection.world);
+            if candidate
+                .layer
+                .as_ref()
+                .is_some_and(|path| !layers.contains(path))
+            {
+                return Err(super::refused(
+                    "Test breakpoint layer is absent from the exact draft",
+                ));
+            }
+        }
         Ok(TestSnapshot {
             revision: super::revision(&merged),
             files: merged,
             selection,
+            breakpoint,
         })
     }
 }

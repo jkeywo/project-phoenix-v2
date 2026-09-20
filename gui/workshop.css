@@ -156,6 +156,9 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-test h2, .workshop-test p { flex-basis: 100%; margin: .25rem 0; overflow-wrap: anywhere; }
 .workshop-test select, .workshop-test input { max-width: 100%; }
 .workshop-test label { overflow-wrap: anywhere; }
+.workshop-test-breakpoint { flex-basis: 100%; display: grid; grid-template-columns: minmax(8rem, auto) minmax(0, 1fr); gap: .45rem .7rem; }
+.workshop-test-breakpoint legend { font-weight: 700; }
+#workshop-test-breakpoint-hit { border-inline-start: .25rem solid currentColor; padding-inline-start: .75rem; }
 .workshop-test-document { min-width: 0; width: 100%; }
 .workshop-test-viewport { width: 100%; }
 .workshop-test-viewscreen { display: block; width: 100%; height: clamp(24rem, 65vh, 55rem); border: 1px solid #8195a8; }

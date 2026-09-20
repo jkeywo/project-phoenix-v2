@@ -34,6 +34,15 @@ describe('browser Test frame isolation', () => {
     expect(() => transferableTestSnapshot({ ...snapshot(), files: { 'assets/model.glb': { asset: 'private-native-reference' } } })).toThrow('source bytes');
   });
 
+  it('carries only the typed local breakpoint launch configuration into the fresh frame', () => {
+    const breakpoint = { layer: 'assets/worlds/test.toml', condition: {
+      kind: 'counter', name: 'waves', comparison: 'ge', value: 2,
+    } };
+    const capture = transferableTestSnapshot({ ...snapshot(), breakpoint, liveDigest: 'private' });
+    expect(capture.snapshot.breakpoint).toEqual(breakpoint);
+    expect(capture.snapshot).not.toHaveProperty('liveDigest');
+  });
+
   it('retains the previous run through preparation/boot failures and destroys it only after replacement starts', async () => {
     const { test, prepare, frame, frames } = fixture();
     await test.start({}, selection);

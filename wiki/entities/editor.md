@@ -287,6 +287,17 @@ the draft and previous run. Stop, child/output failure and view-epoch retirement
 kill/wait the child and release staged files. Worker startup reclaims abandoned
 UUID staging directories with valid typed markers under its existing root claim.
 
+Test may also launch with one typed root-world or loaded-layer state breakpoint:
+a boolean Flag value or integer counter comparison using the runtime's existing
+Flag vocabulary. `workshop/test_breakpoint.rs` observes that store in `FixedLast`
+after the completed `SimTick`, then holds the same shared Test clock and discards
+remaining fixed overstep. Browser and native therefore stop on the same logical
+boundary. The status carries the condition, current value, source when a matching
+Flag trace supplied one, and nearby bounded trace rows. Step advances one ordinary
+fixed tick, Resume continues without immediately retriggering a still-true
+condition, and Restart creates a fresh runtime. Breakpoint state is Test-local and
+does not enter snapshots, digests, save/export data or the Rhai interface.
+
 Browser Test uses the same source catalogue, selection gate and fixed clock.
 `editor/workshop-test-snapshot.js` validates the exact unsaved pack and merges
 captured base, ordered dependencies and candidate bytes. Text remains text;
@@ -308,7 +319,7 @@ the browser save APIs refuse access. Returning to a hidden held iframe shows
 it before awaiting the next clock acknowledgement, because browsers may
 suspend animation frames while it is hidden.
 
-Traces, breakpoints, role preview and specialised entity/definition/model panels
+Role preview and remaining specialised entity/definition panels
 remain M6 continuation work. The existing editor/viewer remain until
 the parity workflow is delivered.
 

@@ -257,11 +257,18 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
         const response = await call({ op: 'test-catalog', files });
         const value = response?.catalog;
         if (response?.status !== 'test-catalog' || !value || !['worlds', 'ships'].every(key =>
-          Array.isArray(value[key]) && value[key].every(path => typeof path === 'string'))) throw new Error('Invalid native Test catalogue');
+          Array.isArray(value[key]) && value[key].every(path => typeof path === 'string'))
+          || !value.layers || typeof value.layers !== 'object' || Array.isArray(value.layers)
+          || Object.entries(value.layers).some(([world, layers]) => !value.worlds.includes(world)
+            || !Array.isArray(layers) || layers.some(path => typeof path !== 'string'))) {
+          throw new Error('Invalid native Test catalogue');
+        }
         return value;
       },
       async start(files, selection) {
-        const response = await call({ op: 'test-start', files, selection });
+        const { breakpoint = null, ...runtimeSelection } = selection;
+        const response = await call({ op: 'test-start', files, selection: runtimeSelection,
+          ...(breakpoint ? { breakpoint } : {}) });
         if (response?.status !== 'test' || !response.run) throw new Error('Invalid native Test start');
         return response.run;
       },

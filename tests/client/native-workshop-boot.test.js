@@ -60,7 +60,7 @@ describe('native Workshop shared boot', () => {
     await pending;
     expect([...document.querySelectorAll('.workshop-dock-panel')].map(node => node.dataset.panel))
       .toEqual(['files', 'dependencies', 'changes', 'composition', 'presets', 'source', 'findings', 'feedback',
-        'model-preview', 'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity']);
+        'model-preview', 'scripts', 'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity']);
   });
 
   it('mounts with visible storage status when preference loading fails and bounds the private queue', async () => {
@@ -169,7 +169,7 @@ describe('native Workshop shared boot', () => {
       };
       if (request.op === 'save-sources') return { status: 'saved', revision: 'saved-r2' };
       if (request.op === 'test-catalog') return {
-        status: 'test-catalog', catalog: { worlds: [], ships: [] },
+        status: 'test-catalog', catalog: { worlds: [], ships: [], layers: {} },
       };
       return { status: 'done' };
     };

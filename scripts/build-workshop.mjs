@@ -20,7 +20,7 @@ const editorModules = [
   'workshop-presets', 'workshop-scripts', 'script-editor', 'script-editor-view',
   'undo-stack', 'validation', 'entity-includes', 'component-schema', 'component-templates', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
-  'workshop-test-frame', 'workshop-test-child', 'workshop-test-runtime', 'workshop-test-snapshot',
+  'workshop-test-frame', 'workshop-test-child', 'workshop-test-runtime', 'workshop-test-snapshot', 'workshop-test-breakpoint',
 ];
 await mkdir(path.join(out, 'editor'), { recursive: true });
 await mkdir(path.join(out, 'assets', 'strings'), { recursive: true });

@@ -71,7 +71,8 @@ export function transferableTestSnapshot(snapshot) {
     } else throw new Error('Invalid Workshop Test source bytes');
     if (length > 512 * 1024 * 1024) throw new Error('Workshop Test snapshot is too large');
   }
-  return { snapshot: { files, selection: structuredClone(snapshot.selection), revision: snapshot.revision }, transfer };
+  return { snapshot: { files, selection: structuredClone(snapshot.selection), revision: snapshot.revision,
+    ...(snapshot.breakpoint ? { breakpoint: structuredClone(snapshot.breakpoint) } : {}) }, transfer };
 }
 
 export function createWorkshopTestFrame({ mount, title, win = mount.ownerDocument.defaultView,

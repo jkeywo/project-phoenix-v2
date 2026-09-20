@@ -36,7 +36,7 @@ pub fn mint_reconnect_credentials() -> Vec<String> {
 pub struct NativeFleetEvents(Vec<NativeFleetEvent>);
 
 #[derive(Resource)]
-pub struct NativeFleetWire(pub crate::native_host::relay_socket::WsRelaySocket);
+pub struct NativeFleetWire(pub Box<dyn RelaySocket>);
 
 #[derive(Resource, Default)]
 struct NativeFleetPublication {

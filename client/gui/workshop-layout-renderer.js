@@ -84,12 +84,17 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   const emit = (next, focusPanel = next.selected) => {
     state = settle(next, narrow ? undefined : canvasBounds()); projectedPanel = null;
     render(); onChange?.(state);
-    win.requestAnimationFrame?.(() => {
+    const restoreFocus = () => {
       const panelTab = canvas.querySelector(`[role="tab"][data-layout-panel="${focusPanel}"]`)
         || canvas.querySelector(`[data-panel="${focusPanel}"] .workshop-panel-tab`);
       const switcherButton = switcher.querySelector(`[data-layout-panel="${focusPanel}"]`);
       (panelTab || switcherButton)?.focus();
-    });
+    };
+    // The newly rendered control already exists. Restore focus now so a
+    // throttled animation frame cannot strand keyboard docking on <body>, then
+    // repeat after layout in case the browser's resize observer repaints it.
+    restoreFocus();
+    win.requestAnimationFrame?.(restoreFocus);
   };
   const updateFloatStacking = () => {
     const active = doc.activeElement;

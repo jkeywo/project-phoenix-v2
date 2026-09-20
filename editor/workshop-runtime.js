@@ -36,6 +36,14 @@ export function createWorkshopRuntime({
     return pending;
   }
   return {
+    async shipSchema() {
+      const { runtime } = await ready();
+      const schema = JSON.parse(runtime.wasm_workshop_ship_schema());
+      if (!Array.isArray(schema?.system_kinds) || !Array.isArray(schema?.directive_kinds)) {
+        throw new Error('Workshop runtime returned an invalid ship schema');
+      }
+      return schema;
+    },
     async dependencies() { return structuredClone((await ready()).dependencies); },
     async testDependencies() { return (await ready()).assets.captureAllBuffers(); },
     async testCatalog(files) {
@@ -165,6 +173,16 @@ export function createWorkshopRuntime({
     async newPreset(id, label) {
       const { runtime } = await ready();
       return runtime.wasm_workshop_new_preset(id, label);
+    },
+    async scriptHostFunctions() {
+      const { runtime } = await ready();
+      if (typeof runtime.wasm_get_script_host_fns !== 'function') throw new Error('Workshop Rhai registry is unavailable');
+      return Array.from(runtime.wasm_get_script_host_fns());
+    },
+    async scriptDiagnostics(source, lineOffset = 0) {
+      const { runtime } = await ready();
+      if (typeof runtime.wasm_script_diagnostics !== 'function') throw new Error('Workshop Rhai diagnostics are unavailable');
+      return Array.from(runtime.wasm_script_diagnostics(String(source), lineOffset >>> 0));
     },
     async validate(bytes) {
       const loaded = await ready();

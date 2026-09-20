@@ -9,6 +9,7 @@ export async function launchWorkshopTest(snapshot, {
   signal,
   onHud = () => {},
   onGm = () => {},
+  onGmRolePresets = () => {},
   onView = () => {},
 } = {}) {
   const runtime = await load();
@@ -98,9 +99,17 @@ export async function launchWorkshopTest(snapshot, {
   try {
     // Winit deliberately unwinds JS when handing control to the browser loop.
     // A genuine boot/renderer exception must still refuse this replacement.
-    try { runtime.wasm_workshop_test_init(JSON.stringify({ selection, revision: snapshot.revision }), files); }
+    try { runtime.wasm_workshop_test_init(JSON.stringify({ selection, revision: snapshot.revision,
+      ...(snapshot.breakpoint ? { breakpoint: snapshot.breakpoint } : {}) }), files); }
     catch (error) { if (!String(error?.message || error).includes('Using exceptions for control flow')) throw error; }
     await waitFor(status => !status.starting, 90000);
+    signal?.throwIfAborted();
+    // The ordinary GM page reads this same runtime export after world load.
+    // Publish only after this captured run has completed startup: an iframe
+    // retired during load must not paint stale authored presentation into a
+    // replacement run. The fresh iframe owns the operator's local selection.
+    onGmRolePresets(typeof runtime.wasm_get_gm_role_presets === 'function'
+      ? runtime.wasm_get_gm_role_presets() : '[]');
   } catch (error) { dispose(); throw error; }
   return {
     status: () => waitFor(() => true),

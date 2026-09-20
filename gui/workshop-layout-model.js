@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { addMigrationPanel, createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const WORKSHOP_LAYOUT_VERSION = 9;
+export const WORKSHOP_LAYOUT_VERSION = 10;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
@@ -10,7 +10,7 @@ export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
   tool('feedback'), tool('dependencies'), tool('settings'),
   tool('models'), documentPanel('model-preview'), tool('sound'),
   tool('changes'), tool('definitions'), tool('composition'), tool('entity'),
-  tool('presets'),
+  tool('presets'), documentPanel('scripts'),
 ]);
 export const WORKSHOP_PANELS = Object.freeze(WORKSHOP_PANEL_REGISTRY.map(panel => panel.id));
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
@@ -50,6 +50,8 @@ const V8_PANELS = Object.freeze([...V7_PANELS, 'entity']);
  * that panel rather than add another, because it previews the same authored
  * presets. */
 const ADDED_IN_V9 = Object.freeze([['presets', 'files']]);
+const V9_PANELS = Object.freeze([...V8_PANELS, 'presets']);
+const ADDED_IN_V10 = Object.freeze([['scripts', 'source']]);
 const legacyDefault = () => ({ version: 2,
   root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
     children: [group(['files']), group(['source']), group(['inspector', 'add', 'recovery'], 'inspector')] },
@@ -89,11 +91,17 @@ const v8Default = () => ({ version: 8,
       group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
       group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity'], 'inspector')] },
   floats: [], closed: [], selected: 'source' });
+const v9Default = () => ({ version: 9,
+  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
+    children: [group(['files', 'dependencies', 'changes', 'composition', 'presets'], 'files'),
+      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
+      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity'], 'inspector')] },
+  floats: [], closed: [], selected: 'source' });
 export function defaultWorkshopLayout() {
   return { version: WORKSHOP_LAYOUT_VERSION,
     root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
       children: [group(['files', 'dependencies', 'changes', 'composition', 'presets'], 'files'),
-        group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
+        group(['source', 'findings', 'feedback', 'model-preview', 'scripts'], 'source'),
         group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity'], 'inspector')] },
     floats: [], closed: [], selected: 'source' };
 }
@@ -113,6 +121,8 @@ const v7 = createDockLayoutModel({ version: 7, panels: V7_PANELS,
   defaultLayout: v7Default, compatibleVersions: [7] });
 const v8 = createDockLayoutModel({ version: 8, panels: V8_PANELS,
   defaultLayout: v8Default, compatibleVersions: [8] });
+const v9 = createDockLayoutModel({ version: 9, panels: V9_PANELS,
+  defaultLayout: v9Default, compatibleVersions: [9] });
 
 // Version 1 held `add` and `recovery` as fixed chrome rather than as placements.
 // They are rehomed first, so a v1 tree ends up where a v2 tree of the same shape
@@ -138,7 +148,8 @@ const migrate = createDockLayoutMigration({
     { version: 6, model: v6, added: ADDED_IN_V6 },
     { version: 7, model: v7, added: ADDED_IN_V7 },
     { version: 8, model: v8, added: ADDED_IN_V8 },
-    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V9 },
+    { version: 9, model: v9, added: ADDED_IN_V9 },
+    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V10 },
   ],
 });
 export const workshopLayoutModel = Object.freeze({ ...base, normalize: migrate });

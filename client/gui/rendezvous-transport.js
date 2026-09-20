@@ -482,6 +482,8 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
  *   exactly the way `gui/connection-diagnostics.js`'s `relayDroppedBy` used to.
  * @param {(msg:string)=>void} [opts.onLog]
  * @param {boolean} [opts.reregister] retry registration after service loss
+ * @param {string[]} [opts.transports] service-advertised paths; native embedded
+ *   surfaces pass `['ws-relay']` because they do not own WebRTC.
  */
 export function createRendezvousHost(opts) {
   const {
@@ -496,6 +498,7 @@ export function createRendezvousHost(opts) {
     onPeerShedding = () => {},
     onLog = () => {},
     reregister = true,
+    transports = ['webrtc', 'ws-relay'],
     levers = defaultTransportLevers(),
     factories = defaultFactories(),
   } = opts;
@@ -848,7 +851,7 @@ export function createRendezvousHost(opts) {
           // what lets a host that CANNOT (the native one, which has no WebRTC
           // at all) declare the truth in the same field rather than by
           // omission (issue #1113).
-          transports: ['webrtc', 'ws-relay'],
+          transports,
           // issue #1115: present the reclaim secret from a PRIOR registration,
           // if this host is holding one, so the registry can hand back the
           // SAME code instead of minting a new one. Absent on this page's
@@ -873,7 +876,9 @@ export function createRendezvousHost(opts) {
         onCode(code);
         break;
       case 'peer-joined':
-        peerState(msg.peer);
+        // A relay-only native host has no RTCPeerConnection implementation.
+        // `relay-peer` creates the same registry entry and channel pair.
+        if (transports.includes('webrtc')) peerState(msg.peer);
         break;
       case 'peer-left': {
         // registry.js's leave() sends this when THAT peer's own rendezvous

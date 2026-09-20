@@ -78,11 +78,15 @@ export function createDockLayoutMigration({ version, generations, current, rehom
     const normalized = generation.model.normalize(value, bounds);
     const added = generations.slice(index + 1).flatMap(later => later.added);
     let migrated = { ...normalized, version, closed: [...normalized.closed, ...added.map(([panel]) => panel)] };
-    const previousActives = activePanels(normalized.root);
     migrated = rehome?.(migrated, from, value, generation) ?? migrated;
     // The panels this migration is about to place are still listed as closed, so
     // the pinned repair has to wait until they have been placed properly.
     migrated = current.settle(migrated, bounds);
+    // Settle may retire the active tab from an older vocabulary. Capture the
+    // repaired view after that pass so a newly registered panel cannot become
+    // active merely because the old active no longer exists.
+    const previousActives = activePanels(migrated.root);
+    const settledSelected = migrated.selected;
     for (const [panel, preferred, placement = 'tab'] of added) {
       migrated = addMigrationPanel(migrated, panel, preferred, current, [], placement);
     }
@@ -94,7 +98,8 @@ export function createDockLayoutMigration({ version, generations, current, rehom
     // was a panel the current registry has since RETIRED, which the sanitize
     // above just dropped from the tree. Restoring that verbatim would name a
     // panel nothing can show, so the sanitize's own choice stands instead.
-    if (current.panels.includes(normalized.selected)) migrated.selected = normalized.selected;
+    migrated.selected = current.panels.includes(normalized.selected)
+      ? normalized.selected : settledSelected;
     return migrated;
   };
 }

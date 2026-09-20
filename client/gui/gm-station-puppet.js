@@ -600,6 +600,13 @@ export function createGmStationPuppet({
     issueConsoleAction,
     settleCommandResults,
     refresh: renderSelected,
+    focusStation(shipId, stationId) {
+      const row = rowsFor(projection).find(candidate => candidate.ship.ship_id === shipId
+        && candidate.station.station_id === stationId);
+      if (!row) return false;
+      selectedKey = row.key; renderSelected(); button?.focus?.();
+      return doc.activeElement === button;
+    },
     state: () => ({ projection, selectedKey, selectedRow, pendingCommands }),
   };
 }

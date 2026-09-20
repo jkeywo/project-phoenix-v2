@@ -18,6 +18,7 @@ export function mountWorkshopModelPreview({ root, provider, draft, selection, bu
   const status = make('p', 'status'); status.setAttribute('role', 'status');
   const stats = make('p', 'stats');
   let session = null, disposed = false, hidden = false, previousDraft, previousRevision, previousSelection;
+  let launchControls = null;
   const invoke = async fn => { try { await fn(); } catch (error) {
     if (!disposed) { status.textContent = String(error?.message || error); status.setAttribute('role', 'alert'); }
   } };
@@ -100,6 +101,11 @@ export function mountWorkshopModelPreview({ root, provider, draft, selection, bu
         triangles: String(measured.triangles), meshes: String(measured.meshes), textures: String(measured.textures),
         measured: String(measured.measured_textures), pixels: String(measured.texture_pixels), largest: String(measured.largest_texture),
       });
+      if (launchControls) {
+        const pending = launchControls; launchControls = null;
+        if (pending.lighting) void invoke(() => session.control({ command: 'lighting', mode: pending.lighting }));
+        if (pending.gizmos != null) void invoke(() => session.control({ command: 'gizmos', enabled: pending.gizmos }));
+      }
     } else stats.textContent = '';
     const lines = [t(!state.available ? 'workshop.models.preview.unavailable'
       : state.loading || state.status?.starting ? 'workshop.models.preview.loading'
@@ -121,5 +127,13 @@ export function mountWorkshopModelPreview({ root, provider, draft, selection, bu
     hidden = nextHidden; panel.hidden = hidden; render();
   }
   refresh();
-  return { refresh, node: panel, dispose() { disposed = true; void Promise.resolve(session.dispose()).catch(() => {}); panel.remove(); } };
+  return { refresh, node: panel,
+    applyLaunch(value) {
+      launchControls = value || null;
+      if (value?.lighting) lighting.value = value.lighting;
+      if (value?.gizmos != null) gizmos.checked = value.gizmos;
+      render();
+    },
+    review(candidate, selected) { return invoke(() => session.refresh(candidate, selected)); },
+    dispose() { disposed = true; void Promise.resolve(session.dispose()).catch(() => {}); panel.remove(); } };
 }

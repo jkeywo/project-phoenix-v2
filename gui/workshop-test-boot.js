@@ -32,6 +32,7 @@ installWorkshopTestChild({
     signal,
     onHud: showHud,
     onGm: (name, payload) => gm?.channel(name, payload),
+    onGmRolePresets: payload => gm?.setRolePresets(payload),
     onView: view => showGm(view?.view === 'game-master'),
   }),
 });

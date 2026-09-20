@@ -12,8 +12,8 @@
  * This module is DOM-free and IO-free: it operates on already-read text through
  * a `read(path) -> string | null` source and a `parse(text) -> object` TOML
  * parser, exactly as the Rust `FragmentSource` trait is the sole seam through
- * which text enters the resolver. `entity-cache.js` (async fs) and
- * `mod-pack-export.js` (in-memory pack) supply those two callbacks.
+ * which text enters the resolver. Workshop's native and archive providers
+ * supply those callbacks from the selected exact-source document.
  *
  * ── Merge semantics mirrored from the Rust `MergePolicy::ComposeFragments`
  *    layer (the ONLY policy this editor path uses) ─────────────────────────
@@ -575,7 +575,7 @@ export function resolveTemplate(rootPath, source, parse) {
  * `[key=val]` / `[index]` array addressing. `station[id=bridge].rating[name=x]`
  * → `[{name:'station', selector:{key:'id',val:'bridge'}}, {name:'rating', …}]`.
  */
-function parseFieldPath(path) {
+export function parseFieldPath(path) {
   const segments = [];
   let i = 0;
   const n = path.length;

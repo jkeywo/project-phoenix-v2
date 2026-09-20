@@ -7,6 +7,8 @@ import { createStoreZip } from './mod-pack-export.js';
 import { createBrowserWorkshopTest, createWorkshopTestFrame } from './workshop-test-frame.js';
 import { createWorkshopTestPreparation } from './workshop-test-snapshot.js';
 import { createBrowserWorkshopPreview, createWorkshopPreviewFrame } from './workshop-preview.js';
+import { createWorkshopBillboardCapture } from './workshop-billboard-capture.js';
+import { createWorkshopLodGeneration } from './workshop-lod-generation.js';
 
 export function newWorkshopPack(dependencies) {
   const content = parse(dependencies.base_files['assets/scenarios.toml']).content;
@@ -55,7 +57,8 @@ export function createBrowserWorkshopProvider({ loadedPack = null, dependencies,
   };
 }
 
-export function createNativeWorkshopProvider({ request }) {
+export function createNativeWorkshopProvider({ request, previewFrame = createWorkshopPreviewFrame,
+  fetcher = (...args) => fetch(...args) }) {
   if (typeof request !== 'function') throw new Error('Native Workshop bridge is unavailable');
   let revision = null;
   let kind = null;
@@ -69,6 +72,65 @@ export function createNativeWorkshopProvider({ request }) {
     operation = next.catch(() => {});
     return next;
   };
+  let previewViewport = null, previewTitle = '';
+  const textDecoder = new TextDecoder('utf-8', { fatal: true });
+  const preview = createBrowserWorkshopPreview({
+    async prepare(files, selection) {
+      const value = await call({ op: 'preview-start', files, selection });
+      if (value?.status !== 'preview' || typeof value.capture !== 'string'
+          || typeof value.base_url !== 'string' || typeof value.revision !== 'string'
+          || !Array.isArray(value.paths) || value.paths.some(path => typeof path !== 'string')) {
+        throw new Error('Invalid native Workshop preview capture');
+      }
+      const base = new URL(value.base_url);
+      if (base.protocol !== 'http:' || !['127.0.0.1', '[::1]', 'localhost'].includes(base.hostname)
+          || !base.pathname.startsWith('/workshop-preview-capture/') || !base.pathname.endsWith('/')) {
+        throw new Error('Invalid native Workshop preview route');
+      }
+      try {
+        const entries = await Promise.all(value.paths.map(async (path, index) => {
+          const response = await fetcher(new URL(String(index), base), { cache: 'no-store', credentials: 'omit' });
+          if (!response.ok) throw new Error(`Captured Workshop preview member is unavailable: ${path}`);
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          return [path, /\.(toml|rhai)$/.test(path) ? textDecoder.decode(bytes) : bytes];
+        }));
+        return { files: Object.fromEntries(entries), selection: value.selection,
+          revision: value.revision, nativeCapture: value.capture };
+      } catch (error) {
+        await call({ op: 'preview-release', capture: value.capture }).catch(() => {});
+        throw error;
+      }
+    },
+    frame: () => {
+      if (!previewViewport) throw new Error('Workshop preview viewport is unavailable');
+      return previewFrame({ mount: previewViewport, title: previewTitle });
+    },
+    release(prepared) {
+      return prepared?.nativeCapture
+        ? call({ op: 'preview-release', capture: prepared.nativeCapture }).then(() => {})
+        : Promise.resolve();
+    },
+  });
+  const uploadBytes = async bytes => {
+    const begin = await call({ op: 'asset-begin', length: bytes.length });
+    if (begin?.status !== 'asset-upload' || typeof begin.token !== 'string') throw new Error('Invalid native asset upload');
+    let finished = false;
+    try {
+      for (let offset = 0; offset < bytes.length; offset += 65536) await call({ op: 'asset-chunk', token: begin.token,
+        offset, bytes: Array.from(bytes.slice(offset, offset + 65536)) });
+      const result = await call({ op: 'asset-finish', token: begin.token });
+      if (result?.status !== 'asset-stored' || !isNativeAssetReference(result.reference)
+          || result.reference.length !== bytes.length) throw new Error('Invalid native asset version');
+      finished = true; return result.reference;
+    } finally { if (!finished) await call({ op: 'asset-cancel', token: begin.token }).catch(() => {}); }
+  };
+  const nativeRuntime = {
+    async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
+  };
+  const billboardCapture = createWorkshopBillboardCapture({ call, fetcher, upload: uploadBytes,
+    runtime: nativeRuntime, restoreDocument: snapshot => WorkshopDocument.restore(snapshot, { native: true }) });
+  const lodGeneration = createWorkshopLodGeneration({ call, fetcher, upload: uploadBytes, runtime: nativeRuntime,
+    restoreDocument: snapshot => WorkshopDocument.restore(snapshot, { native: true }) });
   return {
     canImport: false, canCreate: false,
     async load() {
@@ -78,6 +140,13 @@ export function createNativeWorkshopProvider({ request }) {
       return WorkshopDocument.fromNativeFiles(value.files, { kind });
     },
     runtime: {
+      async shipSchema() {
+        const response = await call({ op: 'ship-schema' });
+        const schema = response?.schema;
+        if (response?.status !== 'ship-schema' || !Array.isArray(schema?.system_kinds)
+            || !Array.isArray(schema?.directive_kinds)) throw new Error('Invalid native Workshop ship schema');
+        return schema;
+      },
       async dependencies() {
         const value = await call({ op: 'load-dependencies' });
         const textFiles = files => files && typeof files === 'object' && !Array.isArray(files)
@@ -91,7 +160,7 @@ export function createNativeWorkshopProvider({ request }) {
         }
         return { base_files: value.base_files, packs: value.packs };
       },
-      async validate(_archive, draft) { return (await call({ op: 'validate-sources', files: draft.toNativeSources() })).report; },
+      ...nativeRuntime,
       async inspect(source, document_path) { return (await call({ op: 'inspect', source, document_path })).fields; },
       async patch(source, patch) { return (await call({ op: 'patch', source, patch })).source; },
       // The native provider builds the dependency bundle itself, the way the
@@ -137,6 +206,16 @@ export function createNativeWorkshopProvider({ request }) {
       // request's correlation number, and the host strips it before the
       // operation is read), so a preset's own id cannot travel under that name.
       async newPreset(id, label) { return (await call({ op: 'new-preset', preset_id: id, label })).source; },
+      async scriptHostFunctions() {
+        const value = await call({ op: 'script-host-functions' });
+        if (value?.status !== 'script-host-functions' || !Array.isArray(value.functions)) throw new Error('Invalid Workshop Rhai registry');
+        return value.functions;
+      },
+      async scriptDiagnostics(source, line_offset = 0) {
+        const value = await call({ op: 'script-diagnostics', source, line_offset });
+        if (value?.status !== 'script-diagnostics' || !Array.isArray(value.diagnostics)) throw new Error('Invalid Workshop Rhai diagnostics');
+        return value.diagnostics;
+      },
     },
     async save(draft) {
       const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });
@@ -149,21 +228,7 @@ export function createNativeWorkshopProvider({ request }) {
     },
     restoreDocument(snapshot) { return WorkshopDocument.restore(snapshot, { native: true }); },
     async importAsset(file) {
-      const begin = await call({ op: 'asset-begin', length: file.size });
-      if (begin?.status !== 'asset-upload' || typeof begin.token !== 'string') throw new Error('Invalid native asset upload');
-      let finished = false;
-      try {
-        for (let offset = 0; offset < file.size; offset += 65536) {
-          const bytes = new Uint8Array(await file.slice(offset, offset + 65536).arrayBuffer());
-          await call({ op: 'asset-chunk', token: begin.token, offset, bytes: Array.from(bytes) });
-        }
-        const result = await call({ op: 'asset-finish', token: begin.token });
-        if (result?.status !== 'asset-stored' || !isNativeAssetReference(result.reference) || result.reference.length !== file.size) throw new Error('Invalid native asset version');
-        finished = true;
-        return result.reference;
-      } finally {
-        if (!finished) await call({ op: 'asset-cancel', token: begin.token }).catch(() => {});
-      }
+      return uploadBytes(new Uint8Array(await file.arrayBuffer()));
     },
     async readAsset(reference) {
       if (!isNativeAssetReference(reference)) throw new Error('Invalid native asset reference');
@@ -181,16 +246,39 @@ export function createNativeWorkshopProvider({ request }) {
       }
       return bytes;
     },
+    modelPreview: {
+      capture(draft) { return draft.toNativeSources(); },
+      start: preview.start,
+      control: preview.control,
+      status: preview.status,
+      async stop() {
+        await preview.stop();
+        await call({ op: 'preview-stop' });
+      },
+      mount(target, label) {
+        previewViewport = target;
+        previewTitle = typeof label === 'string' ? label : label?.title || '';
+      },
+    },
+    billboardCapture,
+    lodGeneration,
     test: {
       async catalog(files) {
         const response = await call({ op: 'test-catalog', files });
         const value = response?.catalog;
         if (response?.status !== 'test-catalog' || !value || !['worlds', 'ships'].every(key =>
-          Array.isArray(value[key]) && value[key].every(path => typeof path === 'string'))) throw new Error('Invalid native Test catalogue');
+          Array.isArray(value[key]) && value[key].every(path => typeof path === 'string'))
+          || !value.layers || typeof value.layers !== 'object' || Array.isArray(value.layers)
+          || Object.entries(value.layers).some(([world, layers]) => !value.worlds.includes(world)
+            || !Array.isArray(layers) || layers.some(path => typeof path !== 'string'))) {
+          throw new Error('Invalid native Test catalogue');
+        }
         return value;
       },
       async start(files, selection) {
-        const response = await call({ op: 'test-start', files, selection });
+        const { breakpoint = null, ...runtimeSelection } = selection;
+        const response = await call({ op: 'test-start', files, selection: runtimeSelection,
+          ...(breakpoint ? { breakpoint } : {}) });
         if (response?.status !== 'test' || !response.run) throw new Error('Invalid native Test start');
         return response.run;
       },

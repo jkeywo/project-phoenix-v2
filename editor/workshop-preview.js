@@ -63,7 +63,7 @@ export function createWorkshopPreviewFrame({ mount, title, win = mount.ownerDocu
 
 /** Preparation and replacement are separate: a refused candidate never
  * destroys the picture the operator is already looking at. */
-export function createBrowserWorkshopPreview({ prepare, frame }) {
+export function createBrowserWorkshopPreview({ prepare, frame, release = async () => {} }) {
   let current = null, generation = 0;
   const booting = new Set();
   const preparing = new Set();
@@ -71,7 +71,11 @@ export function createBrowserWorkshopPreview({ prepare, frame }) {
     for (const cancel of preparing) cancel(); preparing.clear();
     for (const run of booting) run.destroy(); booting.clear();
   }
-  function retire(run) { run.destroy(); if (current === run) current = null; }
+  function retire(record) {
+    record.run.destroy();
+    void release(record.prepared).catch(() => {});
+    if (current === record) current = null;
+  }
   return {
     /** The draft, exactly as it stands. Identical to the Test's capture: the
      * same paths, the same bytes, the same refusal to read anything else. */
@@ -87,36 +91,52 @@ export function createBrowserWorkshopPreview({ prepare, frame }) {
       preparing.add(cancel);
       try {
         const prepared = await Promise.race([prepare(source, selection), cancelled]);
-        if (accepted !== generation) throw new Error('Workshop preview start was cancelled');
+        if (accepted !== generation) {
+          await release(prepared);
+          throw new Error('Workshop preview start was cancelled');
+        }
         const next = frame();
         booting.add(next);
         try {
           const status = await next.start(prepared);
-          if (accepted !== generation) throw new Error('Workshop preview start was cancelled');
+          if (accepted !== generation) {
+            await release(prepared);
+            throw new Error('Workshop preview start was cancelled');
+          }
           if (!status?.running) throw new Error(status?.error || 'Workshop preview could not start');
-          booting.delete(next); current?.destroy(); current = next;
+          booting.delete(next);
+          const previous = current;
+          current = { run: next, prepared };
+          if (previous) retire(previous);
           return status;
-        } catch (error) { if (booting.delete(next)) next.destroy(); throw error; }
+        } catch (error) {
+          if (booting.delete(next)) next.destroy();
+          await release(prepared).catch(() => {});
+          throw error;
+        }
       } finally { preparing.delete(cancel); }
     },
     async control(control) {
       if (!current) return { running: false };
-      const run = current;
+      const record = current, run = record.run;
       try {
         const status = await run.control(control);
-        if (!status.running) retire(run);
+        if (!status.running) retire(record);
         return status;
-      } catch (error) { retire(run); throw error; }
+      } catch (error) { retire(record); throw error; }
     },
     async status() {
       if (!current) return { running: false };
-      const run = current;
+      const record = current, run = record.run;
       try {
         const status = await run.status();
-        if (!status.running) retire(run);
+        if (!status.running) retire(record);
         return status;
-      } catch (error) { retire(run); throw error; }
+      } catch (error) { retire(record); throw error; }
     },
-    async stop() { generation++; cancelBoots(); current?.destroy(); current = null; },
+    async stop() {
+      generation++; cancelBoots();
+      if (current) { const record = current; current = null; await release(record.prepared).catch(() => {}); record.run.destroy(); }
+    },
   };
 }

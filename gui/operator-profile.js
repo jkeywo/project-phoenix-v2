@@ -15,6 +15,7 @@ import {
 } from './accessibility-profile.js';
 import { normalizePrivateAudio, legacyPrivateMaster, LEGACY_PRIVATE_MASTER_KEY } from './private-audio-preferences.js';
 import { defaultWorkshopLayout, normalizeWorkshopLayout } from './workshop-layout-model.js';
+import { defaultWorkshopTestLayout, normalizeWorkshopTestLayout } from './workshop-test-layout-model.js';
 import { defaultLiveLayout, normalizeLiveLayout } from './live-layout-model.js';
 
 export const OPERATOR_PROFILE_KIND = 'project-phoenix/operator-profile';
@@ -40,7 +41,7 @@ const MAX_PROFILE_ENTRIES = 512;
 const MAX_GAMEPAD_SLOT = 15;
 const CURRENT_FIELDS = new Set([
   'kind', 'version', 'accessibility', 'bindings', 'gamepad', 'feedback',
-  'gmConfirmations', 'audio', 'authoringLayout', 'liveLayout',
+  'gmConfirmations', 'audio', 'authoringLayout', 'testLayout', 'liveLayout',
 ]);
 
 function ownRecord(value) {
@@ -190,6 +191,7 @@ export function createDefaultOperatorProfile(registry = null) {
     audio: normalizePrivateAudio(),
     gmConfirmations: record(),
     authoringLayout: defaultWorkshopLayout(),
+    testLayout: defaultWorkshopTestLayout(),
     liveLayout: defaultLiveLayout(),
   };
 }
@@ -209,6 +211,7 @@ export function createOperatorProfileSnapshot({
   audio,
   gmConfirmations,
   authoringLayout,
+  testLayout,
   liveLayout,
 } = {}) {
   const diagnostics = [];
@@ -227,6 +230,7 @@ export function createOperatorProfileSnapshot({
     audio: normalizePrivateAudio(audio),
     gmConfirmations: normalizeConfirmations(gmConfirmations, diagnostics),
     authoringLayout: normalizeWorkshopLayout(authoringLayout),
+    testLayout: normalizeWorkshopTestLayout(testLayout),
     liveLayout: normalizeLiveLayout(liveLayout),
   };
 }
@@ -334,6 +338,7 @@ export function prepareOperatorProfileImport(text, { registry } = {}) {
       diagnostics,
     ),
     authoringLayout: normalizeWorkshopLayout(legacy ? null : raw.authoringLayout),
+    testLayout: normalizeWorkshopTestLayout(legacy ? null : raw.testLayout),
     liveLayout: normalizeLiveLayout(legacy ? null : raw.liveLayout),
   };
   return {
@@ -371,6 +376,7 @@ export function serializeOperatorProfile(profile) {
     audio: profile && profile.audio,
     gmConfirmations: profile && profile.gmConfirmations,
     authoringLayout: profile && profile.authoringLayout,
+    testLayout: profile && profile.testLayout,
     liveLayout: profile && profile.liveLayout,
   });
   return JSON.stringify(safe, null, 2) + '\n';

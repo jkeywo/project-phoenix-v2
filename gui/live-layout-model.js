@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 14;
+export const LIVE_LAYOUT_VERSION = 18;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -18,6 +18,10 @@ export const LIVE_PANEL_REGISTRY = Object.freeze([
   tool('despawn'), tool('faction'),
   tool('objective'),
   tool('entity-fields'),
+  tool('world-fields'),
+  tool('hull-fields'),
+  tool('region-fields'),
+  tool('presentation-fields'),
 ]);
 export const LIVE_PANELS = Object.freeze(LIVE_PANEL_REGISTRY.map(panel => panel.id));
 const V1_PANELS = Object.freeze(['roster', 'readiness', 'join', 'manual-save']);
@@ -35,6 +39,10 @@ const V10_PANELS = Object.freeze([...V9_PANELS, 'system', 'effect']);
 const V11_PANELS = Object.freeze([...V10_PANELS, 'despawn', 'faction']);
 const V12_PANELS = Object.freeze([...V11_PANELS, 'objective']);
 const V13_PANELS = Object.freeze([...V12_PANELS, 'entity-fields']);
+const V14_PANELS = Object.freeze([...V13_PANELS]);
+const V15_PANELS = Object.freeze([...V14_PANELS, 'world-fields']);
+const V16_PANELS = Object.freeze([...V15_PANELS, 'hull-fields']);
+const V17_PANELS = Object.freeze([...V16_PANELS, 'region-fields']);
 /** Panels registered after version 1, with the group each joins on migration.
  *
  * Comms opens a group BELOW the readiness panels rather than joining them,
@@ -148,6 +156,10 @@ const ADDED_IN_V12 = Object.freeze([['objective', 'mission', 'tab']]);
 const ADDED_IN_V13 = Object.freeze([['entity-fields', 'inspector', 'tab']]);
 /** Nothing. Version 14 retires the ghost draft (see LIVE_TEMPORARY_PANELS). */
 const ADDED_IN_V14 = Object.freeze([]);
+const ADDED_IN_V15 = Object.freeze([['world-fields', 'mission', 'tab']]);
+const ADDED_IN_V16 = Object.freeze([['hull-fields', 'entity-fields', 'tab']]);
+const ADDED_IN_V17 = Object.freeze([['region-fields', 'entity-fields', 'tab']]);
+const ADDED_IN_V18 = Object.freeze([['presentation-fields', 'region-fields', 'tab']]);
 const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
 const v1Default = () => ({ version: 1,
   root: group(['roster', 'readiness', 'join', 'manual-save'], 'roster'),
@@ -185,12 +197,12 @@ const liveArrangement = () => ({
     { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
       { type: 'split', axis: 'vertical', sizes: [1, 1], children: [
         group(['roster', 'readiness', 'join', 'manual-save', 'mission',
-          'attention', 'workload', 'widgets', 'station', 'objective'], 'roster'),
+          'attention', 'workload', 'widgets', 'station', 'objective', 'world-fields'], 'roster'),
         group(['presentation', 'audition', 'source-link'], 'presentation'),
       ] },
       { type: 'split', axis: 'horizontal', sizes: [1, 1], children: [
         group(['map', 'station-console'], 'map'),
-        group(['inspector', 'contact', 'npc', 'system', 'despawn', 'faction', 'entity-fields'],
+        group(['inspector', 'contact', 'npc', 'system', 'despawn', 'faction', 'entity-fields', 'hull-fields', 'region-fields', 'presentation-fields'],
           'inspector'),
       ] },
     ] },
@@ -277,6 +289,38 @@ const v13Default = () => ({ version: 13, ...liveArrangement(),
   floats: [],
   closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'ghost', 'effect'],
   selected: 'roster' });
+const arrangementBeforeV17 = () => {
+  const arrangement = arrangementBeforeV18();
+  const documents = arrangement.root.children[0].children[1].children[1];
+  documents.tabs = documents.tabs.filter(panel => panel !== 'region-fields');
+  return arrangement;
+};
+const arrangementBeforeV18 = () => {
+  const arrangement = liveArrangement();
+  const documents = arrangement.root.children[0].children[1].children[1];
+  documents.tabs = documents.tabs.filter(panel => panel !== 'presentation-fields');
+  return arrangement;
+};
+const arrangementBeforeV16 = () => {
+  const arrangement = arrangementBeforeV17();
+  const documents = arrangement.root.children[0].children[1].children[1];
+  documents.tabs = documents.tabs.filter(panel => panel !== 'hull-fields');
+  return arrangement;
+};
+const arrangementBeforeV15 = () => {
+  const arrangement = arrangementBeforeV16();
+  const workflow = arrangement.root.children[0].children[0].children[0];
+  workflow.tabs = workflow.tabs.filter(panel => panel !== 'world-fields');
+  return arrangement;
+};
+const v14Default = () => ({ version: 14, ...arrangementBeforeV15(),
+  floats: [], closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'effect'], selected: 'roster' });
+const v15Default = () => ({ version: 15, ...arrangementBeforeV16(),
+  floats: [], closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'effect'], selected: 'roster' });
+const v16Default = () => ({ version: 16, ...arrangementBeforeV17(),
+  floats: [], closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'effect'], selected: 'roster' });
+const v17Default = () => ({ version: 17, ...arrangementBeforeV18(),
+  floats: [], closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'effect'], selected: 'roster' });
 export function defaultLiveLayout() {
   return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
     floats: [],
@@ -317,6 +361,14 @@ const v12 = createDockLayoutModel({ version: 12, panels: V12_PANELS, defaultLayo
   temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [12] });
 const v13 = createDockLayoutModel({ version: 13, panels: V13_PANELS, defaultLayout: v13Default,
   temporary: TEMPORARY_UNTIL_V13, compatibleVersions: [13] });
+const v14 = createDockLayoutModel({ version: 14, panels: V14_PANELS, defaultLayout: v14Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [14] });
+const v15 = createDockLayoutModel({ version: 15, panels: V15_PANELS, defaultLayout: v15Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [15] });
+const v16 = createDockLayoutModel({ version: 16, panels: V16_PANELS, defaultLayout: v16Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [16] });
+const v17 = createDockLayoutModel({ version: 17, panels: V17_PANELS, defaultLayout: v17Default,
+  temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [17] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -338,7 +390,11 @@ const migrate = createDockLayoutMigration({
     // Version 14 registers nothing: it RETIRES the ghost draft. A retired panel
     // needs no placement pass — the current registry does not know it, so the
     // final sanitize drops it from wherever a stored tree held it.
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V14 },
+    { version: 14, model: v14, added: ADDED_IN_V14 },
+    { version: 15, model: v15, added: ADDED_IN_V15 },
+    { version: 16, model: v16, added: ADDED_IN_V16 },
+    { version: 17, model: v17, added: ADDED_IN_V17 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V18 },
   ],
 });
 export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });

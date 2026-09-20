@@ -30,7 +30,7 @@ export async function launchWorkshopPreview(snapshot, {
   const read = path => (typeof files[path] === 'string' ? files[path] : '');
   // DEFERRED, never answered inside the callback. The runtime calls this from
   // Rust while it still holds its own content-cache borrow, so pushing straight
-  // back in re-enters that borrow; the standalone viewer avoids it by answering
+  // back in re-enters that borrow; the retained preview avoids it by answering
   // from a `fetch().then()`, and the disposable Test by queueing a promise.
   // An absent sidecar is delivered as the empty string, which is what "no rig"
   // means to the resolver — not an error, and not a reason to go looking on a
@@ -52,9 +52,9 @@ export async function launchWorkshopPreview(snapshot, {
   }
   signal?.addEventListener('abort', dispose, { once: true });
 
-  /** The viewer publishes camelCase; the Inspector panel reads snake_case and
-   * expects the whole reading under `stats`. Mapping here keeps the viewer's
-   * own JSON contract — which viewer.html also reads — unchanged. */
+  /** The renderer publishes camelCase; the Inspector panel reads snake_case and
+   * expects the whole reading under `stats`. Mapping here keeps the shared
+   * ViewerPlugin JSON contract unchanged. */
   function status() {
     const text = runtime.viewer_stats();
     const measured = text ? JSON.parse(text) : null;

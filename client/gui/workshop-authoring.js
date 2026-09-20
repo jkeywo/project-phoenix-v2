@@ -15,6 +15,10 @@ import { mountWorkshopDefinitions } from './workshop-definitions-panel.js';
 import { mountWorkshopComposition } from './workshop-composition-panel.js';
 import { mountWorkshopEntity } from './workshop-entity-panel.js';
 import { mountWorkshopPresets } from './workshop-presets-panel.js';
+import { mountWorkshopShipAuthoring } from './workshop-ship-authoring-panel.js';
+import { mountWorkshopScripts } from './workshop-scripts-panel.js';
+import { mountWorkshopSpatial } from './workshop-spatial-panel.js';
+import { inlineBlockBaseLine } from '../editor/script-editor.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -25,6 +29,7 @@ import { createSemanticControlsRemapper } from './semantic-controls-remapper.js'
 import { t } from './strings.js';
 import { renderInspectorMetadata, validInspectorDescriptor } from './inspector-field.js';
 import { mountWorkshopLayout } from './workshop-layout-renderer.js';
+import { workshopTestLayoutModel } from './workshop-test-layout-model.js';
 
 // wasm-bindgen may reject with a string JsValue rather than an Error object.
 const ERROR_STRING_IDS = Object.freeze({
@@ -46,7 +51,7 @@ const NATIVE_COPY = {
   'workshop.recovery_invalid': 'workshop.native_recovery_invalid',
 };
 
-export function mountWorkshopAuthoring({ root, win = window, download = downloadZip, provider = null,
+export function mountWorkshopAuthoring({ root, win = window, download = downloadZip, provider = null, launch = null,
   runtime = provider?.runtime || createWorkshopRuntime(), recovery = provider?.recovery || createWorkshopRecovery({ indexedDB: win.indexedDB }) } = {}) {
   const doc = root.ownerDocument;
   const translate = (id, params) => t(provider?.save ? (NATIVE_COPY[id] || id) : id, params);
@@ -72,6 +77,16 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const importButton = button('editor.mod.import.button', 'workshop-import', () => activate(MOD_IMPORT_ACTION_ID));
   const newButton = button('workshop.new', 'workshop-new', () => createPack());
   const saveButton = button('workshop.save', 'workshop-save', () => saveNative());
+  let testWorkspace = false;
+  let testHadRun = false;
+  const enterTestWorkspace = () => {
+    testWorkspace = true;
+    refresh();
+    testLayoutMount?.reveal('test-controls', { focus: false });
+    void testPanel?.enter().catch(() => {}).finally(refresh);
+  };
+  const openTestButton = button('workshop.test_heading', 'workshop-open-test', enterTestWorkspace);
+  openTestButton.hidden = !provider?.test;
   saveButton.hidden = !provider?.save;
   newButton.hidden = provider?.canCreate === false;
   importButton.hidden = provider?.canImport === false;
@@ -81,8 +96,11 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const exportButton = button('editor.mod.export.button', 'workshop-export', () => activate(MOD_EXPORT_ACTION_ID));
   const dirty = el('span', null, { role: 'status', id: 'workshop-dirty' });
   exportButton.hidden = Boolean(provider?.save);
-  toolbar.append(newButton, importButton, undoButton, redoButton, checkButton, saveButton, exportButton, dirty, fileInput);
+  toolbar.append(newButton, importButton, undoButton, redoButton, checkButton, saveButton, exportButton,
+    openTestButton, dirty, fileInput);
   const layout = el('div', null, { class: 'workshop-layout' });
+  const testLayout = el('div', null, { class: 'workshop-test-layout' });
+  testLayout.hidden = true;
   const filesPanel = el('div', null, { class: 'workshop-files' });
   const filesLabel = el('label', 'workshop.files', { for: 'workshop-files' });
   const files = el('select', null, { id: 'workshop-files' });
@@ -149,7 +167,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   dependencies.append(dependencyButton, el('label', 'workshop.files', { for: 'workshop-dependency' }), dependencySelect,
     el('label', 'workshop.dependency_source', { for: 'workshop-dependency-source' }), dependencySource);
   dependencyButton.disabled = !runtime.dependencies;
-  root.append(toolbar, layout);
+  root.append(toolbar, layout, testLayout);
   let dependencyFiles = [];
   let draft = null;
   let selected = null;
@@ -167,7 +185,11 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let compositionPanel = null;
   let entityPanel = null;
   let presetsPanel = null;
+  let shipAuthoringPanel = null;
+  let scriptsPanel = null;
+  let spatialPanel = null;
   let layoutMount = null;
+  let testLayoutMount = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -233,13 +255,27 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  shipAuthoringPanel = mountWorkshopShipAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  scriptsPanel = mountWorkshopScripts({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  spatialPanel = mountWorkshopSpatial({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
+  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
       findings, feedback, dependencies, settings,
       models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node,
-      changes: changesPanel, definitions: definitionsPanel.node, composition: compositionPanel.node,
-      entity: entityPanel.node, presets: presetsPanel.node },
+      changes: changesPanel, definitions: definitionsPanel.node, composition: compositionTools,
+      entity: entityPanel.node, presets: presetsPanel.node, scripts: scriptsPanel.node },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -257,6 +293,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         sound: translate('sound_cues.title'), changes: translate('workshop.changes.title'),
         definitions: translate('workshop.definitions.title'), composition: translate('workshop.composition.title'),
         entity: translate('workshop.entity.title'), presets: translate('workshop.presets.title'),
+        scripts: translate('workshop.scripts.title'),
       },
     },
     initial: profile.authoringLayout, doc, win,
@@ -293,6 +330,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (!ship || ![...ship.options].some(option => option.value === path && !option.disabled)) return false;
     ship.value = path;
     ship.dispatchEvent(new win.Event('change'));
+    enterTestWorkspace();
     ship.focus();
     return true;
   }
@@ -387,13 +425,17 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     }
     const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
     toolbar.setAttribute('aria-busy', String(busy));
-    const testing = testPanel?.testing() || false;
+    const testing = testWorkspace;
     modelPanel?.refresh({ hidden: testing });
     definitionsPanel?.refresh({ hidden: testing });
     compositionPanel?.refresh({ hidden: testing });
     entityPanel?.refresh({ hidden: testing });
     presetsPanel?.refresh({ hidden: testing });
+    shipAuthoringPanel?.refresh({ hidden: testing });
+    scriptsPanel?.refresh({ hidden: testing });
+    spatialPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
+    testLayout.hidden = !testing;
     sourceScope.hidden = testing;
     root.querySelector('.workshop-mode').textContent = translate(testing ? 'workshop.test_mode' : 'workshop.authoring');
     files.disabled = !draft || busy;
@@ -423,6 +465,23 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     paintMigration();
     dirty.textContent = translate(!draft ? 'workshop.empty' : draft.isDirty() ? 'workshop.dirty' : 'workshop.saved');
     testPanel?.refresh();
+  }
+  function applyLaunch() {
+    // Browser bookmark migration reaches an empty archive workspace first.
+    // Keep the descriptor until import/new/restore supplies a real candidate;
+    // consuming it here would silently lose the requested source or preview.
+    if (!launch || !draft) return !launch;
+    let accepted = true;
+    if (launch.file) {
+      if (draft?.paths().includes(launch.file)) selected = launch.file;
+      else accepted = false;
+    }
+    if (launch.panel) layoutMount.reveal(launch.panel, { focus: false, notify: false });
+    if (launch.preview && !modelPanel?.applyLaunch(launch.preview, launch.controls)) accepted = false;
+    refresh({ selection: true });
+    if (!accepted) show('workshop.legacy_selection_unavailable', [], true);
+    launch = null;
+    return accepted;
   }
   function travel(redo) {
     if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
@@ -564,13 +623,17 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held() || provider?.canCreate === false) return;
     if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return;
     pendingValidation = true; refresh();
+    let created = false;
     try {
       const replacement = newWorkshopPack(await runtime.dependencies());
       if (disposed) return;
-      draft = replacement; selected = draft.paths()[0];
+      draft = replacement; selected = draft.paths()[0]; created = true;
       show('workshop.created'); persistDraft();
     } catch (error) { if (!disposed) show('workshop.runtime_unavailable', [errorText(error)], true); }
-    finally { pendingValidation = false; if (!disposed) refresh({ selection: true }); }
+    finally {
+      pendingValidation = false;
+      if (!disposed) { refresh({ selection: true }); if (created) applyLaunch(); }
+    }
   }
   async function saveNative() {
     if (!provider?.save || !draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
@@ -760,12 +823,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     const pending = pendingImport;
     if (!file || !pending) { cancelImport(); return; }
     refresh();
+    let imported = false;
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (disposed) return;
       const replacement = new WorkshopDocument(bytes);
       draft = replacement;
       selected = draft.paths()[0];
+      imported = true;
       show('workshop.imported', [], false, MOD_IMPORT_ACTION_ID, pending.correlation, { reveal: true });
       persistDraft();
       pending.settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
@@ -777,7 +842,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     } finally {
       pendingImport = null;
       fileInput.value = '';
-      if (!disposed) refresh({ selection: true });
+      if (!disposed) { refresh({ selection: true }); if (imported) applyLaunch(); }
     }
   });
   function cancelImport() {
@@ -822,6 +887,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     restoreButton.hidden = discardButton.hidden = true;
     recoveryStatus.textContent = translate('workshop.recovery_restored');
     refresh({ selection: true });
+    applyLaunch();
     source.focus();
   }
   async function discardRecovery() {
@@ -834,6 +900,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       restoreButton.hidden = discardButton.hidden = true;
       recoveryStatus.textContent = translate('workshop.recovery_discarded');
       refresh();
+      applyLaunch();
       importButton.focus();
     } catch {
       if (!disposed) recoveryStatus.textContent = translate('workshop.recovery_failed');
@@ -859,7 +926,52 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   doc.addEventListener('keydown', keydown);
   win.addEventListener('beforeunload', beforeUnload);
   testPanel = mountWorkshopTestPanel({ root, provider, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed: () => refresh(), win });
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed(state) {
+      if (state?.run) testHadRun = true;
+      else if (testHadRun) { testHadRun = false; testWorkspace = false; }
+      refresh();
+    },
+    leave() { testWorkspace = false; refresh(); },
+    openSource(path, line) {
+      const inline = path.match(/^(.*\.toml)#script\.(.+)$/);
+      const documentPath = inline ? inline[1] : path;
+      if (!draft?.paths().includes(documentPath)) return;
+      const documentLine = inline
+        ? inlineBlockBaseLine(draft.read(documentPath), inline[2]) + (line || 1) : line;
+      testWorkspace = false; selected = documentPath; refresh({ selection: true });
+      layoutMount.reveal('source', { focus: '#workshop-source' });
+      source.focus();
+      const lines = source.value.split('\n');
+      const index = Math.max(0, Math.min(lines.length - 1, (documentLine || 1) - 1));
+      const start = lines.slice(0, index).reduce((total, part) => total + part.length + 1, 0);
+      source.setSelectionRange(start, start + lines[index].length);
+    }, win });
+  if (testPanel.node && testPanel.viewNode && testPanel.traceNode) {
+    testLayoutMount = mountWorkshopLayout({
+      root, surface: testLayout, model: workshopTestLayoutModel,
+      panels: { 'test-controls': testPanel.node, 'test-viewscreen': testPanel.viewNode,
+        'test-trace': testPanel.traceNode },
+      labels: {
+        switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
+        float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
+        dock: {
+          left: translate('workshop.layout.dock_left'), right: translate('workshop.layout.dock_right'),
+          top: translate('workshop.layout.dock_top'), bottom: translate('workshop.layout.dock_bottom'),
+          tab: translate('workshop.layout.dock_tab'),
+        },
+        panels: {
+          'test-controls': translate('workshop.test_heading'),
+          'test-viewscreen': translate('workshop.test_view'),
+          'test-trace': translate('workshop.test_trace'),
+        },
+      },
+      initial: profile.testLayout, doc, win,
+      onChange(testLayoutValue) {
+        profile = { ...profile, testLayout: testLayoutValue };
+        if (saveOperatorProfile(storage, profile).status !== 'saved') reportPersistenceFailure();
+      },
+    });
+  }
   refresh({ selection: true });
   show('workshop.start');
   nativeStorageStatus();
@@ -887,7 +999,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       try {
         const loaded = await provider.load();
         if (disposed) return;
-        if (loaded) { draft = loaded; selected = draft.paths()[0]; refresh({ selection: true }); }
+        if (loaded) { draft = loaded; selected = draft.paths()[0]; refresh({ selection: true }); applyLaunch(); }
       } catch (error) {
         if (!disposed) { pendingRecovery = false; show('workshop.native_load_refused', [errorText(error)], true); refresh(); }
         return;
@@ -907,6 +1019,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       pendingRecovery = false;
       recoveryStatus.textContent = translate('workshop.recovery_empty');
       refresh();
+      applyLaunch();
       return;
     }
     discardButton.hidden = false;
@@ -920,6 +1033,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   })();
   return { ready, dispose() {
     disposed = true;
+    testLayoutMount?.dispose();
     testPanel.dispose();
     soundAudition?.dispose();
     modelPanel?.dispose();
@@ -927,6 +1041,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     compositionPanel?.dispose();
     entityPanel?.dispose();
     presetsPanel?.dispose();
+    shipAuthoringPanel?.dispose();
+    scriptsPanel?.dispose();
+    spatialPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);

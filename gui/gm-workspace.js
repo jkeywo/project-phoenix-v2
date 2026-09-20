@@ -18,12 +18,32 @@ import { createGmPresentationPanel } from './gm-presentation-panel.js';
 import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmEntityInspectorPanel } from './gm-entity-inspector-panel.js';
+import { createGmWorldInspectorPanel } from './gm-world-inspector-panel.js';
+import { createGmShipInspectorPanel } from './gm-ship-inspector-panel.js';
+import { createGmRegionInspectorPanel } from './gm-region-inspector-panel.js';
+import { createGmPresentationInspectorPanel } from './gm-presentation-inspector-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
 import { createGmAttentionPanel } from './gm-attention-panel.js';
 import { createGmAttentionFilters } from './gm-attention-filters.js';
 import { createGmHealthBanner } from './gm-health-banner.js';
 import { createGmHealthPanel } from './gm-health-panel.js';
+
+export function focusGmWorldInspectorOwner({ panel, target, doc, shell, mission, objective }) {
+  if (panel === 'session') {
+    doc.getElementById('gm-session-pause')?.focus();
+    return doc.activeElement?.id === 'gm-session-pause';
+  }
+  if (panel === 'mission') {
+    shell.showLog('gm-mission-panel');
+    return mission.focusEvent(target);
+  }
+  if (panel === 'objective') {
+    shell.showLog('gm-objective-panel');
+    return objective.focusObjective(target);
+  }
+  return false;
+}
 import { createGmWorkloadPanel } from './gm-workload-panel.js';
 import { createGmWidgetsPanel } from './gm-widgets-panel.js';
 import { createGmKnowledgeCompare } from './gm-knowledge-compare.js';
@@ -88,6 +108,9 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let gmDespawn = null;
   let gmNpc = null;
   let gmEntityFields = null;
+  let gmShipFields = null;
+  let gmRegionFields = null;
+  let gmPresentationFields = null;
   let gmObjectivePanel = null;
   const gmProjection = createGmLocalProjection({
     doc: doc,
@@ -104,6 +127,9 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       if (gmObjectivePanel) gmObjectivePanel.select(entity);
       // The entities/AI Live Inspector reads the same selection (issue #1489).
       if (gmEntityFields) gmEntityFields.select(entity);
+      if (gmShipFields) gmShipFields.select(entity);
+      if (gmRegionFields) gmRegionFields.select(entity);
+      if (gmPresentationFields) gmPresentationFields.select(entity);
     },
   });
   const gmActivity = createGmActivityFeed({
@@ -585,9 +611,44 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     selectEntity: entityId => gmProjection.select(entityId),
   });
   win.__hostGmEntityFieldsState = gmEntityFields.state;
+  const gmWorldFields = createGmWorldInspectorPanel({ doc, t,
+    focusPanel: (panel, target) => focusGmWorldInspectorOwner({
+      panel, target, doc, shell, mission: gmMissionPanel, objective: gmObjectivePanel,
+    }),
+  });
+  win.__hostGmWorldFieldsState = gmWorldFields.state;
+  gmShipFields = createGmShipInspectorPanel({ doc, t,
+    focusEffect: (entityId, scope) => {
+      const entity = gmProjection.state().entities.find(row => row.entity_id === entityId);
+      if (!entity) return false;
+      shell.temporaryActions?.open('effect');
+      // Opening a fresh draft resets its scope to the hull default. Aim after
+      // that reset so the link lands on the System row it named.
+      gmDirectEffect.select(entity); gmDirectEffect.selectScope(scope);
+      return gmDirectEffect.focusDraft();
+    },
+    focusSystem: (entityId, systemId) => {
+      const entity = gmProjection.state().entities.find(row => row.entity_id === entityId);
+      if (!entity) return false;
+      gmSystem.select(entity); shell.showLog('gm-system-panel'); return gmSystem.focusSystem(systemId);
+    },
+    focusStation: (entityId, stationId) => {
+      shell.showLog('gm-station-surface'); return gmStationPuppet.focusStation(entityId, stationId);
+    },
+  });
+  win.__hostGmShipFieldsState = gmShipFields.state;
+  gmRegionFields = createGmRegionInspectorPanel({ doc, t });
+  win.__hostGmRegionFieldsState = gmRegionFields.state;
+  gmPresentationFields = createGmPresentationInspectorPanel({ doc, t,
+    focusPresentation: ({ reading, field, value }) => {
+      shell.showLog('gm-presentation-dock');
+      return gmPresentation.focusControls({ ship: reading.shipId, field, value });
+    },
+  });
+  win.__hostGmPresentationFieldsState = gmPresentationFields.state;
   win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); gmRegionFields.reset(); gmPresentationFields.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -602,6 +663,10 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmSystem.update(p);
       gmNpc.update(p);
       gmEntityFields.update(p);
+      gmWorldFields.update(p);
+      gmShipFields.update(p);
+      gmRegionFields.update(p);
+      gmPresentationFields.update(p);
       if (gmProjection.update(p)) {
         gmActivity.reconcileAvailability();
         gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
@@ -658,6 +723,11 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
+    // The live host and disposable Workshop Test both feed the same ordinary
+    // presentation controller. Keeping this on the workspace avoids a second
+    // parser or widget renderer in the Test adapter.
+    setRolePresets: gmRolePresets.setAvailablePresets,
+    rolePresetState: gmRolePresets.state,
     dispose() { gmContact?.dispose(); workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       workshopSource.refresh();

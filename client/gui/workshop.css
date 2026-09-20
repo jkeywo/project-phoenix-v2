@@ -92,16 +92,84 @@ button:not(:disabled) { cursor: pointer; }
    it easier to scan, and the severity below is a word too. */
 .workshop-presets-undrawn label { font-weight: 700; }
 .workshop-presets-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-model-structure { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr)); gap: 1rem; }
+.workshop-model-structure fieldset { min-width: 0; }
+.workshop-model-structure-row { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; margin: .6rem 0; }
+.workshop-model-structure-row :is(input, select) { flex: 1 1 9rem; min-width: 0; min-height: 2.75rem; }
+.workshop-model-structure-row small { flex-basis: 100%; }
 .workshop-model-preview :is(input, select) { max-width: 100%; }
 .workshop-model-preview-viewport { width: 100%; }
 .workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }
-.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: 1.5rem; }
+.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.workshop-composition { display: grid; align-content: start; gap: .5rem; }
+.workshop-composition :is(select, input) { width: 100%; }
+.workshop-composition :is(p, label, li) { overflow-wrap: anywhere; }
+.workshop-composition ul { margin: 0; padding-inline-start: 1.5rem; }
+.workshop-composition-tools { display: grid; gap: 1.25rem; }
+.workshop-entity-composition { display: grid; align-content: start; gap: .5rem; border-top: 1px solid #8195a8; padding-top: 1rem; }
+.workshop-entity-composition :is(select, button, pre) { max-width: 100%; }
+.workshop-entity-composition select { width: 100%; }
+.workshop-entity-composition pre { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workshop-spatial { display: grid; align-content: start; gap: .5rem; border-top: 1px solid #8195a8; padding-top: 1rem; }
+.workshop-spatial :is(select, input, button) { max-width: 100%; }
+.workshop-spatial select { width: 100%; }
+.workshop-spatial-map { position: relative; min-height: 14rem; overflow: hidden; border: 1px solid #8195a8;
+  background: linear-gradient(#18202a99 1px, transparent 1px), linear-gradient(90deg, #18202a99 1px, transparent 1px);
+  background-size: 1.5rem 1.5rem; }
+.workshop-spatial-marker { position: absolute; translate: -50% -50%; min-width: 2rem; min-height: 2rem;
+  border: 2px solid currentColor; border-radius: 50%; color: #d8e8f8; background: #203349; }
+.workshop-spatial-marker[data-kind="anchor"] { border-radius: 0; color: #fff071; }
+.workshop-spatial-marker[data-kind="region"] { color: #72f08d; }
+.workshop-spatial-marker[aria-pressed="true"] { outline: 3px solid #fff; outline-offset: 2px; }
+.workshop-role-presets { display: grid; align-content: start; gap: .5rem; border-top: 1px solid #8195a8; padding-top: 1rem; }
+.workshop-role-presets :is(select, input, button) { max-width: 100%; }
+.workshop-role-presets > :is(select, input) { width: 100%; }
+.workshop-role-presets fieldset { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .35rem .55rem; }
+.workshop-role-presets fieldset legend { grid-column: 1 / -1; }
+.workshop-role-presets :is(p, label, legend) { overflow-wrap: anywhere; }
+.workshop-scripts { display: flex; flex-direction: column; min-height: 28rem; gap: .5rem; }
+.workshop-scripts > select { width: 100%; }
+.script-list-row { padding: .35rem; cursor: pointer; border: 1px solid transparent; }
+.script-list-row.active { border-color: currentColor; font-weight: 700; }
+.script-editor { display: flex; flex-direction: column; min-height: 22rem; }
+.script-editor-header { display: flex; justify-content: space-between; gap: .5rem; align-items: center; }
+.script-editor-title { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.script-editor-body { position: relative; flex: 1; min-height: 14rem; }
+.script-highlight, .script-editor-input { position: absolute; inset: 0; margin: 0; padding: .6rem; font: 1rem/1.5 ui-monospace, monospace; tab-size: 4; white-space: pre; overflow: auto; border: 1px solid #8195a8; }
+.script-highlight { pointer-events: none; color: #d7e3ec; background: #15202a; }
+.script-highlight code { font: inherit; }
+.script-editor-input { color: transparent; background: transparent; caret-color: white; resize: none; }
+.tok-comment { color: #9bc78b; font-style: italic; } .tok-string { color: #efb18c; }
+.tok-number { color: #c6dfa7; } .tok-keyword { color: #91c7ff; } .tok-hostfn { color: #ffe09b; }
+.tok-ident { color: #b6e5ff; } .tok-punct { color: #d7e3ec; }
+.script-autocomplete { position: absolute; z-index: 20; left: .5rem; top: 2rem; max-height: 14rem; overflow: auto; min-width: min(20rem, 90%); list-style: none; margin: 0; padding: .2rem; background: #15202a; border: 1px solid currentColor; }
+.script-autocomplete.hidden { display: none; }
+.script-autocomplete-item { display: flex; flex-direction: column; padding: .3rem; }
+.script-autocomplete-item.active { outline: 2px solid currentColor; }
+.script-diagnostics { max-height: 9rem; overflow: auto; border-top: 1px solid #8195a8; padding: .4rem; }
+.script-diagnostic { display: flex; gap: .5rem; }
+.script-diagnostics-ok { font-weight: 700; }
+.workshop-model-preview :is(input, select) { max-width: 100%; }
+.workshop-model-preview-viewport { width: 100%; }
+.workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }
+.workshop-test { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
 .workshop-test h2, .workshop-test p { flex-basis: 100%; margin: .25rem 0; overflow-wrap: anywhere; }
 .workshop-test select, .workshop-test input { max-width: 100%; }
 .workshop-test label { overflow-wrap: anywhere; }
+.workshop-test-breakpoint { flex-basis: 100%; display: grid; grid-template-columns: minmax(8rem, auto) minmax(0, 1fr); gap: .45rem .7rem; }
+.workshop-test-breakpoint legend { font-weight: 700; }
+#workshop-test-breakpoint-hit { border-inline-start: .25rem solid currentColor; padding-inline-start: .75rem; }
+.workshop-test-document { min-width: 0; width: 100%; }
 .workshop-test-viewport { width: 100%; }
 .workshop-test-viewscreen { display: block; width: 100%; height: clamp(24rem, 65vh, 55rem); border: 1px solid #8195a8; }
 .workshop-test-viewscreen[data-pending] { position: fixed; inset: 0; width: 100vw; height: 100vh; opacity: 0; pointer-events: none; }
+.workshop-test-trace { min-width: 0; overflow: auto; }
+.workshop-test-trace h2, .workshop-test-trace p { overflow-wrap: anywhere; }
+.workshop-test-trace ol { margin: .5rem 0; padding-inline-start: 1.8rem; }
+.workshop-test-trace li { margin-block: .45rem; overflow-wrap: anywhere; }
+.workshop-test-trace-identity { font-variant-numeric: tabular-nums; font-weight: 700; }
+.workshop-test-trace-event { display: inline; }
+.workshop-test-trace-source { max-width: 100%; overflow-wrap: anywhere; }
 details { margin-top: 1.5rem; }
 :root[data-contrast="more"] { background: #000; color: #fff; }
 :root[data-contrast="more"] :is(button, select, textarea) { background: #000; border-color: #fff; }

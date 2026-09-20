@@ -3,10 +3,10 @@
 import { createNativeWorkshopProvider, createWorkshopBridge } from '../editor/workshop-provider.js';
 import { mountWorkshopAuthoring } from './workshop-authoring.js';
 
-export function mountNativeWorkshop({ root, send, win = window }) {
+export function mountNativeWorkshop({ root, send, win = window, launch = null }) {
   const bridge = createWorkshopBridge({ send });
   const provider = createNativeWorkshopProvider({ request: bridge.request });
-  const authoring = mountWorkshopAuthoring({ root, win, provider });
+  const authoring = mountWorkshopAuthoring({ root, win, provider, launch });
   return { ready: authoring.ready, receive: bridge.receive,
     dispose() { authoring.dispose(); bridge.dispose(); } };
 }

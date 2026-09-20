@@ -1557,7 +1557,7 @@
        reports. The attribute, the guards and the duplicated rotated-phone
        blocks in those four sheets are all gone with the rotation. */
   </style>
-<link rel="modulepreload" href="./project-phoenix-cd6b5069ec7657ba.js" crossorigin="anonymous" integrity="sha384-7qWuSEXUYjaxWRxIPm7V6ixM+fjQWvrXlZ18QKbxPQrxr6aNJ0K7gnPw6yOpqQxc"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-cd6b5069ec7657ba_bg.wasm" crossorigin="anonymous" integrity="sha384-+06zW3EKLR23MZvyzeeW4aKN71i7V5RgxK+kF27ZLgY58UhHbKpktpAukOhe4z5d" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-de992eef6aee6e11.js" crossorigin="anonymous" integrity="sha384-RWJ/ubVfaXmS9y4fD4KXRp+NopTsNWHN7CR7g7TCgi4FUgbuw6f8KcQXW2ubtP8x"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-de992eef6aee6e11_bg.wasm" crossorigin="anonymous" integrity="sha384-WtRjXOBRrwVNp5NiNzcFsF2oCsg1sJ1BR4H9J2l6/8QKnbemhTrBK17EcHyljpah" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -2263,6 +2263,62 @@
             <div id="gm-entity-fields-list"></div>
           </article>
         </section>
+        <section id="gm-ship-fields-panel" role="region" aria-labelledby="gm-ship-fields-heading">
+          <h2 id="gm-ship-fields-heading" data-i18n="inspector.ship.heading"></h2>
+          <div role="group" aria-labelledby="gm-ship-fields-heading">
+            <button id="gm-ship-fields-back" type="button" disabled data-i18n="inspector.entity.back"></button>
+            <button id="gm-ship-fields-forward" type="button" disabled data-i18n="inspector.entity.forward"></button>
+          </div>
+          <p id="gm-ship-fields-empty" data-i18n="inspector.ship.empty"></p>
+          <article id="gm-ship-fields-card" hidden>
+            <p id="gm-ship-fields-status" role="status" aria-live="polite" tabindex="-1"></p>
+            <div id="gm-ship-fields-list"></div>
+          </article>
+        </section>
+        <section id="gm-region-fields-panel" role="region" aria-labelledby="gm-region-fields-heading">
+          <h2 id="gm-region-fields-heading" data-i18n="inspector.region.heading"></h2>
+          <div role="group" aria-labelledby="gm-region-fields-heading">
+            <button id="gm-region-fields-back" type="button" disabled data-i18n="inspector.entity.back"></button>
+            <button id="gm-region-fields-forward" type="button" disabled data-i18n="inspector.entity.forward"></button>
+          </div>
+          <p id="gm-region-fields-empty" data-i18n="inspector.region.empty"></p>
+          <article id="gm-region-fields-card" hidden>
+            <p id="gm-region-fields-status" role="status" aria-live="polite" tabindex="-1"></p>
+            <div id="gm-region-fields-list"></div>
+            <section aria-labelledby="gm-region-fields-occupants-heading">
+              <h3 id="gm-region-fields-occupants-heading" data-i18n="inspector.region.occupants"></h3>
+              <ul id="gm-region-fields-occupants"></ul>
+            </section>
+          </article>
+        </section>
+        <section id="gm-presentation-fields-panel" role="region" aria-labelledby="gm-presentation-fields-heading">
+          <h2 id="gm-presentation-fields-heading" data-i18n="inspector.presentation.heading"></h2>
+          <label for="gm-presentation-fields-subject" data-i18n="inspector.presentation.subject_label"></label>
+          <select id="gm-presentation-fields-subject"></select>
+          <div role="group" aria-labelledby="gm-presentation-fields-heading">
+            <button id="gm-presentation-fields-back" type="button" disabled data-i18n="inspector.entity.back"></button>
+            <button id="gm-presentation-fields-forward" type="button" disabled data-i18n="inspector.entity.forward"></button>
+          </div>
+          <p id="gm-presentation-fields-empty" data-i18n="inspector.presentation.empty"></p>
+          <article id="gm-presentation-fields-card" hidden>
+            <p id="gm-presentation-fields-status" role="status" aria-live="polite" tabindex="-1"></p>
+            <div id="gm-presentation-fields-list"></div>
+          </article>
+        </section>
+        <section id="gm-world-fields-panel" role="region" aria-labelledby="gm-world-fields-heading">
+          <h2 id="gm-world-fields-heading" data-i18n="inspector.world.heading"></h2>
+          <label for="gm-world-fields-layer" data-i18n="inspector.world.layer"></label>
+          <select id="gm-world-fields-layer"></select>
+          <div role="group" aria-labelledby="gm-world-fields-heading">
+            <button id="gm-world-fields-back" type="button" disabled data-i18n="inspector.entity.back"></button>
+            <button id="gm-world-fields-forward" type="button" disabled data-i18n="inspector.entity.forward"></button>
+          </div>
+          <p id="gm-world-fields-empty" data-i18n="inspector.world.empty"></p>
+          <article id="gm-world-fields-card" hidden>
+            <p id="gm-world-fields-status" role="status" aria-live="polite" tabindex="-1"></p>
+            <div id="gm-world-fields-list"></div>
+          </article>
+        </section>
         <section id="gm-npc-panel" role="region" aria-labelledby="gm-npc-heading">
           <h2 id="gm-npc-heading" data-i18n="server.gm.npc.heading"></h2>
           <p id="gm-npc-target" role="status"></p>
@@ -2871,8 +2927,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-cd6b5069ec7657ba.js';
-const wasm = await init({ module_or_path: './project-phoenix-cd6b5069ec7657ba_bg.wasm' });
+import init, * as bindings from './project-phoenix-de992eef6aee6e11.js';
+const wasm = await init({ module_or_path: './project-phoenix-de992eef6aee6e11_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -4115,9 +4171,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
     let fleetIceServers = [];
     /** Privileged host-mesh role chosen before open/join. Phones never set it. */
-    let fleetRole = window.__phoenixGmPage ? 'gm' : 'ship';
+    const nativeTechnicalPeer = window.__phoenixNativeTechnicalPeer === true;
+    let fleetRole = nativeTechnicalPeer ? 'ship-gm' : (window.__phoenixGmPage ? 'gm' : 'ship');
     /** Distinguishes the default from an operator deliberately choosing ship. */
-    let fleetRoleExplicit = !!window.__phoenixGmPage;
+    let fleetRoleExplicit = nativeTechnicalPeer || !!window.__phoenixGmPage;
     /** Latest owner-computed collective readiness policy, identical on peers. */
     let fleetStartPolicy = null;
     /** Latest local lobby tally; Rust has already excluded spectators. */
@@ -4179,7 +4236,16 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     let _fleetBootReady = false;
 
     function normaliseFleetRole(role) {
-      return role === 'gm' ? 'gm' : 'ship';
+      if (role === 'gm' || role === 'ship-gm') return role;
+      return 'ship';
+    }
+
+    function fleetRoleHasShip(role = fleetRole) {
+      return normaliseFleetRole(role) !== 'gm';
+    }
+
+    function fleetRoleHasGm(role = fleetRole) {
+      return normaliseFleetRole(role) !== 'ship';
     }
 
     /**
@@ -4214,7 +4280,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     function localGm() {
       const standalone = standaloneGm();
       if (standalone) return standalone;
-      if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) !== 'gm'
+      if (!fleetHandle || !fleetRoleHasGm(fleetHandle.role || fleetRole)
           || !fleetHandle.operatorId || fleetHandle.gmJoinCandidate) return null;
       const gms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
       const row = gms.find(gm => gm && gm.id === fleetHandle.operatorId);
@@ -5278,7 +5344,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     window.__hostFleetRole = function() { return fleetRole; };
     window.__hostSetFleetRole = function(role) {
       const next = normaliseFleetRole(role);
-      if (fleetHandle || (role !== 'ship' && role !== 'gm')) return false;
+      if (nativeTechnicalPeer || fleetHandle || (role !== 'ship' && role !== 'gm')) return false;
 
       // The role is a boot profile, not a mutable label on an already-booted
       // simulation. Keep the role picker discoverable, but make its public UI
@@ -5437,7 +5503,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * during scenario selection has to show until the world loads.
      */
     function fleetShip() {
-      if (fleetRole === 'gm') return null;
+      if (!fleetRoleHasShip()) return null;
       if (_selectedHull) return _selectedHull;
       const path = _preSelection && _preSelection.template_path;
       return path ? { template_path: path } : null;
@@ -5462,7 +5528,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * inert when there is no fleet, which is the ordinary case.
      */
     function announceFleetSelection() {
-      if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) === 'gm') return;
+      if (!fleetHandle || !fleetRoleHasShip(fleetHandle.role || fleetRole)) return;
       try {
         fleetHandle.update({ ship: fleetShip(), ready: !!_selectedHull });
       } catch (e) {
@@ -5879,7 +5945,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         maxShipPathLength: data.limits.max_slot_ship_path_length,
         checkStamp: checkHostStamp,
         role: fleetRole,
-        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
+        name: fleetRoleHasGm() ? t('settings.fleet.role_gm') : '',
         ship: fleetShip(),
         onIdentity: (identity) => {
           fleetRole = normaliseFleetRole(identity && identity.role);
@@ -5965,10 +6031,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // A stored capability also restores the role on a fragment-driven page
       // reload, which otherwise auto-joins before the operator can reopen the
       // Settings selector and choose GM again.
-      const priorIdentity = (!fleetRoleExplicit || fleetRole === 'gm')
+      const priorIdentity = (!fleetRoleExplicit || fleetRoleHasGm())
         ? storedGmIdentity(identityCode)
         : null;
-      if (priorIdentity) fleetRole = 'gm';
+      if (priorIdentity && !nativeTechnicalPeer) fleetRole = 'gm';
       // Seed the role-preset selector from storage BEFORE the identity even
       // reconnects (issue #1319), and key live switches to this code so a
       // later selection change persists under the same stored identity. Only
@@ -5994,7 +6060,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         stamp: hostStampField(),
         iceServers: fleetIceServers,
         role: fleetRole,
-        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
+        name: fleetRoleHasGm() ? t('settings.fleet.role_gm') : '',
         reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null,
         ship: fleetShip(),
         onIdentity: (identity) => {

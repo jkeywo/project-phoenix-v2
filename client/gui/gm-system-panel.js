@@ -93,5 +93,11 @@ export function createGmSystemPanel({ doc = globalThis.document, t = id => id,
   el('restore')?.addEventListener('click', () => choose(false));
   render();
   return { update, choose, reset, refreshAdmission: render, select(entity) { if (selected?.entity_id !== entity?.entity_id) system = ''; selected = entity; options(); render(); },
+    focusSystem(systemId) {
+      if (typeof systemId !== 'string' || !controls[selected?.entity_id]?.some(row => row.system_id === systemId)) return false;
+      system = systemId; options(); render();
+      const target = current()?.gm_disabled ? el('restore') : el('disable');
+      target?.focus?.(); return doc?.activeElement === target;
+    },
     state: () => ({ target: selected?.entity_id || null, system, pending, controls }) };
 }

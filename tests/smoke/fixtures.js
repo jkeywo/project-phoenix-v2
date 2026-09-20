@@ -295,7 +295,7 @@ export function waitForJoinCode(page, elementId = 'join-code', timeout = 30_000)
  */
 export async function waitForWasmReady(page, timeout = WASM_READY_TIMEOUT) {
   await page.bringToFront();
-  await page.waitForFunction(() => !!window.__wasmReady, { timeout });
+  await page.waitForFunction(() => !!window.__wasmReady, undefined, { timeout });
 }
 
 /** Capture real server-page crashes while ignoring Bevy WASM's expected
@@ -501,7 +501,7 @@ export async function createServerPage(
   const page = await ctx.newPage();
   await page.goto('/?scenario=assets/worlds/default.toml');
   await page.bringToFront();
-  await page.waitForFunction(() => !!window.__wasmReady, { timeout: WASM_READY_TIMEOUT });
+  await page.waitForFunction(() => !!window.__wasmReady, undefined, { timeout: WASM_READY_TIMEOUT });
   return page;
 }
 

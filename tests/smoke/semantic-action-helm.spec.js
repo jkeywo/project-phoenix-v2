@@ -87,13 +87,16 @@ async function expectAppliedLifecycles(frameBody, actionId, count = 1) {
 }
 
 test('selected continuous Helm axis steers authoritatively and reconnects neutral-gated', async ({ context }) => {
-  test.setTimeout(180_000);
+  // This pair boots a fresh Bevy/WASM host. A contended CI runner can take
+  // more than three minutes to initialise it, so keep readiness bounded
+  // independently from the interaction assertions that follow.
+  test.setTimeout(300_000);
 
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml', {
     waitUntil: 'domcontentloaded',
   });
-  await waitForWasmReady(serverPage);
+  await waitForWasmReady(serverPage, 240_000);
   const hostId = await readHostPeerId(serverPage);
   const helm = await context.newPage();
   await installFabricatedGamepads(helm);
@@ -216,10 +219,10 @@ test('selected continuous Helm axis steers authoritatively and reconnects neutra
 });
 
 test('@core saved controller restores at startup, updates help and hides only usable Helm controls', async ({ context }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml', { waitUntil: 'domcontentloaded' });
-  await waitForWasmReady(serverPage);
+  await waitForWasmReady(serverPage, 240_000);
   const hostId = await readHostPeerId(serverPage);
   const helm = await context.newPage();
   await installFabricatedGamepads(helm, {

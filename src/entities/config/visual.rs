@@ -129,8 +129,8 @@ pub struct LodLevel {
     /// silhouette of the actual hull reads far better at 400+ than a coloured
     /// sphere — and, because the PNG loads long before a multi-MB GLB, it is
     /// also what shows while the near levels are still streaming in. Mutually
-    /// exclusive with `model` and `shape`; the atlas is baked by the model
-    /// Workshop's capture tool (see `[lod.capture]`).
+    /// exclusive with `model` and `shape`; the atlas is baked by the production
+    /// billboard capture workflow (see `[lod.capture]`).
     #[serde(default)]
     pub billboard: Option<String>,
     /// Procedural shape for this band. Used only when `model` is `None`.
@@ -307,10 +307,13 @@ pub struct LodGeneration {
 ///
 /// **Ignored at runtime**, exactly like [`LodGeneration`]: once the atlas is on
 /// disk the renderer only needs the file. It lives in the sidecar so the ladder
-/// *fully* declares how the atlas comes back — Workshop's capture tool
-/// (`src/viewer/capture.rs`, reached from the Models panel) is the one reader, and
-/// re-baking needs a GPU, so like the Blender voxel pre-pass
-/// this is a local step. CI only re-hashes it against the separate capture
+/// *fully* declares how the atlas comes back. Native Workshop reaches the
+/// production `scripts/capture-billboards.mjs` workflow through
+/// `src/native_host/workshop/billboard_capture.rs`; re-baking needs a GPU, so
+/// like the Blender voxel pre-pass this is a local step. The retained
+/// `src/viewer/capture.rs` exports belong to ViewerPlugin's private captured
+/// preview and are not the native Models-panel tool. CI only re-hashes the
+/// result against the separate capture
 /// provenance contract in `scripts/lod-capture-manifest.toml` (#1245); generated
 /// GLB provenance remains independently owned by `scripts/lod-manifest.toml`.
 ///

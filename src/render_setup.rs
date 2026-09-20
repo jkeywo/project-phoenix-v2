@@ -2,9 +2,9 @@
 //! properties, and the default ambient fill.
 //!
 //! These pieces define what the game *looks* like, independent of what it is
-//! simulating. They live outside the `server` feature gate so the standalone
-//! model viewer (`--features viewer`) renders through the exact same setup as
-//! the real game — if the two ever diverge, the viewer stops being a valid
+//! simulating. They live outside the `server` feature gate so Workshop's private
+//! captured preview (`--features viewer`) renders through the exact same setup
+//! as the real game — if the two ever diverge, the preview stops being a valid
 //! reference for tuning lighting and shaders.
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -330,7 +330,7 @@ pub fn space_skybox(skybox: &SpaceSkyboxAsset) -> Skybox {
 /// The game camera's optical properties — perspective with the game's far
 /// plane. Callers add their own `Camera`/marker components on top, since those
 /// differ between the game (inactive until in-game, `order: -1` so the 3D scene
-/// composites under the UI) and the viewer.
+/// composites under the UI) and Workshop's private ViewerPlugin preview.
 pub fn game_camera_projection() -> Projection {
     Projection::Perspective(PerspectiveProjection {
         far: GAME_CAMERA_FAR,

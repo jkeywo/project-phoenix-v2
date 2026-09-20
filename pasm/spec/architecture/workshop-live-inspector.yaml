@@ -5,7 +5,7 @@ entities:
       confidence: confirmed
       origin: ai
       title: Shared Authoring and Live Dock Layouts
-      summary: "Authoring and Live use one pure-JavaScript dock model and renderer for split, tabbed, in-surface floating, closed, reset and narrow single-panel arrangements. Each context registers its own panels and persists a separate versioned placement tree in the private operator profile: Authoring version 6 covers files, source, inspector, add, recovery, findings, correlated feedback, immutable dependency sources, settings, the model/rig field form, the captured model preview, the sound audition, the workspace changes view (version 5) and the faction and complexity definitions form (version 6, beside the inspector); Live version 14 covers roster, readiness, join requests, manual save, mission events, the Comms studio, the activity feed, the saved action journal, the session history, the omniscient map, the attention queue, Station workload, the authored widget region, peer health, the authentic Station takeover controls, the authentic Station console, typed presentation control, private sound audition, the Workshop source handoff, Spawn, the entity inspector, checkpoint records, live restore, contact control, NPC doctrine, System control, entity removal, faction hostility, the authored Objective controls and the misclassification, reported-information and direct-effect drafts (version 14 retired the ghost-contact draft: placing a ghost is a Spawn outcome); the four record surfaces and health form one default tab group, and the map and the Station console are the documents the workspace is arranged around. Browser and native profile sanitizers apply matching registries, bounds, deduplication, repair, Authoring v1-v5 migration and Live v1-v13 migration. A generated fixture (scripts/generate-live-layout-fixture.mjs) pins the two Live sanitizers to the same result case for case. Fixed Authoring lifecycle controls and the Live Station/status bar remain outside the dock."
+      summary: "Authoring and Live use one pure-JavaScript dock model and renderer for split, tabbed, in-surface floating, closed, reset and narrow single-panel arrangements. Each context registers its own panels and persists a separate versioned placement tree in the private operator profile: Authoring version 10 covers files, source, inspector, add, recovery, findings, correlated feedback, immutable dependency sources, settings, model preview and forms, sound audition, source changes, definition, composition, entity and preset forms, and Rhai authoring; Live version 14 covers the GM workspace. Browser and native profile sanitizers apply matching registries, bounds, deduplication, repair, Authoring v1-v9 migration and Live v1-v13 migration. A generated fixture pins the two Live sanitizers to the same result case for case. Fixed lifecycle controls remain outside the dock."
       rationale:
         - "[ai] Moving a node between parents necessarily disconnects and reconnects it, so a panel holding a live resource restores that resource in connectedCallback rather than only at first template. The navigation map does exactly this; before docking reached it, the desk kept it in one grid cell for that reason. Reparenting is now safe and the map is an ordinary document panel."
         - "[ai] The same move re-creates an iframe's document, so the authentic Station puppet treats any load after the one it requested as a remount: the mount generation advances and pending commands are dropped. Feedback belongs to the interface that sent the command, and a dock move ends that interface. Docking adds no command route, no capability and no simulation participant; the console panel exists exactly while the takeover controls do — while the projection carries a Station row — and closing it releases nothing."
@@ -27,7 +27,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [gui/dock-layout-model.js, gui/dock-layout-migration.js, gui/gm-temporary-actions.js, gui/gm-spawn-panel.js, gui/components/ph-navigation-map.js, gui/gm-station-puppet.js, gui/gm-presentation-panel.js, gui/workshop-source-link.js, scripts/generate-live-layout-fixture.mjs, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-definitions-panel.js, editor/workshop-sound-cues.js, gui/workshop-layout-model.js, gui/live-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-authoring.js, gui/gm-workspace-shell.js, gui/operator-profile.js, src/native_host/panes/operator.rs, src/workshop/provider.rs, editor/workshop-provider.js]
+      paths: [gui/dock-layout-model.js, gui/dock-layout-migration.js, gui/gm-temporary-actions.js, gui/gm-spawn-panel.js, gui/components/ph-navigation-map.js, gui/gm-station-puppet.js, gui/gm-presentation-panel.js, gui/workshop-source-link.js, scripts/generate-live-layout-fixture.mjs, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-definitions-panel.js, gui/workshop-scripts-panel.js, editor/workshop-scripts.js, editor/workshop-sound-cues.js, gui/workshop-layout-model.js, gui/live-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-authoring.js, gui/gm-workspace-shell.js, gui/operator-profile.js, src/native_host/panes/operator.rs, src/workshop/provider.rs, editor/workshop-provider.js]
       symbols: [createDockLayoutModel, PANEL_KIND, createTemporaryActions, createDockLayoutMigration, workshop_panels_for, live_panels_for, workshopLayoutModel, liveLayoutModel, mountDockLayout, mountWorkshopAuthoring, mountGmWorkspaceShell, sanitize_authoring_layout, sanitize_live_layout]
       tests:
         - tests/smoke/gm-spatial-pick.spec.js
@@ -37,6 +37,27 @@ entities:
         - cargo test --lib native_host::panes::operator workshop::provider
         - tests/smoke/workshop-authoring.spec.js
         - tests/smoke/gm-layout.spec.js
+
+  - component: workshop-rhai-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Exact-Source Workshop Rhai Authoring
+      summary: "The Workshop discovers inline world script blocks and sibling Rhai files, edits them in the shared script editor, and offers completion from the runtime-derived host-function registry. The ordinary bounded loading engine supplies compile and top-level runtime diagnostics with exact document lines, while draft revision guards reject late results. Save validates an immutable exact-source candidate through the ordinary Workshop compiler before applying one grouped history change; refusal leaves the draft unchanged, and ordinary recovery, save and export own the accepted source."
+    architecture:
+      kind: authoring-adapter
+      authority: local
+      depends_on: [operator-workspace-dock-layouts]
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [editor/script-editor.js, editor/script-editor-view.js, editor/workshop-scripts.js, gui/workshop-scripts-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, src/world/script/authoring.rs, src/workshop/provider.rs]
+      symbols: [extractScriptUnits, mountScriptEditor, replaceInlineScript, applyWorkshopScript, mountWorkshopScripts, host_fns, script_diagnostics, ScriptHostFunctions, ScriptDiagnostics]
+      tests:
+        - npx vitest run editor/tests/script-editor.test.js editor/tests/script-editor-view.test.js editor/tests/workshop-scripts.test.js tests/client/workshop-scripts-panel.test.js
+        - cargo test --lib world::script::authoring workshop::provider native_host::panes::operator
 
   - component: workshop-live-active-schema-inspector
     core:

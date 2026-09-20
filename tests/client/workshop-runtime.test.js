@@ -173,4 +173,18 @@ describe('offline Workshop runtime capability', () => {
     expect(await runtime.newPreset('watch', 'server.gm.watch')).toContain('[[gm_role_preset]]');
     expect(newPreset).toHaveBeenCalledExactlyOnceWith('watch', 'server.gm.watch');
   });
+
+  it('reads Rhai completion and diagnostics from the runtime authoring registry', async () => {
+    const registry = [{ name: 'on_timer', receiver: '', category: 'register' }];
+    const diagnostics = [{ severity: 'error', message: 'Expected expression', line: 9, column: 2 }];
+    const hostFns = vi.fn(() => registry), compile = vi.fn(() => diagnostics);
+    const runtime = createWorkshopRuntime({ load: async () => ({
+      wasm_workshop_validate_pack: () => '{}',
+      wasm_get_script_host_fns: hostFns,
+      wasm_script_diagnostics: compile,
+    }), dependencies: async () => ({ base_files: {} }) });
+    expect(await runtime.scriptHostFunctions()).toEqual(registry);
+    expect(await runtime.scriptDiagnostics('fn broken( {', 8)).toEqual(diagnostics);
+    expect(compile).toHaveBeenCalledWith('fn broken( {', 8);
+  });
 });

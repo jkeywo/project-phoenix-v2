@@ -15,6 +15,7 @@ import { mountWorkshopDefinitions } from './workshop-definitions-panel.js';
 import { mountWorkshopComposition } from './workshop-composition-panel.js';
 import { mountWorkshopEntity } from './workshop-entity-panel.js';
 import { mountWorkshopPresets } from './workshop-presets-panel.js';
+import { mountWorkshopScripts } from './workshop-scripts-panel.js';
 import { createModActionRegistry, MOD_ACTION_CONTEXT, MOD_IMPORT_ACTION_ID,
   MOD_VALIDATE_ACTION_ID, MOD_EXPORT_ACTION_ID } from '../editor/mod-actions.js';
 import { ACTION_FEEDBACK_STATE, ActionFeedbackLifecycle, emitActionFeedbackTransition } from './action-feedback.js';
@@ -179,6 +180,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let compositionPanel = null;
   let entityPanel = null;
   let presetsPanel = null;
+  let scriptsPanel = null;
   let layoutMount = null;
   let testLayoutMount = null;
   const feedbackRows = new Map();
@@ -246,13 +248,17 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  scriptsPanel = mountWorkshopScripts({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
       findings, feedback, dependencies, settings,
       models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node,
       changes: changesPanel, definitions: definitionsPanel.node, composition: compositionPanel.node,
-      entity: entityPanel.node, presets: presetsPanel.node },
+      entity: entityPanel.node, presets: presetsPanel.node, scripts: scriptsPanel.node },
     labels: {
       switcher: translate('workshop.layout.switcher'), reset: translate('workshop.layout.reset'),
       float: translate('workshop.layout.float'), close: translate('workshop.layout.close'),
@@ -270,6 +276,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         sound: translate('sound_cues.title'), changes: translate('workshop.changes.title'),
         definitions: translate('workshop.definitions.title'), composition: translate('workshop.composition.title'),
         entity: translate('workshop.entity.title'), presets: translate('workshop.presets.title'),
+        scripts: translate('workshop.scripts.title'),
       },
     },
     initial: profile.authoringLayout, doc, win,
@@ -406,6 +413,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     compositionPanel?.refresh({ hidden: testing });
     entityPanel?.refresh({ hidden: testing });
     presetsPanel?.refresh({ hidden: testing });
+    scriptsPanel?.refresh({ hidden: testing });
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     testLayout.hidden = !testing;
     sourceScope.hidden = testing;
@@ -971,6 +979,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     compositionPanel?.dispose();
     entityPanel?.dispose();
     presetsPanel?.dispose();
+    scriptsPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();
     doc.removeEventListener('keydown', keydown);

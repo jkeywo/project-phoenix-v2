@@ -53,7 +53,7 @@ use crate::world::script::engine::{collect_host_fn_descriptors, loading_engine, 
 /// descriptor is emitted by the [`host_fn!`](super::registry::host_fn)
 /// registration that defines the verb, so the registry is derived, not
 /// hand-mirrored (issue #1238).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct HostFn {
     /// The callable name, exactly as it is registered on the engine.
     pub name: &'static str,
@@ -99,7 +99,7 @@ pub fn host_fns() -> &'static [HostFn] {
 }
 
 /// One editor diagnostic: a message pinned to a 1-based line and column.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ScriptDiagnostic {
     /// Human-readable message (no position suffix).
     pub message: String,

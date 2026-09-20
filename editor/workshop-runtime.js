@@ -166,6 +166,16 @@ export function createWorkshopRuntime({
       const { runtime } = await ready();
       return runtime.wasm_workshop_new_preset(id, label);
     },
+    async scriptHostFunctions() {
+      const { runtime } = await ready();
+      if (typeof runtime.wasm_get_script_host_fns !== 'function') throw new Error('Workshop Rhai registry is unavailable');
+      return Array.from(runtime.wasm_get_script_host_fns());
+    },
+    async scriptDiagnostics(source, lineOffset = 0) {
+      const { runtime } = await ready();
+      if (typeof runtime.wasm_script_diagnostics !== 'function') throw new Error('Workshop Rhai diagnostics are unavailable');
+      return Array.from(runtime.wasm_script_diagnostics(String(source), lineOffset >>> 0));
+    },
     async validate(bytes) {
       const loaded = await ready();
       const required = loaded.runtime.wasm_workshop_asset_dependencies?.(bytes) || [];

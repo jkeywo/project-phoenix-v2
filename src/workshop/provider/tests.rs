@@ -71,6 +71,32 @@ fn dependencies_are_exposed_as_read_only_text_without_editable_assets() {
 }
 
 #[test]
+fn private_json_bridge_exposes_runtime_rhai_registry_and_line_mapped_diagnostics() {
+    let fixture = Fixture::new();
+    let mut provider = fixture.open();
+
+    let registry = provider.handle_json(r#"{"id":20,"op":"script-host-functions"}"#);
+    assert!(
+        registry.contains(r#""status":"script-host-functions""#),
+        "{registry}"
+    );
+    assert!(registry.contains(r#""name":"on_timer""#), "{registry}");
+
+    let diagnostics = provider.handle_json(
+        r#"{"id":21,"op":"script-diagnostics","source":"fn broken( {","line_offset":8}"#,
+    );
+    assert!(
+        diagnostics.contains(r#""status":"script-diagnostics""#),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r#""severity":"error""#),
+        "{diagnostics}"
+    );
+    assert!(diagnostics.contains(r#""line":9"#), "{diagnostics}");
+}
+
+#[test]
 fn project_definitions_resolve_against_nothing_beneath_while_a_mod_sees_its_dependencies() {
     let alliance = include_str!("../../../assets/factions/alliance.toml");
     let uuid = crate::ai::faction::parse_faction_config(alliance)

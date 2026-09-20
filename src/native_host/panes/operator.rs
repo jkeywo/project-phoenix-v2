@@ -333,6 +333,26 @@ const WORKSHOP_PANELS_V9: &[&str] = &[
     "entity",
     "presets",
 ];
+const WORKSHOP_PANELS_V10: &[&str] = &[
+    "files",
+    "source",
+    "inspector",
+    "add",
+    "recovery",
+    "findings",
+    "feedback",
+    "dependencies",
+    "settings",
+    "models",
+    "model-preview",
+    "sound",
+    "changes",
+    "definitions",
+    "composition",
+    "entity",
+    "presets",
+    "scripts",
+];
 const WORKSHOP_TEST_PANELS: &[&str] = &["test-controls", "test-viewscreen"];
 /// Panels registered after a stored version, with the group each joins on migration.
 const WORKSHOP_ADDED_IN_V3: &[(&str, &str)] = &[
@@ -365,6 +385,7 @@ const WORKSHOP_ADDED_IN_V8: &[(&str, &str)] = &[("entity", "inspector")];
 /// are authored in a WORLD member, the same document family the composition form
 /// edits, so the form joins that column beside it (issue #1477).
 const WORKSHOP_ADDED_IN_V9: &[(&str, &str)] = &[("presets", "files")];
+const WORKSHOP_ADDED_IN_V10: &[(&str, &str)] = &[("scripts", "source")];
 
 fn workshop_panels_for(version: u64) -> &'static [&'static str] {
     match version {
@@ -375,7 +396,8 @@ fn workshop_panels_for(version: u64) -> &'static [&'static str] {
         6 => WORKSHOP_PANELS_V6,
         7 => WORKSHOP_PANELS_V7,
         8 => WORKSHOP_PANELS_V8,
-        _ => WORKSHOP_PANELS_V9,
+        9 => WORKSHOP_PANELS_V9,
+        _ => WORKSHOP_PANELS_V10,
     }
 }
 
@@ -401,6 +423,9 @@ fn workshop_panels_added_after(version: u64) -> Vec<(&'static str, &'static str)
     }
     if version < 9 {
         added.extend_from_slice(WORKSHOP_ADDED_IN_V9);
+    }
+    if version < 10 {
+        added.extend_from_slice(WORKSHOP_ADDED_IN_V10);
     }
     added
 }
@@ -1079,10 +1104,10 @@ fn sanitize_workshop_node(
 
 fn default_authoring_layout() -> Value {
     json!({
-        "version": 9,
+        "version": 10,
         "root": {"type":"split", "axis":"horizontal", "sizes":[22,56,22], "children":[
             {"type":"tabs", "tabs":["files","dependencies","changes","composition","presets"], "active":"files"},
-            {"type":"tabs", "tabs":["source","findings","feedback","model-preview"], "active":"source"},
+            {"type":"tabs", "tabs":["source","findings","feedback","model-preview","scripts"], "active":"source"},
             {"type":"tabs", "tabs":["inspector","add","recovery","settings","models","sound","definitions","entity"], "active":"inspector"}
         ]},
         "floats": [], "closed": [], "selected": "source"
@@ -1472,7 +1497,7 @@ fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
 }
 
 fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=9).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=10).contains(v))?;
     let allowed = workshop_panels_for(stored);
     let added = workshop_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -2382,7 +2407,7 @@ mod tests {
 
         let saved: Value =
             serde_json::from_str(&sanitize_profile(&profile.to_string()).unwrap()).unwrap();
-        assert_eq!(saved["authoringLayout"]["version"], 9);
+        assert_eq!(saved["authoringLayout"]["version"], 10);
         assert!(saved["authoringLayout"]["root"].is_null());
         assert_eq!(saved["authoringLayout"]["floats"], json!([]));
         assert_eq!(
@@ -2404,7 +2429,8 @@ mod tests {
                 "definitions",
                 "composition",
                 "entity",
-                "presets"
+                "presets",
+                "scripts"
             ])
         );
     }
@@ -2422,7 +2448,7 @@ mod tests {
         });
 
         let repaired = sanitize_authoring_layout(&layout).unwrap();
-        assert_eq!(repaired["version"], 9);
+        assert_eq!(repaired["version"], 10);
         assert_eq!(repaired["selected"], "inspector");
         assert_eq!(repaired["closed"], json!(["add", "recovery"]));
         fn placements(node: &Value, panel: &str) -> usize {
@@ -2458,6 +2484,7 @@ mod tests {
             "composition",
             "entity",
             "presets",
+            "scripts",
         ] {
             let count = placements(&repaired["root"], panel)
                 + repaired["floats"]
@@ -2480,7 +2507,7 @@ mod tests {
         });
 
         let migrated = sanitize_authoring_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 9);
+        assert_eq!(migrated["version"], 10);
         assert_eq!(
             migrated["root"]["tabs"],
             json!([
@@ -2499,7 +2526,8 @@ mod tests {
                 "definitions",
                 "composition",
                 "entity",
-                "presets"
+                "presets",
+                "scripts"
             ])
         );
         assert_eq!(migrated["selected"], "files");
@@ -2522,10 +2550,10 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":9,
+                "version":10,
                 "root":{"type":"split","axis":"horizontal","sizes":[10.0,30.0,60.0],"children":[
                     {"type":"tabs","tabs":["files","add","dependencies","changes","composition","presets"],"active":"add"},
-                    {"type":"tabs","tabs":["source","findings","feedback","model-preview"],"active":"source"},
+                    {"type":"tabs","tabs":["source","findings","feedback","model-preview","scripts"],"active":"source"},
                     {"type":"tabs","tabs":["inspector","settings","models","sound","definitions","entity"],"active":"inspector"}
                 ]},
                 "floats":[{"panel":"recovery","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
@@ -2553,9 +2581,9 @@ mod tests {
             assert_eq!(
                 sanitize_authoring_layout(&layout).unwrap(),
                 json!({
-                    "version":9,
+                    "version":10,
                     "root":{"type":"split","axis":"vertical","sizes":[17.0,83.0],"children":[
-                        {"type":"tabs","tabs":["inspector","dependencies","findings","feedback","settings","models","model-preview","sound","changes","definitions","composition","entity","presets"],"active":"inspector"},
+                        {"type":"tabs","tabs":["inspector","dependencies","findings","feedback","settings","models","model-preview","sound","changes","definitions","composition","entity","presets","scripts"],"active":"inspector"},
                         {"type":"tabs","tabs":["recovery"],"active":"recovery"}
                     ]},
                     "floats":floats, "closed":["add"], "selected":"source"
@@ -2572,7 +2600,7 @@ mod tests {
                 "closed":["files","source","inspector","add","recovery"], "selected":"source"
             });
             let migrated = sanitize_authoring_layout(&layout).unwrap();
-            assert_eq!(migrated["version"], 9);
+            assert_eq!(migrated["version"], 10);
             assert!(migrated["root"].is_null());
             assert_eq!(migrated["floats"], json!([]));
             assert_eq!(
@@ -2594,7 +2622,8 @@ mod tests {
                     "definitions",
                     "composition",
                     "entity",
-                    "presets"
+                    "presets",
+                    "scripts"
                 ])
             );
         }
@@ -2603,7 +2632,7 @@ mod tests {
     #[test]
     fn current_authoring_layout_preserves_registered_panels_and_drops_unknown_fields() {
         let layout = json!({
-            "version":9,
+            "version":10,
             "root":{"type":"tabs","tabs":["source","findings","feedback","dependencies","settings","models","model-preview","sound","unsafe"],"active":"feedback","unsafe":"secret"},
             "floats":[{"panel":"files","x":7,"y":9,"width":300,"height":200,"unsafe":"secret"}],
             "closed":["inspector","add","recovery"],"selected":"feedback","unsafe":"secret"
@@ -2612,10 +2641,10 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":9,
+                "version":10,
                 "root":{"type":"tabs","tabs":["source","findings","feedback","dependencies","settings","models","model-preview","sound"],"active":"feedback"},
                 "floats":[{"panel":"files","x":7.0,"y":9.0,"width":300.0,"height":200.0}],
-                "closed":["inspector","add","recovery","changes","definitions","composition","entity","presets"],"selected":"feedback"
+                "closed":["inspector","add","recovery","changes","definitions","composition","entity","presets","scripts"],"selected":"feedback"
             })
         );
     }
@@ -2635,10 +2664,10 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":9,
+                "version":10,
                 "root":{"type":"split","axis":"horizontal","sizes":[22.0,56.0,22.0],"children":[
                     {"type":"tabs","tabs":["files","dependencies","changes","composition","presets"],"active":"files"},
-                    {"type":"tabs","tabs":["source","findings","model-preview"],"active":"source"},
+                    {"type":"tabs","tabs":["source","findings","model-preview","scripts"],"active":"source"},
                     {"type":"tabs","tabs":["inspector","add","recovery","models","sound","definitions","entity"],"active":"inspector"}
                 ]},
                 "floats":[],"closed":["feedback","settings"],"selected":"source"
@@ -2666,10 +2695,10 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":9,
+                "version":10,
                 "root":{"type":"split","axis":"horizontal","sizes":[22.0,56.0,22.0],"children":[
                     {"type":"tabs","tabs":["files","dependencies","changes","composition","presets"],"active":"changes"},
-                    {"type":"tabs","tabs":["source","findings","feedback","model-preview"],"active":"source"},
+                    {"type":"tabs","tabs":["source","findings","feedback","model-preview","scripts"],"active":"source"},
                     {"type":"tabs","tabs":["inspector","add","recovery","settings","sound","definitions","entity"],"active":"sound"}
                 ]},
                 "floats":[],"closed":["models"],"selected":"source"
@@ -2683,7 +2712,7 @@ mod tests {
             "closed":[],"selected":"composition"
         });
         let migrated = sanitize_authoring_layout(&crafted).unwrap();
-        assert_eq!(migrated["version"], 9);
+        assert_eq!(migrated["version"], 10);
         assert_eq!(migrated["floats"], json!([]));
         assert_eq!(migrated["selected"], "source");
         assert_eq!(migrated["root"]["active"], "source");
@@ -2710,10 +2739,10 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":9,
+                "version":10,
                 "root":{"type":"split","axis":"horizontal","sizes":[22.0,56.0,22.0],"children":[
                     {"type":"tabs","tabs":["files","dependencies","changes","composition","presets"],"active":"composition"},
-                    {"type":"tabs","tabs":["source","findings","feedback","model-preview"],"active":"source"},
+                    {"type":"tabs","tabs":["source","findings","feedback","model-preview","scripts"],"active":"source"},
                     {"type":"tabs","tabs":["inspector","add","recovery","settings","sound","definitions","entity"],"active":"definitions"}
                 ]},
                 "floats":[],"closed":["models"],"selected":"source"
@@ -2727,7 +2756,7 @@ mod tests {
             "closed":[],"selected":"entity"
         });
         let migrated = sanitize_authoring_layout(&crafted).unwrap();
-        assert_eq!(migrated["version"], 9);
+        assert_eq!(migrated["version"], 10);
         assert_eq!(migrated["floats"], json!([]));
         assert_eq!(migrated["selected"], "source");
         assert_eq!(migrated["root"]["active"], "source");
@@ -2755,10 +2784,10 @@ mod tests {
         assert_eq!(
             sanitize_authoring_layout(&layout).unwrap(),
             json!({
-                "version":9,
+                "version":10,
                 "root":{"type":"split","axis":"horizontal","sizes":[22.0,56.0,22.0],"children":[
                     {"type":"tabs","tabs":["files","dependencies","changes","composition","presets"],"active":"composition"},
-                    {"type":"tabs","tabs":["source","findings","feedback","model-preview"],"active":"source"},
+                    {"type":"tabs","tabs":["source","findings","feedback","model-preview","scripts"],"active":"source"},
                     {"type":"tabs","tabs":["inspector","add","recovery","settings","sound","definitions","entity"],"active":"entity"}
                 ]},
                 "floats":[],"closed":["models"],"selected":"source"
@@ -2772,7 +2801,7 @@ mod tests {
             "closed":[],"selected":"presets"
         });
         let migrated = sanitize_authoring_layout(&crafted).unwrap();
-        assert_eq!(migrated["version"], 9);
+        assert_eq!(migrated["version"], 10);
         assert_eq!(migrated["floats"], json!([]));
         assert_eq!(migrated["selected"], "source");
         assert_eq!(migrated["root"]["active"], "source");
@@ -2793,7 +2822,7 @@ mod tests {
         });
 
         let migrated = sanitize_authoring_layout(&layout).unwrap();
-        assert_eq!(migrated["version"], 9);
+        assert_eq!(migrated["version"], 10);
         assert_eq!(migrated["floats"], json!([]));
         assert_eq!(migrated["selected"], "source");
         assert_eq!(migrated["root"]["active"], "source");

@@ -177,6 +177,16 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
       // request's correlation number, and the host strips it before the
       // operation is read), so a preset's own id cannot travel under that name.
       async newPreset(id, label) { return (await call({ op: 'new-preset', preset_id: id, label })).source; },
+      async scriptHostFunctions() {
+        const value = await call({ op: 'script-host-functions' });
+        if (value?.status !== 'script-host-functions' || !Array.isArray(value.functions)) throw new Error('Invalid Workshop Rhai registry');
+        return value.functions;
+      },
+      async scriptDiagnostics(source, line_offset = 0) {
+        const value = await call({ op: 'script-diagnostics', source, line_offset });
+        if (value?.status !== 'script-diagnostics' || !Array.isArray(value.diagnostics)) throw new Error('Invalid Workshop Rhai diagnostics');
+        return value.diagnostics;
+      },
     },
     async save(draft) {
       const result = await call({ op: 'save-sources', files: draft.toNativeSources(), expected_revision: revision });

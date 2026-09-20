@@ -75,6 +75,11 @@ pub enum Operation {
         source: String,
         patch: document::Patch,
     },
+    ScriptHostFunctions,
+    ScriptDiagnostics {
+        source: String,
+        line_offset: usize,
+    },
     Definitions {
         files: BTreeMap<String, String>,
     },
@@ -196,6 +201,12 @@ pub enum Response {
     },
     Patched {
         source: String,
+    },
+    ScriptHostFunctions {
+        functions: Vec<crate::world::script::authoring::HostFn>,
+    },
+    ScriptDiagnostics {
+        diagnostics: Vec<crate::world::script::authoring::ScriptDiagnostic>,
     },
     // Boxed like `Test`: a whole catalog would otherwise make every refusal
     // carry its size.
@@ -470,6 +481,18 @@ impl NativeWorkshopProvider {
             },
             Operation::Patch { source, patch } => Response::Patched {
                 source: document::patch(&source, &patch)?,
+            },
+            Operation::ScriptHostFunctions => Response::ScriptHostFunctions {
+                functions: crate::world::script::authoring::host_fns().to_vec(),
+            },
+            Operation::ScriptDiagnostics {
+                source,
+                line_offset,
+            } => Response::ScriptDiagnostics {
+                diagnostics: crate::world::script::authoring::script_diagnostics(
+                    &source,
+                    line_offset,
+                ),
             },
             // The same read-only bundle Validate resolves against: a mod's
             // definitions see the base set and the packs beneath it, while a

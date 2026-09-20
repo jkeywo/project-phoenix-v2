@@ -272,7 +272,7 @@ export function inlineBlockBaseLine(rawToml, key) {
   let inScriptTable = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    const header = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
     if (header) {
       inScriptTable = header[1].trim() === 'script';
       continue;

@@ -37,6 +37,7 @@ function escapeHtml(s) {
  */
 export function renderScriptList(host, units, { selectedId = null, onSelect } = {}) {
   if (!host) return;
+  const document = host.ownerDocument;
   host.innerHTML = '';
   if (!units || units.length === 0) {
     const p = document.createElement('p');
@@ -54,7 +55,14 @@ export function renderScriptList(host, units, { selectedId = null, onSelect } = 
       `<span class="script-list-icon">${unit.kind === 'sibling' ? '📄' : '❴❵'}</span>` +
       `<span class="script-list-label">${escapeHtml(unit.label)}</span>`;
     if (typeof onSelect === 'function') {
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
       row.addEventListener('click', () => onSelect(unit));
+      row.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onSelect(unit);
+      });
     }
     host.appendChild(row);
   }
@@ -97,6 +105,7 @@ export function mountScriptEditor({
   diagnosticsDelayMs = 250,
 } = {}) {
   if (!host) throw new Error('mountScriptEditor: host is required');
+  const document = host.ownerDocument;
 
   const knownFns = new Set((hostFns || []).map((h) => h.name));
 
@@ -132,8 +141,10 @@ export function mountScriptEditor({
   textarea.setAttribute('autocomplete', 'off');
   textarea.setAttribute('autocapitalize', 'off');
   textarea.value = source;
+  textarea.setAttribute('aria-label', title);
   const popup = document.createElement('ul');
   popup.className = 'script-autocomplete hidden';
+  popup.setAttribute('role', 'listbox');
   body.appendChild(pre);
   body.appendChild(textarea);
   body.appendChild(popup);
@@ -142,6 +153,8 @@ export function mountScriptEditor({
   // Diagnostics.
   const diagEl = document.createElement('div');
   diagEl.className = 'script-diagnostics';
+  diagEl.setAttribute('role', 'status');
+  diagEl.setAttribute('aria-live', 'polite');
   root.appendChild(diagEl);
 
   host.appendChild(root);
@@ -149,6 +162,7 @@ export function mountScriptEditor({
   let currentCompletions = [];
   let activeIndex = -1;
   let diagTimer = null;
+  let diagnosticsGeneration = 0;
 
   function refreshHighlight() {
     const tokens = tokenizeRhai(textarea.value, knownFns);
@@ -180,6 +194,8 @@ export function mountScriptEditor({
     currentCompletions.forEach((item, i) => {
       const li = document.createElement('li');
       li.className = 'script-autocomplete-item';
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', String(i === activeIndex));
       if (i === activeIndex) li.classList.add('active');
       li.innerHTML =
         `<span class="ac-sig">${escapeHtml(item.signature || item.name)}</span>` +
@@ -263,7 +279,9 @@ export function mountScriptEditor({
       row.className = `script-diagnostic sev-${d.severity || 'error'}`;
       const loc = document.createElement('span');
       loc.className = 'script-diagnostic-loc';
-      loc.textContent = `Line ${d.line}${d.column ? ':' + d.column : ''}`;
+      const severity = String(d.severity || 'error').toUpperCase();
+      const file = d.file ? `${d.file}:` : '';
+      loc.textContent = `${severity} — ${file}Line ${d.line}${d.column ? ':' + d.column : ''}`;
       const msg = document.createElement('span');
       msg.className = 'script-diagnostic-msg';
       msg.textContent = d.message;
@@ -278,13 +296,16 @@ export function mountScriptEditor({
       renderDiagnostics([]);
       return [];
     }
+    const requestedSource = textarea.value;
+    const requested = ++diagnosticsGeneration;
     let diags = [];
     try {
-      diags = await getDiagnostics(textarea.value, lineOffset);
+      diags = await getDiagnostics(requestedSource, lineOffset);
     } catch (err) {
       console.warn('[script-editor] diagnostics failed:', err?.message || err);
       diags = [];
     }
+    if (requested !== diagnosticsGeneration || textarea.value !== requestedSource) return [];
     renderDiagnostics(diags || []);
     return diags || [];
   }

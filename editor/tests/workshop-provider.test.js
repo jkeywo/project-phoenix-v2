@@ -79,6 +79,18 @@ describe('explicit Workshop capability providers', () => {
     expect((await provider.runtime.dependencies()).packs[0]).toEqual({ id: 'other', manifest_toml, files: {} });
   });
 
+  it('routes Rhai authoring through the private native provider', async () => {
+    const functions = [{ name: 'on_timer', receiver: '', category: 'register' }];
+    const diagnostics = [{ severity: 'error', message: 'Expected expression', line: 9, column: 2 }];
+    const request = vi.fn(async value => value.op === 'script-host-functions'
+      ? { status: 'script-host-functions', functions }
+      : { status: 'script-diagnostics', diagnostics });
+    const provider = createNativeWorkshopProvider({ request });
+    expect(await provider.runtime.scriptHostFunctions()).toEqual(functions);
+    expect(await provider.runtime.scriptDiagnostics('fn broken( {', 8)).toEqual(diagnostics);
+    expect(request.mock.calls.at(-1)[0]).toEqual({ op: 'script-diagnostics', source: 'fn broken( {', line_offset: 8 });
+  });
+
   it('retains recovered old revisions so stale draft saves reach the native conflict gate', async () => {
     const draft = new WorkshopDocument(workshopPack());
     const saved = { version: 1, selected: WORKSHOP_WORLD, draft: draft.snapshot() };

@@ -2,7 +2,7 @@
 /**
  * script-editor-view.test.js — DOM view for the Rhai script editor (#983).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountScriptEditor, renderScriptList } from '../script-editor-view.js';
 
 const HOST_FNS = [
@@ -35,6 +35,19 @@ describe('renderScriptList', () => {
 });
 
 describe('mountScriptEditor', () => {
+  it('rejects a late diagnostic for an older draft revision', async () => {
+    let finish;
+    const host = document.createElement('div'); document.body.append(host);
+    const editor = mountScriptEditor({ host, source: 'old()', diagnosticsDelayMs: 0,
+      getDiagnostics: vi.fn(source => source === 'old()' ? new Promise(resolve => { finish = resolve; }) : []),
+    });
+    editor.textarea.value = 'new()';
+    editor.textarea.dispatchEvent(new Event('input'));
+    finish([{ severity: 'error', message: 'old failure', line: 1, column: 1 }]);
+    await Promise.resolve(); await Promise.resolve();
+    expect(host.textContent).not.toContain('old failure');
+    editor.destroy();
+  });
   let host;
   beforeEach(() => {
     host = document.createElement('div');

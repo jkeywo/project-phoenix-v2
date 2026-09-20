@@ -48,18 +48,18 @@ describe('Workshop Authoring browser surface', () => {
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-layout .workshop-dock-panel')].map(node => node.dataset.panel))
       .toEqual(['files', 'dependencies', 'changes', 'composition', 'presets', 'source', 'findings', 'feedback',
-        'model-preview', 'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity']);
+        'model-preview', 'scripts', 'inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity']);
     const sourceTab = document.querySelector('[data-panel="source"] .workshop-panel-tab');
     sourceTab.focus();
     sourceTab.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(document.activeElement.closest('[data-panel]')?.dataset.panel).toBe('source'));
-    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(9);
+    expect(JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout.version).toBe(10);
     document.querySelector('[data-panel="inspector"] .workshop-panel-header button:last-child').click();
     expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
     [...document.querySelectorAll('.workshop-panel-switcher button')].find(node => node.textContent === t('workshop.inspector')).click();
     expect(document.querySelector('[data-panel="inspector"]')).not.toBeNull();
     document.querySelector('.workshop-layout-reset').click();
-    expect(document.querySelectorAll('.workshop-layout .workshop-dock-panel')).toHaveLength(17);
+    expect(document.querySelectorAll('.workshop-layout .workshop-dock-panel')).toHaveLength(18);
     expect(document.querySelectorAll('#workshop-add-source')).toHaveLength(1);
     expect(document.querySelectorAll('#workshop-restore')).toHaveLength(1);
     expect(byId('add-source').closest('[data-panel]')?.dataset.panel).toBe('add');
@@ -195,7 +195,7 @@ describe('Workshop Authoring browser surface', () => {
     document.querySelector('[data-panel="model-preview"] [data-layout-control="float"]').click();
     document.querySelector('[data-panel="sound"] [data-layout-control="close"]').click();
     const stored = JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY)).authoringLayout;
-    expect(stored.version).toBe(9);
+    expect(stored.version).toBe(10);
     expect(stored.floats.map(entry => entry.panel)).toContain('model-preview');
     expect(stored.closed).toContain('sound');
     // Placement only: no captured picture, cue selection or audition state may travel with it.
@@ -223,7 +223,7 @@ describe('Workshop Authoring browser surface', () => {
     await mounted.ready;
     expect([...document.querySelectorAll('.workshop-layout .workshop-dock-panel')].map(node => node.dataset.panel))
       .toEqual(['source', 'inspector', 'models', 'model-preview', 'sound', 'changes', 'definitions', 'composition',
-        'entity', 'presets']);
+        'entity', 'presets', 'scripts']);
     // Panels the operator closed under v3 stay closed.
     expect(document.querySelector('[data-panel="findings"]')).toBeNull();
   });
@@ -284,7 +284,7 @@ describe('Workshop Authoring browser surface', () => {
     byId('source').value = 'retained';
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
     window.dispatchEvent(new Event('resize'));
-    expect(document.querySelectorAll('.workshop-layout .workshop-dock-panel')).toHaveLength(17);
+    expect(document.querySelectorAll('.workshop-layout .workshop-dock-panel')).toHaveLength(18);
     expect(byId('source').value).toBe('retained');
   });
 
@@ -357,6 +357,7 @@ describe('Workshop Authoring browser surface', () => {
     expect(byId('composition').hidden).toBe(true);
     expect(byId('entity').hidden).toBe(true);
     expect(byId('presets').hidden).toBe(true);
+    expect(byId('scripts').hidden).toBe(true);
     expect(document.querySelector('.sound-audition').hidden).toBe(true);
     expect(byId('test-world').disabled).toBe(true);
     await vi.waitFor(() => expect(request.mock.calls.some(([value]) => value.op === 'test-start')).toBe(true));

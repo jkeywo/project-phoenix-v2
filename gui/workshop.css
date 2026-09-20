@@ -92,6 +92,28 @@ button:not(:disabled) { cursor: pointer; }
    it easier to scan, and the severity below is a word too. */
 .workshop-presets-undrawn label { font-weight: 700; }
 .workshop-presets-findings li[data-severity="error"] { font-weight: 700; }
+.workshop-scripts { display: flex; flex-direction: column; min-height: 28rem; gap: .5rem; }
+.workshop-scripts > select { width: 100%; }
+.script-list-row { padding: .35rem; cursor: pointer; border: 1px solid transparent; }
+.script-list-row.active { border-color: currentColor; font-weight: 700; }
+.script-editor { display: flex; flex-direction: column; min-height: 22rem; }
+.script-editor-header { display: flex; justify-content: space-between; gap: .5rem; align-items: center; }
+.script-editor-title { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.script-editor-body { position: relative; flex: 1; min-height: 14rem; }
+.script-highlight, .script-editor-input { position: absolute; inset: 0; margin: 0; padding: .6rem; font: 1rem/1.5 ui-monospace, monospace; tab-size: 4; white-space: pre; overflow: auto; border: 1px solid #8195a8; }
+.script-highlight { pointer-events: none; color: #d7e3ec; background: #15202a; }
+.script-highlight code { font: inherit; }
+.script-editor-input { color: transparent; background: transparent; caret-color: white; resize: none; }
+.tok-comment { color: #9bc78b; font-style: italic; } .tok-string { color: #efb18c; }
+.tok-number { color: #c6dfa7; } .tok-keyword { color: #91c7ff; } .tok-hostfn { color: #ffe09b; }
+.tok-ident { color: #b6e5ff; } .tok-punct { color: #d7e3ec; }
+.script-autocomplete { position: absolute; z-index: 20; left: .5rem; top: 2rem; max-height: 14rem; overflow: auto; min-width: min(20rem, 90%); list-style: none; margin: 0; padding: .2rem; background: #15202a; border: 1px solid currentColor; }
+.script-autocomplete.hidden { display: none; }
+.script-autocomplete-item { display: flex; flex-direction: column; padding: .3rem; }
+.script-autocomplete-item.active { outline: 2px solid currentColor; }
+.script-diagnostics { max-height: 9rem; overflow: auto; border-top: 1px solid #8195a8; padding: .4rem; }
+.script-diagnostic { display: flex; gap: .5rem; }
+.script-diagnostics-ok { font-weight: 700; }
 .workshop-model-preview :is(input, select) { max-width: 100%; }
 .workshop-model-preview-viewport { width: 100%; }
 .workshop-model-preview-viewport iframe { width: 100%; height: clamp(20rem, 55vh, 45rem); border: 1px solid #8195a8; }

@@ -57,6 +57,15 @@ function mount() {
 describe('GM authentic Station projection', () => {
   beforeEach(mount);
 
+  it('focusStation aims the matching established Station control', () => {
+    const controller = createGmStationPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }) });
+    controller.update(projection());
+    expect(controller.focusStation('ship-player-1', 'captain')).toBe(true);
+    expect(controller.state().selectedRow.station.station_id).toBe('captain');
+    expect(document.activeElement).toBe(document.getElementById('gm-station-toggle'));
+    expect(controller.focusStation('ship-player-1', 'missing')).toBe(false);
+  });
+
   it('binds each Ship/Station to a fresh browsing context even when its URL matches', () => {
     const submitStationCommand = vi.fn(() => true);
     const listeners = new Map();

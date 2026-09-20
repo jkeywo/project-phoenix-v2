@@ -19,6 +19,7 @@ import { createGmDespawnPanel } from './gm-despawn-panel.js';
 import { createGmNpcPanel } from './gm-npc-panel.js';
 import { createGmEntityInspectorPanel } from './gm-entity-inspector-panel.js';
 import { createGmWorldInspectorPanel } from './gm-world-inspector-panel.js';
+import { createGmShipInspectorPanel } from './gm-ship-inspector-panel.js';
 import { createGmStationPuppet } from './gm-station-puppet.js';
 import { createGmRolePresets } from './gm-role-presets.js';
 import { createGmAttentionPanel } from './gm-attention-panel.js';
@@ -105,6 +106,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   let gmDespawn = null;
   let gmNpc = null;
   let gmEntityFields = null;
+  let gmShipFields = null;
   let gmObjectivePanel = null;
   const gmProjection = createGmLocalProjection({
     doc: doc,
@@ -121,6 +123,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       if (gmObjectivePanel) gmObjectivePanel.select(entity);
       // The entities/AI Live Inspector reads the same selection (issue #1489).
       if (gmEntityFields) gmEntityFields.select(entity);
+      if (gmShipFields) gmShipFields.select(entity);
     },
   });
   const gmActivity = createGmActivityFeed({
@@ -608,9 +611,29 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     }),
   });
   win.__hostGmWorldFieldsState = gmWorldFields.state;
+  gmShipFields = createGmShipInspectorPanel({ doc, t,
+    focusEffect: (entityId, scope) => {
+      const entity = gmProjection.state().entities.find(row => row.entity_id === entityId);
+      if (!entity) return false;
+      shell.temporaryActions?.open('effect');
+      // Opening a fresh draft resets its scope to the hull default. Aim after
+      // that reset so the link lands on the System row it named.
+      gmDirectEffect.select(entity); gmDirectEffect.selectScope(scope);
+      return gmDirectEffect.focusDraft();
+    },
+    focusSystem: (entityId, systemId) => {
+      const entity = gmProjection.state().entities.find(row => row.entity_id === entityId);
+      if (!entity) return false;
+      gmSystem.select(entity); shell.showLog('gm-system-panel'); return gmSystem.focusSystem(systemId);
+    },
+    focusStation: (entityId, stationId) => {
+      shell.showLog('gm-station-surface'); return gmStationPuppet.focusStation(entityId, stationId);
+    },
+  });
+  win.__hostGmShipFieldsState = gmShipFields.state;
   win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -626,6 +649,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmNpc.update(p);
       gmEntityFields.update(p);
       gmWorldFields.update(p);
+      gmShipFields.update(p);
       if (gmProjection.update(p)) {
         gmActivity.reconcileAvailability();
         gmKnowledgeCompare.updateTruth(gmProjection.state().entities);

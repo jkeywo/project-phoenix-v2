@@ -7005,7 +7005,10 @@ pub(crate) fn spawn_from_origin(
     // Put the record back on the ship it describes, so a save taken *after* this
     // resume can rebuild it again. A resumed run that could only be resumed once
     // is a continuation with an expiry date.
-    entity_mut.insert(crate::entities::spawner::EntitySpawnOrigin(origin.clone()));
+    entity_mut.insert((
+        crate::entities::spawner::EntityTemplatePath::new(&origin.template_path),
+        crate::entities::spawner::EntitySpawnOrigin(origin.clone()),
+    ));
     if row
         .ai_fidelity
         .as_ref()

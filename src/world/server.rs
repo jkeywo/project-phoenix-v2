@@ -1560,6 +1560,11 @@ pub fn spawn_immediate_entities_internal(
             uuid,
             entity_inst.id.clone(),
         );
+        commands
+            .entity(entity)
+            .insert(crate::entities::spawner::EntityTemplatePath::new(
+                &entity_inst.template_path,
+            ));
         spawned.push(entity);
     }
 
@@ -1619,6 +1624,11 @@ pub fn spawn_immediate_entities_internal(
             uuid,
             entity_inst.id.clone(),
         );
+        commands
+            .entity(entity)
+            .insert(crate::entities::spawner::EntityTemplatePath::new(
+                &entity_inst.template_path,
+            ));
         // The authored narrative mark (issue #1338). Attached here rather than
         // in a `SpawnSection` because the payload is the WORLD's authored
         // `name` — the unique reference id triggers, comms and objectives all
@@ -3806,9 +3816,9 @@ pub(crate) fn apply_dispatch_result(
                 // Stamped unconditionally rather than only for hostiles or only
                 // for ships: what makes an entity worth recording is that a
                 // *script* made it, not what it turned out to be.
-                commands
-                    .entity(spawned)
-                    .insert(crate::entities::spawner::EntitySpawnOrigin(
+                commands.entity(spawned).insert((
+                    crate::entities::spawner::EntityTemplatePath::new(&template_path),
+                    crate::entities::spawner::EntitySpawnOrigin(
                         crate::world::spawn_origin::SpawnOrigin {
                             template_path,
                             name,
@@ -3818,7 +3828,8 @@ pub(crate) fn apply_dispatch_result(
                             overrides,
                             layer_path: layer_path.clone(),
                         },
-                    ));
+                    ),
+                ));
 
                 // Apply optional rotation (XYZ Euler radians) and scale
                 // (per-axis) via the canonical `TransformConfig` conversions —

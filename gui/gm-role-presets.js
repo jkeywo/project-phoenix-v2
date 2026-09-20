@@ -74,6 +74,7 @@ export const GM_ROLE_PRESET_PANEL_FOLLOWERS = Object.freeze({
   // The entities/AI Live Inspector reads the inspector's own selection, so a
   // preset that puts the inspector away puts its readings away too (#1489).
   'gm-entity-fields-panel': 'gm-inspector',
+  'gm-ship-fields-panel': 'gm-inspector',
 });
 
 /** Quick-action DOM ids this build actually draws. */

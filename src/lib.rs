@@ -157,6 +157,7 @@ pub mod gm_restore;
 /// Crew-public Game Master identities (issue #1289), kept separate from crew
 /// sessions and the player-ship fleet roster by construction.
 pub mod gm_roster;
+pub mod gm_ship_inspector;
 /// The standalone game master's bound identity: the one-peer roster binding and
 /// the read-back the host page reads its own admission from.
 pub mod gm_solo;

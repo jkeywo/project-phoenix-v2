@@ -32,6 +32,23 @@ pub struct EntityId(pub String);
 #[derive(Component, Clone, Debug)]
 pub struct EntityName(pub String);
 
+/// Canonical entity-template path that produced this live entity.
+///
+/// Unlike [`EntitySpawnOrigin`], this identity is present for authored and
+/// runtime spawns alike. Live inspection must never recover provenance by
+/// comparing resolved configs: two templates may intentionally resolve to the
+/// same ship topology while remaining different authored sources.
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct EntityTemplatePath(pub String);
+
+impl EntityTemplatePath {
+    pub fn new(path: &str) -> Self {
+        Self(crate::entities::include_resolve::canonical_template_path(
+            path,
+        ))
+    }
+}
+
 /// Present when the EntityConfig had one or more `[[light]]` entries.
 /// The renderer reads this component to spawn `PointLight` / `DirectionalLight`
 /// components (either on the entity itself or as children for multi-light setups).

@@ -48,6 +48,8 @@ mod tests {
             // markup, not a browser-only panel.
             "gm-entity-fields-panel",
             "gm-entity-fields-list",
+            "gm-ship-fields-panel",
+            "gm-ship-fields-list",
         ] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }

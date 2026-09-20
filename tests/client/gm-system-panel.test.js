@@ -85,3 +85,13 @@ it('crew admission and malformed scope cannot create or settle a request',()=>{
   expect(f.panel.update({...f.payload,system_results:[{action_kind:'system-disable',effect_scope:{station:'helm'},target:'ship-a',operator_id:'gm',correlation:'x',outcome:'applied'}]})).toBe(false);
   expect(f.submit).not.toHaveBeenCalled();
 });
+it('focusSystem aims the matching established disable or restore control',()=>{
+  const f=setup();
+  expect(f.panel.focusSystem('drive')).toBe(true);
+  expect(f.panel.state().system).toBe('drive');
+  expect(document.activeElement).toBe(document.getElementById('gm-system-disable'));
+  f.panel.update({...f.payload,system_controls:{'ship-a':[{system_id:'drive',name:'Drive',gm_disabled:true,available:false}]}});
+  expect(f.panel.focusSystem('drive')).toBe(true);
+  expect(document.activeElement).toBe(document.getElementById('gm-system-restore'));
+  expect(f.panel.focusSystem('missing')).toBe(false);
+});

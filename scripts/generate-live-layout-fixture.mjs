@@ -170,6 +170,12 @@ const CASES = [
       && !['roster', 'mission'].includes(panel)),
     selected: 'mission',
   }],
+  ['a version 15 layout before hull fields registered', {
+    version: 15, root: group(['roster', 'inspector', 'entity-fields'], 'entity-fields'), floats: [],
+    closed: LIVE_PANELS.filter(panel => panel !== 'hull-fields'
+      && !['roster', 'inspector', 'entity-fields'].includes(panel)),
+    selected: 'entity-fields',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

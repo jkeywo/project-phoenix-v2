@@ -151,6 +151,18 @@ second action lifecycle and no generic field setter. Supporting-world paths are
 stable selectable identities; unloading the selected layer leaves its final
 reading visibly gone and disables its links until the operator moves elsewhere.
 
+Issue #1491 adds hull, Station and System inspection. The runtime walks the
+effective `EntityConfig` ship-operation sections, `ShipConfig` and each active
+`SystemBlackboard`, so the descriptor
+inventory follows the known Rust wire schema instead of a second list that can
+silently miss a new weapon, shield, repair, sensor, movement, allocation or
+cooldown field. Authored topology and tuning are Recreate required; current
+health, rating, control source and blackboard context are Derived. Named rows
+aim the existing damage/repair, disable/restore and Station-puppet panels at the
+matching hull and System or Station. A missing or destroyed hull keeps its final
+reading and disables those links. Browser and native GM surfaces reuse the same
+markup, panel module and versioned dock migration.
+
 A field the entity never authored is absent rather than blank: "not authored"
 and "authored empty" are different facts. A despawned entity keeps its final
 reading, marked gone, with every action disabled — and the panel never follows a

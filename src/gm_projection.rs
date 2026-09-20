@@ -18,9 +18,9 @@ use crate::core::messages::{
 };
 use crate::entities::config_cache::FactionRegistryResource;
 use crate::entities::spawner::{
-    AsteroidFieldSection, EntityId, EntityName, EntitySystemHull, EntityTagsSection, EntityUuid,
-    FactionComponent, RadarAppearanceSection, RegionEffectsSection, RegionShapeSection,
-    StaticPointDefence,
+    AsteroidFieldSection, EntityId, EntityName, EntitySystemHull, EntityTagsSection,
+    EntityTemplatePath, EntityUuid, FactionComponent, RadarAppearanceSection, RegionEffectsSection,
+    RegionShapeSection, StaticPointDefence,
 };
 use crate::entities::tags::EntityTag;
 use crate::gm_action::{GmActionKind, GmActionLog, LocalGmActionRefusals, LoggedGmAction};
@@ -217,6 +217,12 @@ pub struct GmEntityProjectionPayload {
     /// any of it changes — which is exactly the bounded cadence a reading wants.
     #[serde(default)]
     pub entity_inspector: crate::gm_entity_inspector::EntityInspectorProjection,
+    /// Active hull/Station/System schema and runtime readings (issue #1491).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::gm_ship_inspector::ShipInspectorProjection::is_empty"
+    )]
+    pub ship_inspector: crate::gm_ship_inspector::ShipInspectorProjection,
     pub entities: Vec<GmEntityProjection>,
     /// Bounded attributed results of the directed world-effect family (issue
     /// #1310), carried on the entity surface rather than a channel of its own.
@@ -719,8 +725,13 @@ fn publish_local_projection(
     system_sources: Query<
         (
             &EntityUuid,
+            Option<&EntityName>,
+            Option<&EntityTemplatePath>,
             &ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
+            &ActiveStationRatings,
+            &EntitySystemHull,
+            Option<&crate::server_app::ShipSystemBlackboards>,
         ),
         With<Ship>,
     >,
@@ -936,6 +947,23 @@ fn publish_local_projection(
         &inspector_intents,
         &inspector_targets,
     );
+    let inspection_config_cache = crate::entities::config_cache::get_config_cache();
+    let ship_inspector = crate::gm_ship_inspector::projection(system_sources.iter().map(
+        |(uuid, name, template, config, controls, ratings, hull, blackboards)| {
+            let authored = ship_inspector_authored_config(template, &inspection_config_cache);
+            crate::gm_ship_inspector::ShipInspectorInputs {
+                id: &uuid.0,
+                label: name.map(|name| name.0.as_str()).unwrap_or(&uuid.0),
+                config: &config.0,
+                authored: authored.map(|(_, config)| config),
+                authored_document: authored.map(|(path, _)| path.as_str()),
+                ratings,
+                controls: &controls.0,
+                hull: &hull.0,
+                blackboards: blackboards.map(|rows| &rows.0),
+            }
+        },
+    ));
     let next = GmEntityProjectionPayload {
         world_inspector: crate::gm_world_inspector::projection(
             world_sources.config.as_deref(),
@@ -949,32 +977,34 @@ fn publish_local_projection(
         ),
         system_controls: system_sources
             .iter()
-            .map(|(uuid, config, sources)| {
-                (
-                    uuid.0.clone(),
-                    config
-                        .0
-                        .systems
-                        .iter()
-                        .map(|system| GmSystemControlStatus {
-                            system_id: system.id.clone(),
-                            name: projected
-                                .iter()
-                                .find(|row| row.entity_id == uuid.0)
-                                .and_then(|row| {
-                                    row.status
-                                        .systems
-                                        .iter()
-                                        .find(|row| row.system_id == system.id)
-                                })
-                                .map(|row| row.name.clone())
-                                .unwrap_or_else(|| system.id.0.clone()),
-                            gm_disabled: sources.0.is_gm_disabled(&system.id),
-                            available: sources.0.policy_for(&system.id).coordinate,
-                        })
-                        .collect(),
-                )
-            })
+            .map(
+                |(uuid, _name, _template, config, sources, _ratings, _hull, _blackboards)| {
+                    (
+                        uuid.0.clone(),
+                        config
+                            .0
+                            .systems
+                            .iter()
+                            .map(|system| GmSystemControlStatus {
+                                system_id: system.id.clone(),
+                                name: projected
+                                    .iter()
+                                    .find(|row| row.entity_id == uuid.0)
+                                    .and_then(|row| {
+                                        row.status
+                                            .systems
+                                            .iter()
+                                            .find(|row| row.system_id == system.id)
+                                    })
+                                    .map(|row| row.name.clone())
+                                    .unwrap_or_else(|| system.id.0.clone()),
+                                gm_disabled: sources.0.is_gm_disabled(&system.id),
+                                available: sources.0.policy_for(&system.id).coordinate,
+                            })
+                            .collect(),
+                    )
+                },
+            )
             .collect(),
         system_results: [
             crate::gm_action::GmActionKind::SystemDisable,
@@ -1033,6 +1063,7 @@ fn publish_local_projection(
             &local_refusals,
         ),
         entity_inspector,
+        ship_inspector,
         entities: projected,
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::DirectEffect,
@@ -1046,6 +1077,14 @@ fn publish_local_projection(
         });
         *previous = Some(next);
     }
+}
+
+fn ship_inspector_authored_config<'a>(
+    template: Option<&'a EntityTemplatePath>,
+    cache: &'a crate::entities::config_cache::ConfigCache,
+) -> Option<(&'a String, &'a crate::entities::config::EntityConfig)> {
+    let template = template?;
+    cache.get(&template.0).map(|config| (&template.0, config))
 }
 
 fn publish_station_projection(
@@ -1318,6 +1357,19 @@ mod tests {
     const PLAYER_ID: &str = "00000000-0000-4000-8000-000000000001";
     const NPC_ID: &str = "00000000-0000-4000-8000-000000000002";
     const FACTION_ID: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+
+    #[test]
+    fn ship_inspector_uses_spawned_template_identity_when_topologies_match() {
+        let same = crate::entities::config::EntityConfig::default();
+        let cache = crate::entities::config_cache::ConfigCache::from([
+            ("assets/entities/a.toml".to_string(), same.clone()),
+            ("assets/entities/b.toml".to_string(), same),
+        ]);
+        let identity = EntityTemplatePath::new("assets/entities/./b.toml");
+        let (path, _) = ship_inspector_authored_config(Some(&identity), &cache).unwrap();
+        assert_eq!(path, "assets/entities/b.toml");
+        assert!(ship_inspector_authored_config(None, &cache).is_none());
+    }
 
     fn hull(percent: f32) -> EntitySystemHull {
         let mut hull = SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);

@@ -169,6 +169,7 @@ function mount() {
     <section id="gm-faction-panel"></section>
     <section id="gm-objective-panel"></section>
     <section id="gm-entity-fields-panel"></section>
+    <section id="gm-ship-fields-panel"></section>
     <section id="gm-activity"></section>
     <section id="gm-station-controls"></section>
     <section id="gm-comms-panel"></section>

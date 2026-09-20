@@ -280,13 +280,18 @@ pub(crate) fn spawn_anonymous_entities_internal(
             }
         };
 
-        crate::entities::spawner::spawn_entity(
+        let spawned_entity = crate::entities::spawner::spawn_entity(
             commands,
             &config,
             pos,
             uuid.clone(),
             entity_inst.id.clone(),
         );
+        commands
+            .entity(spawned_entity)
+            .insert(crate::entities::spawner::EntityTemplatePath::new(
+                &entity_inst.template_path,
+            ));
         upsert_world_entity(
             world,
             snapshot_from_entity_config(uuid, entity_inst.id.clone(), &config, pos),
@@ -623,6 +628,15 @@ pub(crate) fn spawn_game_start_entities(
             uuid.clone(),
             entity_inst.id.clone(),
         );
+        let spawned_template = hull_path
+            .as_deref()
+            .filter(|_| is_fleet_ship)
+            .unwrap_or(&entity_inst.template_path);
+        commands
+            .entity(spawned)
+            .insert(crate::entities::spawner::EntityTemplatePath::new(
+                spawned_template,
+            ));
         game_start_entity_uuids.push(crate::snapshot::GameStartEntityUuid {
             authored_index,
             entity_uuid: uuid,

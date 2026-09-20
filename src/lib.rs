@@ -138,6 +138,7 @@ pub mod gm_exposure;
 pub mod gm_faction;
 pub mod gm_health;
 pub mod gm_information;
+pub mod gm_inspector_coverage;
 pub mod gm_join;
 /// Public presentation of the canonical GM action journal (issue #1441).
 pub mod gm_journal;

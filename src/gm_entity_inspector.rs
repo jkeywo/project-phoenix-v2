@@ -48,6 +48,8 @@ pub struct EntityInspectorField {
     /// String-table id. Player-visible text is never composed here.
     pub label: String,
     pub group: EntityFieldGroup,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_panel: Option<String>,
     #[serde(flatten)]
     pub descriptor: FieldDescriptor,
 }
@@ -88,6 +90,7 @@ fn field(
         id: id.into(),
         label: label.into(),
         group,
+        action_panel: None,
         descriptor: FieldDescriptor {
             kind: kind.into(),
             default_source: None,
@@ -370,6 +373,7 @@ pub fn fields() -> Vec<EntityInspectorField> {
         "inspector.validation.authored_choice".into(),
         "inspector.validation.npc_compatible".into(),
     ];
+    doctrine.action_panel = Some("npc".into());
     fields.push(doctrine);
     for (id, label) in BEHAVIOUR_SCALARS {
         fields.push(field(
@@ -701,6 +705,17 @@ mod tests {
             .map(|field| field.id.as_str())
             .collect();
         assert_eq!(named, vec!["behaviour.doctrine"]);
+        assert_eq!(
+            fields
+                .iter()
+                .find(|field| field.id == "behaviour.doctrine")
+                .and_then(|field| field.action_panel.as_deref()),
+            Some("npc")
+        );
+        assert!(fields.iter().all(|field| {
+            field.descriptor.live_mutability == LiveMutability::NamedAction
+                || field.action_panel.is_none()
+        }));
         // Every field is classified, keyed by its own schema path, and unique.
         let mut seen = std::collections::BTreeSet::new();
         for field in &fields {

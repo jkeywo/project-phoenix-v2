@@ -2,8 +2,8 @@
 title: Station
 type: entity
 tags: [station, lobby, roster, rating, ai, human-seeking]
-sources: [src/ship/config.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/lobby/stations_config.rs, src/lobby/session.rs, src/ship/components.rs, src/ship/rating_systems.rs, gui/mount-plan.js, assets/entities/alliance_destroyer.toml]
-updated: 2026-08-27
+sources: [src/ship/config.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/lobby/stations_config.rs, src/lobby/session.rs, src/ship/components.rs, src/ship/rating_systems.rs, gui/mount-plan.js, assets/entities/alliance_destroyer.toml, assets/entities/dynasty_player_cruiser.toml]
+updated: 2026-09-21
 ---
 
 # Station
@@ -56,6 +56,11 @@ so the client shell mounts the hosted surface for the right player.
 The Alliance Destroyer demonstrates this shape with auxiliary Navigation,
 Comms, and Command stations. Their host order and ratings are hull data, not
 special cases in the lobby or client.
+
+The Dynasty player cruiser demonstrates a second kind of composition: six
+direct Stations regroup existing System families into Command, Helm, Gunnery,
+Sensors, Power, and Damage Control. The regrouping is entirely hull data;
+admission and Backfill still resolve from the authored System owners.
 
 ## Occupancy
 

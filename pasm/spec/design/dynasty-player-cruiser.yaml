@@ -1,0 +1,16 @@
+entities:
+  - decision: dynasty-player-cruiser-six-seat-baseline
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Dynasty Player Cruiser Six-Station Baseline
+      summary: "The selectable Dynasty player cruiser is a distinct composed hull, separate from the existing Harrow NPC cruiser. Its six claimable Stations are Command (Captain and Comms), Helm (movement and Navigation), Gunnery (weapons), Sensors (detection and scanning), Power (energy), and Damage Control (shields and repair). Every responsibility remains an ordinary authored System assignment, so human operators and Backfill use the same admission and projection paths."
+      rationale:
+        - "Issue #1521 establishes the playable role split before the later strike-reserve and weapon-boost enhancements. It composes the proven player-cruiser equipment baseline and specialises identity, presentation and ownership without changing NPC encounter content."
+        - "Dedicated console documents compose the shared family components and action adapters. A Station regrouping never widens authority or creates a human-only combat path."
+    game_design:
+      must_not_be: [implemented by exposing or retuning the Harrow NPC cruiser, granted human-only combat behaviour, dependent on all six seats being occupied]
+    implementation:
+      status: declared
+      paths: [assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/, tests/dynasty_player_cruiser.rs]
+      tests: [cargo test --test dynasty_player_cruiser]

@@ -714,6 +714,18 @@ pub(crate) struct RawActionEntry {
     pub(crate) presentation: Option<crate::gm_presentation::PresentationCue>,
     #[serde(default)]
     pub(crate) id: Option<String>,
+    /// Named Objective instance within `id`; absence retains the exact legacy
+    /// Objective lifecycle.
+    #[serde(default)]
+    pub(crate) instance_id: Option<String>,
+    #[serde(default)]
+    pub(crate) recipient_ship_slots: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) recipient_factions: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) all_player_ships: Option<bool>,
+    #[serde(default)]
+    pub(crate) progress: Option<f32>,
     #[serde(default)]
     pub(crate) text: Option<String>,
     /// Runtime values to interpolate into `text`'s `{placeholder}` tokens for an
@@ -1649,11 +1661,35 @@ pub enum TriggerAction {
             crate::ship::config::StationStanceConfig,
         )>,
     },
+    AddObjectiveInstance {
+        spec: crate::objective_instances::ObjectiveInstanceSpec,
+        text: String,
+        text_params: std::collections::BTreeMap<String, String>,
+        mandatory: bool,
+        targets: Vec<String>,
+        directive: AiDirective,
+        utility: UtilityConfig,
+        source: ObjectiveSource,
+        command_stance: Option<(
+            crate::core::messages::StationId,
+            crate::ship::config::StationStanceConfig,
+        )>,
+    },
     CompleteObjective {
         id: String,
     },
     FailObjective {
         id: String,
+    },
+    CompleteObjectiveInstance {
+        key: crate::objective_instances::ObjectiveInstanceKey,
+    },
+    FailObjectiveInstance {
+        key: crate::objective_instances::ObjectiveInstanceKey,
+    },
+    SetObjectiveInstanceProgress {
+        key: crate::objective_instances::ObjectiveInstanceKey,
+        progress: f32,
     },
     SetAiState {
         entity: String,
@@ -1980,6 +2016,38 @@ fn parse_flag_kind(s: &str) -> Result<crate::core::messages::FlagKind, String> {
     }
 }
 
+fn parse_objective_instance_recipients(
+    raw: &RawActionEntry,
+) -> Result<Vec<crate::objective_instances::RecipientSelector>, String> {
+    let mut recipients = Vec::new();
+    for slot in raw.recipient_ship_slots.clone().unwrap_or_default() {
+        if slot.trim().is_empty() {
+            return Err("objective instance recipient ship-slot ids must not be empty".into());
+        }
+        recipients.push(crate::objective_instances::RecipientSelector::ShipSlot(
+            slot,
+        ));
+    }
+    for faction in raw.recipient_factions.clone().unwrap_or_default() {
+        if faction.trim().is_empty() {
+            return Err("objective instance recipient faction ids must not be empty".into());
+        }
+        recipients.push(crate::objective_instances::RecipientSelector::Faction(
+            faction,
+        ));
+    }
+    if raw.all_player_ships.unwrap_or(false) {
+        recipients.push(crate::objective_instances::RecipientSelector::AllPlayerShips);
+    }
+    if recipients.is_empty() {
+        return Err(
+            "an objective instance requires recipient_ship_slots, recipient_factions, or all_player_ships"
+                .into(),
+        );
+    }
+    Ok(recipients)
+}
+
 /// Parse ONE `[[trigger.action]]` row into a `TriggerAction`.
 ///
 /// Factored out of [`parse_raw_actions`] so the Rhai effect host
@@ -2042,32 +2110,93 @@ pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerA
                     _ => ObjectiveSource::Mission,
                 };
                 let command_stance = parse_command_stance(raw_action)?;
-                TriggerAction::AddObjective {
-                    id: raw_action.id.clone().ok_or_else(|| {
-                        "Action 'add_objective' requires an 'id' field".to_string()
-                    })?,
-                    text: raw_action.text.clone().ok_or_else(|| {
-                        "Action 'add_objective' requires a 'text' field".to_string()
-                    })?,
-                    text_params: raw_action.text_params.clone().unwrap_or_default(),
-                    mandatory: raw_action.mandatory.unwrap_or(false),
-                    targets: raw_action.targets.clone().unwrap_or_default(),
-                    directive,
-                    utility,
-                    source,
-                    command_stance,
-                }
-            }
-            "complete_objective" => TriggerAction::CompleteObjective {
-                id: raw_action.id.clone().ok_or_else(|| {
-                    "Action 'complete_objective' requires an 'id' field".to_string()
-                })?,
-            },
-            "fail_objective" => TriggerAction::FailObjective {
-                id: raw_action
+                let id = raw_action
                     .id
                     .clone()
-                    .ok_or_else(|| "Action 'fail_objective' requires an 'id' field".to_string())?,
+                    .ok_or_else(|| "Action 'add_objective' requires an 'id' field".to_string())?;
+                let text = raw_action
+                    .text
+                    .clone()
+                    .ok_or_else(|| "Action 'add_objective' requires a 'text' field".to_string())?;
+                if let Some(instance_id) = raw_action.instance_id.clone() {
+                    let recipients = parse_objective_instance_recipients(raw_action)?;
+                    TriggerAction::AddObjectiveInstance {
+                        spec: crate::objective_instances::ObjectiveInstanceSpec {
+                            key: crate::objective_instances::ObjectiveInstanceKey {
+                                objective_id: id,
+                                instance_id,
+                            },
+                            recipients,
+                        },
+                        text,
+                        text_params: raw_action.text_params.clone().unwrap_or_default(),
+                        mandatory: raw_action.mandatory.unwrap_or(false),
+                        targets: raw_action.targets.clone().unwrap_or_default(),
+                        directive,
+                        utility,
+                        source,
+                        command_stance,
+                    }
+                } else {
+                    TriggerAction::AddObjective {
+                        id,
+                        text,
+                        text_params: raw_action.text_params.clone().unwrap_or_default(),
+                        mandatory: raw_action.mandatory.unwrap_or(false),
+                        targets: raw_action.targets.clone().unwrap_or_default(),
+                        directive,
+                        utility,
+                        source,
+                        command_stance,
+                    }
+                }
+            }
+            "complete_objective" => {
+                let id = raw_action.id.clone().ok_or_else(|| {
+                    "Action 'complete_objective' requires an 'id' field".to_string()
+                })?;
+                match raw_action.instance_id.clone() {
+                    Some(instance_id) => TriggerAction::CompleteObjectiveInstance {
+                        key: crate::objective_instances::ObjectiveInstanceKey {
+                            objective_id: id,
+                            instance_id,
+                        },
+                    },
+                    None => TriggerAction::CompleteObjective { id },
+                }
+            }
+            "fail_objective" => {
+                let id = raw_action
+                    .id
+                    .clone()
+                    .ok_or_else(|| "Action 'fail_objective' requires an 'id' field".to_string())?;
+                match raw_action.instance_id.clone() {
+                    Some(instance_id) => TriggerAction::FailObjectiveInstance {
+                        key: crate::objective_instances::ObjectiveInstanceKey {
+                            objective_id: id,
+                            instance_id,
+                        },
+                    },
+                    None => TriggerAction::FailObjective { id },
+                }
+            }
+            "set_objective_progress" => TriggerAction::SetObjectiveInstanceProgress {
+                key: crate::objective_instances::ObjectiveInstanceKey {
+                    objective_id: raw_action.id.clone().ok_or_else(|| {
+                        "Action 'set_objective_progress' requires an 'id' field".to_string()
+                    })?,
+                    instance_id: raw_action.instance_id.clone().ok_or_else(|| {
+                        "Action 'set_objective_progress' requires an 'instance_id' field"
+                            .to_string()
+                    })?,
+                },
+                progress: raw_action
+                    .progress
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .ok_or_else(|| {
+                        "Action 'set_objective_progress' requires finite non-negative 'progress'"
+                            .to_string()
+                    })?,
             },
             "set_ai_state" => TriggerAction::SetAiState {
                 entity: raw_action.entity.clone().ok_or_else(|| {

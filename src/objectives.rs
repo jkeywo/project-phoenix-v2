@@ -869,6 +869,23 @@ impl ObjectiveManager {
             .collect()
     }
 
+    /// Same projection with the owning definition id retained, for consumers
+    /// that replace a legacy definition with a ship-effective named instance.
+    pub fn active_station_stances_with_ids_for(
+        &self,
+        ship: &str,
+    ) -> Vec<(String, StationId, StationStanceConfig)> {
+        self.objectives
+            .iter()
+            .filter(|o| o.status == ObjectiveStatus::Active && self.is_for_ship(&o.id, ship))
+            .filter_map(|o| {
+                o.command_stance
+                    .clone()
+                    .map(|(station, stance)| (o.id.clone(), station, stance))
+            })
+            .collect()
+    }
+
     /// Remove the objective with `id` entirely (issue #751).
     ///
     /// Unlike `fail`/`complete` (which transition status but keep the record),

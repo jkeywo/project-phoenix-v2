@@ -420,6 +420,7 @@ mod tests {
         FleetShip {
             host: HostSlot(slot),
             ship_path: Some(hull.to_string()),
+            authored_slot_id: None,
             crew: crew
                 .iter()
                 .map(|station| (StationId((*station).to_string()), "Std".to_string()))
@@ -796,6 +797,7 @@ mod tests {
                 FleetShip {
                     host: HostSlot(1),
                     ship_path: None,
+                    authored_slot_id: None,
                     crew: Vec::new(),
                 },
                 ship(2, DESTROYER, &[]),

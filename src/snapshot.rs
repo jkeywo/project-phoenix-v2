@@ -635,9 +635,12 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// and indistinguishable from correct" shape, and no content-digest argument
 /// rescues it: the GM action moved the world without moving a single authored
 /// file.
-/// `36` — issue #1522 retains the launch-frozen authored ship roster. A
-/// format-35 save cannot distinguish a deliberately absent slot from an old
-/// single-ship boot, so it is refused rather than reconstructed differently.
+/// `36` — issues #1522/#1523 retain the launch-frozen authored ship roster and
+/// independent named Objective instances, including progress, fixed completion
+/// credit and per-ship frozen history. A format-35 save cannot distinguish a
+/// deliberately absent slot from an old single-ship boot, or an untouched
+/// Objective definition from one whose named sibling already completed, so it
+/// is refused rather than reconstructed differently.
 pub const SNAPSHOT_FORMAT: u32 = 36;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
@@ -2644,6 +2647,9 @@ pub struct PhoenixSnapshot {
     /// Exact Objective lifecycle/authored state, excluding presentation transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub objective_records: Vec<crate::objectives::ObjectiveRecord>,
+    /// Named multi-ship Objective instances, including fixed completion credit.
+    #[serde(default)]
+    pub objective_instances: crate::objective_instances::ObjectiveInstanceManager,
     /// Launch-frozen authored ship positions, including omitted absent slots.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen_ship_slots: Option<crate::ship_slots::FrozenShipSlots>,
@@ -2844,6 +2850,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         objective_records: world
             .get_resource::<crate::world::server::ObjectiveManagerRes>()
             .map(|manager| manager.0.records().to_vec())
+            .unwrap_or_default(),
+        objective_instances: world
+            .get_resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+            .map(|manager| manager.0.clone())
             .unwrap_or_default(),
         frozen_ship_slots: world
             .get_resource::<crate::ship_slots::FrozenShipSlots>()
@@ -5694,6 +5704,9 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
             .restore_records(snapshot.objective_records.clone());
         world.insert_resource(manager);
     }
+    world.insert_resource(crate::world::server::ObjectiveInstanceManagerRes(
+        snapshot.objective_instances.clone(),
+    ));
     if let Some(slots) = snapshot.frozen_ship_slots.clone() {
         world.insert_resource(slots);
     }

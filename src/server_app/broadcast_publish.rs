@@ -309,6 +309,7 @@ pub(crate) fn publish_viewscreen_blackboard(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
     mut ship_blackboards_q: Query<
         (
@@ -384,6 +385,11 @@ pub(crate) fn publish_viewscreen_blackboard(
                 )
             })
             .unwrap_or_default();
+        if let Some(instances) = objective_instances.as_ref() {
+            scored_objectives = instances
+                .0
+                .project_scored_for_ship(uuid.map_or("", |u| u.0.as_str()), scored_objectives);
+        }
 
         // Merge the hull's standing template doctrine into the scenario pool (see
         // the "why this MERGES" note above). Score the doctrine with the same

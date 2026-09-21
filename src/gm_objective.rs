@@ -284,30 +284,44 @@ pub fn apply_control(
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ObjectiveRow {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     pub label: String,
     pub text: String,
     pub text_params: std::collections::BTreeMap<String, String>,
     pub recipients: Vec<String>,
     pub status: Option<ObjectiveStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completion_members: Vec<String>,
     pub available: bool,
 }
 
 pub fn rows(
     runtime: Option<&crate::world::server::WorldContentRuntime>,
     manager: Option<&crate::objectives::ObjectiveManager>,
+    instances: Option<&crate::objective_instances::ObjectiveInstanceManager>,
     live: &[String],
 ) -> (Vec<ObjectiveRow>, Vec<ObjectiveRow>) {
-    let objectives = manager
+    let mut objectives: Vec<_> = manager
         .map(|manager| {
             manager
                 .sorted_snapshots()
                 .into_iter()
+                .filter(|snapshot| {
+                    !instances
+                        .is_some_and(|instances| instances.has_definition_instances(&snapshot.id))
+                })
                 .map(|snapshot| {
                     let recipients = manager
                         .recipients(&snapshot.id)
                         .unwrap_or_default()
                         .to_vec();
                     ObjectiveRow {
+                        instance_id: None,
+                        progress: None,
+                        completion_members: Vec::new(),
                         available: valid_request_vocabulary(&snapshot.id, &recipients)
                             && recipients.iter().all(|id| live.contains(id)),
                         recipients,
@@ -321,6 +335,34 @@ pub fn rows(
                 .collect()
         })
         .unwrap_or_default();
+    if let (Some(manager), Some(instances)) = (manager, instances) {
+        for record in instances.records() {
+            let Some(snapshot) = manager
+                .sorted_snapshots()
+                .into_iter()
+                .find(|snapshot| snapshot.id == record.spec.key.objective_id)
+            else {
+                continue;
+            };
+            let recipients = instances.current_members(&record.spec.key);
+            objectives.push(ObjectiveRow {
+                id: format!(
+                    "{}::{}",
+                    record.spec.key.objective_id, record.spec.key.instance_id
+                ),
+                instance_id: Some(record.spec.key.instance_id.clone()),
+                label: snapshot.text.clone(),
+                text: snapshot.text,
+                text_params: snapshot.text_params,
+                available: false,
+                recipients,
+                status: Some(record.status.clone()),
+                progress: Some(record.progress),
+                completion_members: record.completion_members.clone(),
+            });
+        }
+        objectives.sort_by(|left, right| left.id.cmp(&right.id));
+    }
     let palette = runtime
         .map(|runtime| {
             runtime
@@ -336,6 +378,7 @@ pub fn rows(
                     };
                     ObjectiveRow {
                         id: entry.id.clone(),
+                        instance_id: None,
                         label: entry.label.clone(),
                         text: text.clone(),
                         text_params: text_params.clone(),
@@ -344,6 +387,8 @@ pub fn rows(
                         status: manager
                             .and_then(|manager| manager.status(&entry.id))
                             .cloned(),
+                        progress: None,
+                        completion_members: Vec::new(),
                     }
                 })
                 .collect()
@@ -405,13 +450,15 @@ mod tests {
         };
         for invalid in ["x".repeat(129), "bad\nship".into()] {
             runtime.name_to_uuid.insert("alias".into(), invalid.clone());
-            let (palette, _) = rows(Some(&runtime), None, &[invalid]);
+            let (palette, _) = rows(Some(&runtime), None, None, &[invalid]);
             assert!(!palette[0].available);
             assert_eq!(palette[0].recipients, ["alias"]);
         }
         runtime.name_to_uuid.insert("alias".into(), "ship-a".into());
-        assert!(!rows(Some(&runtime), None, &[]).0[0].available);
-        let valid = rows(Some(&runtime), None, &["ship-a".into()]).0.remove(0);
+        assert!(!rows(Some(&runtime), None, None, &[]).0[0].available);
+        let valid = rows(Some(&runtime), None, None, &["ship-a".into()])
+            .0
+            .remove(0);
         assert!(valid.available);
         assert!(valid_request_vocabulary(&valid.id, &valid.recipients));
 
@@ -421,9 +468,71 @@ mod tests {
         manager.add("too-many-ships", "objective.test", true, vec![]);
         let live: Vec<String> = (0..33).map(|n| format!("ship-{n:02}")).collect();
         manager.set_recipients("too-many-ships", live.clone());
-        assert!(rows(None, Some(&manager), &live)
+        assert!(rows(None, Some(&manager), None, &live)
             .1
             .iter()
             .all(|row| !row.available));
+    }
+
+    #[test]
+    fn gm_projection_lists_every_named_instance_with_current_and_fixed_membership() {
+        use crate::objective_instances::{
+            ObjectiveInstanceKey, ObjectiveInstanceManager, ObjectiveInstanceSpec,
+            PlayerShipMembership, RecipientSelector,
+        };
+
+        let mut definitions = crate::objectives::ObjectiveManager::default();
+        definitions.add("hold", "objective.hold", true, vec![]);
+        let fleet = [
+            PlayerShipMembership {
+                ship_id: "ship-a".into(),
+                slot_id: "lead".into(),
+                faction: "alliance".into(),
+            },
+            PlayerShipMembership {
+                ship_id: "ship-b".into(),
+                slot_id: "wing".into(),
+                faction: "alliance".into(),
+            },
+        ];
+        let mut instances = ObjectiveInstanceManager::default();
+        for (instance_id, slot_id) in [("lead", "lead"), ("wing", "wing")] {
+            instances
+                .activate(
+                    ObjectiveInstanceSpec {
+                        key: ObjectiveInstanceKey {
+                            objective_id: "hold".into(),
+                            instance_id: instance_id.into(),
+                        },
+                        recipients: vec![RecipientSelector::ShipSlot(slot_id.into())],
+                    },
+                    &fleet,
+                )
+                .unwrap();
+        }
+        instances
+            .complete(
+                &ObjectiveInstanceKey {
+                    objective_id: "hold".into(),
+                    instance_id: "lead".into(),
+                },
+                &fleet,
+            )
+            .unwrap();
+
+        let projected = rows(
+            None,
+            Some(&definitions),
+            Some(&instances),
+            &["ship-a".into(), "ship-b".into()],
+        )
+        .1;
+        assert_eq!(projected.len(), 2);
+        assert_eq!(projected[0].instance_id.as_deref(), Some("lead"));
+        assert_eq!(projected[0].recipients, ["ship-a"]);
+        assert_eq!(projected[0].completion_members, ["ship-a"]);
+        assert_eq!(projected[1].instance_id.as_deref(), Some("wing"));
+        assert_eq!(projected[1].recipients, ["ship-b"]);
+        assert!(projected[1].completion_members.is_empty());
     }
 }

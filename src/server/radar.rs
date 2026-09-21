@@ -319,6 +319,7 @@ pub(crate) fn sync_server_radar_bridge(
     view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     mut widgets: Query<(
         Entity,
         &ConsoleRadar,
@@ -342,14 +343,16 @@ pub(crate) fn sync_server_radar_bridge(
         return;
     };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
-    let scoped_objectives = objectives
+    let ship_id = observer_q.single().map_or("", |id| id.0.as_str());
+    let mut scoped_objectives = objectives
         .as_ref()
-        .map(|manager| {
-            manager
-                .0
-                .snapshots_for(observer_q.single().map_or("", |id| &id.0))
-        })
+        .map(|manager| manager.0.snapshots_for(ship_id))
         .unwrap_or_default();
+    if let Some(instances) = objective_instances.as_ref() {
+        scoped_objectives = instances
+            .0
+            .project_snapshots_for_ship(ship_id, scoped_objectives);
+    }
     let entities = crate::objectives::project_entity_targets(&world.0.entities, &scoped_objectives);
     let mut projected = if active == ConsoleRadar::ViewscreenScience {
         observer_q

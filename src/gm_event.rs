@@ -351,6 +351,7 @@ pub fn projection<'a>(
 /// admission.
 pub fn publish_mission_projection(
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     ships: Query<&crate::entities::spawner::EntityUuid, With<crate::lockstep::FleetSlotOf>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     log: Res<crate::gm_action::GmActionLog>,
@@ -374,6 +375,7 @@ pub fn publish_mission_projection(
     (next.objective_palette, next.objectives) = crate::gm_objective::rows(
         runtime.as_deref(),
         objectives.as_deref().map(|o| &o.0),
+        objective_instances.as_deref().map(|instances| &instances.0),
         &live,
     );
     next.objective_results = crate::gm_action::projected_results(

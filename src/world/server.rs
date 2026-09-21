@@ -252,6 +252,11 @@ pub struct WorldContentRuntime {
 #[derive(Resource, Default)]
 pub struct ObjectiveManagerRes(pub ObjectiveManager);
 
+/// Explicitly named multi-ship Objective instances. Kept beside the legacy
+/// manager so worlds without instance syntax retain byte-identical behaviour.
+#[derive(Resource, Default)]
+pub struct ObjectiveInstanceManagerRes(pub crate::objective_instances::ObjectiveInstanceManager);
+
 /// Queue of world TOML paths to load additively into the live `WorldContentRuntime`.
 ///
 /// **Nothing enqueues into it, and draining it merges nothing.** The
@@ -772,6 +777,14 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         use crate::authoritative::{DeclareState, StateClass};
         app.declare_state::<ObjectiveManagerRes>(StateClass::Folded, "objective-runtime-state");
+        app.declare_state::<ObjectiveInstanceManagerRes>(
+            StateClass::Folded,
+            "objective-instance-runtime-state",
+        );
+        app.declare_state::<crate::ship_slots::FrozenShipSlots>(
+            StateClass::Folded,
+            "launch-frozen-ship-slots",
+        );
         app.declare_state::<ScriptActivationGate>(
             StateClass::Derived,
             "scenario-script-loader-validation",
@@ -853,6 +866,7 @@ impl Plugin for WorldPlugin {
             .add_plugins(crate::demolition::DemolitionPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
+            .init_resource::<ObjectiveInstanceManagerRes>()
             .init_resource::<PendingScenarioLoad>()
             .init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
@@ -910,6 +924,11 @@ impl Plugin for WorldPlugin {
             FixedUpdate,
             crate::ai::server::advance_objective_cursors
                 .in_set(crate::sim_sets::FixedStep::AdvanceObjectiveCursors)
+                .in_set(crate::sim_sets::SimSet::Modifiers),
+        )
+        .add_systems(
+            FixedUpdate,
+            crate::objective_instances::reconcile_memberships
                 .in_set(crate::sim_sets::SimSet::Modifiers),
         )
         // The scripted-callback drain (issue #984, Rhai M6 phase 2b):
@@ -1840,19 +1859,21 @@ pub(crate) fn load_extra_worlds(
 pub(crate) fn broadcast_objective_summary(
     local_ship: Query<&crate::entities::spawner::EntityUuid, With<crate::server_app::LocalShip>>,
     mut objectives: ResMut<ObjectiveManagerRes>,
+    mut objective_instances: ResMut<ObjectiveInstanceManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if !objectives.0.is_dirty() {
+    if !objectives.0.is_dirty() && !objective_instances.0.is_dirty() {
         return;
     }
 
-    let objectives_snap = objectives.0.snapshots_for(
-        local_ship
-            .iter()
-            .next()
-            .map(|uuid| uuid.0.as_str())
-            .unwrap_or(""),
-    );
+    let ship_id = local_ship
+        .iter()
+        .next()
+        .map(|uuid| uuid.0.as_str())
+        .unwrap_or("");
+    let objectives_snap = objective_instances
+        .0
+        .project_snapshots_for_ship(ship_id, objectives.0.snapshots_for(ship_id));
 
     outbox.push_reliable((
         Target::All,
@@ -1862,6 +1883,7 @@ pub(crate) fn broadcast_objective_summary(
     ));
 
     objectives.0.mark_clean();
+    objective_instances.0.mark_clean();
 }
 
 // -- Mission clock -----------------------------------------------------------
@@ -3530,6 +3552,14 @@ pub(crate) fn apply_dispatch_result(
                     balance_events.as_deref_mut(),
                     layer_map.as_deref_mut(),
                 );
+            }
+            cmd @ (ActionCmd::AddObjectiveInstance { .. }
+            | ActionCmd::CompleteObjectiveInstance { .. }
+            | ActionCmd::FailObjectiveInstance { .. }
+            | ActionCmd::SetObjectiveInstanceProgress { .. }) => {
+                commands.queue(move |world: &mut World| {
+                    crate::objective_instances::apply_command(world, cmd);
+                });
             }
 
             ActionCmd::ResetTrigger { id } => {

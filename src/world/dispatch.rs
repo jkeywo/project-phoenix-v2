@@ -213,6 +213,21 @@ pub enum ActionCmd {
         /// layer-owned objective ids so `UnloadWorld` removes them.
         origin_layer: Option<String>,
     },
+    AddObjectiveInstance {
+        spec: crate::objective_instances::ObjectiveInstanceSpec,
+        text: String,
+        text_params: std::collections::BTreeMap<String, String>,
+        mandatory: bool,
+        targets: Vec<String>,
+        directive: AiDirective,
+        utility: UtilityConfig,
+        source: ObjectiveSource,
+        command_stance: Option<(
+            crate::core::messages::StationId,
+            crate::ship::config::StationStanceConfig,
+        )>,
+        origin_layer: Option<String>,
+    },
     /// Record an authored story beat on the mission timeline (issue #1338).
     ///
     /// `id` is the author's own semantic identifier — the scenario's
@@ -281,6 +296,16 @@ pub enum ActionCmd {
     /// Mark an objective failed. A no-op for unknown / non-Active ids.
     FailObjective {
         id: String,
+    },
+    CompleteObjectiveInstance {
+        key: crate::objective_instances::ObjectiveInstanceKey,
+    },
+    FailObjectiveInstance {
+        key: crate::objective_instances::ObjectiveInstanceKey,
+    },
+    SetObjectiveInstanceProgress {
+        key: crate::objective_instances::ObjectiveInstanceKey,
+        progress: f32,
     },
     /// Move the named entity's infrastructure condition by `delta` points —
     /// negative degrades, positive repairs (issue #1025).
@@ -700,8 +725,12 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
         // (issue #711). This table remains the single entry point over every
         // variant; it just routes these six to their own function.
         TriggerAction::AddObjective { .. }
+        | TriggerAction::AddObjectiveInstance { .. }
         | TriggerAction::CompleteObjective { .. }
         | TriggerAction::FailObjective { .. }
+        | TriggerAction::CompleteObjectiveInstance { .. }
+        | TriggerAction::FailObjectiveInstance { .. }
+        | TriggerAction::SetObjectiveInstanceProgress { .. }
         | TriggerAction::GameOver { .. }
         | TriggerAction::AddFactionEnemy { .. }
         | TriggerAction::RemoveFactionEnemy { .. } => {
@@ -835,6 +864,48 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
         TriggerAction::FailObjective { id } => {
             out.commands
                 .push(ActionCmd::FailObjective { id: id.clone() });
+        }
+
+        TriggerAction::AddObjectiveInstance {
+            spec,
+            text,
+            text_params,
+            mandatory,
+            targets,
+            directive,
+            utility,
+            source,
+            command_stance,
+        } => {
+            let resolved = if targets.is_empty() {
+                context.entity_name.clone().into_iter().collect()
+            } else {
+                targets.clone()
+            };
+            out.commands.push(ActionCmd::AddObjectiveInstance {
+                spec: spec.clone(),
+                text: text.clone(),
+                text_params: text_params.clone(),
+                mandatory: *mandatory,
+                targets: resolved,
+                directive: directive.clone(),
+                utility: utility.clone(),
+                source: source.clone(),
+                command_stance: command_stance.clone(),
+                origin_layer: context.origin_layer.clone(),
+            });
+        }
+        TriggerAction::CompleteObjectiveInstance { key } => out
+            .commands
+            .push(ActionCmd::CompleteObjectiveInstance { key: key.clone() }),
+        TriggerAction::FailObjectiveInstance { key } => out
+            .commands
+            .push(ActionCmd::FailObjectiveInstance { key: key.clone() }),
+        TriggerAction::SetObjectiveInstanceProgress { key, progress } => {
+            out.commands.push(ActionCmd::SetObjectiveInstanceProgress {
+                key: key.clone(),
+                progress: *progress,
+            });
         }
 
         TriggerAction::GameOver { message, outcome } => {

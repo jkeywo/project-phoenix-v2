@@ -1,0 +1,75 @@
+[global]
+seed = 1523
+
+[anchors]
+lead_destination = [100.0, 0.0, 0.0]
+wing_destination = [-100.0, 0.0, 0.0]
+
+[[ship_slot]]
+id = "lead"
+label = "Lead"
+default_ship = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "wing"
+label = "Wing"
+default_ship = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "reserve"
+label = "Reserve"
+default_ship = "assets/entities/alliance_cruiser.toml"
+unclaimed = "absent"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "lead-row"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "wing-row"
+spawn_on = "game_start"
+transform = { position = [50.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "reserve-row"
+spawn_on = "game_start"
+transform = { position = [100.0, 0.0, 0.0] }
+
+[script]
+setup = """
+on_world_loaded("assign_objectives");
+
+fn assign_objectives(ctx) {
+    ctx.effects.add_objective(#{
+        id: "take-position",
+        instance_id: "lead-order",
+        text: "objective.take_position",
+        recipient_ship_slots: ["lead"],
+        directive_kind: "Reach",
+        directive_anchor: "lead_destination",
+        base_priority: 80,
+    });
+    ctx.effects.add_objective(#{
+        id: "take-position",
+        instance_id: "wing-order",
+        text: "objective.take_position",
+        recipient_ship_slots: ["wing"],
+        directive_kind: "Reach",
+        directive_anchor: "wing_destination",
+        base_priority: 80,
+    });
+}
+"""

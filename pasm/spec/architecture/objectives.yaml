@@ -1,4 +1,36 @@
 entities:
+  - component: objective-instance-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Explicitly Shared Objective Instances
+      summary: "Issue #1523: named instances of one Objective carry independent progress and lifecycle. TOML and Rhai address the same typed instance commands. Recipient selectors resolve live authored ship-slot, faction or all-player membership with explicit-slot > faction > all specificity; equal matches refuse atomically. Completion captures members once, while later joins inherit terminal state without replaying effects or credit."
+    architecture:
+      kind: authoritative-state-machine
+      authority: authoritative
+      owns: [objective-instance-state]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/objective_instances.rs, src/ship_slots.rs, src/server_app/world_setup.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/script/schedule.rs, src/narrative.rs, src/snapshot.rs, src/sim_digest.rs]
+      symbols: [ObjectiveInstanceManager, ObjectiveInstanceKey, RecipientSelector, ShipObjectiveInstanceView, AuthoredShipSlotId]
+      tests: [cargo test]
+
+  - state: objective-instance-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Instance State and Attribution
+      summary: Ordered named instance records plus per-ship frozen last-known projections and immutable completion membership, captured and restored together.
+    architecture:
+      classification: authoritative
+      owner: objective-instance-contract
+      writers: [objective-instance-contract]
+    implementation:
+      status: declared
+      paths: [src/objective_instances.rs]
+      symbols: [ObjectiveInstanceRecord, ObjectiveInstanceManager]
+
   - component: objective-directive-contract
     core:
       status: implemented

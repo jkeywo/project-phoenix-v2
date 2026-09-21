@@ -1068,6 +1068,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     world_res: Res<WorldResource>,
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<
@@ -1122,10 +1123,19 @@ pub(crate) fn publish_tactical_radar_blackboard(
                 .filter_map(|s| crate::entities::tags::EntityTag::from_str(s))
                 .collect();
 
+            let ship_id = ship_id.map_or("", |id| id.0.as_str());
             let scoped_objectives = objectives
                 .as_ref()
-                .map(|manager| manager.0.snapshots_for(ship_id.map_or("", |id| &id.0)))
+                .map(|manager| manager.0.snapshots_for(ship_id))
                 .unwrap_or_default();
+            let scoped_objectives =
+                objective_instances
+                    .as_ref()
+                    .map_or(scoped_objectives.clone(), |instances| {
+                        instances
+                            .0
+                            .project_snapshots_for_ship(ship_id, scoped_objectives)
+                    });
             let projected_entities = crate::objectives::project_entity_targets(
                 &world_res.0.entities,
                 &scoped_objectives,

@@ -656,6 +656,7 @@ mod tests {
             vec![FleetShip {
                 host: HostSlot(1),
                 ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
+                authored_slot_id: None,
                 crew: vec![],
             }],
             vec![HostSlot(1), HostSlot(2)],

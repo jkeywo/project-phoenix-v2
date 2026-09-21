@@ -2840,6 +2840,7 @@ station = "navigation"
             crate::lockstep::FleetShip {
                 host: local,
                 ship_path: None,
+                authored_slot_id: None,
                 crew: vec![(
                     crate::core::messages::StationId("captain".into()),
                     "Std".to_string(),

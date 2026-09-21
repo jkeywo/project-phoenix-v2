@@ -309,6 +309,22 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
     );
     host_fn!(
         engine,
+        "complete_objective",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "instance_id"],
+        summary = "Mark one named objective instance complete.",
+        |sink: &mut EffectSink, id: ImmutableString, instance_id: ImmutableString| {
+            sink.push(ActionCmd::CompleteObjectiveInstance {
+                key: crate::objective_instances::ObjectiveInstanceKey {
+                    objective_id: id.to_string(),
+                    instance_id: instance_id.to_string(),
+                },
+            });
+        },
+    );
+    host_fn!(
+        engine,
         "fail_objective",
         receiver = "effects",
         category = "effect",
@@ -316,6 +332,45 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         summary = "Mark the objective failed.",
         |sink: &mut EffectSink, id: ImmutableString| {
             sink.push(ActionCmd::FailObjective { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "fail_objective",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "instance_id"],
+        summary = "Mark one named objective instance failed.",
+        |sink: &mut EffectSink, id: ImmutableString, instance_id: ImmutableString| {
+            sink.push(ActionCmd::FailObjectiveInstance {
+                key: crate::objective_instances::ObjectiveInstanceKey {
+                    objective_id: id.to_string(),
+                    instance_id: instance_id.to_string(),
+                },
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "set_objective_progress",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "instance_id", "progress"],
+        summary = "Set non-negative progress on one named objective instance.",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         instance_id: ImmutableString,
+         progress: RealLit| {
+            let progress = progress.0 as f32;
+            if progress.is_finite() && progress >= 0.0 {
+                sink.push(ActionCmd::SetObjectiveInstanceProgress {
+                    key: crate::objective_instances::ObjectiveInstanceKey {
+                        objective_id: id.to_string(),
+                        instance_id: instance_id.to_string(),
+                    },
+                    progress,
+                });
+            }
         },
     );
     host_fn!(
@@ -1400,6 +1455,10 @@ fn presentation_action(
 fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
     const KNOWN_FIELDS: &[&str] = &[
         "id",
+        "instance_id",
+        "recipient_ship_slots",
+        "recipient_factions",
+        "all_player_ships",
         "text",
         "text_params",
         "mandatory",
@@ -1419,6 +1478,10 @@ fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
     let raw = RawActionEntry {
         kind: "add_objective".to_string(),
         id: map_str(spec, "id"),
+        instance_id: map_str(spec, "instance_id"),
+        recipient_ship_slots: map_string_array(spec, "recipient_ship_slots")?,
+        recipient_factions: map_string_array(spec, "recipient_factions")?,
+        all_player_ships: map_bool(spec, "all_player_ships"),
         text: map_str(spec, "text"),
         text_params: map_text_params(spec, "text_params")?,
         mandatory: map_bool(spec, "mandatory"),
@@ -2410,6 +2473,55 @@ mod tests {
              base_priority = 80.0",
         );
         assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+    }
+
+    #[test]
+    fn named_objective_instance_rhai_matches_toml_and_addresses_one_instance() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.add_objective(#{
+                    id: "hold",
+                    instance_id: "lead",
+                    text: "objective.hold",
+                    recipient_ship_slots: ["lead"],
+                    recipient_factions: ["alliance"],
+                });
+            }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"add_objective\"\n\
+             id = \"hold\"\n\
+             instance_id = \"lead\"\n\
+             text = \"objective.hold\"\n\
+             recipient_ship_slots = [\"lead\"]\n\
+             recipient_factions = [\"alliance\"]",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+
+        let commands = run(
+            r#"fn f(ctx) {
+                ctx.effects.set_objective_progress("hold", "lead", 0.75);
+                ctx.effects.complete_objective("hold", "lead");
+                ctx.effects.fail_objective("hold", "other");
+            }"#,
+            "f",
+        );
+        assert!(matches!(
+            &commands[0],
+            ActionCmd::SetObjectiveInstanceProgress { key, progress }
+                if key.objective_id == "hold" && key.instance_id == "lead" && *progress == 0.75
+        ));
+        assert!(matches!(
+            &commands[1],
+            ActionCmd::CompleteObjectiveInstance { key }
+                if key.objective_id == "hold" && key.instance_id == "lead"
+        ));
+        assert!(matches!(
+            &commands[2],
+            ActionCmd::FailObjectiveInstance { key }
+                if key.objective_id == "hold" && key.instance_id == "other"
+        ));
     }
 
     /// Issue #1139: the script front-end carries Scan's shared target through

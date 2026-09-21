@@ -348,6 +348,8 @@ pub enum NarrativeValue {
     Int(i64),
     Real(f64),
     Flag(bool),
+    /// Stable ordered identifiers, used when attribution is inherently plural.
+    TextList(Vec<String>),
 }
 
 impl NarrativeValue {
@@ -359,6 +361,14 @@ impl NarrativeValue {
             NarrativeValue::Int(i) => i.to_string(),
             NarrativeValue::Real(f) => format!("{f:.4}"),
             NarrativeValue::Flag(b) => b.to_string(),
+            NarrativeValue::TextList(values) => format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| format!("{value:?}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
         }
     }
 }

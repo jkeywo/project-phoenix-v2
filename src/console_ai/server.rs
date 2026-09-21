@@ -579,6 +579,7 @@ struct PowerAiContext<'w> {
     sessions: Res<'w, crate::lobby::Sessions>,
     log: Option<Res<'w, crate::logging::LogFilterConfig>>,
     objectives: Option<Res<'w, crate::world::server::ObjectiveManagerRes>>,
+    objective_instances: Option<Res<'w, crate::world::server::ObjectiveInstanceManagerRes>>,
     tick: Option<Res<'w, crate::sim_tick::SimTick>>,
     base_interval: Option<Res<'w, crate::ai::cadence::AiBaseInterval>>,
 }
@@ -682,6 +683,7 @@ fn ai_power_allocation(
         sessions,
         log,
         objectives,
+        objective_instances,
         tick,
         base_interval,
     } = context;
@@ -707,17 +709,21 @@ fn ai_power_allocation(
     {
         // An assignment to another ship must not bias this ship's power AI.
         let has_destroy_objective = objectives.as_ref().is_some_and(|om| {
-            om.0.scored_pool_for(
-                &crate::objectives::WorldConditions::default(),
-                entity_uuid.map_or("", |u| u.0.as_str()),
-            )
-            .iter()
-            .any(|s| {
-                matches!(
-                    s.directive,
-                    crate::core::messages::AiDirective::Destroy { .. }
-                )
-            })
+            let ship_id = entity_uuid.map_or("", |u| u.0.as_str());
+            let scored =
+                om.0.scored_pool_for(&crate::objectives::WorldConditions::default(), ship_id);
+            objective_instances
+                .as_ref()
+                .map_or(scored.clone(), |instances| {
+                    instances.0.project_scored_for_ship(ship_id, scored)
+                })
+                .iter()
+                .any(|s| {
+                    matches!(
+                        s.directive,
+                        crate::core::messages::AiDirective::Destroy { .. }
+                    )
+                })
         });
         // Control-Source gate through the shared AI host spine (issue #1208): not
         // (or no longer) AI-driven — a human Control Source — stands the reactor

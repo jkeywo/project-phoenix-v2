@@ -157,11 +157,61 @@ fn objective_event(
 /// diff it always was.
 pub fn emit_scenario_narrative(
     objectives: Option<ResMut<ObjectiveManagerRes>>,
+    objective_instances: Option<ResMut<crate::world::server::ObjectiveInstanceManagerRes>>,
     runtime: Option<Res<WorldContentRuntime>>,
     mut seen_objectives: Local<BTreeMap<String, ObjectiveStatus>>,
     mut seen_deadlines: Local<BTreeMap<String, DeadlineState>>,
     mut out: MessageWriter<NarrativeEvent>,
 ) {
+    let mut instanced_definitions = BTreeSet::new();
+    if let Some(mut instances) = objective_instances {
+        instanced_definitions.extend(
+            instances
+                .0
+                .records()
+                .iter()
+                .map(|record| record.spec.key.objective_id.clone()),
+        );
+        let transitions = instances.bypass_change_detection().0.drain_transitions();
+        for transition in transitions {
+            let definition = objectives.as_ref().and_then(|objectives| {
+                objectives
+                    .0
+                    .sorted_snapshots()
+                    .into_iter()
+                    .find(|row| row.id == transition.key.objective_id)
+            });
+            let Some(definition) = definition else {
+                continue;
+            };
+            let kind = kind_for_status(&transition.status);
+            let mut event = objective_event(
+                kind,
+                &format!(
+                    "{}::{}",
+                    transition.key.objective_id, transition.key.instance_id
+                ),
+                &definition.text,
+                definition.mandatory,
+                &definition.targets,
+            )
+            .detail(
+                "objective_id",
+                NarrativeValue::Text(transition.key.objective_id),
+            )
+            .detail(
+                "instance_id",
+                NarrativeValue::Text(transition.key.instance_id),
+            );
+            if transition.status == ObjectiveStatus::Completed {
+                event = event.detail(
+                    "completion_members",
+                    NarrativeValue::TextList(transition.completion_members),
+                );
+            }
+            out.write(event);
+        }
+    }
     if let Some(mut objectives) = objectives {
         // Restoration is history, not a new fictional event. Rebase before
         // draining the log: genuine transitions since the restore still follow
@@ -183,14 +233,16 @@ pub fn emit_scenario_narrative(
         let transitions: Vec<ObjectiveTransition> =
             objectives.bypass_change_detection().0.drain_transitions();
         for transition in transitions {
-            if let Some(kind) = kind_for_transition(transition.kind) {
-                out.write(objective_event(
-                    kind,
-                    &transition.id,
-                    &transition.text,
-                    transition.mandatory,
-                    &transition.targets,
-                ));
+            if !instanced_definitions.contains(&transition.id) {
+                if let Some(kind) = kind_for_transition(transition.kind) {
+                    out.write(objective_event(
+                        kind,
+                        &transition.id,
+                        &transition.text,
+                        transition.mandatory,
+                        &transition.targets,
+                    ));
+                }
             }
             // Keep the backstop's view in step, so a transition reported here is
             // not reported a second time by the diff below.
@@ -217,6 +269,9 @@ pub fn emit_scenario_narrative(
                 Some(prev) => prev != &snap.status,
             };
             if !changed {
+                continue;
+            }
+            if instanced_definitions.contains(&snap.id) {
                 continue;
             }
             out.write(objective_event(

@@ -190,6 +190,7 @@ pub mod modifiers;
 /// that turn Objective / deadline / beat / Comms / marked-entity transitions
 /// into `core::narrative::NarrativeEvent`s for the headless run report.
 pub mod narrative;
+pub mod objective_instances;
 pub mod objectives;
 pub mod radar;
 pub mod radar_config;

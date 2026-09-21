@@ -2033,6 +2033,7 @@ mod tests {
             vec![FleetShip {
                 host: HostSlot::SOLO,
                 ship_path: Some("assets/entities/alliance_cruiser.toml".to_string()),
+                authored_slot_id: None,
                 crew: vec![
                     (StationId("helm".to_string()), "commander".to_string()),
                     (StationId("tactical".to_string()), "commander".to_string()),

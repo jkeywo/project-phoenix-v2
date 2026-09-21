@@ -278,15 +278,23 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
             .unwrap_or_default()
     };
     // Objectives as (id, targets, status) for the local recipient ship.
-    let objectives: Vec<(String, Vec<String>, crate::core::messages::ObjectiveStatus)> = world
+    let legacy_objectives = world
         .get_resource::<crate::world::server::ObjectiveManagerRes>()
-        .map(|m| {
-            m.0.snapshots_for(&local_uuid)
-                .into_iter()
-                .map(|o| (o.id, o.targets, o.status))
-                .collect()
-        })
+        .map(|m| m.0.snapshots_for(&local_uuid))
         .unwrap_or_default();
+    let effective_objectives = world
+        .get_resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+        .map(|instances| {
+            instances
+                .0
+                .project_snapshots_for_ship(&local_uuid, legacy_objectives.clone())
+        })
+        .unwrap_or(legacy_objectives);
+    let objectives: Vec<(String, Vec<String>, crate::core::messages::ObjectiveStatus)> =
+        effective_objectives
+            .into_iter()
+            .map(|o| (o.id, o.targets, o.status))
+            .collect();
 
     // Red Alert on the local ship, if it has spawned.
     let red_alert = {

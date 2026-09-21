@@ -2,8 +2,8 @@
 title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
-sources: [src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
-updated: 2026-09-07
+sources: [src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
+updated: 2026-09-21
 ---
 
 # Objectives
@@ -68,6 +68,45 @@ captured flags and contributes to the digest, so a later unload retracts the sam
 records, directives and stances after restore. Operational activity rows attach
 the recorded recipients as semantic ship references and Ship links; cached names
 or UUID fallbacks keep those rows addressable by the activity feed's ship filter.
+
+## Explicit multi-ship instances
+
+`objective_instances::ObjectiveInstanceManager` is the additive multi-ship
+contract; legacy Objective ids keep the manager and scope above unchanged. An
+instance is addressed by `(objective_id, instance_id)` and owns independent
+progress and lifecycle. Its recipient selectors match ship slots, live faction
+membership, or all player ships. Slot beats faction, faction beats all, and an
+equal-specificity match across instances is refused atomically rather than
+resolved by declaration order.
+
+Crew history stores the last effective instance for each Objective definition.
+Leaving marks that view unassigned and freezes it; joining another instance
+replaces it. Completion records the effective members once. Later membership
+changes may expose the completed state but do not alter credit, reopen the
+instance, or produce another successful completion transition. The manager is
+serialisable as one unit, so restore carries records, attribution and frozen
+history without replaying lifecycle effects.
+
+World TOML uses the ordinary objective verbs with an `instance_id`. An
+`add_objective` instance must also name at least one of
+`recipient_ship_slots`, `recipient_factions`, or `all_player_ships`; an empty
+recipient set is rejected rather than interpreted as everyone.
+`complete_objective` and `fail_objective` accept the same `instance_id`, and
+`set_objective_progress` addresses the pair explicitly. Rhai's
+`add_objective(#{ ... })` accepts those same selector keys, while the two-argument
+`complete_objective(id, instance_id)` and `fail_objective(id, instance_id)`
+overloads preserve the one-argument legacy calls exactly.
+
+Spawned player ships carry `AuthoredShipSlotId` separately from their numeric
+transport `HostSlot`. The instance manager reconciles deterministic
+UUID/slot/live-faction membership from that authored component each fixed tick.
+Captain, Comms, Tactical radar, Power/Comms AI, Viewscreen directives, Command
+stances, station importance and GM ship projections all consume the ship's
+effective instance. Subject `targets` remain target metadata and never become
+recipients. Headless reports and the snapshot retain every instance record and
+fixed completion members; the narrative emits one typed instance transition,
+and its transient transition queue is omitted from saves so restore cannot
+replay credit or rewards.
 
 ## Directive authoring contract
 

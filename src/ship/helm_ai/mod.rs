@@ -240,12 +240,17 @@ pub(crate) fn helm_axes_operate_ai(sources: &ShipSystemControlSources) -> bool {
 pub(crate) fn detect_reached_objective_completion(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
+    objective_instances: Option<ResMut<crate::world::server::ObjectiveInstanceManagerRes>>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ships: Query<
         (
+            &crate::entities::spawner::EntityUuid,
             &ShipSystemControlSources,
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::entities::spawner::BehaviourSection>,
+            Option<&crate::ship_slots::AuthoredShipSlotId>,
+            Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -256,12 +261,31 @@ pub(crate) fn detect_reached_objective_completion(
     let Some(mut objectives) = objectives else {
         return;
     };
+    let mut objective_instances = objective_instances;
+    let mut fleet: Vec<_> = ships
+        .iter()
+        .filter_map(|(uuid, _, _, _, _, slot, faction)| {
+            Some(crate::objective_instances::PlayerShipMembership {
+                ship_id: uuid.0.clone(),
+                slot_id: slot?.0.clone(),
+                faction: faction
+                    .and_then(|faction| {
+                        faction_registry
+                            .as_ref()
+                            .and_then(|registry| registry.get(&faction.0))
+                    })
+                    .map(|faction| faction.name.clone())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    fleet.sort_by(|a, b| a.ship_id.cmp(&b.ship_id));
     let anchors = world_config
         .as_ref()
         .map(|wc| wc.anchors.clone())
         .unwrap_or_default();
 
-    for (sources, physics, blackboards, behaviour_section) in ships.iter() {
+    for (_uuid, sources, physics, blackboards, behaviour_section, _slot, _faction) in ships.iter() {
         if !helm_axes_operate_ai(sources) {
             continue;
         }
@@ -295,17 +319,31 @@ pub(crate) fn detect_reached_objective_completion(
             if (dx * dx + dz * dz).sqrt() < arrival_radius {
                 // Guard the tracer on the actual transition so repeated arrivals
                 // at a shared anchor (idempotent complete) emit once (issue #841).
-                if objectives.0.complete(&obj.snapshot.id) {
+                let instance_key = objective_instances
+                    .as_ref()
+                    .and_then(|instances| instances.0.key_for_display(&obj.snapshot.id));
+                let (changed, balance_id) = if let Some(key) = instance_key {
+                    let changed = objective_instances.as_mut().is_some_and(|instances| {
+                        instances.0.complete(&key, &fleet).unwrap_or(false)
+                    });
+                    (changed, key.objective_id)
+                } else {
+                    (
+                        objectives.0.complete(&obj.snapshot.id),
+                        obj.snapshot.id.clone(),
+                    )
+                };
+                if changed {
                     if let Some(ref mut msgs) = balance_events {
                         msgs.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
-                            objective_id: obj.snapshot.id.clone(),
+                            objective_id: balance_id.clone(),
                         });
                         msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
-                            objective_id: obj.snapshot.id.clone(),
+                            objective_id: balance_id.clone(),
                             status: crate::core::messages::ObjectiveStatus::Completed,
                             targets: objectives
                                 .0
-                                .targets(&obj.snapshot.id)
+                                .targets(&balance_id)
                                 .unwrap_or_default()
                                 .to_vec(),
                         });

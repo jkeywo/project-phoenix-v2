@@ -647,6 +647,7 @@ fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
 /// wire broadcaster is `LocalShip`-filtered).
 fn publish_captain_blackboard(
     objectives: Option<Res<ObjectiveManagerRes>>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     // The named-deadline readout (issue #1024). Both `Option` so a bare-`App`
     // fixture and a world with no content runtime keep working; both read-only,
     // so this system stays a pure publisher.
@@ -775,6 +776,14 @@ fn publish_captain_blackboard(
                         captain_boost,
                         uuid_opt.map_or("", |u| u.0.as_str()),
                     );
+                    let scored = objective_instances
+                        .as_ref()
+                        .map_or(scored.clone(), |instances| {
+                            instances.0.project_scored_for_ship(
+                                uuid_opt.map_or("", |u| u.0.as_str()),
+                                scored,
+                            )
+                        });
                     scored
                         .into_iter()
                         .filter(crate::objectives::is_visible_objective)

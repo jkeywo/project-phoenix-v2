@@ -212,26 +212,26 @@ pub fn advance(world: &mut World) {
             },
         )
         .collect();
-    let observer_targets: BTreeMap<String, Vec<String>> = world
+    let legacy_by_observer: BTreeMap<String, Vec<_>> = world
         .get_resource::<crate::world::server::ObjectiveManagerRes>()
         .map(|manager| {
             observations
                 .iter()
                 .filter(|(_, value)| value.observer)
-                .map(|(id, _)| {
-                    (
-                        id.clone(),
-                        manager
-                            .0
-                            .snapshots_for(id)
-                            .into_iter()
-                            .flat_map(|row| row.targets)
-                            .collect(),
-                    )
-                })
+                .map(|(id, _)| (id.clone(), manager.0.snapshots_for(id)))
                 .collect()
         })
         .unwrap_or_default();
+    let observer_targets: BTreeMap<String, Vec<String>> = legacy_by_observer
+        .into_iter()
+        .map(|(id, rows)| {
+            let rows = world
+                .get_resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+                .map(|instances| instances.0.project_snapshots_for_ship(&id, rows.clone()))
+                .unwrap_or(rows);
+            (id, rows.into_iter().flat_map(|row| row.targets).collect())
+        })
+        .collect();
     let mut runtime = world.resource_mut::<WorldContentRuntime>();
     let WorldContentRuntime {
         contact_information,

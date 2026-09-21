@@ -2339,3 +2339,65 @@ fn multi_ship_launch_frozen_slots_roundtrip_and_move_the_digest() {
     replay.insert_resource(restored);
     assert_eq!(launched, world_digest(&replay));
 }
+
+#[test]
+fn objective_instance_progress_membership_and_completion_credit_move_the_digest() {
+    use crate::objective_instances::{
+        ObjectiveInstanceKey, ObjectiveInstanceManager, ObjectiveInstanceSpec,
+        PlayerShipMembership, RecipientSelector,
+    };
+
+    let key = ObjectiveInstanceKey {
+        objective_id: "hold".into(),
+        instance_id: "alliance".into(),
+    };
+    let alliance = [PlayerShipMembership {
+        ship_id: "ship-a".into(),
+        slot_id: "lead".into(),
+        faction: "alliance".into(),
+    }];
+    let mut manager = ObjectiveInstanceManager::default();
+    manager
+        .activate(
+            ObjectiveInstanceSpec {
+                key: key.clone(),
+                recipients: vec![RecipientSelector::Faction("alliance".into())],
+            },
+            &alliance,
+        )
+        .unwrap();
+    let mut world = fold_world();
+    world.insert_resource(crate::world::server::ObjectiveInstanceManagerRes(manager));
+    let active = world_digest(&world);
+
+    world
+        .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
+        .0
+        .set_progress(&key, 0.5);
+    let progressed = world_digest(&world);
+    assert_ne!(active, progressed);
+
+    let changed_faction = [PlayerShipMembership {
+        faction: "dynasty".into(),
+        ..alliance[0].clone()
+    }];
+    world
+        .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
+        .0
+        .reconcile(&changed_faction)
+        .unwrap();
+    let reassigned = world_digest(&world);
+    assert_ne!(progressed, reassigned);
+
+    world
+        .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
+        .0
+        .reconcile(&alliance)
+        .unwrap();
+    world
+        .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
+        .0
+        .complete(&key, &alliance)
+        .unwrap();
+    assert_ne!(reassigned, world_digest(&world));
+}

@@ -764,7 +764,7 @@ template_path = "assets/entities/ship_scout.toml"
 }
 
 #[test]
-fn authored_ship_slots_expose_allowed_hulls_and_default() {
+fn multi_ship_authored_slots_expose_allowed_hulls_and_default() {
     let cfg = parse_world(
         r#"
 [[ship_slot]]
@@ -790,7 +790,7 @@ label = "Cruiser"
 }
 
 #[test]
-fn legacy_available_ships_synthesise_one_slot() {
+fn multi_ship_legacy_available_ships_synthesise_one_slot() {
     let cfg = parse_world(
         r#"
 [[available_ships]]
@@ -808,7 +808,7 @@ template_path = "assets/entities/ship_cruiser.toml"
 }
 
 #[test]
-fn ship_slot_default_must_be_allowed() {
+fn multi_ship_slot_default_must_be_allowed() {
     let error = parse_world(
         r#"
 [[ship_slot]]
@@ -823,7 +823,7 @@ template_path = "cruiser"
 }
 
 #[test]
-fn ship_slot_unclaimed_policy_defaults_to_backfill_and_accepts_absent() {
+fn multi_ship_slot_unclaimed_policy_defaults_to_backfill_and_accepts_absent() {
     let defaulted = parse_world(
         r#"
 [[ship_slot]]

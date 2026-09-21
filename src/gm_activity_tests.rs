@@ -84,11 +84,13 @@ fn install_production_gm_fleet(app: &mut App) -> crate::command_admission::HostS
             FleetShip {
                 host: HostSlot(1),
                 ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
+                authored_slot_id: None,
                 crew: vec![(StationId("helm".into()), "Std".into())],
             },
             FleetShip {
                 host: remote,
                 ship_path: Some("assets/entities/raider.toml".into()),
+                authored_slot_id: None,
                 crew: vec![(StationId("tactical".into()), "Std".into())],
             },
         ],

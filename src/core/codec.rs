@@ -696,6 +696,14 @@ pub fn encode_scenario_catalog(
     serde_json::to_string(scenarios)
 }
 
+/// Encode named Objective-instance lifecycle/report state at the one JSON
+/// boundary used by headless and native diagnostics.
+pub fn encode_objective_instances(
+    manager: &crate::objective_instances::ObjectiveInstanceManager,
+) -> String {
+    serde_json::to_string(manager).unwrap_or_else(|_| r#"{"instances":[],"history":{}}"#.into())
+}
+
 /// Decode the browser's current enriched picker snapshot before publication.
 pub fn decode_scenario_catalog(
     json: &str,

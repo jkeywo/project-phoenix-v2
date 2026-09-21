@@ -500,6 +500,22 @@ pub(crate) fn register_scheduling(engine: &mut HostRegistry) {
     );
     host_fn!(
         engine,
+        "complete_objective",
+        receiver = "delay",
+        category = "delay",
+        params = ["id", "instance_id"],
+        summary = "Delayed: mark one named objective instance complete.",
+        |b: &mut Schedule, id: ImmutableString, instance_id: ImmutableString| {
+            b.defer(TriggerAction::CompleteObjectiveInstance {
+                key: crate::objective_instances::ObjectiveInstanceKey {
+                    objective_id: id.to_string(),
+                    instance_id: instance_id.to_string(),
+                },
+            });
+        },
+    );
+    host_fn!(
+        engine,
         "fail_objective",
         receiver = "delay",
         category = "delay",
@@ -507,6 +523,22 @@ pub(crate) fn register_scheduling(engine: &mut HostRegistry) {
         summary = "Delayed: mark the objective failed.",
         |b: &mut Schedule, id: ImmutableString| {
             b.defer(TriggerAction::FailObjective { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "fail_objective",
+        receiver = "delay",
+        category = "delay",
+        params = ["id", "instance_id"],
+        summary = "Delayed: mark one named objective instance failed.",
+        |b: &mut Schedule, id: ImmutableString, instance_id: ImmutableString| {
+            b.defer(TriggerAction::FailObjectiveInstance {
+                key: crate::objective_instances::ObjectiveInstanceKey {
+                    objective_id: id.to_string(),
+                    instance_id: instance_id.to_string(),
+                },
+            });
         },
     );
     host_fn!(

@@ -921,6 +921,7 @@ pub(crate) fn broadcast_comms_state(
     mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     mut outbox: ResMut<SimOutbox>,
 ) {
     // Resolve the current Comms host BEFORE the dirty gate: a change of host is
@@ -988,9 +989,14 @@ pub(crate) fn broadcast_comms_state(
             r.available = m.sender_in_range;
         }
     }
-    let objectives_snap = objectives
+    let mut objectives_snap = objectives
         .0
         .snapshots_for(ship_uuid.map_or("", |u| u.0.as_str()));
+    if let Some(instances) = objective_instances.as_ref() {
+        objectives_snap = instances
+            .0
+            .project_snapshots_for_ship(ship_uuid.map_or("", |u| u.0.as_str()), objectives_snap);
+    }
     let mut contacts = comms.contacts.clone();
     // Auto-derive is_urgent: a contact is urgent when it has at least one
     // unread urgent message in the current inbox.

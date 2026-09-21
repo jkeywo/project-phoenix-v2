@@ -1293,6 +1293,7 @@ fn publish_station_projection(
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
     world_data: Option<Res<crate::lobby::server::WorldResource>>,
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     live_entities: Query<
         (
             Option<&EntityUuid>,
@@ -1491,10 +1492,15 @@ fn publish_station_projection(
                     }
                 });
 
-                let scoped_objectives = objectives
+                let mut scoped_objectives = objectives
                     .as_ref()
                     .map(|manager| manager.0.snapshots_for(&uuid.0))
                     .unwrap_or_default();
+                if let Some(instances) = objective_instances.as_ref() {
+                    scoped_objectives = instances
+                        .0
+                        .project_snapshots_for_ship(&uuid.0, scoped_objectives);
+                }
                 GmPuppetShipProjection {
                     ship_id: uuid.0.clone(),
                     name: name.map_or_else(|| uuid.0.clone(), |name| name.0.clone()),

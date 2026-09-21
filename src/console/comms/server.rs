@@ -102,6 +102,7 @@ fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
     runtime: Option<Res<CommsRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     mut ships: Query<
         (
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
@@ -180,7 +181,13 @@ fn publish_comms_blackboard(
             bb.objectives = objectives
                 .as_ref()
                 .map(|o| {
-                    o.0.scored_pool_for(&conditions, uuid.map_or("", |id| id.0.as_str()))
+                    let ship_id = uuid.map_or("", |id| id.0.as_str());
+                    let scored = o.0.scored_pool_for(&conditions, ship_id);
+                    objective_instances
+                        .as_ref()
+                        .map_or(scored.clone(), |instances| {
+                            instances.0.project_scored_for_ship(ship_id, scored)
+                        })
                         .into_iter()
                         .filter(crate::objectives::is_visible_objective)
                         .map(|s| s.snapshot)
@@ -1630,6 +1637,7 @@ fn has_unread_from_sender_with(
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct CommsAiContext<'w> {
     objectives: Option<Res<'w, ObjectiveManagerRes>>,
+    objective_instances: Option<Res<'w, crate::world::server::ObjectiveInstanceManagerRes>>,
     comms: Option<ResMut<'w, CommsRuntime>>,
     inbox: Option<Res<'w, CommsInboxRes>>,
     sessions: Res<'w, crate::lobby::Sessions>,
@@ -1792,6 +1800,7 @@ pub fn operate_comms_ai(
     // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
     let CommsAiContext {
         objectives,
+        objective_instances,
         mut comms,
         inbox,
         sessions,
@@ -1866,10 +1875,14 @@ pub fn operate_comms_ai(
         let mut hits: Vec<DirectiveHit> = Vec::new();
         let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         if let Some(mgr) = objectives.as_ref() {
-            for scored in mgr
-                .0
-                .scored_pool_for(&conditions, entity_uuid.map_or("", |u| u.0.as_str()))
-            {
+            let ship_id = entity_uuid.map_or("", |u| u.0.as_str());
+            let scored = mgr.0.scored_pool_for(&conditions, ship_id);
+            let scored = objective_instances
+                .as_ref()
+                .map_or(scored.clone(), |instances| {
+                    instances.0.project_scored_for_ship(ship_id, scored)
+                });
+            for scored in scored {
                 if !scored
                     .relevance
                     .contains(&crate::core::messages::SystemAffinity::Comms)

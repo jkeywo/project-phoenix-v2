@@ -521,6 +521,13 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
             acc = fold_serde(acc, &manager.0.records());
         }
     }
+    if let Some(manager) = world.get_resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+    {
+        if !manager.0.records().is_empty() {
+            acc = fold_str(acc, "objective-instances");
+            acc = fold_serde(acc, &manager.0);
+        }
+    }
     if let Some(slots) = world.get_resource::<crate::ship_slots::FrozenShipSlots>() {
         if !slots.0.is_empty() {
             acc = fold_str(acc, "launch-frozen-ship-slots");

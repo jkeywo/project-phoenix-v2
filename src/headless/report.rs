@@ -280,6 +280,9 @@ pub struct RunReport {
     /// finished with. `None` when no world was loaded. A read-only projection
     /// off `WorldContentRuntime` — capturing it never moves the seeded digest.
     pub scenario: Option<crate::debug::payload::ScenarioStatePayload>,
+    /// Named Objective instances with fixed completion membership. Kept as an
+    /// object, never reduced to mandatory points or a binary verdict.
+    pub objective_instances: String,
     /// Console input-to-feedback latency (issue #1169, PRD #1144): the
     /// per-action p50/p75/max distributions the tracker held at run end.
     ///
@@ -414,6 +417,14 @@ impl RunReport {
             match &self.scenario {
                 Some(payload) => crate::core::codec::encode_scenario_state(payload),
                 None => "null".to_string(),
+            }
+        ));
+        s.push_str(&format!(
+            "  \"objective_instances\": {},\n",
+            if self.objective_instances.is_empty() {
+                "null"
+            } else {
+                self.objective_instances.as_str()
             }
         ));
         // Console input-to-feedback latency (issue #1169). Always emitted — an
@@ -676,6 +687,11 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
                 .unwrap_or(&default_recorder);
             crate::debug::scenario::collect_scenario_state_with_fires(runtime, objectives, recorder)
         });
+    let objective_instances = app
+        .world()
+        .get_resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+        .map(|manager| crate::core::codec::encode_objective_instances(&manager.0))
+        .unwrap_or_default();
     // Console input-to-feedback latency (issue #1169): the tracker's read-only
     // projection, read straight off the resource. Empty unless the run was
     // started with `--console-latency` — the tracker only takes a wall-clock
@@ -709,6 +725,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         ai_doctrine,
         station_activity,
         scenario,
+        objective_instances,
         console_latency,
     }
     .tap_stream(app, args)
@@ -991,6 +1008,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            objective_instances: String::new(),
             narrative: Default::default(),
             console_latency: Default::default(),
         };
@@ -1041,6 +1059,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            objective_instances: String::new(),
             narrative: Default::default(),
             console_latency: Default::default(),
         };
@@ -1103,6 +1122,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            objective_instances: String::new(),
             narrative: Default::default(),
             console_latency: Default::default(),
         };
@@ -1172,6 +1192,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: payload,
             scenario: None,
+            objective_instances: String::new(),
             narrative: Default::default(),
             console_latency: Default::default(),
         };
@@ -1250,6 +1271,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            objective_instances: String::new(),
             console_latency: Default::default(),
         };
         let json = report.to_json();
@@ -1310,6 +1332,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            objective_instances: String::new(),
             console_latency: Default::default(),
         };
         let parsed: serde_json::Value = serde_json::from_str(&report.to_json())
@@ -1353,6 +1376,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            objective_instances: String::new(),
             narrative: Default::default(),
             console_latency: Default::default(),
         };

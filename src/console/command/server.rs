@@ -234,21 +234,46 @@ impl Plugin for CommandPlugin {
 /// objective set marks the resource clean and triggers no downstream churn.
 fn project_active_objective_stances(
     manager: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
+    ships: Query<&crate::entities::spawner::EntityUuid, With<crate::server_app::Ship>>,
     mut projection: ResMut<ActiveObjectiveStances>,
 ) {
-    let next = manager
-        .map(|m| {
-            let mut scoped = std::collections::BTreeMap::new();
-            for objective in m.0.sorted_snapshots() {
-                for ship in m.0.recipients(&objective.id).unwrap_or_default() {
-                    scoped
-                        .entry(ship.clone())
-                        .or_insert_with(|| m.0.active_station_stances_for(ship));
-                }
+    let next = manager.map_or_else(ActiveObjectiveStances::default, |m| {
+        let all = m.0.active_station_stances_with_ids_for("");
+        let global = all
+            .iter()
+            .filter(|(id, _, _)| {
+                !instances
+                    .as_ref()
+                    .is_some_and(|instances| instances.0.has_definition_instances(id))
+            })
+            .map(|(_, station, stance)| (station.clone(), stance.clone()))
+            .collect();
+        let mut scoped = std::collections::BTreeMap::new();
+        for ship in ships.iter() {
+            let effective =
+                m.0.active_station_stances_with_ids_for(&ship.0)
+                    .into_iter()
+                    .filter(|(id, _, _)| {
+                        if instances
+                            .as_ref()
+                            .is_some_and(|instances| instances.0.has_definition_instances(id))
+                        {
+                            instances.as_ref().is_some_and(|instances| {
+                                instances.0.is_assigned_active(&ship.0, id)
+                            })
+                        } else {
+                            !m.0.recipients(id).unwrap_or_default().is_empty()
+                        }
+                    })
+                    .map(|(_, station, stance)| (station, stance))
+                    .collect::<Vec<_>>();
+            if !effective.is_empty() {
+                scoped.insert(ship.0.clone(), effective);
             }
-            ActiveObjectiveStances(m.0.active_station_stances_for(""), scoped)
-        })
-        .unwrap_or_default();
+        }
+        ActiveObjectiveStances(global, scoped)
+    });
     if *projection != next {
         *projection = next;
     }

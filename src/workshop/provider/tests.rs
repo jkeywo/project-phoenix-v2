@@ -97,6 +97,43 @@ fn private_json_bridge_exposes_runtime_rhai_registry_and_line_mapped_diagnostics
 }
 
 #[test]
+fn named_objective_instance_source_roundtrips_exactly_and_is_editor_clean() {
+    let fixture = Fixture::new();
+    let script = br#"// Preserve this exact source.
+fn on_tick(ctx) {
+    ctx.effects.add_objective(#{ id: "hold", instance_id: "lead", text: "objective.hold", recipient_ship_slots: ["lead"] });
+    ctx.effects.set_objective_progress("hold", "lead", 0.5);
+    ctx.schedule.in_seconds(2).complete_objective("hold", "lead");
+}
+"#;
+    fs::write(fixture.root.join("assets/worlds/objectives.rhai"), script).unwrap();
+    fs::write(
+        fixture.root.join("assets/worlds/test.toml"),
+        b"script='objectives.rhai'\r\n[global]\r\ntitle='Test'\r\n",
+    )
+    .unwrap();
+    let mut provider = fixture.open();
+
+    assert!(crate::world::script::authoring::script_diagnostics(
+        std::str::from_utf8(script).unwrap(),
+        0,
+    )
+    .is_empty());
+    let files = provider.baseline.clone();
+    let result = provider
+        .apply(Operation::Save {
+            files: files.clone(),
+            expected_revision: provider.revision.clone(),
+        })
+        .unwrap();
+    assert!(matches!(result, Response::Saved { .. }), "{result:?}");
+    assert_eq!(
+        fs::read(fixture.root.join("assets/worlds/objectives.rhai")).unwrap(),
+        script
+    );
+}
+
+#[test]
 fn project_definitions_resolve_against_nothing_beneath_while_a_mod_sees_its_dependencies() {
     let alliance = include_str!("../../../assets/factions/alliance.toml");
     let uuid = crate::ai::faction::parse_faction_config(alliance)

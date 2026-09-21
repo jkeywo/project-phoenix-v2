@@ -17,7 +17,7 @@ const editorModules = [
   'workshop-models', 'workshop-model-structure', 'workshop-model-preview', 'workshop-entity-composition', 'workshop-ship-authoring', 'workshop-spatial', 'workshop-preview', 'workshop-preview-runtime',
   'workshop-document', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-launch', 'workshop-billboard-capture', 'workshop-lod-generation', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'workshop-migration', 'workshop-diff', 'workshop-definitions', 'workshop-composition', 'workshop-entity',
-  'workshop-presets', 'workshop-scripts', 'script-editor', 'script-editor-view',
+  'workshop-presets', 'workshop-scripts', 'workshop-localisation', 'script-editor', 'script-editor-view',
   'undo-stack', 'validation', 'entity-includes', 'component-schema', 'component-templates', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
   'workshop-test-frame', 'workshop-test-child', 'workshop-test-runtime', 'workshop-test-snapshot', 'workshop-test-breakpoint',

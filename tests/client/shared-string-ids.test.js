@@ -162,7 +162,12 @@ describe('shared display-text ids', () => {
     // kind at load; this says so at the point the classification depends on it.
     const unknown = new Set();
     for (const { doc } of await entityDocs()) {
-      for (const system of doc.system ?? []) if (!kinds.has(system.kind)) unknown.add(system.kind);
+      for (const system of doc.system ?? []) {
+        // Include-based templates may override or remove a system by id while
+        // inheriting its kind from the composed base row. Only material kind
+        // values are vocabulary declarations for this registry check.
+        if (system.kind != null && !kinds.has(system.kind)) unknown.add(system.kind);
+      }
     }
     expect([...unknown].sort(), 'ship TOML declares [[system]] kinds system_registry.rs does not')
       .toEqual([]);

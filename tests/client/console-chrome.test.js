@@ -44,7 +44,7 @@ function docFor(file) {
 describe('no console draws its own chrome', () => {
   it('finds the whole fleet of console documents', () => {
     // A silent zero would let every assertion below pass over nothing.
-    expect(allConsoleDocuments().length).toBe(22);
+    expect(allConsoleDocuments().length).toBe(28);
   });
 
   for (const file of allConsoleDocuments()) {
@@ -137,6 +137,7 @@ describe('the readouts the footer carried moved into the console body', () => {
       'gui/destroyer/captain.html',
       'gui/destroyer/helm.html',
       'gui/destroyer/tactical.html',
+      'gui/dynasty-cruiser/gunnery.html',
     ]);
   });
 });

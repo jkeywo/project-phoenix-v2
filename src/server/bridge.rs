@@ -1567,13 +1567,12 @@ fn drain_mesh_inbound(world: &mut World) {
                     match frozen {
                         Ok(frozen) => {
                             let accepted = crate::lockstep::join_fleet(world, roster, delay);
-                            if !accepted {
-                                return false;
+                            if accepted {
+                                if let Some(frozen) = frozen {
+                                    world.insert_resource(frozen);
+                                }
                             }
-                            if let Some(frozen) = frozen {
-                                world.insert_resource(frozen);
-                            }
-                            true
+                            accepted
                         }
                         Err(_) => false,
                     }

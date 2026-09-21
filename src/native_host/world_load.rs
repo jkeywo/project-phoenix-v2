@@ -364,13 +364,13 @@ fn drain_scenario_selection(
                     changed = true;
                 }
             }
-            ClientMessage::ReleaseShipSlot => {
-                if slot_claim.0.as_deref() == Some(message.token.as_str()) {
-                    selection.0.slot_id = None;
-                    selection.0.template_path = None;
-                    slot_claim.0 = None;
-                    changed = true;
-                }
+            ClientMessage::ReleaseShipSlot
+                if slot_claim.0.as_deref() == Some(message.token.as_str()) =>
+            {
+                selection.0.slot_id = None;
+                selection.0.template_path = None;
+                slot_claim.0 = None;
+                changed = true;
             }
             _ => {}
         }

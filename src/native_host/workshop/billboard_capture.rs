@@ -411,7 +411,12 @@ mod tests {
             command.process_group(0);
         }
         let mut child = command.spawn().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fs::metadata(&marker).map(|value| value.len()).unwrap_or(0) == 0
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         terminate_tree(&mut child);
         let before = fs::metadata(&marker).map(|value| value.len()).unwrap_or(0);
         assert!(before > 0, "the capture descendant never started");

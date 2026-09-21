@@ -244,7 +244,7 @@ pub(crate) fn detect_reached_objective_completion(
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ships: Query<
         (
-            &crate::entities::spawner::EntityUuid,
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipSystemControlSources,
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
@@ -266,7 +266,7 @@ pub(crate) fn detect_reached_objective_completion(
         .iter()
         .filter_map(|(uuid, _, _, _, _, slot, faction)| {
             Some(crate::objective_instances::PlayerShipMembership {
-                ship_id: uuid.0.clone(),
+                ship_id: uuid?.0.clone(),
                 slot_id: slot?.0.clone(),
                 faction: faction
                     .and_then(|faction| {

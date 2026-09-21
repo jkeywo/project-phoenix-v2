@@ -5,7 +5,7 @@
 | Document | GDD-SCENARIO-AUTHORING |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-09-21 |
 | Scope | Generic scenario design, world TOML, Rhai choreography, outcomes, and validation |
 | Authority | Design and authoring overview. Live world/script schemas, validators, assets, and PASM remain canonical. |
 
@@ -107,6 +107,27 @@ fn on_relief_due(ctx) {
 }
 '''
 ```
+
+`[[available_ships]]` remains the compatible one-slot form: it produces one
+slot named `player`, offers the listed hulls, and defaults to the first. A
+multi-ship mission instead declares explicit slots, each with its own stable id,
+localisable label, allowed hulls and default:
+
+```toml
+[[ship_slot]]
+id = "escort"
+label = "world.example.slot.escort"
+default_ship = "assets/entities/alliance_destroyer.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+label = "world.example.ship.destroyer"
+```
+
+Slot ids are unique. A default must be one of that slot's allowed hulls. The
+lobby applies mission → slot → hull selection and skips a singleton stage.
+Selecting reserves the slot exclusively; Back or a pre-start disconnect
+releases it immediately. Claimed slots need a confirmed hull before launch.
 
 Anchors are reusable positions for routes, objectives, AI directives, spawns, and script calls. A scenario should name spatial intentions rather than repeat coordinates. `extra_worlds` may compose additive world layers; unload policy determines whether pending delayed actions cancel or resolve when a layer leaves.
 

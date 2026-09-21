@@ -83,6 +83,8 @@ fn dispatch(
         | ClientMessage::ControlSystemCorrelated { .. }
         | ClientMessage::SendCoordination { .. }
         | ClientMessage::SelectScenario { .. }
+        | ClientMessage::SelectShipSlot { .. }
+        | ClientMessage::ReleaseShipSlot
         | ClientMessage::SelectPlayerShip { .. }
         | ClientMessage::ReportStationEligibility { .. }
         | ClientMessage::StationVisited { .. }

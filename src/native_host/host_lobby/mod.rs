@@ -1138,6 +1138,18 @@ pub(crate) fn drain_surface_records(
                 });
                 continue;
             }
+            HostLobbyRecord::SelectSlot { slot_id } => {
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: ship position picked: {slot_id}"
+                );
+                inbound.write(crate::lobby::InboundMessage {
+                    token: LOCAL_CONSOLE_TOKEN.to_string(),
+                    msg: ClientMessage::SelectShipSlot { slot_id },
+                });
+                continue;
+            }
             HostLobbyRecord::SelectShip { template_path } => {
                 crate::pinfo!(
                     log,

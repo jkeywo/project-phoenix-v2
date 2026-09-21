@@ -1659,9 +1659,21 @@
         }
         return;
       }
+      if (type === 'SelectShipSlot') {
+        if (typeof window.__arbiterSelectSlot === 'function') {
+          window.__arbiterSelectSlot(data && data.slot_id, LOCAL_CONSOLE_TOKEN);
+        }
+        return;
+      }
+      if (type === 'ReleaseShipSlot') {
+        if (typeof window.__arbiterReleaseSlot === 'function') {
+          window.__arbiterReleaseSlot(LOCAL_CONSOLE_TOKEN);
+        }
+        return;
+      }
       if (type === 'SelectPlayerShip') {
         if (typeof window.__arbiterSelectShip === 'function') {
-          window.__arbiterSelectShip(data && data.template_path);
+          window.__arbiterSelectShip(data && data.template_path, LOCAL_CONSOLE_TOKEN);
         }
         return;
       }
@@ -3324,6 +3336,7 @@
        script below. A fleet is opened on demand, so nothing here registers
        anything at load: a single-ship session never mints a server code. -->
   <script type="module" src="gui/host-mesh.js"></script>
+  <script type="module" src="gui/fleet-selection-gate.js"></script>
   <script type="module" src="gui/fleet-session.js"></script>
 
   <!-- Which transport rung(s) this host may use, and what the #conn-diag
@@ -4153,6 +4166,8 @@
      * deliberately does.
      */
     let fleetNotice = null;
+    /** A member's authored slot/hull patch awaiting the owner's roster echo. */
+    let fleetSelectionPending = false;
     /** Visible first-time GM request and its absolute transfer progress (#1293). */
     let fleetGmJoinRequest = null;
     let fleetGmJoinProgress = null;
@@ -5495,7 +5510,7 @@
       if (!fleetRoleHasShip()) return null;
       if (_selectedHull) return _selectedHull;
       const path = _preSelection && _preSelection.template_path;
-      return path ? { template_path: path } : null;
+      return path ? { template_path: path, slot_id: _preSelection.slot_id || null } : null;
     }
 
     /**
@@ -5516,12 +5531,67 @@
      * the pre-load arbiter, and the moment a fleet is joined or opened — and
      * inert when there is no fleet, which is the ordinary case.
      */
+    function fleetRosterCarriesSelection() {
+      const desired = fleetShip();
+      const roster = fleetHandle.roster();
+      return window.fleetSelectionGate.rosterCarriesSelection(roster, fleetHandle.slot, desired);
+    }
+
+    function rollbackRefusedFleetSelection(reason) {
+      fleetSelectionPending = false;
+      fleetNotice = reason || 'slot-taken';
+      _preSelection = window.fleetSelectionGate.rolledBackSelection(_preSelection);
+      _slotReservations = Object.create(null);
+      _selectedHull = null;
+      _lockedShipTemplate = null;
+      _lockedCuratedShips = [];
+      _fleetValidatedHullPath = null;
+      _fleetBootReady = false;
+      if (_worldLoadStarted && !_worldLoadedIntoBevy) {
+        _worldLoadStarted = false;
+        selectedScenario = null;
+      }
+      // Clear the joiner's cached announcement as well as the page arbiter.
+      // The owner already refused the losing patch, so this cannot release the
+      // winner; it only prevents this host replaying the loser on reconnect.
+      try { fleetHandle?.update({ ship: null, ready: false }); } catch (_e) { /* link owns logging */ }
+      renderScenarioLockState();
+      broadcastScenarioCatalog();
+      paintFleetPanel();
+    }
+
+    function acceptPendingFleetSelectionFromRoster() {
+      if (!fleetSelectionPending || !fleetRosterCarriesSelection()) return;
+      fleetSelectionPending = false;
+      if (window.scenarioArbiter.isComplete(_preSelection, _scenarioCatalog)) driveWorldLoad();
+    }
+
     function announceFleetSelection() {
-      if (!fleetHandle || !fleetRoleHasShip(fleetHandle.role || fleetRole)) return;
+      if (!fleetHandle || !fleetRoleHasShip(fleetHandle.role || fleetRole)) return 'accepted';
       try {
-        fleetHandle.update({ ship: fleetShip(), ready: !!_selectedHull });
+        const desired = fleetShip();
+        const accepted = fleetHandle.update({ ship: desired, ready: !!_selectedHull });
+        const disposition = window.fleetSelectionGate.selectionDisposition({
+          isOwner: fleetHandle.isOwner,
+          updateAccepted: accepted,
+          roster: typeof fleetHandle.roster === 'function' ? fleetHandle.roster() : null,
+          meshSlot: fleetHandle.slot,
+          desired,
+        });
+        if (disposition === 'refused') {
+          rollbackRefusedFleetSelection('slot-taken');
+          return 'refused';
+        }
+        if (disposition === 'pending') {
+          fleetSelectionPending = true;
+          return 'pending';
+        }
+        fleetSelectionPending = false;
+        return 'accepted';
       } catch (e) {
         console.warn('[fleet] could not announce this slot', e);
+        rollbackRefusedFleetSelection('slot-taken');
+        return 'refused';
       }
     }
 
@@ -5549,6 +5619,10 @@
       _fleetValidatedHullPath = null;
       _fleetBootReady = false;
       publishFleetLobbyState();
+      if (_preSelection && _preSelection.slot_id
+          && typeof window.wasm_select_ship_slot === 'function') {
+        window.wasm_select_ship_slot(_preSelection.slot_id);
+      }
       window.wasm_select_ship(templatePath);
       // The authored label when it resolves, the hull's own file name when it
       // does not — the same fallback ladder ph-ship-picker walks. A raw string
@@ -5559,7 +5633,11 @@
       const name = (resolved && resolved !== label)
         ? resolved
         : String(templatePath).split('/').pop().replace(/\.toml$/, '');
-      _selectedHull = { template_path: templatePath, name };
+      _selectedHull = {
+        template_path: templatePath,
+        slot_id: (_preSelection && _preSelection.slot_id) || null,
+        name,
+      };
       announceFleetSelection();
       publishFleetLobbyState();
     }
@@ -5944,6 +6022,7 @@
         onCode: (code) => { fleetSuffix = code.suffix; paintFleetPanel(); },
         onRoster: (roster) => {
           fleetRoster = roster;
+          acceptPendingFleetSelectionFromRoster();
           publishGmRoster(roster);
           publishFleetLobbyState();
           paintGmStartControls();
@@ -6076,6 +6155,7 @@
         onRoster: (roster) => {
           fleetRoster = roster;
           fleetNotice = null;
+          acceptPendingFleetSelectionFromRoster();
           publishGmRoster(roster);
           publishFleetLobbyState();
           paintGmStartControls();
@@ -6092,7 +6172,10 @@
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
         // tearing the link down would evict a member for touching its loadout.
-        onRefusedSlot: (reason) => { fleetNotice = reason; paintFleetPanel(); },
+        onRefusedSlot: (reason) => {
+          if (fleetSelectionPending) rollbackRefusedFleetSelection(reason);
+          else { fleetNotice = reason; paintFleetPanel(); }
+        },
         onError: (reason) => {
           refusal = reason;
           // This fires SYNCHRONOUSLY for a code that does not even parse —
@@ -6503,6 +6586,9 @@
             if (typeof wasm_receive_message === 'function') {
               wasmBindings.wasm_player_disconnected(token);
             }
+            if (typeof window.__arbiterReleaseSlot === 'function') {
+              window.__arbiterReleaseSlot(token);
+            }
           },
           onMessage: (token, json, handle) => {
             const parsed = JSON.parse(json);
@@ -6517,8 +6603,16 @@
               arbiterSelectScenario(parsed.data && parsed.data.scenario_id);
               return;
             }
+            if (parsed.type === 'SelectShipSlot') {
+              arbiterSelectSlot(parsed.data && parsed.data.slot_id, token);
+              return;
+            }
+            if (parsed.type === 'ReleaseShipSlot') {
+              arbiterReleaseSlot(token);
+              return;
+            }
             if (parsed.type === 'SelectPlayerShip') {
-              arbiterSelectShip(parsed.data && parsed.data.template_path);
+              arbiterSelectShip(parsed.data && parsed.data.template_path, token);
               return;
             }
             dispatchToWasm(handle, json);
@@ -6713,7 +6807,8 @@
     /** Pre-load catalog: [{ id, world, label, description, ships:[...] }]. */
     let _scenarioCatalog = [];
     /** Authoritative first-valid-wins selection. */
-    let _preSelection = { scenario_id: null, template_path: null };
+    let _preSelection = { scenario_id: null, slot_id: null, template_path: null };
+    let _slotReservations = Object.create(null);
     let _catalogBuilt = false;
     let _worldLoadStarted = false;
     /** True once the world has been loaded into the running Bevy/WASM instance
@@ -7165,7 +7260,7 @@
       window.__phoenixPendingImport = null;
       if (_worldLoadStarted) return;
       selectedScenario = null;
-      _preSelection = { scenario_id: null, template_path: null };
+      _preSelection = { scenario_id: null, slot_id: null, template_path: null };
       _lockedShipTemplate = null;
       _lockedCuratedShips = [];
       const panel = document.getElementById('scenario-panel');
@@ -7305,6 +7400,7 @@
       return JSON.parse(wasmBindings.wasm_scenario_catalog_message(
         JSON.stringify(_scenarioCatalog),
         _preSelection.scenario_id,
+        _preSelection.slot_id,
         _preSelection.template_path,
       ));
     }
@@ -7380,16 +7476,41 @@
     function arbiterReleaseScenario() {
       if (_worldLoadStarted) return;
       if (_preSelection.scenario_id == null) return;
-      _preSelection = { scenario_id: null, template_path: null };
+      _preSelection = { scenario_id: null, slot_id: null, template_path: null };
+      _slotReservations = Object.create(null);
+      announceFleetSelection();
       renderScenarioLockState();
       // Phones are looking at the same picker: the catalog message carries the
       // lock state, so they follow the host back to the World list rather than
       // sitting on a hull stage the host has left.
       broadcastScenarioCatalog();
     }
-    function arbiterSelectShip(templatePath) {
-      if (_worldLoadStarted || !templatePath) return;
-      const r = window.scenarioArbiter.selectPlayerShip(_preSelection, _scenarioCatalog, templatePath);
+    function arbiterSelectSlot(slotId, claimant) {
+      if (_worldLoadStarted || !slotId || !claimant) return;
+      const r = window.scenarioArbiter.selectShipSlot(
+        _preSelection, _scenarioCatalog, slotId, claimant, _slotReservations);
+      if (r.outcome !== 'accepted') {
+        broadcastScenarioCatalog();
+        return;
+      }
+      _preSelection = r.selection;
+      if (announceFleetSelection() === 'refused') return;
+      renderScenarioLockState();
+      broadcastScenarioCatalog();
+    }
+    function arbiterReleaseSlot(claimant) {
+      if (_worldLoadStarted || !claimant) return;
+      const r = window.scenarioArbiter.releaseShipSlot(_preSelection, claimant, _slotReservations);
+      if (r.outcome !== 'accepted') return;
+      _preSelection = r.selection;
+      if (announceFleetSelection() === 'refused') return;
+      renderScenarioLockState();
+      broadcastScenarioCatalog();
+    }
+    function arbiterSelectShip(templatePath, claimant) {
+      if (_worldLoadStarted || !templatePath || !claimant) return;
+      const r = window.scenarioArbiter.selectPlayerShip(
+        _preSelection, _scenarioCatalog, templatePath, claimant, _slotReservations);
       if (r.outcome !== 'accepted') return;
       _preSelection = r.selection;
       renderScenarioLockState();
@@ -7398,11 +7519,13 @@
       // scenario selection is looking at that roster right now, and world load
       // is measured in seconds. `lockPlayerHull` says it again, `ready` this
       // time, when there is actually a world to fly it in.
-      announceFleetSelection();
+      const fleetOutcome = announceFleetSelection();
+      if (fleetOutcome === 'refused') return;
       // When the selection completes, driveWorldLoad() (for round 1) or
       // broadcastSelectionComplete() inside it (round 2) informs phones — so
       // don't also broadcast an intermediate fully-locked catalog here.
-      if (window.scenarioArbiter.isComplete(_preSelection)) {
+      if (fleetOutcome !== 'pending'
+          && window.scenarioArbiter.isComplete(_preSelection, _scenarioCatalog)) {
         driveWorldLoad();
       } else {
         broadcastScenarioCatalog();
@@ -7411,6 +7534,8 @@
     // Published for the earlier-script __localConsoleSend shim (host's own UI
     // routes select_scenario/select_player_ship through the same action map).
     window.__arbiterSelectScenario = arbiterSelectScenario;
+    window.__arbiterSelectSlot = arbiterSelectSlot;
+    window.__arbiterReleaseSlot = arbiterReleaseSlot;
     window.__arbiterSelectShip = arbiterSelectShip;
 
     function driveWorldLoad() {
@@ -7507,6 +7632,12 @@
         // without a page reload.
         selectScenario: function (scenarioId) {
           window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: scenarioId }));
+        },
+        selectSlot: function (slotId) {
+          window.__sendAction(JSON.stringify({ action: 'select_ship_slot', slot_id: slotId }));
+        },
+        autoSelectSlot: function (slotId) {
+          arbiterSelectSlot(slotId, LOCAL_CONSOLE_TOKEN);
         },
         selectShip: function (templatePath) {
           window.__sendAction(JSON.stringify({ action: 'select_player_ship', template_path: templatePath }));
@@ -8409,7 +8540,8 @@ function finishInit() {
     // buttons. The finished round left _preSelection fully locked and the
     // "both locked" branch removed every scenario entry. Round 2 now re-enters the
     // SAME arbiter flow as round 1 — no legacy confirm bypass.
-    _preSelection = { scenario_id: null, template_path: null };
+    _preSelection = { scenario_id: null, slot_id: null, template_path: null };
+    _slotReservations = Object.create(null);
     _worldLoadStarted = false;
     // Session end / next round discards the WHOLE uploaded mod-pack stack (issue
     // #760 AC4, #987): the next scenario stage starts from base content unless
@@ -8494,6 +8626,7 @@ function finishInit() {
   // ── Available ships from world config (issue #623) ──────────────────────
   window.wasm_get_available_ships = wasmBindings.wasm_get_available_ships;
   window.wasm_select_ship = wasmBindings.wasm_select_ship;
+  window.wasm_select_ship_slot = wasmBindings.wasm_select_ship_slot;
   // Scenario-authored GM role presets (issue #1319) — presentation only, see
   // gui/gm-role-presets.js.
   window.wasm_get_gm_role_presets = wasmBindings.wasm_get_gm_role_presets;

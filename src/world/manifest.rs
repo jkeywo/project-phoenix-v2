@@ -18,7 +18,7 @@
 // testable on native with an in-memory world map, and keeps the wasm/native
 // accessors a thin wrapper over the pure core.
 
-use crate::world::config::{parse_world, AvailableShipEntry};
+use crate::world::config::{parse_world, AvailableShipEntry, ShipSlotConfig};
 use crate::world::validate::{line_of, Severity, SourceLocation, WorldFinding};
 
 /// One `[[scenario]]` entry in the base scenario manifest.
@@ -312,6 +312,8 @@ pub struct ScenarioCatalogEntry {
     /// The ships this scenario offers — the referenced world's
     /// `[[available_ships]]` list, and *only* those (issue #754 AC4).
     pub ships: Vec<CatalogShip>,
+    /// Authored mission slots after legacy one-slot compatibility synthesis.
+    pub slots: Vec<ShipSlotConfig>,
     /// Provenance: the pack id this scenario came from, or `None` for a
     /// base-manifest scenario (issue #987). `build_catalog` always sets `None`;
     /// [`build_merged_catalog`] stamps each mod scenario with its pack id.
@@ -354,22 +356,49 @@ pub fn build_catalog(
         // — the manifest curates, it never reorders. An empty list (the
         // default) keeps every ship the world offers, unchanged from
         // pre-#917 behaviour.
-        let ships = if entry.ships.is_empty() {
+        let all_slots = world.effective_ship_slots();
+        let available: Vec<_> = if world.ship_slots.is_empty() {
             world.available_ships.clone()
         } else {
-            world
-                .available_ships
+            all_slots
+                .iter()
+                .flat_map(|slot| slot.ships.iter().cloned())
+                .fold(Vec::new(), |mut unique, ship| {
+                    if !unique
+                        .iter()
+                        .any(|row: &AvailableShipEntry| row.template_path == ship.template_path)
+                    {
+                        unique.push(ship);
+                    }
+                    unique
+                })
+        };
+        let ships = if entry.ships.is_empty() {
+            available
+        } else {
+            available
                 .iter()
                 .filter(|s| entry.ships.iter().any(|p| p == &s.template_path))
                 .cloned()
                 .collect()
         };
+        let slots = all_slots
+            .into_iter()
+            .map(|mut slot| {
+                if !entry.ships.is_empty() {
+                    slot.ships
+                        .retain(|ship| entry.ships.iter().any(|path| path == &ship.template_path));
+                }
+                slot
+            })
+            .collect();
         scenarios.push(ScenarioCatalogEntry {
             id: entry.id.clone(),
             world: entry.world.clone(),
             label,
             description: world.global.description.clone(),
             ships,
+            slots,
             origin: None,
         });
     }

@@ -7,6 +7,7 @@ import {
   findScenario,
   normalizeSelection,
   curatedShipsFor,
+  selectShipSlot,
 } from '../../gui/scenario-arbiter.js';
 
 // Mirrors the #754 pre-load catalog shape delivered by wasm_get_scenario_catalog.
@@ -83,6 +84,29 @@ describe('scenario-arbiter — ship scoped to the locked scenario', () => {
     const r = selectPlayerShip(locked, CATALOG, 'assets/entities/alliance_destroyer.toml');
     expect(r.outcome).toBe('ignored');
     expect(r.selection.template_path).toBe('assets/entities/alliance_cruiser.toml');
+  });
+});
+
+describe('scenario-arbiter — slot holder owns hull confirmation', () => {
+  const fleetCatalog = [{
+    id: 'fleet', world: 'fleet.toml', ships: [],
+    slots: [{ id: 'lead', ships: [{ template_path: 'lead.toml' }] }],
+  }];
+
+  it('refuses another claimant racing the holder after the slot lock', () => {
+    const reservations = Object.create(null);
+    const scenario = { scenario_id: 'fleet', slot_id: null, template_path: null };
+    const claimed = selectShipSlot(scenario, fleetCatalog, 'lead', 'host-a', reservations);
+    const refused = selectPlayerShip(
+      claimed.selection, fleetCatalog, 'lead.toml', 'host-b', reservations,
+    );
+    expect(refused.outcome).toBe('rejected');
+    expect(reservations.lead.hull).toBeNull();
+    const accepted = selectPlayerShip(
+      claimed.selection, fleetCatalog, 'lead.toml', 'host-a', reservations,
+    );
+    expect(accepted.outcome).toBe('accepted');
+    expect(reservations.lead.hull).toBe('lead.toml');
   });
 });
 

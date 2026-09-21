@@ -70,6 +70,7 @@ fn roster(local: HostSlot, slots: &[HostSlot], uncrewed: &[HostSlot]) -> FleetRo
         .map(|&host| FleetShip {
             host,
             ship_path: Some(SHIP.into()),
+            authored_slot_id: None,
             crew: if uncrewed.contains(&host) {
                 vec![]
             } else {

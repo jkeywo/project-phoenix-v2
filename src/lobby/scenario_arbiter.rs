@@ -64,6 +64,8 @@ use crate::world::manifest::{ScenarioCatalog, ScenarioCatalogEntry};
 pub struct ScenarioSelection {
     /// The locked scenario's catalogue id (`[[scenario]] id` in the manifest).
     pub scenario_id: Option<String>,
+    /// The authored mission slot reserved by this selecting host.
+    pub slot_id: Option<String>,
     /// The locked player hull's `template_path`.
     pub template_path: Option<String>,
 }
@@ -87,12 +89,17 @@ impl ScenarioSelection {
         self.template_path.as_deref().filter(|p| !p.is_empty())
     }
 
+    pub fn slot(&self) -> Option<&str> {
+        self.slot_id.as_deref().filter(|id| !id.is_empty())
+    }
+
     /// This selection with every falsy field coerced to `None` —
     /// `normalizeSelection` in the JS, which returns the normalised object on
     /// *every* path including `ignored` and `rejected`.
     pub fn normalized(&self) -> ScenarioSelection {
         ScenarioSelection {
             scenario_id: self.scenario().map(str::to_string),
+            slot_id: self.slot().map(str::to_string),
             template_path: self.ship().map(str::to_string),
         }
     }
@@ -150,8 +157,37 @@ pub fn select_scenario(
         SelectionOutcome::Accepted,
         ScenarioSelection {
             scenario_id: Some(scenario_id.to_string()),
+            slot_id: None,
             // Deliberately clears the hull, exactly as the JS does: a hull is
             // only meaningful against the scenario that offered it.
+            template_path: None,
+        },
+    )
+}
+
+/// Reserve an authored mission slot after the scenario is locked.
+pub fn select_ship_slot(
+    selection: &ScenarioSelection,
+    catalog: &ScenarioCatalog,
+    slot_id: &str,
+) -> (SelectionOutcome, ScenarioSelection) {
+    let Some(scenario_id) = selection.scenario() else {
+        return (SelectionOutcome::Rejected, selection.normalized());
+    };
+    if selection.slot().is_some() {
+        return (SelectionOutcome::Ignored, selection.normalized());
+    }
+    let Some(entry) = find_scenario(catalog, scenario_id) else {
+        return (SelectionOutcome::Rejected, selection.normalized());
+    };
+    if !entry.slots.iter().any(|slot| slot.id == slot_id) {
+        return (SelectionOutcome::Rejected, selection.normalized());
+    }
+    (
+        SelectionOutcome::Accepted,
+        ScenarioSelection {
+            scenario_id: Some(scenario_id.to_string()),
+            slot_id: Some(slot_id.to_string()),
             template_path: None,
         },
     )
@@ -173,13 +209,19 @@ pub fn select_player_ship(
     let Some(entry) = find_scenario(catalog, scenario_id) else {
         return (SelectionOutcome::Rejected, selection.normalized());
     };
-    if !entry.ships.iter().any(|s| s.template_path == template_path) {
+    let offered = selection
+        .slot()
+        .and_then(|slot_id| entry.slots.iter().find(|slot| slot.id == slot_id))
+        .map(|slot| slot.ships.as_slice())
+        .unwrap_or(entry.ships.as_slice());
+    if !offered.iter().any(|s| s.template_path == template_path) {
         return (SelectionOutcome::Rejected, selection.normalized());
     }
     (
         SelectionOutcome::Accepted,
         ScenarioSelection {
             scenario_id: Some(scenario_id.to_string()),
+            slot_id: selection.slot().map(str::to_string),
             template_path: Some(template_path.to_string()),
         },
     )
@@ -239,6 +281,7 @@ mod tests {
             label: Some(format!("{id} label")),
             description: None,
             ships: ships.iter().map(|p| ship(p)).collect(),
+            slots: Vec::new(),
             origin: None,
         }
     }
@@ -276,6 +319,7 @@ mod tests {
     fn a_later_scenario_request_is_ignored_rather_than_refused() {
         let locked = ScenarioSelection {
             scenario_id: Some("patrol".into()),
+            slot_id: None,
             template_path: None,
         };
         let (outcome, selection) = select_scenario(&locked, &catalog(), "combat_test");
@@ -312,6 +356,7 @@ mod tests {
     fn a_hull_the_locked_scenario_does_not_offer_is_rejected() {
         let locked = ScenarioSelection {
             scenario_id: Some("patrol".into()),
+            slot_id: None,
             template_path: None,
         };
         let (outcome, _) = select_player_ship(
@@ -330,6 +375,7 @@ mod tests {
     fn a_hull_the_locked_scenario_offers_completes_the_selection() {
         let locked = ScenarioSelection {
             scenario_id: Some("combat_test".into()),
+            slot_id: None,
             template_path: None,
         };
         let (outcome, selection) = select_player_ship(
@@ -349,6 +395,7 @@ mod tests {
     fn a_second_hull_request_is_ignored() {
         let locked = ScenarioSelection {
             scenario_id: Some("combat_test".into()),
+            slot_id: None,
             template_path: Some("assets/entities/alliance_destroyer.toml".into()),
         };
         let (outcome, selection) =
@@ -371,6 +418,7 @@ mod tests {
     fn curated_ships_are_the_locked_scenarios_offered_hulls_in_order() {
         let locked = ScenarioSelection {
             scenario_id: Some("combat_test".into()),
+            slot_id: None,
             template_path: None,
         };
         assert_eq!(
@@ -432,6 +480,7 @@ mod tests {
                             label: s["label"].as_str().map(str::to_string),
                         })
                         .collect(),
+                    slots: Vec::new(),
                     origin: None,
                 })
                 .collect(),
@@ -443,6 +492,7 @@ mod tests {
     fn parity_selection(value: &serde_json::Value) -> ScenarioSelection {
         ScenarioSelection {
             scenario_id: value["scenario_id"].as_str().map(str::to_string),
+            slot_id: value["slot_id"].as_str().map(str::to_string),
             template_path: value["template_path"].as_str().map(str::to_string),
         }
     }

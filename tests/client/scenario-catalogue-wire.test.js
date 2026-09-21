@@ -12,6 +12,7 @@ describe('the native and browser catalogue wire in the real phone reducer', () =
       phone.apply(message);
       expect(phone.selectionLocked).toEqual({
         scenario_id: message.data.locked_scenario,
+        slot_id: message.data.locked_slot ?? null,
         template_path: message.data.locked_ship,
       });
       expect(phone.scenarioCatalog).toEqual(message.data.scenarios);
@@ -67,8 +68,8 @@ describe('the native and browser catalogue wire in the real phone reducer', () =
       return JSON.stringify(message);
     } };
     const make = new Function('wasmBindings', '_scenarioCatalog', '_preSelection', body);
-    expect(make(bindings, message.data.scenarios, { scenario_id: 'base', template_path: null })).toEqual(message);
-    expect(calls).toEqual([[JSON.stringify(message.data.scenarios), 'base', null]]);
+    expect(make(bindings, message.data.scenarios, { scenario_id: 'base', slot_id: null, template_path: null })).toEqual(message);
+    expect(calls).toEqual([[JSON.stringify(message.data.scenarios), 'base', null, null]]);
     const sendBody = html.match(/function sendCatalogTo\(conn\) \{([\s\S]*?)\n    \}/)[1];
     const received = [];
     const send = new Function('_catalogBuilt', '_worldLoadStarted', 'scenarioCatalogMessage', 'conn', sendBody);

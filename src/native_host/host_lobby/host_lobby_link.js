@@ -222,7 +222,7 @@ window.__phoenixHostLobby.renderScenario = function (json) {
   // reason it carries those three and nothing else.
   const vm = scenarioCatalogView(
     payload.scenarios,
-    { scenario_id: payload.locked_scenario, template_path: payload.locked_ship },
+    { scenario_id: payload.locked_scenario, slot_id: payload.locked_slot, template_path: payload.locked_ship },
     payload.locked,
   );
   renderHostScenarios(
@@ -236,6 +236,7 @@ window.__phoenixHostLobby.renderScenario = function (json) {
       // a mod pack's literal prose passes through.
       tData: (value) => (value ? localiseTree(value) : ''),
       selectScenario: (scenarioId) => send({ kind: 'select_scenario', scenario_id: scenarioId }),
+      selectSlot: (slotId) => send({ kind: 'select_slot', slot_id: slotId }),
       selectShip: (templatePath) => send({ kind: 'select_ship', template_path: templatePath }),
       autoSelectShip: (templatePath) => {
         if (autoAsked === templatePath) return;

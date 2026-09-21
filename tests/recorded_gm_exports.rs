@@ -91,6 +91,7 @@ fn source() -> (App, StationId, String, SystemId) {
         vec![FleetShip {
             host: HostSlot(1),
             ship_path: Some(args.ship_path),
+            authored_slot_id: None,
             crew: vec![(station.clone(), rating.clone())],
         }],
         vec![HostSlot(1), HostSlot(2)],

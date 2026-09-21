@@ -15,12 +15,14 @@
 //!
 //! Exactly what arrives on the browser: a
 //! [`SelectScenario`](crate::core::messages::ClientMessage::SelectScenario) and a
+//! [`SelectShipSlot`](crate::core::messages::ClientMessage::SelectShipSlot) and
 //! [`SelectPlayerShip`](crate::core::messages::ClientMessage::SelectPlayerShip)
 //! from any participant — a phone, a local Station pane, or (slice #1328) the
 //! host's own on-screen picker — arbitrated first-valid-wins against the
-//! published catalogue. The rule is [`crate::lobby::scenario_arbiter`], which is
-//! a transcription of `gui/scenario-arbiter.js` rather than a second design, and
-//! the catalogue is
+//! published catalogue. A compatibility-synthesized singleton slot is claimed
+//! by the scenario winner without an extra message. The rule is
+//! [`crate::lobby::scenario_arbiter`], which is a transcription of
+//! `gui/scenario-arbiter.js` rather than a second design, and the catalogue is
 //! [`ManifestSource::merged_catalog`](crate::delivery::serve::ManifestSource::merged_catalog),
 //! which is the same [`build_merged_catalog`](crate::world::manifest::build_merged_catalog)
 //! call `wasm_get_scenario_catalog` makes.
@@ -74,7 +76,7 @@ use crate::core::messages::{ClientMessage, GamePhase, ServerMessage};
 use crate::lobby::handler::Target;
 use crate::lobby::scenario_arbiter::{self, ScenarioSelection, SelectionOutcome};
 use crate::lobby::stations_config::ShipStations;
-use crate::lobby::{InboundMessage, LobbyOutbox};
+use crate::lobby::{InboundMessage, LobbyOutbox, PlayerDisconnected};
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::app::{self, HullChoice, NativeHostError};
 use crate::world::manifest::ScenarioCatalog;
@@ -136,6 +138,12 @@ pub struct LobbyBootSettings {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct LobbySelection(pub ScenarioSelection);
 
+/// Claimant holding the selected authored slot while the native host remains
+/// in its pre-world lobby. Kept beside (rather than inside) `ScenarioSelection`
+/// so the published lock never leaks a reconnect credential.
+#[derive(Resource, Clone, Debug, Default)]
+struct LobbySlotClaim(Option<String>);
+
 /// A complete selection waiting to be ingested, written by
 /// [`drain_scenario_selection`] and consumed by [`apply_pending_world_load`] in
 /// the same tick.
@@ -143,8 +151,17 @@ pub struct LobbySelection(pub ScenarioSelection);
 struct PendingWorldLoad {
     world_path: String,
     ship_path: Option<String>,
+    slot_id: Option<String>,
+    claimant: Option<String>,
     curated_ships: Vec<String>,
 }
+
+/// A validated roster waiting for the Lobby exit that makes it immutable.
+/// World ingestion is deliberately earlier than launch: keeping this separate
+/// prevents a loaded-but-still-waiting lobby from claiming its roster has
+/// already crossed the mission freeze boundary.
+#[derive(Resource)]
+struct PendingSlotFreeze(crate::ship_slots::FrozenShipSlots);
 
 /// Installed on every native host. Selection is inert once a world has loaded;
 /// returning crew still receive that retained world's complete lobby projection.
@@ -166,6 +183,7 @@ impl Plugin for NativeWorldLoadPlugin {
                 publish_world_welcome.run_if(resource_exists::<crate::world::config::WorldConfig>),
             );
         }
+        app.add_systems(OnExit(GamePhase::Lobby), freeze_selected_ship_slots);
         // The same authoritative pass as Startup, in this schedule rather
         // than behind a nested schedule that would hide cross-plugin edges.
         crate::world::materialization::register(app, RuntimeWorldLoad);
@@ -184,40 +202,51 @@ impl Plugin for NativeWorldLoadPlugin {
                 .after(crate::world::materialization::WorldMaterialization),
         );
 
-        app.init_resource::<LobbySelection>().add_systems(
-            FixedUpdate,
-            (
-                drain_scenario_selection.run_if(awaiting_world),
-                apply_pending_world_load.run_if(awaiting_world),
-                greet_catalogue,
-            )
-                .chain()
-                .in_set(NativeWorldLoadSet)
-                // After the lobby, so a participant who identifies and picks in
-                // the same tick has a session by the time the catalogue is
-                // addressed to their token — `Target::Token` resolves through
-                // `SessionManager`, and answering a token that does not exist
-                // yet would drop the one message that participant is waiting
-                // for.
-                .after(crate::lobby::LobbySystemSet)
-                // Before the simulation reads anything: a world that lands this
-                // tick must be visible to `SimSet::Input` on the same tick, the
-                // way a `Startup`-ingested one is visible to the first tick.
-                // (`SimSet::Input` already orders itself after
-                // `LobbySystemSet`, so this pair of edges cannot cycle.)
-                .before(crate::sim_sets::SimSet::Input)
-                // And before the outbox drain, so the re-`Welcome`
-                // [`republish_loaded_world`] queues reaches the wire on the tick
-                // the world lands rather than on whichever tick the executor's
-                // ambiguity resolution happens to put the drain after. This is
-                // the same edge `server_app::registration` gives
-                // `refresh_caches_on_midgame_reconnect`, and for the same
-                // reason. It cannot cycle: `drain_lobby_outbox` orders itself
-                // only `.after(tick_countdown)`, which is *inside*
-                // `LobbySystemSet` — already upstream of this set.
-                .before(crate::lobby::server::drain_lobby_outbox)
-                .run_if(resource_exists::<LobbyScenarioCatalog>),
-        );
+        app.init_resource::<LobbySelection>()
+            .init_resource::<LobbySlotClaim>()
+            .add_systems(
+                FixedUpdate,
+                (
+                    drain_scenario_selection.run_if(awaiting_world),
+                    apply_pending_world_load.run_if(awaiting_world),
+                    greet_catalogue,
+                )
+                    .chain()
+                    .in_set(NativeWorldLoadSet)
+                    // After the lobby, so a participant who identifies and picks in
+                    // the same tick has a session by the time the catalogue is
+                    // addressed to their token — `Target::Token` resolves through
+                    // `SessionManager`, and answering a token that does not exist
+                    // yet would drop the one message that participant is waiting
+                    // for.
+                    .after(crate::lobby::LobbySystemSet)
+                    // Before the simulation reads anything: a world that lands this
+                    // tick must be visible to `SimSet::Input` on the same tick, the
+                    // way a `Startup`-ingested one is visible to the first tick.
+                    // (`SimSet::Input` already orders itself after
+                    // `LobbySystemSet`, so this pair of edges cannot cycle.)
+                    .before(crate::sim_sets::SimSet::Input)
+                    // And before the outbox drain, so the re-`Welcome`
+                    // [`republish_loaded_world`] queues reaches the wire on the tick
+                    // the world lands rather than on whichever tick the executor's
+                    // ambiguity resolution happens to put the drain after. This is
+                    // the same edge `server_app::registration` gives
+                    // `refresh_caches_on_midgame_reconnect`, and for the same
+                    // reason. It cannot cycle: `drain_lobby_outbox` orders itself
+                    // only `.after(tick_countdown)`, which is *inside*
+                    // `LobbySystemSet` — already upstream of this set.
+                    .before(crate::lobby::server::drain_lobby_outbox)
+                    .run_if(resource_exists::<LobbyScenarioCatalog>),
+            );
+    }
+}
+
+/// Commit the already-validated authored roster at the phase boundary all
+/// launch paths share: ordinary crew readiness, the viewscreen control, and a
+/// GM/start grant all eventually leave `Lobby` through this schedule.
+fn freeze_selected_ship_slots(world: &mut World) {
+    if let Some(pending) = world.remove_resource::<PendingSlotFreeze>() {
+        world.insert_resource(pending.0);
     }
 }
 
@@ -243,9 +272,11 @@ fn awaiting_world(
 /// enough to load.
 fn drain_scenario_selection(
     mut inbound: MessageReader<InboundMessage>,
+    mut disconnected: MessageReader<PlayerDisconnected>,
     catalog: Res<LobbyScenarioCatalog>,
     settings: Option<Res<LobbyBootSettings>>,
     mut selection: ResMut<LobbySelection>,
+    mut slot_claim: ResMut<LobbySlotClaim>,
     mut outbox: ResMut<LobbyOutbox>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
@@ -260,6 +291,15 @@ fn drain_scenario_selection(
     let pinned_ship: Option<String> = settings.as_ref().and_then(|s| s.ship_path.clone());
     let mut changed = false;
 
+    for departure in disconnected.read() {
+        if slot_claim.0.as_deref() == Some(departure.token.as_str()) {
+            selection.0.slot_id = None;
+            selection.0.template_path = None;
+            slot_claim.0 = None;
+            changed = true;
+        }
+    }
+
     for message in inbound.read() {
         match &message.msg {
             ClientMessage::SelectScenario { scenario_id } => {
@@ -268,15 +308,67 @@ fn drain_scenario_selection(
                 log_outcome(&log, outcome, "scenario", scenario_id);
                 if outcome == SelectionOutcome::Accepted {
                     selection.0 = next;
+                    // Every pre-#1518 world is represented by one synthesized
+                    // slot in the catalogue. That compatibility stage is not a
+                    // new question for the operator: reserve it for the sender
+                    // that won the scenario race, so the historical
+                    // SelectScenario -> SelectPlayerShip pair remains complete.
+                    // A genuinely multi-slot scenario still stops here and
+                    // requires an explicit, claimant-bound slot request.
+                    if let Some(slot_id) = scenario_arbiter::find_scenario(&catalog.0, scenario_id)
+                        .and_then(|entry| {
+                            (entry.slots.len() == 1).then(|| entry.slots[0].id.clone())
+                        })
+                    {
+                        let (slot_outcome, next) =
+                            scenario_arbiter::select_ship_slot(&selection.0, &catalog.0, &slot_id);
+                        debug_assert_eq!(slot_outcome, SelectionOutcome::Accepted);
+                        if slot_outcome == SelectionOutcome::Accepted {
+                            selection.0 = next;
+                            slot_claim.0 = Some(message.token.clone());
+                        }
+                    }
                     changed = true;
                 }
             }
             ClientMessage::SelectPlayerShip { template_path } => {
+                if selection.0.slot().is_some()
+                    && slot_claim.0.as_deref() != Some(message.token.as_str())
+                {
+                    log_outcome(&log, SelectionOutcome::Rejected, "hull", template_path);
+                    continue;
+                }
                 let (outcome, next) =
                     scenario_arbiter::select_player_ship(&selection.0, &catalog.0, template_path);
                 log_outcome(&log, outcome, "hull", template_path);
                 if outcome == SelectionOutcome::Accepted {
                     selection.0 = next;
+                    changed = true;
+                }
+            }
+            ClientMessage::SelectShipSlot { slot_id } => {
+                if slot_claim
+                    .0
+                    .as_deref()
+                    .is_some_and(|held| held != message.token)
+                {
+                    log_outcome(&log, SelectionOutcome::Rejected, "slot", slot_id);
+                    continue;
+                }
+                let (outcome, next) =
+                    scenario_arbiter::select_ship_slot(&selection.0, &catalog.0, slot_id);
+                log_outcome(&log, outcome, "slot", slot_id);
+                if outcome == SelectionOutcome::Accepted {
+                    selection.0 = next;
+                    slot_claim.0 = Some(message.token.clone());
+                    changed = true;
+                }
+            }
+            ClientMessage::ReleaseShipSlot => {
+                if slot_claim.0.as_deref() == Some(message.token.as_str()) {
+                    selection.0.slot_id = None;
+                    selection.0.template_path = None;
+                    slot_claim.0 = None;
                     changed = true;
                 }
             }
@@ -293,8 +385,14 @@ fn drain_scenario_selection(
 
     // Complete when the arbiter locked both halves, OR when it locked the
     // scenario and `--ship` already supplied the other.
-    let complete =
-        selection.0.is_complete() || (selection.0.scenario().is_some() && pinned_ship.is_some());
+    let scenario_needs_slot = selection
+        .0
+        .scenario()
+        .and_then(|id| scenario_arbiter::find_scenario(&catalog.0, id))
+        .is_some_and(|entry| !entry.slots.is_empty());
+    let slot_complete = !scenario_needs_slot || selection.0.slot().is_some();
+    let complete = (selection.0.is_complete() && slot_complete)
+        || (selection.0.scenario().is_some() && slot_complete && pinned_ship.is_some());
     if !changed || !complete {
         return;
     }
@@ -306,6 +404,8 @@ fn drain_scenario_selection(
         // `--ship` still outranks the lobby's pick, the way it outranks the
         // world's default hull on the `--world` path.
         ship_path: pinned_ship.or_else(|| selection.0.ship().map(str::to_string)),
+        slot_id: selection.0.slot().map(str::to_string),
+        claimant: slot_claim.0.clone(),
         curated_ships: scenario_arbiter::curated_ships_for(&catalog.0, &selection.0),
     });
 }
@@ -365,6 +465,7 @@ pub(crate) fn published_catalog(
         crate::delivery::payload::catalog_payload(catalog),
         &crate::entities::config_cache::active_packs(),
         selection.scenario().map(str::to_string),
+        selection.slot().map(str::to_string),
         pinned_ship
             .map(str::to_string)
             .or_else(|| selection.ship().map(str::to_string)),
@@ -461,6 +562,9 @@ fn apply_pending_world_load(world: &mut World) {
             unwind_failed_load(world);
             if let Some(mut selection) = world.get_resource_mut::<LobbySelection>() {
                 selection.0 = ScenarioSelection::default();
+            }
+            if let Some(mut claim) = world.get_resource_mut::<LobbySlotClaim>() {
+                claim.0 = None;
             }
             let pinned = world
                 .get_resource::<LobbyBootSettings>()
@@ -716,6 +820,35 @@ fn load_selected_world(
             seed: settings.seed,
         },
     )?;
+    if !world_config.ship_slots.is_empty() {
+        let mut reservations = crate::ship_slots::ShipSlotReservations::default();
+        let (Some(slot_id), Some(claimant), Some(hull)) = (
+            pending.slot_id.as_deref(),
+            pending.claimant.as_deref(),
+            pending.ship_path.as_deref(),
+        ) else {
+            return Err(NativeHostError::Ship(
+                "authored ship slots require a claimant and confirmed hull before launch".into(),
+            ));
+        };
+        if crate::ship_slots::ClaimOutcome::Claimed
+            != reservations.claim(&world_config.ship_slots, slot_id, claimant)
+            || crate::ship_slots::HullOutcome::Confirmed
+                != reservations.confirm_hull(&world_config.ship_slots, slot_id, claimant, hull)
+        {
+            return Err(NativeHostError::Ship(format!(
+                "hull {hull:?} is not allowed for claimed ship slot {slot_id:?}"
+            )));
+        }
+        let frozen = reservations
+            .freeze(&world_config.ship_slots)
+            .ok_or_else(|| {
+                NativeHostError::Ship(
+                    "every claimed ship slot must confirm a hull before launch".into(),
+                )
+            })?;
+        world.insert_resource(PendingSlotFreeze(frozen));
+    }
     // The seed the world authored (or `--seed` overrode) replaces the OS draw
     // `add_simulation_plugins_with` left behind. Nothing has consumed the
     // stream: the simulation sets are gated on `GamePhase::InProgress` and this
@@ -762,5 +895,34 @@ fn park_mint(world: &mut World) -> Option<WorldIdMintState> {
 fn restore_mint(world: &mut World, saved: Option<WorldIdMintState>) {
     if let Some(state) = saved {
         crate::world_id::install(world, WorldIdMint::from_state(state));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ship_slots::{FrozenShipSlots, LaunchSource, LaunchedSlot};
+
+    #[test]
+    fn selected_slots_become_immutable_only_at_the_shared_lobby_exit() {
+        let expected = FrozenShipSlots(vec![LaunchedSlot {
+            slot_id: "lead".into(),
+            hull: "cruiser.toml".into(),
+            claimant: Some("host-a".into()),
+            source: LaunchSource::Claimed,
+        }]);
+        let mut world = World::new();
+        world.insert_resource(PendingSlotFreeze(expected.clone()));
+
+        assert!(
+            !world.contains_resource::<FrozenShipSlots>(),
+            "loading a world is not the roster-freeze boundary"
+        );
+        freeze_selected_ship_slots(&mut world);
+        assert_eq!(world.resource::<FrozenShipSlots>(), &expected);
+        assert!(
+            !world.contains_resource::<PendingSlotFreeze>(),
+            "the launch boundary consumes the mutable pre-start staging record"
+        );
     }
 }

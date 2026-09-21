@@ -377,7 +377,7 @@ describe('ScenarioCatalog (QR-first pre-scenario picker, issue #755)', () => {
     expect(s.showScenarioPicker()).toBe(true);
     expect(s.scenarioCatalog).toHaveLength(1);
     expect(s.scenarioCatalog[0].id).toBe('default');
-    expect(s.selectionLocked).toEqual({ scenario_id: null, template_path: null });
+    expect(s.selectionLocked).toEqual({ scenario_id: null, slot_id: null, template_path: null });
   });
 
   it('reflects the locked selection from the host', () => {
@@ -385,6 +385,7 @@ describe('ScenarioCatalog (QR-first pre-scenario picker, issue #755)', () => {
     s.apply(catalogMsg('default', 'assets/entities/alliance_cruiser.toml'));
     expect(s.selectionLocked).toEqual({
       scenario_id: 'default',
+      slot_id: null,
       template_path: 'assets/entities/alliance_cruiser.toml',
     });
   });

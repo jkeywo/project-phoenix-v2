@@ -78,6 +78,7 @@ fn roster(local: HostSlot, slots: &[HostSlot]) -> FleetRoster {
         .map(|&host| FleetShip {
             host,
             ship_path: Some(SHIP.into()),
+            authored_slot_id: None,
             crew: vec![(StationId(HELM.into()), RATING.to_string())],
         })
         .collect();

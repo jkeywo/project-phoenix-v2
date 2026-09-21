@@ -763,6 +763,65 @@ template_path = "assets/entities/ship_scout.toml"
     assert!(cfg.available_ships[0].label.is_none());
 }
 
+#[test]
+fn authored_ship_slots_expose_allowed_hulls_and_default() {
+    let cfg = parse_world(
+        r#"
+[[ship_slot]]
+id = "lead"
+label = "world.test.slot.lead"
+default_ship = "assets/entities/ship_scout.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/ship_scout.toml"
+label = "Scout"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/ship_cruiser.toml"
+label = "Cruiser"
+"#,
+    )
+    .expect("slot must parse");
+    let slots = cfg.effective_ship_slots();
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].id, "lead");
+    assert_eq!(slots[0].ships.len(), 2);
+    assert_eq!(slots[0].default_ship, "assets/entities/ship_scout.toml");
+}
+
+#[test]
+fn legacy_available_ships_synthesise_one_slot() {
+    let cfg = parse_world(
+        r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+[[available_ships]]
+template_path = "assets/entities/ship_cruiser.toml"
+"#,
+    )
+    .expect("legacy world must parse");
+    let slots = cfg.effective_ship_slots();
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].id, "player");
+    assert_eq!(slots[0].ships, cfg.available_ships);
+    assert_eq!(slots[0].default_ship, "assets/entities/ship_scout.toml");
+}
+
+#[test]
+fn ship_slot_default_must_be_allowed() {
+    let error = parse_world(
+        r#"
+[[ship_slot]]
+id = "lead"
+default_ship = "destroyer"
+[[ship_slot.ships]]
+template_path = "cruiser"
+"#,
+    )
+    .expect_err("dangling default must fail");
+    assert!(error.contains("default_ship"), "{error}");
+}
+
 // -- player_spawn (issue #623) -------------------------------------------
 
 #[test]

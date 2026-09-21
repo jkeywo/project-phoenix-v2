@@ -25,7 +25,7 @@ use project_phoenix::delivery::serve::ManifestSource;
 use project_phoenix::entities::template_preload::TemplatePreload;
 use project_phoenix::lobby::handler::Target;
 use project_phoenix::lobby::scenario_arbiter;
-use project_phoenix::lobby::server::InboundMessage;
+use project_phoenix::lobby::server::{InboundMessage, PlayerDisconnected};
 use project_phoenix::native_host::host_lobby::{pump_host_lobby, LocalHostLobby};
 use project_phoenix::native_host::panes::RecordingSurface;
 use project_phoenix::native_host::transport::{LoopbackHandle, NativeTransportLink};
@@ -121,6 +121,32 @@ fn select(app: &mut App, token: &str, scenario_id: &str, template_path: &str) {
             msg,
         });
     }
+}
+
+/// The shipped legacy scenario presented as two authored positions. Keeping
+/// the real world/hulls means this exercises the production native app without
+/// inventing a second fixture format; neither test below confirms a hull, so no
+/// runtime ingest is attempted.
+fn two_slot_catalog() -> ScenarioCatalog {
+    let mut catalog = catalog();
+    let entry = scenario_arbiter::find_scenario(&catalog, SCENARIO)
+        .expect("the shipped catalogue publishes the flagship scenario")
+        .clone();
+    let mut lead = entry
+        .slots
+        .first()
+        .expect("legacy compatibility synthesizes one slot")
+        .clone();
+    lead.id = "lead".into();
+    let mut wing = lead.clone();
+    wing.id = "wing".into();
+    catalog
+        .scenarios
+        .iter_mut()
+        .find(|candidate| candidate.id == SCENARIO)
+        .expect("the entry remains present")
+        .slots = vec![lead, wing];
+    catalog
 }
 
 /// Every `EntityUuid` in the world paired with **which entity holds it**,
@@ -524,6 +550,7 @@ fn a_runtime_load_mints_the_same_world_entity_ids_as_a_boot_load() {
         &catalog(),
         &project_phoenix::lobby::scenario_arbiter::ScenarioSelection {
             scenario_id: Some(scenario_id.clone()),
+            slot_id: None,
             template_path: None,
         },
     )
@@ -747,6 +774,151 @@ fn the_first_valid_selection_wins_over_a_later_one() {
             .as_deref(),
         Some(first.id.as_str()),
         "the first valid request locks the scenario; the second is ignored"
+    );
+}
+
+#[test]
+fn the_legacy_single_slot_is_reserved_by_the_scenario_winner_without_an_extra_message() {
+    let preload = preload();
+    let mut app =
+        build_native_host_app(&lobby_config(), &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+
+    app.world_mut().write_message(InboundMessage {
+        token: "host-a".into(),
+        msg: ClientMessage::SelectScenario {
+            scenario_id: SCENARIO.into(),
+        },
+    });
+    pump(&mut app, 4);
+
+    let published = catalog();
+    let entry = scenario_arbiter::find_scenario(&published, SCENARIO).unwrap();
+    assert_eq!(entry.slots.len(), 1, "this is the compatibility path");
+    assert_eq!(
+        app.world().resource::<LobbySelection>().0.slot(),
+        Some(entry.slots[0].id.as_str()),
+        "the synthesized singleton is authoritative without adding a third step"
+    );
+    assert!(
+        app.world().get_resource::<WorldConfig>().is_none(),
+        "slot auto-selection does not bypass hull confirmation"
+    );
+}
+
+#[test]
+fn native_multi_slot_claims_are_exclusive_and_release_before_world_load() {
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.catalog = two_slot_catalog();
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+
+    for (token, msg) in [
+        (
+            "host-a",
+            ClientMessage::SelectScenario {
+                scenario_id: SCENARIO.into(),
+            },
+        ),
+        (
+            "host-a",
+            ClientMessage::SelectShipSlot {
+                slot_id: "lead".into(),
+            },
+        ),
+        (
+            "host-b",
+            ClientMessage::SelectShipSlot {
+                slot_id: "lead".into(),
+            },
+        ),
+    ] {
+        app.world_mut().write_message(InboundMessage {
+            token: token.into(),
+            msg,
+        });
+    }
+    pump(&mut app, 4);
+    assert_eq!(
+        app.world().resource::<LobbySelection>().0.slot(),
+        Some("lead"),
+        "the first claimant keeps the slot when another token races it"
+    );
+
+    app.world_mut().write_message(InboundMessage {
+        token: "host-b".into(),
+        msg: ClientMessage::SelectPlayerShip {
+            template_path: scenario_arbiter::find_scenario(&cfg.catalog, SCENARIO)
+                .unwrap()
+                .slots[0]
+                .default_ship
+                .clone(),
+        },
+    });
+    pump(&mut app, 4);
+    assert!(
+        app.world().resource::<LobbySelection>().0.ship().is_none(),
+        "a non-holder cannot confirm the claimed slot's hull"
+    );
+
+    app.world_mut().write_message(InboundMessage {
+        token: "host-a".into(),
+        msg: ClientMessage::ReleaseShipSlot,
+    });
+    app.world_mut().write_message(InboundMessage {
+        token: "host-b".into(),
+        msg: ClientMessage::SelectShipSlot {
+            slot_id: "wing".into(),
+        },
+    });
+    pump(&mut app, 4);
+    assert_eq!(
+        app.world().resource::<LobbySelection>().0.slot(),
+        Some("wing"),
+        "Back releases immediately, so another admitted claimant can reserve a position"
+    );
+}
+
+#[test]
+fn native_prestart_disconnect_releases_the_authored_slot() {
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.catalog = two_slot_catalog();
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    pump(&mut app, 4);
+    for msg in [
+        ClientMessage::SelectScenario {
+            scenario_id: SCENARIO.into(),
+        },
+        ClientMessage::SelectShipSlot {
+            slot_id: "lead".into(),
+        },
+    ] {
+        app.world_mut().write_message(InboundMessage {
+            token: "host-a".into(),
+            msg,
+        });
+    }
+    pump(&mut app, 4);
+
+    app.world_mut().write_message(PlayerDisconnected {
+        token: "host-a".into(),
+    });
+    pump(&mut app, 4);
+    assert_eq!(app.world().resource::<LobbySelection>().0.slot(), None);
+
+    app.world_mut().write_message(InboundMessage {
+        token: "host-b".into(),
+        msg: ClientMessage::SelectShipSlot {
+            slot_id: "lead".into(),
+        },
+    });
+    pump(&mut app, 4);
+    assert_eq!(
+        app.world().resource::<LobbySelection>().0.slot(),
+        Some("lead"),
+        "disconnect and Back share the same immediate pre-start release"
     );
 }
 
@@ -1064,6 +1236,7 @@ fn catalog_plus(id: &str, world: &str, ships: &[String]) -> ScenarioCatalog {
                     label: None,
                 })
                 .collect(),
+            slots: Vec::new(),
             origin: None,
         });
     catalog

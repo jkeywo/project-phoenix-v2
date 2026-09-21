@@ -842,6 +842,18 @@ pub struct AvailableShipEntry {
     pub label: Option<String>,
 }
 
+/// One mission-authored player-ship position (issue #1518).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShipSlotConfig {
+    pub id: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub ships: Vec<AvailableShipEntry>,
+    pub default_ship: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerSpawnEntry {
     #[serde(default)]
@@ -1320,6 +1332,9 @@ pub struct RawWorld {
     /// List of selectable player ship options for this world.
     #[serde(default)]
     pub available_ships: Vec<AvailableShipEntry>,
+    /// Mission-authored player-ship slots. Empty means the legacy single slot.
+    #[serde(default)]
+    pub ship_slot: Vec<ShipSlotConfig>,
     /// Optional spawn point for the player ship.
     #[serde(default)]
     pub player_spawn: Option<PlayerSpawnEntry>,
@@ -2326,6 +2341,8 @@ pub struct WorldConfig {
     pub dust: Option<DustPfxConfig>,
     /// List of selectable player ship options for this world.
     pub available_ships: Vec<AvailableShipEntry>,
+    /// Mission-authored player-ship slots (issue #1518).
+    pub ship_slots: Vec<ShipSlotConfig>,
     /// Optional spawn point for the player ship.
     pub player_spawn: Option<PlayerSpawnEntry>,
     /// Named mission deadlines, in authored order (issue #1024).
@@ -2894,6 +2911,40 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     }
 
     let available_ships = raw.available_ships;
+    let ship_slots = raw.ship_slot;
+    let mut slot_ids = std::collections::BTreeSet::new();
+    for (index, slot) in ship_slots.iter().enumerate() {
+        if slot.id.trim().is_empty() {
+            return Err(format!("ship_slot[{index}] has an empty id"));
+        }
+        if !slot_ids.insert(slot.id.as_str()) {
+            return Err(format!("duplicate ship_slot id {:?}", slot.id));
+        }
+        if slot.ships.is_empty() {
+            return Err(format!("ship_slot {:?} offers no ships", slot.id));
+        }
+        let mut paths = std::collections::BTreeSet::new();
+        for ship in &slot.ships {
+            if ship.template_path.trim().is_empty() {
+                return Err(format!(
+                    "ship_slot {:?} contains an empty ship path",
+                    slot.id
+                ));
+            }
+            if !paths.insert(ship.template_path.as_str()) {
+                return Err(format!(
+                    "ship_slot {:?} offers ship {:?} more than once",
+                    slot.id, ship.template_path
+                ));
+            }
+        }
+        if !paths.contains(slot.default_ship.as_str()) {
+            return Err(format!(
+                "ship_slot {:?} default_ship {:?} is not in its ships list",
+                slot.id, slot.default_ship
+            ));
+        }
+    }
 
     // Parse `when` predicates on entity entries.
     let mut entities = raw.entities;
@@ -2937,6 +2988,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         audio: raw.audio,
         dust: raw.dust,
         available_ships,
+        ship_slots,
         player_spawn: raw.player_spawn,
         deadlines: raw.deadline,
         routes: raw.route,
@@ -2949,6 +3001,25 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         gm_attention: raw.gm_attention.clone(),
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
+}
+
+impl WorldConfig {
+    /// Picker slots, synthesising the legacy one-slot shape without requiring
+    /// existing content to migrate or show another selection step.
+    pub fn effective_ship_slots(&self) -> Vec<ShipSlotConfig> {
+        if !self.ship_slots.is_empty() {
+            return self.ship_slots.clone();
+        }
+        let Some(default) = self.available_ships.first() else {
+            return Vec::new();
+        };
+        vec![ShipSlotConfig {
+            id: "player".to_string(),
+            label: None,
+            ships: self.available_ships.clone(),
+            default_ship: default.template_path.clone(),
+        }]
+    }
 }
 
 /// Collect the INLINE Rhai bodies out of a raw `[script]` block.

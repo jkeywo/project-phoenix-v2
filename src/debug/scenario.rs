@@ -571,8 +571,24 @@ pub fn render_action(action: &TriggerAction) -> String {
         }
         TriggerAction::SetNpcDoctrine { entity, id } => format!("set_npc_doctrine({entity}, {id})"),
         TriggerAction::AddObjective { id, .. } => format!("add_objective({id})"),
+        TriggerAction::AddObjectiveInstance { spec, .. } => format!(
+            "add_objective({}, instance={})",
+            spec.key.objective_id, spec.key.instance_id
+        ),
         TriggerAction::CompleteObjective { id } => format!("complete_objective({id})"),
         TriggerAction::FailObjective { id } => format!("fail_objective({id})"),
+        TriggerAction::CompleteObjectiveInstance { key } => format!(
+            "complete_objective({}, instance={})",
+            key.objective_id, key.instance_id
+        ),
+        TriggerAction::FailObjectiveInstance { key } => format!(
+            "fail_objective({}, instance={})",
+            key.objective_id, key.instance_id
+        ),
+        TriggerAction::SetObjectiveInstanceProgress { key, progress } => format!(
+            "set_objective_progress({}, instance={}, progress={progress})",
+            key.objective_id, key.instance_id
+        ),
         TriggerAction::SetAiState { entity, state, .. } => {
             format!("set_ai_state({entity}, {state})")
         }

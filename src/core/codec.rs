@@ -1436,6 +1436,11 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
             .get("ship_path")
             .and_then(|p| p.as_str())
             .map(str::to_string);
+        let authored_slot_id = entry
+            .get("authored_slot_id")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let mut crew = Vec::new();
         let seats = match entry.get("crew") {
             None => &[][..],
@@ -1457,6 +1462,7 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
         ships.push(FleetShip {
             host,
             ship_path,
+            authored_slot_id,
             crew: crate::lockstep::crew::canonical_station_ratings(crew)?,
         });
     }

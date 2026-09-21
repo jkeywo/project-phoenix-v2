@@ -53,6 +53,7 @@ fn assert_browser_and_surface(
         ))
         .unwrap(),
         native.locked_scenario.clone(),
+        native.locked_slot.clone(),
         native.locked_ship.clone(),
     )
     .unwrap();
@@ -117,11 +118,13 @@ fn assert_phone_fixture(index: usize) {
         expected["data"]["locked_scenario"]
             .as_str()
             .map(str::to_string),
+        expected["data"]["locked_slot"].as_str().map(str::to_string),
         expected["data"]["locked_ship"].as_str().map(str::to_string),
     );
     let browser = project_phoenix::server::bridge::browser_scenario_catalog_message(
         &encode_scenario_catalog(&catalog_payload(&merged.catalog)).unwrap(),
         snapshot.locked_scenario.clone(),
+        snapshot.locked_slot.clone(),
         snapshot.locked_ship.clone(),
     )
     .unwrap();

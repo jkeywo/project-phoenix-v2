@@ -121,6 +121,10 @@ pub enum HostLobbyRecord {
     SelectScenario {
         scenario_id: String,
     },
+    /// The operator reserved an authored ship position.
+    SelectSlot {
+        slot_id: String,
+    },
     /// The operator picked a hull (or the single-hull auto-resolve did).
     SelectShip {
         template_path: String,
@@ -414,6 +418,7 @@ mod tests {
             label: Some(format!("{id} label")),
             description: None,
             ships: Vec::new(),
+            slots: Vec::new(),
             source: "base".into(),
         }
     }
@@ -505,6 +510,12 @@ mod tests {
             HostLobbyRecord::decode(r#"{"kind":"select_scenario","scenario_id":"patrol"}"#),
             Some(HostLobbyRecord::SelectScenario {
                 scenario_id: "patrol".into()
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"select_slot","slot_id":"escort"}"#),
+            Some(HostLobbyRecord::SelectSlot {
+                slot_id: "escort".into()
             })
         );
         assert_eq!(

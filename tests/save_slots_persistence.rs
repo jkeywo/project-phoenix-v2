@@ -152,11 +152,13 @@ fn fleet_roster(local: HostSlot) -> FleetRoster {
             FleetShip {
                 host: HostSlot(1),
                 ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
+                authored_slot_id: None,
                 crew: vec![(StationId("helm".into()), "Std".into())],
             },
             FleetShip {
                 host: HostSlot(2),
                 ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
+                authored_slot_id: None,
                 crew: vec![(StationId("tactical".into()), "Std".into())],
             },
         ],

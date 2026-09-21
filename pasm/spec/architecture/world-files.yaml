@@ -34,6 +34,38 @@ entities:
       paths: [src/world/config.rs]
       symbols: [WorldConfig]
 
+  - component: mission-ship-slot-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Mission Ship Slot Contract
+      summary: "Issue #1518: a world may declare stable player-ship slots with per-slot allowed hulls and a default. Missing slot declarations synthesize the legacy single player slot from available_ships. Pre-start claims are exclusive, hull confirmation is holder-only, and Back or disconnect releases immediately."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      owns: [mission-ship-slot-reservations]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/ship_slots.rs]
+      symbols: [ShipSlotConfig, ShipSlotReservations, ClaimOutcome, HullOutcome]
+      tests: [cargo test]
+
+  - state: mission-ship-slot-reservations
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Pre-start Ship Slot Reservations
+      summary: The claimant and optional confirmed hull for each reserved authored slot; discarded rather than recovered when a host backs out or disconnects before launch.
+    architecture:
+      classification: authoritative
+      owner: mission-ship-slot-contract
+      writers: [mission-ship-slot-contract]
+    implementation:
+      status: declared
+      paths: [src/ship_slots.rs]
+      symbols: [ShipSlotReservations, SlotReservation]
+
   - component: world-entity-spawner
     core:
       status: implemented

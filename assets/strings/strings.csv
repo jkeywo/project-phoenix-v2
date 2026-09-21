@@ -2023,6 +2023,8 @@ client.loading_ship,Phone loading surface — the ship the crew is about to fly.
 client.loading_ship_class_only,Phone loading surface — the ship line when the Session names a class but no hull id. {class} is the class badge,[{class}]
 client.select_scenario,Phone scenario picker — heading over the scenario list,[Select a scenario]
 client.select_ship,Phone scenario picker — heading over the ship list,[Select a ship]
+client.select_ship_slot,Phone scenario picker — heading over the ship-position list,[Select a ship position]
+client.ship_slot_claimed,Phone scenario picker — tooltip on a ship position reserved by another host,[Already claimed by another host]
 client.scenario_locked,Phone scenario picker — status once the selection is locked and the world is loading,Loading scenario…
 client.scenario_mod_origin,Phone scenario picker — badge on a scenario button showing it came from an applied mod pack. {name} is the pack display name,[Mod: {name}]
 client.mods_active,Phone lobby — heading above the list of mod packs the host applied to this session,[Mods active]
@@ -2111,6 +2113,7 @@ server.landing.packs.conflict_heading,Landing screen mod-pack shelf — heading 
 server.landing.packs.conflict_line,"Landing screen mod-pack shelf — one contested path. {path} is the authored file, {winner} the pack that owns it, {losers} the packs it shadows",[{path}: {winner} wins over {losers}]
 server.select_world,Host lobby — heading over the scenario picker,[Select a world]
 server.select_ship,Host lobby — picker heading after a world with multiple ships is chosen,[Select a ship]
+server.select_ship_slot,Host lobby — picker heading after a multi-ship world is chosen,[Select a ship position]
 server.no_scenarios,Host scenario picker — shown when the pre-load catalog is empty,[No scenarios available]
 server.hulls_offered.one,"Host scenario picker — a World row's count of the hulls it offers, exactly one. {n} is the count",[{n} hull]
 server.hulls_offered.other,"Host scenario picker — a World row's count of the hulls it offers, zero or several. {n} is the count",[{n} hulls]

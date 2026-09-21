@@ -13,7 +13,7 @@ import {
   pendingPick, settlePick, pickStage, scenarioPickView,
 } from '../../gui/scenario-pick.js';
 
-const nothingLocked = { scenario_id: null, template_path: null };
+const nothingLocked = { scenario_id: null, slot_id: null, template_path: null };
 
 describe('settlePick — a request with no acknowledgement', () => {
   it('is idle when nothing was sent', () => {
@@ -46,6 +46,13 @@ describe('settlePick — a request with no acknowledgement', () => {
     expect(lost.state).toBe('lost');
     expect(lost.lostTo).toBe('assets/entities/alliance_cruiser.toml');
   });
+
+  it('settles a slot request against slot_id', () => {
+    const p = pendingPick('slot', 'escort');
+    expect(settlePick(p, { scenario_id: 'combat_test', slot_id: null, template_path: null }).state).toBe('pending');
+    expect(settlePick(p, { scenario_id: 'combat_test', slot_id: 'escort', template_path: null }).state).toBe('won');
+    expect(settlePick(p, { scenario_id: 'combat_test', slot_id: 'flagship', template_path: null }).lostTo).toBe('flagship');
+  });
 });
 
 describe('pickStage', () => {
@@ -53,6 +60,12 @@ describe('pickStage', () => {
     expect(pickStage(nothingLocked)).toBe('scenario');
     expect(pickStage({ scenario_id: 'combat_test', template_path: null })).toBe('ship');
     expect(pickStage({ scenario_id: 'combat_test', template_path: 'assets/entities/x.toml' })).toBe('locked');
+  });
+
+  it('inserts a slot stage only for worlds that author slots', () => {
+    const catalog = [{ id: 'fleet', slots: [{ id: 'flagship' }, { id: 'escort' }] }];
+    expect(pickStage({ scenario_id: 'fleet', slot_id: null, template_path: null }, catalog)).toBe('slot');
+    expect(pickStage({ scenario_id: 'fleet', slot_id: 'escort', template_path: null }, catalog)).toBe('ship');
   });
 });
 

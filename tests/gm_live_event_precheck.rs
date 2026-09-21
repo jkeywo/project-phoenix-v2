@@ -59,6 +59,7 @@ fn host(local: HostSlot) -> App {
             .map(|slot| FleetShip {
                 host: slot,
                 ship_path: Some(SHIP.into()),
+                authored_slot_id: None,
                 crew: Vec::new(),
             })
             .collect(),

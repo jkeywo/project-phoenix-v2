@@ -92,6 +92,7 @@ fn roster(local: HostSlot) -> FleetRoster {
     let crewed = |host| FleetShip {
         host,
         ship_path: Some(SHIP.into()),
+        authored_slot_id: None,
         crew: vec![(StationId(CREWED_STATION.into()), CREWED_RATING.to_string())],
     };
     FleetRoster::new(vec![crewed(SLOT_ONE), crewed(SLOT_TWO)], local)

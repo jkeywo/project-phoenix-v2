@@ -995,6 +995,24 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
             "assets/entities/alliance_cruiser.toml".to_string(),
         ));
     }
+    if let Some(slots) = app
+        .world()
+        .get_resource::<crate::world::config::WorldConfig>()
+        .filter(|config| !config.ship_slots.is_empty())
+        .map(|config| config.ship_slots.clone())
+    {
+        let mut reservations = crate::ship_slots::ShipSlotReservations::default();
+        if let (Some(slot_id), Some(hull)) = (
+            edge::read_selected_ship_slot_id(),
+            edge::read_selected_ship_template_path(),
+        ) {
+            let _ = reservations.claim(&slots, &slot_id, "browser-host");
+            let _ = reservations.confirm_hull(&slots, &slot_id, "browser-host", &hull);
+        }
+        if let Some(frozen) = reservations.freeze(&slots) {
+            app.insert_resource(frozen);
+        }
+    }
     // The same pre-init record that selected the hull also owns the frozen
     // fleet topology. Install it before Startup spawns any GameStart ships, so
     // every slot takes the same authored spawn/component set it did at capture.
@@ -1535,8 +1553,30 @@ fn drain_mesh_inbound(world: &mut World) {
                     // An authored delay of `None` means "whatever this world says",
                     // which is the ordinary case: the fleet agreed a mission, and the
                     // mission's `[global] command_delay_ticks` is the number.
+                    let frozen = world
+                        .get_resource::<crate::world::config::WorldConfig>()
+                        .filter(|config| !config.ship_slots.is_empty())
+                        .map(|config| {
+                            crate::ship_slots::FrozenShipSlots::from_fleet_roster(
+                                &config.ship_slots,
+                                &roster,
+                            )
+                        })
+                        .transpose();
                     let delay = delay.unwrap_or_else(|| crate::lockstep::authored_delay(world));
-                    crate::lockstep::join_fleet(world, roster, delay)
+                    match frozen {
+                        Ok(frozen) => {
+                            let accepted = crate::lockstep::join_fleet(world, roster, delay);
+                            if !accepted {
+                                return false;
+                            }
+                            if let Some(frozen) = frozen {
+                                world.insert_resource(frozen);
+                            }
+                            true
+                        }
+                        Err(_) => false,
+                    }
                 } else {
                     false
                 };
@@ -4085,9 +4125,10 @@ pub fn wasm_get_scenario_catalog() -> Array {
 pub fn wasm_scenario_catalog_message(
     scenarios_json: &str,
     locked_scenario: Option<String>,
+    locked_slot: Option<String>,
     locked_ship: Option<String>,
 ) -> Result<String, JsValue> {
-    browser_scenario_catalog_message(scenarios_json, locked_scenario, locked_ship)
+    browser_scenario_catalog_message(scenarios_json, locked_scenario, locked_slot, locked_ship)
         .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
@@ -4096,6 +4137,7 @@ pub fn wasm_scenario_catalog_message(
 pub fn browser_scenario_catalog_message(
     scenarios_json: &str,
     locked_scenario: Option<String>,
+    locked_slot: Option<String>,
     locked_ship: Option<String>,
 ) -> Result<String, serde_json::Error> {
     use crate::core::codec::JsonCodec;
@@ -4104,6 +4146,7 @@ pub fn browser_scenario_catalog_message(
         scenarios,
         &crate::entities::config_cache::active_packs(),
         locked_scenario,
+        locked_slot,
         locked_ship,
     );
     JsonCodec.encode_server(&crate::core::messages::ServerMessage::ScenarioCatalog(
@@ -4310,6 +4353,13 @@ pub fn wasm_script_diagnostics(source: String, line_offset: u32) -> Array {
 #[wasm_bindgen]
 pub fn wasm_select_ship(template_path: &str) {
     edge::publish_selected_ship_template_path(Some(template_path.to_string()));
+}
+
+/// Store the authored mission position chosen with the hull.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_select_ship_slot(slot_id: &str) {
+    edge::publish_selected_ship_slot_id(Some(slot_id.to_string()));
 }
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────

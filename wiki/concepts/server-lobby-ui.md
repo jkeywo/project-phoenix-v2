@@ -3,7 +3,7 @@ title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
 sources: [assets/audio/room-ducking.toml, gui/audio-ducking.js, scripts/room-ducking.mjs, tests/client/audio-ducking.test.js, tests/smoke/audio-ducking.spec.js, server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/private-alerts.js, src/native_host/native_gm/boot.js, src/server_app/broadcast_publish.rs, gui/operator-profile.js, gui/gm-workspace.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json, src/audio_lifecycle.rs, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
-updated: 2026-09-13
+updated: 2026-09-21
 ---
 
 # Server HTML Lobby UI
@@ -93,6 +93,23 @@ forwards the same attention/health/workload channels to the shared workspace.
 The split exists because there are now **two** surfaces rendering this lobby from the same payload: the host page, and the native host's viewscreen surface (see [Native Host](./native-host.md#the-host-lobby-on-the-viewscreen-issue-1325)), whose document is built from this page's own `#lobby-panel` markup. Both call the same `renderHostLobby`. A second implementation of these element ids would drift the first time either was touched, so there is not one.
 
 Each viewer of `server.html` sees the same lobby state because the data originates from a single authoritative Bevy world.
+
+Mission selection may now expose authored player-ship slots. Worlds with only
+the legacy `[[available_ships]]` list still present their existing single hull
+stage: runtime configuration synthesises one `player` slot, so they need no
+content migration. Explicit slots carry independent allowed/default hulls and
+use the shared `ship_slots` reservation law; reservation is pre-start state,
+released immediately on Back or disconnect rather than entering post-start
+fleet recovery.
+
+Launch freezes claimed hulls and each unclaimed policy in authored slot order.
+`backfill` (the default) materialises the slot's default hull with no human
+crew, so its ordinary Station control-source resolver selects AI. `absent`
+omits that slot's own `GameStart` ship row entirely; an empty audience never
+broadens to every ship. The frozen roster is snapshot/digest state and remains
+fixed when a host disconnects after launch, at which point only its Station
+control sources fall back to AI. An authored multi-slot world is rejected if it
+does not provide one resolvable, ship-tagged `GameStart` row per slot.
 
 ## Push path (Rust → DOM)
 

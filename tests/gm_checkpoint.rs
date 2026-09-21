@@ -365,6 +365,7 @@ fn a_capture_that_cannot_hold_the_current_seating_is_refused_with_its_reason() {
     ships.push(FleetShip {
         host: HostSlot(9),
         ship_path: Some("assets/entities/alliance_destroyer.toml".to_string()),
+        authored_slot_id: None,
         crew: vec![(StationId("helm".into()), "Std".to_string())],
     });
     let live = LiveSeating::from_roster(
@@ -449,6 +450,7 @@ fn build_gm_peer(store: PeerStore) -> App {
             vec![FleetShip {
                 host: HostSlot(1),
                 ship_path: Some(BOOTED_HULL.to_string()),
+                authored_slot_id: None,
                 crew: vec![(StationId("helm".into()), "Std".to_string())],
             }],
             vec![HostSlot(1), HostSlot(2)],

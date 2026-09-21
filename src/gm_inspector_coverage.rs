@@ -1149,6 +1149,7 @@ mod tests {
             audio: _,
             dust: _,
             available_ships: _,
+            ship_slots: _,
             player_spawn: _,
             deadlines: _,
             routes: _,

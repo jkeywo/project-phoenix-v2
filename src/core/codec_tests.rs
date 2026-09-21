@@ -747,9 +747,11 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                         label: Some("Cruiser".into()),
                         ..Default::default()
                     }],
+                    slots: Vec::new(),
                     source: "base".into(),
                 }],
                 locked_scenario: None,
+                locked_slot: None,
                 locked_ship: None,
                 active_packs: vec![],
             }),

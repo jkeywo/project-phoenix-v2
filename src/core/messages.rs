@@ -2821,6 +2821,12 @@ pub enum ClientMessage {
     SelectScenario {
         scenario_id: String,
     },
+    /// Reserve one authored player-ship slot for this admitted pre-start host.
+    SelectShipSlot {
+        slot_id: String,
+    },
+    /// Release this sender's pre-start slot reservation immediately.
+    ReleaseShipSlot,
     /// Pre-scenario selection request: the sender proposes a player ship by
     /// its template path (issue #755). Validated by the host-runtime arbiter
     /// against the *locked scenario's* offered ships, first-valid-wins. Like
@@ -3263,6 +3269,19 @@ pub struct CatalogShipWire {
     pub name: Option<String>,
 }
 
+/// One mission ship-slot in the pre-world catalogue (issues #1518/#1522).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CatalogShipSlotWire {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub ships: Vec<CatalogShipWire>,
+    pub default_ship: String,
+    #[serde(default)]
+    pub unclaimed: crate::world::config::UnclaimedSlotPolicy,
+}
+
 /// Display provenance defaults to the pre-pack catalogue's base content.
 pub fn base_scenario_source() -> String {
     "base".to_string()
@@ -3279,6 +3298,8 @@ pub struct ScenarioCatalogWire {
     pub description: Option<String>,
     #[serde(default)]
     pub ships: Vec<CatalogShipWire>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<CatalogShipSlotWire>,
     #[serde(default = "base_scenario_source")]
     pub source: String,
 }
@@ -3299,6 +3320,8 @@ pub struct ScenarioCatalogPayload {
     pub scenarios: Vec<ScenarioCatalogWire>,
     #[serde(default)]
     pub locked_scenario: Option<String>,
+    #[serde(default)]
+    pub locked_slot: Option<String>,
     #[serde(default)]
     pub locked_ship: Option<String>,
     #[serde(default)]

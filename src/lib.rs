@@ -219,6 +219,7 @@ pub mod server_app_render;
 pub mod session_connections;
 pub mod ship;
 pub mod ship_plugin;
+pub mod ship_slots;
 /// The canonical authoritative-state digest (issue #901). At the crate root
 /// rather than under `headless` since issue #904: a digest that only compiles
 /// on native cannot make a native↔wasm claim. `headless::digest` aliases it.

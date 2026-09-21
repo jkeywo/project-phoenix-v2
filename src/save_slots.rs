@@ -1058,6 +1058,7 @@ mod tests {
                 vec![crate::lockstep::FleetShip {
                     host: HostSlot(1),
                     ship_path: Some("assets/entities/alliance_cruiser.toml".into()),
+                    authored_slot_id: None,
                     crew: Vec::new(),
                 }],
                 vec![HostSlot(1), HostSlot(2)],

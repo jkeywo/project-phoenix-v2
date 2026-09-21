@@ -84,11 +84,12 @@ function stagedDoc() {
 
 /** A recording hook set — what each surface supplies in its own way. */
 function hooks(extra) {
-  const calls = { scenario: [], ship: [], auto: [] };
+  const calls = { scenario: [], slot: [], ship: [], auto: [] };
   return [
     {
       tData: (v) => (v == null ? '' : String(v)),
       selectScenario: (id) => calls.scenario.push(id),
+      selectSlot: (id) => calls.slot.push(id),
       selectShip: (p) => calls.ship.push(p),
       autoSelectShip: (p) => calls.auto.push(p),
       shipStillNeeded: () => true,
@@ -97,6 +98,36 @@ function hooks(extra) {
     calls,
   ];
 }
+
+describe('the authored ship-slot stage', () => {
+  const slotCatalog = [{
+    ...CATALOG[0],
+    slots: [
+      { id: 'lead', label: 'Lead', claimed: false, ships: CATALOG[0].ships },
+      { id: 'wing', label: 'Wing', claimed: true, ships: CATALOG[0].ships },
+    ],
+  }];
+
+  it('uses native buttons for keyboard activation and exposes a claimed-slot refusal', () => {
+    const [h, calls] = hooks();
+    renderHostScenarios(
+      doc,
+      scenarioCatalogView(slotCatalog, { scenario_id: 'combat_test' }, false),
+      t,
+      h,
+    );
+    const lead = doc.querySelector('[data-slot-id="lead"]');
+    const wing = doc.querySelector('[data-slot-id="wing"]');
+    expect(lead.tagName).toBe('BUTTON');
+    expect(lead.tabIndex).toBe(0);
+    lead.click();
+    expect(calls.slot).toEqual(['lead']);
+    expect(wing.disabled).toBe(true);
+    expect(wing.getAttribute('aria-disabled')).toBe('true');
+    wing.click();
+    expect(calls.slot).toEqual(['lead']);
+  });
+});
 
 /** The string resolver both surfaces pass in; ids are enough to assert on. */
 const t = (id) => `«${id}»`;

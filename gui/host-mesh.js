@@ -460,7 +460,7 @@ function crewReadiness(value, maxSlots = 1) {
 }
 
 /**
- * A member's proposed ship, reduced to the two fields a roster carries.
+ * A member's proposed ship, reduced to the bounded fields a roster carries.
  *
  * Anything else — a nested object, an array, a megabyte of text, extra keys —
  * is dropped rather than stored, because whatever enters here is re-broadcast
@@ -477,7 +477,12 @@ function boundedShip(value, fleet) {
   const templatePath = boundedText(value.template_path, fleet.maxShipPathLength);
   if (!templatePath) return null;
   const name = boundedText(value.name, fleet.maxNameLength);
-  return name ? { template_path: templatePath, name } : { template_path: templatePath };
+  const slotId = boundedText(value.slot_id, fleet.maxShipPathLength);
+  return {
+    template_path: templatePath,
+    ...(slotId ? { slot_id: slotId } : {}),
+    ...(name ? { name } : {}),
+  };
 }
 
 /**
@@ -1046,7 +1051,15 @@ export function updateSlot(fleet, id, patch = {}) {
   if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
   const next = { ...slot };
   if (Object.prototype.hasOwnProperty.call(patch, 'ship')) {
-    next.ship = boundedShip(patch.ship, fleet);
+    const ship = boundedShip(patch.ship, fleet);
+    const authoredSlot = ship && ship.slot_id;
+    if (authoredSlot && fleet.slots.some((candidate) => (
+      candidate.id !== id && candidate.connected !== false
+      && candidate.ship && candidate.ship.slot_id === authoredSlot
+    ))) {
+      return { ok: false, reason: REASON_SLOT_TAKEN };
+    }
+    next.ship = ship;
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'ready')) next.ready = !!patch.ready;
   if (Object.prototype.hasOwnProperty.call(patch, 'name')) {
@@ -1429,6 +1442,9 @@ export function simulationRosterOf(roster, mine) {
       ship_path: slot.ship && typeof slot.ship.template_path === 'string'
         ? slot.ship.template_path
         : null,
+      ...(slot.ship && typeof slot.ship.slot_id === 'string'
+        ? { authored_slot_id: slot.ship.slot_id }
+        : {}),
       crew: canonicalStationRatings(slot.station_ratings),
     }))
     .filter((ship) => Number.isSafeInteger(ship.host) && participantSet.has(ship.host))

@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 54 expected action keys', () => {
+  it('contains exactly the 56 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -30,12 +30,14 @@ describe('ACTION_MAP', () => {
       'recall_external_repair',
       'recall_repair_team',
       'recall_security_team',
+      'release_ship_slot',
       'release_tractor',
       'respond_to_message',
       'return_to_lobby',
       'scan_target',
       'select_player_ship',
       'select_scenario',
+      'select_ship_slot',
       'set_boost',
       'set_helm',
       'set_helm_lateral',

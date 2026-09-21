@@ -79,6 +79,10 @@ import {
   reasonStringId,
   serverSurfaceReasons,
 } from '../../gui/join-code.js';
+import {
+  rolledBackSelection,
+  selectionDisposition,
+} from '../../gui/fleet-selection-gate.js';
 import { buildTable } from '../../gui/strings.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -1101,6 +1105,56 @@ describe('updating a slot', () => {
 
   it('refuses a slot nobody holds', () => {
     expect(updateSlot(fleetOf(), 'slot-9', { ready: true }).ok).toBe(false);
+  });
+
+  it('gives an authored mission slot to the first host that announces it', () => {
+    let fleet = admitHost(fleetOf(), { peer: 'p2', name: 'Two' }).fleet;
+    fleet = updateSlot(fleet, 'slot-1', {
+      ship: { template_path: 'cruiser.toml', slot_id: 'lead' },
+    }).fleet;
+    const raced = updateSlot(fleet, 'slot-2', {
+      ship: { template_path: 'destroyer.toml', slot_id: 'lead' },
+    });
+    expect(raced).toMatchObject({ ok: false, reason: REASON_SLOT_TAKEN });
+    expect(simulationRosterOf(rosterOf(fleet), 'slot-1').ships[0]).toMatchObject({
+      authored_slot_id: 'lead',
+    });
+  });
+
+  it('holds both sides of a simultaneous authored-slot race until the owner roster decides', () => {
+    const desired = { template_path: 'cruiser.toml', slot_id: 'lead' };
+    const selection = { scenario_id: 'fleet', slot_id: 'lead', template_path: 'cruiser.toml' };
+    const admitted = admitHost(fleetOf(), { peer: 'member' }).fleet;
+
+    // Owner arrives first: its synchronous reducer accepts, the member's
+    // proposal is refused, and the losing page returns to the slot stage.
+    const ownerFirst = updateSlot(admitted, 'slot-1', { ship: desired });
+    expect(ownerFirst.ok).toBe(true);
+    const memberLost = updateSlot(ownerFirst.fleet, 'slot-2', { ship: desired });
+    expect(memberLost).toMatchObject({ ok: false, reason: REASON_SLOT_TAKEN });
+    expect(selectionDisposition({
+      isOwner: false, updateAccepted: memberLost.ok,
+      roster: rosterOf(ownerFirst.fleet), meshSlot: 'slot-2', desired,
+    })).toBe('refused');
+    expect(rolledBackSelection(selection)).toEqual({
+      scenario_id: 'fleet', slot_id: null, template_path: null,
+    });
+
+    // Member arrives first: sending is only pending; the owner's authoritative
+    // roster echo promotes that exact proposal to accepted. A simultaneous
+    // owner click then loses synchronously and cannot start another world.
+    const memberFirst = updateSlot(admitted, 'slot-2', { ship: desired });
+    expect(memberFirst.ok).toBe(true);
+    expect(selectionDisposition({
+      isOwner: false, updateAccepted: true,
+      roster: rosterOf(admitted), meshSlot: 'slot-2', desired,
+    })).toBe('pending');
+    expect(selectionDisposition({
+      isOwner: false, updateAccepted: true,
+      roster: rosterOf(memberFirst.fleet), meshSlot: 'slot-2', desired,
+    })).toBe('accepted');
+    expect(updateSlot(memberFirst.fleet, 'slot-1', { ship: desired }))
+      .toMatchObject({ ok: false, reason: REASON_SLOT_TAKEN });
   });
 });
 

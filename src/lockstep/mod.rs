@@ -138,6 +138,10 @@ pub struct FleetShip {
     /// whatever this host's own lobby selected", which is what a solo roster
     /// says and is why a solo run is byte-identical to a pre-#1116 one.
     pub ship_path: Option<String>,
+    /// Scenario-authored player-ship slot identity. Separate from numeric
+    /// `host`, which is transport authority and may change on recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_slot_id: Option<String>,
     /// Who is aboard, as agreed when the roster froze: each crewed station and
     /// the Station Rating that crew member chose.
     ///
@@ -161,6 +165,7 @@ impl FleetShip {
         Self {
             host,
             ship_path: None,
+            authored_slot_id: None,
             crew: Vec::new(),
         }
     }
@@ -2475,11 +2480,13 @@ mod tests {
                 FleetShip {
                     host: HostSlot(2),
                     ship_path: Some("b.toml".into()),
+                    authored_slot_id: None,
                     crew: vec![(StationId("helm".into()), "Std".into())],
                 },
                 FleetShip {
                     host: HostSlot(1),
                     ship_path: Some("a.toml".into()),
+                    authored_slot_id: None,
                     crew: vec![],
                 },
             ],

@@ -788,6 +788,11 @@ export const ACTION_MAP = Object.freeze({
     if (!a.template_path) return;
     send('SelectPlayerShip', { template_path: a.template_path });
   },
+  select_ship_slot: (a, send) => {
+    if (typeof a.slot_id !== 'string' || !a.slot_id) return;
+    send('SelectShipSlot', { slot_id: a.slot_id });
+  },
+  release_ship_slot: (_a, send) => send('ReleaseShipSlot', {}),
 });
 
 /**

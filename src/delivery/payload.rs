@@ -41,6 +41,17 @@ pub fn scenario_payload(entry: &ScenarioCatalogEntry) -> ScenarioPayload {
         label: entry.label.clone(),
         description: entry.description.clone(),
         ships: entry.ships.iter().map(ship_payload).collect(),
+        slots: entry
+            .slots
+            .iter()
+            .map(|slot| crate::core::messages::CatalogShipSlotWire {
+                id: slot.id.clone(),
+                label: slot.label.clone(),
+                ships: slot.ships.iter().map(ship_payload).collect(),
+                default_ship: slot.default_ship.clone(),
+                unclaimed: slot.unclaimed,
+            })
+            .collect(),
         source: entry
             .origin
             .clone()
@@ -68,11 +79,13 @@ pub fn catalogue_snapshot(
     scenarios: Vec<ScenarioPayload>,
     active: &[ActivePack],
     locked_scenario: Option<String>,
+    locked_slot: Option<String>,
     locked_ship: Option<String>,
 ) -> ScenarioCatalogPayload {
     ScenarioCatalogPayload {
         scenarios,
         locked_scenario,
+        locked_slot,
         locked_ship,
         active_packs: active.iter().map(ActivePackWire::from).collect(),
     }
@@ -139,6 +152,7 @@ name = "AEV Phoenix"
                     label: None,
                     description: None,
                     ships: vec![ship("curated.toml", Some("Curated"))],
+                    slots: Vec::new(),
                     origin: origin.map(str::to_string),
                 })
                 .collect(),

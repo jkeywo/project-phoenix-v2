@@ -380,6 +380,9 @@ thread_local! {
     /// to `"assets/entities/alliance_cruiser.toml"`.
     static SELECTED_SHIP_TEMPLATE_PATH: RefCell<Option<String>> =
         const { RefCell::new(None) };
+    /// Authored mission position selected alongside the hull. Kept separate
+    /// from the hull for legacy worlds, whose picker still has no slot stage.
+    static SELECTED_SHIP_SLOT_ID: RefCell<Option<String>> = const { RefCell::new(None) };
 
     /// INBOX: instagib-toggle requests from `wasm_toggle_instagib()`, drained by
     /// `drain_instagib_toggle` each `PreUpdate` into the [`crate::server_app::Instagib`] Resource
@@ -486,6 +489,10 @@ pub(super) fn drain_inbound_queue() -> Vec<(String, String)> {
 
 pub(super) fn publish_selected_ship_template_path(value: Option<String>) {
     SELECTED_SHIP_TEMPLATE_PATH.with(|slot| *slot.borrow_mut() = value);
+}
+
+pub(super) fn publish_selected_ship_slot_id(value: Option<String>) {
+    SELECTED_SHIP_SLOT_ID.with(|slot| *slot.borrow_mut() = value);
 }
 
 pub(super) fn publish_snapshot_world(value: Option<(String, String)>) {
@@ -614,6 +621,10 @@ pub(super) fn publish_pending_restore_staged(value: Option<crate::snapshot::Stor
 
 pub(super) fn read_selected_ship_template_path() -> Option<String> {
     SELECTED_SHIP_TEMPLATE_PATH.with(|value| value.borrow().clone())
+}
+
+pub(super) fn read_selected_ship_slot_id() -> Option<String> {
+    SELECTED_SHIP_SLOT_ID.with(|value| value.borrow().clone())
 }
 
 pub(super) fn read_snapshot_world() -> Option<(String, String)> {

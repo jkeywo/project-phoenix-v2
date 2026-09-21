@@ -170,7 +170,7 @@ describe('the shipped entry table', () => {
     }
   });
 
-  it('records both native gaps as unserved STAGES, not as unoffered rows', () => {
+  it('serves the native GM routes while retaining web-only Connect to Host', () => {
     // #1363's AC5 and #1364's native half are unbuilt, and this is where that
     // is written down. The two fields say different things: `platforms` is what
     // a surface does not offer (Connect to Host, for ever, because a native
@@ -182,20 +182,20 @@ describe('the shipped entry table', () => {
     expect(load.stagePlatforms).toEqual(['web']);
     const peer = LANDING_ENTRIES.find((e) => e.id === 'join_peer');
     expect(peer.platforms).toEqual(['web', 'native']);
-    expect(peer.stagePlatforms).toEqual(['web']);
+    expect(peer.stagePlatforms).toBeUndefined();
     const connect = LANDING_ENTRIES.find((e) => e.id === 'connect_host');
     expect(connect.platforms).toEqual(['web']);
     expect(connect.stagePlatforms).toBeUndefined();
     // Nothing else in the shipped table is gated this way; a third would be a
     // third unfinished AC and should arrive with its own test.
     expect(LANDING_ENTRIES.filter((e) => e.stagePlatforms).map((e) => e.id))
-      .toEqual(['load_game', 'host_gm', 'join_peer']);
+      .toEqual(['load_game']);
     // Host as GM is the third, and the same KIND of gap as Join as Peer's: the
     // Game Master profile is a browser profile chosen inside `wasm_init`, and
     // the native host composes its app before any landing row can ask for one.
     const hostGm = LANDING_ENTRIES.find((e) => e.id === 'host_gm');
     expect(hostGm.platforms).toEqual(['web', 'native']);
-    expect(hostGm.stagePlatforms).toEqual(['web']);
+    expect(hostGm.stagePlatforms).toBeUndefined();
   });
 
   it('marks both join routes as pre-boot stages, and nothing else', () => {
@@ -1070,18 +1070,18 @@ describe('landingViewModel — the join stage (issue #1364)', () => {
       .toBe('server.landing.status_hosting');
   });
 
-  it('takes the join descriptor away with the stage where it cannot be served', () => {
+  it('keeps the native Join as Peer descriptor with its live stage', () => {
     // Join as Peer is offered on the native menu and cannot be opened there:
     // the Game Master profile is a BROWSER profile. A row whose stage is gone
     // must not still carry a code field for something to find.
     const native = landingEntries('native', LANDING_ENTRIES)
       .find((e) => e.id === 'join_peer');
-    expect(native.stage).toBe(null);
-    expect(native.docks).toBe(null);
-    expect(native.join).toBe(null);
+    expect(native.stage).toBe('join-code');
+    expect(native.docks).toBe('landing-join-panel');
+    expect(native.join.action).toBe('boot-game-master');
     const vm = landingViewModel({ platform: 'native', openEntryId: 'join_peer' });
-    expect(vm.stage).toBe('idle');
-    expect(vm.join).toBe(null);
+    expect(vm.stage).toBe('join-code');
+    expect(vm.join.action).toBe('boot-game-master');
     // ...and the shipped row is untouched: the copy is the surface's view of it.
     expect(joinOf('join_peer').action).toBe('boot-game-master');
   });

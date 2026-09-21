@@ -80,6 +80,10 @@ pub mod console_assignment;
 /// unchanged.
 #[cfg(feature = "host")]
 pub mod direct_join;
+/// Private reconnect identity for a native GM fleet peer. Entries are keyed by
+/// a deterministic hash of the canonical fleet code and never enter saves or
+/// participant-facing payloads.
+pub mod fleet_identity;
 /// The native host's own lobby surface (issue #1325) — the crew lobby the
 /// browser host shows, composited onto the viewscreen window from an embedded
 /// web view over the SAME `gui/host-lobby-view.js` + `gui/host-lobby-render.js`
@@ -137,6 +141,7 @@ pub mod panes;
 #[cfg(feature = "host")]
 pub mod relay_socket;
 pub mod relay_transport;
+pub mod session_role;
 /// The setup/layout accessibility model (issue #1128) — pure, Bevy-free. The
 /// reflow-headroom check that keeps one- and two-pane layouts operable at the
 /// supported text-scale extremes, the keyboard-focus order across monitors and

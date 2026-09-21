@@ -9,7 +9,7 @@
 //! issue #1360 *because of this surface* — so nothing here re-decides anything
 //! they decide, and there is exactly one landing.
 //!
-//! What crosses is therefore very little: the two facts the page cannot know
+//! What crosses is therefore very little: the process facts the page cannot know
 //! about the process it is embedded in.
 //!
 //! * **which build this is.** A browser host reads it from a `<meta>` tag
@@ -23,6 +23,9 @@
 //!   180, against the landing's 205) has to be visible. On the host page that is
 //!   page lifecycle — `hideLanding()` — and on this surface the host is the only
 //!   thing that knows, which is why it is pushed rather than inferred.
+//! * **how a fleet-peer admission is progressing.** The native WebSocket and
+//!   reconnect identity live outside the embedded document, so their typed
+//!   pending/refusal/admitted state must be projected back onto its join panel.
 //!
 //! Which entry is OPEN is deliberately not here. That is `nextOpenEntry`'s
 //! answer over the page's own memory of it, exactly as `_landingOpenEntry` is
@@ -65,6 +68,10 @@ pub struct LandingPanelPayload {
     /// picker that way, so a `--world` host, which never pushes, never flashes a
     /// front door it has already walked through.
     pub dismissed: bool,
+    /// Native fleet-peer admission state. This is a machine word which the
+    /// shared join-code presentation turns into its existing localised text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub join_status: Option<String>,
 }
 
 impl LandingPanelPayload {
@@ -73,7 +80,13 @@ impl LandingPanelPayload {
         Self {
             build: BUILD_ID.to_string(),
             dismissed,
+            join_status: None,
         }
+    }
+
+    pub fn with_join_status(mut self, status: Option<String>) -> Self {
+        self.join_status = status;
+        self
     }
 
     /// Encode for the bridge. Infallible in practice — one string and one bool —
@@ -90,9 +103,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_payload_carries_the_two_things_the_page_cannot_know_for_itself() {
+    fn the_payload_carries_only_process_state_the_page_cannot_know_for_itself() {
         // Everything else the landing shows is decided by the shared view model
-        // from the shared entry table. These two are facts about the PROCESS,
+        // from the shared entry table. These are facts about the PROCESS,
         // which is the whole reason there is a push at all.
         let json = LandingPanelPayload::new(false).to_json();
         assert!(json.contains(r#""dismissed":false"#));
@@ -101,6 +114,14 @@ mod tests {
         // host holding an opinion the page already holds.
         assert!(!json.contains("platform"));
         assert!(!json.contains("open_entry"));
+    }
+
+    #[test]
+    fn fleet_join_status_is_optional_and_typed() {
+        let json = LandingPanelPayload::new(false)
+            .with_join_status(Some("pending".into()))
+            .to_json();
+        assert!(json.contains(r#""join_status":"pending""#));
     }
 
     #[test]

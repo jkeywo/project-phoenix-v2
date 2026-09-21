@@ -105,6 +105,15 @@ impl std::error::Error for RelayConnectError {}
 /// same upgrade `socketUrl()` performs in gui/rendezvous-transport.js, kept
 /// here rather than asked of the operator.
 pub fn host_socket_url(base: &str) -> Result<String, RelayConnectError> {
+    socket_url(base, "/v1/host")
+}
+
+/// The fleet/crew join endpoint on a rendezvous service base URL.
+pub fn join_socket_url(base: &str) -> Result<String, RelayConnectError> {
+    socket_url(base, "/v1/join")
+}
+
+fn socket_url(base: &str, endpoint: &str) -> Result<String, RelayConnectError> {
     let trimmed = base.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return Err(RelayConnectError::BadUrl(base.to_string()));
@@ -119,7 +128,7 @@ pub fn host_socket_url(base: &str) -> Result<String, RelayConnectError> {
     if rest.is_empty() {
         return Err(RelayConnectError::BadUrl(base.to_string()));
     }
-    Ok(format!("{scheme}://{rest}/v1/host"))
+    Ok(format!("{scheme}://{rest}{endpoint}"))
 }
 
 impl WsRelaySocket {
@@ -133,7 +142,16 @@ impl WsRelaySocket {
     /// which one is an operator decision and a checklist item, not a default
     /// this file can invent.
     pub fn connect(base: &str, origin: &str) -> Result<Self, RelayConnectError> {
-        let url = host_socket_url(base)?;
+        Self::connect_url(host_socket_url(base)?, origin)
+    }
+
+    /// Dial the rendezvous join endpoint with the same bounded queues and
+    /// reconnect supervisor as the host endpoint.
+    pub fn connect_join(base: &str, origin: &str) -> Result<Self, RelayConnectError> {
+        Self::connect_url(join_socket_url(base)?, origin)
+    }
+
+    fn connect_url(url: String, origin: &str) -> Result<Self, RelayConnectError> {
         // The FIRST dial is synchronous, so a typo'd URL, an unreachable
         // service or an origin the deployment does not allow is a startup
         // error the operator reads immediately — rather than a process that
@@ -407,6 +425,14 @@ mod tests {
         assert_eq!(
             host_socket_url("wss://example.test").unwrap(),
             "wss://example.test/v1/host"
+        );
+        assert_eq!(
+            join_socket_url("https://phoenix-rendezvous.project-phoenix.workers.dev/").unwrap(),
+            "wss://phoenix-rendezvous.project-phoenix.workers.dev/v1/join"
+        );
+        assert_eq!(
+            join_socket_url("http://localhost:8787").unwrap(),
+            "ws://localhost:8787/v1/join"
         );
     }
 

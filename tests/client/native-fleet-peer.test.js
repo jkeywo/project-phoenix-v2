@@ -82,4 +82,49 @@ describe('native technical fleet peer', () => {
     expect(handle.setGmReady).toHaveBeenCalledWith(true);
     expect(handle.broadcast.mock.calls.map(call => call[0])).toEqual(['one', 'two']);
   });
+
+  it('joins as a relay-only GM and restores its private reconnect capability', async () => {
+    const sent = [];
+    let options;
+    const handle = {
+      role: 'gm', slot: 'slot-2', update: vi.fn(), setCrewReadiness: vi.fn(),
+      setGmReady: vi.fn(), setStartValidation: vi.fn(), broadcast: vi.fn(),
+      forceStart: vi.fn(), close: vi.fn(),
+    };
+    const createMember = vi.fn(candidate => { options = candidate; return handle; });
+    const peer = createNativeFleetPeer({
+      send: record => sent.push(record), createMember, createOwner: vi.fn(),
+    });
+    expect(peer.configure({
+      base: 'https://fleet.test', owner: false, stamp: '{"protocol":14}',
+      credentials: ['configuration-proof'], gm_name: 'Morgan',
+    })).toBe(true);
+    expect(peer.join('SERVER-ABCD', { namespaces: {} }, {
+      reconnectCredential: 'private-capability', claim: 'slot-2',
+    })).toBe(true);
+    expect(options).toMatchObject({
+      code: 'SERVER-ABCD', role: 'gm', name: 'Morgan',
+      reconnectCredential: 'private-capability', claim: 'slot-2',
+      transports: ['ws-relay'],
+    });
+
+    options.onIdentity({
+      role: 'gm', operatorId: 'gm-1', reconnectCredential: 'private-capability',
+      rolePreset: null,
+    });
+    await Promise.resolve();
+    expect(sent).toContainEqual({
+      kind: 'fleet_identity',
+      identity: {
+        role: 'gm', operatorId: 'gm-1', reconnectCredential: 'private-capability',
+        rolePreset: null, claim: 'slot-2',
+      },
+    });
+
+    const bootstrap = options.onGmJoinBootstrap(7, { frozen: true, local: 2 });
+    expect(sent.at(-1)).toMatchObject({ kind: 'fleet_gm_bootstrap', id: 7, generation: 1 });
+    peer.update({ roster_result: { generation: 1, accepted: true }, force_start: true });
+    await expect(bootstrap).resolves.toBe(true);
+    expect(handle.forceStart).toHaveBeenCalledOnce();
+  });
 });

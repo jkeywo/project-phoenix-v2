@@ -136,11 +136,27 @@ fn drain_native_inbound(
     mut inbound: MessageWriter<InboundMessage>,
     mut disconnects: MessageWriter<PlayerDisconnected>,
     log: Option<Res<LogFilterConfig>>,
+    role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
 ) {
     let Some(mut transport) = transport else {
         return;
     };
+    let gm_only = role.as_ref().is_some_and(|state| {
+        matches!(
+            state.role(),
+            crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+                | crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+        )
+    });
     for event in transport.0.poll() {
+        if gm_only {
+            crate::pdebug!(
+                log,
+                LogCat::Admit,
+                "native transport: crew ingress is disabled for the selected GM role"
+            );
+            continue;
+        }
         match event {
             TransportEvent::Received { token, msg } => {
                 if crate::lobby::handler::is_reserved_token(&token) {

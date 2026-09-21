@@ -117,13 +117,26 @@ fn sync_lobby_role_intent(
     mut authority: ResMut<NativeGmAuthority>,
     mut roster: ResMut<GmRoster>,
     mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
+    role: Option<Res<super::session_role::NativeSessionRoleState>>,
 ) {
     if *phase.get() != GamePhase::Lobby {
         return;
     }
-    let assigned = layout
-        .as_ref()
-        .and_then(|layout| layout.layout.game_master_monitor());
+    let primary_gm = role.as_ref().is_some_and(|state| {
+        state.committed()
+            && matches!(
+                state.role(),
+                super::session_role::NativeSessionRole::StandaloneGameMaster
+                    | super::session_role::NativeSessionRole::FleetGameMaster
+            )
+    });
+    let assigned = layout.as_ref().and_then(|layout| {
+        if primary_gm {
+            Some(layout.layout.viewscreen())
+        } else {
+            layout.layout.game_master_monitor()
+        }
+    });
     if state.enabled == assigned.is_some() && state.desired_monitor.as_ref() == assigned {
         return;
     }
@@ -131,6 +144,9 @@ fn sync_lobby_role_intent(
     state.desired_monitor = assigned.cloned();
     state.ready = false;
     authority.connected = false;
+    if primary_gm {
+        return;
+    }
     let mut rows: Vec<_> = roster
         .operators()
         .iter()
@@ -198,15 +214,43 @@ fn drain_records(world: &mut World) {
                 if surface.bridge.live()
                     && world.resource::<State<GamePhase>>().get() == &GamePhase::Lobby =>
             {
-                world
-                    .resource_mut::<start::NativeGmStartRequests>()
-                    .request();
+                let fleet_peer = world
+                    .get_resource::<super::session_role::NativeSessionRoleState>()
+                    .is_some_and(|state| {
+                        state.committed()
+                            && state.role()
+                                == super::session_role::NativeSessionRole::FleetGameMaster
+                    });
+                if fleet_peer {
+                    world
+                        .resource_mut::<super::host_lobby::fleet::NativeFleetForceRequest>()
+                        .0 = true;
+                } else {
+                    world
+                        .resource_mut::<start::NativeGmStartRequests>()
+                        .request();
+                }
             }
             NativeGmRecord::Action { request } => {
                 let Some(request) = codec::decode_gm_action_request(&request) else {
                     continue;
                 };
-                if let Err(reason) = crate::gm_action::submit_native(world, request.clone()) {
+                let primary_gm = world
+                    .get_resource::<super::session_role::NativeSessionRoleState>()
+                    .is_some_and(|state| {
+                        state.committed()
+                            && matches!(
+                                state.role(),
+                                super::session_role::NativeSessionRole::StandaloneGameMaster
+                                    | super::session_role::NativeSessionRole::FleetGameMaster
+                            )
+                    });
+                let result = if primary_gm {
+                    crate::gm_action::submit_local(world, request.clone())
+                } else {
+                    crate::gm_action::submit_native(world, request.clone())
+                };
+                if let Err(reason) = result {
                     let tick = world.resource::<crate::sim_tick::SimTick>().0;
                     world
                         .resource_mut::<crate::gm_action::LocalGmActionRefusals>()
@@ -234,8 +278,24 @@ fn sync_presence(
     mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
     sessions: Option<Res<crate::lobby::Sessions>>,
     starts: Option<Res<start::NativeGmStartRequests>>,
+    role: Option<Res<super::session_role::NativeSessionRoleState>>,
+    fleet_roster: Option<Res<crate::lockstep::FleetRoster>>,
 ) {
-    let assigned = layout.as_ref().and_then(|l| l.layout.game_master_monitor());
+    let primary_gm = role.as_ref().is_some_and(|state| {
+        state.committed()
+            && matches!(
+                state.role(),
+                super::session_role::NativeSessionRole::StandaloneGameMaster
+                    | super::session_role::NativeSessionRole::FleetGameMaster
+            )
+    });
+    let assigned = layout.as_ref().and_then(|l| {
+        if primary_gm {
+            Some(l.layout.viewscreen())
+        } else {
+            l.layout.game_master_monitor()
+        }
+    });
     if *phase.get() == GamePhase::Lobby {
         state.enabled = assigned.is_some();
         state.desired_monitor = assigned.cloned();
@@ -275,16 +335,27 @@ fn sync_presence(
         state.lost = false;
     }
     authority.connected = connected;
+    let bound_operator = primary_gm
+        .then(|| {
+            let fleet = fleet_roster.as_ref()?;
+            let id = fleet.gm_operator(fleet.local())?;
+            roster.operators().iter().find(|row| row.id == id).cloned()
+        })
+        .flatten();
+    let operator_id = bound_operator
+        .as_ref()
+        .map(|row| row.id.as_str())
+        .unwrap_or(NATIVE_GM_OPERATOR_ID);
     let mut rows: Vec<_> = roster
         .operators()
         .iter()
-        .filter(|gm| gm.id != NATIVE_GM_OPERATOR_ID)
+        .filter(|gm| gm.id != operator_id)
         .cloned()
         .collect();
-    if state.enabled {
+    if state.enabled && (!primary_gm || bound_operator.is_some()) {
         rows.push(GmOperator {
-            id: NATIVE_GM_OPERATOR_ID.into(),
-            name: "GM".into(),
+            id: operator_id.into(),
+            name: bound_operator.map_or_else(|| "GM".into(), |row| row.name),
             connected,
             ready: state.ready,
         });

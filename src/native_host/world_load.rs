@@ -79,6 +79,7 @@ use crate::lobby::stations_config::ShipStations;
 use crate::lobby::{InboundMessage, LobbyOutbox, PlayerDisconnected};
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::app::{self, HullChoice, NativeHostError};
+use crate::sim_rng::{SeedSource, SimRng};
 use crate::world::manifest::ScenarioCatalog;
 use crate::world_id::{WorldIdMint, WorldIdMintState};
 
@@ -280,6 +281,7 @@ fn drain_scenario_selection(
     mut outbox: ResMut<LobbyOutbox>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
+    native_role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
 ) {
     // `--ship` given without `--world` (issue #1326 makes that combination
     // legal) already outranks whatever `SelectPlayerShip` locks, so asking a
@@ -385,13 +387,18 @@ fn drain_scenario_selection(
 
     // Complete when the arbiter locked both halves, OR when it locked the
     // scenario and `--ship` already supplied the other.
-    let scenario_needs_slot = selection
-        .0
-        .scenario()
-        .and_then(|id| scenario_arbiter::find_scenario(&catalog.0, id))
-        .is_some_and(|entry| !entry.slots.is_empty());
+    let fleet_gm = native_role.as_ref().is_some_and(|state| {
+        state.role() == crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+    });
+    let scenario_needs_slot = !fleet_gm
+        && selection
+            .0
+            .scenario()
+            .and_then(|id| scenario_arbiter::find_scenario(&catalog.0, id))
+            .is_some_and(|entry| !entry.slots.is_empty());
     let slot_complete = !scenario_needs_slot || selection.0.slot().is_some();
-    let complete = (selection.0.is_complete() && slot_complete)
+    let complete = fleet_gm && selection.0.scenario().is_some()
+        || (selection.0.is_complete() && slot_complete)
         || (selection.0.scenario().is_some() && slot_complete && pinned_ship.is_some());
     if !changed || !complete {
         return;
@@ -403,9 +410,13 @@ fn drain_scenario_selection(
         world_path: world_path.to_string(),
         // `--ship` still outranks the lobby's pick, the way it outranks the
         // world's default hull on the `--world` path.
-        ship_path: pinned_ship.or_else(|| selection.0.ship().map(str::to_string)),
-        slot_id: selection.0.slot().map(str::to_string),
-        claimant: slot_claim.0.clone(),
+        ship_path: (!fleet_gm)
+            .then(|| pinned_ship.or_else(|| selection.0.ship().map(str::to_string)))
+            .flatten(),
+        slot_id: (!fleet_gm)
+            .then(|| selection.0.slot().map(str::to_string))
+            .flatten(),
+        claimant: (!fleet_gm).then(|| slot_claim.0.clone()).flatten(),
         curated_ships: scenario_arbiter::curated_ships_for(&catalog.0, &selection.0),
     });
 }
@@ -818,22 +829,39 @@ fn load_selected_world(
             .ship_slots = curated;
     }
 
-    // Step two: the hull, the seed and the two ship resources — again the same
-    // function `build_native_host_app` calls.
+    let native_role = world
+        .get_resource::<crate::native_host::session_role::NativeSessionRoleState>()
+        .map(|state| state.role())
+        .unwrap_or(crate::native_host::session_role::NativeSessionRole::ShipHost);
+    let fleet_gm =
+        native_role == crate::native_host::session_role::NativeSessionRole::FleetGameMaster;
+
+    // Step two: ordinary and standalone-GM hosts install their chosen hull.
+    // A fleet GM deliberately owns no ship; the adopted topology is the sole
+    // source of ships on that peer.
     let world_config = world
         .resource::<crate::world::config::WorldConfig>()
         .clone();
-    let sim_rng = app::install_world_selection(
-        world,
-        &world_config,
-        &HullChoice {
-            world_label: &pending.world_path,
-            ship_path: pending.ship_path.as_deref(),
-            curated_ships: &pending.curated_ships,
-            seed: settings.seed,
-        },
-    )?;
-    if !world_config.ship_slots.is_empty() {
+    let sim_rng = if fleet_gm {
+        world.insert_resource(crate::gm_projection::GameMasterPeer);
+        match (settings.seed, world_config.global.seed) {
+            (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
+            (None, Some(seed)) => SimRng::new(seed, SeedSource::World),
+            (None, None) => SimRng::random(),
+        }
+    } else {
+        app::install_world_selection(
+            world,
+            &world_config,
+            &HullChoice {
+                world_label: &pending.world_path,
+                ship_path: pending.ship_path.as_deref(),
+                curated_ships: &pending.curated_ships,
+                seed: settings.seed,
+            },
+        )?
+    };
+    if !fleet_gm && !world_config.ship_slots.is_empty() {
         let mut reservations = crate::ship_slots::ShipSlotReservations::default();
         let (Some(slot_id), Some(claimant), Some(hull)) = (
             pending.slot_id.as_deref(),
@@ -880,6 +908,23 @@ fn load_selected_world(
     let restore = park_mint(world);
     world.run_schedule(RuntimeWorldLoad);
     restore_mint(world, restore);
+    if native_role == crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster {
+        crate::gm_solo::bind_standalone_game_master(world).ok_or_else(|| {
+            NativeHostError::Ship("standalone GM identity could not be admitted".into())
+        })?;
+        if let Some(bridge) =
+            world.get_resource::<crate::native_host::host_lobby::HostLobbyBridgeResource>()
+        {
+            bridge
+                .0
+                .push_join(crate::native_host::host_lobby::join::JoinInvite::Off.to_json());
+        }
+    }
+    if let Some(mut role) =
+        world.get_resource_mut::<crate::native_host::session_role::NativeSessionRoleState>()
+    {
+        role.commit();
+    }
     Ok(())
 }
 

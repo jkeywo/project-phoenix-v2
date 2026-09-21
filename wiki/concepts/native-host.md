@@ -1548,6 +1548,42 @@ localiseHostPayload → hostLobbyViewModel → renderHostLobby
 | This display's saved text size and contrast | `src/native_host/viewscreen_presentation.rs` (`%APPDATA%/ProjectPhoenix/viewscreen-presentation.toml`; seeded into the document by `panes::document::inject_head_script`, written back by `HostLobbyRecord::SetPresentation`) |
 | Compositing and input | `src/native_host/panes/ultralight.rs` |
 
+### Native role routes and the primary GM desk
+
+The landing now has three native session roles in
+`native_host::session_role`: undecided/ordinary ship host, standalone Game
+Master, and fleet Game Master peer. Back can change that choice until a World
+is ingested; ingestion commits it, and later role changes are refused.
+
+**Host as GM** uses the ordinary scenario/hull picker and runtime world loader.
+It installs one selected local hull, binds `gm_solo`'s `gm-1`, AI-backfills the
+Stations, and disables crew ingress and the crew invitation. Start and GM
+actions use the existing fixed-tick force-start and `gm_action::submit_local`
+paths. Once committed, the shared native GM document fills the primary window;
+the retained landing, HUD and 3-D viewscreen stop drawing over it and leave the
+input router.
+
+**Join as Peer** opens the shared typed-code panel and creates a GM-only fleet
+member over the rendezvous join endpoint. The built-in rendezvous URL and
+`http://localhost:8080` origin are used when no service flags were supplied;
+an alternative still requires both `--rendezvous` and `--origin`. The row stays
+live when that service is unavailable and shows the typed refusal. Bootstrap
+may arrive before the operator has selected the fleet's matching scenario; it
+is held until world ingestion and then enters the existing `gm_join` state
+machine. That ingestion installs no `SelectedShipResource`, Stations or
+`LocalShip`: the adopted fleet topology is the only source of ships.
+
+The native peer's reconnect capability and technical slot claim are stored in
+the user's private `ProjectPhoenix/fleet-identities` app-data directory, keyed
+by a stable hash of the canonical fleet code. They do not enter logs, UI state,
+participant payloads, snapshots or session saves.
+
+For `--lobby` only, an omitted `--mod-pack-dir` means `./mod-packs`, resolved
+against the launch directory before the process changes content root and
+created automatically. Only this implicit default is created. An explicit
+missing shelf retains the existing scan error; a failed implicit create is
+non-fatal and appears through that same shelf-error presentation.
+
 The native HUD and lobby are separate Bevy textures. When F9 reveals the
 lobby, `panes::hud::hud_z_index` puts the passive HUD below it so the frame
 cannot obscure the Settings cog, popup or Station rows. Hiding chrome restores

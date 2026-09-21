@@ -687,20 +687,21 @@ fn feed_landing_panel(
     bridge: Option<Res<HostLobbyBridgeResource>>,
     catalog: Option<Res<LobbyScenarioCatalog>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    mut published: Local<bool>,
+    role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
+    mut published: Local<String>,
 ) {
     let (Some(bridge), Some(_catalog)) = (bridge, catalog) else {
         return;
     };
     let dismissed = world_config.is_some();
-    let moved = !*published || world_config.as_ref().is_some_and(|w| w.is_added());
-    if !moved {
+    let payload = landing::LandingPanelPayload::new(dismissed)
+        .with_join_status(role.and_then(|role| role.join_status.clone()))
+        .to_json();
+    if *published == payload {
         return;
     }
-    *published = true;
-    bridge
-        .0
-        .push_landing(landing::LandingPanelPayload::new(dismissed).to_json());
+    published.clone_from(&payload);
+    bridge.0.push_landing(payload);
 }
 
 /// Carry the mod-pack shelf to the surface (issue #1366).
@@ -1062,6 +1063,8 @@ pub(crate) fn drain_surface_records(
     mut room_records: ParamSet<(
         Option<ResMut<super::audio::NativeRoomAudio>>,
         Option<ResMut<fleet::NativeFleetEvents>>,
+        Option<ResMut<super::session_role::NativeSessionRoleState>>,
+        Option<Res<HostLobbyJoinResource>>,
     )>,
 ) {
     let Some(bridge) = bridge else {
@@ -1171,10 +1174,72 @@ pub(crate) fn drain_surface_records(
             }
             HostLobbyRecord::LandingOpen { entry } => {
                 crate::pinfo!(log, LogCat::Lobby, "host lobby: landing opened: {entry}");
+                if let Some(mut role) = room_records.p2() {
+                    use super::session_role::NativeSessionRole;
+                    let requested = match entry.as_str() {
+                        "new_game" => Some(NativeSessionRole::ShipHost),
+                        "host_gm" => Some(NativeSessionRole::StandaloneGameMaster),
+                        "join_peer" => Some(NativeSessionRole::FleetGameMaster),
+                        _ => None,
+                    };
+                    if let Some(requested) = requested {
+                        if !role.request(requested) {
+                            crate::pwarn!(
+                                log,
+                                LogCat::Lobby,
+                                "host lobby: role change refused after commit"
+                            );
+                        } else if requested == NativeSessionRole::StandaloneGameMaster {
+                            bridge.0.push_join(JoinInvite::Off.to_json());
+                        }
+                    }
+                }
                 continue;
             }
             HostLobbyRecord::LandingClose => {
                 crate::pinfo!(log, LogCat::Lobby, "host lobby: landing closed");
+                let restore_join = room_records.p2().as_ref().is_some_and(|role| {
+                    !role.committed()
+                        && role.role()
+                            == super::session_role::NativeSessionRole::StandaloneGameMaster
+                });
+                if let Some(mut role) = room_records.p2() {
+                    role.back();
+                }
+                if restore_join {
+                    if let Some(invite) = room_records
+                        .p3()
+                        .as_ref()
+                        .and_then(|join| join.direct.as_ref().map(|code| join.invite(code)))
+                    {
+                        bridge.0.push_join(invite.to_json());
+                    }
+                }
+                continue;
+            }
+            HostLobbyRecord::JoinPeer { code } => {
+                let accepted = if let Some(mut role) = room_records.p2() {
+                    use super::session_role::NativeSessionRole;
+                    if role.request(NativeSessionRole::FleetGameMaster) {
+                        role.pending_code = Some(code.clone());
+                        role.join_status = Some("pending".into());
+                        true
+                    } else {
+                        crate::pwarn!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: fleet join refused after role commit"
+                        );
+                        false
+                    }
+                } else {
+                    false
+                };
+                if accepted {
+                    if let Some(mut events) = room_records.p1() {
+                        events.request_join(code);
+                    }
+                }
                 continue;
             }
             HostLobbyRecord::ExitDesktop => {
@@ -1342,7 +1407,14 @@ pub(crate) fn drain_surface_records(
             | HostLobbyRecord::FleetHostLost { .. }
             | HostLobbyRecord::FleetSlotClaimed { .. }
             | HostLobbyRecord::FleetWireSend { .. }
-            | HostLobbyRecord::FleetFault { .. } => continue,
+            | HostLobbyRecord::FleetFault { .. }
+            | HostLobbyRecord::FleetIdentity { .. }
+            | HostLobbyRecord::FleetGmBootstrap { .. }
+            | HostLobbyRecord::FleetStartPolicy { .. }
+            | HostLobbyRecord::FleetForceResult { .. }
+            | HostLobbyRecord::FleetGmJoinPending { .. }
+            | HostLobbyRecord::FleetGmJoinStatus { .. }
+            | HostLobbyRecord::FleetJoinStatus { .. } => continue,
         };
         let Some(layout) = layout.as_mut() else {
             crate::pwarn!(

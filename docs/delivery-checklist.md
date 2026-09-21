@@ -337,21 +337,26 @@ cargo build --release --features host --bin phoenix-host
       that is ever wanted, it is a new decision with its own security review, not
       a flag.
 
-### What the native host does NOT do yet
+### Native host runtime boundaries
 
 State this in any release notes, because the gap is not obvious from the name:
 
-- With no `--world` it serves assets, the content manifest, the catalogue and
-  the version pin, and nothing else — the authoritative sim is then still the
-  browser host (`server.html`) or `phoenix-headless`. With `--world` (issue
-  #1121) it *is* the authoritative host and draws the viewscreen itself.
-- Since issue #1113 it **can** carry a crew of its own: `--rendezvous <URL>
-  --origin <URL>` registers it with the rendezvous service and browser clients
-  join over the service's WebSocket game relay, because a native process has no
-  WebRTC. It prints the typed code at startup. A `--world` host can
-  therefore be crewed by phones over the relay, by `--solo` (all Backfill), or
-  by local Ultralight panes (§4a) — and without the rendezvous flags nobody can
-  join and the host says so at boot, which is what `--solo` is for.
+- A bare invocation remains delivery-only. `--world` starts the authoritative
+  host immediately; `--lobby` starts it world-less with the live native
+  landing and picker. The latter gets an implicit launch-relative
+  `./mod-packs` shelf, created on first run. An explicit `--mod-pack-dir` is
+  never auto-created and keeps its scan-error behaviour.
+- A native New Game accepts LAN crew on its own port by default. Explicit
+  `--rendezvous <URL> --origin <URL>` adds the cloud registration leg; the two
+  flags remain a pair. `--solo` and local Ultralight panes (§4a) are the other
+  ordinary crew arrangements.
+- The landing's **Host as GM** route runs one authoritative simulation with one
+  selected AI-backfilled hull and no crew ingress. **Join as Peer** creates a
+  GM-only fleet member and uses the built-in rendezvous service plus
+  `http://localhost:8080` origin when no override flags were supplied. Both
+  routes turn the primary native window into the shared GM desk after commit;
+  an unavailable development rendezvous is a visible refusal, not a disabled
+  row.
 - What it still does **not** do is WebRTC. Every crew member on a native host is
   relayed, so the service carries their traffic for the whole mission rather
   than only introducing them. That is a real cost difference from a browser

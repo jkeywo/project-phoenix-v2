@@ -842,6 +842,7 @@ pub fn build_native_host_app(
     // display config below is what composites the surface, and only a build with
     // the SDK has anything to composite onto.
     if let Some(lobby) = &cfg.host_lobby {
+        app.init_resource::<crate::native_host::session_role::NativeSessionRoleState>();
         app.insert_resource(crate::native_host::host_lobby::HostLobbyBridgeResource(
             lobby.bridge.clone(),
         ));
@@ -1017,9 +1018,9 @@ pub fn build_native_host_app(
         // The mode is correct and the flag is not refused — but with nothing
         // able to connect it opens a window onto a lobby nothing can start.
         // Every route to `InProgress` needs a session (collective `SetReady`
-        // auto-start) or a force-start, and browser participants are still
-        // deferred to issue #1112 — so say so at the top of the log rather than
-        // leaving an operator watching a lobby that will never move.
+        // auto-start) or a force-start. With no bundle there is no client page
+        // for a browser participant to load, so say so at the top of the log
+        // rather than leaving an operator watching a lobby that will never move.
         //
         // Two arrangements do NOT take this arm. A host with local Station panes
         // (issue #1122): its panes are participants, they ready up like any
@@ -1031,8 +1032,7 @@ pub fn build_native_host_app(
             cfg.log,
             crate::logging::LogCat::Lobby,
             "no --solo, no --pane and no lobby surface: this host is waiting in \
-             the lobby for participants, but browser clients cannot join a \
-             native host yet (issue #1112 — PeerJS is browser JavaScript). \
+             the lobby for participants, but it is not serving a client bundle. \
              Nothing can ready up and there is no control to force-start from, \
              so the mission will not start. Re-run with --solo to fly it on \
              Backfill, --pane <NAME> to crew it locally, or --client-dir <DIR> \

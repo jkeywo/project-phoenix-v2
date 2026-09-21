@@ -163,6 +163,29 @@ pub enum HostLobbyRecord {
         reason: String,
         detail: String,
     },
+    FleetIdentity {
+        identity: serde_json::Value,
+    },
+    FleetGmBootstrap {
+        id: u64,
+        generation: u64,
+        roster: String,
+    },
+    FleetStartPolicy {
+        policy: serde_json::Value,
+    },
+    FleetForceResult {
+        result: serde_json::Value,
+    },
+    FleetGmJoinPending {
+        request: serde_json::Value,
+    },
+    FleetGmJoinStatus {
+        status: serde_json::Value,
+    },
+    FleetJoinStatus {
+        status: String,
+    },
     /// The operator pressed a button in the monitor row: show the shared
     /// viewscreen on this display (issue #1330).
     ///
@@ -231,6 +254,10 @@ pub enum HostLobbyRecord {
     /// is a state the host can state, and a sentinel string would be a state
     /// it can only be read to mean.
     LandingClose,
+    /// Begin the native GM-only fleet-member route with a canonical fleet code.
+    JoinPeer {
+        code: String,
+    },
     /// The operator confirmed Exit to Desktop (issue #1365).
     ///
     /// The first landing verb the HOST has to answer, and the reason

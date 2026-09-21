@@ -629,10 +629,11 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
   // come to mean two different things — a code typed and submitted with the
   // keyboard is the ordinary case on a surface driven from across a room.
   const sendJoin = function () {
-    if (!join || !h.submitJoin) return;
+    if (!join || join.pending || !h.submitJoin) return;
     h.submitJoin(join, field ? String(field.value || '') : '');
   };
   if (field) {
+    field.disabled = !!(join && join.pending);
     if (join) {
       field.placeholder = t(join.placeholderId);
       field.setAttribute('aria-label', t(join.labelId));
@@ -646,6 +647,7 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
       }
     };
   }
+  if (submit) submit.disabled = !!(join && join.pending);
   if (submit) submit.onclick = sendJoin;
 
   // ── The confirmation stage (issue #1365) ────────────────────

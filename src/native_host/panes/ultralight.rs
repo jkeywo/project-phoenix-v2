@@ -1427,11 +1427,20 @@ fn sync_host_lobby_presence(
     host: Option<ResMut<PaneHost>>,
     reveal: Option<Res<HostLobbyRevealResource>>,
     mut nodes: Query<&mut Node>,
+    role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
 ) {
     let (Some(mut host), Some(reveal)) = (host, reveal) else {
         return;
     };
-    let present = reveal.0.presence().composited;
+    let gm_committed = role.as_ref().is_some_and(|state| {
+        state.committed()
+            && matches!(
+                state.role(),
+                crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+                    | crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+            )
+    });
+    let present = reveal.0.presence().composited && !gm_committed;
     if host.lobby_present == present {
         return;
     }
@@ -1531,6 +1540,7 @@ fn sync_viewscreen_hud_presence(
     host: Option<ResMut<PaneHost>>,
     phase: Option<Res<State<GamePhase>>>,
     mut nodes: Query<(&mut Node, &mut ZIndex)>,
+    role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
 ) {
     let (Some(mut host), Some(phase)) = (host, phase) else {
         return;
@@ -1547,7 +1557,16 @@ fn sync_viewscreen_hud_presence(
     // and the same surface carries the game-over screen when it ends (its
     // `#game-over-overlay`, revealed by `__updateHud` from `game_over_message`).
     // Hiding it in `GameOver` would blank the ending, so both phases keep it.
-    let want = if matches!(*phase.get(), GamePhase::InProgress | GamePhase::GameOver) {
+    let primary_gm = role.as_ref().is_some_and(|state| {
+        state.committed()
+            && matches!(
+                state.role(),
+                crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+                    | crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+            )
+    });
+    let want = if !primary_gm && matches!(*phase.get(), GamePhase::InProgress | GamePhase::GameOver)
+    {
         Display::DEFAULT
     } else {
         Display::None
@@ -2756,6 +2775,7 @@ struct NativeGmWindow {
     monitor_entity: Entity,
     monitor: crate::native_host::bridge_profile::MonitorIdentity,
     geometry: crate::native_host::bridge_profile::MonitorGeometry,
+    owns_window: bool,
 }
 
 #[derive(Resource, Default)]
@@ -2777,13 +2797,27 @@ fn follow_gm_display(
     mut state: ResMut<NativeGmDisplayState>,
     monitors: Query<(Entity, &Monitor, Has<PrimaryMonitor>)>,
     windows: Query<&Window>,
+    primary_windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
 ) {
     let (Some(mut host), Some(gm), Some(layout)) = (host, gm, layout) else {
         return;
     };
-    let wanted = layout.layout.game_master_monitor().cloned();
+    let primary_gm = role.as_ref().is_some_and(|state| {
+        state.committed()
+            && matches!(
+                state.role(),
+                crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+                    | crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+            )
+    });
+    let wanted = if primary_gm {
+        Some(layout.layout.viewscreen().clone())
+    } else {
+        layout.layout.game_master_monitor().cloned()
+    };
     if state.wanted != wanted {
         state.wanted = wanted.clone();
         state.retries = 0;
@@ -2801,10 +2835,30 @@ fn follow_gm_display(
             .collect(),
         &layout.monitors,
     );
-    let desired = wanted
-        .as_ref()
-        .and_then(|wanted| present.iter().find(|(_, d, _)| &d.identity == wanted))
-        .filter(|(_, d, _)| &d.identity != layout.layout.viewscreen());
+    let desired = if primary_gm {
+        primary_windows.single().ok().map(|(window, value)| {
+            (
+                window,
+                layout.layout.viewscreen().clone(),
+                crate::native_host::bridge_profile::MonitorGeometry {
+                    position_x: 0,
+                    position_y: 0,
+                    physical_width: value.physical_width().max(1),
+                    physical_height: value.physical_height().max(1),
+                    scale_factor: value.scale_factor() as f64,
+                },
+                false,
+            )
+        })
+    } else {
+        wanted
+            .as_ref()
+            .and_then(|wanted| present.iter().find(|(_, d, _)| &d.identity == wanted))
+            .filter(|(_, d, _)| &d.identity != layout.layout.viewscreen())
+            .map(|(monitor, found, geometry)| {
+                (*monitor, found.identity.clone(), geometry.clone(), true)
+            })
+    };
     if state.current.is_some() && !gm.bridge.live() {
         state.loading_frames += 1;
     }
@@ -2818,11 +2872,12 @@ fn follow_gm_display(
     }) {
         gm.bridge.fault();
     }
-    let needs_rebuild = match (&state.current, desired) {
-        (Some(current), Some((monitor_entity, found, actual))) => {
+    let needs_rebuild = match (&state.current, desired.as_ref()) {
+        (Some(current), Some((monitor_entity, identity, actual, owns_window))) => {
             current.monitor_entity != *monitor_entity
-                || current.monitor != found.identity
+                || &current.monitor != identity
                 || &current.geometry != actual
+                || current.owns_window != *owns_window
                 || gm.bridge.failed()
         }
         (Some(_), None) => true,
@@ -2838,13 +2893,15 @@ fn follow_gm_display(
                 commands.entity(pane.canvas).try_despawn();
             }
             release_pane_capture(&mut host, current.pane);
-            commands.entity(current.window).try_despawn();
+            if current.owns_window {
+                commands.entity(current.window).try_despawn();
+            }
             sweep_station_cameras(&mut host, &mut commands);
             host.rebuild_layout();
         }
         gm.bridge.close();
     }
-    let Some((monitor_entity, found, geometry)) = desired else {
+    let Some((monitor_entity, identity, geometry, owns_window)) = desired else {
         return;
     };
     if state.current.is_some() || state.retries > 3 || host.thread.is_none() {
@@ -2852,21 +2909,27 @@ fn follow_gm_display(
     }
     state.serial = state.serial.saturating_add(1);
     let id = PaneId(u32::MAX - 1 - state.serial);
-    let window = commands
-        .spawn((
-            Window {
-                title: format!("{} — GM", crate::native_host::WINDOW_TITLE),
-                name: Some("phoenix-gm".into()),
-                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Entity(*monitor_entity)),
-                ..default()
-            },
-            crate::native_host::bridge_display::BridgeSurface {
-                identity: found.identity.as_str().to_string(),
-                role: "GM".into(),
-            },
-        ))
-        .id();
-    let camera = station_camera(&mut host, &mut commands, window).0;
+    let window = if owns_window {
+        commands
+            .spawn((
+                Window {
+                    title: format!("{} — GM", crate::native_host::WINDOW_TITLE),
+                    name: Some("phoenix-gm".into()),
+                    mode: WindowMode::BorderlessFullscreen(MonitorSelection::Entity(
+                        monitor_entity,
+                    )),
+                    ..default()
+                },
+                crate::native_host::bridge_display::BridgeSurface {
+                    identity: identity.as_str().to_string(),
+                    role: "GM".into(),
+                },
+            ))
+            .id()
+    } else {
+        monitor_entity
+    };
+    let camera = owns_window.then(|| station_camera(&mut host, &mut commands, window).0);
     gm.bridge.activate(id);
     let canvas = make_pane_view(
         &host,
@@ -2877,21 +2940,27 @@ fn follow_gm_display(
         PaneKind::GameMaster,
         PaneSeat {
             window,
-            station_camera: Some(camera),
+            station_camera: camera,
             origin: (0, 0),
             size: (geometry.physical_width, geometry.physical_height),
             scale: geometry.scale_factor,
             window_origin: (geometry.position_x, geometry.position_y),
         },
     );
+    if !owns_window {
+        // The primary-window GM desk replaces both the viewscreen presentation
+        // and its retained landing chrome.
+        commands.entity(canvas.canvas).insert(ZIndex(1_000));
+    }
     host.mirror.insert(id, PaneKind::GameMaster, true, canvas);
     host.rebuild_layout();
     state.current = Some(NativeGmWindow {
         pane: id,
         window,
-        monitor_entity: *monitor_entity,
-        monitor: found.identity.clone(),
-        geometry: geometry.clone(),
+        monitor_entity,
+        monitor: identity,
+        geometry,
+        owns_window,
     });
     state.loading_frames = 0;
 }

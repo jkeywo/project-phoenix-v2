@@ -28,6 +28,7 @@ use project_phoenix::lobby::scenario_arbiter;
 use project_phoenix::lobby::server::{InboundMessage, PlayerDisconnected};
 use project_phoenix::native_host::host_lobby::{pump_host_lobby, LocalHostLobby};
 use project_phoenix::native_host::panes::RecordingSurface;
+use project_phoenix::native_host::session_role::{NativeSessionRole, NativeSessionRoleState};
 use project_phoenix::native_host::transport::{LoopbackHandle, NativeTransportLink};
 use project_phoenix::native_host::world_load::{
     LobbyScenarioCatalog, LobbySelection, RuntimeWorldLoad,
@@ -441,6 +442,76 @@ fn a_selection_pair_loads_the_world_and_the_mission_starts() {
     assert!(
         !entity_identities(&mut app).is_empty(),
         "the world's own entities spawned"
+    );
+}
+
+#[test]
+fn standalone_native_gm_loads_one_ai_backfilled_local_hull_and_gm_one() {
+    let preload = preload();
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    app.insert_resource(NativeSessionRoleState::default());
+    app.world_mut()
+        .resource_mut::<NativeSessionRoleState>()
+        .request(NativeSessionRole::StandaloneGameMaster);
+    pump(&mut app, 4);
+
+    let (scenario_id, hull) = pick();
+    select(&mut app, "native-gm", &scenario_id, &hull);
+    pump(&mut app, 90);
+
+    assert!(app.world().resource::<NativeSessionRoleState>().committed());
+    assert!(app
+        .world()
+        .contains_resource::<project_phoenix::lobby::SelectedShipResource>());
+    assert_eq!(
+        app.world_mut()
+            .query::<&project_phoenix::server_app::LocalShip>()
+            .iter(app.world())
+            .count(),
+        1
+    );
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::gm_roster::GmRoster>()
+            .operators()
+            .iter()
+            .map(|gm| gm.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gm-1"]
+    );
+}
+
+#[test]
+fn native_fleet_gm_ingests_a_scenario_without_installing_a_local_hull() {
+    let preload = preload();
+    let mut app =
+        build_native_host_app(&lobby_config(), &preload).expect("a world-less host assembles");
+    app.insert_resource(NativeSessionRoleState::default());
+    app.world_mut()
+        .resource_mut::<NativeSessionRoleState>()
+        .request(NativeSessionRole::FleetGameMaster);
+    pump(&mut app, 4);
+
+    let (scenario_id, _) = pick();
+    app.world_mut().write_message(InboundMessage {
+        token: "native-gm".to_string(),
+        msg: ClientMessage::SelectScenario { scenario_id },
+    });
+    pump(&mut app, 90);
+
+    assert!(app.world().resource::<NativeSessionRoleState>().committed());
+    assert!(app.world().contains_resource::<WorldConfig>());
+    assert!(!app
+        .world()
+        .contains_resource::<project_phoenix::lobby::SelectedShipResource>());
+    assert_eq!(
+        app.world_mut()
+            .query::<&project_phoenix::server_app::LocalShip>()
+            .iter(app.world())
+            .count(),
+        0
     );
 }
 

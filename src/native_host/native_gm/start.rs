@@ -36,6 +36,10 @@ impl NativeGmStartRequests {
     pub fn last_result(&self) -> Option<&StartGrantResult> {
         self.last_result.as_ref()
     }
+
+    pub fn record_result(&mut self, result: StartGrantResult) {
+        self.last_result = Some(result);
+    }
 }
 
 /// Private metadata for the shared readiness presentation. Invalid aggregate
@@ -96,7 +100,7 @@ pub(crate) fn admit_force_start(world: &mut World) {
             Some(StartGrantReason::InvalidGrant),
         )
     } else {
-        admission(world)
+        admission(world, force_operator_id(world))
     };
     if status == StartGrantStatus::Applied {
         world.resource_mut::<PendingForceStart>().0 = true;
@@ -104,7 +108,7 @@ pub(crate) fn admit_force_start(world: &mut World) {
     let result = StartGrantResult {
         tick: world.resource::<crate::sim_tick::SimTick>().0,
         status,
-        operator_id: Some(NATIVE_GM_OPERATOR_ID.to_owned()),
+        operator_id: Some(force_operator_id(world).to_owned()),
         reason,
         grant_id: sequence.map(|sequence| format!("start-{sequence}")),
     };
@@ -112,18 +116,32 @@ pub(crate) fn admit_force_start(world: &mut World) {
     world.resource_mut::<StartGrantResults>().push(result);
 }
 
-fn admission(world: &World) -> (StartGrantStatus, Option<StartGrantReason>) {
+fn force_operator_id(world: &World) -> &str {
+    world
+        .get_resource::<crate::lockstep::FleetRoster>()
+        .and_then(|roster| roster.gm_operator(roster.local()))
+        .unwrap_or(NATIVE_GM_OPERATOR_ID)
+}
+
+fn admission(world: &World, operator_id: &str) -> (StartGrantStatus, Option<StartGrantReason>) {
     let refuse = |reason| (StartGrantStatus::Refused, Some(reason));
     let Some(managed) = world.get_resource::<FleetManagedLobby>() else {
         return refuse(StartGrantReason::UnauthorizedGrant);
     };
     // A malformed native/fleet composition must not use the standalone latch
     // to evade the fleet's canonical grant and ordering owner.
+    let standalone_gm = world
+        .get_resource::<crate::native_host::session_role::NativeSessionRoleState>()
+        .is_some_and(|role| {
+            role.committed()
+                && role.role()
+                    == crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+        });
     if managed.enabled
         || world.contains_resource::<crate::lockstep::FleetLockstep>()
         || world
             .get_resource::<crate::lockstep::FleetRoster>()
-            .is_some_and(|roster| !roster.is_solo() || !roster.gms().is_empty())
+            .is_some_and(|roster| !roster.is_solo() || (!standalone_gm && !roster.gms().is_empty()))
     {
         return refuse(StartGrantReason::UnauthorizedGrant);
     }
@@ -139,7 +157,12 @@ fn admission(world: &World) -> (StartGrantStatus, Option<StartGrantReason>) {
     let placed = world
         .get_resource::<super::super::bridge_display::BridgeLayoutResource>()
         .is_some_and(|layout| {
-            layout.layout.game_master_monitor().is_some_and(|monitor| {
+            let monitor = if standalone_gm {
+                Some(layout.layout.viewscreen())
+            } else {
+                layout.layout.game_master_monitor()
+            };
+            monitor.is_some_and(|monitor| {
                 layout
                     .monitors
                     .iter()
@@ -173,16 +196,9 @@ fn admission(world: &World) -> (StartGrantStatus, Option<StartGrantReason>) {
         .get_resource::<Sessions>()
         .map(|sessions| sessions.0.readiness_tally())
         .unwrap_or_default();
-    let valid =
-        managed.validation_passed && world.contains_resource::<crate::world::config::WorldConfig>();
-    match evaluate_start_policy(
-        [crew],
-        gms,
-        valid,
-        StartTrigger::Forced {
-            operator_id: NATIVE_GM_OPERATOR_ID,
-        },
-    ) {
+    let valid = (managed.validation_passed || standalone_gm)
+        && world.contains_resource::<crate::world::config::WorldConfig>();
+    match evaluate_start_policy([crew], gms, valid, StartTrigger::Forced { operator_id }) {
         StartPolicyDecision::Start { .. } => (StartGrantStatus::Applied, None),
         StartPolicyDecision::Wait { reason } | StartPolicyDecision::Refused { reason } => {
             refuse(match reason {

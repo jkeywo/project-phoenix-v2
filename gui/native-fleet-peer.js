@@ -1,17 +1,20 @@
-import { createFleetOwner } from './fleet-session.js';
-import { HOST_ROLE_SHIP_GM } from './host-mesh.js';
+import { createFleetMember, createFleetOwner } from './fleet-session.js';
+import { HOST_ROLE_GM, HOST_ROLE_SHIP_GM } from './host-mesh.js';
 
 /**
  * Native host-mesh control plane. The embedded surface owns the network link;
  * every simulation fact crosses the existing native lobby bridge, so this is
  * one technical peer controlling the Rust process rather than a browser sim.
  */
-export function createNativeFleetPeer({ send, log = console.log, createOwner = createFleetOwner } = {}) {
+export function createNativeFleetPeer({
+  send, log = console.log, createOwner = createFleetOwner, createMember = createFleetMember,
+} = {}) {
   let handle = null;
   let configured = false;
   let socket = null;
   let nextRosterGeneration = 1;
   const pendingRosters = new Map();
+  let config = null;
 
   const bridgeSocket = () => {
     const value = {
@@ -57,12 +60,14 @@ export function createNativeFleetPeer({ send, log = console.log, createOwner = c
   return {
     configure(raw) {
       if (configured) return false;
-      let config;
       try { config = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) { return false; }
       if (!config || typeof config.base !== 'string' || !config.base) return false;
       const credentials = Array.isArray(config.credentials) ? [...config.credentials] : [];
       if (!credentials.length) return false;
       configured = true;
+      // Older/native-owner configurations predate the explicit mode field;
+      // absence therefore retains the shipped owner behaviour.
+      if (config.owner === false) return true;
       handle = createOwner({
         base: config.base,
         iceServers: [],
@@ -105,6 +110,55 @@ export function createNativeFleetPeer({ send, log = console.log, createOwner = c
       return true;
     },
 
+    join(code, data, reconnect = null) {
+      if (!configured || !config || handle) return false;
+      handle = createMember({
+        base: config.base,
+        code,
+        data,
+        stamp: config.stamp,
+        iceServers: [],
+        transports: ['ws-relay'],
+        factories: {
+          socket: bridgeSocket,
+          peer: () => { throw new Error('native fleet is relay-only'); },
+        },
+        role: HOST_ROLE_GM,
+        name: config.gm_name || 'GM',
+        reconnectCredential: reconnect && reconnect.reconnectCredential,
+        claim: reconnect && reconnect.claim,
+        // createFleetMember can announce identity synchronously while its
+        // factory call is still assigning `handle`. Defer one microtask so the
+        // persisted reconnect claim contains the admitted mesh slot as well as
+        // the private capability.
+        onIdentity: identity => queueMicrotask(() => emit({
+          kind: 'fleet_identity',
+          identity: { ...identity, claim: handle?.slot || null },
+        })),
+        onSimulationRoster: (roster) => {
+          const generation = nextRosterGeneration++;
+          emit({ kind: 'fleet_roster', generation, roster: JSON.stringify(roster) });
+          return new Promise(resolve => pendingRosters.set(generation, resolve));
+        },
+        onGmJoinBootstrap: (id, roster) => {
+          const generation = nextRosterGeneration++;
+          emit({ kind: 'fleet_gm_bootstrap', id, generation, roster: JSON.stringify(roster) });
+          return new Promise(resolve => pendingRosters.set(generation, resolve));
+        },
+        onSimulationFrame: (frame, authenticated_slot) => emit({
+          kind: 'fleet_frame', frame, authenticated_slot,
+        }),
+        onStartPolicy: policy => emit({ kind: 'fleet_start_policy', policy }),
+        onForceResult: result => emit({ kind: 'fleet_force_result', result }),
+        onGmJoinPending: ({ request }) => emit({ kind: 'fleet_gm_join_pending', request }),
+        onGmJoinStatus: status => emit({ kind: 'fleet_gm_join_status', status }),
+        onStatus: status => emit({ kind: 'fleet_join_status', status }),
+        onError: (reason, detail) => emit({ kind: 'fleet_fault', reason, detail: detail || '' }),
+        onLog: log,
+      });
+      return true;
+    },
+
     update(raw) {
       if (!handle) return false;
       let state;
@@ -122,6 +176,7 @@ export function createNativeFleetPeer({ send, log = console.log, createOwner = c
         }
       }
       for (const frame of state.frames || []) handle.broadcast(frame);
+      if (state.force_start) handle.forceStart?.();
       return true;
     },
 

@@ -123,6 +123,10 @@ pub struct SimArgs {
     /// (`native_host::host_lobby::feed_landing_panel`) and a pack has to be
     /// installed BEFORE a World is ingested to change anything at all.
     pub mod_pack_dir: Option<String>,
+    /// True when [`mod_pack_dir`](Self::mod_pack_dir) came from the lobby's
+    /// implicit `./mod-packs` default. Only that path is created automatically;
+    /// an explicit missing path remains an operator-visible scan error.
+    pub mod_pack_dir_is_default: bool,
     /// Local Station panes to open, one per `--pane <NAME>`, in the order given
     /// (issue #1122).
     ///
@@ -190,6 +194,7 @@ pub const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 pub const DEFAULT_MANIFEST: &str = "assets/scenarios.toml";
 pub const DEFAULT_CONTENT_DIR: &str = ".";
 pub const DEFAULT_SAVE_DIR: &str = ".phoenix/saves";
+pub const DEFAULT_MOD_PACK_DIR: &str = "./mod-packs";
 
 pub const HELP: &str = "\
 phoenix-host — serve the Phoenix client bundle, the content manifest and the
@@ -215,21 +220,20 @@ SIMULATION
                           this process serves delivery only, exactly as it
                           always has.
     --lobby               Open the same viewscreen window with NO world: the
-                          host waits in the lobby publishing its scenario
-                          catalogue, and loads a world when a participant picks
-                          a scenario and a hull — the same first-valid-wins
-                          arbitration the browser host runs before its own world
-                          load. Every flag below still applies to the mission
-                          that eventually starts. Mutually exclusive with
-                          --world, which is simply the same pick made up front.
+                          landing offers New Game, Host as GM and Join as Peer.
+                          New Game and Host as GM use the scenario/hull picker;
+                          Join as Peer uses the typed fleet-code panel. Every
+                          flag below still applies to the mission that
+                          eventually starts. Mutually exclusive with --world,
+                          which is simply the same pick made up front.
     --ship <PATH>         The player's hull [default: the world's first
                           [[available_ships]] entry]
     --seed <N>            Override the world's [global] seed
     --solo                Start the mission immediately with nobody connected;
                           every station runs on Backfill. Without it the host
                           waits in the lobby for participants to ready up,
-                          which needs --rendezvous below — a host with neither
-                          waits for a crew that has no way in, and says so.
+                          Ordinary crew can join on the host's own LAN port;
+                          --rendezvous adds a cloud route.
                           With --lobby it starts on the tick the chosen world
                           lands, not at boot: there is nothing to fly until
                           someone has picked something.
@@ -267,9 +271,10 @@ SIMULATION
 MOD PACKS (issue #1366)
     --mod-pack-dir <DIR>  Scan this directory for mod-pack .zip archives and
                           offer them on the landing screen, relative to the
-                          launch directory. This window has no file dialog, so
-                          the folder IS the file picker. A chosen pack goes
-                          through exactly the validation a browser upload does,
+                          launch directory [default with --lobby: ./mod-packs].
+                          The default folder is created when absent. This window
+                          has no file dialog, so the folder IS the file picker.
+                          A chosen pack goes through exactly the validation a browser upload does,
                           and is refused whole if any of it fails. Needs
                           --lobby: a pack changes the catalogue a world is
                           chosen FROM, and a --world host was told at the prompt
@@ -315,7 +320,9 @@ CREW (issue #1113)
                           member is carried over the service's WebSocket game
                           relay; it registers saying so, and joiners skip the
                           direct ladder rather than spending ninety seconds
-                          discovering it.
+                          discovering it. These explicit flags override the
+                          built-in rendezvous used by the lobby's GM-only Join
+                          as Peer route; New Game remains LAN-direct by default.
     --origin <URL>        The Origin header that socket claims. REQUIRED with
                           --rendezvous and deliberately not defaulted: the
                           service refuses an upgrade whose Origin is not on its
@@ -382,6 +389,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut panes: Vec<String> = Vec::new();
     let mut frame_stats = false;
     let mut mod_pack_dir: Option<String> = None;
+    let mut mod_pack_dir_given = false;
     let mut setup = false;
     let mut test_output = None;
     let mut meter_microphone = None;
@@ -462,7 +470,10 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--resume-save" => resume_slot = Some(value_for(&arg, &mut it)?),
             "--pane" => panes.push(value_for(&arg, &mut it)?),
             "--frame-stats" => frame_stats = true,
-            "--mod-pack-dir" => mod_pack_dir = Some(value_for(&arg, &mut it)?),
+            "--mod-pack-dir" => {
+                mod_pack_dir = Some(value_for(&arg, &mut it)?);
+                mod_pack_dir_given = true;
+            }
             "--rendezvous" => rendezvous = Some(value_for(&arg, &mut it)?),
             "--origin" => origin = Some(value_for(&arg, &mut it)?),
             other => return Err(format!("unknown argument {other:?}")),
@@ -664,6 +675,13 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         );
     }
 
+    // A lobby is the native front door, so it always has a real mod-pack
+    // shelf. Keep the default out of delivery-only and direct --world runs:
+    // neither has a landing on which the shelf could be opened.
+    if lobby && !mod_pack_dir_given {
+        mod_pack_dir = Some(DEFAULT_MOD_PACK_DIR.to_string());
+    }
+
     // The save-catalogue controls and --resume-save act on a concrete scenario
     // at startup — before a --lobby host has picked one — so they need --world
     // itself, not merely a lobby to choose from.
@@ -686,6 +704,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             save_actions,
             resume_slot,
             mod_pack_dir,
+            mod_pack_dir_is_default: lobby && !mod_pack_dir_given,
             panes,
             frame_stats,
             rendezvous,
@@ -947,16 +966,26 @@ mod tests {
         let a = run(&["--lobby", "--mod-pack-dir", "mods"]);
         let sim = a.sim.expect("--lobby selects the simulation");
         assert_eq!(sim.mod_pack_dir.as_deref(), Some("mods"));
+        assert!(!sim.mod_pack_dir_is_default);
     }
 
     #[test]
-    fn a_host_with_no_shelf_is_the_default_rather_than_an_empty_one() {
-        // `None` is "this host has no shelf", which keeps the landing's
-        // Load-mod-pack row the inert one #1360 shipped. An empty-string or
-        // current-directory default would offer a shelf on every host in the
-        // world and make the row lie.
+    fn a_lobby_host_gets_the_default_mod_pack_shelf() {
         let a = run(&["--lobby"]);
-        assert_eq!(a.sim.expect("--lobby").mod_pack_dir, None);
+        let sim = a.sim.expect("--lobby");
+        assert_eq!(sim.mod_pack_dir.as_deref(), Some(DEFAULT_MOD_PACK_DIR));
+        assert!(sim.mod_pack_dir_is_default);
+    }
+
+    #[test]
+    fn non_lobby_modes_do_not_get_the_default_mod_pack_shelf() {
+        let delivery = run(&[]);
+        assert!(delivery.sim.is_none());
+
+        let direct = run(&["--world", "assets/worlds/combat_test.toml"]);
+        let sim = direct.sim.expect("--world selects the simulation");
+        assert_eq!(sim.mod_pack_dir, None);
+        assert!(!sim.mod_pack_dir_is_default);
     }
 
     #[test]

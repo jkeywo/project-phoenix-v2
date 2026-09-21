@@ -11,6 +11,10 @@ REM                             with no other service running -
 REM                             scan the QR, that is all.
 REM                             Pick the scenario and hull on
 REM                             screen; no --world / --ship.
+REM                             Host as GM and Join as Peer are
+REM                             live routes on this landing. A
+REM                             missing .\mod-packs shelf is
+REM                             created automatically.
 REM
 REM   run-native.bat delivery   the old delivery-only host
 REM                             (serves the bundle, no game

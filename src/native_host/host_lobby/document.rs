@@ -327,6 +327,10 @@ pub enum HostLobbyDocumentError {
     NoLandingPanel,
     /// `#landing-panel` opens and never closes.
     UnbalancedLandingPanel,
+    /// The page has no shared landing join-code panel.
+    NoLandingJoinPanel,
+    /// `#landing-join-panel` opens and never closes.
+    UnbalancedLandingJoinPanel,
 }
 
 impl std::fmt::Display for HostLobbyDocumentError {
@@ -375,6 +379,16 @@ impl std::fmt::Display for HostLobbyDocumentError {
                 f,
                 "the host page's #landing-panel never closes — its <div> elements do not \
                  balance before the end of the document"
+            ),
+            HostLobbyDocumentError::NoLandingJoinPanel => write!(
+                f,
+                "the host page has no #landing-join-panel element, so Join as Peer has no \
+                 code entry surface; check that --client-dir points at a current bundle"
+            ),
+            HostLobbyDocumentError::UnbalancedLandingJoinPanel => write!(
+                f,
+                "the host page's #landing-join-panel never closes — its <aside> elements do \
+                 not balance before the end of the document"
             ),
         }
     }
@@ -443,6 +457,9 @@ const SCENARIO_PANEL_MARKER: &str = "<div id=\"scenario-panel\"";
 /// `LANDING_ENTRIES`), built by the shared renderer, which is what lets the two
 /// surfaces differ exactly where a row says they differ and nowhere else.
 const LANDING_PANEL_MARKER: &str = "<div id=\"landing-panel\"";
+
+/// The shared code-entry stage used by Join as Peer.
+const LANDING_JOIN_PANEL_MARKER: &str = "<aside id=\"landing-join-panel\"";
 
 /// The landing's THIRD column — the staged hull picker — which this surface
 /// does not carry (issue #1362).
@@ -576,6 +593,13 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
         &format!("{LANDING_PANEL_MARKER} style=\"display:none\""),
         1,
     );
+    let landing_join_panel = extract_tagged(
+        host_index_html,
+        LANDING_JOIN_PANEL_MARKER,
+        "aside",
+        HostLobbyDocumentError::NoLandingJoinPanel,
+        HostLobbyDocumentError::UnbalancedLandingJoinPanel,
+    )?;
 
     let head = format!(
         "\n<script>\n{}\n{}</script>\n",
@@ -602,6 +626,7 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          <div id=\"overlay\">\n{join_panel}\n</div>\n\
          {QR_TOGGLE_MARKUP}\n\
          {scenario_panel}\n\
+         {landing_join_panel}\n\
          {landing_panel}\n\
          <script type=\"module\">\n{HOST_LOBBY_LINK_JS}\n</script>\n\
          </body>\n\
@@ -901,6 +926,13 @@ mod tests {
          </div>\n\
          </div>\n\
          </div>\n\
+         <aside id=\"landing-join-panel\">\n\
+         <span id=\"landing-join-role\"></span><span id=\"landing-join-blurb\"></span>\n\
+         <label id=\"landing-join-label\" for=\"landing-join-code\"></label>\n\
+         <input id=\"landing-join-code\" type=\"text\" />\n\
+         <p id=\"landing-join-hint\"></p><p id=\"landing-join-error\" role=\"alert\"></p>\n\
+         <button id=\"landing-join-submit\" type=\"button\"></button>\n\
+         </aside>\n\
          <div id=\"landing-panel\" class=\"is-idle\" data-landing-stage=\"idle\">\n\
          <aside class=\"landing-rail\">\n\
          <span id=\"landing-rail-stamp\" data-i18n=\"server.landing.rail_stamp\">PHX</span>\n\
@@ -1013,7 +1045,8 @@ mod tests {
             vec![
                 "ai-launch-btn",
                 "host-lobby-qr-toggle",
-                "landing-fullscreen-btn"
+                "landing-fullscreen-btn",
+                "landing-join-submit"
             ],
             "every control on the assembled document has something wired behind \
              it: the AI launch (issue #1328), the QR toggle (issue #1329) and \
@@ -1178,7 +1211,7 @@ mod tests {
             "exit_desktop",
         ] {
             assert!(
-                !html.contains(id),
+                !nav.contains(id),
                 "{id} is a row in gui/host-landing-view.js, never markup in this document"
             );
         }
@@ -1209,7 +1242,8 @@ mod tests {
             vec![
                 "ai-launch-btn",
                 "host-lobby-qr-toggle",
-                "landing-fullscreen-btn"
+                "landing-fullscreen-btn",
+                "landing-join-submit"
             ]
         );
     }
@@ -1913,6 +1947,7 @@ mod tests {
         let page = "<div id=\"lobby-panel\"><!-- a </div> in prose --><div>x</div></div>\
                     <div id=\"qr-panel\"></div>\
                     <div id=\"scenario-panel\"><div id=\"world-list\"></div></div>\
+                    <aside id=\"landing-join-panel\"></aside>\
                     <div id=\"landing-panel\"><nav id=\"landing-menu\"></nav></div>\
                     <canvas id=\"trailing\"></canvas>";
         let html = build_host_lobby_document(page).unwrap();
@@ -2140,6 +2175,9 @@ mod tests {
                 // moves this window's mode. Until it had that, #1361 stripped
                 // it from this document rather than ship a dead corner.
                 "landing-fullscreen-btn",
+                // Join as Peer's submit control is wired to the typed native
+                // fleet-member request through host_lobby_link.js.
+                "landing-join-submit",
                 // The mod-pack shelf's own two (issue #1366), on the allowlist
                 // by the same rule and for the same reason: `renderHostLanding`
                 // hangs `pick` and `installPack` on them, `host_lobby_link.js`

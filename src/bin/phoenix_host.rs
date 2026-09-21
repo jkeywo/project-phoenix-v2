@@ -139,6 +139,18 @@ fn main() {
             *dir = resolve_launch_path(&launch_dir, dir)
                 .to_string_lossy()
                 .into_owned();
+            if let Err(error) = prepare_implicit_mod_pack_shelf(
+                std::path::Path::new(dir),
+                sim.mod_pack_dir_is_default,
+            ) {
+                // The shelf adapter below will publish the same failure on
+                // the landing. Mod packs are optional content, so a
+                // read-only launch directory must not prevent the base
+                // game from opening.
+                eprintln!(
+                    "phoenix-host: could not create the default mod-pack shelf {dir}: {error}"
+                );
+            }
         }
         for action in &mut sim.save_actions {
             if let project_phoenix::delivery::args::SaveOperatorAction::Export { path, .. } = action
@@ -723,7 +735,13 @@ fn main() {
             std::process::exit(1);
         }
     };
-    if let (Some(base), Some(_lobby)) = (sim.rendezvous.as_deref(), host_lobby.as_ref()) {
+    if host_lobby.is_some() {
+        let explicit_owner = sim.rendezvous.is_some();
+        let base = sim
+            .rendezvous
+            .as_deref()
+            .unwrap_or(native_host::host_lobby::join::CLIENT_DEFAULT_RENDEZVOUS);
+        let origin = sim.origin.as_deref().unwrap_or("http://localhost:8080");
         let table_path =
             std::path::Path::new(&bound.content_dir).join("assets/join/join-codes.toml");
         match native_host::join_codes::JoinCodeTable::read(&table_path) {
@@ -735,6 +753,8 @@ fn main() {
                     .unwrap_or_default();
                 let fleet_config = native_host::host_lobby::fleet::NativeFleetConfig {
                     base: base.to_string(),
+                    origin: origin.to_string(),
+                    owner: explicit_owner,
                     stamp: project_phoenix::core::codec::encode_delivery_stamp(
                         &content.manifest.stamp,
                     ),
@@ -747,22 +767,20 @@ fn main() {
                     operator_id: project_phoenix::gm_action::NATIVE_GM_OPERATOR_ID.to_string(),
                     credentials: native_host::host_lobby::fleet::mint_reconnect_credentials(),
                 };
-                let origin = sim
-                    .origin
-                    .as_deref()
-                    .expect("parse_args refuses --rendezvous without --origin");
-                match native_host::relay_socket::WsRelaySocket::connect(base, origin) {
-                    Ok(socket) => {
-                        app.insert_resource(fleet_config);
-                        app.insert_resource(native_host::host_lobby::fleet::NativeFleetWire(
-                            Box::new(socket),
-                        ));
-                        eprintln!(
-                            "phoenix-host: native fleet peer registering with {base} as {origin}"
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("phoenix-host: native fleet is off — {e}");
+                app.insert_resource(fleet_config);
+                if explicit_owner {
+                    match native_host::relay_socket::WsRelaySocket::connect(base, origin) {
+                        Ok(socket) => {
+                            app.insert_resource(native_host::host_lobby::fleet::NativeFleetWire(
+                                Box::new(socket),
+                            ));
+                            eprintln!(
+                                "phoenix-host: native fleet peer registering with {base} as {origin}"
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("phoenix-host: native fleet is off — {e}");
+                        }
                     }
                 }
             }
@@ -1089,6 +1107,41 @@ fn resolve_launch_path(launch_dir: &std::path::Path, configured: &str) -> std::p
         configured
     } else {
         launch_dir.join(configured)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn prepare_implicit_mod_pack_shelf(
+    path: &std::path::Path,
+    implicit_default: bool,
+) -> std::io::Result<()> {
+    if implicit_default {
+        std::fs::create_dir_all(path)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod launch_path_tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::disallowed_methods)] // UUID isolates a disposable temp fixture.
+    fn only_the_launch_relative_implicit_shelf_is_created() {
+        let root = std::env::temp_dir().join(format!(
+            "phoenix-default-mod-shelf-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let implicit = resolve_launch_path(&root, "./mod-packs");
+        prepare_implicit_mod_pack_shelf(&implicit, true).unwrap();
+        assert!(implicit.is_dir());
+
+        let explicit = resolve_launch_path(&root, "operator-shelf");
+        prepare_implicit_mod_pack_shelf(&explicit, false).unwrap();
+        assert!(!explicit.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 

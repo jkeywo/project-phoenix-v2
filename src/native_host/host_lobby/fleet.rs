@@ -9,6 +9,8 @@ use super::{HostLobbyBridgeResource, HostLobbyRecord};
 #[derive(Resource, Clone, Debug, Serialize)]
 pub struct NativeFleetConfig {
     pub base: String,
+    pub origin: String,
+    pub owner: bool,
     pub stamp: String,
     pub max_slots: usize,
     pub max_name_length: usize,
@@ -39,10 +41,21 @@ pub struct NativeFleetEvents(Vec<NativeFleetEvent>);
 pub struct NativeFleetWire(pub Box<dyn RelaySocket>);
 
 #[derive(Resource, Default)]
+pub struct NativeFleetForceRequest(pub bool);
+
+#[derive(Resource, Default)]
 struct NativeFleetPublication {
     configured: bool,
     last_update: String,
     roster_result: Option<NativeRosterResult>,
+    join_request: Option<NativeFleetJoinRequest>,
+}
+
+#[derive(Resource)]
+struct PendingNativeGmBootstrap {
+    id: u64,
+    generation: u64,
+    roster: crate::lockstep::FleetRoster,
 }
 
 #[derive(Clone, Serialize)]
@@ -52,8 +65,17 @@ struct NativeRosterResult {
     reason: Option<&'static str>,
 }
 
+#[derive(Clone, Serialize)]
+struct NativeFleetJoinRequest {
+    code: String,
+    reconnect: Option<crate::native_host::fleet_identity::NativeFleetIdentity>,
+}
+
 #[derive(Debug)]
 pub enum NativeFleetEvent {
+    Join {
+        code: String,
+    },
     Roster {
         generation: u64,
         raw: String,
@@ -70,9 +92,21 @@ pub enum NativeFleetEvent {
         reason: String,
         detail: String,
     },
+    GmBootstrap {
+        id: u64,
+        generation: u64,
+        raw: String,
+    },
+    Identity(serde_json::Value),
+    ForceResult(serde_json::Value),
+    JoinStatus(String),
 }
 
 impl NativeFleetEvents {
+    pub fn request_join(&mut self, code: String) {
+        self.0.push(NativeFleetEvent::Join { code });
+    }
+
     pub fn record(&mut self, record: &HostLobbyRecord) -> bool {
         let event = match record {
             HostLobbyRecord::FleetRoster { generation, roster } => Some(NativeFleetEvent::Roster {
@@ -100,6 +134,27 @@ impl NativeFleetEvents {
                 reason: reason.clone(),
                 detail: detail.clone(),
             }),
+            HostLobbyRecord::FleetGmBootstrap {
+                id,
+                generation,
+                roster,
+            } => Some(NativeFleetEvent::GmBootstrap {
+                id: *id,
+                generation: *generation,
+                raw: roster.clone(),
+            }),
+            HostLobbyRecord::FleetIdentity { identity } => {
+                Some(NativeFleetEvent::Identity(identity.clone()))
+            }
+            HostLobbyRecord::FleetForceResult { result } => {
+                Some(NativeFleetEvent::ForceResult(result.clone()))
+            }
+            HostLobbyRecord::FleetJoinStatus { status } => {
+                Some(NativeFleetEvent::JoinStatus(status.clone()))
+            }
+            HostLobbyRecord::FleetStartPolicy { .. }
+            | HostLobbyRecord::FleetGmJoinPending { .. }
+            | HostLobbyRecord::FleetGmJoinStatus { .. } => return true,
             _ => return false,
         };
         if let Some(event) = event {
@@ -119,6 +174,8 @@ struct NativeFleetUpdate {
     validation: bool,
     frames: Vec<String>,
     roster_result: Option<NativeRosterResult>,
+    force_start: bool,
+    join_request: Option<NativeFleetJoinRequest>,
 }
 
 pub struct NativeFleetPlugin;
@@ -127,8 +184,11 @@ impl Plugin for NativeFleetPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NativeFleetEvents>()
             .init_resource::<NativeFleetPublication>()
+            .init_resource::<NativeFleetForceRequest>()
+            .insert_resource(crate::native_host::fleet_identity::NativeFleetIdentityStore::user())
             .add_systems(PreUpdate, poll_wire.before(super::drain_surface_records))
             .add_systems(PreUpdate, apply_events.after(super::drain_surface_records))
+            .add_systems(Update, apply_pending_gm_bootstrap)
             .add_systems(PostUpdate, publish_state);
     }
 }
@@ -137,6 +197,36 @@ fn apply_events(world: &mut World) {
     let events = std::mem::take(&mut world.resource_mut::<NativeFleetEvents>().0);
     for event in events {
         match event {
+            NativeFleetEvent::Join { code } => {
+                let Some(config) = world.get_resource::<NativeFleetConfig>().cloned() else {
+                    continue;
+                };
+                let reconnect = world
+                    .resource::<crate::native_host::fleet_identity::NativeFleetIdentityStore>()
+                    .load(&code)
+                    .unwrap_or_else(|error| {
+                        eprintln!(
+                            "phoenix-host: native fleet reconnect identity unavailable — {error}"
+                        );
+                        None
+                    });
+                world.resource_mut::<NativeFleetPublication>().join_request =
+                    Some(NativeFleetJoinRequest { code, reconnect });
+                if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
+                    wire.0.close();
+                }
+                match connect_join_wire(&config.base, &config.origin) {
+                    Ok(wire) => {
+                        world.insert_resource(NativeFleetWire(wire));
+                    }
+                    Err(error) => {
+                        world
+                            .resource_mut::<crate::native_host::session_role::NativeSessionRoleState>()
+                            .join_status = Some("unreachable".into());
+                        eprintln!("phoenix-host: native fleet join is unreachable — {error}");
+                    }
+                }
+            }
             NativeFleetEvent::Roster { generation, raw } => {
                 let decoded = crate::core::codec::decode_fleet_roster(&raw);
                 let accepted = decoded.is_some_and(|(roster, delay)| {
@@ -154,6 +244,74 @@ fn apply_events(world: &mut World) {
                         accepted,
                         reason: (!accepted).then_some("fleet-adoption-refused"),
                     });
+            }
+            NativeFleetEvent::GmBootstrap {
+                id,
+                generation,
+                raw,
+            } => {
+                let Some((roster, _)) = crate::core::codec::decode_fleet_roster(&raw) else {
+                    world.resource_mut::<NativeFleetPublication>().roster_result =
+                        Some(NativeRosterResult {
+                            generation,
+                            accepted: false,
+                            reason: Some("invalid-gm-bootstrap"),
+                        });
+                    continue;
+                };
+                world.insert_resource(PendingNativeGmBootstrap {
+                    id,
+                    generation,
+                    roster,
+                });
+            }
+            NativeFleetEvent::Identity(identity) => {
+                let Some(code) = world
+                    .get_resource::<crate::native_host::session_role::NativeSessionRoleState>()
+                    .and_then(|role| role.pending_code.clone())
+                else {
+                    continue;
+                };
+                let Ok(identity) = serde_json::from_value::<
+                    crate::native_host::fleet_identity::NativeFleetIdentity,
+                >(identity) else {
+                    continue;
+                };
+                if let Err(error) = world
+                    .resource::<crate::native_host::fleet_identity::NativeFleetIdentityStore>()
+                    .save(&code, &identity)
+                {
+                    eprintln!(
+                        "phoenix-host: native fleet reconnect identity was not saved — {error}"
+                    );
+                }
+                world
+                    .resource_mut::<crate::native_host::session_role::NativeSessionRoleState>()
+                    .join_status = Some("admitted".into());
+            }
+            NativeFleetEvent::JoinStatus(status) => {
+                let visible = match status.as_str() {
+                    "connecting" | "ready" => "pending",
+                    "disconnected" | "error" => "unreachable",
+                    _ => status.as_str(),
+                };
+                world
+                    .resource_mut::<crate::native_host::session_role::NativeSessionRoleState>()
+                    .join_status = Some(visible.to_string());
+                eprintln!("phoenix-host: native fleet join status: {status}");
+            }
+            NativeFleetEvent::ForceResult(value) => {
+                let Ok(result) =
+                    serde_json::from_value::<crate::lobby::start_policy::StartGrantResult>(value)
+                else {
+                    continue;
+                };
+                world
+                    .resource_mut::<crate::native_host::native_gm::start::NativeGmStartRequests>()
+                    .record_result(result.clone());
+                world
+                    .resource_mut::<crate::lobby::StartGrantResults>()
+                    .push(result);
             }
             NativeFleetEvent::Frame {
                 raw,
@@ -222,9 +380,50 @@ fn apply_events(world: &mut World) {
                 if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
                     wire.0.close();
                 }
+                if world
+                    .get_resource::<crate::native_host::session_role::NativeSessionRoleState>()
+                    .is_some_and(|role| {
+                        role.role()
+                            == crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+                    })
+                {
+                    world
+                        .resource_mut::<crate::native_host::session_role::NativeSessionRoleState>()
+                        .join_status = Some(reason.clone());
+                }
                 eprintln!("phoenix-host: native fleet closed — {reason}: {detail}");
             }
         }
+    }
+}
+
+#[cfg(feature = "host")]
+fn connect_join_wire(base: &str, origin: &str) -> Result<Box<dyn RelaySocket>, String> {
+    crate::native_host::relay_socket::WsRelaySocket::connect_join(base, origin)
+        .map(|socket| Box::new(socket) as Box<dyn RelaySocket>)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(feature = "host"))]
+fn connect_join_wire(_base: &str, _origin: &str) -> Result<Box<dyn RelaySocket>, String> {
+    Err("this build has no native WebSocket adapter".into())
+}
+
+fn apply_pending_gm_bootstrap(world: &mut World) {
+    if !world.contains_resource::<crate::world::config::WorldConfig>() {
+        return;
+    }
+    let Some(pending) = world.remove_resource::<PendingNativeGmBootstrap>() else {
+        return;
+    };
+    let accepted = crate::gm_join::prepare_candidate_bootstrap(world, pending.roster).is_ok();
+    world.resource_mut::<NativeFleetPublication>().roster_result = Some(NativeRosterResult {
+        generation: pending.generation,
+        accepted,
+        reason: (!accepted).then_some("gm-bootstrap-refused"),
+    });
+    if accepted {
+        let _ = pending.id;
     }
 }
 
@@ -316,6 +515,11 @@ fn publish_state(world: &mut World) {
             .resource::<NativeFleetPublication>()
             .roster_result
             .clone(),
+        force_start: std::mem::take(&mut world.resource_mut::<NativeFleetForceRequest>().0),
+        join_request: world
+            .resource_mut::<NativeFleetPublication>()
+            .join_request
+            .take(),
     };
     if let Ok(json) = serde_json::to_string(&update) {
         let mut publication = world.resource_mut::<NativeFleetPublication>();

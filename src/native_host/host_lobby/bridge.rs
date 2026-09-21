@@ -525,6 +525,13 @@ fn is_fleet_record(json: &str) -> bool {
                 | super::HostLobbyRecord::FleetSlotClaimed { .. }
                 | super::HostLobbyRecord::FleetWireSend { .. }
                 | super::HostLobbyRecord::FleetFault { .. }
+                | super::HostLobbyRecord::FleetIdentity { .. }
+                | super::HostLobbyRecord::FleetGmBootstrap { .. }
+                | super::HostLobbyRecord::FleetStartPolicy { .. }
+                | super::HostLobbyRecord::FleetForceResult { .. }
+                | super::HostLobbyRecord::FleetGmJoinPending { .. }
+                | super::HostLobbyRecord::FleetGmJoinStatus { .. }
+                | super::HostLobbyRecord::FleetJoinStatus { .. }
         )
     )
 }

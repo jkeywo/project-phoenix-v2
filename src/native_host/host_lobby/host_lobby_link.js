@@ -55,7 +55,9 @@ import { applyQrPhase, drawJoinQr, showJoiningOff, toggleQr } from './gui/host-q
 import { joinUrlForCode } from './gui/join-url.js';
 import { scenarioCatalogView } from './gui/host-scenarios.js';
 import { renderHostScenarios } from './gui/host-scenario-render.js';
-import { landingEntries, landingViewModel, nextOpenEntry } from './gui/host-landing-view.js';
+import {
+  landingEntries, landingJoinAttempt, landingViewModel, nextOpenEntry,
+} from './gui/host-landing-view.js';
 import { renderHostLanding } from './gui/host-landing-render.js';
 import { mountNativeSettings } from './gui/native-settings.js';
 import { createNativeAudio } from './gui/native-audio.js';
@@ -193,7 +195,18 @@ function send(record) {
 
 const nativeFleetPeer = createNativeFleetPeer({ send, log: msg => console.log(msg) });
 window.__phoenixHostFleetConfigure = json => nativeFleetPeer.configure(json);
-window.__phoenixHostFleetUpdate = json => nativeFleetPeer.update(json);
+window.__phoenixHostFleetUpdate = json => {
+  let state;
+  try { state = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return false; }
+  if (state?.join_request) {
+    nativeFleetPeer.join(
+      state.join_request.code,
+      landingJoinData,
+      state.join_request.reconnect || null,
+    );
+  }
+  return nativeFleetPeer.update(state);
+};
 window.__phoenixHostFleetWire = frame => nativeFleetPeer.receive(frame);
 
 // What the host last told us is locked. Read by `shipStillNeeded` below, and by
@@ -303,6 +316,14 @@ let landingPacks = null;
 // reason `landingOpenEntry` is: the host hears about a choice when it is asked
 // to install one, and holding it there would make every highlight a round trip.
 let landingPackChoice = null;
+let landingJoinData = null;
+let landingJoinError = null;
+let landingJoinPending = false;
+
+fetch('assets/join/join-codes.json')
+  .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+  .then(data => { landingJoinData = data; })
+  .catch(error => console.warn('[host-lobby] join-code format unavailable', error));
 
 function landingProvides() {
   return landingPacks ? ['packs'] : [];
@@ -341,6 +362,8 @@ function drawLanding() {
       provides: landingProvides(),
       packs: landingPacks,
       chosenPack: landingPackChoice,
+      joinErrorId: landingJoinError,
+      joinPending: landingJoinPending,
     }),
     t,
     {
@@ -360,6 +383,7 @@ function drawLanding() {
         // server.html skips it.
         if (next === landingOpenEntry) return;
         landingOpenEntry = next;
+        landingJoinError = null;
         send(next ? { kind: 'landing_open', entry: next } : { kind: 'landing_close' });
         drawLanding();
       },
@@ -410,6 +434,18 @@ function drawLanding() {
       // `document.fullscreenElement` on an embedded view. A repaint here would
       // be the page claiming to know an answer only the host has.
       toggleFullscreen: () => send({ kind: 'toggle_fullscreen' }),
+      submitJoin: (join, raw) => {
+        const attempt = landingJoinAttempt(join, raw, landingJoinData);
+        if (!attempt.ok) {
+          landingJoinError = attempt.errorId;
+          drawLanding();
+          return;
+        }
+        landingJoinError = null;
+        landingJoinPending = true;
+        send({ kind: 'join_peer', code: attempt.code });
+        drawLanding();
+      },
     },
     // This document has no page lifecycle: its host is the only thing that
     // knows a World has been committed, which is what `dismissed` carries and
@@ -437,10 +473,19 @@ window.__phoenixHostLobby.renderLanding = function (json) {
     build: payload.build || 'dev',
     dismissed: !!payload.dismissed,
   };
+  landingJoinPending = payload.join_status === 'pending';
+  if (payload.join_status === 'admitted') {
+    landingJoinError = null;
+  } else if (payload.join_status && payload.join_status !== 'pending') {
+    landingJoinError = reasonStringId(payload.join_status, 'server');
+  }
   // A dismissed landing drops the open route with it, so a landing brought back
   // later (a Game Over returning this host to selection) opens on its front
   // door rather than on a stage nobody asked for.
-  if (landingState.dismissed) landingOpenEntry = null;
+  if (landingState.dismissed) {
+    landingOpenEntry = null;
+    landingJoinError = null;
+  }
   drawLanding();
   // This push moved one of the join panel's two inputs, so the panel's own law
   // is asked again with the pair now in hand. Without it a World committed

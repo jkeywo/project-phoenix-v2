@@ -171,7 +171,7 @@ describe('renderHostLanding — the idle landing', () => {
     const list = entries(doc);
     expect(list.filter((el) => el.getAttribute('aria-disabled') === 'true')
       .map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
-      .toEqual(['load_game', 'host_gm', 'join_peer', 'load_mod_pack']);
+      .toEqual(['load_game', 'load_mod_pack']);
     expect(list.every((el) => el.disabled === false)).toBe(true);
   });
 
@@ -1144,7 +1144,7 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     const disabled = entries(doc)
       .filter((el) => el.getAttribute('aria-disabled') === 'true')
       .map((el) => el.getAttribute(LANDING_ENTRY_ATTR));
-    expect(disabled).toEqual(['load_game', 'host_gm', 'join_peer', 'load_mod_pack']);
+    expect(disabled).toEqual(['load_game', 'load_mod_pack']);
     // ...and pressing it opens no middle column, which is the failure the row
     // being absent was avoiding in the first place.
     renderHostLanding(
@@ -1263,6 +1263,20 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
     expect(calls.join).toHaveLength(1);
   });
 
+  it('disables both join controls while native admission is pending', () => {
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    const vm = landingViewModel({ openEntryId: 'join_peer', joinPending: true });
+    renderHostLanding(doc, vm, t, h);
+    const field = doc.getElementById('landing-join-code');
+    const submit = doc.getElementById('landing-join-submit');
+    expect(field.disabled).toBe(true);
+    expect(submit.disabled).toBe(true);
+    submit.click();
+    field.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(calls.join).toEqual([]);
+  });
+
   it('binds the submit once per render, not once more each time', () => {
     // The static-markup hazard the fullscreen control has: this function runs
     // again on every menu click and on every refusal, so an accumulated
@@ -1351,12 +1365,12 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
     expect(docked(doc)).toHaveLength(0);
   });
 
-  it('draws nothing at all for a surface whose menu has no join route', () => {
+  it('draws the native Join as Peer route from the shared panel', () => {
     // The native landing: the row is offered, its stage is taken away by
     // `stagePlatforms`, so `vm.join` is null and every sentence stays empty.
     const doc = landingDoc();
     renderHostLanding(doc, landingViewModel({ platform: 'native', openEntryId: 'join_peer' }), t);
-    expect(text(doc, 'landing-join-role')).toBe('');
-    expect(doc.getElementById('landing-join-panel').parentElement).toBe(doc.body);
+    expect(text(doc, 'landing-join-role')).toBe('server.landing.join_peer_role');
+    expect(doc.getElementById('landing-join-panel').parentElement.id).toBe('landing-mid');
   });
 });

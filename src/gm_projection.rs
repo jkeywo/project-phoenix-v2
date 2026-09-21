@@ -45,7 +45,7 @@ struct GmWorldInspectorSources<'w> {
     paused: Option<Res<'w, crate::gm_action::SimulationPaused>>,
 }
 
-/// Marks the explicit production rendererless browser GM peer.
+/// Marks an explicit production GM peer. Browser and native peers share it.
 ///
 /// Rendererless always; shipless only sometimes. A GM that JOINED a fleet owns
 /// no local ship — it selected no hull and looks at somebody else's session. A
@@ -55,7 +55,11 @@ struct GmWorldInspectorSources<'w> {
 /// Anything reading this marker to mean "there is no local ship" is reading it
 /// wrong; ask for the ship.
 #[derive(Resource, Clone, Copy, Debug, Default)]
-pub struct BrowserGameMaster;
+pub struct GameMasterPeer;
+
+/// Compatibility name retained for browser call sites; the marker is no
+/// longer browser-only now native GM-only fleet members use the same rules.
+pub use GameMasterPeer as BrowserGameMaster;
 
 /// Requests GM projections alongside a native ship without changing its boot identity.
 #[derive(Resource, Default)]

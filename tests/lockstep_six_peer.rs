@@ -65,6 +65,7 @@ fn roster(local: HostSlot) -> FleetRoster {
         .into_iter()
         .map(|host| FleetShip {
             host,
+            authored_slot_id: None,
             ship_path: Some(SHIP.into()),
             crew: CREW
                 .into_iter()

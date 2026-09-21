@@ -34,6 +34,42 @@ direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
 position = [ -2.052780701790083, -0.09999999999999998, -0.15326994204139843 ]
 direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
 
+[markers.torpedo_port]
+position = [ 0.35, -0.4, 1.35 ]
+direction = [ 0.13735291561425134, 0, 0.9905221736903543 ]
+
+[markers.torpedo_starboard]
+position = [ -0.35, -0.4, 1.35 ]
+direction = [ -0.14095786999035612, 0, 0.990015595275035 ]
+
+[markers.torpedo_aft]
+position = [ 0, -0.4, -1.55 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.camera_fore]
+position = [ 0, -0.2, 1.8 ]
+direction = [ -0.0015926529164868284, 0, 0.9999987317275396 ]
+
+[markers.camera_aft]
+position = [ 0, -0.2, -2.1 ]
+direction = [ 0.0015926529164868284, 0, -0.9999987317275396 ]
+
+[markers.camera_port]
+position = [ 2.15, -0.2, 0 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
+
+[markers.camera_starboard]
+position = [ -2.15, -0.2, 0 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
+[markers.dock_port]
+position = [ 2.15, -0.2, 0 ]
+direction = [ 0.9999987317275396, 0, 0.0015926529164868284 ]
+
+[markers.dock_starboard]
+position = [ -2.15, -0.2, 0 ]
+direction = [ -0.9999987317275396, 0, -0.0015926529164868284 ]
+
 [[target_points]]
 position = [ -0.7499990487956546, -0.55, 0.29880551031263486 ]
 

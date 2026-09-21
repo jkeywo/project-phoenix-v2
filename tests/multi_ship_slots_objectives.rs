@@ -1,6 +1,9 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 #[path = "common/default_pool.rs"]
+// This target only needs the helper's pinned/default-pool switch; its observer
+// and child-process guards belong to the dedicated determinism test binaries.
+#[allow(dead_code)]
 mod default_pool;
 
 use bevy::prelude::*;

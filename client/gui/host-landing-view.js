@@ -229,7 +229,8 @@ export const LANDING_ENTRIES = [
     // profile, and the only one that opens a session of its own: Join as Peer
     // below joins somebody else's fleet, `?gm=1` is the bookmarkable spelling
     // of the same request, and this row is a host that IS the session — one
-    // selected hull, every station on AI backfill, and no viewscreen.
+    // selected hull, every station on AI backfill, and the GM desk replacing
+    // the 3D viewscreen presentation on the primary window.
     //
     // Its `stage` and `docks` are New Game's, deliberately and to the letter:
     // the questions a game master answers to open a session are the questions
@@ -249,14 +250,8 @@ export const LANDING_ENTRIES = [
     deeper: ['ship-picker'],
     docks: 'scenario-panel',
     platforms: ['web', 'native'],
-    // ...and only the browser host can OPEN it, for the reason Join as Peer's
-    // line below says: the Game Master profile is a BROWSER profile
-    // (`BootProfile::BrowserGameMaster`, chosen inside `wasm_init` from a
-    // thread-local only `wasm_prepare_game_master` sets), and the native host
-    // composes its app before any landing row can ask for one. The row is
-    // still offered there, dashed, because "a native host never game-masters"
-    // is not true — the work is simply not done.
-    stagePlatforms: ['web'],
+    // Native commits this request through NativeSessionRole before ingestion;
+    // browser commits it through its BrowserGameMaster boot profile.
     // PRE-BOOT, and for exactly the reason `join_peer` carries the same field:
     // the profile is read INSIDE `wasm_init` (`is_browser_gm`,
     // src/server/bridge.rs), which throws-to-unwind and runs once per page. On
@@ -281,18 +276,8 @@ export const LANDING_ENTRIES = [
     // Offered on BOTH, because "join someone else's session as a game master"
     // is a route a native build has every business showing.
     platforms: ['web', 'native'],
-    // ...but only the browser host can OPEN it, and this is `stagePlatforms`
-    // rather than `platforms` for the same reason Load Game's is: the route
-    // belongs here and the work does not exist yet, which is a gap to record on
-    // the row and not a claim that native hosts never game-master.
-    //
-    // What a slice closing it has to buy: the Game Master profile is a BROWSER
-    // profile (`BootProfile::BrowserGameMaster`, selected in `wasm_init` from a
-    // thread-local only `wasm_prepare_game_master` sets), the native lobby
-    // document carries no `#landing-join-panel`, and `HostLobbyBridge` has no
-    // channel to carry a typed code back to the host process. None of those is
-    // a port of this row.
-    stagePlatforms: ['web'],
+    // Native carries the same typed panel and submits a native role/join
+    // request; browser continues through __hostFleetJoin.
     // ...and only before this host has booted a world. The Game Master profile
     // is read INSIDE `wasm_init` (`is_browser_gm`, src/server/bridge.rs), which
     // throws-to-unwind and runs exactly once per page: after it, the request
@@ -325,8 +310,9 @@ export const LANDING_ENTRIES = [
   },
   {
     // WEB ONLY, and this is the doctrine rather than a gap (issues #1361,
-    // #1364): a native host is always a host and has no join leg at all, so
-    // there is nothing behind this control on that surface. A control exists
+    // #1364): the native Join as Peer route is GM-only; the native executable
+    // does not turn its primary window into a crew phone client, so there is
+    // nothing behind this distinct control on that surface. A control exists
     // exactly when something behind it can answer it, and the row — not a
     // build check in the renderer — is where that is said.
     id: 'connect_host',
@@ -789,6 +775,7 @@ export function nextOpenEntry(openEntryId, entryId, entries, provides) {
  *   booted?: boolean,
  *   entries?: Array<object>,
  *   joinErrorId?: string|null,
+ *   joinPending?: boolean,
  *   provides?: Array<string>,
  *   packs?: object|null,
  *   chosenPack?: string|null,
@@ -951,7 +938,10 @@ export function landingViewModel(input) {
     // reason `docks` is an id and not a boolean. `null` for every stage that is
     // not a code field, which is the whole condition the renderer reads.
     join: (open && open.join)
-      ? Object.assign({}, JOIN_CODE_FIELD, open.join, { errorId: opts.joinErrorId || null })
+      ? Object.assign({}, JOIN_CODE_FIELD, open.join, {
+        errorId: opts.joinErrorId || null,
+        pending: !!opts.joinPending,
+      })
       : null,
     // The track's offset, as a number the stylesheet reads through a custom
     // property. The DOCUMENT says only how deep it is; which columns that

@@ -16,6 +16,7 @@ entities:
         - "[ai] Watermarks only move forward, so a reordered or duplicated frame is inert rather than a step backwards. That is cheaper to build in here than to bolt onto #1119, which needs reordered and repeated disconnect observations to converge."
         - "[ai] Peers start ready through `delay`, which is not optimism: a host that has run no ticks has by definition already issued everything it ever will for ticks 0..=delay. Seeding anything lower deadlocks the fleet on tick zero, because no host can send a frame before it has stepped."
         - "[ai] A fleet of one is a real state — the operator opened a fleet and nobody joined — and it behaves exactly as an unfleeted host does: no barrier, no delay, no frames. Otherwise the solo path acquires a stall it can never clear."
+        - "[ai] #1519's tested capacity is four ship hosts plus two stationless GM simulation peers, with three active Station clients on each ship and every other Station left on ordinary Backfill. This is a supported evidence target, not an admission cap: the roster remains open to larger sessions without promising the same performance envelope. The short six-peer workload stays in ordinary CI; its ignored wall-clock form is the repeatable one-hour acceptance exercise."
     architecture:
       kind: pure-module
       authority: authoritative
@@ -32,7 +33,7 @@ entities:
         - join_fleet
         - wasm_join_fleet
         - wasm_mesh_status
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/smoke/fleet-lockstep.spec.js]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/smoke/fleet-lockstep.spec.js]
 
   - state: fleet-lockstep-state
     core:
@@ -71,6 +72,7 @@ entities:
         - "[ai] A receiver does not re-run the sending host's OWN authority check (human-vs-AI, station tenure) and cannot: that check is against the sending host's Sessions, and a session token is a bearer credential that never leaves the host holding it. The contract is the one a replay already keeps — a command on this wire is one an authority check already accepted. What the receiver DOES enforce for itself is ship ownership: apply_mesh_inbox drops any peer command whose target ShipKey is not the hull the sending slot owns (looked up from the spawned FleetSlotOf ships), so a host cannot drive another player's ship or an NPC. is_from checks the companion frame-consistency rule (a frame's from and its commands' order origin agree)."
         - "[ai] The one authority dimension NOT yet enforced (issue #1116 review) is that a frame's declared `from` is the connection that delivered it. A transport-authenticated sender slot is deferred to #1118/#1120 mesh hardening: the star relay means a member cannot authenticate a sibling frame the lead forwarded without the lead tagging it, which would change #1114's verbatim-relay envelope. It is deferred rather than half-built, and the ship-ownership check above holds regardless — a spoofed `from` can still speak only for the hull that slot owns. A TODO at the apply site and is_from's own doc record the boundary."
         - "[ai] No AI emission crosses this wire. Every host derives every NPC from the same ticks, the same seeded streams and the same authored policies (AGENTS.md rule 6, p2p-delta-ai-output-is-not-logged); shipping AI output would double-apply it against the replay contract."
+        - "[ai] #1519 observes that rule directly at the six-peer target: tests/lockstep_six_peer.rs compares each peer's per-tick NPC AdmittedCommands as well as the complete authoritative digest. Its failure artifact retains the first divergent tick, revision, seed, content paths and hashes, exact peer/client composition, human command log and canonical GM grants."
         - "[ai] The protocol revision is declared in BOTH halves — HOST_MESH_PROTOCOL in Rust and in gui/host-mesh.js — with a test pinning the number on each side. A host whose Rust half speaks 2 and whose JS half speaks 1 would assemble a fleet and then silently fail to agree a tick, and #1114's decoder refuses an unknown `m` precisely so that fails loudly instead."
     architecture:
       authority: request
@@ -93,7 +95,7 @@ entities:
         - wasm_receive_mesh_frame
         - wasm_take_mesh_frames
         - apply_mesh_inbox
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/client/host-mesh.test.js, tests/smoke/fleet-lockstep.spec.js]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/client/host-mesh.test.js, tests/smoke/fleet-lockstep.spec.js]
 
   - component: peer-independent-command-order
     core:
@@ -175,7 +177,7 @@ entities:
         - "[ai] sim_digest::digest_stages was added alongside it: the running accumulator after each named scope of the fold. \"Two hosts disagree at tick 240\" is where an investigation starts and not where it can usefully stop; comparing the two lists says which SCOPE they disagree in, which is the difference between a bisection and a look. It is not a second digest — the last stage is always world_digest's own answer, pinned by a test."
         - "[ai] The exchange cadence is a diagnostic interval and moves nothing in the simulation, so it is a constant rather than authored content. 300 ticks is five seconds at the default rate: short enough that a crew hears about a split in the engagement it happened in, long enough to be invisible beside the per-tick input traffic."
         - "[ai] The fold is taken from INSIDE the fixed schedule — FixedLast, before advance_sim_tick, the same fold point seal_tick_frame uses — once per fixed step, NOT once per frame in Last (issue #1116 review). A frame that catches up several fixed steps (a browser under load, a post-stall unpause) can advance SimTick past a checkpoint multiple mid-frame, e.g. 299 to 301 across interval 300; a once-per-frame sampler that only read the end-of-frame SimTick would never fold or publish tick 300, and a real divergence at exactly that tick would go undetected. Per-step sampling observes every checkpoint the frame crosses. The fold-point rule still holds: at FixedLast the tick has fully committed (SimSet and the fixed StateTransition have run) and render interpolation, which writes Transform in the frame schedules, has not. Gated to a running fleet so a solo host takes no per-step exclusive sync point for an exchange it has no peer for. tests/lockstep_mesh.rs's a_multi_step_frame_samples_every_checkpoint_it_crosses drives two fixed steps across a checkpoint in one update and asserts it is recorded and published."
-        - "[ai] AC6's cross-instance state-matching is delivered by tests/lockstep_mesh.rs: full native simulations with different local Sessions fold after every tick. #1316 also pins that the browser roster's frozen Rating pairs seed identical per-hull Ratings and control sources before any corrective command. The existing tests/smoke/fleet-lockstep.spec.js covers the wire, WASM boundary and barrier; it does not prove digest agreement between two differently-crewed browser pages. The 300-tick diagnostic exchange follows the slower page's pace, so native agreement evidence and browser transport evidence remain separately reported."
+        - "[ai] AC6's cross-instance state-matching is delivered by tests/lockstep_mesh.rs: full native simulations with different local Sessions fold after every tick. #1519 scales the same native boundary to six complete Apps, four differently-crewed ships, two GM identities, twelve active Station clients and explicit NPC-output comparison in tests/lockstep_six_peer.rs. #1316 also pins that the browser roster's frozen Rating pairs seed identical per-hull Ratings and control sources before any corrective command. The existing tests/smoke/fleet-lockstep.spec.js covers the wire, WASM boundary and barrier; it does not prove digest agreement between differently-crewed browser pages. The 300-tick diagnostic exchange follows the slower page's pace, so native agreement evidence and browser transport evidence remain separately reported."
     architecture:
       authority: authoritative
       owns: [fleet-agreement-state]
@@ -189,7 +191,7 @@ entities:
         - sample_and_publish_digest
         - digest_stages
         - first_divergent_scope
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/smoke/fleet-lockstep.spec.js]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/smoke/fleet-lockstep.spec.js]
 
   - state: fleet-agreement-state
     core:

@@ -35,6 +35,17 @@ show a missing-translation marker. A translation is stale when its recorded
 `<locale>_source` differs from the effective English value after normal mod
 composition. Editing English never updates translations automatically: a
 translator explicitly refreshes the value and its source metadata.
+`explainCatalogueEntry(getCatalogueReport(), id)` returns that retained value,
+its translation and effective-English sources, provenance, status, conflicts,
+and the ordinary-precedence winner for an authoring diagnostic surface.
+
+Workshop's **Localisation** panel is that surface. It reports catalogue-wide
+missing/invalid/stale/conflict counts and, for every String Id authored by the
+open pack, the effective English source, translation source, winning source,
+provenance and relevant findings. Stale text remains in the document. **Refresh
+source metadata** is an explicit, undoable acknowledgement that the retained
+translation was checked against the displayed effective English; the ordinary
+Save/Export path then carries the updated `<locale>_source` cell.
 
 `scripts/extract-strings.mjs` preserves every existing header and cell,
 including locale/freshness/provenance columns, and appends new English rows at
@@ -56,6 +67,13 @@ Welcome it sends each active partial catalogue in load order; the client
 composes them over the shipped table and later packs win each value. English
 and other missing keys continue to come from lower-precedence sources. String
 Ids and simulation data are never rewritten.
+
+The phone chooses a private display language from its browser language on first
+use and exposes every available catalogue locale under Settings → Gameplay.
+An explicit choice is stored only on that device. The shell installs both the
+choice and the ordered Welcome catalogues into each same-origin Console realm
+before its components register, and repeats the install after every iframe
+mount/reload and reconnect. No locale preference crosses the game wire.
 
 ## Square brackets mean "not reviewed yet"
 

@@ -171,6 +171,12 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-test-trace-event { display: inline; }
 .workshop-test-trace-source { max-width: 100%; overflow-wrap: anywhere; }
 details { margin-top: 1.5rem; }
+.workshop-localisation { display: grid; align-content: start; gap: .5rem; }
+.workshop-localisation > select { width: 100%; }
+.workshop-localisation-entry { border: 1px solid #8195a8; padding: .65rem; margin-block: .5rem; overflow-wrap: anywhere; }
+.workshop-localisation-entry h3 { font-family: ui-monospace, monospace; margin-block-start: 0; }
+.workshop-localisation-entry[data-status="stale"],
+.workshop-localisation-entry[data-status="invalid"] { border-inline-start-width: .35rem; }
 :root[data-contrast="more"] { background: #000; color: #fff; }
 :root[data-contrast="more"] :is(button, select, textarea) { background: #000; border-color: #fff; }
 @media (max-width: 55rem) { #workshop { padding: 1rem; } .workshop-toolbar { top: 0; } }

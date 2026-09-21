@@ -180,9 +180,20 @@ export function composeStringCatalogues(inputs, locale = 'en') {
       diagnostics.push(finding('missing-english', chain.at(-1).source, id, 'en', 'no usable English source'));
       continue;
     }
+    if (usableEnglish.length > 1) {
+      diagnostics.push(finding(
+        'conflicting-entry', english.source, id, 'en',
+        `English source from '${english.source}' wins ordinary mod precedence`,
+        {
+          winner: english.source,
+          shadowed: usableEnglish.slice(0, -1).map((candidate) => candidate.source),
+        },
+      ));
+    }
 
     let value = english.cells.en;
     let status = locale === 'en' ? 'current' : 'missing';
+    let refreshable = false;
     let winningSource = english.source;
     const candidates = locale === 'en'
       ? []
@@ -214,12 +225,14 @@ export function composeStringCatalogues(inputs, locale = 'en') {
         const translatedFrom = winner.cells[sourceKey];
         if (translatedFrom === undefined || translatedFrom === '') {
           status = 'invalid';
+          refreshable = true;
           diagnostics.push(finding(
             'invalid-translation', winner.source, id, locale,
             `missing ${sourceKey} freshness metadata; using English fallback`,
           ));
         } else if (translatedFrom !== english.cells.en) {
           status = 'stale';
+          refreshable = true;
           diagnostics.push(finding(
             'stale-translation', winner.source, id, locale,
             'effective English changed after this translation; using English fallback',
@@ -244,9 +257,20 @@ export function composeStringCatalogues(inputs, locale = 'en') {
       translationSource: winner?.source || null,
       provenance: winner?.cells?.[`${locale}_provenance`] || '',
       status,
+      refreshable,
       winningSource,
     });
   }
 
   return { table, entries, diagnostics, locales: [...localeSet].sort() };
+}
+
+/** One author-facing row with only the diagnostics relevant to that String Id. */
+export function explainCatalogueEntry(report, id) {
+  return {
+    entry: report?.entries instanceof Map ? report.entries.get(id) || null : null,
+    diagnostics: Array.isArray(report?.diagnostics)
+      ? report.diagnostics.filter((item) => item.id === id)
+      : [],
+  };
 }

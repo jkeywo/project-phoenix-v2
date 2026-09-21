@@ -2,7 +2,7 @@
 title: Localisation
 type: concept
 tags: [localisation, strings, client, display-text]
-sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/rendezvous-transport.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
+sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
 updated: 2026-09-21
 ---
 
@@ -22,6 +22,11 @@ invalid, or stale translations render effective English. The retained report
 names conflicts, winners, sources and freshness for author tooling; it never
 adds diagnostic markers to player text. `<locale>_source` records the exact
 English value translated and `<locale>_provenance` records its origin.
+The phone's browser/private choice is installed in the shell and every Console
+iframe realm before component construction, then repeated on iframe reload and
+reconnect. Workshop consumes the retained report in its Localisation panel and
+offers the only freshness mutation: an explicit source-metadata refresh that
+enters the ordinary undo/save/export document flow.
 
 A text id may be joined on the wire by a sibling field named `<field>_params`
 (`ObjectiveSnapshot::text_params`, `CommsMessage::body_params`). `localiseTree`

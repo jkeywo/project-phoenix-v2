@@ -30,6 +30,7 @@ import { t } from './strings.js';
 import { renderInspectorMetadata, validInspectorDescriptor } from './inspector-field.js';
 import { mountWorkshopLayout } from './workshop-layout-renderer.js';
 import { workshopTestLayoutModel } from './workshop-test-layout-model.js';
+import { mountWorkshopLocalisation } from './workshop-localisation-panel.js';
 
 // wasm-bindgen may reject with a string JsValue rather than an Error object.
 const ERROR_STRING_IDS = Object.freeze({
@@ -169,6 +170,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   dependencyButton.disabled = !runtime.dependencies;
   root.append(toolbar, layout, testLayout);
   let dependencyFiles = [];
+  let catalogueDependencies = null;
   let draft = null;
   let selected = null;
   let pendingImport = null;
@@ -190,6 +192,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let spatialPanel = null;
   let layoutMount = null;
   let testLayoutMount = null;
+  let localisationPanel = null;
   const feedbackRows = new Map();
   const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
     emitActionFeedbackTransition(win, value);
@@ -267,12 +270,16 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  localisationPanel = mountWorkshopLocalisation({ root, attach: false, draft: () => draft,
+    dependencies: () => catalogueDependencies, t: translate,
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
   compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
       findings, feedback, dependencies, settings,
+      localisation: localisationPanel.node,
       models: modelPanel.node, 'model-preview': modelPanel.previewNode, sound: soundAudition.node,
       changes: changesPanel, definitions: definitionsPanel.node, composition: compositionTools,
       entity: entityPanel.node, presets: presetsPanel.node, scripts: scriptsPanel.node },
@@ -289,6 +296,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
         add: translate('workshop.add_files'), recovery: translate('workshop.recovery'),
         findings: translate('workshop.findings'), feedback: translate('workshop.feedback'),
         dependencies: translate('workshop.dependencies'), settings: translate('editor.mod.settings.heading'),
+        localisation: translate('workshop.localisation.title'),
         models: translate('workshop.models.title'), 'model-preview': translate('workshop.models.preview.title'),
         sound: translate('sound_cues.title'), changes: translate('workshop.changes.title'),
         definitions: translate('workshop.definitions.title'), composition: translate('workshop.composition.title'),
@@ -434,6 +442,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     shipAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
     spatialPanel?.refresh({ hidden: testing });
+    localisationPanel?.refresh();
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
     testLayout.hidden = !testing;
     sourceScope.hidden = testing;
@@ -803,6 +812,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     try {
       const snapshot = await runtime.dependencies();
       if (disposed) return;
+      catalogueDependencies = snapshot;
       // The pin a migration would move this draft onto. Read from the same
       // dependency snapshot the Test and preview merge from, so the Workshop
       // never proposes an epoch the runtime would not itself accept.
@@ -987,6 +997,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     try {
       const snapshot = await runtime.dependencies();
       if (disposed) return;
+      catalogueDependencies = snapshot;
       baseContent = readBaseContent(snapshot);
       refresh();
     } catch { /* No identity, no proposal. */ }

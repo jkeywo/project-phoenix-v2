@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeStringCatalogues } from '../../gui/string-catalogue.js';
+import { composeStringCatalogues, explainCatalogueEntry } from '../../gui/string-catalogue.js';
 import {
   getCataloguePresentation, getCatalogueReport, getLocale, setBaseCatalogue, setLocale,
   setOverlayCatalogues, t,
@@ -79,5 +79,60 @@ describe('ordinary mod String Table composition', () => {
     expect(delivered.data.string_catalogues[0].csv).toBe(GERMAN);
     setLocale('en');
     setOverlayCatalogues([]);
+  });
+
+  it('invalidates against effective overridden English while retaining provenance for refresh', () => {
+    const changedEnglish = 'id,en\nstation.helm.name,Flight Control\n';
+    const stale = composeStringCatalogues([
+      { source: 'core', text: CORE },
+      { source: 'english-edit', text: changedEnglish },
+      { source: 'de-console', text: GERMAN },
+    ], 'de');
+    expect(stale.table.get('station.helm.name')).toBe('Flight Control');
+    const detail = explainCatalogueEntry(stale, 'station.helm.name');
+    expect(detail.entry).toMatchObject({
+      status: 'stale',
+      englishSource: 'english-edit',
+      translation: 'Ruder',
+      translationSource: 'de-console',
+      provenance: 'machine',
+    });
+    expect(detail.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: 'stale-translation',
+        translatedFrom: 'Helm',
+        effectiveEnglish: 'Flight Control',
+      }),
+      expect.objectContaining({
+        category: 'conflicting-entry', locale: 'en', winner: 'english-edit', shadowed: ['core'],
+      }),
+    ]));
+
+    const refreshed = GERMAN.replace(',Helm,machine', ',Flight Control,machine');
+    const current = composeStringCatalogues([
+      { source: 'core', text: CORE },
+      { source: 'english-edit', text: changedEnglish },
+      { source: 'de-console', text: refreshed },
+    ], 'de');
+    expect(current.table.get('station.helm.name')).toBe('Ruder');
+    expect(current.entries.get('station.helm.name').status).toBe('current');
+  });
+
+  it('reports the deterministic winning translation source without exposing a marker', () => {
+    const later = 'id,de,de_source,de_provenance\n'
+      + 'station.helm.name,Steuerstand,Helm,human\n';
+    const result = composeStringCatalogues([
+      { source: 'core', text: CORE },
+      { source: 'older-de', text: GERMAN },
+      { source: 'later-de', text: later },
+    ], 'de');
+    expect(result.table.get('station.helm.name')).toBe('Steuerstand');
+    expect(result.table.get('station.helm.name')).not.toContain('missing');
+    expect(explainCatalogueEntry(result, 'station.helm.name')).toMatchObject({
+      entry: { winningSource: 'later-de', provenance: 'human', status: 'current' },
+      diagnostics: [expect.objectContaining({
+        category: 'conflicting-entry', winner: 'later-de', shadowed: ['older-de'],
+      })],
+    });
   });
 });

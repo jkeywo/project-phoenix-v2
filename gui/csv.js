@@ -32,3 +32,12 @@ export function parseCsv(text) {
   if (field !== '' || row.length > 0) endRow();
   return rows;
 }
+
+/** Serialize values as RFC 4180 CSV without losing multiline/accented cells. */
+export function serializeCsv(rows, newline = '\n') {
+  const cell = (value) => {
+    const text = String(value ?? '');
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  return rows.map((row) => row.map(cell).join(',')).join(newline) + newline;
+}

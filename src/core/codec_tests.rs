@@ -225,6 +225,16 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             },
         ),
         (
+            ClientMessageDiscriminants::SelectShipSlot,
+            ClientMessage::SelectShipSlot {
+                slot_id: "player".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ReleaseShipSlot,
+            ClientMessage::ReleaseShipSlot,
+        ),
+        (
             ClientMessageDiscriminants::SelectPlayerShip,
             ClientMessage::SelectPlayerShip {
                 template_path: "assets/entities/alliance_cruiser.toml".into(),

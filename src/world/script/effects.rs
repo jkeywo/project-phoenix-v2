@@ -296,13 +296,8 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
     register_real_lit(engine.engine_mut());
     register_int_lit(engine.engine_mut());
 
-    host_fn!(
-        engine,
+    engine.register_fn(
         "complete_objective",
-        receiver = "effects",
-        category = "effect",
-        params = ["id"],
-        summary = "Mark the objective complete.",
         |sink: &mut EffectSink, id: ImmutableString| {
             sink.push(ActionCmd::CompleteObjective { id: id.to_string() });
         },
@@ -313,7 +308,8 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         receiver = "effects",
         category = "effect",
         params = ["id", "instance_id"],
-        summary = "Mark one named objective instance complete.",
+        summary =
+            "Mark one named objective instance complete; omit instance_id for a legacy objective.",
         |sink: &mut EffectSink, id: ImmutableString, instance_id: ImmutableString| {
             sink.push(ActionCmd::CompleteObjectiveInstance {
                 key: crate::objective_instances::ObjectiveInstanceKey {
@@ -323,13 +319,8 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
             });
         },
     );
-    host_fn!(
-        engine,
+    engine.register_fn(
         "fail_objective",
-        receiver = "effects",
-        category = "effect",
-        params = ["id"],
-        summary = "Mark the objective failed.",
         |sink: &mut EffectSink, id: ImmutableString| {
             sink.push(ActionCmd::FailObjective { id: id.to_string() });
         },
@@ -340,7 +331,8 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         receiver = "effects",
         category = "effect",
         params = ["id", "instance_id"],
-        summary = "Mark one named objective instance failed.",
+        summary =
+            "Mark one named objective instance failed; omit instance_id for a legacy objective.",
         |sink: &mut EffectSink, id: ImmutableString, instance_id: ImmutableString| {
             sink.push(ActionCmd::FailObjectiveInstance {
                 key: crate::objective_instances::ObjectiveInstanceKey {
@@ -2501,7 +2493,7 @@ mod tests {
 
         let commands = run(
             r#"fn f(ctx) {
-                ctx.effects.set_objective_progress("hold", "lead", 0.75);
+                ctx.effects.set_objective_progress("hold", "lead", flt("0.75"));
                 ctx.effects.complete_objective("hold", "lead");
                 ctx.effects.fail_objective("hold", "other");
             }"#,

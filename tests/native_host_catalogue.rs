@@ -227,6 +227,7 @@ fn real_native_pack_installation_publishes_updates_locks_and_reconnect_metadata(
         scenario_locked.locked_scenario.as_deref(),
         Some("combat_test")
     );
+    assert_eq!(scenario_locked.locked_slot.as_deref(), Some("player"));
     assert_eq!(scenario_locked.locked_ship, None);
     assert_browser_and_surface(&scenario_locked, &lobby, &mut surface);
     handle.send(
@@ -251,6 +252,7 @@ fn real_native_pack_installation_publishes_updates_locks_and_reconnect_metadata(
         let restored = last_catalogue(&handle, Some(token));
         assert_eq!(restored.active_packs, locked.active_packs);
         assert_eq!(restored.locked_scenario, locked.locked_scenario);
+        assert_eq!(restored.locked_slot, locked.locked_slot);
         assert_eq!(restored.locked_ship, locked.locked_ship);
         assert_eq!(
             restored

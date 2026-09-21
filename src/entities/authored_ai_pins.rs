@@ -378,6 +378,10 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // depart from the impulse baseline, not three.
     ("alliance_cruiser", "engines"),
     ("alliance_cruiser", "steering"),
+    // The crewed Dynasty cruiser composes the same class doctrine unchanged;
+    // this is inherited behaviour, not a new tactical departure.
+    ("dynasty_player_cruiser", "engines"),
+    ("dynasty_player_cruiser", "steering"),
     // …and NOT the three tubes the ring exists to point, which is worth a note
     // because they were listed here for one release (issue #929).
     //
@@ -3661,15 +3665,16 @@ fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
     // refit shows up as a diff here.
     assert_eq!(
         weak_entry_strict_launcher_armed_bow,
-        ["alliance_cruiser"],
+        ["alliance_cruiser", "dynasty_player_cruiser"],
         "the hulls whose bow hold opens on readiness, whose tubes hold for a \
          struck-down arc, and which carry a bow-bearing bank to strike it down \
          with. This is a DEPENDENCY, not a deadlock — but it is only discharged by \
          guns that are actually heavy enough, which is a balance claim no authored \
          text can settle. A hull added here owes a seeded sweep in its own file \
-         showing the gate opening in practice; `alliance_cruiser.toml` carries 28 \
-         `probe_duel` seeds, launches on all of them, and the arc-collapse trace \
-         that goes with them"
+         showing the gate opening in practice; the Dynasty hull inherits the \
+         Alliance cruiser's identical weapons and movement doctrine, whose 28 \
+         `probe_duel` seeds launch on all of them and carry the matching \
+         arc-collapse trace"
     );
     assert!(
         weak_entry_permissive_launcher.is_empty(),
@@ -4005,10 +4010,12 @@ fn an_unknown_channel_resolves_to_nothing_on_every_authored_policy() {
         }
     }
     assert_eq!(
-        checked, 169,
-        "the fifteen policy kinds account for 169 of the fleet's 229 AI-capable \
-         fine-system slots (the other 60 are the selectors). A change in this number \
-         means a hull, weapon or kind moved. 169-of-229 since #1163, which added the \
+        checked, 186,
+        "the fifteen policy kinds account for 186 of the fleet's 251 AI-capable \
+         fine-system slots (the other 65 are the selectors). A change in this number \
+         means a hull, weapon or kind moved. 186-of-251 since #1521, which added the \
+         THIRTEENTH AI-bearing hull — `dynasty_player_cruiser`, seventeen inherited \
+         policy slots and five selectors; 169-of-229 since #1163, which added the \
          ELEVENTH and TWELFTH AI-bearing hulls — `ship_harrow_tug` and \
          `alliance_tender`, eleven policy slots and five selectors EACH, both fully \
          composed from the fleet baseline with no bespoke captain; 147-of-197 since \

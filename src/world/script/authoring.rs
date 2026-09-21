@@ -70,7 +70,7 @@ pub struct HostFn {
 
 impl HostFn {
     /// The display signature, e.g. `on_destroyed(entity, handler)` or, for a
-    /// receiver method, `effects.complete_objective(id)`.
+    /// receiver method, `effects.complete_objective(id, instance_id)`.
     pub fn signature(&self) -> String {
         let call = format!("{}({})", self.name, self.params.join(", "));
         if self.receiver.is_empty() {
@@ -263,8 +263,13 @@ mod tests {
         // ctx.flags.*
         ("flags", "increment", &["name", "by"]),
         // ctx.effects.*
-        ("effects", "complete_objective", &["id"]),
-        ("effects", "fail_objective", &["id"]),
+        ("effects", "complete_objective", &["id", "instance_id"]),
+        ("effects", "fail_objective", &["id", "instance_id"]),
+        (
+            "effects",
+            "set_objective_progress",
+            &["id", "instance_id", "progress"],
+        ),
         // The mission-timeline vocabulary (issue #1338). Deliberately exposed:
         // marking a beat and judging a marked entity's outcome are things only
         // a scenario author can do, so they belong in the autocomplete set.
@@ -330,8 +335,8 @@ mod tests {
         // ctx.schedule.* and the in_seconds(n).<verb> delay builder.
         ("schedule", "in_seconds", &["secs"]),
         ("schedule", "after", &["secs", "callback"]),
-        ("delay", "complete_objective", &["id"]),
-        ("delay", "fail_objective", &["id"]),
+        ("delay", "complete_objective", &["id", "instance_id"]),
+        ("delay", "fail_objective", &["id", "instance_id"]),
         ("delay", "reset_trigger", &["id"]),
         ("delay", "load_world", &["path"]),
         ("delay", "unload_world", &["path"]),
@@ -349,7 +354,10 @@ mod tests {
             .iter()
             .find(|h| h.name == "complete_objective" && h.receiver == "effects")
             .unwrap();
-        assert_eq!(complete.signature(), "effects.complete_objective(id)");
+        assert_eq!(
+            complete.signature(),
+            "effects.complete_objective(id, instance_id)"
+        );
     }
 
     #[test]

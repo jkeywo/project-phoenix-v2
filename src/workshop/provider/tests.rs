@@ -102,7 +102,7 @@ fn named_objective_instance_source_roundtrips_exactly_and_is_editor_clean() {
     let script = br#"// Preserve this exact source.
 fn on_tick(ctx) {
     ctx.effects.add_objective(#{ id: "hold", instance_id: "lead", text: "objective.hold", recipient_ship_slots: ["lead"] });
-    ctx.effects.set_objective_progress("hold", "lead", 0.5);
+    ctx.effects.set_objective_progress("hold", "lead", flt("0.5"));
     ctx.schedule.in_seconds(2).complete_objective("hold", "lead");
 }
 "#;

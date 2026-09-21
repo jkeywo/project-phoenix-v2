@@ -229,12 +229,18 @@ fn authored_ship_slots_require_one_resolvable_game_start_ship_row_each() {
 [[ship_slot]]
 id = "lead"
 label = "Lead"
-allowed_ships = ["assets/entities/player.toml"]
+default_ship = "assets/entities/player.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/player.toml"
 
 [[ship_slot]]
 id = "wing"
 label = "Wing"
-allowed_ships = ["assets/entities/player.toml"]
+default_ship = "assets/entities/player.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/player.toml"
 
 [[entity]]
 template_path = "assets/entities/player.toml"

@@ -153,13 +153,14 @@ text = "entity.dynasty_player_cruiser.station.damage_control.tutorial.text"
 trigger = { kind = "first_visit" }
 
 # Command: Captain and Comms responsibilities, plus the existing security and
-# viewscreen operations which are command-level rather than weapon controls.
+# viewscreen operations. The inherited stance-command system is removed: this
+# first six-seat bridge has no stance controls or command target.
 [[system]]
 id = "captain"
 station = "command"
 [[system]]
 id = "command"
-station = "command"
+_remove = true
 [[system]]
 id = "red-alert"
 station = "command"

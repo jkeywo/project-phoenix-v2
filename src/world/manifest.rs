@@ -1168,7 +1168,7 @@ world = "assets/worlds/mod_skirmish.toml"
 
     /// The demo curation manifest (issue #917): must parse, curate the
     /// catalogue down to exactly `combat_test`, and — without editing
-    /// `combat_test.toml`, which still authors four `[[available_ships]]` —
+    /// `combat_test.toml`, which now authors five `[[available_ships]]` —
     /// resolve the ship list to the Destroyer followed by the Cruiser.
     #[test]
     fn demo_manifest_curates_to_combat_test_destroyer_then_cruiser() {
@@ -1216,11 +1216,11 @@ world = "assets/worlds/mod_skirmish.toml"
             ]
         );
 
-        // combat_test.toml itself is untouched: it still authors all four
-        // hulls. Curation happens only in the manifest's ships allowlist.
+        // combat_test.toml itself still authors all five hulls. Curation happens
+        // only in the manifest's ships allowlist.
         let combat_toml = include_str!("../../assets/worlds/combat_test.toml");
         let world = parse_world(combat_toml).expect("combat_test.toml must parse");
-        assert_eq!(world.available_ships.len(), 4);
+        assert_eq!(world.available_ships.len(), 5);
     }
 
     // -- exported mod-pack manifest ------------------------------------------

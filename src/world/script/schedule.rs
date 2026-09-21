@@ -487,13 +487,8 @@ pub(crate) fn register_scheduling(engine: &mut HostRegistry) {
     // The delayed-effect vocabulary: each verb maps to the exact `TriggerAction`
     // the declarative front-end builds, so the delayed dispatch path is the same
     // one a TOML `action_delays` entry takes.
-    host_fn!(
-        engine,
+    engine.register_fn(
         "complete_objective",
-        receiver = "delay",
-        category = "delay",
-        params = ["id"],
-        summary = "Delayed: mark the objective complete.",
         |b: &mut Schedule, id: ImmutableString| {
             b.defer(TriggerAction::CompleteObjective { id: id.to_string() });
         },
@@ -504,7 +499,7 @@ pub(crate) fn register_scheduling(engine: &mut HostRegistry) {
         receiver = "delay",
         category = "delay",
         params = ["id", "instance_id"],
-        summary = "Delayed: mark one named objective instance complete.",
+        summary = "Delayed: mark one named objective instance complete; omit instance_id for a legacy objective.",
         |b: &mut Schedule, id: ImmutableString, instance_id: ImmutableString| {
             b.defer(TriggerAction::CompleteObjectiveInstance {
                 key: crate::objective_instances::ObjectiveInstanceKey {
@@ -514,24 +509,16 @@ pub(crate) fn register_scheduling(engine: &mut HostRegistry) {
             });
         },
     );
-    host_fn!(
-        engine,
-        "fail_objective",
-        receiver = "delay",
-        category = "delay",
-        params = ["id"],
-        summary = "Delayed: mark the objective failed.",
-        |b: &mut Schedule, id: ImmutableString| {
-            b.defer(TriggerAction::FailObjective { id: id.to_string() });
-        },
-    );
+    engine.register_fn("fail_objective", |b: &mut Schedule, id: ImmutableString| {
+        b.defer(TriggerAction::FailObjective { id: id.to_string() });
+    });
     host_fn!(
         engine,
         "fail_objective",
         receiver = "delay",
         category = "delay",
         params = ["id", "instance_id"],
-        summary = "Delayed: mark one named objective instance failed.",
+        summary = "Delayed: mark one named objective instance failed; omit instance_id for a legacy objective.",
         |b: &mut Schedule, id: ImmutableString, instance_id: ImmutableString| {
             b.defer(TriggerAction::FailObjectiveInstance {
                 key: crate::objective_instances::ObjectiveInstanceKey {

@@ -10,6 +10,8 @@
 // (which serves dist/ and navigates to /client/#<hostId>) keeps working:
 //   dist/client/index.html      (= client.html)
 //   dist/client/gui/...         (JS modules + console HTML)
+//   dist/gui/...                (the same modules for server.html and the
+//                                native host's embedded lobby document)
 //   dist/client/assets/<dir>/   (runtime assets referenced by the consoles)
 //   dist/client/assets/ship-cards/  (lobby ship-picker art — see ship-cards.mjs)
 //   dist/client/logo.png
@@ -86,6 +88,16 @@ async function main() {
   // gui/ (JS modules + console HTML + borders)
   await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
 
+  // The native host document is assembled from dist/index.html, so its
+  // absolute `./gui/...` imports resolve against dist/gui rather than the
+  // phone's dist/client/gui copy. run-native.bat intentionally uses this fast
+  // JS build instead of recompiling the WASM host page on every launch; keep
+  // the shared module tree current here or native can execute an older landing
+  // table even while the phone bundle is fresh.
+  const hostGuiOut = path.join(root, 'dist', 'gui');
+  await rm(hostGuiOut, { recursive: true, force: true });
+  await cp(path.join(root, 'gui'), hostGuiOut, { recursive: true });
+
   // assets/<dir>/
   for (const dir of ASSET_DIRS) {
     await cp(
@@ -113,7 +125,7 @@ async function main() {
   await copyFile(path.join(root, 'assets', 'favicon.ico'), path.join(out, 'favicon.ico'));
 
   console.log(
-    `client page built → dist/client/ (pure JS, no WASM; ${cards} ship cards; stamp ${stamp || 'unstamped'})`,
+    `client page built → dist/client/ + shared dist/gui/ (pure JS, no WASM; ${cards} ship cards; stamp ${stamp || 'unstamped'})`,
   );
 }
 

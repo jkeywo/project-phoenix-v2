@@ -37,7 +37,9 @@
  * Tests own the table; explicitly leave it alone.
  */
 
-import { buildTable, setTable } from './strings.js';
+import {
+  applyToDom, getCataloguePresentation, installCataloguePresentation, setBaseCatalogue,
+} from './strings.js';
 
 // Resolved relative to this module, so this works from both the client root
 // (dist/client/) and the console pages under gui/<ship>/.
@@ -51,7 +53,7 @@ if (!UNDER_TEST && typeof XMLHttpRequest !== 'undefined' && typeof document !== 
     xhr.open('GET', CSV_URL, false); // false = synchronous, see header comment
     xhr.send();
     if (xhr.status >= 200 && xhr.status < 300) {
-      setTable(buildTable(xhr.responseText));
+      setBaseCatalogue(xhr.responseText);
     } else {
       throw new Error(`HTTP ${xhr.status}`);
     }
@@ -60,4 +62,29 @@ if (!UNDER_TEST && typeof XMLHttpRequest !== 'undefined' && typeof document !== 
     // ⟨string.id⟩, which is a legible broken console instead of a blank page.
     console.error(`strings: failed to load ${CSV_URL} — UI will show raw ids`, err);
   }
+}
+
+// Console modules import this before defining their components. Pull the
+// same-origin shell presentation synchronously at that boundary so translated
+// template text is correct on first construction, not repaired after load.
+if (!UNDER_TEST && typeof window !== 'undefined' && window.parent !== window) {
+  try {
+    const presentation = window.parent?.phLocale?.presentation?.();
+    if (presentation) installCataloguePresentation(presentation);
+  } catch (_) { /* cross-origin embedding keeps the shipped English table */ }
+}
+
+// Each console iframe is its own JavaScript realm and therefore owns a separate
+// strings.js singleton. The parent shell calls this narrow bridge after every
+// load/reload; sharing only the parent table would leave components imported
+// inside the iframe on English forever.
+if (typeof window !== 'undefined') {
+  window.phStringCatalogue = {
+    install(presentation) {
+      const installed = installCataloguePresentation(presentation);
+      applyToDom(document);
+      return installed;
+    },
+    presentation: getCataloguePresentation,
+  };
 }

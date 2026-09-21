@@ -264,6 +264,7 @@ pub(crate) fn test_reconnect_welcomes(app: &mut App, tokens: &[&str]) {
                     ship_config: Default::default(),
                     station_ratings: Default::default(),
                     gms: vec![],
+                    string_catalogues: vec![],
                 },
             )
         })

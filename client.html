@@ -2300,7 +2300,10 @@
     // substitute the static data-i18n markup once the table is loaded.
     import './gui/strings-boot.js';
     import { t, has, applyToDom, wireText } from './gui/strings.js';
+    import { createLocalePreference } from './gui/locale-preference.js';
     window.phStrings = { t, has, applyToDom, wireText };
+    window.phLocale = createLocalePreference({ doc: document, nav: navigator,
+      storage: window.localStorage });
     applyToDom(document);
   </script>
 
@@ -3995,6 +3998,10 @@
     function _attachIframeLoadListener(iframeEl, consoleName) {
       if (!iframeEl) return;
       iframeEl.addEventListener('load', () => {
+        // A console document owns a distinct module realm. Install the shell's
+        // private locale and the Welcome's ordered mod catalogues before its
+        // first state push so component t() calls see the same table.
+        window.phLocale?.installIframe?.(iframeEl);
         // Push the freshly-loaded iframe its current snapshot. Generic so it
         // covers every station id the ship mounts (including engineering /
         // science aggregates the old per-name switch never handled).
@@ -4413,6 +4420,7 @@
       // #1023 user story 15). Any message counts: the point is that the link
       // is carrying traffic, not which traffic.
       if (msg && !linkHasData) { linkHasData = true; scheduleRender(); }
+      if (msg?.type === 'Welcome') window.phLocale?.apply?.({ reload: true });
       // Targeted authoritative feedback settles only the exact originating
       // correlation.  It is presentation/measurement, not simulation state,
       // so it bypasses the reducers and never mutates Red Alert optimistically.
@@ -4726,6 +4734,16 @@
             // player's explicit choices from it. Client-local, never on the wire.
             accessibilityProfile: window.simState ? window.simState.accessibilityProfile : null,
           }),
+          getLocales: () => window.phLocale?.presentation?.().locales || ['en'],
+          getLocale: () => window.phLocale?.locale?.() || 'en',
+          onLocale: (locale) => {
+            window.phLocale?.select?.(locale);
+            scheduleRender();
+            for (const station of uiState.shipStations?.stations || []) {
+              pushConsoleStateFor(station.id, pushCause().RENDER);
+            }
+            settingsPanel?.rebuildContent?.();
+          },
           // The Accessibility tab's write path (issue #1102): update the
           // client-local profile, persist it privately, and re-apply to the
           // shell + every mounted console iframe. Deliberately NOT `send` —

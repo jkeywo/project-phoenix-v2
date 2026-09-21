@@ -2,8 +2,8 @@
 title: Localisation
 type: concept
 tags: [localisation, strings, client, display-text]
-sources: [assets/strings/strings.csv, gui/strings.js, gui/strings-boot.js, gui/connection-manager.js, scripts/check-strings.mjs, docs/strings-authoring-guide.md]
-updated: 2026-08-27
+sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/rendezvous-transport.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
+updated: 2026-09-21
 ---
 
 # Localisation
@@ -15,6 +15,14 @@ the wire untouched, and the client resolves them once at the message boundary
 Client-side chrome resolves through `t(id, params)` and `data-i18n` attributes,
 loaded at boot by `gui/strings-boot.js`.
 
+Ordinary mods can carry a partial `assets/strings/strings.csv`. Welcome projects
+those catalogues in load order and `gui/string-catalogue.js` composes them over
+the shipped table per id/locale, with later packs winning. Missing, blank,
+invalid, or stale translations render effective English. The retained report
+names conflicts, winners, sources and freshness for author tooling; it never
+adds diagnostic markers to player text. `<locale>_source` records the exact
+English value translated and `<locale>_provenance` records its origin.
+
 A text id may be joined on the wire by a sibling field named `<field>_params`
 (`ObjectiveSnapshot::text_params`, `CommsMessage::body_params`). `localiseTree`
 finds it by name and resolves `t(id, params)`, so a figure the server computed
@@ -25,7 +33,8 @@ all, so payloads that name a figure-free string are unchanged.
 
 English text wrapped in `[square brackets]` is agent-drafted placeholder copy;
 a human removes the brackets (and edits freely) to approve a line. Re-running
-`scripts/extract-strings.mjs` merges by id and never overwrites approved rows.
+`scripts/extract-strings.mjs` merges by id, never overwrites approved rows, and
+preserves every locale and metadata column while appending new English rows.
 
 Names that Rust matches as identifiers — `[[station]] name`,
 `[[station.rating]] name`, faction `name` — stay English in TOML;

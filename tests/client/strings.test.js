@@ -43,6 +43,11 @@ describe('parseCsv', () => {
     expect(parseCsv('﻿id,en\na,b\n')[0][0]).toBe('id');
   });
 
+  it('rejects an unterminated quoted field at EOF', () => {
+    expect(() => parseCsv('id,de,de_source\nfoo,"Hallo, Welt","Hello'))
+      .toThrow(/unterminated quoted field/);
+  });
+
   it('preserves empty fields', () => {
     expect(parseCsv('id,context,en\na,,c\n')[1]).toEqual(['a', '', 'c']);
   });

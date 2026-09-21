@@ -3360,6 +3360,11 @@ pub enum ServerMessage {
         /// not `Player` rows and not player-ship fleet slots.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         gms: Vec<GmOperator>,
+        /// Partial String Tables supplied by ordinary active mods, oldest to
+        /// newest. Presentation-only: clients compose these over their shipped
+        /// catalogue using the same later-pack-wins order as authored content.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        string_catalogues: Vec<StringCatalogueSource>,
     },
     /// Full replacement of the crew-public GM roster (issue #1289). A delta
     /// would make reconnect/order handling part of every client; the host page
@@ -3822,6 +3827,12 @@ pub enum ServerMessage {
         paused: bool,
         god_mode: bool,
     },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StringCatalogueSource {
+    pub source: String,
+    pub csv: String,
 }
 
 // ── HTML console bridge wire types (ADR-0001 / PRD #419) ───────────────────

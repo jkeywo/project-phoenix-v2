@@ -22,22 +22,40 @@ console.sensors.contacts,"Sensors console — contact count. {n} is the number o
 It is standard RFC 4180 CSV, so quoted values may run over several lines; the
 comms prose in the file already does.
 
-Add a locale by appending a column (`fr`, `de`, …). No code changes are needed;
-`buildTable(csv, 'fr')` reads the column directly — it falls back to `en` only
-when the column itself is missing, not for blank cells within it. A
-present-but-blank cell resolves to `''`, and the console renders nothing for
-that row. Fill the new column for **every** row so CI's field-count check
-passes — CI checks that each row has as many fields as the header, so a
-half-width column fails the build one row at a time — but a blank cell only
-satisfies CI, it gives players nothing to read: carry the English text into
-the new column for rows not yet translated, and swap it for the real
-translation later.
+Add a locale by appending three columns (`de`, `de_source`, and optionally
+`de_provenance`). `de_source` is the exact effective English value the
+translation was made from; `de_provenance` records how it was produced (for
+example `machine`). Values containing commas, quotes, or newlines follow the
+same RFC 4180 quoting rule as English.
 
-`scripts/extract-strings.mjs` rewrites the whole file as `id,context,en`; it
-does not know about locale columns and drops them. Run it, if at all,
-**before** adding a locale column — running it afterwards silently deletes
-that column, and the field-count gate stays green, because the header it just
-rewrote is 3 wide and every row it just wrote is 3 wide.
+Missing, blank, malformed, placeholder-incompatible, or stale translated
+values render the effective English value. They are retained in the catalogue
+and reported by `getCatalogueReport()` for author tools; player surfaces never
+show a missing-translation marker. A translation is stale when its recorded
+`<locale>_source` differs from the effective English value after normal mod
+composition. Editing English never updates translations automatically: a
+translator explicitly refreshes the value and its source metadata.
+
+`scripts/extract-strings.mjs` preserves every existing header and cell,
+including locale/freshness/provenance columns, and appends new English rows at
+the existing width. Re-running extraction therefore does not collapse the
+catalogue back to English.
+
+## Translation-only mod packs
+
+An ordinary mod may carry `assets/strings/strings.csv` without a scenario. It
+is a partial catalogue, so it needs only the ids and locale columns it supplies:
+
+```csv
+id,context,de,de_source,de_provenance
+station.helm.name,Helm tab,Ruder,Helm,machine
+```
+
+The host validates and installs the ZIP through the normal mod-pack path. On
+Welcome it sends each active partial catalogue in load order; the client
+composes them over the shipped table and later packs win each value. English
+and other missing keys continue to come from lower-precedence sources. String
+Ids and simulation data are never rewritten.
 
 ## Square brackets mean "not reviewed yet"
 

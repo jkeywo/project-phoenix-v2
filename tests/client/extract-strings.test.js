@@ -6,7 +6,8 @@
  * decision, not the plumbing around it.
  */
 import { describe, it, expect } from 'vitest';
-import { createRowSink, processFile } from '../../scripts/extract-strings.mjs';
+import { createRowSink, mergeCatalogCsv, processFile } from '../../scripts/extract-strings.mjs';
+import { parseCsv } from '../../gui/csv.js';
 
 /** The two passes main() runs, over an in-memory set of world files. */
 function extractWorlds(files) {
@@ -44,6 +45,17 @@ describe('createRowSink', () => {
     expect(sink.addRowOnce('world.entity.earth.name', 'other ctx', 'Earth')).toBe('world.entity.earth.name');
     expect(sink.rows).toHaveLength(1);
   });
+});
+
+it('preserves locale and freshness metadata while appending extracted English', () => {
+  const prior = 'id,context,en,de,de_source,de_provenance\n'
+    + 'console.helm.title,old,Helm,Ruder,Helm,machine\n';
+  const merged = mergeCatalogCsv(prior, [{ id: 'console.helm.speed', context: 'speed', en: 'Speed' }]);
+  expect(parseCsv(merged.text)).toEqual([
+    ['id', 'context', 'en', 'de', 'de_source', 'de_provenance'],
+    ['console.helm.title', 'old', 'Helm', 'Ruder', 'Helm', 'machine'],
+    ['console.helm.speed', 'speed', 'Speed', '', '', ''],
+  ]);
 });
 
 describe('world entity names', () => {

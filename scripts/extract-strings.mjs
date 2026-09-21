@@ -410,12 +410,36 @@ export function processFile(file, src, prefix, nameMap, collectOnly, sink) {
 
 // ── CSV emission ────────────────────────────────────────────────────────────
 
-function toCsv(entries) {
-  const lines = ['id,context,en'];
-  for (const r of entries) {
-    lines.push([r.id, r.context, r.en].map(csvField).join(','));
-  }
+function toCsv(header, entries) {
+  const lines = [header.map(csvField).join(',')];
+  for (const r of entries) lines.push(r.map(csvField).join(','));
   return `${lines.join('\n')}\n`;
+}
+
+/** Preserve the complete existing row shape while appending newly extracted English. */
+export function mergeCatalogCsv(existingText, additions) {
+  const prior = parseCsv(existingText || '');
+  const header = prior[0]?.length ? [...prior[0]] : ['id', 'context', 'en'];
+  for (const required of ['id', 'context', 'en']) {
+    if (!header.includes(required)) throw new Error(`strings.csv: missing required '${required}' column`);
+  }
+  const idCol = header.indexOf('id');
+  const contextCol = header.indexOf('context');
+  const enCol = header.indexOf('en');
+  const rows = prior.slice(1).filter((row) => (row[idCol] || '').trim() !== '');
+  const known = new Set(rows.map((row) => row[idCol]));
+  let added = 0;
+  for (const entry of additions || []) {
+    if (known.has(entry.id)) continue;
+    const row = new Array(header.length).fill('');
+    row[idCol] = entry.id;
+    row[contextCol] = entry.context;
+    row[enCol] = entry.en;
+    rows.push(row);
+    known.add(entry.id);
+    added += 1;
+  }
+  return { text: toCsv(header, rows), existing: rows.length - added, added };
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
@@ -464,28 +488,20 @@ async function main() {
   const outDir = path.join(root, 'assets', 'strings');
   const outFile = path.join(outDir, 'strings.csv');
 
-  let existing = [];
+  let existingText = '';
   try {
-    const prior = parseCsv(await readFile(outFile, 'utf8'));
-    const header = prior[0] ?? [];
-    const idCol = header.indexOf('id');
-    existing = prior.slice(1)
-      .filter((r) => (r[idCol] || '').trim() !== '')
-      .map((r) => ({ id: r[idCol], context: r[header.indexOf('context')] ?? '', en: r[header.indexOf('en')] ?? '' }));
+    existingText = await readFile(outFile, 'utf8');
   } catch { /* first run */ }
-
-  const known = new Set(existing.map((r) => r.id));
-  const added = sink.rows.filter((r) => !known.has(r.id));
-  const merged = [...existing, ...added];
+  const merged = mergeCatalogCsv(existingText, sink.rows);
 
   if (!DRY_RUN) {
     await mkdir(outDir, { recursive: true });
-    await writeFile(outFile, toCsv(merged), 'utf8');
+    await writeFile(outFile, merged.text, 'utf8');
   }
 
   const prefix = DRY_RUN ? '[dry run] ' : '';
   console.log(`${prefix}${sink.rows.length} strings found across ${files} rewritten TOML files`);
-  console.log(`${prefix}${existing.length} existing rows kept, ${added.length} new rows added`);
+  console.log(`${prefix}${merged.existing} existing rows kept, ${merged.added} new rows added`);
   console.log(`${prefix}entity names remapped: ${nameMap.size}`);
 }
 

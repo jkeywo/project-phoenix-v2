@@ -9,7 +9,9 @@
 // The DOM stub is the same minimal one help-panel.test.js uses; the mount tests
 // below drive the real module against it.
 
-import { t } from '../../gui/strings.js';
+import {
+  getCataloguePresentation, setBaseCatalogue, setOverlayCatalogues, t,
+} from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,6 +90,7 @@ function makeEl(doc, tag) {
     getAttribute(k) { return this.attributes[k]; },
     hasAttribute(k) { return k in this.attributes; },
     appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
+    replaceChildren(...children) { this.children = []; for (const child of children) this.appendChild(child); },
     addEventListener(type, fn) {
       (listeners[type] = listeners[type] || []).push(fn);
     },
@@ -1102,6 +1105,51 @@ describe('gameplay tab — rating, QR and leave station', () => {
     inst.open();
     inst.selectTab('gameplay');
   }
+
+  it('offers the private catalogue locales and changes no wire state', () => {
+    const doc = makeDoc();
+    const selected = [];
+    const sent = [];
+    const inst = mount(doc, {
+      getLocales: () => ['de', 'en'], getLocale: () => 'de',
+      onLocale: value => selected.push(value),
+      send: (type, data) => sent.push({ type, data }),
+    });
+    inst.open();
+    inst.selectTab('gameplay');
+    const locale = bodyOf(doc).querySelector('[data-control="private-locale"]');
+    expect(locale.value).toBe('de');
+    locale.value = 'en';
+    locale.dispatch('change');
+    expect(selected).toEqual(['en']);
+    expect(sent).toEqual([]);
+  });
+
+  it('hides language selection for English-only and offers only English plus German', () => {
+    const shipped = repoFile('assets/strings/strings.csv');
+    try {
+      setBaseCatalogue('id,en\nsettings.language,Language\n');
+      setOverlayCatalogues([]);
+      expect(getCataloguePresentation().locales).toEqual(['en']);
+      let doc = makeDoc();
+      let inst = mount(doc, { getLocales: () => getCataloguePresentation().locales });
+      inst.open();
+      inst.selectTab('gameplay');
+      expect(bodyOf(doc).querySelector('[data-control="private-locale"]')).toBeNull();
+
+      setOverlayCatalogues([{ source: 'de-pack', csv: 'id,de,de_source\nsettings.language,Sprache,Language\n' }]);
+      expect(getCataloguePresentation().locales).toEqual(['de', 'en']);
+      doc = makeDoc();
+      inst = mount(doc, { getLocales: () => getCataloguePresentation().locales });
+      inst.open();
+      inst.selectTab('gameplay');
+      const locale = bodyOf(doc).querySelector('[data-control="private-locale"]');
+      expect(locale.children.map((option) => option.value)).toEqual(['de', 'en']);
+    } finally {
+      setBaseCatalogue(shipped);
+      setOverlayCatalogues([]);
+    }
+  });
 
   it('renders a rating button per rating with the active one marked', () => {
     openGameplay(withStation);

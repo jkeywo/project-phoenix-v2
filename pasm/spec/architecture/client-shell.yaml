@@ -1,4 +1,25 @@
 entities:
+  - component: client-string-catalogue-composer
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Client String Catalogue Composer
+      summary: Composes the shipped String Table with partial catalogues projected from the authoritative host's ordinary active mod stack. Values resolve per String Id and locale under later-pack-wins precedence; missing, blank, placeholder-invalid, metadata-invalid, or stale translations retain author diagnostics and render the effective English source without a player-facing marker. Locale choice and composed presentation remain client-local and never enter simulation state or identifiers.
+      rationale:
+        - "[ai] A translation-only pack is an ordinary mod member at assets/strings/strings.csv, not a second package protocol. Welcome carries the ordered partial sources because remote phones cannot read the host's private ZIP overlay."
+        - "[ai] Freshness records the exact effective English source in <locale>_source. Comparing values is deterministic across browsers and needs neither timestamps nor a runtime hash implementation; ordinary English edits never regenerate translation text."
+        - "[ai] Invalid and stale values remain in the author report while the player lookup uses English. Diagnostics therefore do not leak into Console copy and translators do not lose the work they must refresh."
+    architecture:
+      kind: client-presentation-service
+      authority: non-authoritative
+      reads: [client-presentation-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/rendezvous-transport.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, editor/mod-pack-export.js, editor/mod-pack-workspace.js, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
+      tests: [npx vitest run tests/client/string-catalogue.test.js tests/client/extract-strings.test.js editor/tests/mod-pack-export.test.js]
+
   - component: client-console-registry
     core:
       status: implemented

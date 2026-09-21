@@ -475,6 +475,9 @@ function persistMasterVolume(value) {
  *   onOperatorProfileExport?: () => string,
  *   onOperatorProfileImport?: (json: string) => object|Promise<object>,
  *   getOperatorCapabilities?: () => object,
+ *   getLocales?: () => string[],
+ *   getLocale?: () => string,
+ *   onLocale?: (locale: string) => void,
  *   doc?: Document,
  *   isDemo?: () => boolean,
  * }} opts
@@ -505,6 +508,9 @@ export function mountSettings({
   onOperatorProfileExport: _onOperatorProfileExport,
   onOperatorProfileImport: _onOperatorProfileImport,
   getOperatorCapabilities: _getOperatorCapabilities,
+  getLocales: _getLocales,
+  getLocale: _getLocale,
+  onLocale: _onLocale,
   downloadOperatorProfile: _downloadOperatorProfile,
   readOperatorProfileFile: _readOperatorProfileFile,
   doc: _doc,
@@ -1161,6 +1167,25 @@ export function mountSettings({
   }
 
   function buildGameplayTab(body, view) {
+    const languages = typeof _getLocales === 'function' ? _getLocales() : ['en'];
+    if (languages.length > 1) {
+      const languageSection = section('settings.language');
+      const select = doc.createElement('select');
+      select.setAttribute('data-control', 'private-locale');
+      select.setAttribute('aria-label', t('settings.language'));
+      const current = typeof _getLocale === 'function' ? _getLocale() : 'en';
+      select.replaceChildren(...languages.map((locale) => {
+        const option = doc.createElement('option');
+        option.value = locale;
+        option.textContent = locale;
+        return option;
+      }));
+      select.value = languages.includes(current) ? current : 'en';
+      select.addEventListener('change', () => _onLocale?.(select.value));
+      languageSection.appendChild(select);
+      languageSection.appendChild(hint('settings.language.private_hint'));
+      body.appendChild(languageSection);
+    }
     // Dev builds only — see the module doc. The whole section goes, not just
     // the button: a "Simulation" heading over nothing reads as a bug.
     if (view.showPause) {

@@ -45,10 +45,12 @@ import { SOUND_CUES_PATH, validateSoundCatalog } from '../gui/sound-cues.js';
 import { validateFile, partitionFindings } from './validation.js';
 import { resolveTemplate, canonicalTemplatePath, INCLUDES_KEY } from './entity-includes.js';
 import { crc32 } from './crc32.js';
+import { validatePartialStringCatalogue } from '../gui/string-catalogue.js';
 export { crc32 } from './crc32.js';
 
 /** The manifest path a mod pack always carries. */
 export const MANIFEST_PATH = 'scenarios.toml';
+export const STRING_CATALOGUE_PATH = 'assets/strings/strings.csv';
 
 /**
  * Whitelist of authored TOML paths a mod pack may carry. Structural (not
@@ -95,6 +97,7 @@ export function isWorldContentPath(path) {
  */
 export function isAllowedContentPath(path) {
   if (path === SOUND_CUES_PATH) return true;
+  if (path === STRING_CATALOGUE_PATH) return true;
   if (typeof path !== 'string' || path.length === 0) return false;
   if (path.includes('..') || path.includes('\\')) return false;
   if (isPackAssetPath(path)) return true;
@@ -899,6 +902,28 @@ export function exportModPack(input) {
       continue;
     }
 
+    // Translation catalogues are also raw text. Their semantic diagnostics run
+    // through the same pure composer the client uses; the exporter preserves
+    // the exact CSV rather than serialising it as TOML.
+    if (path === STRING_CATALOGUE_PATH) {
+      const src = typeof file.text === 'string' ? file.text : '';
+      if (src.trim().length === 0) {
+        errors.push(`"${path}" is an empty String Table and cannot be exported`);
+        continue;
+      }
+      for (const finding of validatePartialStringCatalogue(src)) {
+        const message = `"${path}"${finding.id ? ` (${finding.id})` : ''}: ${finding.category}: ${finding.message}`;
+        (finding.severity === 'error' ? errors : warnings).push(message);
+      }
+      seenPaths.add(path);
+      zipEntries.push({
+        path,
+        text: src,
+        bytes: verifiedSourceBytes(file.sourceBytes, src, `"${path}"`),
+      });
+      continue;
+    }
+
     // A `.rhai` script is raw text, not TOML: it is carried verbatim and gated
     // by the host's deny-by-default sandbox on upload (issue #988). The exporter
     // checks only that it is non-empty here; the referenced-by-a-world check
@@ -1025,7 +1050,9 @@ export function exportModPack(input) {
   }
 
   // 3. Manifest root-world validation against the selected content.
-  const manifestFindings = validateManifestEntries(scenarios, contentByPath);
+  const translationOnly = scenarios.length === 0 && seenPaths.size === 1
+    && seenPaths.has(STRING_CATALOGUE_PATH);
+  const manifestFindings = translationOnly ? [] : validateManifestEntries(scenarios, contentByPath);
   const { errors: manifestErrors, warnings: manifestWarnings } =
     partitionFindings(manifestFindings);
   for (const r of manifestErrors) errors.push(`${MANIFEST_PATH}: ${r.message}`);

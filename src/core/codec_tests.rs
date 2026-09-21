@@ -296,6 +296,10 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     connected: true,
                     ready: true,
                 }],
+                string_catalogues: vec![StringCatalogueSource {
+                    source: "de-pack".into(),
+                    csv: "id,de\nstation.helm.name,Ruder\n".into(),
+                }],
             },
         ),
         (
@@ -5740,6 +5744,7 @@ fn ship_client_config_station_systems_round_trips() {
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
     assert_server_roundtrip(msg.clone());
     // Verify the station_systems field survives the round-trip.
@@ -5783,6 +5788,7 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
 
     let json = JsonCodec.encode_server(&msg).unwrap();
@@ -5816,6 +5822,7 @@ fn ship_client_config_console_families_default_empty_when_missing() {
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
     let json = JsonCodec.encode_server(&msg).unwrap();
     assert!(
@@ -5851,6 +5858,7 @@ fn ship_client_config_station_systems_defaults_empty_when_missing() {
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
     let full_json = JsonCodec.encode_server(&msg).unwrap();
     // Remove the station_systems entry to simulate an old server payload.
@@ -5887,6 +5895,7 @@ fn ship_client_config_helm_capability_round_trips() {
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
     assert_server_roundtrip(msg.clone());
     // Verify the helm capability fields survive the round-trip.
@@ -5958,6 +5967,7 @@ fn ship_client_config_station_tutorials_round_trip() {
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
     assert_server_roundtrip(msg.clone());
     let json = JsonCodec.encode_server(&msg).unwrap();
@@ -5980,6 +5990,7 @@ fn ship_client_config_station_tutorials_default_empty_when_missing() {
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
     let json = JsonCodec.encode_server(&msg).unwrap();
     assert!(
@@ -6352,6 +6363,7 @@ fn welcome_gm_projection_defaults_empty_for_older_senders() {
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
         gms: vec![],
+        string_catalogues: vec![],
     };
     let encoded = JsonCodec.encode_server(&message).unwrap();
     assert!(!encoded.contains("\"gms\""));

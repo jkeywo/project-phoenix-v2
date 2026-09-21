@@ -16,7 +16,9 @@
  */
 
 import { parse as tomlParse } from 'smol-toml';
-import { crc32, PACK_FORMAT, MANIFEST_PATH, parsePackManifest } from './mod-pack-export.js';
+import {
+  crc32, PACK_FORMAT, MANIFEST_PATH, STRING_CATALOGUE_PATH, parsePackManifest,
+} from './mod-pack-export.js';
 
 const encoder = new TextEncoder();
 
@@ -312,7 +314,7 @@ export class ModPackWorkspace {
     for (const m of this._members.values()) {
       const source = this._findSourceEntry(m.path);
       const sourceBytes = source?.text === m.text ? Uint8Array.from(source.bytes) : undefined;
-      if (m.path.endsWith('.rhai')) {
+      if (m.path.endsWith('.rhai') || m.path === STRING_CATALOGUE_PATH) {
         files.push({ path: m.path, text: m.text, sourceBytes });
         continue;
       }

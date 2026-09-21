@@ -453,6 +453,7 @@ fn whitelist_accepts_supported_paths_and_manifest() {
     assert!(is_allowed_content_path("assets/entities/e.toml"));
     assert!(is_allowed_content_path("assets/factions/f.toml"));
     assert!(is_allowed_content_path("assets/models/m.toml"));
+    assert!(is_allowed_content_path(STRING_CATALOGUE_PATH));
 }
 
 #[test]
@@ -659,6 +660,75 @@ fn valid_pack_is_accepted() {
         result.manifest_toml,
         manifest_for("modx", "assets/worlds/modx.toml")
     );
+}
+
+#[test]
+fn translation_only_pack_is_accepted_without_a_scenario() {
+    let manifest = format!(
+        "[pack]\nformat = 1\nid = \"de-console\"\nversion = \"1.0.0\"\nname = \"German Console\"\n\n\
+         [pack.requires]\ncontent_id = \"{TEST_CONTENT_ID}\"\ncontent_epoch = {TEST_CONTENT_EPOCH}\n"
+    );
+    let csv = "id,de,de_source,de_provenance\nstation.helm.name,Ruder,Helm,machine\n";
+    let zip = create_store_zip(&[(MANIFEST_PATH, &manifest), (STRING_CATALOGUE_PATH, csv)]);
+    let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
+    assert!(result.is_accepted(), "findings: {:?}", result.findings);
+    assert_eq!(
+        result.files.get(STRING_CATALOGUE_PATH),
+        Some(&csv.to_string())
+    );
+}
+
+#[test]
+fn translation_catalogue_schema_and_malformed_rows_reject_with_member_findings() {
+    let manifest = format!(
+        "[pack]\nformat = 1\nid = \"bad-strings\"\nversion = \"1.0.0\"\nname = \"Bad Strings\"\n\n\
+         [pack.requires]\ncontent_id = \"{TEST_CONTENT_ID}\"\ncontent_epoch = {TEST_CONTENT_EPOCH}\n"
+    );
+    for (csv, category) in [
+        ("context,de\nmissing id,Ruder\n", "string-catalogue-schema"),
+        ("id\nfoo\n", "string-catalogue-schema"),
+        (
+            "id,de,de_source\nstation.helm.name,Ruder,Helm,extra\n",
+            "malformed-string-catalogue",
+        ),
+        (
+            "id,de,de_source\nfoo,\"Hallo, Welt\",\"Hello",
+            "malformed-string-catalogue",
+        ),
+    ] {
+        let zip = create_store_zip(&[(MANIFEST_PATH, &manifest), (STRING_CATALOGUE_PATH, csv)]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
+        assert!(!result.is_accepted(), "findings: {:?}", result.findings);
+        assert!(
+            result
+                .findings
+                .iter()
+                .any(|finding| finding.category == category
+                    && finding.source.file == STRING_CATALOGUE_PATH),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+}
+
+#[test]
+fn translation_catalogue_fallback_diagnostics_are_non_blocking_and_visible() {
+    let manifest = format!(
+        "[pack]\nformat = 1\nid = \"diagnostic-strings\"\nversion = \"1.0.0\"\nname = \"Diagnostic Strings\"\n\n\
+         [pack.requires]\ncontent_id = \"{TEST_CONTENT_ID}\"\ncontent_epoch = {TEST_CONTENT_EPOCH}\n"
+    );
+    let csv = "id,de,de_source\nconsole.course,Kurs,Course {degrees}\nconsole.blank,,Standing by\nconsole.no_source,Bereit,\n";
+    let zip = create_store_zip(&[(MANIFEST_PATH, &manifest), (STRING_CATALOGUE_PATH, csv)]);
+    let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
+    assert!(result.is_accepted(), "findings: {:?}", result.findings);
+    assert!(result
+        .findings
+        .iter()
+        .any(|finding| finding.category == "invalid-translation-placeholders"));
+    assert!(result
+        .findings
+        .iter()
+        .any(|finding| finding.category == "translation-fallback"));
 }
 
 #[test]

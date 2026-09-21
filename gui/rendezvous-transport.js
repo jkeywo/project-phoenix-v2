@@ -100,7 +100,7 @@
  */
 
 import './strings-boot.js';
-import { localiseTree } from './strings.js';
+import { localiseTree, setOverlayCatalogues } from './strings.js';
 import {
   NAMESPACE_CLIENT,
   parseJoinCode,
@@ -129,6 +129,14 @@ import {
 
 /** Re-exported so a consumer of this module needs only one import. */
 export { RENDEZVOUS_PROTOCOL };
+
+/** Production ingress boundary: install Welcome catalogues before destructive localisation. */
+export function localiseDeliveredMessage(msg) {
+  if (msg?.type === 'Welcome') {
+    setOverlayCatalogues(msg.data?.string_catalogues || []);
+  }
+  return localiseTree(msg);
+}
 
 /**
  * The service's own URL and the join link a code points at both live in
@@ -1475,7 +1483,7 @@ export function createRendezvousJoiner(opts) {
     // console downstream has to know which of its fields are localisable.
     // A host-mesh peer opts out: its frames carry no string ids, and walking
     // them would be a resolver looking for ids in another protocol's data.
-    onData(localise ? localiseTree(msg) : msg);
+    onData(localise ? localiseDeliveredMessage(msg) : msg);
   }
 
   function handle(gen, msg) {

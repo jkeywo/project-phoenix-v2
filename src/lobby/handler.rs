@@ -88,6 +88,18 @@ pub(crate) fn welcome_message(
         ship_config: ship_config.clone(),
         station_ratings: station_ratings.clone(),
         gms: gm_operators.to_vec(),
+        string_catalogues: crate::entities::config_cache::active_packs()
+            .into_iter()
+            .filter_map(|pack| {
+                pack.files
+                    .get(crate::world::mod_pack::STRING_CATALOGUE_PATH)
+                    .cloned()
+                    .map(|csv| crate::core::messages::StringCatalogueSource {
+                        source: pack.id,
+                        csv,
+                    })
+            })
+            .collect(),
     }
 }
 

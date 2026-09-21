@@ -64,7 +64,47 @@ describe('isAllowedContentPath (AC1 whitelist)', () => {
     expect(isAllowedContentPath('assets/models/mesh.glb')).toBe(true);
     expect(isAllowedContentPath('assets/models/mesh/vertices.bin')).toBe(true);
     expect(isAllowedContentPath('assets/planets/gas_giant/surface_colour.ktx2')).toBe(true);
+    expect(isAllowedContentPath('assets/strings/strings.csv')).toBe(true);
     expect(isAllowedContentPath('scenarios.toml')).toBe(true);
+  });
+
+  it('exports a translation-only pack and preserves accented/multiline metadata exactly', () => {
+    const csv = 'id,de,de_source,de_provenance\n'
+      + 'station.helm.name,Ruder,Helm,machine\n'
+      + 'console.status,"Größe\nbereit","Size\nready",machine\n';
+    const result = exportModPack({
+      pack: goodPack({ id: 'de-console' }),
+      scenarios: [],
+      files: [{ path: 'assets/strings/strings.csv', text: csv }],
+    });
+    expect(result.ok).toBe(true);
+    expect(readStoreZip(result.zip)['assets/strings/strings.csv']).toBe(csv);
+  });
+
+  it('surfaces String Table schema and malformed-row errors through export', () => {
+    for (const csv of [
+      'context,de\nmissing id,Ruder\n',
+      'id,de,de_source\nstation.helm.name,Ruder,Helm,extra\n',
+      'id,de,de_source\nfoo,"Hallo, Welt","Hello',
+    ]) {
+      const result = exportModPack({ pack: goodPack({ id: 'bad-strings' }), scenarios: [],
+        files: [{ path: 'assets/strings/strings.csv', text: csv }] });
+      expect(result.ok).toBe(false);
+      expect(result.errors.join('\n')).toMatch(/string-catalogue-schema|malformed-string-catalogue/);
+    }
+  });
+
+  it('exports fallback-safe translations but reports placeholder and fallback diagnostics', () => {
+    const csv = 'id,de,de_source\n'
+      + 'console.course,Kurs,Course {degrees}\n'
+      + 'console.blank,,Standing by\n'
+      + 'console.no_source,Bereit,\n';
+    const result = exportModPack({ pack: goodPack({ id: 'diagnostic-strings' }), scenarios: [],
+      files: [{ path: 'assets/strings/strings.csv', text: csv }] });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.join('\n')).toContain('invalid-translation-placeholders');
+    expect(result.warnings.join('\n')).toContain('translation-fallback');
+    expect(readStoreZip(result.zip)['assets/strings/strings.csv']).toBe(csv);
   });
 
   it('rejects anything outside the supported authored paths', () => {

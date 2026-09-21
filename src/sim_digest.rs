@@ -521,6 +521,12 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
             acc = fold_serde(acc, &manager.0.records());
         }
     }
+    if let Some(slots) = world.get_resource::<crate::ship_slots::FrozenShipSlots>() {
+        if !slots.0.is_empty() {
+            acc = fold_str(acc, "launch-frozen-ship-slots");
+            acc = fold_serde(acc, slots);
+        }
+    }
     if let Some(mut query) =
         world.try_query::<(&EntityUuid, &crate::ship_plugin::ShipSystemControlSources)>()
     {

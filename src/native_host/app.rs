@@ -676,10 +676,33 @@ pub fn build_native_host_app(
     // the two ship resources `LobbyPlugin` reads.
     let sim_rng = match cfg.world_path.as_deref() {
         Some(world_path) => {
+            if !cfg.curated_ships.is_empty()
+                && !app
+                    .world()
+                    .resource::<crate::world::config::WorldConfig>()
+                    .ship_slots
+                    .is_empty()
+            {
+                let curated = crate::ship_slots::curate_ship_slots(
+                    &app.world()
+                        .resource::<crate::world::config::WorldConfig>()
+                        .ship_slots,
+                    &cfg.curated_ships,
+                )
+                .map_err(NativeHostError::Ship)?;
+                app.world_mut()
+                    .resource_mut::<crate::world::config::WorldConfig>()
+                    .ship_slots = curated;
+            }
             let world_config = app
                 .world()
                 .resource::<crate::world::config::WorldConfig>()
                 .clone();
+            if !world_config.ship_slots.is_empty() {
+                app.insert_resource(crate::ship_slots::FrozenShipSlots::from_unclaimed_slots(
+                    &world_config.ship_slots,
+                ));
+            }
             Some(install_world_selection(
                 app.world_mut(),
                 &world_config,

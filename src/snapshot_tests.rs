@@ -7,6 +7,42 @@ use crate::gm_action::{
 };
 
 #[test]
+fn multi_ship_frozen_backfill_and_absent_survive_snapshot_replay_without_reevaluation() {
+    use crate::ship_slots::{FrozenShipSlots, LaunchSource, LaunchedSlot};
+
+    // `reserve` was authored Absent and is therefore deliberately not in the
+    // launch artifact. `wing` was Backfill and must remain present even if a
+    // continuation's live authoring/configuration would now say otherwise.
+    let frozen = FrozenShipSlots(vec![LaunchedSlot {
+        slot_id: "wing".into(),
+        hull: "destroyer".into(),
+        claimant: None,
+        source: LaunchSource::Backfill,
+    }]);
+    let mut source = App::new();
+    source.insert_resource(frozen.clone());
+    let encoded = serde_json::to_vec(&capture(source.world())).unwrap();
+    let saved: PhoenixSnapshot = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(saved.frozen_ship_slots, Some(frozen.clone()));
+
+    let mut resumed = App::new();
+    resumed.insert_resource(FrozenShipSlots(vec![LaunchedSlot {
+        slot_id: "reserve".into(),
+        hull: "scout".into(),
+        claimant: None,
+        source: LaunchSource::Backfill,
+    }]));
+    let _ = restore(resumed.world_mut(), &saved);
+    assert_eq!(resumed.world().resource::<FrozenShipSlots>(), &frozen);
+    assert!(resumed
+        .world()
+        .resource::<FrozenShipSlots>()
+        .0
+        .iter()
+        .all(|row| row.slot_id != "reserve"));
+}
+
+#[test]
 fn restored_objective_history_is_silent_on_continuation_but_new_transitions_remain_visible() {
     use crate::core::narrative::{NarrativeEvent, NarrativeKind};
     use crate::world::server::ObjectiveManagerRes;

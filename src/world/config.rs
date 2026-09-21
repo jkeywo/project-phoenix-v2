@@ -852,6 +852,20 @@ pub struct ShipSlotConfig {
     #[serde(default)]
     pub ships: Vec<AvailableShipEntry>,
     pub default_ship: String,
+    /// What launch does when no host claimed the slot.
+    #[serde(default)]
+    pub unclaimed: UnclaimedSlotPolicy,
+}
+
+/// Authored initial-mission handling for an unclaimed slot (issue #1522).
+/// Post-start host loss never consults this value: the frozen ship remains and
+/// follows ordinary fleet Backfill/recovery.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnclaimedSlotPolicy {
+    #[default]
+    Backfill,
+    Absent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3018,6 +3032,7 @@ impl WorldConfig {
             label: None,
             ships: self.available_ships.clone(),
             default_ship: default.template_path.clone(),
+            unclaimed: UnclaimedSlotPolicy::Backfill,
         }]
     }
 }

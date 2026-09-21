@@ -118,6 +118,7 @@ localisable label, allowed hulls and default:
 id = "escort"
 label = "world.example.slot.escort"
 default_ship = "assets/entities/alliance_destroyer.toml"
+unclaimed = "backfill" # or "absent"
 
 [[ship_slot.ships]]
 template_path = "assets/entities/alliance_destroyer.toml"
@@ -128,6 +129,10 @@ Slot ids are unique. A default must be one of that slot's allowed hulls. The
 lobby applies mission → slot → hull selection and skips a singleton stage.
 Selecting reserves the slot exclusively; Back or a pre-start disconnect
 releases it immediately. Claimed slots need a confirmed hull before launch.
+An unclaimed `backfill` slot launches its default hull under ordinary AI;
+`absent` launches no ship for that slot. The default is `backfill`. This policy
+is evaluated only at initial launch: losing a host after start does not remove
+its frozen ship or revisit `absent`, and uses the normal recovery contract.
 
 Anchors are reusable positions for routes, objectives, AI directives, spawns, and script calls. A scenario should name spatial intentions rather than repeat coordinates. `extra_worlds` may compose additive world layers; unload policy determines whether pending delayed actions cancel or resolve when a layer leaves.
 

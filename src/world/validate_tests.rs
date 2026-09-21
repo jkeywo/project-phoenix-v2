@@ -223,6 +223,45 @@ fn blind_templates() -> MemoryTemplateLoader {
     MemoryTemplateLoader::blind()
 }
 
+#[test]
+fn authored_ship_slots_require_one_resolvable_game_start_ship_row_each() {
+    let source = r#"
+[[ship_slot]]
+id = "lead"
+label = "Lead"
+allowed_ships = ["assets/entities/player.toml"]
+
+[[ship_slot]]
+id = "wing"
+label = "Wing"
+allowed_ships = ["assets/entities/player.toml"]
+
+[[entity]]
+template_path = "assets/entities/player.toml"
+spawn_on = "game_start"
+"#;
+    let config = cfg(source);
+    let templates = fake_templates(&[("assets/entities/player.toml", "tags = [\"ship\"]\n")]);
+    let findings = validate_ship_slot_capacity_in(
+        &WorldSource::new("assets/worlds/two.toml", source, &config),
+        &templates,
+    );
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].category, "insufficient-player-ship-spawns");
+    assert_eq!(findings[0].source.reference, "wing");
+}
+
+#[test]
+fn legacy_worlds_do_not_gain_a_ship_slot_capacity_migration_gate() {
+    let source = "[global]\ntitle = \"Legacy\"\n";
+    let config = cfg(source);
+    assert!(validate_ship_slot_capacity_in(
+        &WorldSource::new("assets/worlds/legacy.toml", source, &config),
+        &MemoryTemplateLoader::authoritative_empty(),
+    )
+    .is_empty());
+}
+
 /// The ship-level AI declarations an AI-bearing hull owes, appended to the
 /// fixtures below (issue #885b stage 5d).
 ///

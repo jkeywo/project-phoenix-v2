@@ -805,6 +805,19 @@ fn load_selected_world(
     );
     crate::boot::ingest_world(world, &plan).map_err(NativeHostError::Boot)?;
 
+    if !pending.curated_ships.is_empty() {
+        let curated = crate::ship_slots::curate_ship_slots(
+            &world
+                .resource::<crate::world::config::WorldConfig>()
+                .ship_slots,
+            &pending.curated_ships,
+        )
+        .map_err(NativeHostError::Ship)?;
+        world
+            .resource_mut::<crate::world::config::WorldConfig>()
+            .ship_slots = curated;
+    }
+
     // Step two: the hull, the seed and the two ship resources — again the same
     // function `build_native_host_app` calls.
     let world_config = world

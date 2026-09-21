@@ -168,6 +168,21 @@ impl ShipSlotReservations {
 }
 
 impl FrozenShipSlots {
+    /// Freeze a direct launch that has no ship-slot claimant surface.
+    ///
+    /// Headless and native `--world` boots enter the ordinary mission lobby
+    /// without running the browser/native runtime slot arbiter. They therefore
+    /// have no claims to preserve: every authored Backfill slot launches its
+    /// default hull and every Absent slot stays omitted. Materialising that
+    /// decision before `InProgress` prevents the spawn fallback from treating
+    /// an Absent row as an ordinary NPC or applying one CLI-selected hull to an
+    /// authored multi-ship roster.
+    pub fn from_unclaimed_slots(slots: &[ShipSlotConfig]) -> Self {
+        ShipSlotReservations::default()
+            .freeze(slots)
+            .expect("an empty reservation table has no unconfirmed claims")
+    }
+
     /// Freeze an authenticated mesh roster against the world's authored slot
     /// vocabulary. Every peer runs this before adopting the roster, so an
     /// unknown/duplicate slot or a hull outside that slot's allowlist refuses
@@ -237,6 +252,46 @@ impl FrozenShipSlots {
         }
         Ok(Self(launched))
     }
+}
+
+/// Apply one scenario manifest's playable-hull allowlist to authored slots.
+///
+/// These returned rows are launch authority, not picker decoration. Refusing
+/// an empty slot or an excluded default prevents curation from being bypassed
+/// by an unclaimed Backfill hull or a forged mesh announcement.
+pub fn curate_ship_slots(
+    slots: &[ShipSlotConfig],
+    curated_ships: &[String],
+) -> Result<Vec<ShipSlotConfig>, String> {
+    if curated_ships.is_empty() {
+        return Ok(slots.to_vec());
+    }
+    slots
+        .iter()
+        .map(|slot| {
+            let mut curated = slot.clone();
+            curated
+                .ships
+                .retain(|ship| curated_ships.iter().any(|path| path == &ship.template_path));
+            if curated.ships.is_empty() {
+                return Err(format!(
+                    "ship slot {:?} offers no hull allowed by this scenario manifest",
+                    slot.id
+                ));
+            }
+            if !curated
+                .ships
+                .iter()
+                .any(|ship| ship.template_path == curated.default_ship)
+            {
+                return Err(format!(
+                    "ship slot {:?} default {:?} is excluded by this scenario manifest",
+                    slot.id, slot.default_ship
+                ));
+            }
+            Ok(curated)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -356,5 +411,22 @@ mod tests {
         assert_eq!(frozen.0[0].source, LaunchSource::Claimed);
         assert_eq!(frozen.0[1].slot_id, "wing");
         assert_eq!(frozen.0[1].source, LaunchSource::Backfill);
+    }
+
+    #[test]
+    fn multi_ship_curation_refuses_an_excluded_default_and_an_empty_slot() {
+        let authored = slots();
+        assert!(curate_ship_slots(&authored, &["destroyer".into()])
+            .unwrap_err()
+            .contains("offers no hull"));
+
+        let mut two = authored;
+        two[0].ships.push(AvailableShipEntry {
+            template_path: "destroyer".into(),
+            label: None,
+        });
+        assert!(curate_ship_slots(&two, &["destroyer".into()])
+            .unwrap_err()
+            .contains("default"));
     }
 }

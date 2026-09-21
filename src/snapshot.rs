@@ -635,7 +635,10 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// and indistinguishable from correct" shape, and no content-digest argument
 /// rescues it: the GM action moved the world without moving a single authored
 /// file.
-pub const SNAPSHOT_FORMAT: u32 = 35;
+/// `36` — issue #1522 retains the launch-frozen authored ship roster. A
+/// format-35 save cannot distinguish a deliberately absent slot from an old
+/// single-ship boot, so it is refused rather than reconstructed differently.
+pub const SNAPSHOT_FORMAT: u32 = 36;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2641,6 +2644,9 @@ pub struct PhoenixSnapshot {
     /// Exact Objective lifecycle/authored state, excluding presentation transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub objective_records: Vec<crate::objectives::ObjectiveRecord>,
+    /// Launch-frozen authored ship positions, including omitted absent slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_ship_slots: Option<crate::ship_slots::FrozenShipSlots>,
     pub rng: Option<SimRngState>,
     pub mint: Option<WorldIdMintState>,
     pub phase: Option<GamePhase>,
@@ -2839,6 +2845,9 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .get_resource::<crate::world::server::ObjectiveManagerRes>()
             .map(|manager| manager.0.records().to_vec())
             .unwrap_or_default(),
+        frozen_ship_slots: world
+            .get_resource::<crate::ship_slots::FrozenShipSlots>()
+            .cloned(),
         mint: world.get_resource::<WorldIdMint>().map(WorldIdMint::state),
         phase: world
             .get_resource::<State<GamePhase>>()
@@ -5684,6 +5693,9 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
             .0
             .restore_records(snapshot.objective_records.clone());
         world.insert_resource(manager);
+    }
+    if let Some(slots) = snapshot.frozen_ship_slots.clone() {
+        world.insert_resource(slots);
     }
     // Consumer reply routes are transient and reconstructed from the accepted
     // pending commands above.  A pre-restore route must never settle a command

@@ -153,6 +153,56 @@ fn one_executable_loads_ordinary_phoenix_content_and_runs_the_mission() {
 }
 
 #[test]
+fn direct_world_multi_ship_launch_freezes_backfill_defaults_and_omits_absent_slots() {
+    use project_phoenix::ship_slots::{AuthoredShipSlotId, FrozenShipSlots, LaunchSource};
+
+    const MULTI_WORLD: &str = "tests/fixtures/worlds/multi_ship_slots_direct_launch.toml";
+    const HULL: &str = "assets/entities/alliance_cruiser.toml";
+
+    let preload = preload();
+    let mut cfg = NativeHostConfig::new(MULTI_WORLD);
+    cfg.ship_path = Some(HULL.into());
+    cfg.seed = Some(SEED);
+    cfg.solo = true;
+    cfg.surface = NativeRenderSurface::Contract;
+    let mut app = build_native_host_app(&cfg, &preload)
+        .expect("the native --world multi-ship host assembles");
+
+    let frozen = app.world().resource::<FrozenShipSlots>();
+    assert_eq!(
+        frozen
+            .0
+            .iter()
+            .map(|slot| {
+                (
+                    slot.slot_id.as_str(),
+                    slot.hull.as_str(),
+                    slot.claimant.as_deref(),
+                    slot.source.clone(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            ("lead", HULL, None, LaunchSource::Backfill),
+            ("wing", HULL, None, LaunchSource::Backfill),
+        ],
+        "native --world freezes policy before its solo transition"
+    );
+
+    pump(&mut app, 30);
+    let mut query = app
+        .world_mut()
+        .query_filtered::<&AuthoredShipSlotId, With<project_phoenix::server_app::Ship>>();
+    let mut slots: Vec<_> = query.iter(app.world()).map(|slot| slot.0.clone()).collect();
+    slots.sort();
+    assert_eq!(
+        slots,
+        vec!["lead".to_string(), "wing".to_string()],
+        "the real native --world entry spawns Backfill defaults and omits reserve"
+    );
+}
+
+#[test]
 fn native_operator_save_boots_a_compatible_slot_into_a_new_app() {
     let save_dir =
         std::env::temp_dir().join(format!("phoenix-native-save-boot-{}", std::process::id()));

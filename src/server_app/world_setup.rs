@@ -432,6 +432,7 @@ pub(crate) fn spawn_game_start_entities(
     mut has_spawned: Local<bool>,
     id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
+    frozen_ship_slots: Option<Res<crate::ship_slots::FrozenShipSlots>>,
     gm_join_bootstrap: Option<Res<crate::gm_join::GmJoinBootstrap>>,
     fleet_session: Option<Res<crate::lockstep::FleetLockstep>>,
     resume_game_start_uuids: Option<Res<ResumeGameStartEntityUuids>>,
@@ -460,7 +461,11 @@ pub(crate) fn spawn_game_start_entities(
                 .map(|bootstrap| bootstrap.topology())
         })
         .unwrap_or(&solo_roster);
+    let launch_ship_count = frozen_ship_slots
+        .as_ref()
+        .map_or_else(|| roster.len(), |slots| slots.0.len());
     let mut player_ships_spawned = 0usize;
+    let mut authored_ship_row_index = 0usize;
     let mut game_start_entity_uuids = Vec::new();
     let named_positions = crate::world::config::build_named_entity_positions(mc);
     for (authored_index, entity_inst) in mc.entities.iter().enumerate() {
@@ -469,6 +474,28 @@ pub(crate) fn spawn_game_start_entities(
         }
         let authored_index = u32::try_from(authored_index)
             .expect("a WorldConfig cannot contain more than u32::MAX entity rows");
+        let config = match crate::entities::loader::resolve_entity_via(
+            entity_inst,
+            &config_cache,
+            &crate::entities::loader::WasmTemplateLoader,
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                bevy::log::error!(
+                    "Failed to resolve GameStart entity '{}': {}",
+                    entity_inst.template_path,
+                    e
+                );
+                continue;
+            }
+        };
+        let is_authored_ship_row = config.tags.iter().any(|tag| tag == "ship");
+        let authored_slot = is_authored_ship_row
+            .then(|| mc.ship_slots.get(authored_ship_row_index))
+            .flatten();
+        if is_authored_ship_row {
+            authored_ship_row_index += 1;
+        }
         // A resume reproduces the original GameStart row set recorded in its
         // authored-index map. Fresh lobby timing may leave flags at different
         // values, so re-evaluating `when` here could omit a saved live entity or
@@ -487,22 +514,6 @@ pub(crate) fn spawn_game_start_entities(
                 continue;
             }
         }
-        let config = match crate::entities::loader::resolve_entity_via(
-            entity_inst,
-            &config_cache,
-            &crate::entities::loader::WasmTemplateLoader,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                bevy::log::error!(
-                    "Failed to resolve GameStart entity '{}': {}",
-                    entity_inst.template_path,
-                    e
-                );
-                continue;
-            }
-        };
-
         // The player ship's full loadout (weapons, torpedoes, blasters, shields,
         // mesh, stations) must come from the lobby-selected ship template, not
         // the world's `[[entity]] player-ship` placeholder. The placeholder only
@@ -522,16 +533,36 @@ pub(crate) fn spawn_game_start_entities(
         // and the roster decides how many of them are crewed hulls rather than
         // ordinary NPCs — so a two-ship world played solo spawns one player
         // ship and one NPC, exactly as it did before the fleet existed.
-        let is_fleet_ship =
-            player_ships_spawned < roster.len() && config.tags.iter().any(|t| t == "ship");
+        let frozen_slot = if let Some(slot) = authored_slot {
+            frozen_ship_slots
+                .as_ref()
+                .and_then(|frozen| frozen.0.iter().find(|row| row.slot_id == slot.id))
+        } else if is_authored_ship_row {
+            frozen_ship_slots
+                .as_ref()
+                .and_then(|frozen| frozen.0.get(player_ships_spawned))
+        } else {
+            None
+        };
+        // In an authored slot world, a frozen omission is the `Absent` policy,
+        // not an NPC fallback. Skip that slot's own GameStart row completely.
+        if authored_slot.is_some() && frozen_ship_slots.is_some() && frozen_slot.is_none() {
+            continue;
+        }
+        let is_fleet_ship = if authored_slot.is_some() && frozen_ship_slots.is_some() {
+            frozen_slot.is_some()
+        } else {
+            player_ships_spawned < launch_ship_count && is_authored_ship_row
+        };
         let fleet_ship = is_fleet_ship
             .then(|| roster.ship(player_ships_spawned))
             .flatten();
         // Which hull this slot flies: the roster's choice for a fleet member,
         // and this host's own lobby selection for a lone host (`ship_path` is
         // `None` there, which is what keeps the solo spawn byte-identical).
-        let hull_path: Option<String> = fleet_ship
-            .and_then(|ship| ship.ship_path.clone())
+        let hull_path: Option<String> = frozen_slot
+            .map(|slot| slot.hull.clone())
+            .or_else(|| fleet_ship.and_then(|ship| ship.ship_path.clone()))
             .or_else(|| selected_ship.as_ref().map(|sel| sel.0.clone()));
         let config = if is_fleet_ship {
             player_hull_config(
@@ -686,7 +717,23 @@ pub(crate) fn spawn_game_start_entities(
         // the sequence and set of `.insert()` / `insert_resource` /
         // `remove_resource` calls is byte-for-byte the one that shipped inline,
         // which the archetype-order guard gates.
-        if let Some(fleet_ship) = fleet_ship {
+        if is_fleet_ship {
+            let synthetic_host = fleet_ship
+                .map(|ship| ship.host)
+                .or_else(|| {
+                    frozen_slot.map(|slot| {
+                        if slot.claimant.is_some() {
+                            crate::command_admission::HostSlot::SOLO
+                        } else {
+                            crate::command_admission::HostSlot(
+                                u32::try_from(player_ships_spawned + 1)
+                                    .expect("ship-slot count fits a u32"),
+                            )
+                        }
+                    })
+                })
+                .unwrap_or(crate::command_admission::HostSlot::SOLO);
+            let crew = fleet_ship.map_or(&[][..], |ship| ship.crew.as_slice());
             configure_player_ship(
                 &mut commands,
                 spawned,
@@ -696,15 +743,26 @@ pub(crate) fn spawn_game_start_entities(
                 &mut pending_ship_config,
                 &mut sessions,
                 &FleetPlacement {
-                    host: fleet_ship.host,
-                    is_local: roster.is_local(fleet_ship.host),
-                    uses_live_sessions: crate::lockstep::uses_live_sessions(
-                        roster,
-                        fleet_session.is_some(),
-                        fleet_ship.host,
-                    ),
-                    crew: &fleet_ship.crew,
+                    host: synthetic_host,
+                    is_local: if fleet_ship.is_some() {
+                        roster.is_local(synthetic_host)
+                    } else {
+                        frozen_slot.is_some_and(|slot| slot.claimant.is_some())
+                    },
+                    uses_live_sessions: if fleet_ship.is_some() {
+                        crate::lockstep::uses_live_sessions(
+                            roster,
+                            fleet_session.is_some(),
+                            synthetic_host,
+                        )
+                    } else {
+                        frozen_slot.is_some_and(|slot| slot.claimant.is_some())
+                    },
+                    crew,
                     hull_path: hull_path.as_deref(),
+                    authored_slot_id: frozen_slot
+                        .map(|slot| slot.slot_id.as_str())
+                        .or_else(|| fleet_ship.and_then(|ship| ship.authored_slot_id.as_deref())),
                 },
                 &config_cache,
             );
@@ -747,6 +805,9 @@ pub(crate) struct FleetPlacement<'a> {
     pub crew: &'a [(crate::core::messages::StationId, String)],
     /// The hull this slot flies, as an entity-template path.
     pub hull_path: Option<&'a str>,
+    /// Scenario-authored ship-slot identity. Unlike `host`, this is stable
+    /// content vocabulary and may be used by objective recipient selectors.
+    pub authored_slot_id: Option<&'a str>,
 }
 
 /// Configure one GameStart player ship: resolve its hull config, seed the boot
@@ -932,6 +993,9 @@ fn insert_player_core_bundle(
     // insertion order — which is archetype-creation order — is unchanged.
     if placement.is_local {
         ship.insert(LocalShip);
+    }
+    if let Some(slot_id) = placement.authored_slot_id {
+        ship.insert(crate::ship_slots::AuthoredShipSlotId(slot_id.to_string()));
     }
     ship
         // Which host flies this hull. On every host in the fleet, for every

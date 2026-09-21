@@ -822,6 +822,37 @@ template_path = "cruiser"
     assert!(error.contains("default_ship"), "{error}");
 }
 
+#[test]
+fn ship_slot_unclaimed_policy_defaults_to_backfill_and_accepts_absent() {
+    let defaulted = parse_world(
+        r#"
+[[ship_slot]]
+id = "lead"
+default_ship = "cruiser"
+[[ship_slot.ships]]
+template_path = "cruiser"
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        defaulted.ship_slots[0].unclaimed,
+        UnclaimedSlotPolicy::Backfill
+    );
+
+    let absent = parse_world(
+        r#"
+[[ship_slot]]
+id = "wing"
+default_ship = "cruiser"
+unclaimed = "absent"
+[[ship_slot.ships]]
+template_path = "cruiser"
+"#,
+    )
+    .unwrap();
+    assert_eq!(absent.ship_slots[0].unclaimed, UnclaimedSlotPolicy::Absent);
+}
+
 // -- player_spawn (issue #623) -------------------------------------------
 
 #[test]

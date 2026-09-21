@@ -1,0 +1,45 @@
+[global]
+seed = 1522
+
+[[ship_slot]]
+id = "lead"
+label = "Lead"
+default_ship = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "wing"
+label = "Wing"
+default_ship = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "reserve"
+label = "Reserve"
+default_ship = "assets/entities/alliance_cruiser.toml"
+unclaimed = "absent"
+
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "lead-row"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "wing-row"
+spawn_on = "game_start"
+transform = { position = [50.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "reserve-row"
+spawn_on = "game_start"
+transform = { position = [100.0, 0.0, 0.0] }

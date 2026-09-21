@@ -295,6 +295,16 @@ fn build_headless_inner(
         .resource::<crate::world::config::WorldConfig>()
         .global
         .seed;
+    let authored_slots = app
+        .world()
+        .resource::<crate::world::config::WorldConfig>()
+        .ship_slots
+        .clone();
+    if !authored_slots.is_empty() {
+        app.insert_resource(crate::ship_slots::FrozenShipSlots::from_unclaimed_slots(
+            &authored_slots,
+        ));
+    }
     let sim_rng = match (args.seed, world_seed) {
         (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
         (None, Some(seed)) => SimRng::new(seed, SeedSource::World),

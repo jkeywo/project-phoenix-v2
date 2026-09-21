@@ -269,9 +269,10 @@ pub fn validate_manifest(
                     // curating a ship that can never appear.
                     for ship_path in &entry.ships {
                         let offered = parsed
-                            .available_ships
+                            .effective_ship_slots()
                             .iter()
-                            .any(|s| &s.template_path == ship_path);
+                            .flat_map(|slot| slot.ships.iter())
+                            .any(|ship| &ship.template_path == ship_path);
                         if !offered {
                             findings.push(finding(
                                 "unknown-scenario-ship",
@@ -282,6 +283,41 @@ pub fn validate_manifest(
                                     entry.id, ship_path, entry.world
                                 ),
                             ));
+                        }
+                    }
+                    if !parsed.ship_slots.is_empty() && !entry.ships.is_empty() {
+                        for slot in &parsed.ship_slots {
+                            let retained: Vec<_> = slot
+                                .ships
+                                .iter()
+                                .filter(|ship| {
+                                    entry.ships.iter().any(|path| path == &ship.template_path)
+                                })
+                                .collect();
+                            if retained.is_empty() {
+                                findings.push(finding(
+                                    "empty-curated-ship-slot",
+                                    manifest_toml,
+                                    &entry.id,
+                                    format!(
+                                        "scenario {:?} curation leaves ship slot {:?} with no playable hull",
+                                        entry.id, slot.id
+                                    ),
+                                ));
+                            } else if !retained
+                                .iter()
+                                .any(|ship| ship.template_path == slot.default_ship)
+                            {
+                                findings.push(finding(
+                                    "excluded-curated-slot-default",
+                                    manifest_toml,
+                                    &entry.id,
+                                    format!(
+                                        "scenario {:?} curation excludes default hull {:?} from ship slot {:?}",
+                                        entry.id, slot.default_ship, slot.id
+                                    ),
+                                ));
+                            }
                         }
                     }
                 }
@@ -382,16 +418,27 @@ pub fn build_catalog(
                 .cloned()
                 .collect()
         };
-        let slots = all_slots
-            .into_iter()
-            .map(|mut slot| {
-                if !entry.ships.is_empty() {
-                    slot.ships
-                        .retain(|ship| entry.ships.iter().any(|path| path == &ship.template_path));
-                }
-                slot
-            })
-            .collect();
+        let slots = if world.ship_slots.is_empty() {
+            all_slots
+                .into_iter()
+                .map(|mut slot| {
+                    if !entry.ships.is_empty() {
+                        slot.ships.retain(|ship| {
+                            entry.ships.iter().any(|path| path == &ship.template_path)
+                        });
+                    }
+                    slot
+                })
+                .collect()
+        } else {
+            let Ok(slots) = crate::ship_slots::curate_ship_slots(&all_slots, &entry.ships) else {
+                // The validator reports the exact slot/default failure. A
+                // catalogue is selection authority, so it must not publish a
+                // scenario whose frozen launch definition violates curation.
+                continue;
+            };
+            slots
+        };
         scenarios.push(ScenarioCatalogEntry {
             id: entry.id.clone(),
             world: entry.world.clone(),
@@ -738,6 +785,62 @@ ships = ["assets/entities/alliance_destroyer.toml"]
             catalog.scenarios[0].ships[0].template_path,
             "assets/entities/alliance_destroyer.toml"
         );
+    }
+
+    #[test]
+    fn multi_ship_catalogue_refuses_a_curated_out_default() {
+        let manifest_toml = r#"
+[[scenario]]
+id = "fleet"
+world = "assets/worlds/fleet.toml"
+ships = ["destroyer.toml"]
+"#;
+        let world = r#"
+[[ship_slot]]
+id = "lead"
+default_ship = "cruiser.toml"
+
+[[ship_slot.ships]]
+template_path = "cruiser.toml"
+
+[[ship_slot.ships]]
+template_path = "destroyer.toml"
+"#;
+        let manifest = parse_manifest(manifest_toml).unwrap();
+        let map = HashMap::from([("assets/worlds/fleet.toml".into(), world.into())]);
+        let findings = validate_manifest(&manifest, manifest_toml, resolver(map.clone()));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.category == "excluded-curated-slot-default"));
+        assert!(build_catalog(&manifest, resolver(map)).scenarios.is_empty());
+    }
+
+    #[test]
+    fn multi_ship_catalogue_refuses_a_slot_emptied_by_curation() {
+        let manifest_toml = r#"
+[[scenario]]
+id = "fleet"
+world = "assets/worlds/fleet.toml"
+ships = ["destroyer.toml"]
+"#;
+        let world = r#"
+[[available_ships]]
+template_path = "destroyer.toml"
+
+[[ship_slot]]
+id = "lead"
+default_ship = "cruiser.toml"
+
+[[ship_slot.ships]]
+template_path = "cruiser.toml"
+"#;
+        let manifest = parse_manifest(manifest_toml).unwrap();
+        let map = HashMap::from([("assets/worlds/fleet.toml".into(), world.into())]);
+        let findings = validate_manifest(&manifest, manifest_toml, resolver(map.clone()));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.category == "empty-curated-ship-slot"));
+        assert!(build_catalog(&manifest, resolver(map)).scenarios.is_empty());
     }
 
     #[test]

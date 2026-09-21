@@ -2275,3 +2275,67 @@ fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() 
          exactly as it did and no recorded world's digest moved"
     );
 }
+
+#[test]
+fn multi_ship_launch_frozen_slots_roundtrip_and_move_the_digest() {
+    let mut world = fold_world();
+    let bare = world_digest(&world);
+    let slot = |id: &str, hull: &str, unclaimed| crate::world::config::ShipSlotConfig {
+        id: id.into(),
+        label: None,
+        ships: vec![crate::world::config::AvailableShipEntry {
+            template_path: hull.into(),
+            label: None,
+        }],
+        default_ship: hull.into(),
+        unclaimed,
+    };
+    let authored = vec![
+        slot(
+            "lead",
+            "cruiser",
+            crate::world::config::UnclaimedSlotPolicy::Backfill,
+        ),
+        slot(
+            "wing",
+            "destroyer",
+            crate::world::config::UnclaimedSlotPolicy::Backfill,
+        ),
+        slot(
+            "reserve",
+            "scout",
+            crate::world::config::UnclaimedSlotPolicy::Absent,
+        ),
+    ];
+    let mut reservations = crate::ship_slots::ShipSlotReservations::default();
+    assert_eq!(
+        reservations.claim(&authored, "lead", "slot-1"),
+        crate::ship_slots::ClaimOutcome::Claimed
+    );
+    assert_eq!(
+        reservations.confirm_hull(&authored, "lead", "slot-1", "cruiser"),
+        crate::ship_slots::HullOutcome::Confirmed
+    );
+    let frozen = reservations.freeze(&authored).unwrap();
+    assert_eq!(
+        frozen
+            .0
+            .iter()
+            .map(|row| (row.slot_id.as_str(), &row.source))
+            .collect::<Vec<_>>(),
+        [
+            ("lead", &crate::ship_slots::LaunchSource::Claimed),
+            ("wing", &crate::ship_slots::LaunchSource::Backfill),
+        ],
+        "Backfill survives launch while Absent remains omitted"
+    );
+    let restored: crate::ship_slots::FrozenShipSlots =
+        serde_json::from_str(&serde_json::to_string(&frozen).unwrap()).unwrap();
+    world.insert_resource(restored.clone());
+    let launched = world_digest(&world);
+    assert_ne!(bare, launched);
+
+    let mut replay = fold_world();
+    replay.insert_resource(restored);
+    assert_eq!(launched, world_digest(&replay));
+}

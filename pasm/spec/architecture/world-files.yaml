@@ -40,6 +40,8 @@ entities:
       confidence: confirmed
       title: Mission Ship Slot Contract
       summary: "Issue #1518: a world may declare stable player-ship slots with per-slot allowed hulls and a default. Missing slot declarations synthesize the legacy single player slot from available_ships. Pre-start claims are exclusive, hull confirmation is holder-only, and Back or disconnect releases immediately."
+      rationale:
+        - "Issue #1522: each unclaimed slot authors backfill (the default) or absent. Launch freezes claimed confirmed hulls and unclaimed Backfill defaults in authored slot order and emits no row for absent slots; restore/replay carries that frozen roster rather than re-evaluating initial absence after host loss."
     architecture:
       kind: pure-module
       authority: authoritative
@@ -48,7 +50,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/config.rs, src/ship_slots.rs]
-      symbols: [ShipSlotConfig, ShipSlotReservations, ClaimOutcome, HullOutcome]
+      symbols: [ShipSlotConfig, UnclaimedSlotPolicy, ShipSlotReservations, FrozenShipSlots, ClaimOutcome, HullOutcome]
       tests: [cargo test]
 
   - state: mission-ship-slot-reservations

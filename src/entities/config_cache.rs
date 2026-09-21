@@ -987,13 +987,20 @@ pub fn wasm_load_world(
     WORLD_PRELOAD_PENDING.with(|pending| *pending.borrow_mut() = true);
     PRELOAD_FAILURE.with(|failure| *failure.borrow_mut() = None);
     PRELOAD_COMPLETE.with(|complete| *complete.borrow_mut() = false);
-    let world_config = crate::world::config::parse_world(&toml_str).map_err(|e| {
+    let mut world_config = crate::world::config::parse_world(&toml_str).map_err(|e| {
         web_sys::console::error_1(&JsValue::from_str(&format!(
             "Failed to parse world TOML at {}: {}",
             path, e
         )));
         JsValue::from_str(&format!("World parse error at {}: {}", path, e))
     })?;
+    if !world_config.ship_slots.is_empty() {
+        world_config.ship_slots =
+            crate::ship_slots::curate_ship_slots(&world_config.ship_slots, &curated_ships)
+                .map_err(|error| {
+                    JsValue::from_str(&format!("Ship-slot curation error: {error}"))
+                })?;
+    }
 
     // Queue every entity template path discovered by the unified pipeline,
     // restricted to the locked scenario's curated playable-hull allowlist

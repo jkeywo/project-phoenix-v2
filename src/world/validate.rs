@@ -1729,6 +1729,75 @@ pub fn validate_relative_to(path: &str, toml: &str, config: &WorldConfig) -> Vec
     validate_relative_to_in(&WorldSource::new(path, toml, config))
 }
 
+/// Refuse an authored multi-ship layout that cannot materialise every slot.
+///
+/// `spawn_game_start_entities` consumes one `GameStart` row whose resolved
+/// template carries the `ship` tag per frozen slot. Without this authoring
+/// check a valid two-slot lobby could launch into a world with only one player
+/// ship, silently dropping the later slot. Legacy worlds do not author
+/// `[[ship_slot]]` and retain their historical single-row behaviour unchanged.
+fn validate_ship_slot_capacity_in(
+    src: &WorldSource,
+    templates: &dyn TemplateLoader,
+) -> Vec<WorldFinding> {
+    if src.config.ship_slots.is_empty() {
+        return Vec::new();
+    }
+
+    let required = src.config.ship_slots.len();
+    let mut available = 0usize;
+    for entity in src
+        .config
+        .entities
+        .iter()
+        .filter(|entity| entity.spawn_on == crate::world::config::WorldEntitySpawnOn::GameStart)
+    {
+        let Some(template) = templates.load_template(&entity.template_path) else {
+            return Vec::new();
+        };
+        let resolved = entity
+            .overrides
+            .as_ref()
+            .map_or(Ok(template.clone()), |overrides| {
+                crate::entities::loader::apply_overrides(&template, overrides)
+            });
+        match resolved {
+            Ok(config) if config.tags.iter().any(|tag| tag == "ship") => available += 1,
+            Ok(_) => {}
+            // Template-resolution validation reports authoritative failures.
+            // A browser still filling its preload cannot decide capacity yet.
+            Err(_) => return Vec::new(),
+        }
+    }
+    if available >= required {
+        return Vec::new();
+    }
+
+    vec![WorldFinding {
+        severity: Severity::Error,
+        category: "insufficient-player-ship-spawns",
+        message: format!(
+            "world '{}' declares {required} player ship slots but only {available} resolvable \
+             `spawn_on = \"game_start\"` rows use a template tagged `ship`; author at least one \
+             player-ship row per slot or reduce the slot count",
+            src.path
+        ),
+        source: SourceLocation {
+            file: src.path.clone(),
+            line: src
+                .config
+                .ship_slots
+                .get(available)
+                .and_then(|slot| line_of(src.toml, &slot.id)),
+            reference: src
+                .config
+                .ship_slots
+                .get(available)
+                .map_or_else(String::new, |slot| slot.id.clone()),
+        },
+    }]
+}
+
 /// Every finding that blocks activation of a root world at Bevy `Startup`.
 ///
 /// # Why this is one function and not a list each caller assembles
@@ -1781,6 +1850,7 @@ pub fn activation_findings(
     let src = WorldSource::new("", "", config);
     let mut seen = HashSet::new();
     findings.extend(validate_template_resolution_in(&src, templates, &mut seen));
+    findings.extend(validate_ship_slot_capacity_in(&src, templates));
     findings
 }
 
@@ -1841,6 +1911,8 @@ pub fn validate_composition_with_fragments(
     fragments: &dyn FragmentSource,
 ) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
+
+    findings.extend(validate_ship_slot_capacity_in(root, template_loader));
 
     // Per-world identity (duplicate names).
     findings.extend(validate_entity_identity(

@@ -262,6 +262,28 @@ export function renderHostScenarios(doc, vm, t, hooks, opts) {
     return;
   }
 
+  if (vm.stage === 'slot-auto') {
+    if (h.selectSlot) h.selectSlot(vm.slotId);
+    return;
+  }
+
+  if (vm.stage === 'slot-picker') {
+    if (label) label.textContent = t(vm.labelId);
+    clearScenarioEntries(worldList);
+    vm.slots.forEach(function (slot) {
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS;
+      btn.dataset.slotId = slot.id;
+      btn.textContent = tData(slot.label) || slot.id;
+      btn.disabled = !!slot.disabled;
+      if (slot.disabled) btn.setAttribute('aria-disabled', 'true');
+      btn.addEventListener('click', function () { if (h.selectSlot) h.selectSlot(slot.id); });
+      appendScenarioEntry(worldList, btn);
+    });
+    return;
+  }
+
   if (vm.stage === 'scenario-empty') {
     if (label) label.textContent = t(vm.labelId);
     clearScenarioEntries(worldList);

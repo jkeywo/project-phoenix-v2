@@ -22,69 +22,11 @@
  * environment. The fetch that populates it lives in gui/strings-boot.js.
  */
 
+import { parseCsv } from './csv.js';
+import { composeStringCatalogues } from './string-catalogue.js';
+export { parseCsv } from './csv.js';
+
 // ── CSV parsing ─────────────────────────────────────────────────────────────
-
-/**
- * Parse RFC 4180 CSV into an array of string arrays.
- *
- * Hand-rolled rather than pulled from npm because the client ships as plain ES
- * modules with no bundler, and because we need exactly one feature beyond
- * `split(',')`: quoted fields. Those are not optional here — the comms dialogue
- * in assets/worlds/*.toml is multi-line and full of commas, so a naive split
- * silently shreds it.
- *
- * @param {string} text
- * @returns {string[][]} rows of fields; blank trailing lines dropped
- */
-export function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = '';
-  let quoted = false;
-  let i = 0;
-
-  // Strip a UTF-8 BOM — Excel writes one, and it would otherwise become part
-  // of the first column's header name.
-  if (text.charCodeAt(0) === 0xfeff) i = 1;
-
-  const endField = () => { row.push(field); field = ''; };
-  const endRow = () => {
-    endField();
-    // A trailing newline produces one empty final row; drop it rather than
-    // emitting a bogus entry with an empty id.
-    if (!(row.length === 1 && row[0] === '')) rows.push(row);
-    row = [];
-  };
-
-  while (i < text.length) {
-    const ch = text[i];
-
-    if (quoted) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-        quoted = false;
-        i += 1;
-        continue;
-      }
-      field += ch;
-      i += 1;
-      continue;
-    }
-
-    if (ch === '"' && field === '') { quoted = true; i += 1; continue; }
-    if (ch === ',') { endField(); i += 1; continue; }
-    if (ch === '\r') { i += 1; continue; }
-    if (ch === '\n') { endRow(); i += 1; continue; }
-
-    field += ch;
-    i += 1;
-  }
-
-  // Final row without a trailing newline.
-  if (field !== '' || row.length > 0) endRow();
-
-  return rows;
-}
 
 /**
  * Build an id → text lookup from CSV text.
@@ -118,7 +60,9 @@ export function buildTable(text, locale = 'en') {
     if (table.has(id)) {
       console.warn(`strings.csv: duplicate id '${id}' — later row wins`);
     }
-    table.set(id, rows[r][textCol] ?? '');
+    const selected = rows[r][textCol] ?? '';
+    const english = rows[r][header.indexOf('en')] ?? '';
+    table.set(id, selected.trim() === '' ? english : selected);
   }
   return table;
 }
@@ -127,6 +71,11 @@ export function buildTable(text, locale = 'en') {
 
 /** @type {Map<string, string>} */
 let table = new Map();
+
+let baseCatalogue = null;
+let overlayCatalogues = [];
+let locale = 'en';
+let catalogueReport = { entries: new Map(), diagnostics: [], locales: ['en'] };
 
 /** Warn once per missing id — a re-rendering console would otherwise spam. */
 const warned = new Set();
@@ -139,6 +88,70 @@ const warned = new Set();
 export function setTable(next) {
   table = next;
   warned.clear();
+}
+
+function rebuildCatalogue() {
+  if (!baseCatalogue) return;
+  const report = composeStringCatalogues([baseCatalogue, ...overlayCatalogues], locale);
+  catalogueReport = report;
+  setTable(report.table);
+}
+
+/** Install the immutable shipped catalogue loaded by strings-boot. */
+export function setBaseCatalogue(text, source = 'core') {
+  baseCatalogue = { source, text: String(text) };
+  rebuildCatalogue();
+}
+
+/** Replace the ordered mod catalogue stack received from the authoritative host. */
+export function setOverlayCatalogues(sources) {
+  overlayCatalogues = Array.isArray(sources)
+    ? sources.filter((item) => item && typeof item.source === 'string' && typeof item.csv === 'string')
+      .map((item) => ({ source: item.source, text: item.csv }))
+    : [];
+  rebuildCatalogue();
+  // Welcome localisation is destructive: localiseTree replaces ids with text.
+  // Resolve a browser region (de-DE) to an authored base language (de) here,
+  // synchronously, before the transport walks that same Welcome.
+  if (!catalogueReport.locales.includes(locale)) {
+    const language = locale.toLowerCase().split('-')[0];
+    const match = catalogueReport.locales.find((item) =>
+      item.toLowerCase().split('-')[0] === language);
+    if (match) {
+      locale = match;
+      rebuildCatalogue();
+    }
+  }
+}
+
+/** Select a private presentation locale; no message is sent to the host. */
+export function setLocale(next) {
+  locale = typeof next === 'string' && next.trim() ? next.trim() : 'en';
+  rebuildCatalogue();
+  return locale;
+}
+
+export function getLocale() { return locale; }
+
+/** A cloneable snapshot for installing this presentation in another realm. */
+export function getCataloguePresentation() {
+  return {
+    locale,
+    catalogues: overlayCatalogues.map(({ source, text }) => ({ source, csv: text })),
+    locales: [...catalogueReport.locales],
+  };
+}
+
+/** Install the parent shell's private locale and authoritative overlay stack. */
+export function installCataloguePresentation(presentation) {
+  setOverlayCatalogues(presentation?.catalogues || []);
+  setLocale(presentation?.locale || 'en');
+  return getCataloguePresentation();
+}
+
+/** Author-facing composition/freshness details; player renderers use only t(). */
+export function getCatalogueReport() {
+  return catalogueReport;
 }
 
 /** @returns {Map<string, string>} the live table (read-only by convention) */

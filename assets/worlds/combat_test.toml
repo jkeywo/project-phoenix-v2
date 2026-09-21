@@ -436,6 +436,10 @@ template_path = "assets/entities/alliance_cruiser.toml"
 label = "world.combat_test.available_ships.1.label"
 
 [[available_ships]]
+template_path = "assets/entities/dynasty_player_cruiser.toml"
+label = "world.combat_test.available_ships.dynasty_cruiser.label"
+
+[[available_ships]]
 template_path = "assets/entities/alliance_battleship.toml"
 label = "world.combat_test.available_ships.2.label"
 

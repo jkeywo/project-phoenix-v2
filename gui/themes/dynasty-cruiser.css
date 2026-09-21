@@ -1,0 +1,11 @@
+/* The T5 Dynasty bridge keeps the shared console grammar while giving the
+   variant a warm, high-contrast identity.  All controls still inherit the
+   common focus, motion and hit-target rules from console.css. */
+:root {
+  --rgb-panel: 43, 18, 18;
+  --rgb-deep: 16, 7, 8;
+  --cyan: #ff8b55;
+  --loaded: #f2a15f;
+  --edge: rgba(255, 139, 85, 0.48);
+  --line-soft: rgba(255, 176, 128, 0.22);
+}

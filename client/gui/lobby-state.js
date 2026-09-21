@@ -123,7 +123,7 @@ export class LobbyState {
     this.activePacks = [];
     /** The authoritative first-valid-wins lock reflected to phones:
      *  `{ scenario_id: string|null, template_path: string|null }`. */
-    this.selectionLocked = { scenario_id: null, template_path: null };
+    this.selectionLocked = { scenario_id: null, slot_id: null, template_path: null };
   }
 
   /**
@@ -201,6 +201,7 @@ export class LobbyState {
         // the host before world load (issue #755).
         this.selectionLocked = {
           scenario_id: d.locked_scenario != null ? d.locked_scenario : null,
+          slot_id: d.locked_slot != null ? d.locked_slot : null,
           template_path: d.locked_ship != null ? d.locked_ship : null,
         };
         // The active mod-pack list (issue #990) rides on EVERY catalog message —
@@ -208,8 +209,12 @@ export class LobbyState {
         // broadcast — so it lands whether the phone is still picking or resuming
         // an already-loaded world. Stored regardless of the lock state below.
         this.activePacks = Array.isArray(d.active_packs) ? d.active_packs : [];
+        const chosen = (Array.isArray(d.scenarios) ? d.scenarios : [])
+          .find(candidate => candidate?.id === this.selectionLocked.scenario_id);
+        const slotLocked = !chosen || !(chosen.slots || []).length || this.selectionLocked.slot_id != null;
         const bothLocked =
           this.selectionLocked.scenario_id != null &&
+          slotLocked &&
           this.selectionLocked.template_path != null;
         if (bothLocked) {
           // Second-round selection is complete and the host is reusing the

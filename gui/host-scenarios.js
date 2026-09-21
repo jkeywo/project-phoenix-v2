@@ -114,7 +114,19 @@ export function scenarioCatalogView(catalog, preSelection, locked) {
 
   if (sel.template_path == null) {
     const entry = findScenario(list, sel.scenario_id);
-    const ships = (entry && entry.ships) || [];
+    const slots = (entry && Array.isArray(entry.slots)) ? entry.slots : [];
+    if (sel.slot_id == null && slots.length === 1) {
+      return { stage: 'slot-auto', slotId: slots[0].id };
+    }
+    if (sel.slot_id == null && slots.length > 1) {
+      return {
+        stage: 'slot-picker', labelId: 'server.select_ship_slot',
+        scenarioId: sel.scenario_id,
+        slots: slots.map(slot => ({ ...slot, disabled: !!slot.claimed })),
+      };
+    }
+    const selectedSlot = slots.find(slot => slot && slot.id === sel.slot_id);
+    const ships = selectedSlot ? selectedSlot.ships : ((entry && entry.ships) || []);
     // A scenario curated (or authored) down to exactly one playable hull
     // resolves straight to it — no picker click needed (issue #917).
     // Count-based, not keyed on any hull name.
@@ -132,6 +144,7 @@ export function scenarioCatalogView(catalog, preSelection, locked) {
       labelId: 'server.select_ship',
       worldLabelId: 'server.select_world',
       scenarioId: sel.scenario_id,
+      slotId: sel.slot_id,
       entries: worldRows(list, sel.scenario_id),
       ships,
     };

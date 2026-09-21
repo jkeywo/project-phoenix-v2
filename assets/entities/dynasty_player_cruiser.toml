@@ -1,0 +1,266 @@
+# T5's crewed Dynasty cruiser is a distinct selectable hull.  It deliberately
+# composes the proven player-cruiser equipment baseline rather than exposing or
+# changing ship_harrow_cruiser.toml: the latter remains the NPC encounter hull.
+# Issue #1521 only establishes the six-role bridge; strike reserve and weapon
+# boost specialise this variant in later slices.
+includes = ["alliance_cruiser.toml"]
+
+name = "entity.dynasty_player_cruiser.name"
+display_name = "entity.dynasty_player_cruiser.display_name"
+hull_id = "DYN-T5-01"
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+tags = ["ship"]
+css = "gui/themes/dynasty-cruiser.css"
+
+[mesh]
+model = "assets/models/dynasty_cruiser_recreated.glb"
+shape = "cuboid"
+size = [6.0, 2.0, 10.0]
+colour = [0.85, 0.35, 0.12]
+
+[radar_appearance]
+colour = [0.85, 0.35, 0.12]
+size = 8.0
+icon = "cruiser"
+
+# Remove the Alliance roster before declaring the six Dynasty seats.  Systems
+# below are reassigned by id; all other equipment and AI policy stays shared.
+[[station]]
+id = "captain"
+_remove = true
+[[station]]
+id = "helm"
+_remove = true
+[[station]]
+id = "tactical"
+_remove = true
+[[station]]
+id = "science"
+_remove = true
+[[station]]
+id = "engineering"
+_remove = true
+[[station]]
+id = "comms"
+_remove = true
+[[station]]
+id = "navigation"
+_remove = true
+[[station]]
+id = "command"
+_remove = true
+
+[[station]]
+id = "command"
+name = "Command"
+description = "entity.dynasty_player_cruiser.station.command.description"
+rank = "Cmdr."
+short_code = "CMD"
+console = "gui/dynasty-cruiser/command.html"
+manual_overview = "Set the ship's intent, direct the viewscreen and red alert state, and handle communications. Command coordinates the attack; it does not bypass the Gunnery or Helm systems that carry it out."
+[[station.rating]]
+name = "Std"
+automated_systems = ["security"]
+[[station.tutorial]]
+id = "command-welcome"
+title = "entity.dynasty_player_cruiser.station.command.tutorial.title"
+text = "entity.dynasty_player_cruiser.station.command.tutorial.text"
+trigger = { kind = "first_visit" }
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "entity.dynasty_player_cruiser.station.helm.description"
+rank = "Ltn."
+short_code = "HLM"
+console = "gui/dynasty-cruiser/helm.html"
+manual_overview = "Plan the approach on Navigation, then fly it with the ship's ordinary thrust, steering, impulse and boost controls."
+[[station.rating]]
+name = "Std"
+automated_systems = ["dock"]
+[[station.tutorial]]
+id = "helm-welcome"
+title = "entity.dynasty_player_cruiser.station.helm.tutorial.title"
+text = "entity.dynasty_player_cruiser.station.helm.tutorial.text"
+trigger = { kind = "first_visit" }
+
+[[station]]
+id = "gunnery"
+name = "Gunnery"
+description = "entity.dynasty_player_cruiser.station.gunnery.description"
+rank = "Ltn."
+short_code = "GUN"
+console = "gui/dynasty-cruiser/gunnery.html"
+manual_overview = "Lock contacts and operate every weapon through the ordinary Tactical admission path."
+[[station.rating]]
+name = "Std"
+automated_systems = []
+[[station.tutorial]]
+id = "gunnery-welcome"
+title = "entity.dynasty_player_cruiser.station.gunnery.tutorial.title"
+text = "entity.dynasty_player_cruiser.station.gunnery.tutorial.text"
+trigger = { kind = "first_visit" }
+
+[[station]]
+id = "sensors"
+name = "Sensors"
+description = "entity.dynasty_player_cruiser.station.sensors.description"
+rank = "Ltn."
+short_code = "SNS"
+console = "gui/dynasty-cruiser/sensors.html"
+manual_overview = "Detect and scan contacts, then pass useful target information to the rest of the bridge."
+[[station.rating]]
+name = "Std"
+automated_systems = []
+[[station.tutorial]]
+id = "sensors-welcome"
+title = "entity.dynasty_player_cruiser.station.sensors.tutorial.title"
+text = "entity.dynasty_player_cruiser.station.sensors.tutorial.text"
+trigger = { kind = "first_visit" }
+
+[[station]]
+id = "power"
+name = "Power"
+description = "entity.dynasty_player_cruiser.station.power.description"
+rank = "Ltn."
+short_code = "PWR"
+console = "gui/dynasty-cruiser/power.html"
+manual_overview = "Allocate reactor and battery output between the ship's ordinary power groups."
+[[station.rating]]
+name = "Std"
+automated_systems = []
+[[station.tutorial]]
+id = "power-welcome"
+title = "entity.dynasty_player_cruiser.station.power.tutorial.title"
+text = "entity.dynasty_player_cruiser.station.power.tutorial.text"
+trigger = { kind = "first_visit" }
+
+[[station]]
+id = "damage-control"
+name = "Damage Control"
+description = "entity.dynasty_player_cruiser.station.damage_control.description"
+rank = "Ltn."
+short_code = "DCO"
+console = "gui/dynasty-cruiser/damage-control.html"
+manual_overview = "Focus the shield grid and dispatch repair teams. Coupling equipment is kept here with the ship's other recovery work."
+[[station.rating]]
+name = "Std"
+automated_systems = ["tractor", "umbilical"]
+[[station.tutorial]]
+id = "damage-control-welcome"
+title = "entity.dynasty_player_cruiser.station.damage_control.tutorial.title"
+text = "entity.dynasty_player_cruiser.station.damage_control.tutorial.text"
+trigger = { kind = "first_visit" }
+
+# Command: Captain and Comms responsibilities, plus the existing security and
+# viewscreen operations. The inherited stance-command system is removed: this
+# first six-seat bridge has no stance controls or command target.
+[[system]]
+id = "captain"
+station = "command"
+[[system]]
+id = "command"
+_remove = true
+[[system]]
+id = "red-alert"
+station = "command"
+[[system]]
+id = "comms"
+station = "command"
+[[system]]
+id = "viewscreen"
+station = "command"
+[[system]]
+id = "security"
+station = "command"
+
+# Helm: movement and Navigation.
+[[system]]
+id = "helm-thrust"
+station = "helm"
+[[system]]
+id = "helm-steering"
+station = "helm"
+[[system]]
+id = "helm-joystick"
+station = "helm"
+[[system]]
+id = "helm-engine-port"
+station = "helm"
+[[system]]
+id = "helm-engine-starboard"
+station = "helm"
+[[system]]
+id = "helm-radar"
+station = "helm"
+[[system]]
+id = "helm-impulse"
+station = "helm"
+[[system]]
+id = "helm-boost"
+station = "helm"
+[[system]]
+id = "helm-lateral-thrust"
+station = "helm"
+[[system]]
+id = "navigation"
+station = "helm"
+[[system]]
+id = "dock"
+station = "helm"
+
+# Gunnery: every weapon and its targeting radar.
+[[system]]
+id = "tactical-radar"
+station = "gunnery"
+[[system]]
+id = "phaser-control"
+station = "gunnery"
+[[system]]
+id = "phaser-fore"
+station = "gunnery"
+[[system]]
+id = "phaser-aft"
+station = "gunnery"
+[[system]]
+id = "torpedo-magazine"
+station = "gunnery"
+[[system]]
+id = "torpedo-tube-fore-port"
+station = "gunnery"
+[[system]]
+id = "torpedo-tube-fore-starboard"
+station = "gunnery"
+[[system]]
+id = "torpedo-tube-aft"
+station = "gunnery"
+
+# Sensors: detection and scanning only.
+[[system]]
+id = "sensors"
+station = "sensors"
+[[system]]
+id = "sensor-radar"
+station = "sensors"
+
+# Power: energy generation and allocation only.
+[[system]]
+id = "power-reactor"
+station = "power"
+[[system]]
+id = "power-battery"
+station = "power"
+
+# Damage Control: shields, repair, and recovery/coupling gear.
+[[system]]
+id = "shields-system"
+station = "damage-control"
+[[system]]
+id = "repair"
+station = "damage-control"
+[[system]]
+id = "tractor"
+station = "damage-control"
+[[system]]
+id = "umbilical"
+station = "damage-control"

@@ -18,5 +18,10 @@
     "image": "assets/ship-cards/alliance_destroyer.png",
     "views": 8,
     "tile": 3
+  },
+  "assets/entities/dynasty_player_cruiser.toml": {
+    "image": "assets/ship-cards/dynasty_player_cruiser.png",
+    "views": 8,
+    "tile": 3
   }
 }

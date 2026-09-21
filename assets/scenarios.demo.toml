@@ -9,7 +9,8 @@
 # full catalogue is unaffected.
 #
 # Curation never edits the referenced world TOML: `combat_test.toml` still
-# authors all four Alliance hulls in its own `[[available_ships]]` list. The
+# authors four Alliance hulls plus the Dynasty cruiser in its own
+# `[[available_ships]]` list. The
 # optional `ships` field below is an allowlist of `template_path` values —
 # the pre-load catalog (`world::manifest::build_catalog`) filters the world's
 # ship list down to just these, in the world's own authored order, and

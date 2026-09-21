@@ -29,9 +29,9 @@
 /**
  * The local record of an unacknowledged request.
  *
- * @param {'scenario'|'ship'} kind
- * @param {string} id  the scenario id, or the ship's template_path
- * @returns {{ kind: 'scenario'|'ship', id: string }}
+ * @param {'scenario'|'slot'|'ship'} kind
+ * @param {string} id  the scenario id, slot id, or ship's template_path
+ * @returns {{ kind: 'scenario'|'slot'|'ship', id: string }}
  */
 export function pendingPick(kind, id) {
   return { kind, id };
@@ -40,6 +40,7 @@ export function pendingPick(kind, id) {
 /** The locked value this pending request is waiting on, or null. */
 function lockedValueFor(kind, locked) {
   const l = locked || {};
+  if (kind === 'slot') return l.slot_id != null ? l.slot_id : null;
   if (kind === 'ship') return l.template_path != null ? l.template_path : null;
   return l.scenario_id != null ? l.scenario_id : null;
 }
@@ -73,9 +74,11 @@ export function settlePick(pending, locked) {
  *
  * @returns {'scenario'|'ship'|'locked'}
  */
-export function pickStage(locked) {
+export function pickStage(locked, catalog = []) {
   const l = locked || {};
   if (l.scenario_id == null) return 'scenario';
+  const scenario = catalog.find(candidate => candidate && candidate.id === l.scenario_id);
+  if ((scenario?.slots || []).length > 0 && l.slot_id == null) return 'slot';
   if (l.template_path == null) return 'ship';
   return 'locked';
 }
@@ -95,12 +98,13 @@ export function scenarioPickView(input = {}) {
   const locked = input.locked || { scenario_id: null, template_path: null };
   const pending = input.pending || null;
   const notice = input.notice || null;
-  const stage = pickStage(locked);
+  const stage = pickStage(locked, catalog);
 
   // A tap is only in flight for the stage that issued it. A scenario request
   // that has already been answered cannot grey out the ship buttons.
   const busy = !!pending && (
     (pending.kind === 'scenario' && stage === 'scenario')
+    || (pending.kind === 'slot' && stage === 'slot')
     || (pending.kind === 'ship' && stage === 'ship')
   );
 

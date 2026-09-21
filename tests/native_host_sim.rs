@@ -178,7 +178,7 @@ fn direct_world_multi_ship_launch_freezes_backfill_defaults_and_omits_absent_slo
                     slot.slot_id.as_str(),
                     slot.hull.as_str(),
                     slot.claimant.as_deref(),
-                    slot.source.clone(),
+                    slot.source,
                 )
             })
             .collect::<Vec<_>>(),

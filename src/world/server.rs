@@ -781,6 +781,10 @@ impl Plugin for WorldPlugin {
             StateClass::Folded,
             "objective-instance-runtime-state",
         );
+        app.declare_state::<crate::ship_slots::AuthoredShipSlotId>(
+            StateClass::Folded,
+            "objective-instance-state",
+        );
         app.declare_state::<crate::ship_slots::FrozenShipSlots>(
             StateClass::Folded,
             "launch-frozen-ship-slots",

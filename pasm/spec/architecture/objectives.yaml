@@ -21,15 +21,15 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective Instance State and Attribution
-      summary: Ordered named instance records plus per-ship frozen last-known projections and immutable completion membership, captured and restored together.
+      summary: Ordered named instance records plus each ship's authored slot identity, per-ship frozen last-known projections and immutable completion membership, captured and restored together. The digest folds authored slot identity beside the ship's stable entity UUID.
     architecture:
       classification: authoritative
       owner: objective-instance-contract
       writers: [objective-instance-contract]
     implementation:
       status: declared
-      paths: [src/objective_instances.rs]
-      symbols: [ObjectiveInstanceRecord, ObjectiveInstanceManager]
+      paths: [src/objective_instances.rs, src/ship_slots.rs, src/sim_digest.rs]
+      symbols: [ObjectiveInstanceRecord, ObjectiveInstanceManager, AuthoredShipSlotId]
 
   - component: objective-directive-contract
     core:

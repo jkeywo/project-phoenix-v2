@@ -89,6 +89,7 @@ fn fold_world() -> World {
     world.register_component::<ShipPhysics>();
     world.register_component::<EntitySystemHull>();
     world.register_component::<ShipRedAlert>();
+    world.register_component::<crate::ship_slots::AuthoredShipSlotId>();
     world.register_component::<AsteroidUuid>();
     world.register_component::<Transform>();
     world.register_component::<InfrastructureCondition>();
@@ -98,15 +99,77 @@ fn fold_world() -> World {
     world
 }
 
-fn spawn_ship(world: &mut World, uuid: &str, x: f32) {
-    world.spawn((
-        EntityUuid(uuid.to_string()),
-        ShipPhysics {
-            x,
-            ..Default::default()
-        },
-        ShipRedAlert(false),
-    ));
+fn spawn_ship(world: &mut World, uuid: &str, x: f32) -> Entity {
+    world
+        .spawn((
+            EntityUuid(uuid.to_string()),
+            ShipPhysics {
+                x,
+                ..Default::default()
+            },
+            ShipRedAlert(false),
+        ))
+        .id()
+}
+
+#[test]
+fn authored_ship_slot_identity_moves_the_digest() {
+    let id = "00000000-0000-8000-8000-000000000001";
+    let mut alpha = fold_world();
+    let alpha_entity = spawn_ship(&mut alpha, id, 0.0);
+    alpha
+        .entity_mut(alpha_entity)
+        .insert(crate::ship_slots::AuthoredShipSlotId("alpha".into()));
+
+    let mut beta = fold_world();
+    let beta_entity = spawn_ship(&mut beta, id, 0.0);
+    beta.entity_mut(beta_entity)
+        .insert(crate::ship_slots::AuthoredShipSlotId("beta".into()));
+
+    assert_ne!(
+        world_digest(&alpha),
+        world_digest(&beta),
+        "hosts assigning the same ship to different authored slots must diverge"
+    );
+}
+
+#[test]
+fn unused_authored_ship_slots_preserve_legacy_entity_folding() {
+    let id = "00000000-0000-8000-8000-000000000001";
+
+    let mut registered_a = fold_world();
+    spawn_ship(&mut registered_a, id, 1.0);
+    let mut registered_b = fold_world();
+    spawn_ship(&mut registered_b, id, 2.0);
+    assert_eq!(
+        fold_authored_ship_slots_namespace(&registered_a, FOLD_SEED),
+        FOLD_SEED,
+        "a registered component with no authored rows must be an empty walk"
+    );
+    assert_ne!(world_digest(&registered_a), world_digest(&registered_b));
+
+    let mut unregistered_a = World::new();
+    unregistered_a.register_component::<EntityUuid>();
+    unregistered_a.register_component::<ShipPhysics>();
+    unregistered_a.register_component::<EntitySystemHull>();
+    unregistered_a.register_component::<ShipRedAlert>();
+    spawn_ship(&mut unregistered_a, id, 1.0);
+    let mut unregistered_b = World::new();
+    unregistered_b.register_component::<EntityUuid>();
+    unregistered_b.register_component::<ShipPhysics>();
+    unregistered_b.register_component::<EntitySystemHull>();
+    unregistered_b.register_component::<ShipRedAlert>();
+    spawn_ship(&mut unregistered_b, id, 2.0);
+    assert_eq!(
+        fold_authored_ship_slots_namespace(&unregistered_a, FOLD_SEED),
+        FOLD_SEED,
+        "an app that never registers authored slots must keep the old digest"
+    );
+    assert_ne!(
+        fold_entity_namespace(&unregistered_a, FOLD_SEED),
+        fold_entity_namespace(&unregistered_b, FOLD_SEED),
+        "an unregistered authored-slot type must not disable entity divergence detection"
+    );
 }
 
 fn spawn_rock(world: &mut World, uuid: &str, x: f32) {

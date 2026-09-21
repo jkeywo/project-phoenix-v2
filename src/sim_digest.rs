@@ -443,6 +443,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("run", fold_run_scope),
     ("scenario", fold_scenario_scope),
     ("entity", fold_entity_namespace),
+    ("authored-ship-slots", fold_authored_ship_slots_namespace),
     ("infrastructure", fold_infrastructure_namespace),
     ("civilian", fold_civilian_namespace),
     ("station-stances", fold_station_stances_namespace),
@@ -1720,6 +1721,41 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
             Some(active) => fold_u64(fold_u64(acc, 1), u64::from(active)),
             None => fold_u64(acc, 0),
         };
+    }
+    acc
+}
+
+/// Authored mission-slot identity, bound to each ship's stable entity UUID.
+///
+/// This is a separate, empty-when-unused walk so adding the component does not
+/// change legacy worlds' digests and a partial app that never registers the
+/// component cannot disable the established entity namespace above.
+fn fold_authored_ship_slots_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) =
+        world.try_query::<(Entity, &EntityUuid, &crate::ship_slots::AuthoredShipSlotId)>()
+    else {
+        return acc;
+    };
+    let mut rows: Vec<_> = query
+        .iter(world)
+        .map(|(entity, uuid, slot)| {
+            (
+                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                entity.index(),
+                slot.0.as_str(),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "authored-ship-slots");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, slot) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_str(acc, slot);
     }
     acc
 }

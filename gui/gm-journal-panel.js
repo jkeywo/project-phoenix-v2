@@ -52,6 +52,7 @@ export const GM_JOURNAL_ACTION_KIND_LABELS = Object.freeze({
   'event-control': 'server.gm.journal.kind.event_control',
   'direct-effect': 'server.gm.journal.kind.direct_effect',
   'world-spawn': 'server.gm.journal.kind.world_spawn',
+  'ship-slot-backfill': 'server.gm.journal.kind.ship_slot_backfill',
   'world-despawn': 'server.gm.journal.kind.world_despawn',
   'objective-control': 'server.gm.journal.kind.objective_control',
   'contact-information': 'server.gm.contact.information',

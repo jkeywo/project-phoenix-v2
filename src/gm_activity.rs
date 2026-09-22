@@ -184,6 +184,11 @@ pub enum GmActivityAction {
     SpawnPaletteEntity {
         palette: String,
     },
+    /// One authored player-ship slot was filled with its default hull and AI
+    /// crew before launch.
+    BackfillShipSlot {
+        slot: String,
+    },
     /// One authored GM-operable event was paused or resumed (issue #1303).
     /// `active` is the absolute state the GM asked for, so the feed says
     /// "paused" or "resumed" rather than "toggled".
@@ -535,6 +540,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         GmActivityAction::SetContactClassification { active, target, .. } => (18, *active, target),
         GmActivityAction::Presentation { ship } => (19, false, ship),
         GmActivityAction::SetContactInformation { target, .. } => (20, false, target),
+        GmActivityAction::BackfillShipSlot { slot } => (21, false, slot),
     }
 }
 
@@ -1266,6 +1272,7 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::SensorExposureElapsed => "sensor-exposure-elapsed",
         Reason::RestoreIdentityOccupied => "restore-identity-occupied",
         Reason::RestoreReferenceConflict => "restore-reference-conflict",
+        Reason::UnknownShipSlot => "unknown-ship-slot",
     }
 }
 
@@ -1546,6 +1553,11 @@ fn terminal_action_entries(
                         (crate::gm_action::GmActionKind::WorldSpawn, _) => {
                             GmActivityAction::SpawnPaletteEntity {
                                 palette: fact.target.clone()?,
+                            }
+                        }
+                        (crate::gm_action::GmActionKind::ShipSlotBackfill, _) => {
+                            GmActivityAction::BackfillShipSlot {
+                                slot: fact.target.clone()?,
                             }
                         }
                         // The typed, attributed faction adapter (issue #1442).

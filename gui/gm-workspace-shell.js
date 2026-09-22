@@ -88,6 +88,16 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   ['world-fields', 'gm-world-fields-panel'],
 ]);
 
+/** Visual-Studio-style window menus. They are deliberately presentation-only:
+ * every item still invokes the dock's ordinary reveal/reopen operation. */
+export const GM_LIVE_DOCK_MENUS = Object.freeze([
+  ['session', ['roster', 'readiness', 'join', 'manual-save', 'mission', 'health', 'checkpoint', 'restore']],
+  ['crew', ['workload', 'station', 'station-console']],
+  ['communications', ['comms', 'activity', 'journal', 'session-history', 'presentation', 'audition']],
+  ['world', ['map', 'spawn', 'contact', 'npc', 'misclassify', 'report-policy', 'system', 'effect', 'despawn', 'faction', 'objective']],
+  ['inspect', ['inspector', 'entity-fields', 'hull-fields', 'region-fields', 'presentation-fields', 'world-fields', 'widgets', 'source-link']],
+]);
+
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
   const root = doc.getElementById('gm-console');
   if (!root) return { refresh() {}, metadata() {}, selection() {}, dispose() {},
@@ -347,6 +357,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // would be behind that tab and unreachable, which is what #gm-inspector-back
   // had silently become.
   let gms = [];
+  let shipSlots = [];
+  let backfillSequence = 0;
   let entities = [];
   let selected = null;
   let pillSignature = null;
@@ -449,11 +461,40 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     // rebuild every roster button a second — discarding a mousedown held on a
     // row, dropping hover and active state, and losing a screen reader's place
     // in the ship list — for a pill whose word had not changed.
-    const signature = JSON.stringify([entities.map(({ entity_id, name, kind, faction }) => ({ entity_id, name, kind, faction })), stationProjection.ships.map(ship => [ship.ship_id, ship.stations, ship.ship_config?.station_systems, ship.control_sources]), gms, entities.map(({ entity_id }) => workloadWord(entity_id))]);
+    const signature = JSON.stringify([entities.map(({ entity_id, name, kind, faction }) => ({ entity_id, name, kind, faction })), stationProjection.ships.map(ship => [ship.ship_id, ship.stations, ship.ship_config?.station_systems, ship.control_sources]), gms, shipSlots, entities.map(({ entity_id }) => workloadWord(entity_id))]);
     if (signature === rosterSignature) return;
     rosterSignature = signature;
     const focused = doc.activeElement?.dataset?.entityId;
     ships.replaceChildren();
+    if (shipSlots.length) {
+      ships.append(element('h3', null, 'server.gm.shell.player_slots'));
+      for (const slot of shipSlots) {
+        const row = element('div'); row.className = 'gm-roster-row gm-ship-slot-row';
+        row.dataset.shipSlot = slot.id;
+        const title = element('strong'); title.textContent = label(slot.label) || slot.id;
+        const state = element('span'); state.className = 'gm-ship-slot-state';
+        state.textContent = t(`server.gm.shell.ship_slot.${slot.state}`);
+        row.append(title, state);
+        if (slot.can_backfill) {
+          const button = element('button'); button.type = 'button';
+          button.dataset.shipSlotAction = slot.id;
+          button.textContent = t('server.gm.shell.ship_slot.spawn_backfill');
+          button.addEventListener('click', () => {
+            const operator = win.__hostLocalGm?.();
+            if (!operator || typeof win.__hostBackfillShipSlot !== 'function') return;
+            button.disabled = true;
+            const accepted = win.__hostBackfillShipSlot({
+              operator_id: operator.id,
+              correlation: `slot-backfill-${Date.now()}-${backfillSequence += 1}`,
+              slot: slot.id,
+            });
+            if (accepted !== true) button.disabled = false;
+          });
+          row.append(button);
+        }
+        ships.append(row);
+      }
+    }
     for (const kind of ['player_ship', 'npc_ship']) {
       ships.append(element('h3', null, `server.gm.shell.${kind}`));
       for (const entity of entities.filter(row => row.kind === kind)) {
@@ -510,6 +551,10 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   function styleButtons() {
     segments.forEach(paint => paint());
     root.querySelectorAll('button').forEach(button => {
+      // Dock chrome has its own compact desktop styling. Turning a 22px tab or
+      // icon into the console's 44px chamfered action button is what made the
+      // workspace chrome consume most of the native screen.
+      if (button.closest('.workshop-panel-switcher, .workshop-tab-list, .workshop-panel-header, .workshop-dock-targets')) return;
       button.classList.add('btn', 'btn--md');
       if (button.querySelector('.btn-bg')) return;
       const label = element('span'); label.className = 'label';
@@ -630,6 +675,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       },
       labels: {
         switcher: t('server.gm.shell.layout.switcher'), reset: t('server.gm.shell.layout.reset'),
+        layoutMenu: t('server.gm.shell.layout.menu.layout'),
         float: t('server.gm.shell.layout.float'), close: t('server.gm.shell.layout.close'),
         dock: Object.fromEntries(['left', 'right', 'top', 'bottom', 'tab'].map(place =>
           [place, t(`server.gm.shell.layout.dock_${place}`)])),
@@ -637,6 +683,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
           [panel, t(`server.gm.shell.layout.panel.${panel.replace(/-/g, '_')}`)])),
         tabs: t('server.gm.shell.log_tabs'),
       },
+      panelMenus: GM_LIVE_DOCK_MENUS.map(([id, panels]) => ({
+        label: t(`server.gm.shell.layout.menu.${id}`), panels,
+      })),
       // The migrated panels' contents are owned by modules that resolve them by
       // id AFTER this mounts, so no registered panel may leave the document.
       retain: true,
@@ -705,7 +754,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       if (!entry || !panel || panel.hidden) return false;
       return liveLayout?.reveal(entry[0]) === true;
     },
-    metadata(value) { gms = value.gms || []; paintRoster(); },
+    metadata(value) { gms = value.gms || []; shipSlots = value.ship_slots || []; paintRoster(); },
     selection(entity) {
       selected = entity?.entity_id || null;
       chip.textContent = entity ? label(entity.name) : t('server.gm.inspector.empty');

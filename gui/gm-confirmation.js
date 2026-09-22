@@ -69,6 +69,7 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   FireGmEvent: ['event.fire'],
   ApplyDirectEffect: ['effect.damage', 'effect.lethal', 'effect.heal'],
   SpawnPaletteEntity: ['world.spawn'],
+  BackfillShipSlot: ['world.spawn'],
   SetEventPaused: ['event.pause'],
   ArmGmEventSkip: ['event.skip'],
   DespawnEntity: ['world.despawn'],

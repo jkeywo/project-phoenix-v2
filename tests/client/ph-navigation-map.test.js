@@ -890,6 +890,17 @@ describe('PhNavigationMap', () => {
     expect(canvas.height).toBe(400);
   });
 
+  it('remeasures synchronously when a native dock reveals it without a resize callback', () => {
+    const h = setup();
+    h.canvas.width = 0;
+    h.canvas.height = 0;
+    // No ResizeObserver callback: this is the Ultralight dock transition that
+    // previously left a valid GM projection painting into a zero-size canvas.
+    h.el.setRendering(true);
+    expect(h.canvas.width).toBe(600);
+    expect(h.canvas.height).toBe(600);
+  });
+
   // Canvas 600x600 → cx=cy=300, R=300; range 5000 → scale = 0.06 buffer px
   // per world unit at zoom 1. World (1000, 0) → screen (360, 300).
   describe('regions', () => {

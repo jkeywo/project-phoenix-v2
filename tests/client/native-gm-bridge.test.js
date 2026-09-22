@@ -76,12 +76,12 @@ describe('native GM private bridge boot', () => {
     expect(send).toHaveBeenCalledWith(JSON.stringify({ kind: 'loaded' }));
     const receive = vi.fn();
     window.phoenixNativeGm.subscribe(receive);
-    window.__phoenixNativeGmChannels.metadata(JSON.stringify({ phase: 'InProgress', gms: [
-      { id: 'native-gm', name: 'GM', connected: true, ready: false },
+    window.__phoenixNativeGmChannels.metadata(JSON.stringify({ phase: 'InProgress', local_operator_id: 'gm-7', gms: [
+      { id: 'gm-7', name: 'GM', connected: true, ready: false },
     ] }));
-    expect(window.phoenixNativeGm.getOperator().id).toBe('native-gm');
+    expect(window.phoenixNativeGm.getOperator().id).toBe('gm-7');
     expect(window.phoenixNativeGm.returnToHostLobby()).toBe(false);
-    const request = { operator_id: 'native-gm', correlation: 'pause-1', action: 'set_session_paused', active: true };
+    const request = { operator_id: 'gm-7', correlation: 'pause-1', action: 'set_session_paused', active: true };
     expect(window.phoenixNativeGm.submitAction(request)).toBe(true);
     expect(JSON.parse(send.mock.lastCall[0])).toEqual({kind: 'action', request: JSON.stringify(request)});
     window.__phoenixNativeGmChannels.metadata(JSON.stringify({phase: 'InProgress', gms: []}));
@@ -95,7 +95,9 @@ describe('native GM private bridge boot', () => {
     window.phoenixNativeGmOut = {send};
     new Function('mountNativeGmWorkspace', boot)(vi.fn());
     const gms = [{id: 'native-gm', name: 'GM', connected: true}];
-    const metadata = value => window.__phoenixNativeGmChannels.metadata(JSON.stringify({...value, gms}));
+    const metadata = value => window.__phoenixNativeGmChannels.metadata(JSON.stringify({
+      ...value, local_operator_id: 'native-gm', gms,
+    }));
     metadata({phase: 'Lobby', host_lobby_unavailable: false});
     expect(window.phoenixNativeGm.returnToHostLobby()).toBe(false);
     metadata({phase: 'InProgress', host_lobby_unavailable: true});

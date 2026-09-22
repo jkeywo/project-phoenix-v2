@@ -143,10 +143,12 @@ fn publish_metadata(bridge: &NativeGmBridge, phase: GamePhase) {
         codec::encode_native_gm_metadata(&NativeGmMetadata {
             phase,
             host_lobby_unavailable: false,
+            local_operator_id: Some(NATIVE_GM_OPERATOR_ID.into()),
             role_presets: Vec::new(),
             gms: gms.projection(),
             start_policy: readiness_totals(Default::default(), &gms),
             start_result: None,
+            ship_slots: Vec::new(),
         })
         .unwrap(),
     );
@@ -193,6 +195,7 @@ fn publish_session(bridge: &NativeGmBridge, paused: bool) {
             paused,
             results: Vec::new(),
             journal: Default::default(),
+            factions: Vec::new(),
         })
         .unwrap(),
     );
@@ -233,7 +236,7 @@ fn native_gm_shared_workspace_loads_and_uses_the_private_engine_bridge() {
     publish_ship(&bridge, "Engine Test Ship", 10.0, 73);
     publish_session(&bridge, false);
     wait_for(&mut runtime, &mut surface, &bridge, &mut records,
-        "document.documentElement.classList.contains('phoenix-gm-page') && typeof window.__hostIssueStationCommand === 'function' && typeof window.__hostTransmitComms === 'function' && customElements.get('ph-navigation-map') && document.getElementById('gm-entity-map').state.blips.length === 1 && !document.getElementById('gm-ready-btn').disabled");
+        "document.documentElement.classList.contains('phoenix-gm-page') && typeof window.__hostIssueStationCommand === 'function' && typeof window.__hostTransmitComms === 'function' && customElements.get('ph-navigation-map') && document.getElementById('gm-entity-map').state.blips.length === 1 && document.getElementById('gm-entity-map').shadowRoot.querySelector('canvas').width > 0 && document.getElementById('gm-entity-map').shadowRoot.querySelector('canvas').height > 0 && !document.getElementById('gm-ready-btn').disabled");
     assert!(records
         .iter()
         .any(|record| matches!(record, NativeGmRecord::Loaded)));
@@ -241,6 +244,16 @@ fn native_gm_shared_workspace_loads_and_uses_the_private_engine_bridge() {
     assert_eq!(surface.view_mut().evaluate(
         "String(['gm-map-panel','gm-inspector','gm-activity','gm-session-controls','gm-mission-panel','gm-spawn-panel','gm-station-controls','gm-knowledge-panel'].every(id => !!document.getElementById(id)))",
     ).unwrap(), "true", "the complete shared workspace was retained");
+    let menu_contract = surface.view_mut().evaluate(
+        "JSON.stringify({menus:document.querySelectorAll('.workshop-panel-switcher.is-menu-bar > details').length, misplaced:!!document.querySelector('.workshop-dock-canvas > .workshop-panel-switcher'), raw:(document.body.textContent.match(/server\\.gm\\.shell\\.layout\\.panel\\.[a-z_-]+/)||[])[0]||false})",
+    ).unwrap();
+    assert_eq!(
+        menu_contract, r#"{"menus":6,"misplaced":false,"raw":false}"#,
+        "the native desk uses categorised menus and resolves every panel label"
+    );
+    assert_eq!(surface.view_mut().evaluate(
+        "String([...document.querySelectorAll('.workshop-tab-stack')].every(stack => stack.querySelector('.workshop-tab-list .workshop-dock-actions') && !stack.querySelector('.workshop-dock-panel > .workshop-panel-header')) && parseFloat(getComputedStyle(document.querySelector('.workshop-tab-list')).minHeight) < 40)",
+    ).unwrap(), "true", "docked tabs and icon actions share one compact chrome row");
     assert_eq!(surface.view_mut().evaluate(
         "String(typeof window.phoenixPaneOut === 'undefined' && typeof window.__phoenixPaneApply === 'undefined' && typeof window.wasm_init === 'undefined')",
     ).unwrap(), "true", "neither the crew queue nor a second simulation boot is installed");

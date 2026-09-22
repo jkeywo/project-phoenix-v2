@@ -1,27 +1,64 @@
 .workshop-dock-root.workshop-layout { min-height: 32rem; }
-/* The switcher wraps: at 200% text a dozen tabs no longer fit one row, and a
-   row that will not wrap squeezes each tab below its label and pushes the page
-   sideways instead. */
+/* Workshop keeps the legacy wrapping switcher; Live replaces it with the
+   compact categorised desktop menu bar below. */
 .workshop-dock-root .workshop-panel-switcher { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-bottom: .5rem; }
 .workshop-dock-root .workshop-layout-reset { margin-left: auto; }
+.workshop-dock-root .workshop-panel-switcher.is-menu-bar {
+  flex-wrap: nowrap; gap: 0; min-height: 1.75rem; margin: 0;
+  padding: 0 .25rem; overflow: visible; background: #111923;
+  border: 1px solid #52687a; border-bottom: 0;
+}
+.workshop-dock-root .workshop-window-menu { position: relative; }
+.workshop-dock-root .workshop-window-menu > summary {
+  padding: .3rem .65rem; color: #d7dee7; cursor: default; list-style: none;
+  font: 600 .72rem/1.2 system-ui, sans-serif; letter-spacing: .02em;
+}
+.workshop-dock-root .workshop-window-menu > summary::-webkit-details-marker { display: none; }
+.workshop-dock-root .workshop-window-menu[open] > summary,
+.workshop-dock-root .workshop-window-menu > summary:hover { background: #22384b; color: #fff; }
+.workshop-dock-root .workshop-window-menu-items {
+  position: absolute; z-index: 100; top: 100%; left: 0; display: grid;
+  min-width: 13rem; max-height: min(70vh, 36rem); overflow: auto;
+  padding: .25rem; background: #182634; border: 1px solid #71879a;
+  box-shadow: 0 .5rem 1.2rem #000b;
+}
+.workshop-dock-root .workshop-window-menu-items button {
+  display: block; min-height: 1.75rem; padding: .25rem .55rem; border: 0;
+  color: #d7dee7; background: transparent; text-align: left; white-space: nowrap;
+  font: 500 .72rem/1.25 system-ui, sans-serif;
+}
+.workshop-dock-root .workshop-window-menu-items button:hover,
+.workshop-dock-root .workshop-window-menu-items button:focus-visible { background: #365774; color: #fff; }
+.workshop-dock-root .workshop-window-menu-items button[aria-checked="true"]::before {
+  content: '\2713'; display: inline-block; width: 1.2rem; color: #ffe49b;
+}
+.workshop-dock-root .workshop-window-menu-items button[aria-checked="false"]::before {
+  content: ''; display: inline-block; width: 1.2rem;
+}
 .workshop-dock-root .workshop-dock-canvas { position: relative; display: grid; min-height: 32rem; overflow: hidden auto; border: 1px solid #52687a; background: #0c141d; }
-/* A docked frame never shrinks past a header and one row of controls. A group's
-   tab list wraps at narrow widths and takes its rows out of the frame beneath
-   it — at 1280 wide a ten-tab group left its frame a 21px sliver — so the floor
-   is here, the row it sits in is at least its content (the renderer sizes
-   vertical rows minmax(min-content, …)), and the canvas above scrolls the rest
-   rather than clipping it. */
+/* A docked frame never shrinks past its compact tab row and useful content. */
 .workshop-dock-root .workshop-tab-stack > .workshop-dock-panel { min-height: 6rem; }
 .workshop-dock-root .workshop-split { display: grid; gap: .25rem; min-width: 0; min-height: 0; height: 100%; }
 .workshop-dock-root .workshop-tab-stack { display: flex; flex-direction: column; }
 .workshop-dock-root :is(.workshop-tab-stack, .workshop-dock-panel) { min-width: 0; min-height: 0; height: 100%; }
-/* Wrapping, not scrolling: a tab strip is a set of destinations, and a group
-   can hold six of them in a quarter-width column (the Live inspector's, since
-   issue #1512). A strip that overflowed sideways would put a panel behind a
-   horizontal scroll nobody looks for; one that wraps grows downward, which is
-   what every other control in this console does at 200% text. */
-.workshop-dock-root .workshop-tab-list { display: flex; flex-wrap: wrap; gap: .25rem; padding: .25rem; background: #0c141d; border-bottom: 1px solid #52687a; }
+/* Tabs stay one desktop-height row. Overflow is local to that row instead of
+   consuming the panel body vertically. */
+.workshop-dock-root .workshop-tab-list { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; min-height: 1.85rem; padding: 0; overflow-x: auto; background: #0c141d; border-bottom: 1px solid #52687a; }
+.workshop-dock-root .workshop-panel-switcher.is-menu-bar + .workshop-dock-canvas .workshop-tab-list { flex-wrap: nowrap; }
+.workshop-dock-root .workshop-tab-list > [role="tab"] {
+  flex: 0 1 auto; min-width: 0; min-height: 1.85rem; padding: .28rem .65rem;
+  border: 0; border-right: 1px solid #334858; color: #aeb9c5; background: #111923;
+  font: 600 .7rem/1.2 system-ui, sans-serif; white-space: nowrap;
+}
 .workshop-dock-root .workshop-tab-list button[aria-selected="true"] { border-color: #ffe49b; background: #22384b; }
+.workshop-dock-root .workshop-dock-actions { display: inline-flex; flex: 0 0 auto; margin-left: auto; }
+.workshop-dock-root .workshop-dock-actions button {
+  width: 1.85rem; min-width: 1.85rem; min-height: 1.85rem; padding: 0;
+  border: 0; border-left: 1px solid #334858; color: #aeb9c5; background: #111923;
+  font: 700 1rem/1 system-ui, sans-serif;
+}
+.workshop-dock-root .workshop-dock-actions button:hover,
+.workshop-dock-root .workshop-dock-actions button:focus-visible { color: #fff; background: #365774; }
 .workshop-dock-root .workshop-dock-panel { position: relative; display: flex; flex: 1 1 0; flex-direction: column; overflow: auto; padding: .65rem; background: #111923; }
 .workshop-dock-root .workshop-dock-targets { display: none; position: absolute; inset: 50% auto auto 50%; z-index: 30; grid-template: repeat(3, 2.5rem) / repeat(3, 2.5rem); transform: translate(-50%, -50%); }
 .workshop-dock-root .workshop-dock-canvas.is-dragging .workshop-dock-targets { display: grid; }
@@ -34,7 +71,7 @@
 .workshop-dock-root .workshop-dock-target.is-right { grid-area: 2 / 3; }
 .workshop-dock-root .workshop-panel-header { display: flex; align-items: center; gap: .3rem; margin: -.65rem -.65rem .65rem; padding: .25rem; background: #182634; border-bottom: 1px solid #52687a; }
 .workshop-dock-root .workshop-panel-tab { flex: 1; text-align: left; font-weight: 700; touch-action: none; }
-.workshop-dock-root .workshop-panel-header button { min-height: 2.25rem; }
+.workshop-dock-root .workshop-panel-header button { min-height: 1.85rem; padding: .25rem .5rem; }
 .workshop-dock-root .workshop-dock-panel.is-floating { position: absolute; z-index: 10; max-width: calc(100% - 1rem); max-height: calc(100% - 1rem); border: 1px solid #ffe49b; box-shadow: 0 .7rem 2rem #000a; }
 .workshop-dock-root .workshop-dock-canvas.is-narrow > .workshop-dock-panel { min-height: 32rem; }
 

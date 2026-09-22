@@ -82,6 +82,61 @@ it('lays the desk out as one region: the dock workspace IS the desk', () => {
   expect(document.getElementById('gm-restore-apply')).not.toBeNull();
 });
 
+it('uses compact categorised window menus instead of a master tab strip', () => {
+  const labels = {
+    'server.gm.shell.layout.menu.session': 'Session',
+    'server.gm.shell.layout.menu.crew': 'Crew',
+    'server.gm.shell.layout.menu.communications': 'Communications',
+    'server.gm.shell.layout.menu.world': 'World',
+    'server.gm.shell.layout.menu.inspect': 'Inspect',
+    'server.gm.shell.layout.menu.layout': 'Layout',
+    'server.gm.shell.layout.panel.entity_fields': 'Entity fields',
+  };
+  mount({}, id => labels[id] || id);
+  const bar = document.querySelector('.workshop-panel-switcher.is-menu-bar');
+  expect([...bar.querySelectorAll(':scope > details > summary')].map(node => node.textContent))
+    .toEqual(['Session', 'Crew', 'Communications', 'World', 'Inspect', 'Layout']);
+  expect(bar.querySelector(':scope > [data-layout-control="switcher"]')).toBeNull();
+  expect(bar.querySelector('[data-layout-panel="entity-fields"]').textContent).toBe('Entity fields');
+});
+
+it('puts compact icon actions in the tab row and waits for a real drag before showing targets', () => {
+  mount();
+  const stack = document.querySelector('[data-panel="roster"]').closest('.workshop-tab-stack');
+  const tabs = stack.querySelector(':scope > .workshop-tab-list');
+  expect(tabs.querySelector('[data-layout-control="float"]').textContent).toBe('↗');
+  expect(tabs.querySelector('[data-layout-control="close"]').textContent).toBe('×');
+  expect(stack.querySelector('[data-panel="roster"] > .workshop-panel-header')).toBeNull();
+  const tab = tabs.querySelector('[role="tab"]');
+  const pointer = (type, x, y) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, { pointerType: 'mouse', button: 0, pointerId: 1, clientX: x, clientY: y });
+    tab.dispatchEvent(event);
+  };
+  pointer('pointerdown', 10, 10);
+  expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-dragging')).toBe(false);
+  pointer('pointermove', 12, 12);
+  expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-dragging')).toBe(false);
+  pointer('pointermove', 30, 30);
+  expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-dragging')).toBe(true);
+  pointer('pointerup', 30, 30);
+});
+
+it('offers an authoritative AI backfill action for an empty player slot', () => {
+  const submitted = vi.fn(() => true);
+  const { shell, win } = mount({
+    __hostLocalGm: () => ({ id: 'gm-1', connected: true }),
+    __hostBackfillShipSlot: submitted,
+  }, id => id);
+  shell.metadata({ gms: [], ship_slots: [{ id: 'wing', label: 'Wing ship',
+    default_hull: 'assets/entities/wing.toml', state: 'empty', can_backfill: true }] });
+  document.querySelector('[data-ship-slot-action="wing"]').click();
+  expect(submitted).toHaveBeenCalledWith(expect.objectContaining({
+    operator_id: 'gm-1', slot: 'wing', correlation: expect.stringContaining('slot-backfill-'),
+  }));
+  expect(win.__hostBackfillShipSlot).toBe(submitted);
+});
+
 it('registers every migrated desk panel in the dock, documents included', () => {
   mount();
   for (const [panel, id] of [['mission', 'gm-mission-panel'], ['comms', 'gm-comms-panel'],

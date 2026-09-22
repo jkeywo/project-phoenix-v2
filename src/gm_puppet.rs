@@ -266,7 +266,8 @@ pub fn validate_station_action(
         | GmAction::SetFactionHostility { .. }
         | GmAction::UndoGmAction { .. }
         | GmAction::RequestLiveRestore { .. }
-        | GmAction::ArmGmEventSkip { .. } => return Ok(()),
+        | GmAction::ArmGmEventSkip { .. }
+        | GmAction::BackfillShipSlot { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
         | GmAction::IssueStationCommand { station, .. } => station,
     };
@@ -324,7 +325,8 @@ pub fn validate_station_action(
         | GmAction::SetFactionHostility { .. }
         | GmAction::UndoGmAction { .. }
         | GmAction::RequestLiveRestore { .. }
-        | GmAction::ArmGmEventSkip { .. } => unreachable!(),
+        | GmAction::ArmGmEventSkip { .. }
+        | GmAction::BackfillShipSlot { .. } => unreachable!(),
     }
 }
 

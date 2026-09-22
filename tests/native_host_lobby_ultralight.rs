@@ -544,6 +544,7 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
                 locked_ship: None,
                 active_packs: vec![],
             },
+            ship_required: true,
             locked: false,
         }
         .to_json(),

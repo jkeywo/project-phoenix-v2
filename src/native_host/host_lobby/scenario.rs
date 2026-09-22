@@ -51,11 +51,18 @@ use crate::core::messages::ScenarioCatalogPayload;
 /// fields carry the wire message's names rather than the view model's: the
 /// payload is the host's answer, and the mapping into the view model's argument
 /// shape is one line on the page.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioPanelPayload {
     /// The crew wire's complete snapshot, including provenance and active packs.
     #[serde(flatten)]
     pub catalog: ScenarioCatalogPayload,
+    /// Whether this native role must choose a local player hull. A fleet GM is
+    /// shipless: the ship-owning peer chooses its own slot and hull.
+    #[serde(
+        default = "default_ship_required",
+        skip_serializing_if = "ship_is_required"
+    )]
+    pub ship_required: bool,
     /// The picker is closed for good: a world has been ingested.
     ///
     /// `scenarioCatalogView`'s third argument, and the native twin of
@@ -67,6 +74,24 @@ pub struct ScenarioPanelPayload {
     /// deriving lockedness from completeness alone would be wrong on exactly
     /// that host.
     pub locked: bool,
+}
+
+const fn default_ship_required() -> bool {
+    true
+}
+
+const fn ship_is_required(required: &bool) -> bool {
+    *required
+}
+
+impl Default for ScenarioPanelPayload {
+    fn default() -> Self {
+        Self {
+            catalog: ScenarioCatalogPayload::default(),
+            ship_required: true,
+            locked: false,
+        }
+    }
 }
 
 impl ScenarioPanelPayload {
@@ -461,6 +486,7 @@ mod tests {
                 locked_scenario: Some("combat_test".into()),
                 ..Default::default()
             },
+            ship_required: true,
             locked: false,
         };
         let json = payload.to_json();

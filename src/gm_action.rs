@@ -302,6 +302,11 @@ pub enum GmAction {
         doctrine: String,
         expected_revision: String,
     },
+    /// Fill one still-empty authored player-ship slot with its default hull and
+    /// AI crew. Appended to preserve durable postcard enum indices.
+    BackfillShipSlot {
+        slot: String,
+    },
 }
 
 /// The exact affected field one GM action changed, with its before and after
@@ -531,6 +536,10 @@ pub enum GmActionKind {
     ContactClassificationNormal,
     Presentation,
     ContactInformation,
+    /// Fill one authored player-ship slot with its default hull and AI crew
+    /// before launch. Appended because this enum is postcard-folded into the
+    /// durable journal by variant index.
+    ShipSlotBackfill,
 }
 
 impl GmActionKind {
@@ -558,6 +567,7 @@ impl GmActionKind {
             | Self::ContactClassificationNormal
             | Self::Presentation
             | Self::ContactInformation
+            | Self::ShipSlotBackfill
             | Self::Comms
             // The faction whose OWN enemies list moves. The other half of the
             // pair rides `LoggedGmAction::affected` rather than being folded
@@ -634,7 +644,8 @@ impl GmAction {
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
             | Self::RequestLiveRestore { .. }
-            | Self::ArmGmEventSkip { .. } => None,
+            | Self::ArmGmEventSkip { .. }
+            | Self::BackfillShipSlot { .. } => None,
             Self::SetStationPuppet { ship, .. }
             | Self::IssueStationCommand { ship, .. }
             | Self::SetContactOverride { ship, .. }
@@ -668,6 +679,7 @@ impl GmAction {
             // has to say WHAT the operator placed, and the instance name is
             // minted by the reducer a boundary later.
             Self::SpawnPaletteEntity { palette, .. } => Some(palette.as_str()),
+            Self::BackfillShipSlot { slot } => Some(slot.as_str()),
             Self::ObjectiveAction { objective, .. } => Some(objective),
             Self::TransmitComms { transmission } => Some(&transmission.sender),
             Self::SetContactInformation { change, .. } => Some(change.target()),
@@ -825,6 +837,7 @@ impl GmAction {
             {
                 Ok(())
             }
+            Self::BackfillShipSlot { slot } if bounded(slot) => Ok(()),
             Self::SetStationPuppet { ship, station, .. }
                 if bounded(&ship.0) && bounded(&station.0) =>
             {
@@ -865,6 +878,7 @@ impl GmAction {
             | Self::ArmGmEventSkip { .. } => GmActionKind::EventControl,
             Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
+            Self::BackfillShipSlot { .. } => GmActionKind::ShipSlotBackfill,
             Self::DespawnEntity { .. } => GmActionKind::WorldDespawn,
             Self::ObjectiveAction { .. } => GmActionKind::ObjectiveControl,
             Self::SetContactInformation { .. } => GmActionKind::ContactInformation,
@@ -914,7 +928,8 @@ impl GmAction {
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
             | Self::RequestLiveRestore { .. }
-            | Self::ArmGmEventSkip { .. } => None,
+            | Self::ArmGmEventSkip { .. }
+            | Self::BackfillShipSlot { .. } => None,
         }
     }
 
@@ -1015,6 +1030,7 @@ impl GmAction {
             // Not session pause: a paused EVENT stops one authored condition
             // being evaluated and leaves the simulation running.
             | Self::SetEventPaused { .. } => None,
+            Self::BackfillShipSlot { .. } => None,
         }
     }
 
@@ -1046,7 +1062,8 @@ impl GmAction {
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
             | Self::RequestLiveRestore { .. }
-            | Self::TransmitComms { .. } => None,
+            | Self::TransmitComms { .. }
+            | Self::BackfillShipSlot { .. } => None,
         }
     }
 
@@ -1082,7 +1099,8 @@ impl GmAction {
             // A restore is always a request to make something happen; WHICH
             // checkpoint rides the action, not this boolean.
             | Self::RequestLiveRestore { .. }
-            | Self::ArmGmEventSkip { .. } => true,
+            | Self::ArmGmEventSkip { .. }
+            | Self::BackfillShipSlot { .. } => true,
         }
     }
 }
@@ -1592,6 +1610,9 @@ pub enum GmActionRefusalReason {
     /// winner. It reads [`GmActionJournal::live_restore_admitted`], which is
     /// replicated journal state, so every peer folds the same outcome.
     LiveRestoreInProgress,
+    /// No authored player-ship slot carries the requested id. Appended because
+    /// refusal variants are postcard-indexed in the durable journal.
+    UnknownShipSlot,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -2460,7 +2481,8 @@ impl GmActionJournal {
                         // state they left, which this reducer does not hold.
                         | GmAction::SetFactionHostility { .. }
                         | GmAction::UndoGmAction { .. }
-                        | GmAction::TransmitComms { .. } => {}
+                        | GmAction::TransmitComms { .. }
+                        | GmAction::BackfillShipSlot { .. } => {}
                         // An accepted live restore HOLDS the session (issue
                         // #1446): the reducer stops the world in the same
                         // breath as it arms the peer-local driver. This
@@ -2547,7 +2569,8 @@ impl GmActionJournal {
                 | GmAction::SetNpcDoctrineChecked { .. }
                 | GmAction::SetFactionHostility { .. }
                 | GmAction::UndoGmAction { .. }
-                | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
+                | GmAction::TransmitComms { .. }
+                | GmAction::BackfillShipSlot { .. } => GmActionOutcome::Applied,
                 // The same hold, PROJECTED: a request this prefix has not
                 // applied yet will stop the world when it does, and that is
                 // what decides where the grant after it may be scheduled.
@@ -2674,7 +2697,8 @@ impl GmActionJournal {
                 | GmAction::SetNpcDoctrineChecked { .. }
                 | GmAction::SetFactionHostility { .. }
                 | GmAction::UndoGmAction { .. }
-                | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
+                | GmAction::TransmitComms { .. }
+                | GmAction::BackfillShipSlot { .. } => GmActionOutcome::Applied,
                 // The applied fold's hold, in the reducer-free projection: an
                 // admitted live restore stops the world, so whatever this
                 // prefix schedules after it must land on the stopped boundary
@@ -3247,6 +3271,9 @@ pub fn apply_due_actions(
         mut factions,
         mut exposure,
         mut restore,
+        mut frozen_ship_slots,
+        world_config,
+        game_phase,
     ): (
         crate::gm_despawn::RemovalQuery,
         crate::gm_objective::ObjectiveControl,
@@ -3258,6 +3285,9 @@ pub fn apply_due_actions(
         // without a world to place anything in.
         Option<ResMut<crate::gm_exposure::GmSpawnExposure>>,
         Option<ResMut<crate::gm_restore::GmLiveRestore>>,
+        Option<ResMut<crate::ship_slots::FrozenShipSlots>>,
+        Option<Res<crate::world::config::WorldConfig>>,
+        Option<Res<State<crate::core::messages::GamePhase>>>,
     ),
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
@@ -3292,6 +3322,38 @@ pub fn apply_due_actions(
             losses.as_deref(),
         );
         let (outcome, reason) = match &grant.action {
+            GmAction::BackfillShipSlot { slot } => {
+                if !game_phase
+                    .as_ref()
+                    .is_some_and(|phase| phase.get() == &crate::core::messages::GamePhase::Lobby)
+                {
+                    (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::WrongPhase),
+                    )
+                } else {
+                    match (world_config.as_deref(), frozen_ship_slots.as_deref_mut()) {
+                        (Some(config), Some(frozen)) => {
+                            match frozen.backfill_slot(&config.ship_slots, slot) {
+                                crate::ship_slots::BackfillSlotOutcome::Applied => {
+                                    (GmActionOutcome::Applied, None)
+                                }
+                                crate::ship_slots::BackfillSlotOutcome::AlreadyPresent => {
+                                    (GmActionOutcome::NoOp, None)
+                                }
+                                crate::ship_slots::BackfillSlotOutcome::UnknownSlot => (
+                                    GmActionOutcome::Refused,
+                                    Some(GmActionRefusalReason::UnknownShipSlot),
+                                ),
+                            }
+                        }
+                        _ => (
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::WorldUnavailable),
+                        ),
+                    }
+                }
+            }
             GmAction::Presentation { ship, cue } => {
                 let live = removal_targets
                     .iter()
@@ -4613,7 +4675,14 @@ pub fn sequence_owner_proposal(
         .recovery_generation_boundary(proposal.from, recovery_generation)
         .unwrap_or(0);
     let projected_paused = journal.projected_pause();
-    let apply_tick = if projected_paused || (current_paused && live_hold) {
+    let lobby_boundary_action = matches!(proposal.action, GmAction::BackfillShipSlot { .. });
+    let apply_tick = if lobby_boundary_action {
+        // Player-ship topology is frozen before launch, while the simulation
+        // clock is deliberately stopped. Keep this action in the same ordered,
+        // replicated journal, but settle it on the current logical boundary so
+        // it cannot wait forever for a mission tick that has not started.
+        journal.last_apply_tick().unwrap_or(now).max(now)
+    } else if projected_paused || (current_paused && live_hold) {
         // A live hold — a technical join hold, a native screen pause, or a
         // settled live restore (issue #1446) — can make the session paused even
         // when the durable GM prefix last projected Running. Resume must land at
@@ -4711,22 +4780,28 @@ fn submit_bound(
     let now = world
         .get_resource::<crate::sim_tick::SimTick>()
         .map_or(0, |tick| tick.0);
-    // Session pause is run state, not lobby/countdown state. Production apps
-    // always carry GamePhase; the absent-state allowance keeps the pure and
-    // replay fixtures intentionally phase-agnostic.
-    if world
+    // Almost every GM action is live-session state. Filling an authored ship
+    // slot is the one deliberate lobby action: it changes the canonical launch
+    // topology before GameStart consumes it. The absent-state allowance keeps
+    // pure/replay fixtures phase-agnostic.
+    let lobby_backfill = matches!(request.action, GmAction::BackfillShipSlot { .. });
+    let current_phase = world
         .get_resource::<State<crate::core::messages::GamePhase>>()
-        .is_some_and(|phase| phase.get() != &crate::core::messages::GamePhase::InProgress)
-        || world
-            .get_resource::<NextState<crate::core::messages::GamePhase>>()
-            .is_some_and(|next| {
-                matches!(
-                    next,
-                    NextState::Pending(phase)
-                        if phase != &crate::core::messages::GamePhase::InProgress
-                )
-            })
-    {
+        .map(|phase| phase.get());
+    let current_allowed = current_phase.is_none_or(|phase| {
+        phase == &crate::core::messages::GamePhase::InProgress
+            || (lobby_backfill && phase == &crate::core::messages::GamePhase::Lobby)
+    });
+    let next_allowed = world
+        .get_resource::<NextState<crate::core::messages::GamePhase>>()
+        .is_none_or(|next| match next {
+            NextState::Unchanged => true,
+            NextState::Pending(phase) | NextState::PendingIfNeq(phase) => {
+                phase == &crate::core::messages::GamePhase::InProgress
+                    || (lobby_backfill && phase == &crate::core::messages::GamePhase::Lobby)
+            }
+        });
+    if !current_allowed || !next_allowed {
         return Err(GmActionRefusalReason::WrongPhase);
     }
     let (local, bound) = if native {
@@ -7190,6 +7265,60 @@ station = "helm"
         assert!(!world.resource::<Time<Virtual>>().is_paused());
         let fact = &world.resource::<GmActionLog>().entries()[0];
         assert_eq!(fact.operator_id, NATIVE_GM_OPERATOR_ID);
+        assert_eq!(fact.outcome, GmActionOutcome::Applied);
+    }
+
+    #[test]
+    fn a_player_ship_backfill_is_sequenced_and_applied_on_the_stopped_lobby_boundary() {
+        use crate::world::config::{AvailableShipEntry, ShipSlotConfig, UnclaimedSlotPolicy};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = admitted_world();
+        world.insert_resource(State::new(crate::core::messages::GamePhase::Lobby));
+        world.insert_resource(NextState::<crate::core::messages::GamePhase>::Unchanged);
+        world.insert_resource(crate::ship_slots::FrozenShipSlots::default());
+        let mut config = crate::world::config::WorldConfig::default();
+        config.ship_slots.push(ShipSlotConfig {
+            id: "wing".into(),
+            label: Some("Wing ship".into()),
+            ships: vec![AvailableShipEntry {
+                template_path: "wing.toml".into(),
+                label: None,
+            }],
+            default_ship: "wing.toml".into(),
+            unclaimed: UnclaimedSlotPolicy::Absent,
+        });
+        world.insert_resource(config);
+
+        let GmActionSubmission::Granted(grant) = submit_local(
+            &mut world,
+            GmActionRequest {
+                operator_id: "gm-1".into(),
+                correlation: GmActionId::new("backfill-wing").unwrap(),
+                action: GmAction::BackfillShipSlot {
+                    slot: "wing".into(),
+                },
+            },
+        )
+        .unwrap() else {
+            panic!("the fleet owner sequences its lobby action");
+        };
+        assert_eq!(
+            grant.apply_tick, 10,
+            "the stopped lobby clock cannot advance"
+        );
+
+        world.run_system_once(apply_due_actions).unwrap();
+        let frozen = world.resource::<crate::ship_slots::FrozenShipSlots>();
+        assert_eq!(frozen.0.len(), 1);
+        assert_eq!(frozen.0[0].slot_id, "wing");
+        assert_eq!(
+            frozen.0[0].source,
+            crate::ship_slots::LaunchSource::Backfill
+        );
+        let fact = &world.resource::<GmActionLog>().entries()[0];
+        assert_eq!(fact.action_kind, GmActionKind::ShipSlotBackfill);
+        assert_eq!(fact.target.as_deref(), Some("wing"));
         assert_eq!(fact.outcome, GmActionOutcome::Applied);
     }
 

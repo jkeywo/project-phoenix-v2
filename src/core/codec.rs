@@ -1776,6 +1776,11 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 candidate: bounded_gm_target_id(object.get("candidate")?.as_str()?)?,
             }
         }
+        "backfill_ship_slot" if object.len() == 4 && object.contains_key("slot") => {
+            crate::gm_action::GmAction::BackfillShipSlot {
+                slot: bounded_gm_target_id(object.get("slot")?.as_str()?)?,
+            }
+        }
         "spawn_palette_entity"
             if object.len() == 7
                 && object.contains_key("palette")

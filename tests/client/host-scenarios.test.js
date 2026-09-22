@@ -43,6 +43,13 @@ describe('scenarioCatalogView', () => {
     expect(scenarioCatalogView(CATALOG, complete, false)).toEqual({ stage: 'locked' });
   });
 
+  it('ends after scenario selection for a shipless fleet GM', () => {
+    expect(scenarioCatalogView(CATALOG, { scenario_id: 'default' }, false,
+      { shipRequired: false })).toEqual({ stage: 'locked' });
+    expect(scenarioCatalogView(CATALOG, EMPTY_SEL, false, { shipRequired: false }).stage)
+      .toBe('scenario-list');
+  });
+
   it('lists every catalog scenario when nothing is selected yet', () => {
     const vm = scenarioCatalogView(CATALOG, EMPTY_SEL, false);
     expect(vm.stage).toBe('scenario-list');

@@ -197,6 +197,21 @@ function spawnPaletteEntity(data = {}, action = {}) {
   }, { ships: [], links: [] });
 }
 
+function backfillShipSlot(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' },
+      correlation: 'backfill-1',
+      action: { type: 'backfill_ship_slot', slot: 'wing', ...action },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 8, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
 /** One Pause/Resume of an authored GM event (issue #1303), the same family. */
 function pauseGmEvent(data = {}, action = {}) {
   return entry('gm_action', {
@@ -471,6 +486,14 @@ describe('GM activity feed pure adapter', () => {
       .toBeUndefined();
     // And no template path can ride in: the placement row names an id only.
     expect(parsed.entries[0].detail.data.action).not.toHaveProperty('template_path');
+  });
+
+  it('accepts a player-slot backfill and rejects a nameless slot', () => {
+    const parsed = parseGmActivityFeed(payload([backfillShipSlot()]));
+    expect(parsed.entries[0].detail.data.action)
+      .toEqual({ type: 'backfill_ship_slot', slot: 'wing' });
+    expect(parseGmActivityFeed(payload([backfillShipSlot({}, { slot: '' })])))
+      .toBeUndefined();
   });
 
   it('accepts a paused GM event and tells it apart from a fired one', () => {

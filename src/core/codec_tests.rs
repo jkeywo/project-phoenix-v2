@@ -1143,6 +1143,24 @@ fn gm_despawn_ingress_accepts_only_one_bounded_stable_target() {
 }
 
 #[test]
+fn gm_ship_slot_backfill_ingress_is_exact_and_bounded() {
+    let raw = r#"{"operator_id":"gm-1","correlation":"slot-1","action":"backfill_ship_slot","slot":"wing"}"#;
+    let request = decode_gm_action_request(raw).expect("typed slot backfill");
+    assert_eq!(
+        request.action,
+        crate::gm_action::GmAction::BackfillShipSlot {
+            slot: "wing".into()
+        }
+    );
+    let mut extra: serde_json::Value = serde_json::from_str(raw).unwrap();
+    extra["hull"] = serde_json::json!("assets/entities/forged.toml");
+    assert!(decode_gm_action_request(&extra.to_string()).is_none());
+    let mut empty: serde_json::Value = serde_json::from_str(raw).unwrap();
+    empty["slot"] = serde_json::json!("");
+    assert!(decode_gm_action_request(&empty.to_string()).is_none());
+}
+
+#[test]
 fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
     use crate::gm_activity::{
         GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityConnection,

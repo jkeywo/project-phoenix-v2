@@ -13,7 +13,7 @@ window.__phoenixNativeGmChannels = Object.fromEntries(channels.map(channel => [c
   const payload = JSON.parse(json);
   latest.set(channel, payload);
   if (channel === 'metadata') {
-    operator = payload.gms.find(gm => gm.id === 'native-gm') || null;
+    operator = payload.gms.find(gm => gm.id === payload.local_operator_id) || null;
     phase = payload.phase;
     hostLobbyUnavailable = payload.host_lobby_unavailable === true;
   }

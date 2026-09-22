@@ -237,6 +237,7 @@ window.__phoenixHostLobby.renderScenario = function (json) {
     payload.scenarios,
     { scenario_id: payload.locked_scenario, slot_id: payload.locked_slot, template_path: payload.locked_ship },
     payload.locked,
+    { shipRequired: payload.ship_required !== false },
   );
   renderHostScenarios(
     document,
@@ -256,7 +257,7 @@ window.__phoenixHostLobby.renderScenario = function (json) {
         autoAsked = templatePath;
         send({ kind: 'select_ship', template_path: templatePath });
       },
-      shipStillNeeded: () => lockedShip === null,
+      shipStillNeeded: () => payload.ship_required !== false && lockedShip === null,
     },
     // This document has no driveWorldLoad() and no return-to-lobby handler, so
     // the payload is the whole of what it knows about whether the picker

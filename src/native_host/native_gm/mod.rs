@@ -42,10 +42,23 @@ pub enum NativeGmRecord {
 pub struct NativeGmMetadata {
     pub phase: GamePhase,
     pub host_lobby_unavailable: bool,
+    /// The operator bound to this private surface. Fleet GM ids are assigned by
+    /// the admitted roster and are not necessarily `native-gm`.
+    pub local_operator_id: Option<String>,
     pub role_presets: Vec<crate::world::config::GmRolePresetEntry>,
     pub gms: Vec<GmOperator>,
     pub start_policy: start::NativeGmReadinessTotals,
     pub start_result: Option<crate::lobby::start_policy::StartGrantResult>,
+    pub ship_slots: Vec<NativeGmShipSlot>,
+}
+
+#[derive(Serialize)]
+pub struct NativeGmShipSlot {
+    pub id: String,
+    pub label: Option<String>,
+    pub default_hull: String,
+    pub state: &'static str,
+    pub can_backfill: bool,
 }
 
 pub struct NativeGmPlugin;
@@ -280,6 +293,7 @@ fn sync_presence(
     starts: Option<Res<start::NativeGmStartRequests>>,
     role: Option<Res<super::session_role::NativeSessionRoleState>>,
     fleet_roster: Option<Res<crate::lockstep::FleetRoster>>,
+    frozen_ship_slots: Option<Res<crate::ship_slots::FrozenShipSlots>>,
 ) {
     let primary_gm = role.as_ref().is_some_and(|state| {
         state.committed()
@@ -355,7 +369,9 @@ fn sync_presence(
     if state.enabled && (!primary_gm || bound_operator.is_some()) {
         rows.push(GmOperator {
             id: operator_id.into(),
-            name: bound_operator.map_or_else(|| "GM".into(), |row| row.name),
+            name: bound_operator
+                .as_ref()
+                .map_or_else(|| "GM".into(), |row| row.name.clone()),
             connected,
             ready: state.ready,
         });
@@ -381,6 +397,8 @@ fn sync_presence(
             state.enabled,
             layout.as_deref(),
         ),
+        local_operator_id: (state.enabled && (!primary_gm || bound_operator.is_some()))
+            .then(|| operator_id.to_owned()),
         role_presets: config
             .as_ref()
             .map(|c| c.gm_role_presets.clone())
@@ -393,6 +411,28 @@ fn sync_presence(
             &roster,
         ),
         start_result: starts.as_deref().and_then(|s| s.last_result().cloned()),
+        ship_slots: config.as_ref().map_or_else(Vec::new, |config| {
+            config
+                .ship_slots
+                .iter()
+                .map(|slot| {
+                    let launched = frozen_ship_slots
+                        .as_ref()
+                        .and_then(|frozen| frozen.0.iter().find(|row| row.slot_id == slot.id));
+                    NativeGmShipSlot {
+                        id: slot.id.clone(),
+                        label: slot.label.clone(),
+                        default_hull: slot.default_ship.clone(),
+                        state: match launched.map(|row| row.source) {
+                            Some(crate::ship_slots::LaunchSource::Claimed) => "claimed",
+                            Some(crate::ship_slots::LaunchSource::Backfill) => "backfill",
+                            None => "empty",
+                        },
+                        can_backfill: *phase.get() == GamePhase::Lobby && launched.is_none(),
+                    }
+                })
+                .collect()
+        }),
     }) {
         surface.bridge.publish("metadata", json);
     }

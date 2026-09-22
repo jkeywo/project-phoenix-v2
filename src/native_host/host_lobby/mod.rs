@@ -634,6 +634,7 @@ fn feed_scenario_panel(
     selection: Option<Res<LobbySelection>>,
     settings: Option<Res<LobbyBootSettings>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
     mut published: Local<bool>,
 ) {
     let (Some(bridge), Some(catalog), Some(selection)) = (bridge, catalog, selection) else {
@@ -642,14 +643,18 @@ fn feed_scenario_panel(
     let moved = !*published
         || selection.is_changed()
         || catalog.is_changed()
+        || role.as_ref().is_some_and(|r| r.is_changed())
         || world_config.as_ref().is_some_and(|w| w.is_added());
     if !moved {
         return;
     }
     *published = true;
     let pinned = settings.as_ref().and_then(|s| s.ship_path.as_deref());
-    let payload =
+    let mut payload =
         published_catalog(&catalog.0, &selection.0, pinned).surface(world_config.is_some());
+    payload.ship_required = !role.as_ref().is_some_and(|state| {
+        state.role() == crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+    });
     bridge.0.push_scenario(payload.to_json());
 }
 

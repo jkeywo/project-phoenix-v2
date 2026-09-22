@@ -81,6 +81,15 @@ describe('native GM workspace over the shared GM presenters', () => {
     app.view.dispose();
   });
 
+  it('submits an attributed player-slot backfill through the ordinary GM action bridge', () => {
+    const app = mount();
+    expect(window.__hostBackfillShipSlot({ slot: 'wing', correlation: 'slot-1' })).toBe(true);
+    expect(app.bridge.submitAction).toHaveBeenCalledWith({
+      slot: 'wing', correlation: 'slot-1', action: 'backfill_ship_slot', operator_id: 'native-gm',
+    });
+    app.view.dispose();
+  });
+
   it('uses authoritative readiness and permits no launch action after the lobby', () => {
     const app = mount();
     expect(document.getElementById('landing-panel')).toBeNull();

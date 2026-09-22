@@ -90,6 +90,7 @@ export const GM_INVERSE_SUPPORT = Object.freeze({
   // a redo rather than an undo. Ask for the state you want instead.
   'action-undo': OUT_OF_SCOPE('server.gm.inverse.unavailable.inverse'),
   'session-pause': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
+  'ship-slot-backfill': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'station-puppet': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'objective-control': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),
   'contact-information': OUT_OF_SCOPE('server.gm.inverse.unavailable.absolute_state'),

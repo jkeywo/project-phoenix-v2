@@ -507,6 +507,7 @@ impl PublishedCatalog {
     ) -> crate::native_host::host_lobby::ScenarioPanelPayload {
         crate::native_host::host_lobby::ScenarioPanelPayload {
             catalog: self.0,
+            ship_required: true,
             locked,
         }
     }
@@ -842,6 +843,16 @@ fn load_selected_world(
     let world_config = world
         .resource::<crate::world::config::WorldConfig>()
         .clone();
+    if fleet_gm && !world_config.ship_slots.is_empty() {
+        if let Some(roster) = world.get_resource::<crate::lockstep::FleetRoster>() {
+            let frozen = crate::ship_slots::FrozenShipSlots::from_fleet_roster(
+                &world_config.ship_slots,
+                roster,
+            )
+            .map_err(NativeHostError::Ship)?;
+            world.insert_resource(frozen);
+        }
+    }
     let sim_rng = if fleet_gm {
         world.insert_resource(crate::gm_projection::GameMasterPeer);
         match (settings.seed, world_config.global.seed) {

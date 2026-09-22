@@ -230,8 +230,27 @@ fn apply_events(world: &mut World) {
             NativeFleetEvent::Roster { generation, raw } => {
                 let decoded = crate::core::codec::decode_fleet_roster(&raw);
                 let accepted = decoded.is_some_and(|(roster, delay)| {
+                    let frozen = world
+                        .get_resource::<crate::world::config::WorldConfig>()
+                        .filter(|config| !config.ship_slots.is_empty())
+                        .map(|config| {
+                            crate::ship_slots::FrozenShipSlots::from_fleet_roster(
+                                &config.ship_slots,
+                                &roster,
+                            )
+                        })
+                        .transpose();
+                    let Ok(frozen) = frozen else {
+                        return false;
+                    };
                     let delay = delay.unwrap_or_else(|| crate::lockstep::authored_delay(world));
-                    crate::lockstep::join_fleet(world, roster, delay)
+                    let accepted = crate::lockstep::join_fleet(world, roster, delay);
+                    if accepted {
+                        if let Some(frozen) = frozen {
+                            world.insert_resource(frozen);
+                        }
+                    }
+                    accepted
                 });
                 if accepted {
                     let mut managed = world.resource_mut::<crate::lobby::FleetManagedLobby>();

@@ -95,7 +95,7 @@ function worldRows(list, selectedId) {
  *   perform) rather than render anything — mirrors the original inline
  *   single-ship auto-resolve (issue #917).
  */
-export function scenarioCatalogView(catalog, preSelection, locked) {
+export function scenarioCatalogView(catalog, preSelection, locked, { shipRequired = true } = {}) {
   const list = Array.isArray(catalog) ? catalog : [];
   const sel = normalizeSelection(preSelection);
 
@@ -111,6 +111,10 @@ export function scenarioCatalogView(catalog, preSelection, locked) {
       entries: worldRows(list, null),
     };
   }
+
+  // A fleet GM contributes no ship to topology. Scenario selection is its
+  // entire picker; the connected ship peer owns slot and hull selection.
+  if (!shipRequired) return { stage: 'locked' };
 
   if (sel.template_path == null) {
     const entry = findScenario(list, sel.scenario_id);

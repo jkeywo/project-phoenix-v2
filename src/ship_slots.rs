@@ -69,6 +69,13 @@ pub struct LaunchedSlot {
 )]
 pub struct FrozenShipSlots(pub Vec<LaunchedSlot>);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackfillSlotOutcome {
+    Applied,
+    AlreadyPresent,
+    UnknownSlot,
+}
+
 impl ShipSlotReservations {
     pub fn claim(
         &mut self,
@@ -168,6 +175,35 @@ impl ShipSlotReservations {
 }
 
 impl FrozenShipSlots {
+    /// Add one still-empty authored slot using its default hull. This is the
+    /// pre-launch GM operation; sorting back into authored order preserves the
+    /// same spawn/mint order an authored `unclaimed = "backfill"` row has.
+    pub fn backfill_slot(
+        &mut self,
+        slots: &[ShipSlotConfig],
+        slot_id: &str,
+    ) -> BackfillSlotOutcome {
+        let Some(slot) = slots.iter().find(|slot| slot.id == slot_id) else {
+            return BackfillSlotOutcome::UnknownSlot;
+        };
+        if self.0.iter().any(|row| row.slot_id == slot_id) {
+            return BackfillSlotOutcome::AlreadyPresent;
+        }
+        self.0.push(LaunchedSlot {
+            slot_id: slot.id.clone(),
+            hull: slot.default_ship.clone(),
+            claimant: None,
+            source: LaunchSource::Backfill,
+        });
+        self.0.sort_by_key(|row| {
+            slots
+                .iter()
+                .position(|slot| slot.id == row.slot_id)
+                .unwrap_or(usize::MAX)
+        });
+        BackfillSlotOutcome::Applied
+    }
+
     /// Freeze a direct launch that has no ship-slot claimant surface.
     ///
     /// Headless and native `--world` boots enter the ordinary mission lobby
@@ -411,6 +447,48 @@ mod tests {
         assert_eq!(frozen.0[0].source, LaunchSource::Claimed);
         assert_eq!(frozen.0[1].slot_id, "wing");
         assert_eq!(frozen.0[1].source, LaunchSource::Backfill);
+    }
+
+    #[test]
+    fn a_gm_backfill_adds_an_empty_slot_in_authored_order_once() {
+        let mut authored = slots();
+        authored.push(ShipSlotConfig {
+            id: "wing".into(),
+            label: None,
+            ships: vec![AvailableShipEntry {
+                template_path: "wing.toml".into(),
+                label: None,
+            }],
+            default_ship: "wing.toml".into(),
+            unclaimed: UnclaimedSlotPolicy::Absent,
+        });
+        let mut frozen = FrozenShipSlots(vec![LaunchedSlot {
+            slot_id: "lead".into(),
+            hull: "ship.toml".into(),
+            claimant: Some("host-1".into()),
+            source: LaunchSource::Claimed,
+        }]);
+        assert_eq!(
+            frozen.backfill_slot(&authored, "wing"),
+            BackfillSlotOutcome::Applied
+        );
+        assert_eq!(
+            frozen.0[1],
+            LaunchedSlot {
+                slot_id: "wing".into(),
+                hull: "wing.toml".into(),
+                claimant: None,
+                source: LaunchSource::Backfill
+            }
+        );
+        assert_eq!(
+            frozen.backfill_slot(&authored, "wing"),
+            BackfillSlotOutcome::AlreadyPresent
+        );
+        assert_eq!(
+            frozen.backfill_slot(&authored, "missing"),
+            BackfillSlotOutcome::UnknownSlot
+        );
     }
 
     #[test]

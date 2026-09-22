@@ -249,6 +249,10 @@ export class PhNavigationMap extends PhElement {
       return;
     }
     if (!this.isConnected) return;
+    // Ultralight's ResizeObserver can miss the zero-size -> docked transition
+    // when this element is reparented into an already-laid-out tab stack.
+    // Measure synchronously on reveal as well as listening for later changes.
+    this.syncCanvasSize();
     this.needsRender = true;
     if (this.rafId == null) this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
@@ -617,23 +621,31 @@ export class PhNavigationMap extends PhElement {
   }
 
   initResize() {
-    const updateSize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const rect = this.getBoundingClientRect();
-      const newW = Math.round(rect.width * dpr);
-      const newH = Math.round(rect.height * dpr);
-      if (newW > 0 && newH > 0 && (this.canvas.width !== newW || this.canvas.height !== newH)) {
-        this.canvas.width = newW;
-        this.canvas.height = newH;
-        this.needsRender = true;
-      }
-    };
-    updateSize();
-    this.resizeObserver = new ResizeObserver(() => updateSize());
-    this.resizeObserver.observe(this);
+    this.syncCanvasSize();
+    if (typeof ResizeObserver === 'function') {
+      this.resizeObserver = new ResizeObserver(() => this.syncCanvasSize());
+      this.resizeObserver.observe(this);
+    }
+  }
+
+  syncCanvasSize() {
+    if (!this.canvas) return false;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = this.getBoundingClientRect();
+    const newW = Math.round(rect.width * dpr);
+    const newH = Math.round(rect.height * dpr);
+    if (newW <= 0 || newH <= 0 || (this.canvas.width === newW && this.canvas.height === newH)) return false;
+    this.canvas.width = newW;
+    this.canvas.height = newH;
+    this.needsRender = true;
+    return true;
   }
 
   #rafLoop() {
+    // This is intentionally also a fallback poll. Embedded native surfaces do
+    // not consistently report a ResizeObserver edge when a closed/parked dock
+    // panel becomes the active tab, but the chart must paint on that reveal.
+    this.syncCanvasSize();
     const scale = textScaleOf(this);
     if (scale !== this.#lastTextScale) {
       this.#lastTextScale = scale;

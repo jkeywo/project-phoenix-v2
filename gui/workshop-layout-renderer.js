@@ -8,6 +8,7 @@ let nextLayoutInstance = 0;
 export function mountDockLayout({ root, surface, panels, labels, initial, onChange, onVisible,
   available = () => true, retain = false, mayReset = () => true, mayClose = () => true,
   onOpen = () => {}, onDiscard = () => {},
+  panelMenus = null,
   model = workshopLayoutModel, viewportNarrow = false, doc = root.ownerDocument, win = doc.defaultView }) {
   surface.classList.add('workshop-dock-root');
   const panelIds = model.panels;
@@ -107,7 +108,9 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   };
   const makeButton = (text, action, attrs = {}) => {
     const button = doc.createElement('button'); button.type = 'button'; button.textContent = text;
-    for (const [key, value] of Object.entries(attrs)) button.setAttribute(key, value);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (value != null) button.setAttribute(key, value);
+    }
     button.addEventListener('click', action); return button;
   };
   const pointerTarget = event => doc.elementFromPoint?.(event.clientX, event.clientY)
@@ -121,18 +124,25 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   };
   const beginPointer = (event, panel, floating, node) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
-    drag = { panel, x: event.clientX, y: event.clientY, floating, moved: false, node };
+    drag = { panel, x: event.clientX, y: event.clientY, startX: event.clientX,
+      startY: event.clientY, floating, moved: false, node };
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    canvas.classList.add('is-dragging');
   };
   const movePointer = event => {
     if (!drag) return;
+    if (!drag.moved) {
+      // A press selects a tab. It is not a docking gesture, and must not flash
+      // five drop targets over the desk. Wait for deliberate pointer travel.
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+      drag.moved = true;
+      canvas.classList.add('is-dragging');
+    }
     showPointerTarget(event);
     if (!drag.floating) return;
     const entry = state.floats.find(value => value.panel === drag.panel);
     if (!entry) return;
     const x = entry.x + event.clientX - drag.x, y = entry.y + event.clientY - drag.y;
-    drag.x = event.clientX; drag.y = event.clientY; drag.moved = true;
+    drag.x = event.clientX; drag.y = event.clientY;
     state = model.moveFloat(state, drag.panel, x, y, canvasBounds());
     const moved = state.floats.find(value => value.panel === drag.panel);
     drag.node.style.left = `${moved.x}px`; drag.node.style.top = `${moved.y}px`;
@@ -140,7 +150,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   const endPointer = (event, cancelled = false) => {
     if (!drag) return;
     const gesture = drag;
-    const target = cancelled ? null : pointerTarget(event);
+    const target = cancelled || !gesture.moved ? null : pointerTarget(event);
     drag = null; canvas.classList.remove('is-dragging');
     canvas.querySelectorAll('.workshop-dock-target.is-pointer-target')
       .forEach(node => node.classList.remove('is-pointer-target'));
@@ -158,7 +168,26 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     tab.addEventListener('pointerup', endPointer);
     tab.addEventListener('pointercancel', event => endPointer(event, true));
   };
-  function frame(panel, floating = false, projection = false, tabId = null) {
+  const panelActions = panel => {
+    const actions = doc.createElement('span'); actions.className = 'workshop-dock-actions';
+    actions.dataset.layoutActionsFor = panel;
+    actions.append(makeButton('↗', () => emit(model.float(state, panel, {}, canvasBounds()), panel), {
+      title: `${labels.float}: ${labels.panels[panel]}`,
+      'aria-label': `${labels.float}: ${labels.panels[panel]}`, 'data-layout-control': 'float',
+    }));
+    if (!model.isPinned?.(panel)) {
+      actions.append(makeButton('×', () => {
+        if (mayClose(panel) !== true) return;
+        onDiscard(panel);
+        emit(model.close(state, panel), panel);
+      }, {
+        title: `${labels.close}: ${labels.panels[panel]}`,
+        'aria-label': `${labels.close}: ${labels.panels[panel]}`, 'data-layout-control': 'close',
+      }));
+    }
+    return actions;
+  };
+  function frame(panel, floating = false, projection = false, tabId = null, showHeader = true) {
     const node = doc.createElement('section'); node.className = `workshop-dock-panel${floating ? ' is-floating' : ''}`;
     node.dataset.panel = panel;
     // Document panels are the surfaces a context is arranged around; tools sit beside them.
@@ -178,23 +207,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     });
     if (!projection) attachPointerDocking(tab, panel, floating, node);
     header.append(tab);
-    if (!projection) {
-      header.append(makeButton(labels.float, () => emit(model.float(state, panel, {}, canvasBounds()), panel), {
-        'aria-label': `${labels.float}: ${labels.panels[panel]}`, 'data-layout-control': 'float',
-      }));
-      // A pinned panel offers no way to close it, because there is none.
-      if (!model.isPinned?.(panel)) {
-        header.append(makeButton(labels.close, () => {
-          // Closing a panel that holds unsent work is the operator losing it,
-          // so whoever owns that work gets asked first.
-          if (mayClose(panel) !== true) return;
-          onDiscard(panel);
-          emit(model.close(state, panel), panel);
-        }, {
-          'aria-label': `${labels.close}: ${labels.panels[panel]}`, 'data-layout-control': 'close',
-        }));
-      }
-    }
+    if (!projection) header.append(panelActions(panel));
     const targets = doc.createElement('div'); targets.className = 'workshop-dock-targets';
     if (!projection) {
       for (const [placement, symbol] of [['left', '<'], ['top', '^'], ['tab', '+'], ['bottom', 'v'], ['right', '>']]) {
@@ -205,7 +218,8 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
         targets.append(target);
       }
     }
-    node.append(header, targets, panels[panel]);
+    if (showHeader) node.append(header);
+    node.append(targets, panels[panel]);
     if (floating) {
       node.addEventListener('focusin', updateFloatStacking);
       node.addEventListener('focusout', () => win.requestAnimationFrame?.(updateFloatStacking));
@@ -218,10 +232,46 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       if (!shown.length) return null;
       const active = activeTab(node);
       const stack = doc.createElement('div'); stack.className = 'workshop-tab-stack';
-      if (shown.length > 1) {
-        const tabs = doc.createElement('div'); tabs.className = 'workshop-tab-list'; tabs.setAttribute('role', 'tablist');
-        if (labels.tabs) tabs.setAttribute('aria-label', labels.tabs);
+      if (!panelMenus) {
+        if (shown.length > 1) {
+          const tabs = doc.createElement('div'); tabs.className = 'workshop-tab-list'; tabs.setAttribute('role', 'tablist');
+          if (labels.tabs) tabs.setAttribute('aria-label', labels.tabs);
+          for (const panel of shown) {
+            const tabId = `${layoutId}-tab-${panel}`;
+            const tab = makeButton(labels.panels[panel], () => emit(model.select(state, panel), panel), {
+              id: tabId,
+              role: 'tab', 'aria-selected': String(active === panel),
+              'aria-controls': `${layoutId}-panel-${panel}`,
+              tabindex: active === panel ? '0' : '-1',
+              'data-layout-panel': panel, 'data-layout-control': 'stack-tab',
+            });
+            tab.addEventListener('keydown', event => {
+              if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
+              const current = shown.indexOf(panel);
+              const index = event.key === 'Home' ? 0 : event.key === 'End' ? shown.length - 1
+                : event.key === 'ArrowLeft' ? (current - 1 + shown.length) % shown.length
+                  : event.key === 'ArrowRight' ? (current + 1) % shown.length : -1;
+              if (index < 0) return;
+              event.preventDefault(); emit(model.select(state, shown[index]), shown[index]);
+            });
+            attachPointerDocking(tab, panel);
+            tabs.append(tab);
+          }
+          stack.append(tabs);
+        }
         for (const panel of shown) {
+          const tabId = shown.length > 1 ? `${layoutId}-tab-${panel}` : null;
+          const child = frame(panel, false, false, tabId);
+          child.hidden = panel !== active; stack.append(child);
+        }
+        return stack;
+      }
+      // Every dock group has one compact chrome row. It owns both the tabs and
+      // the selected panel's icon actions; the panel body does not repeat its
+      // title in a second header underneath.
+      const tabs = doc.createElement('div'); tabs.className = 'workshop-tab-list'; tabs.setAttribute('role', 'tablist');
+      if (labels.tabs) tabs.setAttribute('aria-label', labels.tabs);
+      for (const panel of shown) {
           const tabId = `${layoutId}-tab-${panel}`;
           const tab = makeButton(labels.panels[panel], () => emit(model.select(state, panel), panel), {
             id: tabId,
@@ -241,12 +291,16 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
           });
           attachPointerDocking(tab, panel);
           tabs.append(tab);
-        }
-        stack.append(tabs);
       }
       for (const panel of shown) {
-        const tabId = shown.length > 1 ? `${layoutId}-tab-${panel}` : null;
-        const child = frame(panel, false, false, tabId);
+        const actions = panelActions(panel);
+        actions.hidden = panel !== active;
+        tabs.append(actions);
+      }
+      stack.append(tabs);
+      for (const panel of shown) {
+        const tabId = `${layoutId}-tab-${panel}`;
+        const child = frame(panel, false, true, tabId, false);
         child.hidden = panel !== active; stack.append(child);
       }
       return stack;
@@ -315,6 +369,9 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
         tab.setAttribute('aria-selected', String(tab.dataset.layoutPanel === active));
         tab.tabIndex = tab.dataset.layoutPanel === active ? 0 : -1;
       }
+      for (const actions of list?.querySelectorAll('[data-layout-actions-for]') || []) {
+        actions.hidden = actions.dataset.layoutActionsFor !== active;
+      }
     }
     for (const node of canvas.querySelectorAll('[data-panel] > .workshop-panel-header > .workshop-panel-tab')) {
       node.setAttribute('aria-pressed', String(node.closest('[data-panel]').dataset.panel === chosen));
@@ -329,7 +386,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     updateFloatStacking();
   }
   function paint() {
-    switcher.replaceChildren(...panelIds.filter(usable).map(panel => makeButton(labels.panels[panel], () => {
+    const switchPanel = panel => {
       if (narrow) {
         const opened = openInState(panel);
         projectedPanel = panel; render();
@@ -344,14 +401,43 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
         emit(model.isTemporary?.(panel) ? model.float(state, panel, {}, canvasBounds())
           : model.reopen(state, panel), panel);
       }
-    }, { 'aria-pressed': String((narrow ? projectedPanel || state.selected : state.selected) === panel), 'data-layout-panel': panel, 'data-layout-control': 'switcher' })),
-    makeButton(labels.reset, () => {
+    };
+    const switchButton = panel => makeButton(labels.panels[panel], event => {
+      switchPanel(panel);
+      const menu = event.currentTarget.closest('details');
+      if (menu) menu.open = false;
+    }, {
+      role: panelMenus ? 'menuitemcheckbox' : null,
+      'aria-checked': panelMenus ? String(!state.closed.includes(panel)) : null,
+      'aria-pressed': String((narrow ? projectedPanel || state.selected : state.selected) === panel),
+      'data-layout-panel': panel, 'data-layout-control': 'switcher',
+    });
+    const reset = makeButton(labels.reset, () => {
       // Resetting the arrangement would take an open draft away with it, so the
       // drafts get their say first.
       if (mayReset() !== true) return;
       onDiscard(null);
       emit(model.defaultLayout());
-    }, { class: 'workshop-layout-reset', 'data-layout-control': 'reset' }));
+    }, { class: 'workshop-layout-reset', 'data-layout-control': 'reset' });
+    if (panelMenus) {
+      const menus = panelMenus.map(group => {
+        const details = doc.createElement('details'); details.className = 'workshop-window-menu';
+        const summary = doc.createElement('summary'); summary.textContent = group.label;
+        const menu = doc.createElement('div'); menu.className = 'workshop-window-menu-items';
+        menu.setAttribute('role', 'menu');
+        menu.append(...group.panels.filter(panel => panelIds.includes(panel) && usable(panel)).map(switchButton));
+        details.append(summary, menu); return details;
+      }).filter(details => details.querySelector('[data-layout-panel]'));
+      const layout = doc.createElement('details'); layout.className = 'workshop-window-menu';
+      const summary = doc.createElement('summary'); summary.textContent = labels.layoutMenu;
+      const items = doc.createElement('div'); items.className = 'workshop-window-menu-items'; items.setAttribute('role', 'menu');
+      items.append(reset); layout.append(summary, items); menus.push(layout);
+      switcher.classList.add('is-menu-bar');
+      switcher.replaceChildren(...menus);
+    } else {
+      switcher.classList.remove('is-menu-bar');
+      switcher.replaceChildren(...panelIds.filter(usable).map(switchButton), reset);
+    }
     canvas.replaceChildren(); canvas.classList.toggle('is-narrow', narrow);
     if (narrow) {
       const selected = narrowProjection();

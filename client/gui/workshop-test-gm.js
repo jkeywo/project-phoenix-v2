@@ -29,6 +29,7 @@ export const TEST_GM_REFUSED_ACTIONS = Object.freeze([
   '__hostDespawnEntity', '__hostSetNpcDoctrine', '__hostSetNpcDoctrineChecked',
   '__hostSetFactionHostility', '__hostUndoGmAction', '__hostRequestLiveRestore',
   '__hostSetStationPuppet', '__hostIssueStationCommand',
+  '__hostBackfillShipSlot',
   // Save authority, refused for the same reason and in the same place.
   '__hostSaveSlotCapture', '__hostSaveSlotRestore',
 ]);

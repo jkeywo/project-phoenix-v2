@@ -132,6 +132,10 @@ function normaliseAction(value) {
       && typeof value.palette === 'string' && value.palette.length > 0) {
     return { type: value.type, palette: value.palette };
   }
+  if (value.type === 'backfill_ship_slot'
+      && typeof value.slot === 'string' && value.slot.length > 0) {
+    return { type: value.type, slot: value.slot };
+  }
   // One authored GM event was paused or resumed (issue #1303). A sibling
   // variant rather than a flag on the one above, because "fired" and "paused"
   // are different things that happened to the same event, and `active` says
@@ -501,6 +505,10 @@ export function createGmActivityFeed({
         } else if (detail.action.type === 'spawn_palette_entity') {
           action = t('server.gm.activity.action.spawn_palette_entity', {
             palette: detail.action.palette,
+          });
+        } else if (detail.action.type === 'backfill_ship_slot') {
+          action = t('server.gm.activity.action.backfill_ship_slot', {
+            slot: detail.action.slot,
           });
         } else if (detail.action.type === 'set_faction_hostility') {
           // Four sentences, not one with a blank: a refusal and a No-op carry

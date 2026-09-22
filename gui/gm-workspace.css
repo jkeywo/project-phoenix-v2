@@ -194,7 +194,8 @@
 #gm-console.gm-desk #gm-station-frame { width: 1280px; height: 720px; max-width: none; }
 #gm-console.gm-desk #gm-start-controls { position: static; padding: var(--space-4) 0; }
 #gm-console.gm-desk #gm-live-layout { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
-#gm-console.gm-desk #gm-live-layout .workshop-panel-switcher { overflow-x: auto; }
+#gm-console.gm-desk #gm-live-layout .workshop-panel-switcher:not(.is-menu-bar) { overflow-x: auto; }
+#gm-console.gm-desk #gm-live-layout .workshop-panel-switcher.is-menu-bar { flex: 0 0 auto; overflow: visible; }
 #gm-console.gm-desk #gm-live-layout .workshop-dock-canvas { min-height: 24rem; flex: 1 1 auto; }
 /* Each record panel scrolls inside its own frame; the frame is the scroll box,
    exactly as the retired centre region was. */

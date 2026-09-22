@@ -27,6 +27,7 @@ const ACTIONS = Object.freeze({
   __hostRequestLiveRestore: 'request_live_restore',
   __hostSetStationPuppet: 'set_station_puppet',
   __hostIssueStationCommand: 'issue_station_command',
+  __hostBackfillShipSlot: 'backfill_ship_slot',
 });
 
 export function mountNativeGmWorkspace({ bridge, win = window, doc = win.document }) {

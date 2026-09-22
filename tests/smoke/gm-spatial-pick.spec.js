@@ -41,7 +41,7 @@ test('a GM picks a place and a direction on the docked map', { tag: '@core' }, a
   // an inactive tab of the records group, so it is brought to the front first —
   // its float control is only there to press once its frame is the shown one.
   await revealGmPanel(page, 'journal');
-  await page.locator('#gm-live-layout [data-panel="journal"] [data-layout-control="float"]').click();
+  await page.locator('#gm-live-layout [data-layout-actions-for="journal"] [data-layout-control="float"]').click();
   const journal = page.locator('[data-panel="journal"].is-floating');
   await expect(journal).toBeVisible();
 

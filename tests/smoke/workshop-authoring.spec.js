@@ -34,6 +34,9 @@ test('offline Workshop imports, edits, undoes and exports one source-preserving 
   expect(start).not.toBeNull();
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
   await page.mouse.down();
+  // A press only selects a tab. Dock affordances appear once the pointer has
+  // travelled far enough to become an intentional drag.
+  await page.mouse.move(start.x + start.width / 2 + 10, start.y + start.height / 2 + 10);
   const dockTarget = page.locator('[data-panel="source"] [data-placement="bottom"]');
   await expect(dockTarget).toBeVisible();
   const destination = await dockTarget.boundingBox();

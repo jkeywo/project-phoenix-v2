@@ -27,10 +27,12 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1920, height: 108
     });
     await page.goto('/native-gm-lobby.html');
     await page.waitForFunction(() => typeof window.__phoenixNativeGmChannels === 'object');
-    const metadata = { phase: 'Lobby', gms: [{ id: 'native-gm', name: 'Local GM', connected: true, ready: false }],
+    const metadata = { phase: 'Lobby', local_operator_id: 'native-gm',
+      gms: [{ id: 'native-gm', name: 'Local GM', connected: true, ready: false }],
       start_policy: { ready_total: 0, connected_total: 1 } };
     await page.evaluate(value => window.__phoenixNativeGmChannels.metadata(JSON.stringify(value)), metadata);
     const readiness = page.locator('#gm-live-layout .workshop-panel-switcher [data-layout-panel="readiness"]');
+    await readiness.locator('xpath=ancestor::details/summary').click();
     await expect(readiness).toBeInViewport({ ratio: 1 });
     await readiness.click();
     const ready = page.locator('#gm-ready-btn');

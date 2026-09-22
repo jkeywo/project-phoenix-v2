@@ -58,7 +58,7 @@ test('Live dock persists separately and keeps the operator bar visible in narrow
   await joinAsReadyGm(page, world);
   await expect(page.locator('#gm-console > header')).toBeVisible();
   await expect(page.locator('[data-panel="roster"] #gm-roster')).toBeVisible();
-  await page.locator('[data-panel="roster"] [data-layout-control="float"]').click();
+  await page.locator('[data-layout-actions-for="roster"] [data-layout-control="float"]').click();
   await expect(page.locator('[data-panel="roster"].is-floating')).toBeVisible();
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('phoenix-operator-profile-v1')));
   expect(stored.liveLayout.floats[0].panel).toBe('roster');
@@ -72,7 +72,7 @@ test('Live dock persists separately and keeps the operator bar visible in narrow
   await page.setViewportSize({ width: 800, height: 720 });
   await expect(page.locator('#gm-console > header')).toBeVisible();
   await expect(page.locator('#gm-live-layout .workshop-dock-panel')).toHaveCount(1);
-  await page.locator('#gm-live-layout [data-layout-panel="readiness"]').click();
+  await revealGmPanel(page, 'readiness');
   await expect(page.locator('[data-panel="readiness"] #gm-start-controls')).toBeVisible();
 });
 

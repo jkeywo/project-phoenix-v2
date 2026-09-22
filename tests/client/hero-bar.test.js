@@ -239,6 +239,30 @@ it('renders accessible per-tab progress bars that survive an importance alert', 
   expect(fillOf('helm').style.width).toBe('40%');
 });
 
+it('does not mutate unchanged chrome but refreshes callbacks and translated labels', () => {
+  const { elements } = heroDom();
+  const doc = elements.tabsEl.ownerDocument;
+  const model = heroBarModel({ directStation:'helm', stations,
+    stationHealth:{helm:0.5}, stationRatings:{helm:'Detailed'}, activeStation:'helm' });
+  const first=vi.fn(), next=vi.fn();
+  const args={...elements, model, translate};
+  renderHeroBarDom({...args,onActivate:first});
+  const button=elements.tabsEl.querySelector('[data-station="helm"]');
+  button.focus();
+  const observer=new doc.defaultView.MutationObserver(()=>{});
+  observer.observe(doc.body,{subtree:true,attributes:true,childList:true,characterData:true});
+  renderHeroBarDom({...args,onActivate:next});
+  expect(observer.takeRecords()).toEqual([]);
+  expect(doc.activeElement).toBe(button);
+  button.click();
+  expect(next).toHaveBeenCalledWith('helm','station');
+  expect(first).not.toHaveBeenCalled();
+  renderHeroBarDom({...args,onActivate:next,translate:(key,params)=>'changed '+translate(key,params)});
+  expect(elements.ratingEl.textContent).toBe('changed Rating: Detailed');
+  expect(observer.takeRecords().length).toBeGreaterThan(0);
+  observer.disconnect();
+});
+
 it('keeps a red endpoint at zero health and shows rating without ownership text', () => {
   const { elements } = heroDom();
   const model = heroBarModel({

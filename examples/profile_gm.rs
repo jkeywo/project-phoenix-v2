@@ -90,11 +90,27 @@ fn main() {
     let lobby = LocalHostLobby::open(server.local_addr());
     lobby.publish(&html, &documents).unwrap();
     let stage = std::env::var("PHOENIX_GM_PROFILE_STAGE").expect("profile stage");
-    assert!(["idle", "running", "observed", "controlled", "raster"].contains(&stage.as_str()));
+    assert!([
+        "idle",
+        "running",
+        "observed",
+        "controlled",
+        "raster",
+        "player",
+        "multi"
+    ]
+    .contains(&stage.as_str()));
+    let multi = stage == "multi";
+    let player = stage == "player" || multi;
     let script = std::fs::read_to_string("examples/profile_gm.js")
         .expect("measurement driver")
         .replace("MARKER_ORIGIN", &format!("http://{marker_address}"))
-        .replace("PROFILE_STAGE", &stage);
+        .replace("PROFILE_STAGE", if multi { "running" } else { &stage });
+    let script = if multi {
+        script.replace("stage, ...extra", "stage: 'gm-' + stage, ...extra")
+    } else {
+        script
+    };
     // Windows known-folder resolution can ignore APPDATA overrides. This
     // benchmark alone uses an in-memory preference adapter: no user profile
     // migration/read/write, while the ordinary layout and storage reply API run.
@@ -109,10 +125,27 @@ fn main() {
         native_host::native_gm::document::document_path(&lobby.nonce),
         gm,
     );
-    let panes = LocalPanes::open(&[], server.local_addr());
+    let names = if player {
+        vec!["Performance pilot".into()]
+    } else {
+        vec![]
+    };
+    let panes = LocalPanes::open(&names, server.local_addr());
+    let player_script = std::fs::read_to_string("examples/profile_player.js")
+        .expect("player measurement driver")
+        .replace("MARKER_ORIGIN", &format!("http://{marker_address}"))
+        .replace("PROFILE_STAGE", &stage);
     panes
         .publish(
-            &std::fs::read_to_string("dist/client/index.html").unwrap(),
+            &std::fs::read_to_string("dist/client/index.html")
+                .unwrap()
+                .replace(
+                    "</body>",
+                    &format!(
+                        "<script type=\"module\">{}</script></body>",
+                        if player { &player_script } else { "" }
+                    ),
+                ),
             &documents,
         )
         .unwrap();
@@ -127,19 +160,38 @@ fn main() {
         .merged_catalog()
         .catalog;
     let mut cfg = native_host::NativeHostConfig::lobby(catalog);
+    if player {
+        cfg = native_host::NativeHostConfig::new("assets/worlds/combat_test.toml");
+        cfg.ship_path = Some("assets/entities/alliance_destroyer.toml".into());
+        cfg.solo = true;
+    }
     cfg.surface = NativeRenderSurface::Window;
     cfg.seed = Some(42);
     cfg.frame_stats = true;
     cfg.remember_layout = false;
     cfg.log = project_phoenix::logging::parse_log_spec("info").unwrap();
     cfg.log_spec = "info".into();
-    cfg.host_lobby = Some(lobby);
+    cfg.host_lobby = if player && !multi { None } else { Some(lobby) };
+    if multi {
+        cfg.solo = false;
+        let path = std::env::var("PHOENIX_GM_BRIDGE_PROFILE").expect("three-monitor profile");
+        cfg.bridge_profile = Some(
+            native_host::bridge_profile::BridgeProfile::from_toml(
+                &std::fs::read_to_string(path).expect("read bridge profile"),
+            )
+            .expect("parse bridge profile")
+            .validate()
+            .expect("validate bridge profile"),
+        );
+    }
     cfg.panes = Some(panes);
     let preload = native_host::preload_content_templates(".").unwrap();
     let mut app = native_host::build_native_host_app(&cfg, &preload).unwrap();
-    app.world_mut()
-        .resource_mut::<NativeSessionRoleState>()
-        .request(NativeSessionRole::StandaloneGameMaster);
+    if !player {
+        app.world_mut()
+            .resource_mut::<NativeSessionRoleState>()
+            .request(NativeSessionRole::StandaloneGameMaster);
+    }
     let mut windows = app.world_mut().query::<&mut Window>();
     for mut window in windows.iter_mut(app.world_mut()) {
         window.resolution =
@@ -147,17 +199,19 @@ fn main() {
         window.title = "Phoenix — GM performance capture (1920 × 1080)".into();
         window.resizable = false;
     }
-    app.add_systems(Update, |world: &mut World, mut sent: Local<bool>| {
-        if !*sent {
-            world.write_message(project_phoenix::lobby::server::InboundMessage {
-                token: "native-gm".into(),
-                msg: project_phoenix::core::messages::ClientMessage::SelectScenario {
-                    scenario_id: "combat_test".into(),
-                },
-            });
-            *sent = true;
-        }
-    });
+    if !player {
+        app.add_systems(Update, |world: &mut World, mut sent: Local<bool>| {
+            if !*sent {
+                world.write_message(project_phoenix::lobby::server::InboundMessage {
+                    token: "native-gm".into(),
+                    msg: project_phoenix::core::messages::ClientMessage::SelectScenario {
+                        scenario_id: "combat_test".into(),
+                    },
+                });
+                *sent = true;
+            }
+        });
+    }
     // Diagnostics wrap the existing systems; acceptance has no wrappers or
     // per-frame file IO. Both retain lightweight workload samples in memory.
     use std::sync::{atomic::Ordering, Arc, Mutex};

@@ -58,6 +58,79 @@ describe('Workshop layout renderer', () => {
   beforeEach(() => { window.requestAnimationFrame = callback => callback(); });
   afterEach(() => { mounted?.dispose(); vi.restoreAllMocks(); });
 
+  it('reorders inside a strip without docking or remounting an embedded document', () => {
+    const initial = dockWorkshopPanel(defaultWorkshopLayout(), 'inspector', 'source', 'tab');
+    ({ mounted, changes, panels } = mount(initial));
+    const frame = document.createElement('iframe'); panels.inspector.append(frame);
+    const context = frame.contentWindow;
+    const tab = document.querySelector('[role="tab"][data-layout-panel="inspector"]');
+    const strip = tab.closest('[role="tablist"]');
+    vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 500, top: 0, bottom: 30 });
+    [...strip.querySelectorAll('[role="tab"]')].forEach((node, index) => {
+      vi.spyOn(node, 'getBoundingClientRect').mockReturnValue({ left: index * 100, width: 100 });
+    });
+    tab.dispatchEvent(pointer('pointerdown', 250, 15));
+    tab.dispatchEvent(pointer('pointermove', 248, 15));
+    expect(document.querySelector('.is-tab-insertion')).toBeNull();
+    tab.dispatchEvent(pointer('pointermove', 30, 15));
+    expect(document.querySelector('.is-tab-insertion')?.dataset.layoutPanel).toBe('source');
+    expect(document.querySelector('.is-dragging')).toBeNull();
+    tab.dispatchEvent(pointer('pointerup', 30, 15));
+    expect(strip.querySelector('[role="tab"]').dataset.layoutPanel).toBe('inspector');
+    expect(changes).toHaveLength(1);
+    expect(mounted.state().floats).toHaveLength(0);
+    expect(frame.contentWindow).toBe(context);
+    expect(frame.parentNode).toBe(panels.inspector);
+  });
+
+  it('keeps an active console visible until the hide owner acknowledges release', () => {
+    let complete, released = false;
+    const initial = dockWorkshopPanel(defaultWorkshopLayout(), 'inspector', 'source', 'tab');
+    ({ mounted } = mount(initial, { mayHide: (panel, retry) => {
+      if (panel !== 'inspector' || released) return true;
+      complete = retry; return false;
+    } }));
+    document.querySelector('[role="tab"][data-layout-panel="source"]').click();
+    expect(mounted.state().selected).toBe('inspector');
+    expect(complete).toBeTypeOf('function');
+    // This callback is only called after authoritative release by the owner.
+    released = true; complete();
+    expect(mounted.state().selected).toBe('source');
+  });
+
+  it('offers docked targets and floats a Live tab dropped away from a handle', () => {
+    ({ mounted } = mount(undefined, { panelMenus: [{ label: 'Windows', panels: WORKSHOP_PANELS }] }));
+    const tab = document.querySelector('[role="tab"][data-layout-panel="files"]');
+    expect(document.querySelector('[data-layout-control="float"]')).toBeNull();
+    expect(document.querySelector('[data-panel="source"] [data-placement="left"]')).not.toBeNull();
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => null });
+    tab.dispatchEvent(pointer('pointerdown', 20, 20));
+    expect(document.querySelector('.is-dragging')).toBeNull();
+    tab.dispatchEvent(pointer('pointermove', 100, 100));
+    expect(document.querySelector('.is-dragging')).not.toBeNull();
+    tab.dispatchEvent(pointer('pointerup', 100, 100));
+    expect(mounted.state().floats.map(row => row.panel)).toContain('files');
+    expect(document.querySelector('[data-panel="files"].is-floating')).not.toBeNull();
+  });
+
+  it('dismisses window menus on an outside pointer press', () => {
+    ({ mounted } = mount(undefined, { panelMenus: [{ label: 'Windows', panels: WORKSHOP_PANELS }] }));
+    const menu = document.querySelector('details'); menu.open = true;
+    document.querySelector('.workshop-dock-canvas').dispatchEvent(pointer('pointerdown', 30, 30));
+    expect(menu.open).toBe(false);
+  });
+
+  it('persists docked split and floating size changes from keyboard resize handles', () => {
+    ({ mounted } = mount());
+    const before = mounted.state().root.sizes;
+    document.querySelector('.workshop-split-resize').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(mounted.state().root.sizes).not.toEqual(before);
+    document.querySelector('[data-panel="files"] [data-layout-control="float"]').click();
+    const width = mounted.state().floats[0].width;
+    document.querySelector('.workshop-float-resize').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(mounted.state().floats[0].width).toBe(width + 20);
+  });
+
   it.each(['left', 'right', 'top', 'bottom', 'tab'])('offers touch pointer %s docking', placement => {
     ({ mounted } = mount());
     const target = document.querySelector(`[data-panel="source"] [data-placement="${placement}"]`);
@@ -144,7 +217,7 @@ describe('Workshop layout renderer', () => {
     const nested = document.querySelector('.workshop-split .workshop-split.is-vertical');
     // Rows are at least their content, so a wrapped tab list cannot take its
     // rows out of the frame beneath it; columns still squeeze to their sizes.
-    expect(nested.style.gridTemplateRows).toMatch(/^minmax\(min-content, .+fr\) minmax\(min-content, .+fr\)$/);
+    expect(nested.style.gridTemplateRows).toMatch(/^minmax\(min-content, .+fr\) 5px minmax\(min-content, .+fr\)$/);
 
     const css = readFileSync('gui/dock-layout.css', 'utf8');
     expect(css).toMatch(/\.workshop-dock-root \.workshop-dock-canvas\s*\{[^}]*min-height:\s*32rem/);

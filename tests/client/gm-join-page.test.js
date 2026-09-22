@@ -279,9 +279,9 @@ describe('standalone Host as GM start control (issue #1368)', () => {
     );
   });
 
-  it('shows that Start only for a fleetless GM whose session is still in the Lobby', () => {
+  it('keeps the obsolete header Start hidden beside the shared state widget', () => {
     expect(SERVER_HTML).toContain(
-      "sessionStart.hidden = !(fleetRole === 'gm' && gmStandalone() && fleetLobbyPhase === 'Lobby');",
+      'sessionStart.hidden = true; // Force Start lives in Session; the header has one state widget.',
     );
   });
 

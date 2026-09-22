@@ -82,9 +82,25 @@ impl NativeOperators {
                 let loaded = self
                     .path(name)
                     .ok_or_else(|| "Profile storage is unavailable".to_owned())
-                    .and_then(|path| match std::fs::read_to_string(path) {
+                    .and_then(|path| match std::fs::read_to_string(&path) {
                         Ok(text) if text.len() <= PROFILE_LIMIT => {
-                            sanitize_profile(&text).map(Some)
+                            let profile = sanitize_profile(&text)?;
+                            let reset = serde_json::from_str::<Value>(&text)
+                                .ok()
+                                .and_then(|raw| raw["liveLayout"]["version"].as_u64())
+                                .is_some_and(|version| version < 19);
+                            if reset {
+                                // Backup and replacement are one atomic private write.
+                                // An unwritable preference directory cannot disable the desk.
+                                if let Err(error) =
+                                    super::super::layout_store::write_atomically(&path, &profile)
+                                {
+                                    bevy::log::warn!(
+                                        "Could not persist GM layout migration: {error}"
+                                    );
+                                }
+                            }
+                            Ok(Some(profile))
                         }
                         Ok(_) => Err("Stored profile is too large".to_owned()),
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -1012,15 +1028,31 @@ const LIVE_ADDED_IN_V13: &[(&str, &str, &str)] = &[("entity-fields", "inspector"
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
-const LIVE_TEMPORARY_PANELS: &[&str] =
-    &["spawn", "restore", "misclassify", "report-policy", "effect"];
+const LIVE_TEMPORARY_PANELS: &[&str] = &[
+    "spawn",
+    "restore",
+    "misclassify",
+    "report-policy",
+    "effect",
+    "manual-save",
+    "contact",
+    "npc",
+    "system",
+    "despawn",
+    "faction",
+    "entity-fields",
+    "world-fields",
+    "hull-fields",
+    "region-fields",
+    "presentation-fields",
+];
 
 /// Panels the operator may not close. The attention region renders connection
 /// and recovery banners verbatim and health is the table behind them: a Game
 /// Master must not be able to hide a failure from themselves, whichever
 /// mechanism does the hiding. Mirrors LIVE_PINNED_PANELS in
 /// gui/live-layout-model.js.
-const LIVE_PINNED_PANELS: &[&str] = &["attention", "health"];
+const LIVE_PINNED_PANELS: &[&str] = &[];
 
 /// Put a pinned panel back into the first group of a stored tree that claimed
 /// it was closed. Mirrors `placeInFirstGroup` in gui/dock-layout-model.js.
@@ -1214,32 +1246,32 @@ fn default_test_layout() -> Value {
 }
 
 fn default_live_layout() -> Value {
+    let open = ["roster", "map", "inspector", "activity"];
+    let closed: Vec<_> = live_panels_for(u64::MAX)
+        .iter()
+        .filter(|id| !open.contains(id))
+        .collect();
     json!({
-        "version": 18,
-        "root": {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
-            {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
-                {"type":"split", "axis":"vertical", "sizes":[1.0,1.0], "children":[
-                    {"type":"tabs", "tabs":["roster","readiness","join","manual-save","mission",
-                        "attention","workload","widgets","station","objective","world-fields"], "active":"roster"},
-                    {"type":"tabs", "tabs":["presentation","audition","source-link"], "active":"presentation"}
-                ]},
-                {"type":"split", "axis":"horizontal", "sizes":[1.0,1.0], "children":[
-                    {"type":"tabs", "tabs":["map","station-console"], "active":"map"},
-                    {"type":"tabs",
-                        "tabs":["inspector","contact","npc","system","despawn","faction","entity-fields","hull-fields","region-fields","presentation-fields"],
-                        "active":"inspector"}
-                ]}
+        "version": 19,
+        "root": {"type":"split", "axis":"vertical", "sizes":[4,1], "children":[
+            {"type":"split", "axis":"horizontal", "sizes":[22,52,26], "children":[
+                {"type":"tabs", "tabs":["roster"], "active":"roster"},
+                {"type":"tabs", "tabs":["map"], "active":"map"},
+                {"type":"tabs", "tabs":["inspector"], "active":"inspector"}
             ]},
-            {"type":"tabs", "tabs":["comms","activity","journal","session-history","health","checkpoint"], "active":"comms"}
+            {"type":"tabs", "tabs":["activity"], "active":"activity"}
         ]},
         "floats": [],
-        "closed": ["spawn","restore","misclassify","report-policy","effect"],
+        "closed": closed,
         "selected": "roster"
     })
 }
 
 fn sanitize_live_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=18).contains(v))?;
+    let stored = value["version"].as_u64().filter(|v| (1..=19).contains(v))?;
+    if stored < 19 {
+        return Some(default_live_layout());
+    }
     let allowed = live_panels_for(stored);
     let added = live_panels_added_after(stored);
     let mut seen = BTreeSet::new();
@@ -2154,6 +2186,28 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
     if let Some(layout) = sanitize_live_layout(&raw["liveLayout"]) {
         safe["liveLayout"] = layout;
     }
+    let previous = if raw["previousLiveLayout"].is_object() {
+        &raw["previousLiveLayout"]
+    } else if raw["liveLayout"]["version"]
+        .as_u64()
+        .is_some_and(|v| v < 19)
+    {
+        &raw["liveLayout"]
+    } else {
+        &Value::Null
+    };
+    if previous.is_object() {
+        let mut previous = previous.clone();
+        previous["version"] = json!(19);
+        if let Some(layout) = sanitize_live_layout(&previous) {
+            safe["previousLiveLayout"] = layout;
+        }
+    }
+    safe["gmDensity"] = json!(if raw["gmDensity"] == "touch" {
+        "touch"
+    } else {
+        "compact"
+    });
     serde_json::to_string_pretty(&safe).map_err(|e| e.to_string())
 }
 
@@ -2178,6 +2232,33 @@ mod tests {
         }
     }
     const PADS: &str = "window.__phoenixSetGamepads([{\"index\":0,\"id\":\"pad\",\"buttons\":[{\"pressed\":true,\"value\":1}],\"axes\":[1]}])";
+
+    #[test]
+    fn loading_an_old_live_layout_atomically_keeps_a_backup_and_persists_the_reset() {
+        let dir = Scratch::new();
+        let mut state = NativeOperators {
+            root: Some(dir.0.clone()),
+            scope: Some("gm".into()),
+            ..Default::default()
+        };
+        let path = state.path("desk").unwrap();
+        let mut layout = default_live_layout();
+        layout["version"] = json!(18);
+        let old = json!({"kind":"project-phoenix/operator-profile", "version":1,
+            "liveLayout":layout, "gmDensity":"touch",
+            "accessibility":{"presentation":{"textScale":1.25}}});
+        super::super::super::layout_store::write_atomically(&path, &old.to_string()).unwrap();
+        let request = r#"{"type":"NativeOperator","operation":"load"}"#;
+        assert!(state.handle(PaneId(1), "desk", request));
+        let first = std::fs::read_to_string(&path).unwrap();
+        let saved: Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(saved["liveLayout"], default_live_layout());
+        assert!(saved["previousLiveLayout"].is_object());
+        assert_eq!(saved["gmDensity"], "touch");
+        assert_eq!(saved["accessibility"]["presentation"]["textScale"], 1.25);
+        assert!(state.handle(PaneId(1), "desk", request));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), first);
+    }
 
     #[test]
     fn test_layout_matches_the_browser_model_case_for_case() {
@@ -2393,16 +2474,17 @@ mod tests {
             saved["liveLayout"]["version"],
             default_live_layout()["version"]
         );
-        assert_eq!(saved["liveLayout"]["floats"][0]["panel"], "join");
-        assert!(saved["liveLayout"]["floats"][0].get("unsafe").is_none());
+        assert_eq!(saved["liveLayout"], default_live_layout());
+        assert_eq!(saved["previousLiveLayout"]["floats"][0]["panel"], "join");
+        assert!(saved["previousLiveLayout"]["floats"][0]
+            .get("unsafe")
+            .is_none());
         assert!(saved.get("reconnectCredential").is_none());
         assert!(!saved.to_string().contains("secret"));
     }
 
     #[test]
-    fn the_attention_and_health_panels_cannot_be_stored_closed() {
-        // A Game Master must not be able to hide a connection or recovery
-        // failure from themselves, by role preset OR by arrangement.
+    fn awareness_panels_can_close_with_critical_warnings_owned_by_the_header() {
         let mut closed: Vec<&str> = live_panels_for(u64::MAX)
             .iter()
             .filter(|panel| **panel != "roster")
@@ -2418,13 +2500,13 @@ mod tests {
         let repaired = sanitize_live_layout(&layout).unwrap();
         assert_eq!(
             repaired["root"],
-            json!({"type":"tabs", "tabs":["roster","attention","health"], "active":"roster"})
+            json!({"type":"tabs", "tabs":["roster"], "active":"roster"})
         );
         let closed = repaired["closed"].as_array().unwrap();
-        for panel in LIVE_PINNED_PANELS {
+        for panel in ["attention", "health"] {
             assert!(
-                !closed.iter().any(|value| value == panel),
-                "{panel} was left closed"
+                closed.iter().any(|value| value == panel),
+                "{panel} was forced open"
             );
         }
     }

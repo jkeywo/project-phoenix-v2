@@ -118,6 +118,22 @@ describe('GM omniscient local projection', () => {
 
   beforeEach(() => { harness = mount(); });
 
+  it('notifies detail tools only when the selected reading changes', () => {
+    const onSelectionChanged = vi.fn();
+    const {projection} = mount({onSelectionChanged});
+    projection.update(payload([entity()]));
+    projection.update(payload([entity({position:[20,2,-30]})]));
+    expect(onSelectionChanged).toHaveBeenCalledTimes(1);
+    projection.select(PLAYER_ID);
+    expect(onSelectionChanged).toHaveBeenCalledTimes(2);
+    projection.update(payload([entity({position:[20,2,-30]})]));
+    expect(onSelectionChanged).toHaveBeenCalledTimes(2);
+    projection.update(payload([entity({position:[21,2,-30]})]));
+    expect(onSelectionChanged).toHaveBeenCalledTimes(3);
+    projection.update(payload([]));
+    expect(onSelectionChanged).toHaveBeenLastCalledWith(null);
+  });
+
   it('carries the absolute hull totals a direct-effect preview needs', () => {
     const parsed = parseGmEntityProjection({ entities: [entity()] });
     expect(parsed[0].status.hull_current_milli_hp).toBe(73_000);

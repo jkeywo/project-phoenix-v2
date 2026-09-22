@@ -139,10 +139,21 @@ function latestActivity(projection, shipId, stationId) {
  * GM-only config/entity/region reducer while still making a newly opened
  * iframe complete on its first projection.
  */
-export function buildGmStationConsoleInput(projection, ship) {
-  const state = new ClientSimState();
-  const entities = (ship.entities || []).map(entity => ({ ...entity }));
-  state.apply({
+const consoleConfigurations = new WeakMap();
+const consoleWorlds = new WeakMap();
+const liveEntityFields = ['position', 'yaw', 'hull_fraction', 'shield_fraction', 'shields', 'shield_freq'];
+export function buildGmStationConsoleInput(projection, ship, previous = null) {
+  const state = previous || new ClientSimState();
+  const configuration = JSON.stringify([projection.presentation_generation, ship.ship_id, ship.ship_config]);
+  const targets = new Set(ship.objective_targets || []);
+  const metadata = projection.entities || ship.entities || [];
+  const worldKey = JSON.stringify([projection.presentation_generation, projection.world_revision ?? metadata, ship.objective_targets]);
+  const configurationChanged = consoleConfigurations.get(state) !== configuration;
+  const worldChanged = configurationChanged || consoleWorlds.get(state)?.key !== worldKey;
+  const entities = worldChanged ? metadata.map(entity => projection.entities
+    ? { ...entity, objective_target:targets.has(entity.uuid) } : { ...entity }) : state.world.entities;
+  if (configurationChanged) {
+    state.apply({
     type: 'Welcome',
     data: {
       state: {
@@ -152,12 +163,36 @@ export function buildGmStationConsoleInput(projection, ship) {
       ship_config: ship.ship_config,
       station_ratings: ship.station_ratings || {},
     },
-  });
+    });
+    consoleConfigurations.set(state, configuration);
+  } else if (worldChanged) {
+    // Absolute metadata replaces the registry (including despawns and removed
+    // fields), without replaying the Welcome/configuration reducer.
+    state.apply({ type:'WorldSetup', data:{world:{entities, scenario_title:'', scenario_description:''}} });
+  }
+  if (worldChanged) consoleWorlds.set(state, {key:worldKey, metadata});
+  else {
+    // SimState's ordinary lane is delta-shaped. Before applying this absolute
+    // presentation snapshot, restore omitted live fields from the structural
+    // baseline, without replacing the registry or its stable entity objects.
+    const baseline = consoleWorlds.get(state).metadata;
+    for (let index = 0; index < entities.length; index++) {
+      for (const field of liveEntityFields) {
+        if (Object.prototype.hasOwnProperty.call(baseline[index], field)) entities[index][field] = baseline[index][field];
+        else delete entities[index][field];
+      }
+    }
+  }
+  // This lane is absolute, unlike participant blackboard deltas. Clear keys
+  // removed since the last snapshot rather than leaving stale readings.
+  state.blackboards = {};
+  state.blackboardKinds = {};
+  state.blackboardPresentation = {};
   state.apply({
     type: 'SimState',
     data: {
       snapshot: {
-        entity_states: ship.entity_states || [],
+        entity_states: projection.entity_states || ship.entity_states || [],
         navigation_waypoint: ship.navigation_waypoint || null,
         control_sources: ship.control_sources || {},
         station_puppets: [],
@@ -187,6 +222,7 @@ export function buildGmStationConsoleInput(projection, ship) {
     };
   }
   state.controlSources = ship.control_sources || {};
+  state.stationRatings = {...ship.station_ratings};
   state.stationPuppets = stationPuppets;
   state.tutorialProgress = tutorialProgressFor(ship.ship_id);
 
@@ -201,11 +237,11 @@ export function buildGmStationConsoleInput(projection, ship) {
   // catches up.
   const pose = ship.ship_pose || {};
   Object.defineProperties(state, {
-    shipX: { value: pose.x ?? 0, enumerable: true },
-    shipY: { value: pose.y ?? 0, enumerable: true },
-    shipZ: { value: pose.z ?? 0, enumerable: true },
-    shipYaw: { value: pose.yaw ?? 0, enumerable: true },
-    forwardSpeed: { value: pose.forward_speed ?? 0, enumerable: true },
+    shipX: { value: pose.x ?? 0, enumerable: true, configurable: true },
+    shipY: { value: pose.y ?? 0, enumerable: true, configurable: true },
+    shipZ: { value: pose.z ?? 0, enumerable: true, configurable: true },
+    shipYaw: { value: pose.yaw ?? 0, enumerable: true, configurable: true },
+    forwardSpeed: { value: pose.forward_speed ?? 0, enumerable: true, configurable: true },
   });
   if (Object.prototype.hasOwnProperty.call(ship, 'navigation_waypoint')) {
     state.navigationWaypoint = ship.navigation_waypoint || null;
@@ -218,6 +254,7 @@ export function createGmStationPuppet({
   win = window,
   t = id => id,
   getOperator = () => null,
+  requestInterest = () => false,
   submitStationPuppet = () => false,
   submitStationCommand = () => false,
   confirmAction = (request) => request.accept(),
@@ -235,6 +272,8 @@ export function createGmStationPuppet({
   const select = doc.getElementById('gm-station-select');
   const button = doc.getElementById('gm-station-toggle');
   const status = doc.getElementById('gm-station-status');
+  const connection = doc.createElement('p'); connection.id = 'gm-station-connection'; connection.setAttribute('role', 'status');
+  panel?.append(connection);
   let frame = doc.getElementById('gm-station-frame');
   const activityList = doc.getElementById('gm-station-activity');
   let projection = { ships: [], activity: [] };
@@ -244,11 +283,67 @@ export function createGmStationPuppet({
   let loadedUrl = null;
   let mountedKey = null;
   let mountGeneration = 0;
+  let lastInterest = null;
+  function publishInterest() {
+    const request = {consumer:'console', ship:selectedRow?.ship.ship_id || '', station:selectedRow?.station.station_id || '',
+      visible:visible && !!selectedRow, mount_generation:mountGeneration, world_generation:projection.presentation_generation || 0};
+    const signature = JSON.stringify(request);
+    if (signature !== lastInterest && requestInterest(request) !== false) lastInterest = signature;
+  }
+  function hasCurrentDetail() {
+    if (!Array.isArray(projection.detail_ships)) return true;
+    const interest = projection.console_interest;
+    return projection.detail_ships.includes(selectedRow?.ship.ship_id)
+      && interest?.ship === selectedRow?.ship.ship_id && interest?.station === selectedRow?.station.station_id
+      && interest?.mount_generation === mountGeneration && interest?.world_generation === projection.presentation_generation;
+  }
   // Whether the document currently in the frame is the one this puppet asked
   // for. A frame that loads again after that — because the dock moved the
   // panel, and moving a node between parents re-creates its document — is a
   // REMOUNT, not the mount we were waiting for.
   let mountSettled = false;
+  let visible = false;
+  let optionsSignature = '', activitySignature = '';
+  let releasePending = null;
+  let recovery = '';
+  let loadTimer = null, loadAttempts = 0, loadFailed = false;
+  const appliedPresentation = new WeakMap();
+  function cancelLoadWatch() {
+    if (loadTimer != null) win.clearTimeout(loadTimer);
+    loadTimer = null;
+  }
+  function watchLoad() {
+    if (!visible || loadTimer != null || loadFailed) return;
+    loadTimer = win.setTimeout(() => {
+      loadTimer = null;
+      if (pushState()) return;
+      if (++loadAttempts >= 100) {
+        loadFailed = true;
+        connection.textContent = t('server.gm.station.load_failed');
+      } else watchLoad();
+    }, 100);
+  }
+  const activeHere = () => !!getOperator()?.id && getOperator()?.connected !== false
+    && selectedRow?.station.operators.includes(getOperator().id);
+
+  function releaseThen(continuation) {
+    if (releasePending) return false;
+    if (!activeHere()) { continuation(); return true; }
+    recovery = t('server.gm.station.releasing');
+    const request = { ship: selectedRow.ship.ship_id, station: selectedRow.station.station_id,
+      active: false, correlation: correlation('release') };
+    const waiting = { continuation, key: selectedKey, correlation: request.correlation, operator: getOperator().id, timer: null };
+    releasePending = waiting;
+    if (submitStationPuppet(request) !== true) {
+      releasePending = null; recovery = t('server.gm.station.release_failed'); renderSelected(); return false;
+    }
+    waiting.timer = schedule(() => {
+      if (releasePending !== waiting) return;
+      releasePending = null; recovery = t('server.gm.station.release_failed'); renderSelected();
+    }, boundedFeedbackTimeoutMs);
+    renderSelected();
+    return false;
+  }
   const pendingCommands = new Map();
   const boundedPendingCapacity = Math.max(1, Math.min(
     GM_STATION_PENDING_CAPACITY,
@@ -323,27 +418,41 @@ export function createGmStationPuppet({
     if (!idoc || !idoc.documentElement) return;
     const presentation = win.__serverSettings && win.__serverSettings.presentation;
     const effects = typeof presentation?.effects === 'function' ? presentation.effects() : null;
-    if (effects) applyViewscreenEffectsToRoot(idoc.documentElement, effects);
+    if (effects) {
+      const signature = JSON.stringify(effects);
+      if (appliedPresentation.get(idoc.documentElement) !== signature) {
+        applyViewscreenEffectsToRoot(idoc.documentElement, effects);
+        appliedPresentation.set(idoc.documentElement, signature);
+      }
+    }
   }
 
   function pushState() {
-    if (!selectedRow || !frame || !frame.contentWindow
+    if (!visible || !selectedRow || !consoleInput || !hasCurrentDetail() || !frame || !frame.contentWindow
         || typeof frame.contentWindow.__updateConsole !== 'function') return false;
     const builder = win.buildConsoleState;
     if (typeof builder !== 'function') return false;
     applyPresentation();
     const json = builder(selectedRow.station.station_id, consoleInput);
     frame.contentWindow.__updateConsole(selectedRow.station.station_id, json);
+    cancelLoadWatch(); loadFailed = false; loadAttempts = 0;
+    const label = t(activeHere() ? 'server.gm.station.controlling' : 'server.gm.station.observing');
+    if (connection.textContent !== label) connection.textContent = label;
+    frame.style.pointerEvents = activeHere() && !releasePending ? '' : 'none';
+    frame.tabIndex = activeHere() && !releasePending ? 0 : -1;
+    frame.setAttribute('aria-disabled', String(!activeHere() || !!releasePending));
     return true;
   }
 
   function renderActivity() {
     if (!activityList) return;
-    activityList.replaceChildren();
-    if (!selectedRow) return;
-    const entries = projection.activity.filter(entry => entry
+    const entries = !selectedRow ? [] : projection.activity.filter(entry => entry
       && entry.ship === selectedRow.ship.ship_id
-      && entry.station === selectedRow.station.station_id);
+      && entry.station === selectedRow.station.station_id).slice(-32);
+    const signature = JSON.stringify(entries);
+    if (signature === activitySignature) return;
+    activitySignature = signature;
+    activityList.replaceChildren();
     for (const entry of entries.slice(-32)) {
       const item = doc.createElement('li');
       item.dataset.operator = entry.operator_id;
@@ -364,6 +473,7 @@ export function createGmStationPuppet({
     selectedRow = rows.find(row => row.key === selectedKey) || rows[0] || null;
     selectedKey = selectedRow ? selectedRow.key : null;
     if (!selectedRow) {
+      publishInterest();
       if (mountedKey !== null) replaceFrame(null);
       consoleInput = null;
       if (pending) pending.hidden = false;
@@ -379,11 +489,12 @@ export function createGmStationPuppet({
     const operatorId = operator && operator.id;
     const locallyActive = !!operatorId && selectedRow.station.operators.includes(operatorId);
     if (button) {
-      button.textContent = t(locallyActive
+      const label = t(locallyActive
         ? 'server.gm.station.release'
         : 'server.gm.station.take_over');
+      if (button.textContent !== label) button.textContent = label;
       button.dataset.active = locallyActive ? 'true' : 'false';
-      button.disabled = !operatorId;
+      button.disabled = !operatorId || operator.connected === false || !!releasePending;
     }
     if (status) {
       if (selectedRow.station.operators.length > 0) {
@@ -395,20 +506,37 @@ export function createGmStationPuppet({
       }
     }
 
-    consoleInput = buildGmStationConsoleInput(projection, selectedRow.ship);
+    if (status && recovery) status.textContent = recovery;
+    if (!visible) { publishInterest(); return; }
+    let replaced = false;
     if (frame && (mountedKey !== selectedKey || loadedUrl !== selectedRow.station.console)) {
       // A new browsing context is the identity boundary. Navigating the same
       // iframe retains its WindowProxy, allowing queued messages from its old
       // document to masquerade as commands for the newly selected Ship.
       replaceFrame(selectedKey);
+      replaced = true;
       loadedUrl = selectedRow.station.console;
       mountSettled = false;
       frame.dataset.station = selectedRow.station.station_id;
       frame.dataset.ship = selectedRow.ship.ship_id;
       frame.setAttribute('title', `${selectedRow.ship.name} — ${selectedRow.station.name}`);
       frame.setAttribute('src', selectedRow.station.console);
-    } else {
-      pushState();
+      connection.textContent = t('server.gm.station.loading');
+      watchLoad();
+    }
+    publishInterest();
+    if (!hasCurrentDetail()) {
+      consoleInput = null;
+      if (button) button.disabled = true;
+      connection.textContent = t('server.gm.station.loading');
+      return;
+    }
+    consoleInput = buildGmStationConsoleInput(projection, selectedRow.ship, consoleInput);
+    if (!replaced) {
+      if (!pushState()) {
+        connection.textContent = t(loadFailed ? 'server.gm.station.load_failed' : 'server.gm.station.loading');
+        watchLoad();
+      }
     }
     renderActivity();
   }
@@ -430,6 +558,7 @@ export function createGmStationPuppet({
   /** Feedback belongs to its originating interface; a later mount cannot
    * inherit its timers or correlation, even if it uses the same URL. */
   function invalidateMount() {
+    cancelLoadWatch(); loadAttempts = 0; loadFailed = false;
     mountGeneration += 1;
     mountSettled = false;
     for (const command of pendingCommands.values()) {
@@ -444,13 +573,17 @@ export function createGmStationPuppet({
     // panel — and the commands the previous document sent must not have their
     // feedback delivered into it.
     if (mountSettled) invalidateMount();
+    publishInterest();
     mountSettled = true;
-    pushState();
+    if (!pushState()) watchLoad();
   }
 
   function rebuildOptions() {
     if (!select) return;
     const rows = rowsFor(projection);
+    const signature = JSON.stringify(rows.map(row => [row.key, row.ship.name, row.station.name]));
+    if (signature === optionsSignature) return;
+    optionsSignature = signature;
     select.replaceChildren(...rows.map(row => {
       const option = doc.createElement('option');
       option.value = row.key;
@@ -462,9 +595,18 @@ export function createGmStationPuppet({
   function update(raw) {
     const next = parseGmStationProjection(raw);
     if (!next) return false;
+    if ((next.presentation_generation ?? 0) < (projection.presentation_generation ?? 0)) return false;
+    if (next.presentation_generation !== projection.presentation_generation) {
+      consoleInput = null;
+      if (projection.presentation_generation != null) invalidateMount();
+    }
     projection = next;
     rebuildOptions();
     renderSelected();
+    if (releasePending && selectedKey === releasePending.key && !activeHere()) {
+      const waiting = releasePending; releasePending = null; recovery = '';
+      cancelSchedule(waiting.timer); waiting.continuation();
+    }
     settleCommandResults(next.results);
     return true;
   }
@@ -484,11 +626,13 @@ export function createGmStationPuppet({
   }
 
   function toggle() {
-    if (!selectedRow) return false;
+    if (!selectedRow || releasePending) return false;
+    recovery = '';
     const operator = getOperator();
-    if (!operator || !operator.id) return false;
+    if (!operator || !operator.id || operator.connected === false) return false;
     const active = !selectedRow.station.operators.includes(operator.id);
     const target = selectedRow;
+    const generation = mountGeneration;
     const category = !active ? 'station.release'
       : target.station.rating === 'Backfill' ? 'station.takeover' : 'station.takeover-human';
     const description = t('settings.gm.confirmation.station', {
@@ -496,7 +640,9 @@ export function createGmStationPuppet({
       ship: target.ship.name, station: target.station.name,
     });
     return confirmAction({ category, description, preview: () => description,
-      accept: () => getOperator()?.id === operator.id && submitStationPuppet({
+      accept: () => visible && !releasePending && getOperator()?.connected !== false
+        && getOperator()?.id === operator.id && selectedKey === target.key
+        && mountGeneration === generation && submitStationPuppet({
         ship: target.ship.ship_id, station: target.station.station_id, active,
         correlation: correlation(active ? 'takeover' : 'release'),
       }) === true,
@@ -504,7 +650,7 @@ export function createGmStationPuppet({
   }
 
   function issueConsoleAction(raw) {
-    if (!selectedRow) return false;
+    if (!selectedRow || !consoleInput || !hasCurrentDetail()) return false;
     const action = parsePayload(raw);
     if (!action || typeof action !== 'object') return false;
     // The console's tutorial bookkeeping runs here exactly as it does on a
@@ -537,7 +683,7 @@ export function createGmStationPuppet({
       };
       const acceptCommand = () => {
         attempted = true;
-        if (!operator?.id || getOperator()?.id !== operator.id
+        if (!visible || releasePending || !activeHere() || !operator?.id || getOperator()?.id !== operator.id
             || mountGeneration !== requestGeneration
             || frame?.contentWindow !== frameWindow || selectedRow?.key !== targetRow.key) {
           refuseLocal();
@@ -582,30 +728,61 @@ export function createGmStationPuppet({
   }
 
   if (select) select.addEventListener('change', () => {
-    selectedKey = select.value;
-    loadedUrl = null;
-    renderSelected();
+    const next = select.value; select.value = selectedKey;
+    releaseThen(() => { selectedKey = next; recovery = ''; renderSelected(); });
   });
   if (button) button.addEventListener('click', toggle);
   if (frame) frame.addEventListener('load', onFrameLoad);
-  win.addEventListener('message', event => {
+  const onMessage = event => {
     if (!frame || event.source !== frame.contentWindow
         || !event.data || event.data.type !== 'console_action') return;
     issueConsoleAction(event.data.payload);
-  });
+  };
+  win.addEventListener('message', onMessage);
 
   return {
     update,
     toggle,
     issueConsoleAction,
     settleCommandResults,
+    settleLifecycleResults(rows = []) {
+      const refusal = releasePending && rows.find(row => row.operator_id === releasePending.operator
+        && row.correlation === releasePending.correlation && row.outcome === 'refused');
+      if (!refusal) return;
+      cancelSchedule(releasePending.timer); releasePending = null;
+      recovery = t('server.gm.station.release_failed'); renderSelected();
+    },
     refresh: renderSelected,
+    setVisible(value) {
+      if (visible === (value === true)) return;
+      visible = value === true;
+      if (!visible) cancelLoadWatch();
+      renderSelected();
+    },
+    mayHide(retry) {
+      if (!activeHere() && !releasePending) return true;
+      return releaseThen(retry);
+    },
+    dispose() {
+      visible = false; publishInterest();
+      invalidateMount();
+      if (releasePending) cancelSchedule(releasePending.timer);
+      win.removeEventListener('message', onMessage);
+    },
+    reset() {
+      if (releasePending) cancelSchedule(releasePending.timer);
+      releasePending = null; recovery = '';
+      projection = { ships: [], activity: [], results: [] };
+      selectedKey = null; selectedRow = null; consoleInput = null;
+      invalidateMount(); rebuildOptions(); renderSelected();
+    },
     focusStation(shipId, stationId) {
       const row = rowsFor(projection).find(candidate => candidate.ship.ship_id === shipId
         && candidate.station.station_id === stationId);
       if (!row) return false;
-      selectedKey = row.key; renderSelected(); button?.focus?.();
-      return doc.activeElement === button;
+      const focus = () => { selectedKey = row.key; visible = true; recovery = ''; renderSelected(); button?.focus?.(); };
+      if (selectedKey === row.key) { focus(); return true; }
+      return releaseThen(focus);
     },
     state: () => ({ projection, selectedKey, selectedRow, pendingCommands }),
   };

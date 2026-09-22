@@ -106,6 +106,23 @@ const bookmarkButton = () => document.getElementById('gm-checkpoint-bookmark');
 
 // ── Named capture ──────────────────────────────────────────────────────────
 
+it('accepts an asynchronous native receipt and exposes its slot for completion matching', async () => {
+  await mount();
+  let resolve;
+  api.create.mockImplementation(() => new Promise(done => { resolve = done; }));
+  nameField().value = 'Native checkpoint';
+  bookmarkButton().click();
+  expect(panel.state().pending).toBe(true);
+  expect(panel.state().pendingSlotId).toBeNull();
+  resolve('native-slot');
+  await Promise.resolve();
+  expect(panel.state().pendingSlotId).toBe('native-slot');
+  listed = [row({ slot_id: 'native-slot', display_name: 'Native checkpoint' })];
+  await panel.reportOutcome(true);
+  expect(panel.state().statusTone).toBe('ok');
+  expect(panel.state().pendingSlotId).toBeNull();
+});
+
 it('shows a capture tick and time only after the checkpoint really reaches the catalogue', async () => {
   await mount();
   nameField().value = 'Before the ambush';

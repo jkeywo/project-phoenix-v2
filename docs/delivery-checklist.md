@@ -350,8 +350,10 @@ State this in any release notes, because the gap is not obvious from the name:
   `--rendezvous <URL> --origin <URL>` adds the cloud registration leg; the two
   flags remain a pair. `--solo` and local Ultralight panes (§4a) are the other
   ordinary crew arrangements.
-- The landing's **Host as GM** route runs one authoritative simulation with one
-  selected AI-backfilled hull and no crew ingress. **Join as Peer** creates a
+- The landing's **Host as GM** route selects only a scenario, with no locally
+  owned hull or crew ingress. The GM can fill empty player slots with AI before
+  Start. Ready, Pause and Resume share one header position; checkpoints and
+  manual saves use the native save directory. **Join as Peer** creates a
   GM-only fleet member and uses the built-in rendezvous service plus
   `http://localhost:8080` origin when no override flags were supplied. Both
   routes turn the primary native window into the shared GM desk after commit;

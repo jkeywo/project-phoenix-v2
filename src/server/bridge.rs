@@ -1359,6 +1359,26 @@ pub fn wasm_submit_gm_action(request_json: &str) -> bool {
     edge::submit_gm_action(request_json)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_gm_inspector_interest(json: &str) -> bool {
+    let Some(panels) = codec::decode_gm_inspector_interest(json) else {
+        return false;
+    };
+    edge::set_gm_inspector_interest(panels);
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_gm_console_interest(json: &str) -> bool {
+    let Some(request) = codec::decode_gm_console_interest(json) else {
+        return false;
+    };
+    edge::set_gm_console_interest(request);
+    true
+}
+
 /// Queue one GM paused-transfer transaction for owner sequencing (#1293/#1294).
 /// A first-time request reaches this only after visible acceptance; a reconnect
 /// reaches it automatically after the private capability selected an existing
@@ -1736,6 +1756,17 @@ fn drain_gm_roster(world: &mut World) {
 /// boundary therefore takes effect before this frame can spend a fixed step.
 #[cfg(target_arch = "wasm32")]
 fn drain_gm_action_input(world: &mut World) {
+    for (_, request) in edge::take_gm_console_interest() {
+        world
+            .resource_mut::<crate::gm_projection::GmConsoleSubscriptions>()
+            .requests
+            .insert(request.consumer, request);
+    }
+    if let Some(panels) = edge::take_gm_inspector_interest() {
+        world
+            .resource_mut::<crate::gm_projection::GmInspectorInterest>()
+            .0 = Some(panels.into_iter().collect());
+    }
     let requests = edge::drain_pending_gm_actions();
     for request in requests {
         // `submit_local` consumes the request, so the refusal is built from a

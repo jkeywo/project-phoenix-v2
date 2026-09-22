@@ -223,7 +223,7 @@ describe('createGmEntityInspectorPanel', () => {
     // The panel is only a reading surface if something actually feeds it. This
     // reads the wiring the way its sibling panels' tests do.
     const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
-    expect(workspace).toContain('gmEntityFields.update(p)');
+    expect(workspace).toContain("updateReading('entity-fields', gmEntityFields, p)");
     expect(workspace).toContain('gmEntityFields.select(entity)');
     expect(workspace).toContain('gmEntityFields.reset()');
     // The doctrine link must AIM the owning panel, not merely reveal it: a

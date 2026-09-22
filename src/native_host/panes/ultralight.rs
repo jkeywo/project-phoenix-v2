@@ -294,6 +294,8 @@ pub struct UltralightPaneSurface {
     /// lobby surface something to say and #1330 gave it more; this field is what
     /// makes the mistake unrepresentable.
     drain_script: String,
+    render_visible: bool,
+    applied_visibility: Option<bool>,
 }
 
 impl UltralightPaneSurface {
@@ -320,6 +322,8 @@ impl UltralightPaneSurface {
             loaded: false,
             transparent,
             drain_script: pane_drain_script(),
+            render_visible: true,
+            applied_visibility: None,
         }
     }
 
@@ -337,6 +341,8 @@ impl UltralightPaneSurface {
             // false, and this is the same answer said in the adapter.
             transparent: false,
             drain_script: host_lobby_drain_script(),
+            render_visible: true,
+            applied_visibility: None,
         }
     }
 
@@ -354,13 +360,31 @@ impl UltralightPaneSurface {
         if !self.loaded && !self.view.is_loading() {
             self.loaded = true;
         }
+        self.apply_visibility();
         self.loaded
+    }
+
+    fn apply_visibility(&mut self) {
+        if !self.loaded || self.applied_visibility == Some(self.render_visible) {
+            return;
+        }
+        // The SDK renders every dirty view, including ones Bevy does not
+        // composite. Hide its document at the paint source, not merely the
+        // copied texture. The DOM, subscriptions and reliable queues survive.
+        let script = format!(
+            "(()=>{{const root=document.documentElement;if(!root)throw Error('document loading');let style=document.getElementById('phoenix-native-visibility');if(!style){{style=document.createElement('style');style.id='phoenix-native-visibility';style.textContent='html[data-phoenix-native-hidden]{{display:none!important}}';document.head.appendChild(style);}}root.toggleAttribute('data-phoenix-native-hidden',{});}})()",
+            !self.render_visible
+        );
+        if self.view.evaluate(&script).is_ok() {
+            self.applied_visibility = Some(self.render_visible);
+        }
     }
 }
 
 impl PaneSurface for UltralightPaneSurface {
     fn load(&mut self, url: &str) -> Result<(), PaneSurfaceError> {
         self.loaded = false;
+        self.applied_visibility = None;
         self.view
             .load_url(url)
             .map_err(|e| PaneSurfaceError::Load(e.to_string()))
@@ -400,6 +424,10 @@ impl PaneSurface for UltralightPaneSurface {
 /// let it run on a thread of its own. The calls, and their order, are exactly
 /// the calls and the order they were.
 impl PaneView for UltralightPaneSurface {
+    fn set_visible(&mut self, visible: bool) {
+        self.render_visible = visible;
+        self.apply_visibility();
+    }
     fn refresh_loaded(&mut self) -> bool {
         UltralightPaneSurface::refresh_loaded(self)
     }

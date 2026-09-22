@@ -374,6 +374,24 @@ pub fn encode_gm_entity_projection(
     serde_json::to_string(payload)
 }
 
+/// Private host-page presentation request, not a participant message.
+pub fn decode_gm_inspector_interest(
+    json: &str,
+) -> Option<Vec<crate::gm_projection::GmInspectorKind>> {
+    if json.len() > 256 {
+        return None;
+    }
+    serde_json::from_str(json).ok()
+}
+
+pub fn decode_gm_console_interest(json: &str) -> Option<crate::gm_projection::GmConsoleInterest> {
+    if json.len() > 1024 {
+        return None;
+    }
+    let request: crate::gm_projection::GmConsoleInterest = serde_json::from_str(json).ok()?;
+    request.valid().then_some(request)
+}
+
 /// Encode the rendererless GM peer's absolute bounded activity Host Channel
 /// projection (issues #1297/#1298).
 pub fn encode_gm_activity_feed(
@@ -2042,6 +2060,20 @@ pub fn decode_native_gm_record(
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn encode_native_gm_metadata(
     value: &crate::native_host::native_gm::NativeGmMetadata,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(value)
+}
+
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub(crate) fn encode_native_gm_save_reply(
+    value: &crate::native_host::native_gm::saves::SaveReply,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(value)
+}
+
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub(crate) fn encode_native_gm_save_outcomes(
+    value: &[crate::native_host::native_gm::saves::SaveOutcome],
 ) -> Result<String, serde_json::Error> {
     serde_json::to_string(value)
 }

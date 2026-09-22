@@ -829,7 +829,11 @@ fn main() {
             }
         }
     }
-    app.add_systems(bevy::prelude::Update, report_save_outcomes);
+    use bevy::prelude::IntoScheduleConfigs;
+    app.add_systems(
+        bevy::prelude::Last,
+        report_save_outcomes.after(project_phoenix::native_host::native_gm::publish_save_outcomes),
+    );
 
     // ── The crew paths ───────────────────────────────────────────────────────
     //

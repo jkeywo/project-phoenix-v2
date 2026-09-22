@@ -3334,7 +3334,7 @@ pub fn apply_due_actions(
                 } else {
                     match (world_config.as_deref(), frozen_ship_slots.as_deref_mut()) {
                         (Some(config), Some(frozen)) => {
-                            match frozen.backfill_slot(&config.ship_slots, slot) {
+                            match frozen.backfill_slot(&config.effective_ship_slots(), slot) {
                                 crate::ship_slots::BackfillSlotOutcome::Applied => {
                                     (GmActionOutcome::Applied, None)
                                 }

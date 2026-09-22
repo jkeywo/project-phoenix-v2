@@ -8,6 +8,7 @@ import { createGmLocalProjection } from './gm-local-projection.js';
 import { createGmDirectEffectPanel } from './gm-direct-effect-panel.js';
 import { createGmConfirmationProfile, createGmConfirmationController } from './gm-confirmation.js';
 import { createGmSessionControls } from './gm-session-controls.js';
+import { createGmSessionWidget } from './gm-session-widget.js';
 import { createGmMissionPanel } from './gm-mission-panel.js';
 import { createGmObjectivePanel } from './gm-objective-panel.js';
 import { createGmCommsPanel } from './gm-comms-panel.js';
@@ -92,12 +93,49 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     audio: { action: (...args) => privateAudio?.action(...args) },
     getOperator: () => win.__hostLocalGm?.(),
   });
-  const privateSubmit = (actionId, request, send) => privateAudio
-    ? requestFeedback.submit(actionId, request, send) : send();
+  const popupRequests = new Map();
+  const popupForAction = { 'gm.faction': 'faction', 'gm.system': 'system', 'gm.contact': 'contact',
+    'gm.despawn': 'despawn', 'gm.npc': 'npc' };
+  const privateSubmit = (actionId, request, send) => {
+    const accepted = privateAudio ? requestFeedback.submit(actionId, request, send) : send();
+    if (accepted !== false && request.correlation && popupForAction[actionId]) {
+      if (popupRequests.size >= 128) popupRequests.delete(popupRequests.keys().next().value);
+      popupRequests.set(request.correlation, { panel: popupForAction[actionId], operator: request.operator_id || win.__hostLocalGm?.()?.id });
+    }
+    return accepted;
+  };
   const shell = mountGmWorkspaceShell({ doc, win, t, has, native: requireNativeProvider,
     selectEntity: id => gmProjection.select(id) });
   const workshopSource = mountWorkshopSourceLink({ root: doc.getElementById('gm-console'), win, t });
   win.__hostGmShellMetadata = shell.metadata;
+  win.__hostGmTemporaryActions = shell.temporaryActions;
+  const deferredReadings = new Map();
+  let visibleTools = new Set();
+  let lastInspectorInterest = null;
+  win.__hostGmRefreshInspectorInterest = () => {
+    if (typeof win.__hostGmInspectorInterest !== 'function') return;
+    const panels = [...visibleTools].filter(panel => ['entity-fields','hull-fields','region-fields','presentation-fields','world-fields'].includes(panel)).sort();
+    const signature = JSON.stringify(panels);
+    if (signature === lastInspectorInterest) return;
+    if (win.__hostGmInspectorInterest(panels) !== false) lastInspectorInterest = signature;
+  };
+  win.__hostGmToolsVisible = visible => {
+    visibleTools = new Set(visible);
+    win.__hostGmRefreshInspectorInterest();
+    for (const [panel, entry] of deferredReadings) {
+      if (visibleTools.has(panel) && entry.pending) {
+        entry.pending = false; entry.controller.update(entry.payload);
+      }
+    }
+  };
+  // Read-only detail tools have no action outcomes to settle while closed.
+  // Prime availability once, then retain only the newest absolute reading.
+  function updateReading(panel, controller, payload) {
+    const previous = deferredReadings.get(panel);
+    const pending = !!previous && !visibleTools.has(panel);
+    deferredReadings.set(panel, { controller, payload, pending });
+    if (!pending) controller.update(payload);
+  }
   // Late-bound because the panel needs the projection's selection and the
   // projection needs the panel's `select`; the closure resolves at call time,
   // after both exist.
@@ -214,7 +252,9 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   });
   win.__hostGmCheckpointPanel = gmCheckpointPanel;
   win.__hostGmCheckpointState = gmCheckpointPanel.state;
-  win.__hostGmSessionRefresh = () => { gmSessionControls.refreshAdmission(); workshopSource.refresh(); };
+  const sessionWidget = createGmSessionWidget({ doc, t, getOperator: () => win.__hostLocalGm?.() });
+  win.__hostGmSessionContext = value => sessionWidget.update(value);
+  win.__hostGmSessionRefresh = () => { gmSessionControls.refreshAdmission(); sessionWidget.render(); workshopSource.refresh(); };
   win.__hostGmSessionReset = gmSessionControls.reset;
   win.__hostGmSessionState = gmSessionControls.state;
   let operatorStorage = null;
@@ -479,6 +519,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   win.__hostGmOpenAction = panel => shell.temporaryActions?.open(panel) === true;
   win.__hostGmActivityState = gmActivity.state;
   const gmStationPuppet = createGmStationPuppet({
+    requestInterest: request => win.__hostGmConsoleInterest?.(request) ?? false,
     doc: doc,
     win: win,
     t,
@@ -493,6 +534,12 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   });
   win.__hostGmStationRefresh = gmStationPuppet.refresh;
   win.__hostGmStationState = gmStationPuppet.state;
+  win.__hostGmStationVisible = gmStationPuppet.setVisible;
+  win.__hostGmStationMayHide = gmStationPuppet.mayHide;
+  win.__hostGmFocusStation = (ship, station) => {
+    shell.showLog('gm-station-surface');
+    return gmStationPuppet.focusStation(ship, station);
+  };
   // Presentation-only role presets (issue #1319). `onSelect` fires only on
   // the operator's OWN explicit live switch; the classic script below turns
   // that into a `rememberGmIdentity` write when a reconnectable GM identity
@@ -520,7 +567,10 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   // consumer of the other two controllers' already-parsed public state —
   // never re-parses the raw Host Channel payload itself — and keeps its
   // own selection independent of gmStationPuppet's takeover selection.
-  const gmKnowledgeCompare = createGmKnowledgeCompare({ doc: doc, t });
+  const gmKnowledgeCompare = createGmKnowledgeCompare({ doc: doc, t,
+    requestInterest: request => win.__hostGmConsoleInterest?.(request) ?? false });
+  gmKnowledgeCompare.setVisible(false);
+  win.__hostGmKnowledgeVisible = gmKnowledgeCompare.setVisible;
   win.__hostGmKnowledgeState = gmKnowledgeCompare.state;
   // Direct damage/repair on the selected entity (issue #1310). Its
   // authoritative results ride the same `gm_entity` projection the map does.
@@ -654,6 +704,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   win.__hostActionFeedback = hostActionFeedback;
   const handlers = {
     gm_entity:    function(p) {
+      if (typeof p === 'string') { try { p = JSON.parse(p); } catch (_) { return; } }
       gmDespawn.update(p);
       gmContact.update(p);
       // Spawn's ghost outcome reads the observing ships from the same
@@ -662,15 +713,16 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmPresentation.update(p);
       gmSystem.update(p);
       gmNpc.update(p);
-      gmEntityFields.update(p);
-      gmWorldFields.update(p);
-      gmShipFields.update(p);
-      gmRegionFields.update(p);
-      gmPresentationFields.update(p);
+      updateReading('entity-fields', gmEntityFields, p);
+      updateReading('world-fields', gmWorldFields, p);
+      updateReading('hull-fields', gmShipFields, p);
+      updateReading('region-fields', gmRegionFields, p);
+      updateReading('presentation-fields', gmPresentationFields, p);
       if (gmProjection.update(p)) {
         gmActivity.reconcileAvailability();
         gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
-        shell.refresh(gmProjection.state());
+        const raw = typeof p === 'string' ? JSON.parse(p) : p;
+        shell.refresh({ ...gmProjection.state(), world_inspector: raw.world_inspector, world_membership: raw.world_membership });
       }
       // The directed-effect results ride the same payload, so they fold
       // even if the entity list itself was rejected as malformed.
@@ -685,7 +737,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       }
     },
     gm_session:   function(p) {
-      gmSessionControls.update(p);
+      if (gmSessionControls.update(p)) sessionWidget.update(typeof p === 'string' ? JSON.parse(p) : p);
       gmFactionPanel.update(p);
       gmJournalPanel.update(p);
       // A refused restore request never reaches the health projection — no
@@ -696,6 +748,13 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       }
       gmRestoreControl.settleJournal(session?.journal?.entries);
       requestFeedback.settle(session?.journal?.entries);
+      gmStationPuppet.settleLifecycleResults(session?.journal?.entries);
+      for (const row of session?.journal?.entries || []) {
+        const pending = popupRequests.get(row.correlation);
+        if (!pending || pending.operator !== row.operator_id || !['applied', 'no-op', 'refused'].includes(row.outcome)) continue;
+        popupRequests.delete(row.correlation);
+        if (row.outcome !== 'refused') shell.temporaryActions?.succeeded(pending.panel);
+      }
     },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
     gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
@@ -728,12 +787,13 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     // parser or widget renderer in the Test adapter.
     setRolePresets: gmRolePresets.setAvailablePresets,
     rolePresetState: gmRolePresets.state,
-    dispose() { gmContact?.dispose(); workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
+    dispose() { gmStationPuppet.dispose(); sessionWidget.dispose(); gmContact?.dispose(); workshopSource.dispose(); soundAudition?.dispose(); win.removeEventListener('phoenix-operator-profile-loaded', reloadNativeProfile); disposePrivateAlerts(); requestFeedback.reset(); unsubscribePrivateProfile?.(); disposePrivateAudio?.(); gmAttentionPanel.dispose(); gmWorkloadPanel.dispose(); gmWidgetsPanel.dispose(); shell.dispose(); },
     refreshAdmission() {
       workshopSource.refresh();
       if (!alertScope()) privateAlerts.reset();
       shell.refresh();
       gmSessionControls.refreshAdmission();
+      sessionWidget.render();
       win.__hostGmMissionRefresh();
       gmCommsPanel.refreshAdmission();
       gmSpawnPanel.refreshAdmission();
@@ -747,6 +807,8 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       win.__hostGmEffectRefresh();
     },
     reset() {
+      deferredReadings.clear(); popupRequests.clear();
+      sessionWidget.reset(); gmStationPuppet.reset();
       privateAlerts.reset();
       requestFeedback.reset();
       privateAudio?.setActive(false);

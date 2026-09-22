@@ -3,7 +3,7 @@ import { WORKSHOP_LAYOUT_VERSION } from '../../gui/workshop-layout-model.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES, BROWSER_ZOOMS } from '../fixtures/device-matrix.mjs';
-import { revealGmPanel } from './dock-helpers.js';
+import { revealGmPanel, floatGmPanel } from './dock-helpers.js';
 
 // Issue #1430: the GM's smallest supported landscape surface and the top of
 // the enlargement range, from #1421's shared matrix (PRD #1418) — the same
@@ -58,7 +58,7 @@ test('Live dock persists separately and keeps the operator bar visible in narrow
   await joinAsReadyGm(page, world);
   await expect(page.locator('#gm-console > header')).toBeVisible();
   await expect(page.locator('[data-panel="roster"] #gm-roster')).toBeVisible();
-  await page.locator('[data-layout-actions-for="roster"] [data-layout-control="float"]').click();
+  await floatGmPanel(page, 'roster');
   await expect(page.locator('[data-panel="roster"].is-floating')).toBeVisible();
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('phoenix-operator-profile-v1')));
   expect(stored.liveLayout.floats[0].panel).toBe('roster');

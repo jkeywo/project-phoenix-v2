@@ -414,7 +414,7 @@ function renderCategory({ tbody, table, empty, summary }, diff, describe, doc, t
  * selection (issue #1318 AC #2): choosing a ship to compare never opens its
  * Station iframe or requires takeover.
  */
-export function createGmKnowledgeCompare({ doc = document, t = (id) => id, displayText = wireText } = {}) {
+export function createGmKnowledgeCompare({ doc = document, t = (id) => id, displayText = wireText, requestInterest = () => false } = {}) {
   const describeObjectiveBound = (entry, tt) => describeObjective(entry, tt, displayText);
   const pending = doc.getElementById('gm-knowledge-pending');
   const panel = doc.getElementById('gm-knowledge-panel');
@@ -453,6 +453,15 @@ export function createGmKnowledgeCompare({ doc = document, t = (id) => id, displ
   let truthEntities = [];
   let projection = { ships: [], activity: [] };
   let selectedShipId = null;
+  let visible = true;
+  let optionsSignature = '';
+  let lastInterest = null;
+  function publishInterest() {
+    const request = {consumer:'comparison', ship:selectedShipId || '', station:'', visible:visible && !!selectedShipId,
+      mount_generation:0, world_generation:projection.presentation_generation || 0};
+    const signature = JSON.stringify(request);
+    if (signature !== lastInterest && requestInterest(request) !== false) lastInterest = signature;
+  }
 
   function selectedShip() {
     return projection.ships.find((ship) => ship.ship_id === selectedShipId) || null;
@@ -460,6 +469,9 @@ export function createGmKnowledgeCompare({ doc = document, t = (id) => id, displ
 
   function rebuildOptions() {
     if (!select) return;
+    const signature = JSON.stringify(projection.ships.map(ship => [ship.ship_id, ship.name]));
+    if (signature === optionsSignature) { select.value = selectedShipId || ''; return; }
+    optionsSignature = signature;
     select.replaceChildren(...projection.ships.map((ship) => {
       const option = doc.createElement('option');
       option.value = ship.ship_id;
@@ -482,9 +494,11 @@ export function createGmKnowledgeCompare({ doc = document, t = (id) => id, displ
   }
 
   function render() {
+    if (!visible) { publishInterest(); return; }
     const ships = projection.ships;
     if (ships.length === 0) {
       selectedShipId = null;
+      publishInterest();
       if (pending) pending.hidden = false;
       if (panel) panel.hidden = true;
       if (select) select.replaceChildren();
@@ -497,6 +511,12 @@ export function createGmKnowledgeCompare({ doc = document, t = (id) => id, displ
     if (pending) pending.hidden = true;
     if (panel) panel.hidden = false;
     rebuildOptions();
+    publishInterest();
+    if (Array.isArray(projection.detail_ships) && !projection.detail_ships.includes(selectedShipId)) {
+      renderEmptyCategories();
+      if (pending) pending.hidden = false;
+      return;
+    }
     const compare = buildKnowledgeCompare(truthEntities, projection, selectedShip(), { displayText });
     renderCategory(categories.contacts, compare.contacts, describeContact, doc, t);
     renderCategory(categories.objectives, compare.objectives, describeObjectiveBound, doc, t);
@@ -537,6 +557,11 @@ export function createGmKnowledgeCompare({ doc = document, t = (id) => id, displ
   }
 
   return {
+    setVisible(value) {
+      if (visible === (value === true)) return;
+      visible = value === true;
+      render();
+    },
     updateTruth,
     updateStations,
     select: selectShip,

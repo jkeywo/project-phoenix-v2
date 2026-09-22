@@ -71,6 +71,7 @@ pub fn nested_template_paths(config: &crate::entities::config::EntityConfig) -> 
 thread_local! {
     /// Cache of loaded entity configs by path.
     static CONFIG_CACHE: RefCell<HashMap<String, EntityConfig>> = RefCell::new(HashMap::new());
+    static CONFIG_REVISION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 
     /// Queue of entity paths that need to be loaded.
     static PENDING_QUEUE: RefCell<VecDeque<String>> = RefCell::new(VecDeque::new());
@@ -909,6 +910,7 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
                     CONFIG_CACHE.with(|cache| {
                         cache.borrow_mut().insert(requested, config);
                     });
+                    CONFIG_REVISION.with(|revision| revision.set(revision.get().wrapping_add(1)));
                     if let Some(path) = primary_sidecar {
                         queue_primary_sidecar_preload(path);
                     }
@@ -1667,6 +1669,19 @@ static NATIVE_CONFIG_CACHE: std::sync::RwLock<
     Option<std::collections::HashMap<String, crate::entities::config::EntityConfig>>,
 > = std::sync::RwLock::new(None);
 
+#[cfg(not(target_arch = "wasm32"))]
+static CONFIG_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Presentation-only invalidation token. Includes template replacement and the
+/// mod overlay revision; never participates in simulation ordering or digests.
+pub fn config_cache_revision() -> (u64, u64) {
+    #[cfg(target_arch = "wasm32")]
+    let templates = CONFIG_REVISION.with(std::cell::Cell::get);
+    #[cfg(not(target_arch = "wasm32"))]
+    let templates = CONFIG_REVISION.load(std::sync::atomic::Ordering::Acquire);
+    (templates, mod_pack_revision())
+}
+
 /// Insert a parsed template into the native cache under `path`.
 ///
 /// Keyed by the same repo-relative path the world TOML uses
@@ -1679,6 +1694,7 @@ pub fn insert_native_config(path: String, config: crate::entities::config::Entit
     guard
         .get_or_insert_with(Default::default)
         .insert(path, config);
+    CONFIG_REVISION.fetch_add(1, std::sync::atomic::Ordering::Release);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

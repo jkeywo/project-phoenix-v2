@@ -188,6 +188,10 @@ const CASES = [
       && !['roster', 'inspector', 'entity-fields', 'hull-fields', 'region-fields'].includes(panel)),
     selected: 'region-fields',
   }],
+  ['a version 18 layout resets to the compact desk', {
+    version: 18, root: group(['roster', 'station', 'readiness'], 'station'), floats: [],
+    closed: LIVE_PANELS.filter(panel => !['roster', 'station', 'readiness'].includes(panel)), selected: 'station',
+  }],
   ['a current layout with unknown fields', {
     version: defaultLiveLayout().version,
     root: { type: 'tabs', tabs: ['comms', 'journal', 'unsafe'], active: 'journal', unsafe: 'secret' },

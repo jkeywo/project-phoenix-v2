@@ -30,7 +30,7 @@ use project_phoenix::native_host::panes::PaneId;
 use vellum_ultralight::runtime::{RuntimeOptions, UltralightRuntime};
 
 const PATIENCE: Duration = Duration::from_secs(30);
-const SIZE: (u32, u32) = (1440, 1000);
+const SIZE: (u32, u32) = (1920, 1080);
 const SURFACE: PaneId = PaneId(41);
 const SHIP_ID: &str = "00000000-0000-4000-8000-000000000041";
 
@@ -126,7 +126,7 @@ fn wait_for(
         std::thread::sleep(Duration::from_millis(16));
     }
     let diagnostic = surface.view_mut().evaluate(
-        "JSON.stringify({ready:document.readyState,gm:typeof window.phoenixNativeGm,channels:typeof window.__phoenixNativeGmChannels,body:document.body.innerText.slice(0,1500)})",
+        "JSON.stringify({ready:document.readyState,gm:typeof window.phoenixNativeGm,channels:typeof window.__phoenixNativeGmChannels,readyDisabled:document.getElementById('gm-ready-btn')?.disabled,map:document.getElementById('gm-entity-map')?.getBoundingClientRect().toJSON(),canvas:document.getElementById('gm-entity-map')?.shadowRoot?.querySelector('canvas')?.getBoundingClientRect().toJSON(),body:document.body.innerText.slice(0,1500)})",
     );
     panic!("GM workspace did not satisfy {expression}; engine diagnostic: {diagnostic:?}");
 }
@@ -325,5 +325,228 @@ fn native_gm_shared_workspace_loads_and_uses_the_private_engine_bridge() {
         pixels.iter().any(|byte| *byte != 0),
         "the loaded workspace rasterizes"
     );
+    exercise_live_station(&mut runtime, &mut surface, &bridge);
     bridge.close();
+}
+
+// A real native simulation and real Ultralight iframe in the same test process.
+// Only monitor placement is omitted. Requests still leave the document through
+// its private queue and enter the primary-GM submit_local admission boundary.
+fn exercise_live_station(
+    runtime: &mut UltralightHost,
+    surface: &mut UltralightPaneSurface,
+    bridge: &NativeGmBridge,
+) {
+    use bevy::prelude::*;
+    use phoenix::gm_action::{GmActionId, GmActionRequest};
+    use phoenix::native_host::session_role::{NativeSessionRole, NativeSessionRoleState};
+    use project_phoenix as phoenix;
+    let preload = phoenix::native_host::preload_content_templates(".").unwrap();
+    let catalog = phoenix::delivery::serve::ManifestSource::read(".", "assets/scenarios.toml")
+        .unwrap()
+        .merged_catalog()
+        .catalog;
+    let mut config = phoenix::native_host::NativeHostConfig::lobby(catalog);
+    config.surface = phoenix::boot::NativeRenderSurface::Contract;
+    config.seed = Some(42);
+    let mut app = phoenix::native_host::build_native_host_app(&config, &preload).unwrap();
+    app.add_plugins(phoenix::gm_projection::GmProjectionPlugin);
+    app.insert_resource(phoenix::gm_projection::NativeGmPresentation);
+    let mut role = NativeSessionRoleState::default();
+    role.request(NativeSessionRole::StandaloneGameMaster);
+    app.insert_resource(role);
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        Duration::from_secs_f64(1.0 / 60.0),
+    ));
+    app.finish();
+    app.cleanup();
+    for _ in 0..4 {
+        app.update();
+    }
+    app.world_mut()
+        .write_message(phoenix::lobby::server::InboundMessage {
+            token: "native-gm".into(),
+            msg: phoenix::core::messages::ClientMessage::SelectScenario {
+                scenario_id: "combat_test".into(),
+            },
+        });
+    for _ in 0..90 {
+        app.update();
+    }
+    phoenix::gm_action::submit_local(
+        app.world_mut(),
+        GmActionRequest {
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("engine-backfill").unwrap(),
+            action: GmAction::BackfillShipSlot {
+                slot: "player".into(),
+            },
+        },
+    )
+    .unwrap();
+    for _ in 0..4 {
+        app.update();
+    }
+    app.world_mut()
+        .resource_mut::<NextState<GamePhase>>()
+        .set(GamePhase::InProgress);
+    for _ in 0..10 {
+        app.update();
+    }
+    let uuid = app.world_mut().query_filtered::<&phoenix::entities::spawner::EntityUuid, With<phoenix::lockstep::FleetSlotOf>>()
+        .iter(app.world()).next().unwrap().0.clone();
+    assert!(!app
+        .world()
+        .contains_resource::<phoenix::lobby::SelectedShipResource>());
+    let roster = app.world().resource::<GmRoster>();
+    bridge.publish(
+        "metadata",
+        codec::encode_native_gm_metadata(&NativeGmMetadata {
+            phase: GamePhase::InProgress,
+            host_lobby_unavailable: false,
+            local_operator_id: Some("gm-1".into()),
+            role_presets: Vec::new(),
+            gms: roster.projection(),
+            start_policy: readiness_totals(Default::default(), roster),
+            start_result: None,
+            ship_slots: Vec::new(),
+        })
+        .unwrap(),
+    );
+    let mut live_frame = |surface: &mut UltralightPaneSurface, runtime: &mut UltralightHost| {
+        runtime.update();
+        surface.refresh_loaded();
+        bridge.pump(SURFACE, surface);
+        for json in bridge.take_records() {
+            if let Some(NativeGmRecord::Action { request }) = codec::decode_native_gm_record(&json)
+            {
+                phoenix::gm_action::submit_local(
+                    app.world_mut(),
+                    codec::decode_gm_action_request(&request).unwrap(),
+                )
+                .expect("real iframe action is admitted through the primary-GM boundary");
+            }
+        }
+        app.update();
+        if let Some(message) = app
+            .world_mut()
+            .resource_mut::<Messages<phoenix::console_bridge::GmStationProjectionChanged>>()
+            .drain()
+            .last()
+        {
+            bridge.publish(
+                "gm_station",
+                codec::encode_gm_station_projection(&message.payload).unwrap(),
+            );
+        }
+        if let Some(message) = app
+            .world_mut()
+            .resource_mut::<Messages<phoenix::console_bridge::GmEntityProjectionChanged>>()
+            .drain()
+            .last()
+        {
+            bridge.publish(
+                "gm_entity",
+                codec::encode_gm_entity_projection(&message.payload).unwrap(),
+            );
+        }
+        runtime.render();
+    };
+    for _ in 0..5 {
+        live_frame(surface, runtime);
+    }
+    surface.view_mut().evaluate(&format!("window.__hostGmConfirmationProfile.setMode('station.takeover','immediate'); window.__hostGmConfirmationProfile.setMode('station.release','immediate'); window.__hostGmConfirmationProfile.setMode('station.command','immediate'); window.__hostGmFocusStation('{uuid}','helm')")).unwrap();
+    let mut await_condition = |expression: &str| {
+        let deadline = Instant::now() + PATIENCE;
+        while Instant::now() < deadline {
+            live_frame(surface, runtime);
+            if surface
+                .view_mut()
+                .evaluate(&format!("String({expression})"))
+                .ok()
+                .as_deref()
+                == Some("true")
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        panic!(
+            "native live station did not satisfy {expression}: {:?}",
+            surface
+                .view_mut()
+                .evaluate("document.getElementById('gm-station-connection').textContent")
+        );
+    };
+    await_condition("document.getElementById('gm-station-frame').contentWindow && typeof document.getElementById('gm-station-frame').contentWindow.sendAction === 'function' && document.getElementById('gm-station-connection').textContent.includes('Observation')");
+    drop(await_condition);
+    surface.view_mut().evaluate("window.__nativeReadings = []; const stationWindow = document.getElementById('gm-station-frame').contentWindow; const stationUpdate = stationWindow.__updateConsole; stationWindow.__updateConsole = function(id, json) { window.__nativeReadings.push(typeof json === 'string' ? JSON.parse(json).speed : json.speed); return stationUpdate.apply(this, arguments); };").unwrap();
+    surface.view_mut().evaluate("window.__nativeStationFrame = document.getElementById('gm-station-frame'); document.getElementById('gm-station-toggle').click()").unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    while Instant::now() < deadline {
+        live_frame(surface, runtime);
+        if surface
+            .view_mut()
+            .evaluate(
+                "String(document.getElementById('gm-station-toggle').dataset.active === 'true')",
+            )
+            .unwrap()
+            == "true"
+        {
+            break;
+        }
+    }
+    assert_eq!(
+        surface
+            .view_mut()
+            .evaluate(
+                "String(document.getElementById('gm-station-toggle').dataset.active === 'true')"
+            )
+            .unwrap(),
+        "true"
+    );
+    surface.view_mut().evaluate("document.getElementById('gm-station-frame').contentWindow.sendAction('set_helm_thrust', {value:0.65, correlation:'native-live-thrust'})").unwrap();
+    for _ in 0..30 {
+        live_frame(surface, runtime);
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert_eq!(
+        surface
+            .view_mut()
+            .evaluate("String(new Set(window.__nativeReadings.filter(Number.isFinite)).size > 1)")
+            .unwrap(),
+        "true",
+        "the real authored Helm console receives changing live speed readings"
+    );
+    surface
+        .view_mut()
+        .evaluate("window.__hostSetSessionPaused(true, 'native-pause-before-release')")
+        .unwrap();
+    for _ in 0..5 {
+        live_frame(surface, runtime);
+    }
+    surface
+        .view_mut()
+        .evaluate("document.getElementById('gm-station-toggle').click()")
+        .unwrap();
+    for _ in 0..15 {
+        live_frame(surface, runtime);
+    }
+    assert_eq!(surface.view_mut().evaluate("String(document.getElementById('gm-station-toggle').dataset.active === 'false' && document.getElementById('gm-station-frame') === window.__nativeStationFrame)").unwrap(), "true", "release hands back without replacing the console");
+    drop(live_frame);
+    assert!(
+        app.world()
+            .resource::<phoenix::gm_action::SimulationPaused>()
+            .0,
+        "release remains possible with the simulation paused"
+    );
+    assert!(
+        app.world()
+            .resource::<phoenix::gm_action::GmActionLog>()
+            .entries()
+            .iter()
+            .any(|row| row.correlation.as_str() == "native-live-thrust"
+                && row.outcome == phoenix::gm_action::GmActionOutcome::Applied),
+        "an action sent by the authentic native iframe reaches the authoritative journal"
+    );
 }

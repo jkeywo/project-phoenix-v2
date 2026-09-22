@@ -83,6 +83,8 @@ thread_local! {
     /// admission pass. This lane remains live while FixedUpdate is paused.
     static PENDING_GM_ACTIONS: RefCell<VecDeque<crate::gm_action::GmActionRequest>> =
         const { RefCell::new(VecDeque::new()) };
+    static GM_INSPECTOR_INTEREST: RefCell<Option<Vec<crate::gm_projection::GmInspectorKind>>> = const { RefCell::new(None) };
+    static GM_CONSOLE_INTEREST: RefCell<BTreeMap<crate::gm_projection::GmConsoleConsumer, crate::gm_projection::GmConsoleInterest>> = const { RefCell::new(BTreeMap::new()) };
 
     /// Accepted GM join transactions waiting for the deterministic sequencer.
     /// First-time decisions came from a visible peer; reconnects came from the
@@ -1038,6 +1040,25 @@ pub(super) fn submit_gm_action(request_json: &str) -> bool {
         pending.push_back(request);
         true
     })
+}
+
+pub(super) fn set_gm_inspector_interest(panels: Vec<crate::gm_projection::GmInspectorKind>) {
+    GM_INSPECTOR_INTEREST.with(|pending| *pending.borrow_mut() = Some(panels));
+}
+
+pub(super) fn take_gm_inspector_interest() -> Option<Vec<crate::gm_projection::GmInspectorKind>> {
+    GM_INSPECTOR_INTEREST.with(|pending| pending.borrow_mut().take())
+}
+
+pub(super) fn set_gm_console_interest(request: crate::gm_projection::GmConsoleInterest) {
+    GM_CONSOLE_INTEREST.with(|pending| {
+        pending.borrow_mut().insert(request.consumer, request);
+    });
+}
+
+pub(super) fn take_gm_console_interest(
+) -> BTreeMap<crate::gm_projection::GmConsoleConsumer, crate::gm_projection::GmConsoleInterest> {
+    GM_CONSOLE_INTEREST.with(|pending| std::mem::take(&mut *pending.borrow_mut()))
 }
 
 pub(super) fn begin_gm_join(

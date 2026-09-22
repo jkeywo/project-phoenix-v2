@@ -11,9 +11,14 @@
 import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 import { healthStateLabelId } from './gm-health-banner.js';
 import { formatAttentionAge } from './gm-attention-panel.js';
-import { liveLayoutModel } from './live-layout-model.js';
+import { liveLayoutModel, restorePreviousLiveLayout } from './live-layout-model.js';
 import { createTemporaryActions } from './gm-temporary-actions.js';
 import { mountDockLayout } from './workshop-layout-renderer.js';
+import { createGmEntityTree } from './gm-entity-tree.js';
+
+function putText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
 
 /** Workload levels that are a claim about a PERSON, worst last. A hull's word
  * is the worst of these across its Stations; a hull whose Stations are all
@@ -32,14 +37,10 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   ['mission', 'gm-mission-panel'],
   ['comms', 'gm-comms-panel'],
   ['activity', 'gm-activity'],
-  ['journal', 'gm-journal'],
-  ['session-history', 'gm-session-history'],
   ['map', 'gm-map-panel'],
   ['attention', 'gm-attention-panel'],
   ['workload', 'gm-workload-panel'],
   ['widgets', 'gm-widgets'],
-  ['health', 'gm-health-panel'],
-  ['station', 'gm-station-tools'],
   ['station-console', 'gm-station-surface'],
   ['presentation', 'gm-presentation-dock'],
   ['audition', 'gm-audition-dock'],
@@ -78,7 +79,6 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
   // Activating, completing and failing an authored Objective: ordinary dock
   // controls in the mission workflow, because the authored target and its
   // recipients already define the operation (issue #1513).
-  ['objective', 'gm-objective-panel'],
   // The entities/AI domain of the Live Inspector (issue #1489): a reading
   // surface beside the selection it reads, never a second action route.
   ['entity-fields', 'gm-entity-fields-panel'],
@@ -91,10 +91,10 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
 /** Visual-Studio-style window menus. They are deliberately presentation-only:
  * every item still invokes the dock's ordinary reveal/reopen operation. */
 export const GM_LIVE_DOCK_MENUS = Object.freeze([
-  ['session', ['roster', 'readiness', 'join', 'manual-save', 'mission', 'health', 'checkpoint', 'restore']],
-  ['crew', ['workload', 'station', 'station-console']],
-  ['communications', ['comms', 'activity', 'journal', 'session-history', 'presentation', 'audition']],
-  ['world', ['map', 'spawn', 'contact', 'npc', 'misclassify', 'report-policy', 'system', 'effect', 'despawn', 'faction', 'objective']],
+  ['session', ['roster', 'readiness', 'manual-save', 'mission', 'checkpoint', 'restore']],
+  ['crew', ['workload', 'station-console']],
+  ['communications', ['comms', 'activity', 'presentation', 'audition']],
+  ['world', ['map', 'spawn', 'contact', 'npc', 'misclassify', 'report-policy', 'system', 'effect', 'despawn', 'faction']],
   ['inspect', ['inspector', 'entity-fields', 'hull-fields', 'region-fields', 'presentation-fields', 'world-fields', 'widgets', 'source-link']],
 ]);
 
@@ -178,7 +178,32 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   roster.append(element('h2', 'gm-roster-heading', 'server.gm.shell.roster'));
   const ships = element('div', 'gm-roster-ships');
   const operators = element('div', 'gm-roster-operators');
-  roster.append(ships, element('h3', null, 'server.gm.shell.operators'), operators);
+  roster.append(ships);
+  let worldReadings = {}, worldMembership = {};
+  const groupSummary = element('section', 'gm-tree-inspection'); groupSummary.hidden = true;
+  get('gm-inspector')?.prepend(groupSummary);
+  const entityTree = createGmEntityTree({ root: ships, doc, t, onSelect(row) {
+    groupSummary.hidden = row.kind === 'entity' || row.kind === 'station';
+    get('gm-inspector').dataset.groupInspection = String(!groupSummary.hidden);
+    if (row.kind === 'station') { win.__hostGmFocusStation?.(row.entity.entity_id, row.station.station_id); return; }
+    if (row.kind === 'entity') { selectEntity(row.entity.entity_id); liveLayout?.reveal('inspector'); return; }
+    const title = element('h3'); title.textContent = row.label;
+    const detail = element('p');
+    const members = entities.filter(entity => (worldMembership[entity.entity_id] || 'unassigned') === row.world
+      && (row.kind !== 'faction' || (entity.faction?.entity_id || 'none') === row.faction));
+    detail.textContent = row.kind === 'slot' ? t(`server.gm.shell.ship_slot.${row.slot.state}`)
+      : t('server.gm.tree.group_summary', { id: row.kind === 'world' ? row.world : row.faction, count: members.length });
+    groupSummary.replaceChildren(title, detail);
+    if (row.kind === 'slot' && row.slot.can_backfill) {
+      const fill = element('button', null, 'server.gm.shell.ship_slot.spawn_backfill');
+      fill.addEventListener('click', () => {
+        const operator = win.__hostLocalGm?.();
+        if (operator) win.__hostBackfillShipSlot?.({ operator_id: operator.id, slot: row.slot.id,
+          correlation: `slot-backfill-${Date.now()}-${++backfillSequence}` });
+      }); groupSummary.append(fill);
+    }
+    liveLayout?.reveal('inspector');
+  } });
   // Spawn left the roster to become a temporary action panel (issue #1506).
   // It stays in the document for the ordinary browser host, which has no dock.
   root.append(get('gm-spawn-panel'));
@@ -243,6 +268,16 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // #gm-session-log by id, and on the ordinary browser host there is no dock to
   // place it. The dock moves it out into its own frame when it mounts.
   get('gm-activity')?.append(sessionHistory);
+  const activityHost = element('section', 'gm-activity-dock'); root.append(activityHost);
+  const activityFilter = element('select'); activityFilter.setAttribute('aria-label', t('server.gm.activity.source'));
+  const activitySources = [get('gm-activity'), get('gm-journal'), sessionHistory].filter(Boolean);
+  for (const [value, key] of [['all', 'server.gm.role_preset.option.all'], ['gm-activity', 'server.gm.shell.layout.panel.activity'],
+    ['gm-journal', 'server.gm.shell.layout.panel.journal'], ['gm-session-history', 'server.gm.shell.layout.panel.session_history']]) {
+    const option = element('option', null, key); option.value = value; activityFilter.append(option);
+  }
+  activityHost.append(activityFilter, ...activitySources);
+  activityFilter.addEventListener('change', () => activitySources.forEach(node => { node.hidden = activityFilter.value !== 'all' && activityFilter.value !== node.id; }));
+  if (get('gm-objective-panel')) get('gm-mission-panel')?.append(get('gm-objective-panel'));
   const inspector = get('gm-inspector');
   // Authentic Station operation is two dock panels (issue #1504): the pending
   // state and the takeover controls are an ordinary tool, and the console
@@ -259,6 +294,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   root.append(stationTools, stationSurface);
   move(stationTools, 'gm-station-pending', 'gm-station-controls');
   move(stationSurface, 'gm-station-frame', 'gm-station-activity-heading', 'gm-station-activity');
+  stationSurface.prepend(stationTools);
   // The operator's own utilities mount LATER than this shell and resolve their
   // host by id, so each gets a stable one now. Each host sits where its panel
   // used to, which is what the ordinary browser host — which has no dock — still
@@ -272,10 +308,11 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   // handed NODES rather than ids, which also survives a re-mount when the
   // migrated panels already live in the previous canvas.
   const liveDockNodes = new Map(GM_LIVE_DOCK_PANEL_IDS.map(([panel, id]) => [panel,
-    { 'gm-session-history': sessionHistory, 'gm-station-tools': stationTools,
+    { 'gm-activity': activityHost, 'gm-session-history': sessionHistory, 'gm-station-tools': stationTools,
       'gm-station-surface': stationSurface, 'gm-presentation-dock': presentationHost,
       'gm-audition-dock': auditionHost, 'gm-source-link-dock': sourceLinkHost }[id] || get(id)]));
   const tabs = element('div', 'gm-inspector-tabs');
+  let inspectorVisible = true;
   tabs.setAttribute('role', 'tablist');
   const knowledge = get('gm-knowledge-panel');
   const comparison = element('div', 'gm-comparison');
@@ -308,6 +345,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   function setTab(mode) {
     inspector.dataset.view = mode;
     comparison.hidden = mode === 'truth';
+    win.__hostGmKnowledgeVisible?.(inspectorVisible && mode !== 'truth');
     tabs.querySelectorAll('button').forEach(button => {
       button.setAttribute('aria-selected', String(button.id === `gm-tab-${mode}`));
       button.tabIndex = button.id === `gm-tab-${mode}` ? 0 : -1;
@@ -455,120 +493,21 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     healthPills.replaceChildren(...nodes);
   }
   function paintRoster() {
-    // Only the DERIVED word goes in, never the advisory itself: a gm_workload
-    // row carries `sustained_secs`, which moves about once a simulated second
-    // while any Station holds demand. Folding the raw projection in here would
-    // rebuild every roster button a second — discarding a mousedown held on a
-    // row, dropping hover and active state, and losing a screen reader's place
-    // in the ship list — for a pill whose word had not changed.
-    const signature = JSON.stringify([entities.map(({ entity_id, name, kind, faction }) => ({ entity_id, name, kind, faction })), stationProjection.ships.map(ship => [ship.ship_id, ship.stations, ship.ship_config?.station_systems, ship.control_sources]), gms, shipSlots, entities.map(({ entity_id }) => workloadWord(entity_id))]);
-    if (signature === rosterSignature) return;
-    rosterSignature = signature;
-    const focused = doc.activeElement?.dataset?.entityId;
-    ships.replaceChildren();
-    if (shipSlots.length) {
-      ships.append(element('h3', null, 'server.gm.shell.player_slots'));
-      for (const slot of shipSlots) {
-        const row = element('div'); row.className = 'gm-roster-row gm-ship-slot-row';
-        row.dataset.shipSlot = slot.id;
-        const title = element('strong'); title.textContent = label(slot.label) || slot.id;
-        const state = element('span'); state.className = 'gm-ship-slot-state';
-        state.textContent = t(`server.gm.shell.ship_slot.${slot.state}`);
-        row.append(title, state);
-        if (slot.can_backfill) {
-          const button = element('button'); button.type = 'button';
-          button.dataset.shipSlotAction = slot.id;
-          button.textContent = t('server.gm.shell.ship_slot.spawn_backfill');
-          button.addEventListener('click', () => {
-            const operator = win.__hostLocalGm?.();
-            if (!operator || typeof win.__hostBackfillShipSlot !== 'function') return;
-            button.disabled = true;
-            const accepted = win.__hostBackfillShipSlot({
-              operator_id: operator.id,
-              correlation: `slot-backfill-${Date.now()}-${backfillSequence += 1}`,
-              slot: slot.id,
-            });
-            if (accepted !== true) button.disabled = false;
-          });
-          row.append(button);
-        }
-        ships.append(row);
-      }
+    entityTree.update({ entities, worlds: worldReadings, membership: worldMembership,
+      stations: stationProjection.ships, slots: shipSlots });
+    const signature = JSON.stringify(gms);
+    if (operators.dataset.signature !== signature) {
+      operators.dataset.signature = signature;
+      operators.replaceChildren(...gms.map(gm => { const row = element('p'); row.textContent = `${gm.name || gm.id} · ${t(gm.connected === false ? 'server.gm.shell.disconnected' : gm.ready ? 'server.gm.shell.ready' : 'server.gm.shell.waiting')}`; return row; }));
     }
-    for (const kind of ['player_ship', 'npc_ship']) {
-      ships.append(element('h3', null, `server.gm.shell.${kind}`));
-      for (const entity of entities.filter(row => row.kind === kind)) {
-        const row = element('div'); row.className = 'gm-roster-row';
-        const button = element('button'); button.type = 'button';
-        button.dataset.entityId = entity.entity_id;
-        button.setAttribute('aria-pressed', String(entity.entity_id === selected));
-        button.textContent = label(entity.name) || entity.entity_id;
-        button.addEventListener('click', () => selectEntity(entity.entity_id));
-        row.append(button);
-        if (entity.faction) {
-          const faction = element('span'); faction.textContent = label(entity.faction.name); row.append(faction);
-        }
-        const stationShip = stationProjection.ships.find(ship => ship.ship_id === entity.entity_id);
-        const pills = element('div'); pills.className = 'gm-station-pills';
-        for (const station of stationShip?.stations || []) {
-          const pill = element('span');
-          const owned = stationShip.ship_config?.station_systems?.[station.station_id] || [];
-          const sources = new Set(owned.map(id => stationShip.control_sources?.[id]).filter(Boolean));
-          const source = sources.size > 1 ? 'mixed' : [...sources][0];
-          const stateKey = { Human: 'server.gm.shell.control.human', Ai: 'server.gm.shell.control.ai',
-            Offline: 'server.gm.shell.control.offline', mixed: 'server.gm.shell.control.mixed' }[source];
-          pill.textContent = `${label(station.name)} · ${stateKey ? t(stateKey) : station.rating}`;
-          pill.title = station.rating;
-          pill.dataset.rating = station.rating;
-          pills.append(pill);
-        }
-        row.append(pills);
-        // The artboard's workload word beside a crewed hull (issue #1438 data,
-        // not a second advisory): a WORD, with the panel below still carrying
-        // the evidence behind it.
-        const level = workloadWord(entity.entity_id);
-        if (level) {
-          const word = element('span');
-          word.className = 'gm-roster-workload';
-          word.dataset.level = level;
-          word.textContent = t(`server.gm.workload.state.${level}`);
-          row.append(word);
-        }
-        ships.append(row);
-      }
-    }
-    if (focused) [...ships.querySelectorAll('button')].find(button => button.dataset.entityId === focused)?.focus({ preventScroll: true });
-    operators.replaceChildren();
-    for (const gm of gms) {
-      const row = element('p');
-      row.textContent = `${gm.name || gm.id} · ${t(gm.connected === false ? 'server.gm.shell.disconnected' : gm.ready ? 'server.gm.shell.ready' : 'server.gm.shell.waiting')}`;
-      operators.append(row);
-    }
-    peers.textContent = t('server.gm.shell.peers', { gms: gms.length, ships: entities.filter(row => row.kind === 'player_ship').length });
+    putText(peers, t('server.gm.shell.peers', { gms: gms.length, ships: entities.filter(row => row.kind === 'player_ship').length }));
   }
-  // Presenters repaint button text. Restore the shared family's background
-  // and label after each paint, without changing listeners or control ids.
-  function styleButtons() {
-    segments.forEach(paint => paint());
-    root.querySelectorAll('button').forEach(button => {
-      // Dock chrome has its own compact desktop styling. Turning a 22px tab or
-      // icon into the console's 44px chamfered action button is what made the
-      // workspace chrome consume most of the native screen.
-      if (button.closest('.workshop-panel-switcher, .workshop-tab-list, .workshop-panel-header, .workshop-dock-targets')) return;
-      button.classList.add('btn', 'btn--md');
-      if (button.querySelector('.btn-bg')) return;
-      const label = element('span'); label.className = 'label';
-      label.append(...button.childNodes);
-      const background = element('span'); background.className = 'btn-bg';
-      background.setAttribute('aria-hidden', 'true');
-      button.append(background, label);
-    });
-  }
-  const observer = new win.MutationObserver(() => { styleButtons(); liveLayout?.syncAvailability(); });
+  function styleButtons() { segments.forEach(paint => paint()); }
+  const observer = new win.MutationObserver(() => { liveLayout?.syncAvailability(); });
   // `hidden` is watched as well as the tree: the role preset toggles Comms and
   // Activity without any other signal reaching this shell, and a tab for a
   // panel the preset has put away is a control that leads nowhere.
-  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+  for (const node of liveDockNodes.values()) if (node) observer.observe(node, { attributes: true, attributeFilter: ['hidden'] });
   styleButtons();
   get('gm-station-toggle')?.addEventListener('click', () => {
     // Taking a Station over brings its console to hand. In the dock that is a
@@ -590,8 +529,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       // nobody opened is simply not there — so a shortcut that points into one
       // opens it, through the lifecycle that owns what opening means. Every
       // other panel is only brought forward: closing one is a decision.
-      if (liveLayoutModel.isTemporary(entry[0])) return temporaryActions.open(entry[0]) === true;
-      return liveLayout?.reveal(entry[0], { reopen: false }) === true;
+      if (liveLayoutModel.isTemporary(entry[0]) && temporaryActions.open(entry[0])) return true;
+      return liveLayout?.reveal(entry[0]) === true;
     }
     return false;
   }
@@ -633,6 +572,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     if (!isLiveWorkspace()) { pendingMount = { initial, onChange }; return null; }
     pendingMount = null;
     ensureDockCss();
+    if (liveLayout) restoreDockedNodes();
     liveLayout?.dispose();
     const readiness = element('section', 'gm-readiness-dock');
     const startControls = get('gm-start-controls');
@@ -641,6 +581,11 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     const join = get('gm-join-controls');
     preserveForDock(join, ['style']);
     join?.removeAttribute('style');
+    readiness.append(operators);
+    if (join) readiness.append(join);
+    preserveForDock(get('gm-health-panel'));
+    if (get('gm-health-panel')) readiness.append(get('gm-health-panel'));
+    move(bar, 'gm-attention-banners');
     const manual = element('section', 'gm-manual-save-dock');
     const manualPanel = get('manual-save-panel');
     preserveForDock(manualPanel, native ? ['hidden'] : []);
@@ -659,8 +604,12 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       migrated[panel] = node || element('section');
     }
     liveLayout = mountDockLayout({ root, surface: liveSurface,
-      panels: { roster, readiness, join: join || element('section'), 'manual-save': manual, ...migrated },
+      panels: { roster, readiness, 'manual-save': manual, ...migrated },
       available: panel => {
+        // Read-only inspectors are demand-loaded. Empty initial readings must
+        // not make the menu item needed to request those readings disappear.
+        if (['entity-fields','hull-fields','region-fields','presentation-fields','world-fields'].includes(panel)) return true;
+        if (['join', 'health', 'station', 'objective', 'journal', 'session-history'].includes(panel)) return false;
         const source = GM_LIVE_DOCK_PANEL_IDS.find(([name]) => name === panel)?.[2];
         // A panel that declares an availability node and has not mounted it yet
         // has nothing to show, so it is not offered. The tree observer brings it
@@ -669,9 +618,13 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
         return !liveDockNodes.get(panel)?.hidden;
       },
       onVisible(visible) {
+        inspectorVisible = visible.has('inspector');
+        win.__hostGmKnowledgeVisible?.(inspectorVisible && inspector.dataset.view !== 'truth');
         // A map with no frame draws 60 times a second into a canvas of no size.
         liveDockNodes.get('map')?.querySelector('ph-navigation-map')
           ?.setRendering?.(visible.has('map'));
+        win.__hostGmStationVisible?.(visible.has('station-console'));
+        win.__hostGmToolsVisible?.(visible);
       },
       labels: {
         switcher: t('server.gm.shell.layout.switcher'), reset: t('server.gm.shell.layout.reset'),
@@ -680,19 +633,46 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
         dock: Object.fromEntries(['left', 'right', 'top', 'bottom', 'tab'].map(place =>
           [place, t(`server.gm.shell.layout.dock_${place}`)])),
         panels: Object.fromEntries(liveLayoutModel.panels.map(panel =>
-          [panel, t(`server.gm.shell.layout.panel.${panel.replace(/-/g, '_')}`)])),
+          [panel, t(panel === 'roster' ? 'server.gm.tree.title' : panel === 'readiness' ? 'server.gm.session.title' : `server.gm.shell.layout.panel.${panel.replace(/-/g, '_')}`)])),
         tabs: t('server.gm.shell.log_tabs'),
       },
       panelMenus: GM_LIVE_DOCK_MENUS.map(([id, panels]) => ({
         label: t(`server.gm.shell.layout.menu.${id}`), panels,
       })),
+      layoutActions: [
+        { label: t('server.gm.layout.restore_previous'), run: () => {
+          const profile = win.__hostGmConfirmationProfile;
+          if (!profile?.previousLiveLayout() || !temporaryActions.mayReset()) return;
+          const value = restorePreviousLiveLayout(profile.previousLiveLayout());
+          if (profile.setLiveLayout(value).status === 'saved') liveLayout.set(value);
+        } },
+        { label: t('server.gm.layout.toggle_density'), run: () => {
+          const profile = win.__hostGmConfirmationProfile;
+          if (profile?.setDensity(profile.density() === 'touch' ? 'compact' : 'touch').status === 'saved') root.dataset.density = profile.density();
+        } },
+      ],
       // The migrated panels' contents are owned by modules that resolve them by
       // id AFTER this mounts, so no registered panel may leave the document.
       retain: true,
       mayReset: () => temporaryActions.mayReset(),
       mayClose: panel => temporaryActions.mayDiscard(panel),
+      mayHide: (panel, retry) => panel !== 'station-console' || !win.__hostGmStationMayHide
+        || win.__hostGmStationMayHide(retry),
       onDiscard: panel => temporaryActions.discard(panel),
       initial, onChange, model: liveLayoutModel, viewportNarrow: true, doc, win });
+    for (const panel of liveLayoutModel.temporary) {
+      if (['spawn', 'restore', 'misclassify', 'report-policy', 'effect'].includes(panel)) continue;
+      const node = panel === 'manual-save' ? manual : liveDockNodes.get(panel);
+      if (!node || node.querySelector('[data-popup-keep]')) continue;
+      let dirty = false;
+      const label = element('label');
+      const keep = element('input'); keep.type = 'checkbox'; keep.dataset.popupKeep = panel;
+      label.append(keep, doc.createTextNode(t('server.gm.action.keep_open'))); node.append(label);
+      node.addEventListener('input', event => { if (event.target !== keep) dirty = true; });
+      node.addEventListener('gm-save-confirmed', () => temporaryActions.succeeded(panel));
+      temporaryActions.register(panel, { isDirty: () => dirty, reset: () => { dirty = false; },
+        keepOpen: () => keep.checked, focus: () => node.querySelector('input:not([type=checkbox]), select, button')?.focus() });
+    }
     styleButtons();
     return liveLayout;
   }
@@ -710,8 +690,8 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   rootObserver.observe(doc.documentElement, { attributes: true, attributeFilter: ['class'] });
   return {
     dispose() {
-      liveLayout?.dispose();
       restoreDockedNodes();
+      liveLayout?.dispose();
       observer.disconnect();
       rootObserver.disconnect();
       dockCss?.remove();
@@ -738,7 +718,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
      * cannot hide a connection or recovery failure from themselves; a panel
      * sitting behind another tab would hide it just as effectively as a role
      * preset would, so the arrangement yields to it. */
-    revealBanners() { return liveLayout?.reveal('attention') === true; },
+    revealBanners() { return true; },
     /** Bring one of the migrated record panels to the front.
      *
      * A panel that is not the active tab is `hidden`, so anything inside it is
@@ -751,41 +731,49 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     showLog(panelId) {
       const entry = GM_LIVE_DOCK_PANEL_IDS.find(([, id]) => id === panelId);
       const panel = entry && liveDockNodes.get(entry[0]);
-      if (!entry || !panel || panel.hidden) return false;
+      if (!entry || !panel || (panel.hidden && !['entity-fields','hull-fields','region-fields','presentation-fields','world-fields'].includes(entry[0]))) return false;
       return liveLayout?.reveal(entry[0]) === true;
     },
     metadata(value) { gms = value.gms || []; shipSlots = value.ship_slots || []; paintRoster(); },
     selection(entity) {
+      if (!groupSummary.hidden && (entity?.entity_id || null) === selected) return;
+      groupSummary.hidden = true;
+      get('gm-inspector').dataset.groupInspection = 'false';
+      entityTree.selectEntity(entity?.entity_id);
       selected = entity?.entity_id || null;
-      chip.textContent = entity ? label(entity.name) : t('server.gm.inspector.empty');
+      putText(chip, entity ? label(entity.name) : t('server.gm.inspector.empty'));
+      const systemSignature = JSON.stringify(entity?.status.systems || []);
+      if (systems.dataset.readings === systemSignature) return;
+      systems.dataset.readings = systemSignature;
       systems.replaceChildren();
       for (const system of entity?.status.systems || []) {
         const pill = element('span');
         pill.textContent = `${label(system.name)} · ${system.max_milli_hp ? Math.round(system.current_milli_hp / system.max_milli_hp * 100) : 0}%`;
         systems.append(pill);
       }
-      ships.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.entityId === selected)));
     },
     refresh(projection, stations) {
-      if (projection) entities = projection.entities;
+      const density = win.__hostGmConfirmationProfile?.density() || 'compact';
+      if (root.dataset.density !== density) root.dataset.density = density;
+      if (projection) { entities = projection.entities; worldReadings = projection.world_inspector?.readings || {}; worldMembership = projection.world_membership || {}; }
       if (stations) stationProjection = stations;
       knowledgeScope.hidden = !knowledge || knowledge.hidden;
       stationSurface.hidden = !get('gm-station-controls') || get('gm-station-controls').hidden;
       const gm = win.__hostLocalGm?.();
-      identity.textContent = gm ? `${gm.name || gm.id}` : '';
+      putText(identity, gm ? `${gm.name || gm.id}` : '');
       const title = get('lobby-title')?.textContent;
       scenario.hidden = !title || title === t('server.loading');
-      scenario.textContent = scenario.hidden ? '' : title;
+      putText(scenario, scenario.hidden ? '' : title);
       modes.value = win.__hostGmConfirmationProfile?.mode('effect.lethal') || 'confirm-preview';
       if (typeof win.wasm_sim_tick === 'function') {
         clock.hidden = false;
-        clock.textContent = t('server.gm.shell.tick', { tick: win.wasm_sim_tick() });
+        putText(clock, t('server.gm.shell.tick', { tick: win.wasm_sim_tick() }));
       }
       if (get('gm-spawn-panel')) get('gm-spawn-panel').dataset.empty = String(!win.__hostGmSpawnState?.().palette);
       if (get('gm-comms-panel')) get('gm-comms-panel').dataset.empty = String(!win.__hostGmCommsState?.().routes.length);
       const armed = win.__hostGmSpawnState?.().arming;
       armedChip.hidden = !armed;
-      armedChip.textContent = armed ? t('server.gm.shell.armed', { palette: armed }) : '';
+      putText(armedChip, armed ? t('server.gm.shell.armed', { palette: armed }) : '');
       paintHealthPills();
       // The role preset may have just put a record panel away or brought it
       // back; the dock re-reads that rather than being told twice.

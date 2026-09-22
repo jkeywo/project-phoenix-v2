@@ -50,6 +50,18 @@
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
 
+// These control inputs are primitive absolute readings. Reassigning unchanged
+// state still invokes each custom element's layout/paint work; movement of a
+// radar contact must not redraw an unchanged joystick or charge button.
+const controlReadings = new WeakMap();
+function updateControl(node, reading) {
+  if (!node) return;
+  const previous = controlReadings.get(node);
+  if (previous && Object.keys(reading).every(key => previous[key] === reading[key])) return;
+  controlReadings.set(node, {...reading});
+  node.state = reading;
+}
+
 /**
  * Build a Helm `renderStation(s, doc)` for one hull from its `variant`.
  *
@@ -76,28 +88,28 @@ export function makeHelmRender(variant) {
 
     // ── Joystick(s) ──────────────────────────────────────────────────────
     const joystickEl = doc.getElementById(ids.joystick);
-    if (joystickEl) joystickEl.state = { auto: !!s.helm_auto };
+    updateControl(joystickEl, { auto: !!s.helm_auto });
     if (ids.lateral) {
       const lateralEl = doc.getElementById(ids.lateral);
-      if (lateralEl) lateralEl.state = { auto: !!s.lateral_auto };
+      updateControl(lateralEl, { auto: !!s.lateral_auto });
     }
 
     // ── Impulse / boost ──────────────────────────────────────────────────
     const impulseEl = doc.getElementById(ids.impulse);
     if (impulseEl) {
-      impulseEl.state = {
+      updateControl(impulseEl, {
         state: s.impulse_charge_progress > 0 ? 'charging' : 'ready',
         charge_pct: (s.impulse_charge_progress || 0) * 100,
         auto: !!s.helm_auto,
-      };
+      });
     }
     const boostEl = doc.getElementById(ids.boost);
     if (boostEl) {
-      boostEl.state = {
+      updateControl(boostEl, {
         available: !!s.boost_enabled, active: !!s.boost_active,
         recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100,
         auto: !!s.helm_auto,
-      };
+      });
     }
 
     // ── AUTO badge ──────────────────────────────────────────────────────

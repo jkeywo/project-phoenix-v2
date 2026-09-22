@@ -2,6 +2,8 @@
 pub mod bridge;
 pub mod document;
 pub mod recovery;
+pub(crate) mod saves;
+pub use saves::publish_outcomes as publish_save_outcomes;
 pub mod start;
 
 use super::bridge_display::BridgeLayoutResource;
@@ -31,11 +33,26 @@ pub struct NativeGmLifecycle {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum NativeGmRecord {
     Loaded,
-    Ready { ready: bool },
+    Ready {
+        ready: bool,
+    },
     ForceStart,
     SurfaceFault,
     RecoveryHostLobby,
-    Action { request: String },
+    InspectorInterest {
+        panels: Vec<crate::gm_projection::GmInspectorKind>,
+    },
+    ConsoleInterest {
+        request: crate::gm_projection::GmConsoleInterest,
+    },
+    Action {
+        request: String,
+    },
+    Save {
+        id: String,
+        operation: String,
+        name: Option<String>,
+    },
 }
 
 #[derive(Serialize)]
@@ -115,6 +132,10 @@ impl Plugin for NativeGmPlugin {
                     .after(crate::gm_health::publish_health_projection)
                     .after(crate::gm_workload::publish_workload_projection)
                     .run_if(resource_exists::<NativeGmSurface>),
+            )
+            .add_systems(
+                Last,
+                publish_save_outcomes.run_if(resource_exists::<NativeGmSurface>),
             );
     }
 }
@@ -210,6 +231,24 @@ fn drain_records(world: &mut World) {
             continue;
         }
         match record {
+            NativeGmRecord::ConsoleInterest { request } if request.valid() => {
+                world
+                    .resource_mut::<crate::gm_projection::GmConsoleSubscriptions>()
+                    .requests
+                    .insert(request.consumer, request);
+            }
+            NativeGmRecord::InspectorInterest { panels } => {
+                world
+                    .resource_mut::<crate::gm_projection::GmInspectorInterest>()
+                    .0 = Some(panels.into_iter().collect());
+            }
+            NativeGmRecord::Save {
+                id,
+                operation,
+                name,
+            } if surface.bridge.live() => {
+                saves::request(world, &surface.bridge, id, &operation, name);
+            }
             NativeGmRecord::RecoveryHostLobby => {
                 recovery::request(world);
             }
@@ -413,7 +452,7 @@ fn sync_presence(
         start_result: starts.as_deref().and_then(|s| s.last_result().cloned()),
         ship_slots: config.as_ref().map_or_else(Vec::new, |config| {
             config
-                .ship_slots
+                .effective_ship_slots()
                 .iter()
                 .map(|slot| {
                     let launched = frozen_ship_slots

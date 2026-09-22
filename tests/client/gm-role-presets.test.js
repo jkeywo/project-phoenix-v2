@@ -222,10 +222,11 @@ describe('createGmRolePresets (DOM controller)', () => {
     expect(document.getElementById('gm-station-controls').hidden).toBe(true);
   });
 
-  it('live-switches panel and quick-action visibility and notifies onSelect', () => {
+  it('live-switches panels without changing the state-owned session widget', () => {
     mount();
     const onSelect = vi.fn();
     const controller = createGmRolePresets({ doc: document, onSelect });
+    document.getElementById('gm-session-resume').hidden = true;
     controller.setAvailablePresets([TACTICAL, NARRATIVE]);
 
     controller.select('tactical');
@@ -240,9 +241,10 @@ describe('createGmRolePresets (DOM controller)', () => {
     // Live switch back to All restores every panel and quick action.
     controller.select('all');
     expect(onSelect).toHaveBeenLastCalledWith(null);
-    for (const id of [...GM_ROLE_PRESET_PANEL_IDS, ...GM_ROLE_PRESET_QUICK_ACTION_IDS]) {
+    for (const id of GM_ROLE_PRESET_PANEL_IDS) {
       expect(document.getElementById(id).hidden).toBe(false);
     }
+    expect(document.getElementById('gm-session-resume').hidden).toBe(true);
   });
 
   it('drives the live switch from the <select> element itself', () => {

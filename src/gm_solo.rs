@@ -57,7 +57,23 @@ pub fn bind_standalone_game_master(world: &mut World) -> Option<GmOperator> {
     {
         return None;
     }
-    let roster = FleetRoster::solo_game_master(SOLO_GM_OPERATOR_ID)?;
+    // A scenario-only GM has no locally owned hull. Its unclaimed launch slots
+    // supply AI ships separately; do not inherit the legacy solo ship row.
+    let roster = if world.contains_resource::<crate::gm_projection::GameMasterPeer>() {
+        let slot = crate::command_admission::HostSlot::SOLO;
+        FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![slot],
+            vec![crate::lockstep::FleetGm {
+                host: slot,
+                operator_id: SOLO_GM_OPERATOR_ID.into(),
+            }],
+            slot,
+            slot,
+        )?
+    } else {
+        FleetRoster::solo_game_master(SOLO_GM_OPERATOR_ID)?
+    };
     let operator = GmOperator {
         id: SOLO_GM_OPERATOR_ID.to_string(),
         // The operator never typed one: this route asks for a scenario and a

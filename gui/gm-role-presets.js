@@ -288,10 +288,8 @@ export function createGmRolePresets({
       const el = doc && doc.getElementById(id);
       if (el) el.hidden = !isGmPanelVisible(effective, leader);
     }
-    for (const id of GM_ROLE_PRESET_QUICK_ACTION_IDS) {
-      const el = doc && doc.getElementById(id);
-      if (el) el.hidden = !isGmQuickActionVisible(effective, id);
-    }
+    // Legacy quick-action preferences remain importable, but session state
+    // exclusively owns Ready/Pause/Resume. Presets cannot override that widget.
   }
 
   function reconcileEffective() {

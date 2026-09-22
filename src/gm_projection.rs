@@ -43,6 +43,96 @@ struct GmWorldInspectorSources<'w> {
     objectives: Option<Res<'w, crate::world::server::ObjectiveManagerRes>>,
     layers: Option<Res<'w, crate::world::server::WorldLayerMap>>,
     paused: Option<Res<'w, crate::gm_action::SimulationPaused>>,
+    interest: Option<Res<'w, GmInspectorInterest>>,
+}
+
+/// Local presentation demand, never participant input or command authority.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum GmInspectorKind {
+    EntityFields,
+    HullFields,
+    RegionFields,
+    PresentationFields,
+    WorldFields,
+}
+
+#[derive(Resource, Default)]
+pub struct GmInspectorInterest(pub Option<std::collections::BTreeSet<GmInspectorKind>>);
+
+impl GmInspectorInterest {
+    fn wants(&self, panel: GmInspectorKind) -> bool {
+        // An unmounted adapter retains the full projection contract. Once the
+        // desk declares its visible tools, closed inspectors do no schema work.
+        self.0.as_ref().is_none_or(|panels| panels.contains(&panel))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum GmConsoleConsumer {
+    Console,
+    Comparison,
+}
+
+/// Private presentation demand. Station ownership is deliberately absent.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GmConsoleInterest {
+    pub consumer: GmConsoleConsumer,
+    pub ship: String,
+    pub station: String,
+    pub visible: bool,
+    pub mount_generation: u64,
+    pub world_generation: u64,
+}
+
+impl GmConsoleInterest {
+    pub fn valid(&self) -> bool {
+        self.ship.len() <= 128
+            && self.station.len() <= 64
+            && (!self.visible
+                || (!self.ship.is_empty()
+                    && (self.consumer == GmConsoleConsumer::Comparison
+                        || !self.station.is_empty())))
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct GmConsoleSubscriptions {
+    pub requests: BTreeMap<GmConsoleConsumer, GmConsoleInterest>,
+    pub generation: u64,
+    lifecycle: Option<u64>,
+}
+
+impl GmConsoleSubscriptions {
+    fn wants(&self, ship: &str) -> bool {
+        self.requests.is_empty()
+            || self.requests.values().any(|request| {
+                request.visible
+                    && request.world_generation == self.generation
+                    && request.ship == ship
+            })
+    }
+}
+
+fn prepare_presentation_generation(
+    mut subscriptions: ResMut<GmConsoleSubscriptions>,
+    config: Option<Res<crate::world::config::WorldConfig>>,
+    lifecycle: Option<Res<crate::audio_lifecycle::RoomAudioLifecycle>>,
+) {
+    let generation = lifecycle.map(|owner| owner.state.generation);
+    if config.is_some_and(|config| config.is_changed()) || generation != subscriptions.lifecycle {
+        subscriptions.generation = subscriptions.generation.wrapping_add(1);
+        subscriptions.lifecycle = generation;
+    }
+}
+
+#[derive(SystemParam)]
+struct GmStationPresentation<'w> {
+    world_data: Option<Res<'w, crate::lobby::server::WorldResource>>,
+    world_config: Option<Res<'w, crate::world::config::WorldConfig>>,
+    subscriptions: Res<'w, GmConsoleSubscriptions>,
 }
 
 /// Marks an explicit production GM peer. Browser and native peers share it.
@@ -202,6 +292,9 @@ pub struct GmEntityProjection {
 /// state when every selectable ship has left the world.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct GmEntityProjectionPayload {
+    /// Derived live world membership for the GM tree; not snapshot authority.
+    #[serde(default)]
+    pub world_membership: BTreeMap<String, String>,
     #[serde(
         default,
         skip_serializing_if = "crate::gm_world_inspector::WorldInspectorProjection::is_empty"
@@ -331,14 +424,8 @@ pub struct GmPuppetShipProjection {
     pub station_ratings: BTreeMap<String, String>,
     pub control_sources: BTreeMap<SystemId, String>,
     pub blackboards: Vec<(SystemId, SystemBlackboard)>,
-    /// Static/reconnect world registry from `WorldResource`. The browser folds
-    /// `entity_states` over this through the ordinary `ClientSimState` reducer,
-    /// exactly as `WorldSetup` followed by `SimState` does for a player.
-    pub entities: Vec<EntitySnapshot>,
-    /// Absolute (not delta-compressed) version of the ordinary `SimState`
-    /// entity lane. Field meanings and shield derivation are identical; being
-    /// absolute is what makes a newly opened GM iframe complete immediately.
-    pub entity_states: Vec<EntityStateSnapshot>,
+    /// Recipient-scoped objective markers over the shared world registry.
+    pub objective_targets: Vec<String>,
     /// Current mission objective snapshots from `ObjectiveManager`.
     pub objectives: Vec<ObjectiveSnapshot>,
     /// Explicit current pose from the selected fleet ship's `ShipPhysics`.
@@ -355,6 +442,18 @@ pub struct GmPuppetShipProjection {
 /// continue to see only source-stripped commands.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct GmStationProjectionPayload {
+    /// Structural world data is shared by all visible consumers, not repeated
+    /// in every ship. The revision allows client replicas to retain its rows.
+    pub entities: Vec<EntitySnapshot>,
+    pub world_revision: u64,
+    pub entity_states: Vec<EntityStateSnapshot>,
+    #[serde(default)]
+    pub presentation_generation: u64,
+    #[serde(default)]
+    pub console_interest: Option<GmConsoleInterest>,
+    /// None is the legacy/unmounted adapter; Some names complete console rows.
+    #[serde(default)]
+    pub detail_ships: Option<Vec<String>>,
     pub ships: Vec<GmPuppetShipProjection>,
     pub activity: Vec<StationPuppetActivityEntry>,
     /// Canonical terminal results for authentic Station commands. Correlation
@@ -375,6 +474,13 @@ impl Plugin for GmProjectionPlugin {
             StateClass::Presentation,
             "native-local-gm-workspace",
         )
+        .declare_state::<GmInspectorInterest>(StateClass::Presentation, "native-local-gm-workspace")
+        .init_resource::<GmInspectorInterest>()
+        .declare_state::<GmConsoleSubscriptions>(
+            StateClass::Presentation,
+            "native-local-gm-workspace",
+        )
+        .init_resource::<GmConsoleSubscriptions>()
         .init_resource::<StationPuppets>()
         .init_resource::<crate::gm_puppet::StationPuppetActivity>()
         .init_resource::<GmActionLog>()
@@ -382,27 +488,62 @@ impl Plugin for GmProjectionPlugin {
         .add_message::<GmEntityProjectionChanged>()
         .add_message::<GmStationProjectionChanged>()
         .add_systems(
-            FixedLast,
-            (publish_local_projection, publish_station_projection).run_if(gm_presentation_active),
+            PostUpdate,
+            prepare_presentation_generation
+                .before(HeldGmProjection)
+                .after(crate::audio_lifecycle::AudioLifecyclePublished),
         )
         .add_systems(
             PostUpdate,
-            // Presentation actions are admitted at a held tick too. Publish
-            // their current state and terminal result without requiring Resume.
-            // The existing absolute projection owns this payload in both cases.
-            publish_local_projection
+            // One absolute presentation build after all completed fixed ticks.
+            // Also runs in Lobby and while paused; native and browser delivery
+            // explicitly follow this set. Authoritative schedules are unchanged.
+            (publish_local_projection, publish_station_projection)
                 .in_set(HeldGmProjection)
-                .run_if(gm_presentation_active)
-                .run_if(presentation_clock_held),
+                .run_if(gm_presentation_active),
         );
     }
 }
 
-fn presentation_clock_held(
-    paused: Option<Res<crate::gm_action::SimulationPaused>>,
-    time: Option<Res<Time<Virtual>>>,
-) -> bool {
-    paused.is_some_and(|paused| paused.0) || time.is_some_and(|time| time.is_paused())
+#[derive(Default)]
+struct PresentationConfigCache {
+    revision: Option<(u64, u64)>,
+    authored: Option<crate::entities::config_cache::ConfigCache>,
+    ships: BTreeMap<String, ShipClientConfig>,
+}
+
+impl PresentationConfigCache {
+    fn refresh(&mut self) {
+        let revision = crate::entities::config_cache::config_cache_revision();
+        self.refresh_revision(revision);
+    }
+
+    fn refresh_revision(&mut self, revision: (u64, u64)) {
+        if self.revision != Some(revision) {
+            self.revision = Some(revision);
+            self.authored = None;
+            self.ships.clear();
+        }
+    }
+
+    fn authored(&mut self) -> &crate::entities::config_cache::ConfigCache {
+        self.refresh();
+        self.authored
+            .get_or_insert_with(crate::entities::config_cache::get_config_cache)
+    }
+
+    fn ship(&mut self, path: &str) -> ShipClientConfig {
+        self.refresh();
+        self.ships
+            .entry(path.to_owned())
+            .or_insert_with(|| {
+                crate::entities::config_cache::get_cached_entity_config(path)
+                    .as_ref()
+                    .map(crate::lobby::server::project_ship_client_config)
+                    .unwrap_or_default()
+            })
+            .clone()
+    }
 }
 
 type GmShipProjectionQuery<'w, 's> = Query<
@@ -932,18 +1073,37 @@ fn publish_local_projection(
     world_entities: GmWorldProjectionQuery,
     region_inspector_sources: GmRegionInspectorSources,
     presentation_inspector_sources: GmPresentationInspectorSources,
-    all_names: Query<(&EntityUuid, Option<&EntityName>, Option<&EntityId>)>,
+    all_names: Query<(
+        &EntityUuid,
+        Option<&EntityName>,
+        Option<&EntityId>,
+        Option<&crate::world::server::EntityOriginLayer>,
+    )>,
     factions: Option<Res<FactionRegistryResource>>,
     world_sources: GmWorldInspectorSources,
     world_setup: Option<Res<WorldResource>>,
     action_log: Res<GmActionLog>,
     local_refusals: Res<LocalGmActionRefusals>,
-    mut previous: Local<Option<GmEntityProjectionPayload>>,
+    mut presentation: Local<(Option<GmEntityProjectionPayload>, PresentationConfigCache)>,
     mut changed: MessageWriter<GmEntityProjectionChanged>,
     removal_targets: crate::gm_despawn::RemovalQuery,
     presentation_control: crate::gm_presentation::PresentationControl,
 ) {
     let world_content = &world_sources.runtime;
+    let wants = |panel| {
+        world_sources
+            .interest
+            .as_ref()
+            .is_none_or(|interest| interest.wants(panel))
+    };
+    let (previous, configuration) = &mut *presentation;
+    if world_sources
+        .config
+        .as_ref()
+        .is_some_and(|config| config.is_changed())
+    {
+        *configuration = PresentationConfigCache::default();
+    }
     // Resolve names in a separate deterministic lookup so target links never
     // leak a Bevy `Entity` and remain useful after a projection refresh.
     let authored_names: BTreeMap<&str, &str> = world_setup
@@ -959,7 +1119,7 @@ fn publish_local_projection(
         .unwrap_or_default();
     let names: BTreeMap<String, String> = all_names
         .iter()
-        .map(|(uuid, name, id)| {
+        .map(|(uuid, name, id, _)| {
             (
                 uuid.0.clone(),
                 display_name(uuid, name, id, &authored_names),
@@ -1125,54 +1285,107 @@ fn publish_local_projection(
         .filter_map(|(uuid, status)| Some((uuid.clone(), status.intent.clone()?)))
         .collect();
     let inspector_sources = doctrine_then_inspector.p1();
-    let entity_inspector = entity_inspector_projection(
-        &inspector_sources,
-        factions.as_deref(),
-        &inspector_intents,
-        &inspector_targets,
-    );
-    let inspection_config_cache = crate::entities::config_cache::get_config_cache();
-    let ship_inspector = crate::gm_ship_inspector::projection(system_sources.iter().map(
-        |(uuid, name, template, config, controls, ratings, hull, blackboards)| {
-            let authored = ship_inspector_authored_config(template, &inspection_config_cache);
-            crate::gm_ship_inspector::ShipInspectorInputs {
-                id: &uuid.0,
-                label: name.map(|name| name.0.as_str()).unwrap_or(&uuid.0),
-                config: &config.0,
-                authored: authored.map(|(_, config)| config),
-                authored_document: authored.map(|(path, _)| path.as_str()),
-                ratings,
-                controls: &controls.0,
-                hull: &hull.0,
-                blackboards: blackboards.map(|rows| &rows.0),
-            }
-        },
-    ));
-    let region_inspector = region_inspector_projection(
-        &region_inspector_sources,
-        &authored_names,
-        &names,
-        &inspection_config_cache,
-    );
+    let entity_inspector = if wants(GmInspectorKind::EntityFields) {
+        entity_inspector_projection(
+            &inspector_sources,
+            factions.as_deref(),
+            &inspector_intents,
+            &inspector_targets,
+        )
+    } else {
+        Default::default()
+    };
+    let inspection_config_cache = configuration.authored();
+    let ship_inspector = if wants(GmInspectorKind::HullFields) {
+        crate::gm_ship_inspector::projection(system_sources.iter().map(
+            |(uuid, name, template, config, controls, ratings, hull, blackboards)| {
+                let authored = ship_inspector_authored_config(template, inspection_config_cache);
+                crate::gm_ship_inspector::ShipInspectorInputs {
+                    id: &uuid.0,
+                    label: name.map(|name| name.0.as_str()).unwrap_or(&uuid.0),
+                    config: &config.0,
+                    authored: authored.map(|(_, config)| config),
+                    authored_document: authored.map(|(path, _)| path.as_str()),
+                    ratings,
+                    controls: &controls.0,
+                    hull: &hull.0,
+                    blackboards: blackboards.map(|rows| &rows.0),
+                }
+            },
+        ))
+    } else {
+        Default::default()
+    };
+    let region_inspector = if wants(GmInspectorKind::RegionFields) {
+        region_inspector_projection(
+            &region_inspector_sources,
+            &authored_names,
+            &names,
+            inspection_config_cache,
+        )
+    } else {
+        Default::default()
+    };
     let presentation_messages = presentation_control.message_choices();
-    let presentation_inspector = presentation_inspector_projection(
-        &presentation_inspector_sources,
-        &authored_names,
-        world_content.as_deref(),
-        &presentation_messages,
-        presentation_control.inbox.as_deref(),
-    );
-    let next = GmEntityProjectionPayload {
-        world_inspector: crate::gm_world_inspector::projection(
-            world_sources.config.as_deref(),
+    let presentation_inspector = if wants(GmInspectorKind::PresentationFields) {
+        presentation_inspector_projection(
+            &presentation_inspector_sources,
+            &authored_names,
             world_content.as_deref(),
-            world_sources
-                .objectives
-                .as_deref()
-                .map(|objectives| &objectives.0),
-            world_sources.layers.as_deref(),
-            world_sources.paused.as_deref().map(|paused| paused.0),
-        ),
+            &presentation_messages,
+            presentation_control.inbox.as_deref(),
+        )
+    } else {
+        Default::default()
+    };
+    let root_members: std::collections::BTreeSet<&str> = named_uuids
+        .iter()
+        .copied()
+        .chain(
+            world_setup
+                .iter()
+                .flat_map(|world| world.0.entities.iter().map(|entity| entity.uuid.as_str())),
+        )
+        .chain(
+            ships
+                .iter()
+                .filter(|ship| ship.5.is_some())
+                .map(|ship| ship.0 .0.as_str()),
+        )
+        .collect();
+    let next = GmEntityProjectionPayload {
+        world_membership: all_names
+            .iter()
+            .map(|(uuid, _, _, layer)| {
+                (
+                    uuid.0.clone(),
+                    layer.map(|layer| layer.0.clone()).unwrap_or_else(|| {
+                        if root_members.contains(uuid.0.as_str()) {
+                            "root".into()
+                        } else {
+                            "unassigned".into()
+                        }
+                    }),
+                )
+            })
+            .collect(),
+        world_inspector: if wants(GmInspectorKind::WorldFields) {
+            crate::gm_world_inspector::projection(
+                world_sources.config.as_deref(),
+                world_content.as_deref(),
+                world_sources
+                    .objectives
+                    .as_deref()
+                    .map(|objectives| &objectives.0),
+                world_sources.layers.as_deref(),
+                world_sources.paused.as_deref().map(|paused| paused.0),
+            )
+        } else {
+            crate::gm_world_inspector::topology(
+                world_sources.config.as_deref(),
+                world_sources.layers.as_deref(),
+            )
+        },
         system_controls: system_sources
             .iter()
             .map(
@@ -1295,7 +1508,7 @@ fn publish_station_projection(
     local_refusals: Res<LocalGmActionRefusals>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
-    world_data: Option<Res<crate::lobby::server::WorldResource>>,
+    presentation: GmStationPresentation,
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
     objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     live_entities: Query<
@@ -1314,6 +1527,7 @@ fn publish_station_projection(
             Option<&EntityName>,
             Option<&crate::lockstep::FleetSlotOf>,
             Option<&crate::gm_puppet::capability::NpcStationConfig>,
+            Option<&crate::entities::spawner::EntityTemplatePath>,
             &ShipConfigComponent,
             &ActiveStationRatings,
             &ShipSystemControlSources,
@@ -1325,6 +1539,7 @@ fn publish_station_projection(
         With<crate::server_app::Ship>,
     >,
     mut previous: Local<Option<GmStationProjectionPayload>>,
+    mut configuration: Local<PresentationConfigCache>,
     mut changed: MessageWriter<GmStationProjectionChanged>,
 ) {
     // This is the absolute counterpart of `build_sim_state_entity_states`:
@@ -1333,8 +1548,20 @@ fn publish_station_projection(
     // through the ordinary `ClientSimState` reducer over `WorldResource`, so
     // there is one raw/local projection boundary rather than a GM-only radar
     // model.
+    if presentation
+        .world_config
+        .as_ref()
+        .is_some_and(|config| config.is_changed())
+    {
+        *configuration = PresentationConfigCache::default();
+    }
+    let wants_detail = presentation.subscriptions.requests.is_empty()
+        || presentation.subscriptions.requests.values().any(|request| {
+            request.visible && request.world_generation == presentation.subscriptions.generation
+        });
     let mut entity_states = live_entities
         .iter()
+        .filter(|_| wants_detail)
         .filter_map(|(uuid, asteroid_uuid, transform, hull, shields)| {
             let uuid = uuid
                 .map(|uuid| uuid.0.clone())
@@ -1372,8 +1599,10 @@ fn publish_station_projection(
         })
         .collect::<Vec<_>>();
     entity_states.sort_by(|left, right| left.uuid.cmp(&right.uuid));
-    let entities = world_data
+    let entities = presentation
+        .world_data
         .as_ref()
+        .filter(|_| wants_detail)
         .map(|world| world.0.entities.clone())
         .unwrap_or_default();
 
@@ -1385,6 +1614,7 @@ fn publish_station_projection(
                 name,
                 slot,
                 npc_config,
+                template,
                 config,
                 ratings,
                 sources,
@@ -1393,21 +1623,28 @@ fn publish_station_projection(
                 waypoint,
                 hull,
             )| {
-                let config_path = roster
-                    .as_ref()
-                    .and_then(|roster| {
-                        roster
-                            .ships()
-                            .iter()
-                            .find(|ship| slot.is_some_and(|slot| ship.host == slot.0))
-                            .and_then(|ship| ship.ship_path.as_deref())
-                    })
-                    .or_else(|| selected_ship.as_ref().map(|selected| selected.0.as_str()));
-                let config_cache = crate::entities::config_cache::get_config_cache();
-                let ship_client_config = if slot.is_some() {
+                let detailed = presentation.subscriptions.wants(&uuid.0);
+                // A GM-only host has no SelectedShipResource. In particular,
+                // an AI-filled mission slot is not a ship in the peer roster.
+                // Its instance template, not the operator's hull, owns the
+                // console topology and authored controls.
+                let config_path = template.map(|path| path.0.as_str()).or_else(|| {
+                    roster
+                        .as_ref()
+                        .and_then(|roster| {
+                            roster
+                                .ships()
+                                .iter()
+                                .find(|ship| slot.is_some_and(|slot| ship.host == slot.0))
+                                .and_then(|ship| ship.ship_path.as_deref())
+                        })
+                        .or_else(|| selected_ship.as_ref().map(|selected| selected.0.as_str()))
+                });
+                let ship_client_config = if !detailed {
+                    ShipClientConfig::default()
+                } else if slot.is_some() {
                     config_path
-                        .and_then(|path| config_cache.get(path))
-                        .map(crate::lobby::server::project_ship_client_config)
+                        .map(|path| configuration.ship(path))
                         .unwrap_or_default()
                 } else {
                     npc_config
@@ -1418,6 +1655,7 @@ fn publish_station_projection(
                     .0
                     .stations
                     .iter()
+                    .filter(|_| detailed)
                     .map(|station| {
                         (
                             station.id.0.clone(),
@@ -1451,6 +1689,7 @@ fn publish_station_projection(
                 let control_sources = sources
                     .0
                     .entries()
+                    .filter(|_| detailed)
                     .map(|(system, source)| {
                         let source = if sources.0.is_offline(system) {
                             crate::ship::control_source::ControlSource::Offline
@@ -1468,10 +1707,12 @@ fn publish_station_projection(
                 let mut blackboards = blackboards
                     .0
                     .iter()
+                    .filter(|_| detailed)
                     .map(|(system, value)| (system.clone(), value.clone()))
                     .collect::<Vec<_>>();
                 blackboards.sort_by(|left, right| left.0.cmp(&right.0));
                 let console_hull = hull
+                    .filter(|_| detailed)
                     .map(|hull| {
                         hull.0
                             .iter()
@@ -1486,21 +1727,23 @@ fn publish_station_projection(
                             .collect()
                     })
                     .unwrap_or_default();
-                let ship_pose = physics.map_or_else(GmShipPoseProjection::default, |physics| {
-                    GmShipPoseProjection {
+                let ship_pose = physics.filter(|_| detailed).map_or_else(
+                    GmShipPoseProjection::default,
+                    |physics| GmShipPoseProjection {
                         x: physics.x,
                         y: physics.y,
                         z: physics.z,
                         yaw: physics.yaw,
                         forward_speed: physics.forward_speed,
-                    }
-                });
+                    },
+                );
 
                 let mut scoped_objectives = objectives
                     .as_ref()
+                    .filter(|_| detailed)
                     .map(|manager| manager.0.snapshots_for(&uuid.0))
                     .unwrap_or_default();
-                if let Some(instances) = objective_instances.as_ref() {
+                if let Some(instances) = objective_instances.as_ref().filter(|_| detailed) {
                     scoped_objectives = instances
                         .0
                         .project_snapshots_for_ship(&uuid.0, scoped_objectives);
@@ -1513,14 +1756,20 @@ fn publish_station_projection(
                     station_ratings,
                     control_sources,
                     blackboards,
-                    entities: crate::objectives::project_entity_targets(
-                        &entities,
-                        &scoped_objectives,
-                    ),
-                    entity_states: entity_states.clone(),
+                    objective_targets: if detailed {
+                        crate::objectives::project_entity_targets(&entities, &scoped_objectives)
+                            .into_iter()
+                            .filter(|entity| entity.objective_target)
+                            .map(|entity| entity.uuid)
+                            .collect()
+                    } else {
+                        Vec::new()
+                    },
                     objectives: scoped_objectives,
                     ship_pose,
-                    navigation_waypoint: waypoint.and_then(|waypoint| waypoint.snapshot()),
+                    navigation_waypoint: waypoint
+                        .filter(|_| detailed)
+                        .and_then(|waypoint| waypoint.snapshot()),
                     console_hull,
                 }
             },
@@ -1529,7 +1778,30 @@ fn publish_station_projection(
         .collect::<Vec<_>>();
     projected_ships.sort_by(|left, right| left.ship_id.cmp(&right.ship_id));
 
+    let world_revision = previous.as_ref().map_or(1, |previous| {
+        previous.world_revision
+            + u64::from(
+                previous.entities != entities
+                    || previous.presentation_generation != presentation.subscriptions.generation,
+            )
+    });
     let next = GmStationProjectionPayload {
+        world_revision,
+        entities,
+        entity_states,
+        presentation_generation: presentation.subscriptions.generation,
+        console_interest: presentation
+            .subscriptions
+            .requests
+            .get(&GmConsoleConsumer::Console)
+            .cloned(),
+        detail_ships: (!presentation.subscriptions.requests.is_empty()).then(|| {
+            projected_ships
+                .iter()
+                .filter(|ship| presentation.subscriptions.wants(&ship.ship_id))
+                .map(|ship| ship.ship_id.clone())
+                .collect()
+        }),
         ships: projected_ships,
         activity: activity.entries().to_vec(),
         results: crate::gm_action::projected_results(
@@ -1549,6 +1821,68 @@ fn publish_station_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presentation_configuration_reuses_templates_and_invalidates_on_content_changes() {
+        let mut cache = PresentationConfigCache::default();
+        cache.refresh_revision((1, 2));
+        cache
+            .ships
+            .insert("hull".into(), ShipClientConfig::default());
+        cache.refresh_revision((1, 2));
+        assert_eq!(cache.ships.len(), 1);
+        cache.refresh_revision((2, 2));
+        assert!(cache.ships.is_empty());
+        cache
+            .ships
+            .insert("hull".into(), ShipClientConfig::default());
+        cache.refresh_revision((2, 3));
+        assert!(cache.ships.is_empty());
+    }
+
+    #[test]
+    fn inspector_interest_is_absolute_bounded_and_retains_world_nodes() {
+        let mut app = app();
+        let mut config = crate::world::config::WorldConfig::default();
+        config.global.title = Some("world.test".into());
+        app.insert_resource(config);
+        app.world_mut().resource_mut::<GmInspectorInterest>().0 = Some(Default::default());
+        app.world_mut().run_schedule(PostUpdate);
+        let closed = take(&mut app).pop().unwrap();
+        assert!(closed.entity_inspector.fields.is_empty());
+        assert!(closed.world_inspector.fields.is_empty());
+        assert_eq!(closed.world_inspector.readings["root"].label, "world.test");
+        app.world_mut().resource_mut::<GmInspectorInterest>().0 =
+            Some([GmInspectorKind::WorldFields].into());
+        app.world_mut().run_schedule(PostUpdate);
+        let opened = take(&mut app).pop().unwrap();
+        assert!(!opened.world_inspector.fields.is_empty());
+        assert_eq!(opened.world_inspector.readings["root"].label, "world.test");
+        assert!(crate::core::codec::decode_gm_inspector_interest("[\"not-a-panel\"]").is_none());
+    }
+
+    #[test]
+    fn catch_up_ticks_do_not_build_presentation_and_paused_frames_still_publish() {
+        let mut app = app();
+        app.init_schedule(FixedLast);
+        for _ in 0..4 {
+            app.world_mut().run_schedule(FixedLast);
+        }
+        assert!(take(&mut app).is_empty());
+        assert!(take_stations(&mut app).is_empty());
+        app.world_mut().run_schedule(PostUpdate);
+        assert_eq!(take(&mut app).len(), 1);
+        assert_eq!(take_stations(&mut app).len(), 1);
+        app.insert_resource(crate::gm_action::SimulationPaused(true));
+        app.world_mut().spawn((
+            Ship,
+            EntityUuid("new-ship".into()),
+            hull(100.0),
+            ShipPhysics::default(),
+        ));
+        app.world_mut().run_schedule(PostUpdate);
+        assert_eq!(take(&mut app).len(), 1);
+    }
     use crate::ai::faction::{FactionConfig, FactionRegistry};
     use crate::command_admission::HostSlot;
     use crate::core::messages::SystemId;
@@ -1651,7 +1985,7 @@ mod tests {
             TacticalRadarSelection(Some(NPC_ID.into())),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payload = take(&mut app).pop().expect("first absolute projection");
         assert_eq!(payload.entities.len(), 2);
         assert_eq!(payload.entities[0].entity_id, PLAYER_ID);
@@ -1697,9 +2031,9 @@ mod tests {
             ShipPhysics::default(),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         assert_eq!(take(&mut app)[0].entities.len(), 1);
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         assert!(
             take(&mut app).is_empty(),
             "unchanged absolute state is deduped"
@@ -1715,7 +2049,7 @@ mod tests {
             .get_mut::<TacticalRadarSelection>()
             .unwrap()
             .0 = Some("removed-target".into());
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let updated = take(&mut app).pop().unwrap();
         assert_eq!(updated.entities[0].position[0], 5.0);
         assert_eq!(
@@ -1725,7 +2059,7 @@ mod tests {
         );
 
         app.world_mut().despawn(npc);
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         assert!(take(&mut app).pop().unwrap().entities.is_empty());
     }
 
@@ -1742,7 +2076,7 @@ mod tests {
             TacticalRadarSelection::default(),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payload = take(&mut app)
             .pop()
             .expect("first absolute projection must clear stale browser state");
@@ -1768,7 +2102,7 @@ mod tests {
             }),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payload = take(&mut app).pop().expect("absolute structure projection");
         assert_eq!(payload.entities.len(), 1);
         assert_eq!(payload.entities[0].entity_id, STRUCTURE_ID);
@@ -1800,7 +2134,7 @@ mod tests {
             }),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payload = take(&mut app).pop().expect("absolute celestial projection");
         assert_eq!(payload.entities.len(), 1);
         assert_eq!(payload.entities[0].entity_id, PLANET_ID);
@@ -1912,7 +2246,7 @@ mod tests {
             }),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payload = take(&mut app).pop().unwrap();
         assert_eq!(
             payload
@@ -2024,7 +2358,7 @@ mod tests {
             hull(100.0),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payload = take(&mut app).pop().unwrap();
         assert_eq!(payload.entities.len(), 1);
         assert_eq!(payload.entities[0].entity_id, AUTHORED_ID);
@@ -2077,16 +2411,16 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let initial = take(&mut app).pop().unwrap();
         assert_eq!(initial.entities.len(), 2, "duplicate UUIDs collapse");
         assert_eq!(initial.entities[0].entity_id, FIRST_ID);
         assert_eq!(initial.entities[1].entity_id, SECOND_ID);
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         assert!(take(&mut app).is_empty(), "unchanged state emits nothing");
 
         app.world_mut().despawn(second);
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let removed = take(&mut app).pop().unwrap();
         assert_eq!(removed.entities.len(), 1);
         assert_eq!(removed.entities[0].entity_id, FIRST_ID);
@@ -2101,7 +2435,7 @@ mod tests {
             RegionShapeSection(RegionShape::Sphere { radius: 4.0 }),
             EntityOriginLayer("assets/worlds/reloaded-layer-one.toml".into()),
         ));
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let reappeared = take(&mut app).pop().unwrap();
         assert_eq!(reappeared.entities.len(), 1);
         assert_eq!(reappeared.entities[0].entity_id, FIRST_ID);
@@ -2170,7 +2504,7 @@ station = "captain"
             crate::server_app::ShipSystemBlackboards::default(),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payloads = take_stations(&mut app);
         assert_eq!(payloads.len(), 1);
         let ship = &payloads[0].ships[0];
@@ -2266,7 +2600,7 @@ station = "helm"
             hull(80.0),
         ));
 
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         let payload = take_stations(&mut app).pop().expect("projection");
         let ship = payload
             .ships
@@ -2287,8 +2621,8 @@ station = "helm"
         );
         assert_eq!(ship.objectives.len(), 1);
         assert_eq!(ship.objectives[0].id, "reach-contact");
-        assert_eq!(ship.entities[0].position, Some([1.0, 0.0, 2.0]));
-        let live_contact = ship
+        assert_eq!(payload.entities[0].position, Some([1.0, 0.0, 2.0]));
+        let live_contact = payload
             .entity_states
             .iter()
             .find(|entity| entity.uuid == contact_uuid)
@@ -2377,7 +2711,7 @@ station = "navigation"
                 .entities
                 .iter()
                 .all(|entity| entity.objective_target));
-            app.world_mut().run_schedule(FixedLast);
+            app.world_mut().run_schedule(PostUpdate);
             let payload = take_stations(&mut app).pop().unwrap();
             let recipient = payload
                 .ships
@@ -2390,12 +2724,9 @@ station = "navigation"
                 .find(|ship| ship.ship_id == "ship-b")
                 .unwrap();
             assert_eq!(recipient.objectives.len(), 1);
-            assert!(recipient
-                .entities
-                .iter()
-                .all(|entity| entity.objective_target));
+            assert_eq!(recipient.objective_targets.len(), payload.entities.len());
             assert!(other.objectives.is_empty());
-            assert!(other.entities.iter().all(|entity| !entity.objective_target));
+            assert!(other.objective_targets.is_empty());
             assert_eq!(
                 app.world().resource::<crate::lobby::WorldResource>().0,
                 metadata
@@ -2405,12 +2736,12 @@ station = "navigation"
             .resource_mut::<crate::world::server::ObjectiveManagerRes>()
             .0
             .fail("private");
-        app.world_mut().run_schedule(FixedLast);
+        app.world_mut().run_schedule(PostUpdate);
         assert!(take_stations(&mut app)
             .pop()
             .unwrap()
             .ships
             .iter()
-            .all(|ship| ship.entities.iter().all(|entity| !entity.objective_target)));
+            .all(|ship| ship.objective_targets.is_empty()));
     }
 }

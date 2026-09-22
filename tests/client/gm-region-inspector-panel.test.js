@@ -100,7 +100,7 @@ describe('Region Live Inspector', () => {
 
   it('is selection-scoped, reset, and registered for browser/native parity', () => {
     const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
-    expect(workspace).toContain('gmRegionFields.update(p)');
+    expect(workspace).toContain("updateReading('region-fields', gmRegionFields, p)");
     expect(workspace).toContain('gmRegionFields.select(entity)');
     expect(workspace).toContain('gmRegionFields.reset()');
     expect(readFileSync('src/native_host/native_gm/document.rs', 'utf8')).toContain('gm-region-fields-panel');

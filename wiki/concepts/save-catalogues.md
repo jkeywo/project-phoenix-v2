@@ -3,7 +3,7 @@ title: Peer-Local Save Catalogues
 type: concept
 tags: [save, snapshot, persistence, autosave, browser, native, catalogue]
 sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/snapshot.rs, src/core/collision_history.rs, tests/collision_history.rs, tests/same_target_damage_ordering.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/headless/replay/recorded_gm.rs, tests/recorded_gm_exports.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
-updated: 2026-09-08
+updated: 2026-09-22
 ---
 
 # Peer-Local Save Catalogues
@@ -77,6 +77,13 @@ releases the lock, while the non-`.ron` sentinel remains and is ignored by
 `--save-list`, `--save-create`, `--save-rename`, `--save-export`, confirmed
 `--save-delete`, and startup-only `--resume-save`. A CLI create made before the
 mission begins waits for its first capturable in-progress fixed tick.
+
+The native GM desk also lists and creates named checkpoints and manual saves
+through its [private typed surface bridge](../../src/native_host/native_gm/saves.rs). It uses this
+same FileStore and canonical capture boundary, not browser storage. Completion
+receipts survive CLI logging and delayed surface delivery; the desk reports a
+write failure instead of claiming the checkpoint exists. Capture is available
+only during a running mission.
 
 ## Compatibility and startup restore
 

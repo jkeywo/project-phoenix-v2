@@ -5250,6 +5250,7 @@
 
     /** Paint only after authenticated GM admission; every admitted GM is equal. */
     function paintGmStartControls() {
+      window.__hostGmSessionContext?.({ phase: fleetLobbyPhase });
       const controls = document.getElementById('gm-start-controls');
       const readyBtn = document.getElementById('gm-ready-btn');
       const forceBtn = document.getElementById('gm-force-start-btn');
@@ -5276,7 +5277,7 @@
       // while there is a mission to start — a fleetless GM in the Lobby phase.
       const sessionStart = document.getElementById('gm-session-start');
       if (sessionStart) {
-        sessionStart.hidden = !(fleetRole === 'gm' && gmStandalone() && fleetLobbyPhase === 'Lobby');
+        sessionStart.hidden = true; // Force Start lives in Session; the header has one state widget.
       }
       // The operator strip a fleet GM gets from `publishGmRoster`, for the
       // session that has no fleet to publish one. Display only: the authority
@@ -5293,7 +5294,8 @@
       // live; only the collective ones are missing, and they say why.
       if (fleetRole === 'gm' && gmStandalone()) {
         controls.setAttribute('aria-hidden', 'false');
-        readyBtn.hidden = true;
+        readyBtn.hidden = true; // The shared header owns Ready/Unready presentation.
+        readyBtn.disabled = !standalone || fleetLobbyPhase !== 'Lobby';
         forceBtn.hidden = false;
         forceBtn.textContent = t('server.gm.start.force');
         forceBtn.disabled = false;
@@ -6256,7 +6258,18 @@
 
     document.getElementById('gm-ready-btn')?.addEventListener('click', () => {
       const gm = localGm();
-      if (!gm || !fleetHandle || typeof fleetHandle.setGmReady !== 'function') return;
+      if (!gm || fleetLobbyPhase !== 'Lobby') return;
+      if (gmStandalone()) {
+        // Queue the ordinary public roster replacement. The widget keeps
+        // reading authoritative readiness; it never toggles optimistically.
+        const refusal = window.wasm_set_gm_roster?.(JSON.stringify([{ ...gm, ready: !gm.ready }]));
+        if (refusal !== '') fleetStartResultView = {
+          id: 'server.gm.start.force_refused', params: {}, refused: true,
+        };
+        paintGmStartControls();
+        return;
+      }
+      if (!fleetHandle || typeof fleetHandle.setGmReady !== 'function') return;
       if (!fleetHandle.setGmReady(!gm.ready)) {
         fleetStartResultView = {
           id: 'server.gm.start.force_refused', params: {}, refused: true,
@@ -8420,6 +8433,10 @@ function finishInit() {
   // First typed GM action tracer (#1292). The page supplies the admitted
   // operator and semantic-action correlation; Rust owns admission and result.
   window.wasm_submit_gm_action = wasmBindings.wasm_submit_gm_action;
+  window.__hostGmInspectorInterest = panels => wasmBindings.wasm_set_gm_inspector_interest(JSON.stringify(panels));
+  window.__hostGmRefreshInspectorInterest?.();
+  window.__hostGmConsoleInterest = request => wasmBindings.wasm_set_gm_console_interest(JSON.stringify(request));
+  window.__hostGmStationRefresh?.();
   // Visible first-time GM admission (#1293): Accept queues the one pause;
   // progress releases transport/public roster admission only after digest proof.
   window.wasm_begin_gm_join = wasmBindings.wasm_begin_gm_join;

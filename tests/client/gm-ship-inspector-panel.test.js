@@ -104,7 +104,7 @@ describe('hull/Station/System Live Inspector', () => {
 
   it('is folded, selection-scoped, reset and registered for browser/native parity', () => {
     const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
-    expect(workspace).toContain('gmShipFields.update(p)');
+    expect(workspace).toContain("updateReading('hull-fields', gmShipFields, p)");
     expect(workspace).toContain('gmShipFields.select(entity)');
     expect(workspace).toContain('gmShipFields.reset()');
     expect(workspace.indexOf("shell.temporaryActions?.open('effect')"))

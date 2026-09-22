@@ -181,6 +181,41 @@ fn definition(reading: &mut WorldInspection, config: &crate::world::config::Worl
 }
 
 /// Build one descriptor table and one reading for each active authored layer.
+/// Lightweight world nodes remain available while the detail tool is closed.
+pub fn topology(
+    world: Option<&crate::world::config::WorldConfig>,
+    layers: Option<&crate::world::server::WorldLayerMap>,
+) -> WorldInspectorProjection {
+    let mut result = WorldInspectorProjection::default();
+    let Some(world) = world else {
+        return result;
+    };
+    result.readings.insert(
+        "root".into(),
+        WorldInspection {
+            label: world.global.title.clone().unwrap_or_else(|| "root".into()),
+            origin_layer: Some("root".into()),
+            values: BTreeMap::new(),
+        },
+    );
+    if let Some(layers) = layers {
+        for (path, layer) in &layers.0 {
+            if layer.is_active {
+                result.readings.insert(
+                    path.clone(),
+                    WorldInspection {
+                        label: path.clone(),
+                        origin_layer: Some(path.clone()),
+                        values: BTreeMap::new(),
+                    },
+                );
+            }
+        }
+    }
+    result
+}
+
+/// Build one descriptor table and one reading for each active authored layer.
 /// The root is always `root`; supporting-layer keys are their retained paths.
 pub fn projection(
     world: Option<&crate::world::config::WorldConfig>,

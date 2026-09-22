@@ -388,7 +388,11 @@ fn drain_scenario_selection(
     // Complete when the arbiter locked both halves, OR when it locked the
     // scenario and `--ship` already supplied the other.
     let fleet_gm = native_role.as_ref().is_some_and(|state| {
-        state.role() == crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+        matches!(
+            state.role(),
+            crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+                | crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+        )
     });
     let scenario_needs_slot = !fleet_gm
         && selection
@@ -834,16 +838,24 @@ fn load_selected_world(
         .get_resource::<crate::native_host::session_role::NativeSessionRoleState>()
         .map(|state| state.role())
         .unwrap_or(crate::native_host::session_role::NativeSessionRole::ShipHost);
-    let fleet_gm =
-        native_role == crate::native_host::session_role::NativeSessionRole::FleetGameMaster;
+    let fleet_gm = matches!(
+        native_role,
+        crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+            | crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+    );
 
-    // Step two: ordinary and standalone-GM hosts install their chosen hull.
-    // A fleet GM deliberately owns no ship; the adopted topology is the sole
-    // source of ships on that peer.
+    // Step two: only ship hosts install a chosen local hull. A GM owns no
+    // ship: standalone slots or the adopted fleet topology supply the ships.
     let world_config = world
         .resource::<crate::world::config::WorldConfig>()
         .clone();
-    if fleet_gm && !world_config.ship_slots.is_empty() {
+    if native_role == crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster {
+        world.insert_resource(
+            crate::ship_slots::ShipSlotReservations::default()
+                .freeze(&world_config.effective_ship_slots())
+                .expect("empty reservations are confirmed"),
+        );
+    } else if fleet_gm && !world_config.ship_slots.is_empty() {
         if let Some(roster) = world.get_resource::<crate::lockstep::FleetRoster>() {
             let frozen = crate::ship_slots::FrozenShipSlots::from_fleet_roster(
                 &world_config.ship_slots,

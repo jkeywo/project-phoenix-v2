@@ -576,6 +576,20 @@ describe('GM activity feed presentation and selection links', () => {
       .toContain('Ari');
   });
 
+  it('retains unchanged entries and choices across world updates and appended events', () => {
+    const entries = allCategories();
+    harness.feed.update(payload(entries));
+    const first = document.querySelector('.gm-activity-entry');
+    const option = document.querySelector('#gm-activity-ship-filter option');
+    harness.feed.reconcileAvailability();
+    harness.feed.update(payload(entries));
+    expect(document.querySelector('.gm-activity-entry')).toBe(first);
+    expect(document.querySelector('#gm-activity-ship-filter option')).toBe(option);
+    harness.feed.update(payload([...entries, entries[0]]));
+    expect(document.querySelector('.gm-activity-entry')).toBe(first);
+    expect(document.querySelectorAll('.gm-activity-entry')).toHaveLength(entries.length + 1);
+  });
+
   it('names the fired event and its refusal reason from the String Table', () => {
     const refused = fireGmEvent({
       correlation: 'fire-2',

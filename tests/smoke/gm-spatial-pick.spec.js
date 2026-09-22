@@ -1,6 +1,6 @@
 import { test, expect, waitForWasmReady, captureServerPageErrors } from './fixtures';
 import { ts } from './strings';
-import { revealGmPanel } from './dock-helpers.js';
+import { revealGmPanel, floatGmPanel } from './dock-helpers.js';
 
 /**
  * Directed spatial picking on the docked Live map (issue #1508).
@@ -41,7 +41,7 @@ test('a GM picks a place and a direction on the docked map', { tag: '@core' }, a
   // an inactive tab of the records group, so it is brought to the front first —
   // its float control is only there to press once its frame is the shown one.
   await revealGmPanel(page, 'journal');
-  await page.locator('#gm-live-layout [data-layout-actions-for="journal"] [data-layout-control="float"]').click();
+  await floatGmPanel(page, 'journal');
   const journal = page.locator('[data-panel="journal"].is-floating');
   await expect(journal).toBeVisible();
 

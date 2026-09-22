@@ -20,12 +20,34 @@ struct Inner {
     latest: BTreeMap<String, String>,
     pending: BTreeMap<String, String>,
     records: VecDeque<String>,
+    save_outcomes: VecDeque<super::saves::SaveOutcome>,
 }
 
 #[derive(Clone, Default)]
 pub struct NativeGmBridge(Arc<Mutex<Inner>>);
 
 impl NativeGmBridge {
+    /// Retain bounded completion receipts even after the CLI logger drains
+    /// the store, or while an embedded frame has not yet pumped its mailbox.
+    pub(super) fn retain_save_outcomes(&self, outcomes: Vec<super::saves::SaveOutcome>) {
+        if outcomes.is_empty() {
+            return;
+        }
+        let mut state = self.lock();
+        for outcome in outcomes {
+            state.save_outcomes.retain(|row| row.slot != outcome.slot);
+            state.save_outcomes.push_back(outcome);
+        }
+        while state.save_outcomes.len() > 64 {
+            state.save_outcomes.pop_front();
+        }
+        let outcomes: Vec<_> = state.save_outcomes.iter().cloned().collect();
+        drop(state);
+        if let Ok(json) = crate::core::codec::encode_native_gm_save_outcomes(&outcomes) {
+            self.publish("save_outcomes", json);
+        }
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }

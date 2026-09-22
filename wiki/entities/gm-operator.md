@@ -15,7 +15,7 @@ have the same role; the host mesh's technical star centre and private mesh slot
 do not create a public leader or permission tier.
 
 Native GM operators use either of two routes. **Host as GM** shares one local
-authoritative simulation with an AI-crewed selected hull and puts the GM desk
+authoritative simulation without a locally selected hull and puts the GM desk
 on the primary window. **Join as Peer** is a GM-only member of another fleet:
 it owns no local hull, restores through the ordinary GM-join state machine, and
 persists its reconnect capability privately. Both use the same map, inspection,
@@ -23,105 +23,76 @@ activity, session and Station-puppeting presentations and typed action reducers
 as browser GM operators. A legacy explicitly assigned local GM monitor remains
 available to ordinary ship-host layouts. See [Native Host](../concepts/native-host.md).
 
+Native GM hosting selects only a scenario. Its player slots are available in
+the lobby roster for AI backfill before Start, and Ready is also visible in the
+desk header. The desk's checkpoint and manual-save controls access the native
+FileStore through private typed requests and report the actual fixed-tick write
+outcome. Dock groups have resize separators; floating windows resize from their
+corner and are created by dragging a tab away from docking targets.
+
 ## Shared desktop workspace
 
-`gui/gm-workspace-shell.js` composes the existing browser/native presenters
-into the same six-panel desk, styled by `gui/gm-workspace.css`: roster, map,
-Inspector, mission events, Comms Studio and activity. It moves existing nodes,
-retaining their ids, listeners and live-region wiring. Roster rows select through
-`gm-local-projection`; action shortcuts bring the existing forms into view.
-The role and lethal-confirmation segments drive the existing private selectors
-and confirmation profile. Scenario-authored role presets still filter panels.
+The shared browser/native workspace starts with four dock panes: **Entity Tree,
+Map, Inspector and Activity**. The categorised menu opens Session (readiness,
+join requests, GM presence and peer health), Mission (events and objectives),
+Comms, Presentation and checkpoints. Activity filters the feed, action journal
+and session history without merging their distinct records. Critical warnings
+remain in the header even when Session is closed.
 
-Live's roster, readiness, join-request and manual-save nodes are moved into the
-shared constrained dock renderer, and since issue #1502 the mission events, the
-Comms studio, the activity feed, the saved action journal and the session
-history join them. Those five were the desk's centre-bottom region behind a
-bespoke tab strip; they are now the dock's own default tab group, with its
-roving tablist semantics, and docking may pull any of them out. The strip,
-`#gm-desk-log` and its `data-log-view` switch are gone. Issue #1503 then brought
-in the omniscient map, the attention queue, Station workload, the authored
-widget region and peer health, leaving the desk as TWO grid regions: the dock
-workspace across the left and centre, and the detail column.
+`gui/gm-entity-tree.js` retains keyed rows through projection updates. Loaded
+worlds/layers contain faction groups, entities and stations; unassociated runtime
+entities have a separate group. Empty player slots expose pre-launch AI backfill.
+World and faction selections show contextual Inspector summaries, entity
+selection uses the existing projection owner, and station selection opens the
+authored console in observation mode. Selection alone never grants authority.
 
-Issue #1504 then brought authentic Station operation in: the takeover controls
-and pending state are an ordinary tool panel, and the console is a second
-*document* beside the map. Neither is a new command route — the puppet still
-owns the iframe, its typed bridge and the capability gate — and neither is
-another simulation participant. The console panel exists exactly while the takeover controls do — that is, while
-the projection carries a Station row, taken over or not — which is the same rule
-its surface's own `hidden` always carried. Closing it is an arrangement choice
-that releases nothing, and taking a Station over brings an OPEN console forward
-without reopening one the operator closed.
+Live layout version 19 resets older arrangements once and retains their sanitised
+backup in private operator preferences. The Layout menu can restore that backup,
+mapping retired panel IDs to Session, Mission, Activity or Station Console.
+Unrelated preferences survive. Tab-strip dragging reorders buttons without
+reparenting the panel or its iframe; leaving the strip enters docking/floating.
+Dock groups and floating windows resize. Desktop controls use compact spacing;
+the private density preference switches to touch-sized targets.
 
-Issue #1509 finished the migration. Checkpoint browsing is a RECORD and joins
-the reading surfaces beside the journal and the session history; restoring is a
-complex action and became a draft of its own, because it combines a selection, a
-preflight, a consequence preview and a confirmation. The candidate it acts on is
-still whatever the record has selected — the move carried the controls, not the
-decision — and the journal and the `gm_health` phase remain the canonical result
-surfaces. Only a restore that LANDED finishes the draft: a rollback, a failure
-and a local refusal all leave it standing with its phase on screen. With that,
-every panel the desk ever held is a dock panel, so the dock workspace IS the
-desk: one grid child across the whole screen, and the detail column is gone.
+Manual save and Inspector-linked editing/detail tools open as dockable pop-ups.
+Temporary tools close on successful completion unless Keep open is selected;
+refusals retain the draft. Manual save completes only after the storage adapter
+confirms success, including native FileStore outcomes.
 
-Issue #1510 separated what the contact tool had been carrying. Deciding what one
-observing ship may see of one target is a verb — reveal, conceal, normal — and
-stays on the contact panel beside the observer it applies to. Misclassifying a
-contact and setting a reported-information policy each
-compose several choices before anything can be sent, so each became a draft of
-its own with the shared temporary lifecycle: absent from the default
-arrangement, opened floating, cleared or kept by its own Keep open, and finished
-only by its own applied outcome. Clearing a policy, clearing a false classification and removing a
-ghost undo something rather than compose it, so they remain simple actions and
-finish no draft — and what is IN FORCE is a record rather than a draft, so the
-classification, the policy and the ghosts an observing crew is being told about
-are all read on the contact tool that is always there, and the first two are
-cleared there too. A ghost is removed through the draft, because removing one
-means saying WHICH: choosing it from that record opens the draft and loads it,
-which also ends any pick in progress — an armed chart and a loaded place are
-two answers to the same question. Contact control and NPC doctrine read the same selection the inspector
-does, so they join its column as tabs rather than living inside it — and a quick
-action that jumps to a control in one of them brings its panel forward first,
-because a panel behind another tab is `hidden` and a control in it is
-unfocusable. Placing a ghost may be done on the chart, through the same picking
-gesture Spawn uses: the chart speaks metres and the position is canonical
-integer millimetres, so the picked place is converted into the same fields, with
-the same bounds, checked by the same validation. A place beyond those bounds is
-written verbatim and refused, not quietly clamped.
+`gui/gm-session-widget.js` alone selects Ready/Unready, Pause or Resume from
+phase, admission, readiness and pause state. Role presets do not write those
+buttons. Force Start stays in Session. Unknown/disconnected state disables the
+applicable control, and terminal phases expose neither Pause nor Resume.
 
-Creating a ghost contact was the third such draft until placing one became a
-Spawn outcome: the placement panel's palette, its chart gesture and its typed
-form place either a real entity or a false Sensors report of that entry for one
-observing ship. A ghost is reported to a ship and never spawned, so that outcome
-asks which ship, and under what identity it can later be removed; the contact
-tool keeps the per-observer record and a Remove beside each entry. Live layout
-version 14 retired the ghost draft panel.
+Take Over/Release, ownership and connection status sit beside the live Station
+Console. Switching stations, closing the console or deliberately hiding its tab
+waits for authoritative release; refusal or timeout retains the console and a
+recovery message. Docking, resizing and ordinary focus changes do not release.
+A mounted-generation guard rejects stale iframe commands and feedback.
+The native projection resolves a backfilled hull from its entity template,
+without requiring SelectedShipResource. Entity and Station projections publish
+once in PostUpdate after completed fixed ticks, including held-clock frames;
+both native and browser delivery follow that shared pass. Presentation-only
+configuration caches invalidate on template/overlay revision changes. Station
+ownership and outcomes still publish while paused, so release does not require Resume.
 
-Issue #1511 took the last two selected-entity actions out of the inspector.
-Disabling and restoring one authored System is a target-relative choice and a
-verb, so it stays an ordinary tool beside the selection it reads. Direct damage
-and repair became a draft: it combines an effect kind, an amount, a scope over
-the whole hull or one Station or one System, and a clamp and lethality preview,
-and it finishes only on a press the world TOOK — a refusal leaves it open with
-its numbers and its reason on screen, which is the whole point of composing them
-somewhere of their own. After a press that landed, HOW MUCH stays and WHERE it
-was aimed goes back to the whole hull. A press still in flight counts as unsent
-work even when the fields read as untouched, so closing the panel asks first;
-the SELECTION never does, because it belongs to the map and the inspector rather
-than to this draft. A quick action pointing into a draft opens it, because a
-draft nobody opened is not a panel put away — it is simply not there.
+The private local presentation adapters accept typed Inspector visibility and
+console-interest requests, separate from GM actions and participant messages.
+Detailed schemas are constructed only for visible Inspector tools; lightweight
+world/layer nodes remain in the Entity Tree. Station topology remains complete,
+while detailed readings are limited to the visible selected console and, when
+opened, the independently selected crew-knowledge comparison. Shared world
+entities and absolute entity state appear once in the Station payload; each ship
+keeps only its recipient-scoped Objective target IDs. Console input reuses one
+client-state object and rejects obsolete world/mount generations. None of these
+subscriptions grants command authority.
 
-Issue #1512 finished the desk. Removing one selected entity, and setting an
-ordered faction pair's absolute hostility, are each one choice and a verb: a
-removable target plus its consequence confirmation, and a directional pair plus
-a hostile/neutral state. Neither composes anything, so neither is forced through
-the draft lifecycle — both are ordinary tools in the column that reads the same
-selection and projection they do. Rearranging them is a layout decision and
-nothing else: a stored arrangement carries placement only, never the selection
-the tools are aimed at and never an open confirmation, because a desk restored
-aimed at something the operator never chose is a desk that removes the wrong
-hull.
+Presentation work no longer decorates every workspace button on each mutation.
+Tree rows, station choices and activity entries use relevant-data signatures;
+closed read-only detail tools coalesce updates, the map suspends when hidden,
+and the console mounts only when opened. This is not a measured 60 FPS claim:
+see [compact desk acceptance](../../docs/acceptance/gm-compact-desk.md) for the
+native proof and outstanding performance capture.
 
 Issue #1489 opened the Live Inspector's first domain: entities and AI. It is a
 READING surface. The runtime publishes one descriptor table for the whole
@@ -383,10 +354,12 @@ Pause/Resume quick actions. Presets never change action authority or enter
 ### A game master with no fleet
 
 The landing's Host as GM route opens a session in which the game master IS the
-session: one browser or native peer, one simulation, the hull it picked on the
-landing flown by AI backfill, and nobody else on the wire. On native, the GM
-workspace replaces the primary viewscreen after ingestion and participant
-ingress is disabled. There is no fleet owner to
+session: one browser or native peer, one simulation, and nobody else on the
+wire. The browser route's selected hull flies on AI backfill. Native selects
+only the scenario: authored player slots supply ships and the GM may backfill
+empty slots before Start, without owning a local hull. The native GM workspace
+replaces the primary viewscreen after ingestion and participant ingress is
+disabled. There is no fleet owner to
 mint anything, so `src/gm_solo.rs` binds the identity instead. `wasm_prepare_game_master(standalone)`
 tells the profile which route booted it, and a standalone one installs a
 one-participant `FleetRoster` whose single `FleetGm` names `gm-1` on its own

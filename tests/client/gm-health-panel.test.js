@@ -443,9 +443,9 @@ describe('authored advisory config cannot reach the technical treatment', () => 
     // and the banner region lives inside the queue.
     expect(GM_ROLE_PRESET_PANEL_IDS).not.toContain('gm-attention-panel');
     expect(GM_ROLE_PRESET_PANEL_IDS).not.toContain('gm-health-panel');
-    // Docking is the other way a panel could be hidden, so the Live dock
-    // refuses to close these two for the same reason (issue #1503).
-    expect(LIVE_PINNED_PANELS).toEqual(['attention', 'health']);
+    // Critical banners now live in the permanent header, independently of
+    // whether either detailed panel is open.
+    expect(LIVE_PINNED_PANELS).toEqual([]);
   });
 
   it('wires the desk so the queue owns the region and the health component owns the drawing', () => {

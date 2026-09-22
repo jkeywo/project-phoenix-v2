@@ -292,6 +292,19 @@ describe('safe and atomic import', () => {
 });
 
 describe('private persistence and export boundary', () => {
+  it('persists the one-time desk reset and backup without resetting other preferences', () => {
+    const registry = createClientSemanticActionRegistry();
+    const previous = currentProfile(registry);
+    previous.liveLayout.version = 18;
+    const storage = fakeStorage({ [OPERATOR_PROFILE_KEY]: JSON.stringify(previous) });
+    const loaded = loadOperatorProfile(storage, { registry });
+    const saved = JSON.parse(storage.getItem(OPERATOR_PROFILE_KEY));
+    expect(saved.liveLayout.version).toBe(19);
+    expect(saved.previousLiveLayout).toBeTruthy();
+    expect(saved.accessibility).toEqual(previous.accessibility);
+    expect(saved.bindings).toEqual(previous.bindings);
+    expect(loadOperatorProfile(storage, { registry }).profile).toEqual(loaded.profile);
+  });
   it('migrates legacy storage once and writes the current versioned key', () => {
     const registry = createClientSemanticActionRegistry();
     const legacy = {
@@ -354,7 +367,7 @@ describe('private persistence and export boundary', () => {
     const exported = JSON.parse(serializeOperatorProfile(profile));
     expect(Object.keys(exported).sort()).toEqual([
       'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback', 'gamepad',
-      'gmConfirmations', 'kind', 'liveLayout', 'testLayout', 'version',
+      'gmConfirmations', 'gmDensity', 'kind', 'liveLayout', 'previousLiveLayout', 'testLayout', 'version',
     ]);
     // The three layout fields are placement vocabulary — `station` and
     // `station-console` are PANEL IDS since issue #1504, not a Station identity —

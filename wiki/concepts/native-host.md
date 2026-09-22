@@ -1555,13 +1555,18 @@ The landing now has three native session roles in
 Master, and fleet Game Master peer. Back can change that choice until a World
 is ingested; ingestion commits it, and later role changes are refused.
 
-**Host as GM** uses the ordinary scenario/hull picker and runtime world loader.
-It installs one selected local hull, binds `gm_solo`'s `gm-1`, AI-backfills the
-Stations, and disables crew ingress and the crew invitation. Start and GM
+**Host as GM** uses the scenario picker and runtime world loader without asking
+the GM to select or own a hull. It binds `gm_solo`'s `gm-1`, stages authored
+player slots for AI backfill in the lobby, and disables crew ingress and the
+crew invitation. Ready is visible in the workspace header. Start and GM
 actions use the existing fixed-tick force-start and `gm_action::submit_local`
 paths. Once committed, the shared native GM document fills the primary window;
 the retained landing, HUD and 3-D viewscreen stop drawing over it and leave the
 input router.
+
+The private GM save bridge (`native_gm/saves.rs`) exposes named captures and
+checkpoint catalogue reads through the existing native FileStore, including
+shared candidate preflight and real persisted-write outcomes.
 
 **Join as Peer** opens the shared typed-code panel and creates a GM-only fleet
 member over the rendezvous join endpoint. The built-in rendezvous URL and

@@ -606,4 +606,19 @@ describe('createGmKnowledgeCompare', () => {
     expect(document.getElementById('gm-knowledge-panel').hidden).toBe(true);
     expect(controller.state()).toEqual({ selectedShipId: null, shipIds: [] });
   });
+
+  it('suspends hidden comparison work and renders the latest projection on reopen', () => {
+    const controller = createGmKnowledgeCompare({ doc: document, t: id => id });
+    controller.setVisible(false);
+    const ship = shipProjection({});
+    controller.updateStations({ ships:[ship], activity:[] });
+    expect(document.getElementById('gm-knowledge-select').options.length).toBe(0);
+    controller.updateStations({ ships:[], activity:[] });
+    controller.setVisible(true);
+    expect(document.getElementById('gm-knowledge-panel').hidden).toBe(true);
+    controller.updateStations({ ships:[ship], activity:[] });
+    const option = document.getElementById('gm-knowledge-select').options[0];
+    controller.updateStations({ ships:[ship], activity:[] });
+    expect(document.getElementById('gm-knowledge-select').options[0]).toBe(option);
+  });
 });

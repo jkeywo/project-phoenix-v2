@@ -3,7 +3,7 @@ title: Performance Measurement
 type: concept
 tags: [profiling, headless, renderer, performance]
 sources: [src/perf/mod.rs, src/perf/native_frames.rs, src/bin/phoenix_headless.rs, examples/profile_systems.rs, examples/profile_systems/timing.rs, examples/profile_systems/gpu.rs, scripts/profile-provenance.mjs, scripts/profile-analysis.mjs, scripts/profile-native.ps1, scripts/profile-native-matrix.ps1, src/native_host/panes/surface_stats.rs, src/native_host/panes/render_geometry.rs, src/native_host/panes/frame_stats.rs, docs/profiling.md, pasm/spec/architecture/performance-measurement.yaml]
-updated: 2026-09-08
+updated: 2026-09-22
 ---
 
 # Performance Measurement
@@ -14,8 +14,31 @@ The `profile_systems` example builds the production headless or native App and o
 
 The runners and validity checks live in `scripts/profile-*`; commands and interpretation are in [docs/profiling.md](../../docs/profiling.md). Build receipts pin a clean source revision, executable, symbols, SDK resources and content. Profiling builds use a target directory private to the checkout. Samples, hardware records and raw traces stay under ignored `.phoenix/` directories.
 
+The working-tree GM desk harness is `examples/profile_gm.rs` with its injected
+`profile_gm.js` driver and `scripts/profile-gm-current.ps1` launcher. It observes
+the player-slot Helm through the real native surface at 1080p, using 40 seconds
+of warm-up and 60 seconds of measurement. `-Diagnostic` enables named-system
+spans; ordinary samples suppress per-frame log writes and retain buffered
+workload and continuous console-health checks. `profile-gm-report.mjs` reports
+invalid samples instead of treating missing telemetry or stale consoles as
+success. `sampleValid` covers workload/telemetry validity; `accepted` also
+requires outer and live-console cadence. `-Stage raster` is an explicitly
+non-acceptance visual-isolation probe, including animation callback costs:
+Ultralight's global render span can include those callbacks, not just pixels.
+This dirty-tree harness is distinct from clean-build receipts above;
+results and limitations are in [GM performance evidence](../../docs/acceptance/gm-performance-2026-09-22.md).
+
 `profile-native.ps1 -Condition three` requires live helm, tactical and engineering Station consoles on the harness's Alliance Destroyer. The optional `profile-native-matrix.ps1 -ThreeStations -Experiment scale2` brackets each experiment with native-scale runs of the same three-console profile; the original renderer/chrome/one/two matrix remains the default. The shared validator rejects an omitted Station or a console that loses readiness during observation.
 
 Native pane observations live in `panes::surface_stats` and `pane_thread`. Copy events retain separate dirty and copied rectangles; forced/failed dirty bounds remain unknown because the pinned SDK wrapper exposes only copied bounds. `--frame-stats` adds literal per-pane rectangle lines to the Lobby log. [The attribution runbook](../../docs/acceptance/1405-surface-attribution.md) describes capture limits and compatibility with earlier schema 1 pixel-only records.
+
+Pane visibility now reaches the embedded document as well as the compositor:
+`PaneView::set_visible` retains a hide during load, and the Ultralight adapter
+suspends hidden-document layout/paint without unloading it. Bridge delivery
+continues; reveal removes the private hide rule and owes a fresh full copy.
+The shared navigation map caches its full-resolution grid by geometry and
+colours, while live contacts/regions remain frame-current. Map and radar paint
+directly to their displayed canvases instead of copying full-size staging
+canvases on every update.
 
 `panes::render_geometry` defines the opt-in `scale2` Console raster experiment selected by `PaneExperiments`. `panes::ultralight` uses reduced view/texture dimensions and device scale while retaining display/input geometry; Lobby and HUD stay native. Source tests do not establish real-display text legibility or a performance benefit.

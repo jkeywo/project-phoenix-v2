@@ -431,6 +431,7 @@ export function createGmSessionControls({
     if (region) region.dataset.admitted = String(admitted);
     for (const button of [pause, resume]) {
       if (!button) continue;
+      if (button.dataset.sessionOwner === 'widget') continue;
       button.disabled = !admitted;
       button.setAttribute('aria-disabled', admitted ? 'false' : 'true');
     }
@@ -438,6 +439,10 @@ export function createGmSessionControls({
   }
 
   function activate(actionId, source = 'control') {
+    const button = actionId === GM_PAUSE_ACTION_ID ? pause : actionId === GM_RESUME_ACTION_ID ? resume : null;
+    if (button?.dataset.sessionOwner === 'widget' && (button.hidden || button.disabled)) {
+      return { claimed: true, actionId, handled: false };
+    }
     if (!refreshAdmission()) {
       return { claimed: true, actionId, handled: false };
     }

@@ -24,6 +24,22 @@ function mount(markup) {
 }
 const el = (id) => document.getElementById(id);
 
+it('does not repaint unchanged controls when only live map readings change', () => {
+  mount('<ph-helm-radar id="helm-radar"></ph-helm-radar><ph-helm-joystick id="helm-joystick"></ph-helm-joystick><ph-boost-btn id="boost-btn"></ph-boost-btn>');
+  destroyerRender({helm_auto:true, boost_battery:1, x:1}, document);
+  const firstJoystick = el('helm-joystick').state;
+  const firstBoost = el('boost-btn').state;
+  const firstRadar = el('helm-radar').state;
+  destroyerRender({helm_auto:true, boost_battery:1, x:2}, document);
+  expect(el('helm-joystick').state).toBe(firstJoystick);
+  expect(el('boost-btn').state).toBe(firstBoost);
+  expect(el('helm-radar').state).not.toBe(firstRadar);
+  expect(el('helm-radar').state.x).toBe(2);
+  destroyerRender({helm_auto:false, boost_battery:0.5, x:3}, document);
+  expect(el('helm-joystick').state.auto).toBe(false);
+  expect(el('boost-btn').state.recharge_pct).toBe(50);
+});
+
 const BATTLESHIP_FIXTURE =
   '<ph-helm-radar id="helm-radar"></ph-helm-radar>' +
   '<ph-helm-joystick id="helm-joystick"></ph-helm-joystick>' +

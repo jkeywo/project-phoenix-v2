@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountNativeGmWorkspace } from '../../gui/native-gm-workspace.js';
 import { t } from '../../gui/strings.js';
 
-function mount() {
+function mount(overrides = {}) {
   let operator = { id: 'native-gm', name: 'GM', connected: true, ready: false };
   let listener;
   const bridge = {
@@ -13,6 +13,7 @@ function mount() {
     forceStart: vi.fn(() => true),
     returnToHostLobby: vi.fn(() => true),
     subscribe: fn => { listener = fn; return () => { listener = null; }; },
+    ...overrides,
   };
   const view = mountNativeGmWorkspace({ bridge, win: window, doc: document });
   return { bridge, view,
@@ -45,6 +46,49 @@ describe('native GM workspace over the shared GM presenters', () => {
     expect(window.__hostSetContactClassification({ ...request, operator_id: 'other' })).toBe(false);
     app.view.dispose(); expect(window.__hostSetContactClassification(request)).toBe(false);
   });
+
+  it('keeps presentation interest off the authoritative action lane', () => {
+    const inspectorInterest = vi.fn(() => true), consoleInterest = vi.fn(() => true);
+    const app = mount({inspectorInterest, consoleInterest});
+    const request = {consumer:'console', ship:'player', station:'helm', visible:true, mount_generation:2, world_generation:3};
+    window.__hostGmConsoleInterest(request);
+    window.__hostGmInspectorInterest(['hull-fields']);
+    expect(consoleInterest).toHaveBeenCalledWith(request);
+    expect(inspectorInterest).toHaveBeenCalledWith(['hull-fields']);
+    expect(app.bridge.submitAction).not.toHaveBeenCalled();
+    app.view.dispose();
+  });
+  it('shares one location between Ready, Pause and Resume', () => {
+    document.body.insertAdjacentHTML('beforeend', '<div id="gm-session-actions"></div>');
+    const app = mount();
+    const ready = document.getElementById('gm-header-ready');
+    const pause = document.getElementById('gm-session-pause');
+    const resume = document.getElementById('gm-session-resume');
+    expect(ready.parentElement.id).toBe('gm-session-actions');
+    expect([ready.hidden, pause.hidden, resume.hidden]).toEqual([false, true, true]);
+    app.receive('metadata', { phase: 'InProgress', gms: [] });
+    app.receive('gm_session', { paused: false, results: [] });
+    expect([ready.hidden, pause.hidden, resume.hidden]).toEqual([true, false, true]);
+    app.receive('gm_session', { paused: true, results: [] });
+    expect([ready.hidden, pause.hidden, resume.hidden]).toEqual([true, true, false]);
+    app.view.dispose();
+  });
+  it('waits for native save completion and surfaces write failures', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<section id="manual-save-panel"></section>');
+    const saveRequest = vi.fn().mockResolvedValue('native-slot');
+    const app = mount({ saveRequest });
+    app.receive('metadata', { phase: 'InProgress', gms: [] });
+    const panel = document.getElementById('manual-save-panel');
+    panel.querySelector('input').value = 'Before battle';
+    panel.querySelector('button').click();
+    await Promise.resolve();
+    expect(saveRequest).toHaveBeenCalledWith('create', 'Before battle');
+    expect(panel.querySelector('button').disabled).toBe(true);
+    app.receive('save_outcomes', [{ slot: 'native-slot', ok: false, error: 'Disk full' }]);
+    expect(panel.querySelector('[role="status"]').textContent).toBe('Disk full');
+    expect(panel.querySelector('button').disabled).toBe(false);
+    app.view.dispose();
+  });
   it('requires an explicit native private audio provider even without an operator capability declaration', async () => {
     delete window.PhoenixOperatorCapabilities;
     const audioContext = vi.fn(); window.AudioContext = audioContext;
@@ -58,6 +102,7 @@ describe('native GM workspace over the shared GM presenters', () => {
 
   it('uses the ordinary GM session projection and submits attributed absolute pause state', () => {
     const app = mount();
+    app.receive('metadata', { phase: 'InProgress', gms: [] });
     app.receive('gm_session', { paused: false, results: [] });
     document.getElementById('gm-session-pause').click();
     expect(app.bridge.submitAction).toHaveBeenCalledWith(expect.objectContaining({

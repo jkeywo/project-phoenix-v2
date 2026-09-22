@@ -230,6 +230,25 @@ function touch(el, type, touches, changedTouches = []) {
 }
 
 describe('PhNavigationMap', () => {
+  it('reuses the full-resolution grid for moving contacts and invalidates it on pan, zoom, range and resize', () => {
+    const h = setup();
+    const state = {range:50000, show_ship_marker:false, blips:[{uuid:'ship', world_x:0, world_z:0}]};
+    h.el.state = state; h.tickRaf();
+    const gridCount = () => h.fakeCtx._ops.filter(op => op.op === 'stroke' && op.lineWidth === 0.5).length;
+    let count = gridCount();
+    expect(count).toBeGreaterThan(0);
+    h.el.state = {...state, blips:[{...state.blips[0], world_x:42}]}; h.tickRaf();
+    expect(gridCount()).toBe(count);
+    for (const change of [
+      () => h.el.navigationPan({x:20}),
+      () => h.el.navigationZoom({factor:1.2}),
+      () => { h.el.state = {...state, range:20000}; },
+      () => h.el.getBoundingClientRect.mockReturnValue({width:400,height:300,left:0,top:0}),
+    ]) {
+      change(); h.tickRaf(); expect(gridCount()).toBeGreaterThan(count); count = gridCount();
+    }
+    expect(h.canvas.width).toBe(800);
+  });
   it('is defined and registered as a custom element', () => {
     expect(customElements.get('ph-navigation-map')).toBeDefined();
   });

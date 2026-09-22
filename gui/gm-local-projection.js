@@ -276,6 +276,7 @@ export function createGmLocalProjection({
   const map = doc.getElementById('gm-entity-map');
   let entities = [];
   let selectedId = null;
+  let selectionSignature;
 
   const inspector = createEntityInspector({
     doc,
@@ -288,6 +289,9 @@ export function createGmLocalProjection({
   }
 
   function announceSelection(entity) {
+    const signature = JSON.stringify(entity);
+    if (signature === selectionSignature) return;
+    selectionSignature = signature;
     try {
       onSelectionChanged(entity);
     } catch (_) {

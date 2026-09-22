@@ -653,7 +653,11 @@ fn feed_scenario_panel(
     let mut payload =
         published_catalog(&catalog.0, &selection.0, pinned).surface(world_config.is_some());
     payload.ship_required = !role.as_ref().is_some_and(|state| {
-        state.role() == crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+        matches!(
+            state.role(),
+            crate::native_host::session_role::NativeSessionRole::FleetGameMaster
+                | crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+        )
     });
     bridge.0.push_scenario(payload.to_json());
 }

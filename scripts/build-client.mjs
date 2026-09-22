@@ -97,6 +97,9 @@ async function main() {
   const hostGuiOut = path.join(root, 'dist', 'gui');
   await rm(hostGuiOut, { recursive: true, force: true });
   await cp(path.join(root, 'gui'), hostGuiOut, { recursive: true });
+  // Native GM/lobby modules resolve the table beside the host bundle, not
+  // beside the phone page. Keep that table current on the fast native build.
+  await cp(path.join(root, 'assets', 'strings'), path.join(root, 'dist', 'assets', 'strings'), { recursive: true });
 
   // assets/<dir>/
   for (const dir of ASSET_DIRS) {

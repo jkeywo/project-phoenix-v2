@@ -3,12 +3,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildGmStationConsoleInput,
-  createGmStationPuppet,
+  createGmStationPuppet as createPuppet,
   GM_STATION_PENDING_CAPACITY,
   parseGmStationProjection,
 } from '../../gui/gm-station-puppet.js';
 import { initConsole } from '../../gui/console-core.js';
 import { createGmConfirmationProfile, createGmConfirmationController } from '../../gui/gm-confirmation.js';
+
+// Exercise explicitly opened stations; the desk lazily mounts closed panes.
+function createGmStationPuppet(options) {
+  const puppet = createPuppet(options); puppet.setVisible(true); return puppet;
+}
 
 function projection({ operators = [], activity = [], results = [], rating = 'Backfill' } = {}) {
   return {
@@ -57,6 +62,150 @@ function mount() {
 describe('GM authentic Station projection', () => {
   beforeEach(mount);
 
+  it('subscribes by mount and world generation, rejects stale state and preserves the iframe on updates', () => {
+    const interest = vi.fn(() => true);
+    const builder = vi.spyOn(window, 'buildConsoleState').mockReturnValue('{}');
+    const controller = createGmStationPuppet({doc:document, win:window, requestInterest:interest});
+    const p = {...projection(), presentation_generation:3, detail_ships:[], console_interest:null};
+    controller.update(p);
+    const frame = document.getElementById('gm-station-frame');
+    const draw = vi.fn(); frame.contentWindow.__updateConsole = draw;
+    const requested = interest.mock.calls.at(-1)[0];
+    expect(requested).toMatchObject({consumer:'console', ship:'ship-player-1', station:'captain', visible:true, world_generation:3});
+    controller.update({...p, detail_ships:['ship-player-1'], console_interest:{...requested, mount_generation:requested.mount_generation-1}});
+    expect(draw).not.toHaveBeenCalled();
+    controller.update({...p, detail_ships:['ship-player-1'], console_interest:requested});
+    expect(draw).toHaveBeenCalledOnce();
+    expect(document.getElementById('gm-station-frame')).toBe(frame);
+    controller.setVisible(false);
+    expect(interest.mock.calls.at(-1)[0].visible).toBe(false);
+    expect(controller.update({...p, presentation_generation:2})).toBe(false);
+    controller.setVisible(true);
+    expect(interest.mock.calls.at(-1)[0].visible).toBe(true);
+    controller.dispose(); builder.mockRestore();
+  });
+
+  it('folds shared world data with ship-scoped objective targets', () => {
+    const p = projection();
+    p.entities = [{uuid:'contact', position:[1,0,2], objective_target:true}];
+    p.entity_states = [{uuid:'contact', position:[4,0,5]}];
+    p.world_revision = 1;
+    const ship = p.ships[0]; ship.objective_targets = [];
+    const state = buildGmStationConsoleInput(p, ship);
+    expect(state.world.entities[0]).toMatchObject({position:[4,0,5],objective_target:false});
+    const retainedEntity = state.world.entities[0];
+    const apply = vi.spyOn(state, 'apply');
+    p.entity_states = [{uuid:'contact', position:[8,0,9]}];
+    buildGmStationConsoleInput(p,ship,state);
+    expect(state.world.entities[0]).toBe(retainedEntity);
+    expect(state.world.entities[0].position).toEqual([8,0,9]);
+    expect(apply.mock.calls.some(([message])=>['Welcome','WorldSetup'].includes(message.type))).toBe(false);
+    apply.mockRestore();
+    ship.objective_targets = ['contact'];
+    expect(buildGmStationConsoleInput(p,ship,state).world.entities[0].objective_target).toBe(true);
+    expect(p.entities[0].position).toEqual([1,0,2]);
+  });
+
+  it('reuses client state and matches full reconstruction after absolute world and ownership changes', () => {
+    const p = projection();
+    const ship = p.ships[0];
+    ship.entities = [{uuid:'gone', position:[0,0,0]}, {uuid:'moving', position:[1,0,1]}];
+    ship.entity_states = [{uuid:'moving', position:[2,0,2], hull_fraction:0.8}];
+    let state = buildGmStationConsoleInput(p, ship);
+    const apply = vi.spyOn(state, 'apply');
+    ship.entities = [{uuid:'moving', position:[1,0,1]}, {uuid:'spawned', position:[3,0,3]}];
+    ship.entity_states = [{uuid:'moving', position:[4,0,5], hull_fraction:0.4}];
+    ship.objectives = [{id:'new', title:'Objective', complete:false}];
+    ship.blackboards = [];
+    ship.ship_pose = {x:4,y:0,z:5,yaw:0.2,forward_speed:2};
+    ship.stations[0].operators = ['gm-1'];
+    const next = buildGmStationConsoleInput(p, ship, state);
+    expect(next).toBe(state);
+    expect(apply.mock.calls.some(([message])=>message.type==='Welcome')).toBe(false);
+    apply.mockRestore();
+    const fresh = buildGmStationConsoleInput(p, ship);
+    expect(next).toEqual(fresh);
+    ship.ship_config = {...ship.ship_config, helm_radar_range:999};
+    state = buildGmStationConsoleInput(p, ship, next);
+    expect(state.helmRadarRange).toBe(999);
+    expect(state).toEqual(buildGmStationConsoleInput(p, ship));
+  });
+
+  it('does not mount a closed station, then observes without command authority', () => {
+    const send = vi.fn(() => true);
+    const controller = createPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }), submitStationCommand: send });
+    controller.update(projection());
+    expect(document.getElementById('gm-station-frame').getAttribute('src')).toBeNull();
+    controller.focusStation('ship-player-1', 'captain');
+    controller.issueConsoleAction({ action: 'set_red_alert', console: 'captain', active: true, correlation: 'observation-refused' });
+    expect(send).not.toHaveBeenCalled();
+    controller.update(projection({ operators: ['gm-1'] }));
+    controller.issueConsoleAction({ action: 'set_red_alert', console: 'captain', active: true, correlation: 'confirmed-control' });
+    expect(send).toHaveBeenCalledOnce();
+    controller.dispose();
+  });
+  it('completes release before hiding and preserves the console until confirmation', () => {
+    const submit = vi.fn(() => true), hide = vi.fn();
+    const controller = createGmStationPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }), submitStationPuppet: submit });
+    controller.update(projection({ operators: ['gm-1'] }));
+    const frame = document.getElementById('gm-station-frame');
+    expect(controller.mayHide(hide)).toBe(false);
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ active: false }));
+    expect(hide).not.toHaveBeenCalled();
+    expect(document.getElementById('gm-station-frame')).toBe(frame);
+    controller.update(projection());
+    expect(hide).toHaveBeenCalledOnce();
+    controller.dispose();
+  });
+  it('waits for release before switching stations and never mounts a new target on refusal', () => {
+    const submit = vi.fn(() => true);
+    const controller = createGmStationPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }), submitStationPuppet: submit });
+    const first = projection({ operators: ['gm-1'] });
+    first.ships.push({ ...first.ships[0], ship_id: 'second', stations: [{ ...first.ships[0].stations[0], operators: [] }] });
+    controller.update(first);
+    const frame = document.getElementById('gm-station-frame');
+    expect(controller.focusStation('second', 'captain')).toBe(false);
+    controller.settleLifecycleResults([{ operator_id: 'gm-1', correlation: submit.mock.calls[0][0].correlation, outcome: 'refused' }]);
+    expect(document.getElementById('gm-station-frame')).toBe(frame);
+    expect(controller.state().selectedRow.ship.ship_id).toBe('ship-player-1');
+    expect(document.getElementById('gm-station-status').textContent).toBe('server.gm.station.release_failed');
+    controller.dispose();
+  });
+  it('keeps the console with recovery text if release times out', () => {
+    const timers = [], hide = vi.fn();
+    const controller = createGmStationPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }),
+      submitStationPuppet: () => true, schedule: fn => { timers.push(fn); return timers.length; }, cancelSchedule: () => {} });
+    controller.update(projection({ operators: ['gm-1'] }));
+    controller.mayHide(hide); timers.at(-1)();
+    expect(hide).not.toHaveBeenCalled();
+    expect(document.getElementById('gm-station-status').textContent).toBe('server.gm.station.release_failed');
+    controller.dispose();
+  });
+
+  it('reports an authored console that never becomes ready instead of loading forever', () => {
+    vi.useFakeTimers();
+    const controller = createGmStationPuppet({ doc: document, win: window });
+    try {
+      controller.update(projection());
+      vi.advanceTimersByTime(10_000);
+      expect(document.getElementById('gm-station-connection').textContent).toBe('server.gm.station.load_failed');
+    } finally { controller.dispose(); vi.useRealTimers(); }
+  });
+
+  it('refuses an old takeover confirmation after the console target changes', () => {
+    let confirmation;
+    const submit = vi.fn(() => true);
+    const controller = createGmStationPuppet({ doc: document, win: window,
+      getOperator: () => ({ id: 'gm-1', connected: true }), submitStationPuppet: submit,
+      confirmAction: request => { confirmation = request; return true; } });
+    const state = projection({ operators: [] });
+    state.ships.push({ ...state.ships[0], ship_id: 'second' });
+    controller.update(state); controller.toggle();
+    controller.focusStation('second', 'captain');
+    expect(confirmation.accept()).toBe(false);
+    expect(submit).not.toHaveBeenCalled(); controller.dispose();
+  });
+
   it('focusStation aims the matching established Station control', () => {
     const controller = createGmStationPuppet({ doc: document, win: window, getOperator: () => ({ id: 'gm-1' }) });
     controller.update(projection());
@@ -69,7 +218,8 @@ describe('GM authentic Station projection', () => {
   it('binds each Ship/Station to a fresh browsing context even when its URL matches', () => {
     const submitStationCommand = vi.fn(() => true);
     const listeners = new Map();
-    const hostWindow = { addEventListener: (type, listener) => listeners.set(type, listener) };
+    const hostWindow = { addEventListener: (type, listener) => listeners.set(type, listener),
+      setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window) };
     const controller = createGmStationPuppet({
       doc: document, win: hostWindow, getOperator: () => ({ id: 'gm-1' }), submitStationCommand,
     });

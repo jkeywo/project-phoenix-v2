@@ -9,6 +9,23 @@ const boot = readFileSync(resolve('src/native_host/native_gm/boot.js'), 'utf8')
 const queue = readFileSync(resolve('src/native_host/native_gm/queue.js'), 'utf8');
 
 describe('native GM private bridge boot', () => {
+  it('serializes native save requests and resolves typed private replies', async () => {
+    document.body.innerHTML = '<main id="gm-console"></main>';
+    window.phoenixNativeGmOut = { send: vi.fn() };
+    new Function('mountNativeGmWorkspace', boot)(vi.fn());
+    const first = window.phoenixNativeGm.saveRequest('list');
+    const second = window.phoenixNativeGm.saveRequest('create', 'Before battle');
+    await Promise.resolve();
+    const request = JSON.parse(window.phoenixNativeGmOut.send.mock.calls.at(-1)[0]);
+    expect(request.operation).toBe('list');
+    window.__phoenixNativeGmChannels.save_reply(JSON.stringify({ id: request.id, value: [] }));
+    await expect(first).resolves.toEqual([]);
+    await Promise.resolve();
+    const create = JSON.parse(window.phoenixNativeGmOut.send.mock.calls.at(-1)[0]);
+    expect(create.operation).toBe('create');
+    window.__phoenixNativeGmChannels.save_reply(JSON.stringify({ id: create.id, value: 'saved-slot' }));
+    await expect(second).resolves.toBe('saved-slot');
+  });
   beforeEach(() => {
     // The real embedded document installs this profile bridge before boot.js.
     window.PhoenixInstallNativeOperatorStorage = vi.fn();

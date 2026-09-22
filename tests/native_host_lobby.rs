@@ -446,23 +446,82 @@ fn a_selection_pair_loads_the_world_and_the_mission_starts() {
 }
 
 #[test]
-fn standalone_native_gm_loads_one_ai_backfilled_local_hull_and_gm_one() {
+fn standalone_native_gm_selects_only_scenario_and_binds_gm_one_without_local_hull() {
     let preload = preload();
-    let mut cfg = lobby_config();
-    cfg.solo = true;
+    let cfg = lobby_config();
     let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
+    app.insert_resource(project_phoenix::gm_projection::NativeGmPresentation);
+    app.add_plugins(project_phoenix::gm_projection::GmProjectionPlugin);
     app.insert_resource(NativeSessionRoleState::default());
     app.world_mut()
         .resource_mut::<NativeSessionRoleState>()
         .request(NativeSessionRole::StandaloneGameMaster);
     pump(&mut app, 4);
 
-    let (scenario_id, hull) = pick();
-    select(&mut app, "native-gm", &scenario_id, &hull);
+    let (scenario_id, _) = pick();
+    app.world_mut().write_message(InboundMessage {
+        token: "native-gm".to_string(),
+        msg: ClientMessage::SelectScenario { scenario_id },
+    });
     pump(&mut app, 90);
 
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby
+    );
+    // Empty player slots can be filled through the real local admission path
+    // before the stopped lobby clock advances or any player hull spawns.
+    app.insert_resource(project_phoenix::ship_slots::FrozenShipSlots::default());
+    project_phoenix::gm_action::submit_local(
+        app.world_mut(),
+        project_phoenix::gm_action::GmActionRequest {
+            operator_id: "gm-1".into(),
+            correlation: project_phoenix::gm_action::GmActionId::new("native-pregame-backfill")
+                .unwrap(),
+            action: project_phoenix::gm_action::GmAction::BackfillShipSlot {
+                slot: "player".into(),
+            },
+        },
+    )
+    .expect("the standalone GM is admitted before Start");
+    pump(&mut app, 4);
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::ship_slots::FrozenShipSlots>()
+            .0
+            .len(),
+        1
+    );
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Lobby
+    );
+    app.world_mut()
+        .resource_mut::<NextState<GamePhase>>()
+        .set(GamePhase::InProgress);
+    pump(&mut app, 10);
+
+    let station_projection = app
+        .world_mut()
+        .resource_mut::<Messages<project_phoenix::console_bridge::GmStationProjectionChanged>>()
+        .drain()
+        .last()
+        .expect("the native desk receives stations")
+        .payload;
+    let player_uuid = app.world_mut().query_filtered::<&project_phoenix::entities::spawner::EntityUuid,
+        With<project_phoenix::lockstep::FleetSlotOf>>().iter(app.world()).next().expect("filled player slot").0.clone();
+    let ship = station_projection
+        .ships
+        .iter()
+        .find(|ship| ship.ship_id == player_uuid)
+        .expect("an AI-filled player slot exposes its authored consoles");
+    assert!(
+        !ship.ship_config.station_systems.is_empty(),
+        "a GM-only host must resolve each slot's own hull, without a SelectedShipResource"
+    );
+
     assert!(app.world().resource::<NativeSessionRoleState>().committed());
-    assert!(app
+    assert!(!app
         .world()
         .contains_resource::<project_phoenix::lobby::SelectedShipResource>());
     assert_eq!(
@@ -470,7 +529,7 @@ fn standalone_native_gm_loads_one_ai_backfilled_local_hull_and_gm_one() {
             .query::<&project_phoenix::server_app::LocalShip>()
             .iter(app.world())
             .count(),
-        1
+        0
     );
     assert_eq!(
         app.world()

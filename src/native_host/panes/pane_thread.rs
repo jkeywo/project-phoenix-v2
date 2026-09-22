@@ -513,6 +513,10 @@ pub trait PaneView: PaneSurface {
     /// Resize the view, in physical pixels.
     fn resize(&mut self, width: u32, height: u32);
 
+    /// Suspend painting of an uncomposited document, without unloading it or
+    /// dropping its reliable bridge messages. Loading views retain the request.
+    fn set_visible(&mut self, visible: bool);
+
     /// Deliver one input. Fire-and-forget by construction: nothing is read back,
     /// which is what lets the whole set cross a channel.
     fn input(&mut self, input: &PaneInput);
@@ -1183,7 +1187,8 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 // The load happens inside `create` (slice 2), so there is one
                 // answer to report rather than two.
                 let result = match self.runtime.create(id, kind, &spec, &url) {
-                    Ok(view) => {
+                    Ok(mut view) => {
+                        view.set_visible(visible);
                         self.panes.push(LoopPane {
                             id,
                             kind,
@@ -1266,6 +1271,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
                         pane.hud_apply_owed = true;
                     }
                     pane.visible = visible;
+                    pane.view.set_visible(visible);
                     if let Some(observer) = &observer {
                         observer.record(
                             Some(pane.identity()),
@@ -1778,6 +1784,9 @@ mod thread_tests {
         }
     }
     impl PaneView for TrackedView {
+        fn set_visible(&mut self, visible: bool) {
+            self.inner.set_visible(visible);
+        }
         fn refresh_loaded(&mut self) -> bool {
             self.inner.refresh_loaded()
         }
@@ -2190,6 +2199,7 @@ pub(crate) mod doubles {
         pub inputs: Vec<PaneInput>,
         /// Every size this view was asked to take.
         pub resizes: Vec<(u32, u32)>,
+        pub visibility: Vec<bool>,
         /// What the next copy reports as repainted. `None` is a still page.
         pub paint: Option<FrameRect>,
         /// How many copies to fail before answering normally again — the
@@ -2257,6 +2267,9 @@ pub(crate) mod doubles {
     }
 
     impl PaneView for RecordingView {
+        fn set_visible(&mut self, visible: bool) {
+            self.visibility.push(visible);
+        }
         fn refresh_loaded(&mut self) -> bool {
             if !self.loaded && self.surface.is_ready() {
                 if self.calls_while_ready >= self.finishes_loading_after {
@@ -2926,6 +2939,10 @@ mod loop_tests {
         let (hidden_identity, hidden, sample) = step(&mut driver, &mut sink);
         assert!(!hidden_identity.visible);
         assert_eq!(
+            driver.view_mut(CONSOLE).unwrap().visibility.last(),
+            Some(&false)
+        );
+        assert_eq!(
             (hidden.outcome, hidden.dirty_rect, hidden.copied_rect),
             ("hidden", None, None)
         );
@@ -2951,6 +2968,10 @@ mod loop_tests {
         );
         driver.view_mut(CONSOLE).unwrap().paint = Some(FrameRect::full(8, 6));
         let (resized, reveal, _) = step(&mut driver, &mut sink);
+        assert_eq!(
+            driver.view_mut(CONSOLE).unwrap().visibility.last(),
+            Some(&true)
+        );
         assert_eq!(
             (
                 resized.epoch,

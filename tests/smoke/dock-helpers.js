@@ -34,6 +34,18 @@ export async function clickGmControl(page, controlId, panel = 'readiness') {
   await page.locator(`#${controlId}`).evaluate(control => control.click());
 }
 
+export async function floatGmPanel(page, panel) {
+  await revealGmPanel(page, panel);
+  const tab = page.locator(`#gm-live-layout [role="tab"][data-layout-panel="${panel}"]`);
+  await tab.scrollIntoViewIfNeeded();
+  const box = await tab.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 80, { steps: 5 });
+  await page.mouse.up();
+  await page.locator(`#gm-live-layout [data-panel="${panel}"].is-floating`).waitFor({ state: 'visible' });
+}
+
 export async function revealWorkshopPanel(page, panel) {
   await page.locator(`.workshop-layout .workshop-panel-switcher [data-layout-panel="${panel}"]`).click();
 }

@@ -7,8 +7,8 @@ let nextLayoutInstance = 0;
 
 export function mountDockLayout({ root, surface, panels, labels, initial, onChange, onVisible,
   available = () => true, retain = false, mayReset = () => true, mayClose = () => true,
-  onOpen = () => {}, onDiscard = () => {},
-  panelMenus = null,
+  onOpen = () => {}, onDiscard = () => {}, mayHide = () => true,
+  panelMenus = null, layoutActions = [],
   model = workshopLayoutModel, viewportNarrow = false, doc = root.ownerDocument, win = doc.defaultView }) {
   surface.classList.add('workshop-dock-root');
   const panelIds = model.panels;
@@ -35,6 +35,31 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   let state = model.normalize(initial, narrow ? undefined : canvasBounds());
   let projectedPanel = null;
   let drag = null;
+  const closeMenus = event => {
+    for (const menu of switcher.querySelectorAll('details[open]')) {
+      if (!menu.contains(event.target)) menu.open = false;
+    }
+  };
+  doc.addEventListener('pointerdown', closeMenus);
+  const resizeHandle = (handle, change) => {
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const start = { x: event.clientX, y: event.clientY };
+      const update = change(start);
+      handle.setPointerCapture?.(event.pointerId);
+      const move = event => update(event.clientX - start.x, event.clientY - start.y);
+      const end = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        onChange?.(state);
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    });
+  };
   /** Picking on a document covers the surface with a gesture, and an in-surface
    * floating panel sits on top of exactly that. Hiding the floats for the
    * duration is a presentation state, not a layout change: nothing is closed,
@@ -82,7 +107,22 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   };
 
   const settle = (value, bounds) => (model.settle || model.normalize)(value, bounds);
-  const emit = (next, focusPanel = next.selected) => {
+  const visibleIn = value => {
+    const visit = node => !node ? [] : node.type === 'tabs' ? [activeTab(node)] : node.children.flatMap(visit);
+    return new Set([...visit(value.root), ...value.floats.map(row => row.panel)]);
+  };
+  const emit = (next, focusPanel = next.selected, guard = true) => {
+    if (guard) {
+      const showing = visibleIn(next);
+      const requestedFrom = state;
+      for (const panel of visibleIn(state)) {
+        if (!showing.has(panel) && mayHide(panel, () => {
+          // A later layout gesture supersedes this request while release is
+          // pending; never restore its stale geometry over the newer choice.
+          if (state === requestedFrom) emit(next, focusPanel);
+        }) !== true) return;
+      }
+    }
     state = settle(next, narrow ? undefined : canvasBounds()); projectedPanel = null;
     render(); onChange?.(state);
     const restoreFocus = () => {
@@ -125,8 +165,34 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   const beginPointer = (event, panel, floating, node) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     drag = { panel, x: event.clientX, y: event.clientY, startX: event.clientX,
-      startY: event.clientY, floating, moved: false, node };
+      startY: event.clientY, floating, moved: false, node,
+      strip: event.currentTarget.closest('[role="tablist"]'), reorder: false };
     event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  let reorderScroll = null;
+  const stopReorderScroll = () => {
+    if (reorderScroll != null) win.cancelAnimationFrame?.(reorderScroll);
+    reorderScroll = null;
+  };
+  const scrollReorder = () => {
+    reorderScroll = null;
+    if (!drag?.reorder) return;
+    const bounds = drag.strip.getBoundingClientRect();
+    const direction = drag.pointerX > bounds.right - 24 ? 1 : drag.pointerX < bounds.left + 24 ? -1 : 0;
+    if (!direction) return;
+    const previous = drag.strip.scrollLeft;
+    drag.strip.scrollLeft += direction * 8;
+    if (drag.strip.scrollLeft !== previous) {
+      markInsertion();
+      reorderScroll = win.requestAnimationFrame?.(scrollReorder);
+    }
+  };
+  const markInsertion = () => {
+    canvas.querySelectorAll('.is-tab-insertion').forEach(node => node.classList.remove('is-tab-insertion'));
+    const tabs = [...drag.strip.querySelectorAll('[role="tab"]')].filter(tab => tab.dataset.layoutPanel !== drag.panel);
+    const before = tabs.find(tab => { const r = tab.getBoundingClientRect(); return drag.pointerX < r.left + r.width / 2; });
+    drag.before = before?.dataset.layoutPanel ?? null;
+    (before || drag.strip).classList.add('is-tab-insertion');
   };
   const movePointer = event => {
     if (!drag) return;
@@ -135,7 +201,20 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       // five drop targets over the desk. Wait for deliberate pointer travel.
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
       drag.moved = true;
-      canvas.classList.add('is-dragging');
+    }
+    const strip = drag.strip;
+    const bounds = strip?.getBoundingClientRect();
+    drag.reorder = !!bounds && event.clientX >= bounds.left && event.clientX <= bounds.right
+      && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
+    drag.pointerX = event.clientX;
+    stopReorderScroll();
+    canvas.querySelectorAll('.is-tab-insertion').forEach(node => node.classList.remove('is-tab-insertion'));
+    canvas.classList.toggle('is-dragging', !drag.reorder);
+    canvas.querySelector(`[data-panel="${drag.panel}"]`)?.classList.toggle('is-drag-source', !drag.reorder);
+    if (drag.reorder) {
+      markInsertion();
+      reorderScroll = win.requestAnimationFrame?.(scrollReorder);
+      return;
     }
     showPointerTarget(event);
     if (!drag.floating) return;
@@ -149,17 +228,33 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   };
   const endPointer = (event, cancelled = false) => {
     if (!drag) return;
+    stopReorderScroll();
     const gesture = drag;
     const target = cancelled || !gesture.moved ? null : pointerTarget(event);
     drag = null; canvas.classList.remove('is-dragging');
+    canvas.querySelectorAll('.is-tab-insertion').forEach(node => node.classList.remove('is-tab-insertion'));
+    canvas.querySelectorAll('.is-drag-source').forEach(node => node.classList.remove('is-drag-source'));
     canvas.querySelectorAll('.workshop-dock-target.is-pointer-target')
       .forEach(node => node.classList.remove('is-pointer-target'));
     const targetPanel = target?.closest('[data-panel]')?.dataset.panel;
     const placement = target?.dataset.placement;
-    if (targetPanel && placement && targetPanel !== gesture.panel) {
-      emit(model.dock(state, gesture.panel, targetPanel, placement), gesture.panel);
-    } else if (gesture.moved) {
+    if (gesture.moved && gesture.reorder && !cancelled && model.reorder) {
+      state = model.reorder(state, gesture.panel, gesture.before);
+      // Reorder only the strip's buttons. Never reparent a live iframe's panel.
+      const tab = gesture.strip.querySelector(`[data-layout-panel="${gesture.panel}"]`);
+      const before = gesture.before && gesture.strip.querySelector(`[data-layout-panel="${gesture.before}"]`);
+      gesture.strip.insertBefore(tab, before || gesture.strip.querySelector('[data-layout-actions-for]'));
+      painted = signature();
       onChange?.(state);
+    } else if (targetPanel && placement && targetPanel !== gesture.panel) {
+      emit(model.dock(state, gesture.panel, targetPanel, placement), gesture.panel, false);
+    } else if (gesture.moved && !cancelled) {
+      if (!gesture.floating) {
+        const rect = canvas.getBoundingClientRect();
+        emit(model.float(state, gesture.panel, {
+          x: event.clientX - rect.left - 40, y: event.clientY - rect.top - 15,
+        }, canvasBounds()), gesture.panel, false);
+      } else onChange?.(state);
     }
   };
   const attachPointerDocking = (tab, panel, floating = false, node = null) => {
@@ -171,7 +266,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   const panelActions = panel => {
     const actions = doc.createElement('span'); actions.className = 'workshop-dock-actions';
     actions.dataset.layoutActionsFor = panel;
-    actions.append(makeButton('↗', () => emit(model.float(state, panel, {}, canvasBounds()), panel), {
+    if (!panelMenus) actions.append(makeButton('↗', () => emit(model.float(state, panel, {}, canvasBounds()), panel), {
       title: `${labels.float}: ${labels.panels[panel]}`,
       'aria-label': `${labels.float}: ${labels.panels[panel]}`, 'data-layout-control': 'float',
     }));
@@ -219,14 +314,36 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       }
     }
     if (showHeader) node.append(header);
+    panels[panel].classList.add('workshop-panel-content');
     node.append(targets, panels[panel]);
     if (floating) {
+      const grip = doc.createElement('div'); grip.className = 'workshop-float-resize';
+      grip.setAttribute('role', 'separator'); grip.tabIndex = 0;
+      grip.setAttribute('aria-label', labels.panels[panel]);
+      const resize = (width, height) => {
+        state = settle({ ...state, floats: state.floats.map(entry => entry.panel === panel
+          ? { ...entry, width, height } : entry) }, canvasBounds());
+        restyle();
+      };
+      resizeHandle(grip, () => {
+        const entry = state.floats.find(entry => entry.panel === panel);
+        return (dx, dy) => resize(entry.width + dx, entry.height + dy);
+      });
+      grip.addEventListener('keydown', event => {
+        const entry = state.floats.find(entry => entry.panel === panel);
+        if (!event.key.startsWith('Arrow')) return;
+        event.preventDefault();
+        resize(entry.width + (event.key === 'ArrowRight' ? 20 : event.key === 'ArrowLeft' ? -20 : 0),
+          entry.height + (event.key === 'ArrowDown' ? 20 : event.key === 'ArrowUp' ? -20 : 0));
+        onChange?.(state);
+      });
+      node.append(grip);
       node.addEventListener('focusin', updateFloatStacking);
       node.addEventListener('focusout', () => win.requestAnimationFrame?.(updateFloatStacking));
     }
     return node;
   }
-  function renderNode(node) {
+  function renderNode(node, path = []) {
     if (node.type === 'tabs') {
       const shown = availableTabs(node);
       if (!shown.length) return null;
@@ -300,25 +417,56 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       stack.append(tabs);
       for (const panel of shown) {
         const tabId = `${layoutId}-tab-${panel}`;
-        const child = frame(panel, false, true, tabId, false);
+        const child = frame(panel, false, false, tabId, false);
         child.hidden = panel !== active; stack.append(child);
       }
       return stack;
     }
-    const rendered = node.children.map((child, index) => [renderNode(child), node.sizes[index]])
+    const rendered = node.children.map((child, index) => [renderNode(child, [...path, index]), node.sizes[index], index])
       .filter(([child]) => child);
     if (!rendered.length) return null;
     if (rendered.length === 1) return rendered[0][0];
     const split = doc.createElement('div'); split.className = `workshop-split is-${node.axis}`;
+    split.dataset.splitPath = JSON.stringify(path);
+    split.dataset.splitChildren = JSON.stringify(rendered.map(([, , index]) => index));
     split.style.setProperty('--workshop-sizes', rendered.map(([, size]) => size).join('fr '));
     // A column may squeeze to nothing — min-width: 0 handles what is inside —
     // but a row is at least its content: a wrapped tab list must not take its
     // rows out of the frame below it, and the canvas scrolls what will not fit.
-    const floor = node.axis === 'vertical' ? 'min-content' : '0';
-    const tracks = rendered.map(([, size]) => `minmax(${floor}, ${size}fr)`).join(' ');
+    const floor = panelMenus ? '0' : node.axis === 'vertical' ? 'min-content' : '0';
+    const tracks = rendered.map(([, size]) => `minmax(${floor}, ${size}fr)`).join(' 5px ');
     split.style.gridTemplateColumns = node.axis === 'horizontal' ? tracks : '';
     split.style.gridTemplateRows = node.axis === 'vertical' ? tracks : '';
-    split.append(...rendered.map(([child]) => child)); return split;
+    rendered.forEach(([child, , original], index) => {
+      split.append(child);
+      if (index === rendered.length - 1) return;
+      const handle = doc.createElement('div'); handle.className = 'workshop-split-resize';
+      handle.setAttribute('role', 'separator'); handle.tabIndex = 0;
+      handle.setAttribute('aria-orientation', node.axis === 'horizontal' ? 'vertical' : 'horizontal');
+      const adjust = delta => {
+        const next = JSON.parse(JSON.stringify(state));
+        const target = path.reduce((value, part) => value.children[part], next.root);
+        const other = rendered[index + 1][2];
+        const total = target.sizes[original] + target.sizes[other];
+        target.sizes[original] = Math.max(total * .1, Math.min(total * .9, target.sizes[original] + delta));
+        target.sizes[other] = total - target.sizes[original]; state = next;
+        const tracks = rendered.map(([, , i]) => `minmax(${floor}, ${target.sizes[i]}fr)`).join(' 5px ');
+        if (node.axis === 'horizontal') split.style.gridTemplateColumns = tracks;
+        else split.style.gridTemplateRows = tracks;
+      };
+      resizeHandle(handle, () => {
+        let previous = 0;
+        const rect = split.getBoundingClientRect();
+        const scale = node.sizes.reduce((a, b) => a + b, 0) / (node.axis === 'horizontal' ? rect.width : rect.height);
+        return (dx, dy) => { const distance = node.axis === 'horizontal' ? dx : dy; adjust((distance - previous) * scale); previous = distance; };
+      });
+      handle.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault(); adjust(['ArrowLeft', 'ArrowUp'].includes(event.key) ? -.1 : .1); onChange?.(state);
+      });
+      split.append(handle);
+    });
+    return split;
   }
   /** What a paint would BUILD, as opposed to what it would merely set.
    *
@@ -342,10 +490,14 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     ? { narrow: true, panel: narrowProjection() }
     : { root: shapeOf(state.root), floats: state.floats.map(entry => entry.panel) });
   let painted = null;
+  let menuPainted = null;
+  const menuSignature = () => JSON.stringify([panelIds.filter(usable), state.closed]);
   const render = (...args) => {
     observed = observeAvailability();
     try {
       const next = signature();
+      const menus = menuSignature();
+      if (menuPainted !== menus) { paintMenus(); menuPainted = menus; }
       if (painted === next) restyle();
       else { paint(...args); painted = next; }
       park();
@@ -354,6 +506,13 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
   };
   /** Bring an unchanged arrangement up to date without touching the tree. */
   function restyle() {
+    for (const split of canvas.querySelectorAll('[data-split-path]')) {
+      const node = JSON.parse(split.dataset.splitPath).reduce((value, index) => value.children[index], state.root);
+      const floor = panelMenus ? '0' : node.axis === 'vertical' ? 'min-content' : '0';
+      const tracks = JSON.parse(split.dataset.splitChildren).map(index => `minmax(${floor}, ${node.sizes[index]}fr)`).join(' 5px ');
+      if (node.axis === 'horizontal') split.style.gridTemplateColumns = tracks;
+      else split.style.gridTemplateRows = tracks;
+    }
     const chosen = narrow ? narrowProjection() : state.selected;
     for (const button of switcher.querySelectorAll('[data-layout-control="switcher"]')) {
       button.setAttribute('aria-pressed', String(button.dataset.layoutPanel === chosen));
@@ -385,9 +544,11 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     }
     updateFloatStacking();
   }
-  function paint() {
+  function paintMenus() {
     const switchPanel = panel => {
       if (narrow) {
+        const current = narrowProjection();
+        if (current !== panel && mayHide(current, () => switchPanel(panel)) !== true) return;
         const opened = openInState(panel);
         projectedPanel = panel; render();
         if (opened) onChange?.(state);
@@ -431,13 +592,16 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
       const layout = doc.createElement('details'); layout.className = 'workshop-window-menu';
       const summary = doc.createElement('summary'); summary.textContent = labels.layoutMenu;
       const items = doc.createElement('div'); items.className = 'workshop-window-menu-items'; items.setAttribute('role', 'menu');
-      items.append(reset); layout.append(summary, items); menus.push(layout);
+      items.append(reset, ...layoutActions.map(action => makeButton(action.label, action.run, { role: 'menuitem' })));
+      layout.append(summary, items); menus.push(layout);
       switcher.classList.add('is-menu-bar');
       switcher.replaceChildren(...menus);
     } else {
       switcher.classList.remove('is-menu-bar');
       switcher.replaceChildren(...panelIds.filter(usable).map(switchButton), reset);
     }
+  }
+  function paint() {
     canvas.replaceChildren(); canvas.classList.toggle('is-narrow', narrow);
     if (narrow) {
       const selected = narrowProjection();
@@ -501,7 +665,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     const target = order[(index + direction + order.length) % order.length];
     const placement = event.altKey ? 'tab' : event.code === 'ArrowLeft' ? 'left'
       : event.code === 'ArrowRight' ? 'right' : event.code === 'ArrowUp' ? 'top' : 'bottom';
-    event.preventDefault(); emit(model.dock(state, panel, target, placement), panel);
+    event.preventDefault(); emit(model.dock(state, panel, target, placement), panel, false);
   }
   function resize() {
     const nextNarrow = narrowWidth() <= NARROW_WIDTH;
@@ -533,6 +697,12 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     // Closing a panel is a decision; a caller may bring one FORWARD without
     // undoing it. `reopen: false` says so.
     if (!reopen && state.closed.includes(panel)) return false;
+    const next = !state.closed.includes(panel) ? model.select(state, panel)
+      : model.isTemporary?.(panel) ? model.float(state, panel, {}, canvasBounds())
+        : model.reopen(state, panel);
+    const hidden = narrow ? [narrowProjection()].filter(id => id !== panel)
+      : [...visibleIn(state)].filter(id => !visibleIn(next).has(id));
+    for (const id of hidden) if (mayHide(id, () => reveal(panel, { focus, notify, reopen })) !== true) return false;
     if (narrow) {
       const opened = reopen && openInState(panel);
       projectedPanel = panel;
@@ -541,10 +711,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     } else {
       // A temporary panel is a draft: opening one opens it floating, exactly as
       // the switcher does, rather than docking it into somebody else's group.
-      const opened = !state.closed.includes(panel) ? model.select(state, panel)
-        : model.isTemporary?.(panel) ? model.float(state, panel, {}, canvasBounds())
-          : model.reopen(state, panel);
-      state = settle(opened, canvasBounds());
+      state = settle(next, canvasBounds());
       projectedPanel = null;
       render();
       if (notify) onChange?.(state);
@@ -570,7 +737,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
    * those two cannot disagree with what the operator can see.
    */
   function syncAvailability() {
-    if (signature() === painted) return false;
+    if (signature() === painted && menuSignature() === menuPainted) return false;
     const active = doc.activeElement;
     // A tab button and a switcher button name their panel directly and live
     // OUTSIDE the frame, so the frame lookup alone would miss the commonest
@@ -612,8 +779,10 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     set: next => emit(model.normalize(next, narrow ? undefined : canvasBounds())),
     reset: () => { if (mayReset() !== true) return; onDiscard(null); emit(model.defaultLayout()); },
     reveal, syncAvailability, dispose() {
+      stopReorderScroll(); drag = null;
       painted = null;
     observer?.disconnect(); win.removeEventListener?.('resize', resize); doc.removeEventListener('keydown', keydown);
+    doc.removeEventListener('pointerdown', closeMenus);
     parked.remove();
     surface.classList.remove('workshop-dock-root');
   } };

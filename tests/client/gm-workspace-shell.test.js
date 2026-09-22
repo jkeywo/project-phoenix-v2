@@ -100,97 +100,6 @@ it('uses compact categorised window menus instead of a master tab strip', () => 
   expect(bar.querySelector('[data-layout-panel="entity-fields"]').textContent).toBe('Entity fields');
 });
 
-it('puts compact icon actions in the tab row and waits for a real drag before showing targets', () => {
-  mount();
-  const stack = document.querySelector('[data-panel="roster"]').closest('.workshop-tab-stack');
-  const tabs = stack.querySelector(':scope > .workshop-tab-list');
-  expect(tabs.querySelector('[data-layout-control="float"]').textContent).toBe('↗');
-  expect(tabs.querySelector('[data-layout-control="close"]').textContent).toBe('×');
-  expect(stack.querySelector('[data-panel="roster"] > .workshop-panel-header')).toBeNull();
-  const tab = tabs.querySelector('[role="tab"]');
-  const pointer = (type, x, y) => {
-    const event = new Event(type, { bubbles: true, cancelable: true });
-    Object.assign(event, { pointerType: 'mouse', button: 0, pointerId: 1, clientX: x, clientY: y });
-    tab.dispatchEvent(event);
-  };
-  pointer('pointerdown', 10, 10);
-  expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-dragging')).toBe(false);
-  pointer('pointermove', 12, 12);
-  expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-dragging')).toBe(false);
-  pointer('pointermove', 30, 30);
-  expect(document.querySelector('.workshop-dock-canvas').classList.contains('is-dragging')).toBe(true);
-  pointer('pointerup', 30, 30);
-});
-
-it('offers an authoritative AI backfill action for an empty player slot', () => {
-  const submitted = vi.fn(() => true);
-  const { shell, win } = mount({
-    __hostLocalGm: () => ({ id: 'gm-1', connected: true }),
-    __hostBackfillShipSlot: submitted,
-  }, id => id);
-  shell.metadata({ gms: [], ship_slots: [{ id: 'wing', label: 'Wing ship',
-    default_hull: 'assets/entities/wing.toml', state: 'empty', can_backfill: true }] });
-  document.querySelector('[data-ship-slot-action="wing"]').click();
-  expect(submitted).toHaveBeenCalledWith(expect.objectContaining({
-    operator_id: 'gm-1', slot: 'wing', correlation: expect.stringContaining('slot-backfill-'),
-  }));
-  expect(win.__hostBackfillShipSlot).toBe(submitted);
-});
-
-it('registers every migrated desk panel in the dock, documents included', () => {
-  mount();
-  for (const [panel, id] of [['mission', 'gm-mission-panel'], ['comms', 'gm-comms-panel'],
-    ['activity', 'gm-activity'], ['journal', 'gm-journal'], ['session-history', 'gm-session-history'],
-    ['map', 'gm-map-panel'], ['attention', 'gm-attention-panel'], ['workload', 'gm-workload-panel'],
-    ['health', 'gm-health-panel'], ['inspector', 'gm-inspector'], ['readiness', 'gm-start-controls'],
-    ['join', 'gm-join-controls'], ['manual-save', 'manual-save-panel'],
-    ['region-fields', 'gm-region-fields-panel'],
-    ['presentation-fields', 'gm-presentation-fields-panel']]) {
-    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
-  }
-  // The surfaces this workspace is arranged around.
-  for (const panel of ['map', 'inspector']) {
-    expect(document.querySelector(`[data-panel="${panel}"]`).dataset.panelKind, panel).toBe('document');
-  }
-  expect(document.querySelector('[data-panel="roster"]').dataset.panelKind).toBe('tool');
-  expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
-  expect(document.querySelector('[data-panel="join"] #gm-join-controls').style.position).toBe('');
-});
-
-it('parks a panel whose own owner has put it away, rather than detaching it', () => {
-  mount();
-  // gui/gm-widgets-panel.js owns `hidden` on the authored widget region, so a
-  // scenario that authors no widget has no widget tab — and the node is parked
-  // in the surface, because that owner is the only thing that can bring it back.
-  expect(document.getElementById('gm-widgets').hidden).toBe(true);
-  expect(document.getElementById('gm-widgets').closest('.workshop-dock-parked')).not.toBeNull();
-  // With no Station taken over the console has nothing to show, so it has no
-  // panel — the same rule the surface's own `hidden` always carried.
-  expect(document.getElementById('gm-station-surface').closest('.workshop-dock-parked')).not.toBeNull();
-  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
-});
-
-it('keeps the authentic Station iframe out of the inspector, as it always has', () => {
-  mount();
-  expect(document.querySelector('[data-panel="readiness"] #gm-force-start-btn')).not.toBeNull();
-  // Authentic Station operation is two dock panels (issue #1504): the takeover
-  // controls are a tool and the console is a document.
-  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
-  expect(document.querySelector('#gm-station-tools #gm-station-pending')).not.toBeNull();
-  expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
-  expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();
-  expect(document.querySelector('#gm-inspector #gm-station-toggle')).toBeNull();
-});
-
-it('keeps the technical banner region inside the queue a Game Master reads', () => {
-  mount();
-  // The #1437 seam has to sit beside the list they read and filter, which is
-  // the surface it exists to be un-hideable from.
-  expect(document.querySelector('#gm-attention-panel #gm-attention-banners')).not.toBeNull();
-  expect(document.querySelector('#gm-health-panel #gm-attention-banners')).toBeNull();
-  expect(document.querySelector('[data-panel="manual-save"] #manual-save-panel')).not.toBeNull();
-});
-
 it('keeps every operator and session status control in the fixed bar outside Live docking', () => {
   mount();
   const bar = document.querySelector('#gm-console > header');
@@ -203,15 +112,6 @@ it('keeps every operator and session status control in the fixed bar outside Liv
     .toMatch(/#gm-console \.gm-station-bar\s*\{[^}]*position:\s*sticky/);
 });
 
-it('moves original Live workflow nodes into one shared dock rather than cloning them', () => {
-  mount();
-  for (const [panel, id] of [['readiness', 'gm-start-controls'], ['join', 'gm-join-controls'],
-    ['manual-save', 'manual-save-panel']]) {
-    expect(document.querySelectorAll(`#${id}`)).toHaveLength(1);
-    expect(document.querySelector(`[data-panel="${panel}"] #${id}`)).not.toBeNull();
-  }
-  expect(document.querySelector('[data-panel="roster"] #gm-roster')).not.toBeNull();
-});
 it('leaves ordinary host lobby and save controls in their authored surfaces', () => {
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   document.body.innerHTML = parsed.body.innerHTML;
@@ -236,34 +136,6 @@ it('leaves ordinary host lobby and save controls in their authored surfaces', ()
   shell.dispose();
 });
 
-it('restores original host controls and attributes when the GM workspace closes', () => {
-  const parsed = new DOMParser().parseFromString(source, 'text/html');
-  document.body.innerHTML = parsed.body.innerHTML;
-  document.documentElement.classList.add('phoenix-gm-page');
-  const controls = ['gm-start-controls', 'gm-join-controls', 'manual-save-panel']
-    .map(id => document.getElementById(id));
-  const origins = controls.map(node => ({ parent: node.parentNode, next: node.nextSibling,
-    style: node.getAttribute('style'), hidden: node.getAttribute('hidden') }));
-  const clicked = vi.fn();
-  document.getElementById('gm-force-start-btn').addEventListener('click', clicked);
-  const shell = mountGmWorkspaceShell({ doc: document,
-    win: { document, Event, MutationObserver, __phoenixGmPage: true },
-    t: id => id, has: () => false, selectEntity: vi.fn() });
-  expect(document.querySelector('[data-panel="readiness"] #gm-start-controls')).not.toBeNull();
-
-  shell.dispose();
-
-  controls.forEach((node, index) => {
-    expect(node.parentNode).toBe(origins[index].parent);
-    expect(node.nextSibling).toBe(origins[index].next);
-    expect(node.getAttribute('style')).toBe(origins[index].style);
-    expect(node.getAttribute('hidden')).toBe(origins[index].hidden);
-    expect(document.querySelectorAll(`#${node.id}`)).toHaveLength(1);
-  });
-  document.getElementById('gm-force-start-btn').click();
-  expect(clicked).toHaveBeenCalledOnce();
-});
-
 it('loads only a globally neutral dock stylesheet into the host document', () => {
   const dockCss = readFileSync('gui/dock-layout.css', 'utf8');
   const shellSource = readFileSync('gui/gm-workspace-shell.js', 'utf8');
@@ -274,133 +146,6 @@ it('loads only a globally neutral dock stylesheet into the host document', () =>
   expect(shellSource).toContain("new URL('./dock-layout.css', import.meta.url)");
   expect(shellSource).not.toContain("new URL('./workshop.css', import.meta.url)");
   expect(readFileSync('workshop.html', 'utf8')).toContain('gui/dock-layout.css');
-});
-it('uses the same Live mount for native and reports missing save capability instead of inventing one', () => {
-  const parsed = new DOMParser().parseFromString(source, 'text/html');
-  document.body.innerHTML = parsed.body.innerHTML;
-  document.documentElement.classList.add('phoenix-gm-page');
-  const win = { document, Event, MutationObserver, __phoenixGmPage: true,
-    addEventListener: window.addEventListener.bind(window), removeEventListener: window.removeEventListener.bind(window) };
-  const shell = mountGmWorkspaceShell({ doc: document, win, t: id => id, has: () => false,
-    selectEntity: vi.fn(), native: true });
-  expect(document.querySelector('[data-panel="readiness"] #gm-start-controls')).not.toBeNull();
-  expect(document.getElementById('gm-native-manual-save-unavailable')?.textContent)
-    .toBe('server.gm.shell.manual_save_unavailable');
-  expect(win.__hostGmCheckpointCreate).toBeUndefined();
-  shell.dispose();
-});
-it('selects roster entities through the map seam and shows authored Station ratings', () => {
-  const {shell,selectEntity} = mount();
-  shell.refresh({entities:[{entity_id:'ship',name:'Courier',kind:'player_ship',faction:null}]},
-    {ships:[{ship_id:'ship',stations:[{name:'Helm',rating:'Backfill'}]}]});
-  document.querySelector('#gm-roster-ships button').click();
-  expect(selectEntity).toHaveBeenCalledWith('ship');
-  shell.selection({entity_id:'ship',name:'Courier',status:{systems:[]}});
-  expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
-  expect(document.querySelector('.gm-station-pills').textContent).toContain('Helm · Backfill');
-});
-it('opens, focuses, docks and floats the authentic Station console', () => {
-  const { shell } = mount();
-  const surface = document.getElementById('gm-station-surface');
-  const controls = document.getElementById('gm-station-controls');
-  // A Station row in the projection is what gives the console something to show;
-  // the puppet shows the takeover controls then, taken over or not. The shell is
-  // the only writer of the surface's `hidden` and the dock reads it.
-  controls.hidden = false;
-  shell.refresh();
-  const framed = document.querySelector('[data-panel="station-console"]');
-  expect(framed).not.toBeNull();
-  expect(framed.dataset.panelKind).toBe('document');
-  expect(surface.closest('[data-panel]')).toBe(framed);
-  // The iframe travelled with it rather than being rebuilt beside it.
-  expect(document.querySelectorAll('#gm-station-frame')).toHaveLength(1);
-  expect(document.getElementById('gm-station-frame').closest('[data-panel]').dataset.panel)
-    .toBe('station-console');
-
-  // Float it, then dock it beside the roster: the same node each time.
-  shell.setLiveLayout(liveLayoutModel.float(shell.liveLayoutState(), 'station-console',
-    { x: 20, y: 30, width: 500, height: 400 }));
-  expect(document.querySelector('[data-panel="station-console"].is-floating')
-    .contains(document.getElementById('gm-station-frame'))).toBe(true);
-  shell.setLiveLayout(liveLayoutModel.dock(shell.liveLayoutState(), 'station-console', 'roster', 'tab'));
-  expect(document.getElementById('gm-station-frame').closest('[data-panel]').dataset.panel)
-    .toBe('station-console');
-
-  // Closing it is an arrangement choice, not a release: the node stays in the
-  // surface and the takeover controls are untouched.
-  shell.setLiveLayout(liveLayoutModel.close(shell.liveLayoutState(), 'station-console'));
-  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
-  expect(document.getElementById('gm-station-frame')).not.toBeNull();
-  expect(document.getElementById('gm-station-controls').hidden).toBe(false);
-  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
-
-  // Losing the Station row takes the console's panel away again.
-  controls.hidden = true;
-  shell.refresh();
-  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
-  expect(surface.closest('.workshop-dock-parked')).not.toBeNull();
-});
-it('keeps the Station takeover controls out of the role preset reach', () => {
-  const { shell } = mount();
-  // The takeover controls are their own dock panel now, not a block inside the
-  // inspector, so a preset that puts the inspector away no longer takes them
-  // with it — which is what docs/toml-authoring-guide.md already promised.
-  expect(document.querySelector('#gm-inspector #gm-station-controls')).toBeNull();
-  document.getElementById('gm-inspector').hidden = true;
-  shell.refresh();
-  expect(document.querySelector('[data-panel="station"] #gm-station-toggle')).not.toBeNull();
-  document.getElementById('gm-inspector').hidden = false;
-  shell.refresh();
-  // The console follows its own surface, which the shell alone writes.
-  document.getElementById('gm-station-controls').hidden = false;
-  shell.refresh();
-  expect(document.querySelector('[data-panel="station-console"]')).not.toBeNull();
-  document.getElementById('gm-station-controls').hidden = true;
-  shell.refresh();
-  expect(document.querySelector('[data-panel="station-console"]')).toBeNull();
-  expect(document.getElementById('gm-station-frame')).not.toBeNull();
-});
-it('docks the presentation, audition and Workshop source utilities', () => {
-  const { shell } = mount();
-  for (const [panel, id] of [['presentation', 'gm-presentation-dock'],
-    ['audition', 'gm-audition-dock']]) {
-    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
-    expect(document.querySelector(`[data-panel="${panel}"]`).dataset.panelKind).toBe('tool');
-  }
-  // The handoff shows itself only when a retained source pack exists, and the
-  // dock reads that rather than the empty host, so it offers no empty tab.
-  expect(document.querySelector('[data-panel="source-link"]')).toBeNull();
-  const handoff = document.createElement('section');
-  handoff.id = 'gm-workshop-source'; handoff.hidden = true;
-  document.getElementById('gm-source-link-dock').append(handoff);
-  shell.refresh();
-  expect(document.querySelector('[data-panel="source-link"]')).toBeNull();
-  handoff.hidden = false;
-  shell.refresh();
-  expect(document.getElementById('gm-source-link-dock').closest('[data-panel]').dataset.panel)
-    .toBe('source-link');
-  // They share one group by default: each is a local instrument, not a record.
-  const group = document.getElementById('gm-presentation-dock').closest('.workshop-tab-stack');
-  expect(group.contains(document.getElementById('gm-audition-dock'))).toBe(true);
-  expect(group.contains(document.getElementById('gm-source-link-dock'))).toBe(true);
-  expect(group.contains(document.getElementById('gm-roster-ships'))).toBe(false);
-
-  // Keyboard docking moves one like any other panel, and the move is persisted
-  // as placement with no payload riding along.
-  shell.setLiveLayout(liveLayoutModel.dock(defaultLiveLayout(), 'audition', 'roster', 'tab'));
-  expect(document.getElementById('gm-audition-dock').closest('[data-panel]').dataset.panel)
-    .toBe('audition');
-  shell.setLiveLayout(liveLayoutModel.float(shell.liveLayoutState(), 'source-link', { x: 12, y: 14 }));
-  expect(document.querySelector('[data-panel="source-link"].is-floating')
-    .contains(document.getElementById('gm-source-link-dock'))).toBe(true);
-  const stored = JSON.stringify(shell.liveLayoutState());
-  for (const key of ['cue', 'audio', 'route', 'view', 'draft', 'pack', 'workshop']) {
-    expect(stored, key).not.toContain(key);
-  }
-  // Reset puts them back where the default arrangement has them.
-  shell.setLiveLayout(defaultLiveLayout());
-  expect(document.getElementById('gm-audition-dock').closest('.workshop-tab-stack'))
-    .toBe(document.getElementById('gm-presentation-dock').closest('.workshop-tab-stack'));
 });
 it('opens Spawn as a floating draft and keeps a docked one in the stored layout', () => {
   const { shell } = mount();
@@ -476,36 +221,6 @@ it('asks before a stored arrangement replaces an open draft', () => {
   expect(shell.setLiveLayout(defaultLiveLayout())).toBe(true);
   expect(document.querySelector('[data-panel="spawn"]')).toBeNull();
 });
-it('keeps checkpoints as a record and restore as a draft of its own', () => {
-  const { shell } = mount();
-  // Browsing checkpoints is reading, so it sits with the other records.
-  expect(document.getElementById('gm-checkpoint').closest('[data-panel]').dataset.panel)
-    .toBe('checkpoint');
-  expect(document.getElementById('gm-checkpoint').closest('.workshop-tab-stack')
-    .contains(document.getElementById('gm-journal'))).toBe(true);
-  expect(document.querySelector('[data-panel="checkpoint"]').dataset.panelKind).toBe('tool');
-
-  // Restoring combines a selection, a preflight, a preview and a confirmation,
-  // so it is a draft: absent from the arrangement until it is opened.
-  expect(document.querySelector('[data-panel="restore"]')).toBeNull();
-  expect(shell.liveLayoutState().closed).toContain('restore');
-  expect(document.getElementById('gm-restore-apply')).not.toBeNull();
-
-  document.querySelector('[data-layout-panel="restore"][data-layout-control="switcher"]').click();
-  const framed = document.querySelector('[data-panel="restore"]');
-  expect(framed.classList.contains('is-floating')).toBe(true);
-  expect(framed.contains(document.getElementById('gm-restore-apply'))).toBe(true);
-  // A floating draft is not restored; a docked one is, and comes back empty.
-  expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed).toContain('restore');
-  shell.setLiveLayout(liveLayoutModel.dock(shell.liveLayoutState(), 'restore', 'checkpoint', 'tab'));
-  const restored = liveLayoutModel.normalize(shell.liveLayoutState());
-  expect(restored.closed).not.toContain('restore');
-  // Placement only: no candidate, phase or correlation rides along.
-  const stored = JSON.stringify(restored);
-  for (const key of ['candidate', 'phase', 'correlation', 'tick', 'slot']) {
-    expect(stored, key).not.toContain(key);
-  }
-});
 it('leaves a refused restore draft open, and keeps a kept-open one', () => {
   const { shell } = mount();
   let dirty = false;
@@ -551,32 +266,6 @@ it('carries no takeover draft or console runtime state in the stored layout', ()
   expect(stored).toContain('"station-console"');
   expect(stored.match(/console/g)).toHaveLength(1);
 });
-it('keeps the selected entity and the map alive across a rearrangement', () => {
-  const { shell, selectEntity } = mount();
-  shell.refresh({ entities: [{ entity_id: 'ship', name: 'Courier', kind: 'player_ship', faction: null }] },
-    { ships: [{ ship_id: 'ship', stations: [{ name: 'Helm', rating: 'Backfill' }] }] });
-  document.querySelector('#gm-roster-ships button').click();
-  expect(selectEntity).toHaveBeenCalledWith('ship');
-  shell.selection({ entity_id: 'ship', name: 'Courier', status: { systems: [] } });
-  const map = document.getElementById('gm-entity-map');
-  expect(map.closest('[data-panel]').dataset.panel).toBe('map');
-
-  // Pull the map out of its column and float the roster; the selection seam is
-  // the same nodes moved, not rebuilt, so it survives.
-  let layout = liveLayoutModel.dock(defaultLiveLayout(), 'map', 'comms', 'tab');
-  layout = liveLayoutModel.float(layout, 'roster', { x: 30, y: 40, width: 400, height: 300 });
-  shell.setLiveLayout(layout);
-
-  expect(document.getElementById('gm-entity-map')).toBe(map);
-  expect(map.closest('[data-panel]').dataset.panel).toBe('map');
-  expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
-  document.querySelector('#gm-roster-ships button').click();
-  expect(selectEntity).toHaveBeenCalledTimes(2);
-  expect(selectEntity).toHaveBeenLastCalledWith('ship');
-  // And a reload restores placement without restoring a selection.
-  const stored = shell.liveLayoutState();
-  expect(JSON.stringify(stored)).not.toContain('ship');
-});
 it('drops the map tab when the role preset puts the map away', () => {
   const { shell } = mount();
   expect(document.querySelector('[data-panel="map"]')).not.toBeNull();
@@ -603,243 +292,6 @@ it('drops the map tab when the role preset puts the map away', () => {
 // this checks the actual shipped CSS TEXT rather than a jsdom layout it
 // cannot produce; `tests/smoke/gm-layout.spec.js` is where a real engine
 // proves the rendered edge.
-it('gives the selected roster row a real border rule, not only the pressed button background', () => {
-  const sheet = readFileSync('gui/gm-workspace.css', 'utf8');
-  expect(sheet).toMatch(
-    /\.gm-roster-row:has\(\s*>?\s*button\[aria-pressed="true"\]\s*\)\s*\{[^}]*border-left/,
-  );
-  // And the real markup this rule targets exists: a roster row whose direct
-  // child is the pressed button, matched with the same `:has()` jsdom itself
-  // supports for `querySelectorAll` (only its computed-style var() resolution
-  // is the gap, proven above).
-  const { shell } = mount();
-  shell.refresh({ entities: [
-    { entity_id: 'ship-a', name: 'Courier', kind: 'player_ship', faction: null },
-    { entity_id: 'ship-b', name: 'Resolute', kind: 'player_ship', faction: null },
-  ] }, { ships: [] });
-  shell.selection({ entity_id: 'ship-a', name: 'Courier', status: { systems: [] } });
-  const matched = [...document.querySelectorAll(
-    '.gm-roster-row:has(> button[aria-pressed="true"])',
-  )];
-  expect(matched).toHaveLength(1);
-  expect(matched[0].querySelector('button').dataset.entityId).toBe('ship-a');
-});
-const recordTab = panel => document.querySelector(`[role="tab"][data-layout-panel="${panel}"]`);
-const recordFrame = panel => document.querySelector(`[data-panel="${panel}"]`);
-it('keeps Comms, Activity, the action log and the session history as one default tab group', () => {
-  mount();
-  expect(recordTab('comms').getAttribute('aria-selected')).toBe('true');
-  expect(recordTab('comms').getAttribute('aria-controls')).toBe(recordFrame('comms').id);
-  expect(recordFrame('journal').getAttribute('role')).toBe('tabpanel');
-  expect(recordFrame('journal').getAttribute('aria-labelledby')).toBe(recordTab('journal').id);
-  // Arrow keys walk the group, exactly as the inspector's tabs do.
-  recordTab('comms').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
-  expect(recordFrame('activity').hidden).toBe(false);
-  recordTab('journal').click();
-  expect(recordFrame('journal').hidden).toBe(false);
-  expect(recordTab('activity').getAttribute('aria-selected')).toBe('false');
-  expect(recordTab('activity').tabIndex).toBe(-1);
-  // Choosing a tab must never write `hidden` on the panels themselves: that
-  // attribute belongs to the role preset (GM_ROLE_PRESET_PANEL_IDS).
-  expect(document.getElementById('gm-comms-panel').hidden).toBe(false);
-  expect(document.getElementById('gm-activity').hidden).toBe(false);
-});
-it('keeps every migrated record reachable by id whatever the arrangement', () => {
-  const { shell } = mount();
-  // Their contents are owned by modules that resolve them by id after the dock
-  // mounts, so no arrangement may take one out of the document.
-  const ids = ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history',
-    // gui/gm-station-puppet.js resolves every one of these by id at ITS mount,
-    // which happens after the dock's.
-    'gm-station-tools', 'gm-station-pending', 'gm-station-controls', 'gm-station-select',
-    'gm-station-toggle', 'gm-station-surface', 'gm-station-frame', 'gm-station-activity',
-    // The operator's own utilities mount into these AFTER the dock does.
-    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock',
-    'gm-inspector', 'gm-entity-card', 'gm-inspector-tabs', 'gm-knowledge-select'];
-  for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
-  expect(document.querySelector('#gm-session-history #gm-session-log')).not.toBeNull();
-  // Closed in a restored arrangement.
-  shell.setLiveLayout({ ...defaultLiveLayout(), root: { type: 'tabs', tabs: ['roster'], active: 'roster' },
-    closed: ['readiness', 'join', 'manual-save', 'mission', 'comms', 'activity', 'journal', 'session-history'],
-    selected: 'roster' });
-  for (const id of ids) {
-    expect(document.getElementById(id), `${id} while closed`).not.toBeNull();
-    expect(document.getElementById(id).closest('.workshop-dock-parked'), `${id} parked`).not.toBeNull();
-  }
-});
-it('keeps every migrated record reachable by id in the narrow projection', () => {
-  // The Live dock measures the viewport, not the surface, so a narrow GM window
-  // frames exactly one panel and leaves every other node without one.
-  mount({ innerWidth: 600 });
-  expect(document.querySelectorAll('.workshop-dock-panel')).toHaveLength(1);
-  for (const id of ['gm-mission-panel', 'gm-comms-panel', 'gm-activity', 'gm-journal', 'gm-session-history',
-    'gm-station-tools', 'gm-station-controls', 'gm-station-select', 'gm-station-toggle',
-    'gm-station-surface', 'gm-station-frame', 'gm-station-activity',
-    'gm-presentation-dock', 'gm-audition-dock', 'gm-source-link-dock',
-    'gm-inspector', 'gm-entity-card', 'gm-inspector-tabs']) {
-    expect(document.getElementById(id), `${id} while narrow`).not.toBeNull();
-  }
-  // The narrow switcher offers the Station tool like any other, and the console
-  // once the projection carries a Station row.
-  expect(document.querySelector('[data-layout-panel="station"][data-layout-control="switcher"]'))
-    .not.toBeNull();
-  expect(document.querySelector('[data-layout-panel="station-console"][data-layout-control="switcher"]'))
-    .toBeNull();
-});
-it('keeps the record workflows working after the panels are rearranged', () => {
-  const { shell } = mount();
-  // Pull the journal out of its default group and float the Comms studio.
-  let layout = liveLayoutModel.dock(defaultLiveLayout(), 'journal', 'roster', 'tab');
-  layout = liveLayoutModel.float(layout, 'comms', { x: 40, y: 50, width: 400, height: 300 });
-  shell.setLiveLayout(layout);
-  // The draft field, its wrapper class and the bounded lists all travelled with
-  // the original nodes rather than being rebuilt.
-  expect(document.getElementById('gm-comms-text').closest('.gm-comms-draft')).not.toBeNull();
-  expect(document.getElementById('gm-comms-text').closest('[data-panel]').dataset.panel).toBe('comms');
-  expect(document.querySelector('[data-panel="comms"]').classList.contains('is-floating')).toBe(true);
-  expect(document.getElementById('gm-journal-list')).not.toBeNull();
-  expect(document.getElementById('gm-mission-events')).not.toBeNull();
-  // A caller navigating to a record still reaches it in the new arrangement.
-  expect(shell.showLog('gm-journal')).toBe(true);
-  expect(document.getElementById('gm-journal').closest('[data-panel]').hidden).toBe(false);
-  expect(shell.showLog('gm-comms-panel')).toBe(true);
-  expect(document.getElementById('gm-comms-text').isConnected).toBe(true);
-});
-it('separates a record panel from its default group through docking', () => {
-  const { shell } = mount();
-  shell.setLiveLayout(liveLayoutModel.dock(defaultLiveLayout(), 'journal', 'roster', 'tab'));
-  expect(document.getElementById('gm-journal').closest('[data-panel]').dataset.panel).toBe('journal');
-  expect(recordTab('journal').closest('.workshop-tab-list')
-    .contains(recordTab('roster'))).toBe(true);
-  expect(recordTab('comms').closest('.workshop-tab-list')
-    .contains(recordTab('journal'))).toBe(false);
-});
-it('drops the tab for a panel the role preset has put away and moves the operator off it', () => {
-  const { shell } = mount();
-  recordTab('activity').click();
-  expect(recordFrame('activity').hidden).toBe(false);
-  // What gui/gm-role-presets.js does to a panel the effective preset omits.
-  document.getElementById('gm-activity').hidden = true;
-  shell.refresh();
-  expect(recordTab('activity')).toBeNull();
-  expect(recordFrame('activity')).toBeNull();
-  // The operator is left on a record that is still there, not on nothing.
-  expect(recordFrame('comms').hidden).toBe(false);
-  // The arrangement is unchanged: availability is read, never written.
-  expect(shell.liveLayoutState().closed).not.toContain('activity');
-  document.getElementById('gm-activity').hidden = false;
-  shell.refresh();
-  expect(recordTab('activity')).not.toBeNull();
-});
-it('brings a record panel to the front for a caller about to focus it', () => {
-  const { shell } = mount();
-  // The attention queue opens an authored Comms route (gui/gm-workspace.js).
-  // A `hidden` panel has nothing to focus, so the shell reveals it first — for
-  // the PANEL the caller names, not a dock id it has to know.
-  expect(recordFrame('comms').hidden).toBe(false);
-  expect(shell.showLog('gm-journal')).toBe(true);
-  expect(recordFrame('journal').hidden).toBe(false);
-  expect(shell.showLog('gm-comms-panel')).toBe(true);
-  expect(recordFrame('comms').hidden).toBe(false);
-  // A panel the role preset has put away is left alone: a preset hiding a
-  // panel is a decision, not something a navigation may override.
-  shell.showLog('gm-journal');
-  document.getElementById('gm-comms-panel').hidden = true;
-  expect(shell.showLog('gm-comms-panel')).toBe(false);
-  expect(recordFrame('journal').hidden).toBe(false);
-  document.getElementById('gm-comms-panel').hidden = false;
-  // And a node that is not a registered panel at all is not this seam's
-  // business, even though the desk is full of registered ones.
-  expect(shell.showLog('gm-live-layout')).toBe(false);
-  // The desk really does wire it to the queue's own Comms navigation.
-  const workspace = readFileSync('gui/gm-workspace.js', 'utf8');
-  expect(workspace).toContain("shell.showLog('gm-comms-panel');");
-});
-it('states the workload of a crewed hull as a word beside its roster row', () => {
-  const { shell } = mount({
-    __hostGmWorkloadState: () => [
-      { ship: { entity_id: 'ship' }, station_id: 'helm', level: 'engaged' },
-      { ship: { entity_id: 'ship' }, station_id: 'comms', level: 'overloaded' },
-      { ship: { entity_id: 'other' }, station_id: 'helm', level: 'backfill' },
-    ],
-  });
-  shell.refresh({ entities: [
-    { entity_id: 'ship', name: 'Courier', kind: 'player_ship', faction: null },
-    { entity_id: 'other', name: 'Resolute', kind: 'player_ship', faction: null },
-    { entity_id: 'quiet', name: 'Kestrel', kind: 'npc_ship', faction: null },
-  ] }, { ships: [] });
-  const words = [...document.querySelectorAll('#gm-roster-ships .gm-roster-workload')];
-  // The worst claim about a PERSON wins for a hull with several Stations…
-  expect(words.map(word => word.dataset.level)).toEqual(['overloaded', 'backfill']);
-  expect(words[0].textContent).toBe('server.gm.workload.state.overloaded');
-  // …and a hull the advisory published no rows for says nothing at all.
-  expect(document.querySelectorAll('#gm-roster-ships .gm-roster-row')).toHaveLength(3);
-});
-it('repaints the roster on a changed workload word, not on the advisory ticking', () => {
-  let rows = [{ ship: { entity_id: 'ship' }, station_id: 'helm', level: 'engaged', count: 2, sustained_secs: 4 }];
-  const { shell } = mount({ __hostGmWorkloadState: () => rows });
-  const projection = { entities: [
-    { entity_id: 'ship', name: 'Courier', kind: 'player_ship', faction: null },
-  ] };
-  shell.refresh(projection, { ships: [] });
-  const button = document.querySelector('#gm-roster-ships button');
-  // gm_workload republishes about once a simulated second while a Station
-  // holds demand: same level, longer sustain. Nothing a Game Master can read
-  // has changed, so the button their pointer is down on must be the same node
-  // — a replaced button eats the mouseup and loses a screen reader's place.
-  rows = [{ ship: { entity_id: 'ship' }, station_id: 'helm', level: 'engaged', count: 2, sustained_secs: 5 }];
-  shell.refresh(projection, { ships: [] });
-  expect(document.querySelector('#gm-roster-ships button')).toBe(button);
-  // The WORD changing is a real change, and does repaint.
-  rows = [{ ship: { entity_id: 'ship' }, station_id: 'helm', level: 'overloaded', count: 3, sustained_secs: 6 }];
-  shell.refresh(projection, { ships: [] });
-  expect(document.querySelector('#gm-roster-ships button')).not.toBe(button);
-  expect(document.querySelector('#gm-roster-ships .gm-roster-workload').dataset.level)
-    .toBe('overloaded');
-});
-it('keeps entity selection and the comparison tabs across a rearranged inspector', () => {
-  const { shell, selectEntity } = mount();
-  shell.refresh({ entities: [{ entity_id: 'ship', name: 'Courier', kind: 'player_ship', faction: null }] },
-    { ships: [{ ship_id: 'ship', stations: [{ name: 'Helm', rating: 'Backfill' }] }] });
-  document.querySelector('#gm-roster-ships button').click();
-  shell.selection({ entity_id: 'ship', name: 'Courier', status: { systems: [] } });
-  const card = document.getElementById('gm-entity-card');
-  const tabs = document.getElementById('gm-inspector-tabs');
-
-  // Pull the inspector out of the documents group and float it. The selection
-  // seam is the same nodes moved, not rebuilt, so it survives.
-  shell.setLiveLayout(liveLayoutModel.float(defaultLiveLayout(), 'inspector', { x: 30, y: 40 }));
-  expect(document.getElementById('gm-entity-card')).toBe(card);
-  expect(document.getElementById('gm-inspector-tabs')).toBe(tabs);
-  expect(document.getElementById('gm-inspector').closest('[data-panel]').classList
-    .contains('is-floating')).toBe(true);
-  expect(document.querySelector('#gm-roster-ships button').getAttribute('aria-pressed')).toBe('true');
-  document.querySelector('#gm-roster-ships button').click();
-  expect(selectEntity).toHaveBeenLastCalledWith('ship');
-
-  // The comparison tabs and their independent observing-ship scope came along.
-  document.getElementById('gm-tab-truth').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
-  expect(document.getElementById('gm-tab-crew').getAttribute('aria-selected')).toBe('true');
-  expect(document.getElementById('gm-knowledge-select').closest('[data-panel]').dataset.panel)
-    .toBe('inspector');
-  // Placement only: no selected entity rides along in the stored arrangement.
-  expect(JSON.stringify(shell.liveLayoutState())).not.toContain('ship');
-});
-it('drops the inspector tab when the role preset puts it away, keeping its placement', () => {
-  const { shell } = mount();
-  // gui/gm-role-presets.js lists gm-inspector in GM_ROLE_PRESET_PANEL_IDS.
-  document.getElementById('gm-inspector').hidden = true;
-  shell.refresh();
-  expect(document.querySelector('[data-panel="inspector"]')).toBeNull();
-  // The switcher stops offering it too: a preset hiding a panel is a decision.
-  expect(document.querySelector('[data-layout-panel="inspector"][data-layout-control="switcher"]'))
-    .toBeNull();
-  expect(document.getElementById('gm-inspector').closest('.workshop-dock-parked')).not.toBeNull();
-  expect(shell.liveLayoutState().closed).not.toContain('inspector');
-  document.getElementById('gm-inspector').hidden = false;
-  shell.refresh();
-  expect(document.getElementById('gm-inspector').closest('[data-panel]').dataset.panel).toBe('inspector');
-});
 it('offers keyboard-operated comparison tabs without replacing existing comparison controls', () => {
   mount();
   document.getElementById('gm-tab-truth').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight'}));
@@ -848,16 +300,6 @@ it('offers keyboard-operated comparison tabs without replacing existing comparis
   expect(document.getElementById('gm-knowledge-select')).not.toBeNull();
 });
 
-it('refreshes Station control-source pills when ownership changes without a rating change', () => {
-  const {shell} = mount();
-  const entity = {entity_id:'ship',name:'Courier',kind:'player_ship',faction:null};
-  const ship = {ship_id:'ship',stations:[{station_id:'helm',name:'Helm',rating:'Manual'}],
-    ship_config:{station_systems:{helm:['drive']}},control_sources:{drive:'Human'}};
-  shell.refresh({entities:[entity]},{ships:[ship]});
-  expect(document.querySelector('.gm-station-pills').textContent).toContain('server.gm.shell.control.human');
-  shell.refresh(null,{ships:[{...ship,control_sources:{drive:'Ai'}}]});
-  expect(document.querySelector('.gm-station-pills').textContent).toContain('server.gm.shell.control.ai');
-});
 it('keeps the observing ship selector available without changing the action target', () => {
   const {shell,selectEntity} = mount();
   document.getElementById('gm-knowledge-panel').hidden = false;
@@ -871,124 +313,6 @@ it('keeps the observing ship selector available without changing the action targ
   expect(chooser.value).toBe('crew');
   expect(selectEntity).not.toHaveBeenCalled();
 });
-it('sends the inspector shortcut into the panel that owns the Objective controls', () => {
-  // Since issue #1513 not one of the five shortcut targets is still the
-  // inspector's own child, so every one of them brings ANOTHER dock panel
-  // forward. The sticky way back up the inspector went with them: it could
-  // only ever have appeared behind the tab the operator had just left.
-  const { shell } = mount();
-  expect(document.getElementById('gm-inspector-back')).toBeNull();
-  expect(document.querySelector('#gm-inspector #gm-objective-panel')).toBeNull();
-  // Put the objective panel behind another tab, so revealing it is observable.
-  shell.setLiveLayout(liveLayoutModel.select(shell.liveLayoutState(), 'roster'));
-  const framed = () => document.getElementById('gm-objective-panel').closest('[data-panel]');
-  expect(framed().hidden).toBe(true);
-  [...document.querySelectorAll('#gm-action-grid button')]
-    .find(button => button.getAttribute('aria-controls') === 'gm-objective-panel').click();
-  expect(framed().hidden).toBe(false);
-  expect(framed().dataset.panel).toBe('objective');
-  // A panel the operator CLOSED stays closed: closing is a decision and the
-  // shortcut is a convenience, exactly as it is for every other migrated tool.
-  shell.setLiveLayout(liveLayoutModel.close(shell.liveLayoutState(), 'objective'));
-  expect(document.querySelector('[data-panel="objective"]')).toBeNull();
-  [...document.querySelectorAll('#gm-action-grid button')]
-    .find(button => button.getAttribute('aria-controls') === 'gm-objective-panel').click();
-  expect(document.querySelector('[data-panel="objective"]')).toBeNull();
-});
-
-it('gives contact control, NPC doctrine and their three drafts panels of their own', () => {
-  const { shell } = mount();
-  // The tools join the inspector's column: they read the selection it reads.
-  for (const [panel, id] of [['contact', 'gm-contact-panel'], ['npc', 'gm-npc-panel']]) {
-    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
-    expect(document.querySelector(`#gm-inspector #${id}`), id).toBeNull();
-  }
-  // The two drafts split out of the contact tool are complex actions: absent
-  // from the arrangement, present in the document, ready to be opened. (The
-  // ghost draft that stood beside them was retired in Live layout version 14:
-  // placing a ghost is a Spawn outcome.)
-  for (const [panel, id] of [['misclassify', 'gm-contact-misclassify-panel'],
-    ['report-policy', 'gm-contact-report-panel']]) {
-    expect(document.querySelector(`[data-panel="${panel}"]`), panel).toBeNull();
-    expect(shell.liveLayoutState().closed, panel).toContain(panel);
-    expect(document.getElementById(id), id).not.toBeNull();
-    document.querySelector(`[data-layout-panel="${panel}"][data-layout-control="switcher"]`).click();
-    const framed = document.querySelector(`[data-panel="${panel}"]`);
-    expect(framed.classList.contains('is-floating'), panel).toBe(true);
-    expect(framed.contains(document.getElementById(id)), panel).toBe(true);
-    // A floating draft is a form, not an arrangement, so it is not restored.
-    expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed, panel).toContain(panel);
-  }
-  // Nothing about the contact tool's own controls moved into a draft panel.
-  expect(document.querySelector('#gm-contact-panel #gm-contact-observer')).not.toBeNull();
-  expect(document.querySelector('#gm-contact-misclassify-panel #gm-contact-classification'))
-    .not.toBeNull();
-  expect(document.querySelector('#gm-contact-report-panel #gm-contact-report-delay')).not.toBeNull();
-  // Each draft says how it went WHERE IT WAS COMPOSED: a panel behind another
-  // tab is `hidden`, so a refusal written only into the contact tool is one the
-  // operator never sees.
-  for (const [id, feedback] of [['gm-contact-misclassify-panel', 'gm-contact-misclassify-feedback'],
-    ['gm-contact-report-panel', 'gm-contact-report-feedback']]) {
-    expect(document.querySelector(`#${id} #${feedback}`), feedback).not.toBeNull();
-  }
-  // What is in FORCE is a record, not a draft, and so is the simple action
-  // that clears it: neither is behind opening a temporary panel.
-  for (const id of ['gm-contact-classification-current', 'gm-contact-classification-normal',
-    'gm-contact-report-current', 'gm-contact-report-clear', 'gm-contact-ghosts',
-    'gm-contact-results']) {
-    expect(document.querySelector(`#gm-contact-panel #${id}`), id).not.toBeNull();
-  }
-});
-
-it('brings a quick action its own panel forward before it focuses a control in it', () => {
-  const { shell } = mount();
-  // Since issue #1510 the contact controls are a panel of their own, and a
-  // panel behind another tab is `hidden`: focusing into it would do nothing.
-  shell.setLiveLayout(liveLayoutModel.select(shell.liveLayoutState(), 'npc'));
-  expect(document.getElementById('gm-contact-observer').closest('[data-panel]').hidden).toBe(true);
-  [...document.querySelectorAll('#gm-action-grid button')]
-    .find(button => button.getAttribute('aria-controls') === 'gm-contact-observer').click();
-  expect(document.getElementById('gm-contact-observer').closest('[data-panel]').hidden).toBe(false);
-  expect(document.activeElement).toBe(document.getElementById('gm-contact-observer'));
-  // A panel the operator CLOSED stays closed: closing is a decision.
-  shell.setLiveLayout(liveLayoutModel.close(shell.liveLayoutState(), 'contact'));
-  expect(document.querySelector('[data-panel="contact"]')).toBeNull();
-  [...document.querySelectorAll('#gm-action-grid button')]
-    .find(button => button.getAttribute('aria-controls') === 'gm-contact-observer').click();
-  expect(document.querySelector('[data-panel="contact"]')).toBeNull();
-});
-it('docks System control as a tool and direct effect as a draft of its own', () => {
-  const { shell } = mount();
-  // Disabling one authored System is a target-relative choice and a verb, so
-  // it is an ordinary tool in the column that reads the same selection.
-  expect(document.getElementById('gm-system-panel').closest('[data-panel]').dataset.panel)
-    .toBe('system');
-  expect(document.querySelector('#gm-inspector #gm-system-panel')).toBeNull();
-  expect(document.querySelector('[data-panel="system"] #gm-system-select')).not.toBeNull();
-
-  // Direct damage and repair composes a kind, an amount, a scope and a
-  // clamp/lethality preview, so it is a draft: not in the arrangement, in the
-  // document, and floating when it is opened.
-  expect(document.querySelector('[data-panel="effect"]')).toBeNull();
-  expect(shell.liveLayoutState().closed).toContain('effect');
-  expect(document.querySelector('#gm-inspector #gm-effect-panel')).toBeNull();
-  document.querySelector('[data-layout-panel="effect"][data-layout-control="switcher"]').click();
-  const framed = document.querySelector('[data-panel="effect"]');
-  expect(framed.classList.contains('is-floating')).toBe(true);
-  expect(framed.contains(document.getElementById('gm-effect-amount'))).toBe(true);
-  expect(framed.contains(document.getElementById('gm-effect-log'))).toBe(true);
-  // A floating draft is a form, not an arrangement, so it is not restored.
-  expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed).toContain('effect');
-  // Docked, it is a tool kept to hand and does survive.
-  shell.setLiveLayout(liveLayoutModel.dock(shell.liveLayoutState(), 'effect', 'roster', 'tab'));
-  expect(liveLayoutModel.normalize(shell.liveLayoutState()).closed).not.toContain('effect');
-  // Placement only: no amount, scope, kind or correlation rides along.
-  const stored = JSON.stringify(liveLayoutModel.normalize(shell.liveLayoutState()));
-  for (const key of ['amount', 'scope', 'milli_hp', 'correlation']) {
-    expect(stored, key).not.toContain(key);
-  }
-});
-
 it('opens the draft a quick action points into rather than pointing at nothing', () => {
   const { shell } = mount();
   const opened = [];
@@ -1003,132 +327,12 @@ it('opens the draft a quick action points into rather than pointing at nothing',
     .find(button => button.getAttribute('aria-controls') === 'gm-effect-amount').click();
   expect(document.querySelector('[data-panel="effect"]')).not.toBeNull();
   expect(opened).toEqual([{ keepReusable: false }]);
-  // An ordinary tool is only brought forward; one the operator CLOSED stays so.
+  // Inspector tools now open on demand as popups too.
   shell.setLiveLayout(liveLayoutModel.select(shell.liveLayoutState(), 'contact'));
-  expect(document.getElementById('gm-system-select').closest('[data-panel]').hidden).toBe(true);
+  expect(document.getElementById('gm-system-select').closest('[data-panel]')).toBeNull();
   [...document.querySelectorAll('#gm-action-grid button')]
     .find(button => button.getAttribute('aria-controls') === 'gm-system-select').click();
   expect(document.getElementById('gm-system-select').closest('[data-panel]').hidden).toBe(false);
-});
-it('docks removal and faction hostility as ordinary tools, not drafts', () => {
-  const { shell } = mount();
-  // Each is one choice and a verb, so neither goes through the draft
-  // lifecycle: both are in the arrangement from the start, in the column that
-  // reads the same selection and projection they do.
-  for (const [panel, id] of [['despawn', 'gm-despawn-panel'], ['faction', 'gm-faction-panel']]) {
-    expect(document.getElementById(id).closest('[data-panel]')?.dataset.panel, id).toBe(panel);
-    expect(document.querySelector(`#gm-inspector #${id}`), id).toBeNull();
-    expect(shell.liveLayoutState().closed, panel).not.toContain(panel);
-    expect(liveLayoutModel.isTemporary(panel), panel).toBe(false);
-    expect(document.querySelector(`[data-panel="${panel}"]`).dataset.panelKind, panel).toBe('tool');
-  }
-  expect(document.querySelector('[data-panel="despawn"] #gm-despawn-preview')).not.toBeNull();
-  expect(document.querySelector('[data-panel="faction"] #gm-faction-apply')).not.toBeNull();
-  // Since issue #1513 the inspector holds only its own reading surfaces —
-  // every panel it used to carry is a dock panel.
-  expect([...document.getElementById('gm-inspector').querySelectorAll('section[id]')]
-    .map(section => section.id)).toEqual(['gm-knowledge-panel']);
-});
-
-it('docks the authored Objective controls in the mission workflow', () => {
-  const { shell } = mount();
-  // The authored target and its recipients already define the operation, so
-  // these are ordinary dock controls with the existing consequence
-  // confirmation rather than a draft with a lifecycle of its own.
-  const frame = document.getElementById('gm-objective-panel').closest('[data-panel]');
-  expect(frame.dataset.panel).toBe('objective');
-  expect(frame.dataset.panelKind).toBe('tool');
-  expect(liveLayoutModel.isTemporary('objective')).toBe(false);
-  expect(shell.liveLayoutState().closed).not.toContain('objective');
-  // It sits with the mission events it belongs to, not in the selected-entity
-  // column, and it is out of the inspector entirely.
-  expect(frame.closest('.workshop-tab-stack').querySelector('[data-panel="mission"]'))
-    .not.toBeNull();
-  expect(document.querySelector('#gm-inspector #gm-objective-panel')).toBeNull();
-  // Every verb travelled with it, and so did the confirmation and the results.
-  expect(frame.querySelector('#gm-objective-list')).not.toBeNull();
-  expect(frame.querySelector('#gm-objective-confirmation')).not.toBeNull();
-  expect(frame.querySelector('#gm-objective-results')).not.toBeNull();
-  // And it is ONE panel: the inspector reaches it by pointing, not by keeping
-  // a second copy of the controls.
-  expect(document.querySelectorAll('#gm-objective-list')).toHaveLength(1);
-  expect([...document.querySelectorAll('#gm-action-grid button')]
-    .filter(b => b.getAttribute('aria-controls') === 'gm-objective-panel')).toHaveLength(1);
-});
-
-it('docks the entities/AI Live Inspector as a reading beside the selection', () => {
-  const { shell } = mount();
-  // A reading surface, not an action route: it joins the inspector's own column
-  // because it reads the selection the inspector reads (issue #1489).
-  const frame = document.getElementById('gm-entity-fields-panel').closest('[data-panel]');
-  expect(frame.dataset.panel).toBe('entity-fields');
-  expect(frame.dataset.panelKind).toBe('tool');
-  expect(liveLayoutModel.isTemporary('entity-fields')).toBe(false);
-  expect(shell.liveLayoutState().closed).not.toContain('entity-fields');
-  expect(frame.closest('.workshop-tab-stack').querySelector('[data-panel="inspector"]'))
-    .not.toBeNull();
-  // It carries no control that submits anything. The one authored field with a
-  // named action reaches the panel that owns it instead.
-  expect(frame.querySelector('#gm-entity-fields-list')).not.toBeNull();
-  expect(frame.querySelectorAll('select')).toHaveLength(0);
-});
-
-it('brings the authored Objective panel back where it was, asking nothing', () => {
-  const first = mount();
-  first.shell.setLiveLayout(
-    liveLayoutModel.dock(first.shell.liveLayoutState(), 'objective', 'map', 'tab'));
-  const stored = liveLayoutModel.normalize(first.shell.liveLayoutState());
-  mountedShells.splice(mountedShells.indexOf(first.shell), 1);
-  first.shell.dispose();
-
-  const { shell } = mount();
-  shell.mountLiveLayout(stored);
-  // Placement comes back: the map's group is a place only the stored
-  // arrangement puts it, never the default.
-  const stack = document.getElementById('gm-objective-panel').closest('.workshop-tab-stack');
-  expect(stack.querySelector('[data-panel="map"]')).not.toBeNull();
-  expect(stack.querySelector('[data-panel="mission"]')).toBeNull();
-  expect(shell.liveLayoutState()).toEqual(stored);
-  // Preview and pending state do not: an arrangement carries placement only,
-  // so a reloaded desk is not sitting on a confirmation nobody opened.
-  expect(document.getElementById('gm-objective-confirmation').hidden).toBe(true);
-});
-
-it('restores where a tool was, aimed at nothing and asking nothing', () => {
-  // Rearranging is a layout decision and nothing else. A desk restored aimed at
-  // an entity the operator never chose is a desk that removes the wrong hull,
-  // and one restored mid-confirmation is a press nobody made.
-  const first = mount();
-  first.shell.selection({ entity_id: 'npc-7', name: 'Raider', status: { systems: [] } });
-  document.getElementById('gm-despawn-preview').disabled = false;
-  first.shell.setLiveLayout(
-    liveLayoutModel.dock(first.shell.liveLayoutState(), 'despawn', 'roster', 'tab'));
-  const stored = liveLayoutModel.normalize(first.shell.liveLayoutState());
-  expect(JSON.stringify(stored.root.children[0].children[0].children[0].tabs))
-    .toContain('despawn');
-  // The chip the desk drew for that selection is on screen right now, so a
-  // restored desk that did the same would be indistinguishable from this one.
-  expect(document.getElementById('gm-selection-chip').textContent).toBe('Raider');
-  mountedShells.splice(mountedShells.indexOf(first.shell), 1);
-  first.shell.dispose();
-
-  // A fresh desk, given nothing but that arrangement.
-  const { shell } = mount();
-  shell.mountLiveLayout(stored);
-  // It comes back where it was: sharing the roster's stack, which is a place
-  // only the stored arrangement puts it — by default it is a tab of the
-  // inspector's group, at the other end of the desk.
-  const stack = document.getElementById('gm-despawn-panel').closest('.workshop-tab-stack');
-  expect(stack.querySelector('[data-panel="roster"]')).not.toBeNull();
-  expect(stack.querySelector('[data-panel="inspector"]')).toBeNull();
-  expect(shell.liveLayoutState()).toEqual(stored);
-  // And it restores PLACEMENT only. The desk it was stored from had a live
-  // selection drawn on it; this one has never selected anything, and an
-  // arrangement cannot say otherwise.
-  expect(document.getElementById('gm-selection-chip').textContent).toBe('');
-  // What each tool is aimed at is the panel module's own state, and clearing
-  // it is tested where those modules run: tests/client/gm-despawn-panel.test.js
-  // and tests/client/gm-faction-panel.test.js.
 });
 it('draws a bar pill only for a session fact a live payload carries', () => {
   const { shell } = mount();
@@ -1189,4 +393,121 @@ it('applies the endpoint text scale exactly once', () => {
   expect(source).toContain(
     'html { font-size: calc(var(--root-size-viewscreen) * var(--a11y-text-scale, 1)); }',
   );
+});
+
+
+
+const get = id => document.getElementById(id);
+function openPanel(panel) {
+  document.querySelector('.workshop-panel-switcher [data-layout-panel="' + panel + '"]').click();
+}
+it('opens exactly Entity Tree, Map, Inspector and Activity by default', () => {
+  const { shell } = mount();
+  expect([...document.querySelectorAll('.workshop-dock-panel[data-panel]')].map(node => node.dataset.panel).sort())
+    .toEqual(['activity', 'inspector', 'map', 'roster']);
+  expect(shell.liveLayoutState().closed).toContain('manual-save');
+  expect(get('gm-station-frame').getAttribute('src')).toBeNull();
+});
+it('shows critical warnings in the fixed header while Session remains closed', () => {
+  const { shell } = mount();
+  expect(get('gm-attention-banners').closest('.gm-station-bar')).not.toBeNull();
+  shell.revealBanners();
+  expect(shell.liveLayoutState().closed).toContain('readiness');
+});
+it('composes readiness, join requests, GM presence and peer health in Session', () => {
+  mount(); openPanel('readiness');
+  const session = document.querySelector('[data-panel="readiness"]');
+  for (const id of ['gm-start-controls', 'gm-join-controls', 'gm-roster-operators', 'gm-health-panel']) {
+    expect(session.contains(get(id)), id).toBe(true);
+  }
+  for (const retired of ['join', 'health', 'station', 'objective', 'journal', 'session-history']) {
+    expect(document.querySelector('.workshop-panel-switcher [data-layout-panel="' + retired + '"]')).toBeNull();
+  }
+});
+it('retains original controls and listeners when saved layout mounts again', () => {
+  const { shell } = mount();
+  const ready = get('gm-ready-btn'), manual = get('manual-save-panel'), health = get('gm-health-panel');
+  const clicked = vi.fn(); ready.addEventListener('click', clicked);
+  shell.mountLiveLayout(defaultLiveLayout());
+  openPanel('readiness'); get('gm-ready-btn').click();
+  expect(clicked).toHaveBeenCalledOnce();
+  expect(get('gm-ready-btn')).toBe(ready);
+  expect(get('manual-save-panel')).toBe(manual);
+  expect(get('gm-health-panel')).toBe(health);
+});
+it('merges mission events and objectives, preserving both presenters', () => {
+  mount(); openPanel('mission');
+  const frame = get('gm-objective-panel').closest('[data-panel]');
+  expect(frame.dataset.panel).toBe('mission');
+  expect(frame.contains(get('gm-mission-panel'))).toBe(true);
+});
+it('keeps three distinct Activity sources selectable within one pane', () => {
+  mount();
+  const activity = get('gm-activity-dock');
+  const filter = activity.querySelector('select');
+  filter.value = 'gm-journal'; filter.dispatchEvent(new Event('change'));
+  expect(get('gm-journal').hidden).toBe(false);
+  expect(get('gm-activity').hidden).toBe(true);
+  expect(get('gm-session-history').hidden).toBe(true);
+  filter.value = 'all'; filter.dispatchEvent(new Event('change'));
+  expect(get('gm-session-history').hidden).toBe(false);
+});
+it('opens detail tools as dockable popups rather than initial tabs', () => {
+  const { shell } = mount();
+  for (const panel of ['contact', 'npc', 'system', 'despawn', 'faction', 'entity-fields']) {
+    expect(shell.liveLayoutState().closed).toContain(panel);
+    openPanel(panel);
+    expect(document.querySelector('[data-panel="' + panel + '"]').classList.contains('is-floating')).toBe(true);
+  }
+});
+it('closes manual save only on confirmed success and honours Keep open', () => {
+  const { shell } = mount(); openPanel('manual-save');
+  expect(shell.liveLayoutState().closed).not.toContain('manual-save');
+  get('manual-save-panel').dispatchEvent(new Event('gm-save-confirmed', { bubbles: true }));
+  expect(shell.liveLayoutState().closed).toContain('manual-save');
+  openPanel('manual-save');
+  document.querySelector('[data-popup-keep="manual-save"]').checked = true;
+  get('manual-save-panel').dispatchEvent(new Event('gm-save-confirmed', { bubbles: true }));
+  expect(shell.liveLayoutState().closed).not.toContain('manual-save');
+});
+it('places explicit takeover and feedback alongside the authentic station frame', () => {
+  const { shell } = mount(); get('gm-station-controls').hidden = false; shell.refresh();
+  openPanel('station-console');
+  const surface = get('gm-station-surface');
+  for (const id of ['gm-station-frame', 'gm-station-toggle', 'gm-station-status', 'gm-station-select']) {
+    expect(surface.contains(get(id)), id).toBe(true);
+  }
+  expect(get('gm-inspector').contains(surface)).toBe(false);
+});
+it('uses compact icon chrome without a Float button', () => {
+  mount();
+  const stack = document.querySelector('[data-panel="roster"]').closest('.workshop-tab-stack');
+  expect(stack.querySelector('[data-layout-control="float"]')).toBeNull();
+  expect(stack.querySelector('[data-layout-control="close"]').textContent).toBe('×');
+  expect(stack.querySelector('.workshop-dock-panel > .workshop-panel-header')).toBeNull();
+});
+it('selects entities through the shared selection seam and stations in observation mode', () => {
+  const station = vi.fn();
+  const { shell, selectEntity } = mount({ __hostGmFocusStation: station });
+  const entity = { entity_id: 'ship', name: 'Resolute', kind: 'player_ship', faction: null, status: { systems: [] } };
+  shell.refresh({ entities: [entity] }, { ships: [{ ship_id: 'ship', stations: [{ station_id: 'helm', name: 'Helm', rating: 'Backfill' }] }] });
+  const button = text => [...get('gm-roster-ships').querySelectorAll('button')].find(node => node.textContent === text);
+  button('Resolute').click(); expect(selectEntity).toHaveBeenCalledWith('ship');
+  button('Helm · Backfill').click(); expect(station).toHaveBeenCalledWith('ship', 'helm');
+});
+it('lets an empty player-slot tree node fill with AI before Start', () => {
+  const submitted = vi.fn(() => true);
+  const { shell } = mount({ __hostLocalGm: () => ({ id: 'gm-1' }), __hostBackfillShipSlot: submitted });
+  shell.metadata({ gms: [], ship_slots: [{ id: 'wing', label: 'Wing slot', state: 'empty', can_backfill: true }] });
+  [...get('gm-roster-ships').querySelectorAll('button')].find(node => node.textContent === 'Wing slot').click();
+  get('gm-tree-inspection').querySelector('button').click();
+  expect(submitted).toHaveBeenCalledWith(expect.objectContaining({ operator_id: 'gm-1', slot: 'wing' }));
+});
+it('does not rebuild unchanged tree rows on every projection', () => {
+  const { shell } = mount();
+  const payload = { entities: [{ entity_id: 'ship', name: 'Resolute', faction: null, kind: 'player_ship' }] };
+  shell.refresh(payload);
+  const row = [...get('gm-roster-ships').querySelectorAll('button')].find(node => node.textContent === 'Resolute');
+  shell.refresh({ entities: [{ ...payload.entities[0], position: [5, 0, 0] }] });
+  expect([...get('gm-roster-ships').querySelectorAll('button')].find(node => node.textContent === 'Resolute')).toBe(row);
 });

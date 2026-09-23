@@ -242,6 +242,7 @@
 #gm-console.gm-desk #gm-spawn-panel[data-empty="true"] > #gm-spawn-exact-form { display: none; }
 #gm-console.gm-desk button.btn { background: var(--edge-bright); }
 #gm-console.gm-desk button[aria-pressed="true"], #gm-console.gm-desk button[aria-selected="true"] { background: var(--gold); }
+#gm-console.gm-desk #gm-live-layout :is([role="tab"][aria-selected="true"], .workshop-panel-tab[aria-pressed="true"]) { background: var(--gold); color: #111923; }
 /* The selected roster entity survives forced colours as more than a control
    background (issue #1430, PRD #1418 story 6): a browser in forced-colours
    mode replaces an authored button fill with its own system colours, so the
@@ -303,6 +304,7 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk #gm-session-controls { flex: 0 1 190px; min-width: 0; }
 #gm-console.gm-desk #gm-session-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
 #gm-console.gm-desk #gm-session-actions button { min-width: 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk #gm-session-actions.gm-native-session-actions { grid-template-columns: 1fr; }
 #gm-console.gm-desk #gm-knowledge-scope { display: grid; gap: var(--space-2); }
 
 /* ── Legibility (GM console feedback, 2026-09-10) ──────────────────────
@@ -637,3 +639,48 @@ html.phoenix-gm-page #lobby-panel { display: none !important; }
 #gm-console.gm-desk .gm-widget-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); min-width: 0; }
 #gm-console.gm-desk .gm-widget-actions button { flex: 1 1 12ch; min-height: var(--control-hit-min); min-width: 0; }
 #gm-console.gm-desk .gm-widget-actions button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+/* Desktop density is local to the GM desk, never to a player's console. */
+#gm-console.gm-desk { --control-hit-min: 28px; --gm-hit: 28px; }
+#gm-console.gm-desk[data-density="touch"] { --control-hit-min: 44px; --gm-hit: 44px; }
+#gm-console.gm-desk button,
+#gm-console.gm-desk :is(input:not([type="checkbox"]), select) {
+  min-height: var(--gm-hit); height: auto; padding: 3px 7px;
+  font-size: 13px; line-height: 1.35; letter-spacing: normal;
+  text-transform: none; clip-path: none; border-radius: 3px;
+}
+#gm-console.gm-desk button {
+  color: var(--ink); background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+}
+#gm-console.gm-desk button[aria-selected="true"] { color: var(--ink); border-color: var(--gold); background: var(--surface-panel); }
+#gm-console.gm-desk button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+#gm-console.gm-desk #gm-session-actions.gm-state-widget { display: flex; gap: 4px; }
+#gm-console.gm-desk .gm-segment-source { display: none !important; }
+#gm-console.gm-desk .gm-segment button[aria-pressed="true"] {
+  color: var(--ink); background: var(--surface-panel); border-color: var(--gold);
+}
+#gm-console.gm-desk .gm-state-widget [hidden] { display: none !important; }
+#gm-console.gm-desk .workshop-panel-body { padding: 6px; }
+#gm-console.gm-desk .workshop-panel-body :is(p, h3, h4) { margin-block: 5px; }
+#gm-console.gm-desk .workshop-panel-body label { gap: 4px; }
+#gm-console.gm-desk .gm-tree-line { display: flex; align-items: center; gap: 2px; }
+#gm-console.gm-desk .gm-tree-line button { border: 0; background: transparent; text-align: left; }
+#gm-console.gm-desk .gm-tree-line button:first-child { flex: 0 0 var(--gm-hit); }
+#gm-console.gm-desk .gm-tree-line button:last-child { flex: 1; overflow-wrap: anywhere; }
+#gm-console.gm-desk .gm-tree-node > [role="group"] { padding-left: 16px; }
+#gm-console.gm-desk .gm-tree-node[aria-selected="true"] > .gm-tree-line { background: var(--surface-panel-up); outline: 1px solid var(--gold); }
+#gm-console.gm-desk .gm-tree-node:focus { outline: none; }
+#gm-console.gm-desk .gm-tree-node:focus > .gm-tree-line { outline: 2px solid var(--gold); }
+#gm-console.gm-desk #gm-roster-ships > input { box-sizing: border-box; width: 100%; }
+#gm-console.gm-desk #gm-workspace { display: flex; height: calc(100vh - 80px); min-height: 400px; padding: 0; gap: 0; }
+#gm-console.gm-desk #gm-workspace > .gm-desk-dock { flex: 1; }
+#gm-console.gm-desk #gm-live-layout { min-height: 0; }
+#gm-console.gm-desk #gm-live-layout .workshop-dock-canvas { min-height: 0; flex: 1 1 0; }
+#gm-console.gm-desk #gm-live-layout .workshop-tab-stack { overflow: hidden; }
+#gm-console.gm-desk #gm-live-layout .workshop-tab-list { flex: 0 0 auto; }
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel { padding: 6px; }
+#gm-console.gm-desk #gm-live-layout .workshop-dock-panel > #gm-map-panel { min-height: 0; }
+#gm-console.gm-desk #gm-live-layout #gm-map-panel { display: flex; flex-direction: column; }
+#gm-console.gm-desk #gm-live-layout #gm-entity-map { flex: 1 1 0; min-height: 80px; height: 100%; }
+#gm-console.gm-desk #gm-live-layout #gm-session-log { display: block; }
+#gm-console.gm-desk #gm-inspector[data-group-inspection="true"] :is(#gm-entity-card, #gm-inspector-tabs, #gm-comparison, #gm-inspector-shortcuts) { display: none; }

@@ -16,7 +16,7 @@ import {
 import { normalizePrivateAudio, legacyPrivateMaster, LEGACY_PRIVATE_MASTER_KEY } from './private-audio-preferences.js';
 import { defaultWorkshopLayout, normalizeWorkshopLayout } from './workshop-layout-model.js';
 import { defaultWorkshopTestLayout, normalizeWorkshopTestLayout } from './workshop-test-layout-model.js';
-import { defaultLiveLayout, normalizeLiveLayout } from './live-layout-model.js';
+import { defaultLiveLayout, normalizeLiveLayout, LIVE_LAYOUT_VERSION } from './live-layout-model.js';
 
 export const OPERATOR_PROFILE_KIND = 'project-phoenix/operator-profile';
 export const OPERATOR_PROFILE_VERSION = 1;
@@ -41,7 +41,7 @@ const MAX_PROFILE_ENTRIES = 512;
 const MAX_GAMEPAD_SLOT = 15;
 const CURRENT_FIELDS = new Set([
   'kind', 'version', 'accessibility', 'bindings', 'gamepad', 'feedback',
-  'gmConfirmations', 'audio', 'authoringLayout', 'testLayout', 'liveLayout',
+  'gmConfirmations', 'audio', 'authoringLayout', 'testLayout', 'liveLayout', 'previousLiveLayout', 'gmDensity',
 ]);
 
 function ownRecord(value) {
@@ -193,6 +193,7 @@ export function createDefaultOperatorProfile(registry = null) {
     authoringLayout: defaultWorkshopLayout(),
     testLayout: defaultWorkshopTestLayout(),
     liveLayout: defaultLiveLayout(),
+    previousLiveLayout: null, gmDensity: 'compact',
   };
 }
 
@@ -213,6 +214,7 @@ export function createOperatorProfileSnapshot({
   authoringLayout,
   testLayout,
   liveLayout,
+  previousLiveLayout, gmDensity,
 } = {}) {
   const diagnostics = [];
   return {
@@ -232,6 +234,8 @@ export function createOperatorProfileSnapshot({
     authoringLayout: normalizeWorkshopLayout(authoringLayout),
     testLayout: normalizeWorkshopTestLayout(testLayout),
     liveLayout: normalizeLiveLayout(liveLayout),
+    previousLiveLayout: previousLiveLayout ? normalizeLiveLayout({ ...previousLiveLayout, version: LIVE_LAYOUT_VERSION }) : null,
+    gmDensity: gmDensity === 'touch' ? 'touch' : 'compact',
   };
 }
 
@@ -340,6 +344,9 @@ export function prepareOperatorProfileImport(text, { registry } = {}) {
     authoringLayout: normalizeWorkshopLayout(legacy ? null : raw.authoringLayout),
     testLayout: normalizeWorkshopTestLayout(legacy ? null : raw.testLayout),
     liveLayout: normalizeLiveLayout(legacy ? null : raw.liveLayout),
+    previousLiveLayout: (raw.previousLiveLayout || (raw.liveLayout?.version < LIVE_LAYOUT_VERSION && raw.liveLayout))
+      ? normalizeLiveLayout({ ...(raw.previousLiveLayout || raw.liveLayout), version: LIVE_LAYOUT_VERSION }) : null,
+    gmDensity: raw.gmDensity === 'touch' ? 'touch' : 'compact',
   };
   return {
     status: legacy ? 'migrated' : 'imported',
@@ -378,6 +385,7 @@ export function serializeOperatorProfile(profile) {
     authoringLayout: profile && profile.authoringLayout,
     testLayout: profile && profile.testLayout,
     liveLayout: profile && profile.liveLayout,
+    previousLiveLayout: profile?.previousLiveLayout, gmDensity: profile?.gmDensity,
   });
   return JSON.stringify(safe, null, 2) + '\n';
 }
@@ -429,7 +437,13 @@ export function loadOperatorProfile(storage, { registry } = {}) {
   if (current != null) {
     const result = prepareOperatorProfileImport(current, { registry });
     let hasAudio = true;
-    try { hasAudio = own(JSON.parse(current), 'audio'); } catch (_) { /* rejected above */ }
+    let resetLayout = false;
+    try {
+      const raw = JSON.parse(current);
+      hasAudio = own(raw, 'audio');
+      resetLayout = Number.isInteger(raw.liveLayout?.version) && raw.liveLayout.version < LIVE_LAYOUT_VERSION;
+    } catch (_) { /* rejected above */ }
+    if (resetLayout) return migrateMaster(result, true);
     return hasAudio ? result : migrateMaster(result);
   }
 

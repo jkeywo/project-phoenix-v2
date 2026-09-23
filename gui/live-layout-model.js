@@ -1,7 +1,7 @@
 import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { createDockLayoutMigration } from './dock-layout-migration.js';
 
-export const LIVE_LAYOUT_VERSION = 18;
+export const LIVE_LAYOUT_VERSION = 19;
 const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
 const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
 export const LIVE_PANEL_REGISTRY = Object.freeze([
@@ -90,6 +90,8 @@ export const LIVE_TEMPORARY_PANELS = Object.freeze([
   // the hull, a Station or one System, and a clamp/lethality preview — several
   // choices about one press, which is what makes it a draft (issue #1511).
   'effect',
+  'manual-save', 'contact', 'npc', 'system', 'despawn', 'faction',
+  'entity-fields', 'world-fields', 'hull-fields', 'region-fields', 'presentation-fields',
 ]);
 /** The draft vocabulary every version up to 13 stored, which still carried the
  * ghost draft. A stored tree is sanitized against ITS version's drafts — a
@@ -103,7 +105,7 @@ const TEMPORARY_UNTIL_V13 = Object.freeze([...LIVE_TEMPORARY_PANELS.slice(0, 4),
  * role preset (they are absent from GM_ROLE_PRESET_PANEL_IDS) and neither may be
  * closed here either: a Game Master must not be able to hide a failure from
  * themselves, whichever mechanism does the hiding. */
-export const LIVE_PINNED_PANELS = Object.freeze(['attention', 'health']);
+export const LIVE_PINNED_PANELS = Object.freeze([]);
 /** Panels registered after version 4. The operator's own utilities — typed
  * presentation control, private sound audition and the one-way Workshop source
  * handoff — open a group of their own under the workflow panels: each is a
@@ -322,9 +324,14 @@ const v16Default = () => ({ version: 16, ...arrangementBeforeV17(),
 const v17Default = () => ({ version: 17, ...arrangementBeforeV18(),
   floats: [], closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'effect'], selected: 'roster' });
 export function defaultLiveLayout() {
-  return { version: LIVE_LAYOUT_VERSION, ...liveArrangement(),
+  return { version: LIVE_LAYOUT_VERSION,
+    root: { type: 'split', axis: 'vertical', sizes: [4, 1], children: [
+      { type: 'split', axis: 'horizontal', sizes: [22, 52, 26], children: [
+        group(['roster'], 'roster'), group(['map'], 'map'), group(['inspector'], 'inspector'),
+      ] }, group(['activity'], 'activity'),
+    ] },
     floats: [],
-    closed: ['spawn', 'restore', 'misclassify', 'report-policy', 'effect'],
+    closed: LIVE_PANELS.filter(id => !['roster', 'map', 'inspector', 'activity'].includes(id)),
     selected: 'roster' };
 }
 const base = createDockLayoutModel({
@@ -369,6 +376,8 @@ const v16 = createDockLayoutModel({ version: 16, panels: V16_PANELS, defaultLayo
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [16] });
 const v17 = createDockLayoutModel({ version: 17, panels: V17_PANELS, defaultLayout: v17Default,
   temporary: LIVE_TEMPORARY_PANELS, compatibleVersions: [17] });
+const v18 = createDockLayoutModel({ version: 18, panels: LIVE_PANEL_REGISTRY,
+  defaultLayout: () => ({ ...defaultLiveLayout(), version: 18 }), compatibleVersions: [18] });
 const migrate = createDockLayoutMigration({
   version: LIVE_LAYOUT_VERSION, current: base,
   generations: [
@@ -394,8 +403,22 @@ const migrate = createDockLayoutMigration({
     { version: 15, model: v15, added: ADDED_IN_V15 },
     { version: 16, model: v16, added: ADDED_IN_V16 },
     { version: 17, model: v17, added: ADDED_IN_V17 },
-    { version: LIVE_LAYOUT_VERSION, model: base, added: ADDED_IN_V18 },
+    { version: 18, model: v18, added: ADDED_IN_V18 },
+    { version: LIVE_LAYOUT_VERSION, model: base, added: [] },
   ],
 });
-export const liveLayoutModel = Object.freeze({ ...base, normalize: migrate });
-export const normalizeLiveLayout = migrate;
+export function normalizeLiveLayout(value, bounds) {
+  return value?.version === LIVE_LAYOUT_VERSION ? base.normalize(value, bounds) : base.defaultLayout();
+}
+export function restorePreviousLiveLayout(value) {
+  const aliases = { join: 'readiness', health: 'readiness', objective: 'mission', journal: 'activity',
+    'session-history': 'activity', station: 'station-console' };
+  const rewrite = node => !node ? null : node.type === 'tabs'
+    ? { ...node, tabs: node.tabs.map(id => aliases[id] || id), active: aliases[node.active] || node.active }
+    : { ...node, children: node.children.map(rewrite) };
+  const old = migrate(value);
+  return base.normalize({ ...old, version: LIVE_LAYOUT_VERSION, root: rewrite(old.root),
+    floats: old.floats.map(row => ({ ...row, panel: aliases[row.panel] || row.panel })),
+    selected: aliases[old.selected] || old.selected });
+}
+export const liveLayoutModel = Object.freeze({ ...base, normalize: normalizeLiveLayout });

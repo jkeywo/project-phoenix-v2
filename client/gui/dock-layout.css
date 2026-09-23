@@ -40,6 +40,13 @@
 .workshop-dock-root .workshop-tab-stack > .workshop-dock-panel { min-height: 6rem; }
 .workshop-dock-root .workshop-split { display: grid; gap: .25rem; min-width: 0; min-height: 0; height: 100%; }
 .workshop-dock-root .workshop-tab-stack { display: flex; flex-direction: column; }
+.workshop-dock-root .workshop-split-resize { background: #334858; touch-action: none; cursor: col-resize; }
+.workshop-dock-root .is-vertical > .workshop-split-resize { cursor: row-resize; }
+.workshop-dock-root .workshop-split-resize:hover, .workshop-dock-root .workshop-split-resize:focus { background: #ffe49b; }
+.workshop-dock-root .workshop-float-resize { position: absolute; bottom: 0; right: 0; z-index: 25; width: 16px; height: 16px; background: linear-gradient(135deg, transparent 50%, #71879a 50%); cursor: nwse-resize; touch-action: none; }
+.workshop-dock-root .workshop-tab-list > [role="tab"] { touch-action: none; }
+.workshop-dock-root [role="tab"].is-tab-insertion { box-shadow: inset 3px 0 #fff; }
+.workshop-dock-root [role="tablist"].is-tab-insertion { box-shadow: inset -3px 0 #fff; }
 .workshop-dock-root :is(.workshop-tab-stack, .workshop-dock-panel) { min-width: 0; min-height: 0; height: 100%; }
 /* Tabs stay one desktop-height row. Overflow is local to that row instead of
    consuming the panel body vertically. */
@@ -62,6 +69,8 @@
 .workshop-dock-root .workshop-dock-panel { position: relative; display: flex; flex: 1 1 0; flex-direction: column; overflow: auto; padding: .65rem; background: #111923; }
 .workshop-dock-root .workshop-dock-targets { display: none; position: absolute; inset: 50% auto auto 50%; z-index: 30; grid-template: repeat(3, 2.5rem) / repeat(3, 2.5rem); transform: translate(-50%, -50%); }
 .workshop-dock-root .workshop-dock-canvas.is-dragging .workshop-dock-targets { display: grid; }
+.workshop-dock-root .workshop-dock-panel.is-drag-source { pointer-events: none; }
+.workshop-dock-root .workshop-dock-canvas.is-dragging .is-drag-source .workshop-dock-targets { display: none; }
 .workshop-dock-root .workshop-dock-target { padding: 0; background: #22384b; }
 .workshop-dock-root .workshop-dock-target.is-pointer-target { border-color: #ffe49b; background: #365774; }
 .workshop-dock-root .workshop-dock-target.is-left { grid-area: 2 / 1; }
@@ -81,4 +90,4 @@
 
 /* Document panels are the surfaces a context is arranged around: they take the
    room a split gives them rather than shrinking to their content. */
-.workshop-dock-root .workshop-dock-panel[data-panel-kind="document"] > :last-child { flex: 1 1 auto; min-height: 0; }
+.workshop-dock-root .workshop-dock-panel[data-panel-kind="document"] > .workshop-panel-content { flex: 1 1 auto; min-height: 0; }

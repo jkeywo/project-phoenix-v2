@@ -517,7 +517,6 @@ export function mountSaveSlots(options) {
         actionFailure('');
         return;
       }
-      createInput.value = '';
       state.pendingCapture = true;
       render();
       setStatus('pending', t('server.save_slots.pending'));
@@ -637,7 +636,9 @@ export function mountSaveSlots(options) {
     state.pendingCapture = false;
     render();
     if (ok) {
+      createInput.value = '';
       setStatus('ok', t('server.save_slots.created'));
+      root.dispatchEvent(new doc.defaultView.Event('gm-save-confirmed', { bubbles: true }));
       if (showsCatalogue) await refresh();
     } else {
       actionFailure(detail);

@@ -178,6 +178,19 @@ export function createDockLayoutModel({ version, panels, defaultLayout, pinned =
     next.floats.push({ panel, x: rect.x ?? offset, y: rect.y ?? offset, width: rect.width ?? 420, height: rect.height ?? 360 });
     next.selected = panel; return settle(next, bounds);
   }
+  function reorder(state, panel, before = null) {
+    if (!isPanel(panel) || panel === before) return state;
+    const next = clone(state);
+    const result = updateNode(next.root, panel, node => {
+      if (before !== null && !node.tabs.includes(before)) return node;
+      const tabs = node.tabs.filter(id => id !== panel);
+      tabs.splice(before === null ? tabs.length : tabs.indexOf(before), 0, panel);
+      return { ...node, tabs };
+    });
+    if (!result.found) return state;
+    next.root = result.node;
+    return next;
+  }
   function moveFloat(state, panel, x, y, bounds) {
     const next = clone(state); const entry = next.floats.find(value => value.panel === panel);
     if (!entry || !Number.isFinite(x) || !Number.isFinite(y)) return state;
@@ -202,5 +215,5 @@ export function createDockLayoutModel({ version, panels, defaultLayout, pinned =
     // `normalize` reads STORED state and guards it; `settle` tidies state this
     // surface just produced. A transition must use `settle`, or opening a draft
     // would be undone by the very rule that refuses to restore one.
-    defaultLayout, normalize, settle, select, dock, float, moveFloat, close, reopen });
+    defaultLayout, normalize, settle, select, dock, reorder, float, moveFloat, close, reopen });
 }

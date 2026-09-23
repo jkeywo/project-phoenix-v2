@@ -314,6 +314,8 @@ export function createGmActivityFeed({
   const list = doc && doc.getElementById('gm-activity-list');
   const empty = doc && doc.getElementById('gm-activity-empty');
   let state = { capacity: 0, entries: [] };
+  let shipChoicesSignature = '', renderedSignature = '';
+  let entryNodes = new Map();
 
   if (region) {
     region.setAttribute('role', 'region');
@@ -349,6 +351,8 @@ export function createGmActivityFeed({
 
   function paintLink(button) {
     const available = isAvailable(button.dataset.entityId);
+    if (button.dataset.available === String(available)) return;
+    button.dataset.available = String(available);
     button.disabled = !available;
     button.setAttribute('aria-disabled', available ? 'false' : 'true');
     button.title = t(available
@@ -388,13 +392,16 @@ export function createGmActivityFeed({
         if (isAvailable(ship.entity_id)) ships.set(ship.entity_id, ship);
       }
     }
+    const choices = [...ships.values()].sort((left, right) => left.entity_id.localeCompare(right.entity_id));
+    const signature = JSON.stringify(choices);
+    if (signature === shipChoicesSignature) return;
+    shipChoicesSignature = signature;
     shipFilter.replaceChildren();
     const all = doc.createElement('option');
     all.value = 'all';
     all.textContent = t('server.gm.activity.filter.ship_all');
     shipFilter.appendChild(all);
-    for (const ship of [...ships.values()]
-      .sort((left, right) => left.entity_id.localeCompare(right.entity_id))) {
+    for (const ship of choices) {
       const option = doc.createElement('option');
       option.value = ship.entity_id;
       option.textContent = shownName(ship);
@@ -587,6 +594,7 @@ export function createGmActivityFeed({
       row.appendChild(reason);
     }
     list.appendChild(row);
+    return row;
   }
 
   function render({ rebuildShips = true } = {}) {
@@ -595,9 +603,25 @@ export function createGmActivityFeed({
       category: categoryFilter?.value || 'all',
       ship: shipFilter?.value || 'all',
     });
+    const signature = JSON.stringify([filtered, state.capacity, state.entries.length]);
+    if (signature === renderedSignature) return;
+    renderedSignature = signature;
     if (list) {
-      list.replaceChildren();
-      for (const entry of filtered) appendEntry(entry);
+      const retained = new Map(), occurrences = new Map();
+      let previous = null;
+      for (const entry of filtered) {
+        const content = JSON.stringify(entry);
+        const ordinal = occurrences.get(content) || 0;
+        occurrences.set(content, ordinal + 1);
+        // Equal events remain distinct occurrences, never deduplicated.
+        const key = `${ordinal}:${content}`;
+        const node = entryNodes.get(key) || appendEntry(entry);
+        const before = previous ? previous.nextElementSibling : list.firstElementChild;
+        if (node !== before) list.insertBefore(node, before);
+        retained.set(key, node); previous = node;
+      }
+      for (const [key, node] of entryNodes) if (!retained.has(key)) node.remove();
+      entryNodes = retained;
     }
     if (empty) empty.hidden = filtered.length !== 0;
     if (status) {

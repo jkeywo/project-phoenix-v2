@@ -360,12 +360,26 @@ export function createGmCheckpointPanel({
     if (!captureAvailable() || state.pending) return false;
     let slotId = '';
     try {
-      slotId = text(api.create(displayName));
+      const created = api.create(displayName);
+      if (created && typeof created.then === 'function') {
+        state.pending = true; render();
+        return created.then(value => finishBookmark(text(value), displayName)).catch(error => {
+          state.pending = false; render();
+          setStatus('failed', t('server.gm.checkpoint.failed', { detail: errorDetail(error) }));
+          return false;
+        });
+      }
+      slotId = text(created);
     } catch (error) {
       setStatus('failed', t('server.gm.checkpoint.failed', { detail: errorDetail(error) }));
       return false;
     }
+    return finishBookmark(slotId, displayName);
+  }
+
+  function finishBookmark(slotId, displayName) {
     if (!slotId) {
+      state.pending = false; render();
       setStatus('failed', t('server.gm.checkpoint.failed', {
         detail: t('server.gm.checkpoint.local_failure'),
       }));
@@ -474,6 +488,7 @@ export function createGmCheckpointPanel({
       rows: rows(),
       selected: selected(),
       pending: state.pending,
+      pendingSlotId: state.pendingSlotId,
       statusTone: state.statusTone,
       statusText: state.statusText,
     }),

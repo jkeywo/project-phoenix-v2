@@ -29,7 +29,8 @@ export class PhNavigationMap extends PhElement {
   // bookkeeping live as PLAIN properties instead (set in onTemplate), because
   // onTemplate runs before this subclass's field-init phase (see ph-element.js).
   #state = null;
-  #offscreen = null;
+  #gridCanvas = null;
+  #gridKey = null;
   #icons = {};
   #projectedBlips = [];
   #projectedRegions = [];
@@ -740,24 +741,24 @@ export class PhNavigationMap extends PhElement {
       this.#dispatch('navselect', null);
     }
 
-    let octx = this.ctx;
-    if (typeof document !== 'undefined') {
-      if (!this.#offscreen || this.#offscreen.width !== W || this.#offscreen.height !== H) {
-        this.#offscreen = document.createElement('canvas');
-        this.#offscreen.width = W;
-        this.#offscreen.height = H;
-      }
-      octx = this.#offscreen.getContext('2d');
-    }
-
-    octx.fillStyle = phColor(this, 'var(--surface-abyss)');
-    octx.fillRect(0, 0, W, H);
-
+    const octx = this.ctx;
     // World-anchored, north-up chart: the camera is fixed on the world origin
     // (0,0) rather than the ship, so the ship icon is plotted at its true
     // sector position and visibly moves as it flies — instead of being pinned
     // to the centre of the screen. Matches the legacy navigation console.
-    this.#drawGrid(octx, cx, cy, scale, 0, 0, 0, W, H, rangeClamped);
+    const gridKey = JSON.stringify([W, H, rangeClamped, this.#zoom, this.#panX, this.#panY,
+      phColor(this, 'var(--surface-abyss)'), phColor(this, 'rgba(var(--rgb-edge), 0.18)'),
+      phColor(this, 'rgba(var(--rgb-edge-control), 0.28)')]);
+    if (!this.#gridCanvas) this.#gridCanvas = document.createElement('canvas');
+    if (this.#gridKey !== gridKey) {
+      this.#gridCanvas.width = W; this.#gridCanvas.height = H;
+      const grid = this.#gridCanvas.getContext('2d', {alpha:false});
+      grid.fillStyle = phColor(this, 'var(--surface-abyss)');
+      grid.fillRect(0, 0, W, H);
+      this.#drawGrid(grid, cx, cy, scale, 0, 0, 0, W, H, rangeClamped);
+      this.#gridKey = gridKey;
+    }
+    octx.drawImage(this.#gridCanvas, 0, 0);
 
     // Areas sit under every point marker, matching the viewscreen radar's
     // draw order (regions before blips) so a hull never hides inside its fill.
@@ -810,10 +811,6 @@ export class PhNavigationMap extends PhElement {
     if (this.#keyboardCursorVisible) this.#drawKeyboardCursor(octx, W, H, px);
     if (this.#placementArmed) {
       this.#drawPlacement(octx, cx, cy, scale, px);
-    }
-
-    if (this.#offscreen) {
-      this.ctx.drawImage(this.#offscreen, 0, 0);
     }
 
     this.#updateBar();

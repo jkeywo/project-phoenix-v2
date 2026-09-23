@@ -26,6 +26,7 @@ export function createEntityInspector({
   const hull = doc.getElementById('gm-entity-hull');
   const target = doc.getElementById('gm-entity-target');
   let current = null;
+  let cleared = false;
 
   if (target) {
     target.addEventListener('click', () => {
@@ -37,6 +38,8 @@ export function createEntityInspector({
   function clear() {
     current = null;
     if (!card || !empty) return false;
+    if (cleared) return true;
+    cleared = true;
     card.hidden = true;
     empty.hidden = false;
     delete card.dataset.entityId;
@@ -62,6 +65,7 @@ export function createEntityInspector({
     if (!card || !empty || !name || !identity || !kind || !position
         || !faction || !status || !hull || !target) return false;
     current = entity;
+    cleared = false;
     card.dataset.entityId = entity.entity_id;
     card.dataset.kind = entity.kind;
     card.dataset.destroyed = String(entity.status.destroyed);

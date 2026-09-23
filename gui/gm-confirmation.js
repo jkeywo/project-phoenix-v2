@@ -142,12 +142,19 @@ export function createGmConfirmationProfile({ storage, registry = createSemantic
     if (result.status === 'saved') profile = next;
     return result;
   }
+  function setDensity(value) {
+    const next = { ...snapshot(), gmDensity: value === 'touch' ? 'touch' : 'compact' };
+    const result = saveOperatorProfile(storage, next);
+    if (result.status === 'saved') { profile = next; for (const listener of listeners) listener(); }
+    return result;
+  }
   function reload() {
     profile = loadOperatorProfile(storage, {registry:catalogue}).profile;
     registry.replaceProfile({bindings:profile.bindings,tuning:profile.gamepad.tuning});
     for (const listener of listeners) listener();
   }
-  return { mode, setMode, importProfile, setAudio, setLiveLayout, reload,
+  return { mode, setMode, importProfile, setAudio, setLiveLayout, setDensity, reload,
+    previousLiveLayout: () => profile.previousLiveLayout, density: () => profile.gmDensity,
     liveLayout: () => profile.liveLayout, audio: () => profile.audio, feedback: () => profile.feedback,
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     exportProfile: () => serializeOperatorProfile(snapshot()),

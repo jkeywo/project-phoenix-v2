@@ -41,12 +41,40 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
   let metadata = { phase: 'Lobby', gms: [] };
   let disposed = false;
   let lastStartResult = null;
+  let saveOutcomes = [];
+  let manualSave = null;
+  const settleCheckpoint = () => {
+    const state = win.__hostGmCheckpointState?.();
+    const outcome = saveOutcomes.find(row => row.slot === state?.pendingSlotId);
+    if (outcome) win.__hostGmCheckpointPanel?.reportOutcome(outcome.ok, outcome.error || '');
+    const manualOutcome = saveOutcomes.find(row => row.slot === manualSave?.slot);
+    if (manualOutcome) {
+      manualSave.status.textContent = manualOutcome.ok ? t('server.gm.checkpoint.confirmed', {
+        name: manualSave.name, tick: manualOutcome.tick, time: new Date().toLocaleTimeString(),
+      }) : manualOutcome.error;
+      manualSave.slot = null;
+      manualSave.pending = false;
+      manualSave.button.disabled = metadata.phase !== 'InProgress';
+      if (manualOutcome.ok) {
+        manualSave.input.value = '';
+        win.__hostGmTemporaryActions?.succeeded('manual-save');
+      }
+    }
+  };
   const getOperator = () => {
     const operator = bridge.getOperator();
     return operator && operator.connected !== false && typeof operator.id === 'string'
       ? operator : null;
   };
   win.__hostLocalGm = getOperator;
+  win.__hostGmInspectorInterest = panels => bridge.inspectorInterest?.(panels);
+  win.__hostGmConsoleInterest = request => bridge.consoleInterest?.(request);
+  if (bridge.saveRequest) {
+    win.__hostGmCheckpointList = () => bridge.saveRequest('list');
+    win.__hostGmCheckpointCreate = name => bridge.saveRequest('create', name).then(slot => {
+      win.setTimeout(settleCheckpoint, 0); return slot;
+    });
+  }
   win.__hostGmName = id => metadata.gms.find(row => row.id === id)?.name || id;
   const submit = (action, request) => {
     const operator = getOperator();
@@ -74,6 +102,32 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
   const readyButton = doc.getElementById('gm-ready-btn');
   const forceButton = doc.getElementById('gm-force-start-btn');
   const result = doc.getElementById('gm-start-result');
+  if (bridge.saveRequest) {
+    const manual = doc.getElementById('manual-save-panel');
+    if (manual) {
+      manual.hidden = false;
+      const input = doc.createElement('input'); input.placeholder = t('server.gm.checkpoint.name_required');
+      input.setAttribute('aria-label', input.placeholder);
+      const button = doc.createElement('button'); button.textContent = t('server.gm.shell.layout.panel.manual_save');
+      const status = doc.createElement('p'); status.setAttribute('role', 'status');
+      manualSave = { button, status, input, slot: null, name: '', pending: false };
+      button.addEventListener('click', async () => {
+        if (manualSave.pending) return;
+        manualSave.pending = true;
+        button.disabled = true;
+        try {
+          manualSave.name = input.value;
+          manualSave.slot = await bridge.saveRequest('create', input.value);
+          status.textContent = t('server.gm.checkpoint.pending', { name: input.value });
+          settleCheckpoint();
+        } catch (error) {
+          manualSave.pending = false;
+          status.textContent = error.message; button.disabled = metadata.phase !== 'InProgress';
+        }
+      });
+      manual.replaceChildren(input, button, status);
+    }
+  }
   const recoveryButton = doc.createElement('button');
   recoveryButton.id = 'gm-return-to-host-lobby';
   recoveryButton.type = 'button';
@@ -93,6 +147,10 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
       readyButton.textContent = t(operator?.ready ? 'server.gm.start.unready' : 'server.gm.start.ready');
       readyButton.disabled = !operator || !inLobby();
     }
+    win.__hostGmSessionContext?.({ phase: metadata.phase });
+    win.__saveSlotsCaptureAvailable = metadata.phase === 'InProgress';
+    if (manualSave) manualSave.button.disabled = !win.__saveSlotsCaptureAvailable || manualSave.pending;
+    win.__hostGmCheckpointPanel?.setPhase(metadata.phase);
     if (forceButton) {
       forceButton.textContent = t('server.gm.start.force');
       forceButton.disabled = !operator || !inLobby();
@@ -132,7 +190,11 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
   recoveryButton.addEventListener('click', returnToHostLobby);
   const unsubscribe = bridge.subscribe((channel, payload) => {
     if (disposed) return;
-    if (channel === 'metadata') {
+    if (channel === 'save_outcomes') {
+      saveOutcomes = typeof payload === 'string' ? JSON.parse(payload) : payload;
+      settleCheckpoint();
+      win.__hostGmCheckpointPanel?.refresh();
+    } else if (channel === 'metadata') {
       let value = payload;
       if (typeof value === 'string') {
         try { value = JSON.parse(value); } catch (_) { return; }

@@ -285,6 +285,24 @@ export function heroBarKeyTarget(ids, current, key) {
   return null;
 }
 
+function textIfChanged(node, value) {
+  if (node.textContent !== value) node.textContent = value;
+}
+
+function attributeIfChanged(node, name, value) {
+  if (node.getAttribute(name) === value) return;
+  if (value == null) node.removeAttribute(name);
+  else node.setAttribute(name, value);
+}
+
+function propertyIfChanged(node, name, value) {
+  if (node[name] !== value) node[name] = value;
+}
+
+function styleIfChanged(node, name, value) {
+  if (node.style.getPropertyValue(name) !== value) node.style.setProperty(name, value);
+}
+
 /**
  * Reconcile the Hero Bar without replacing unchanged tab buttons. Simulation
  * snapshots render the shell frequently, so preserving button identity is what
@@ -369,48 +387,47 @@ export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
       button.children[4].append(badgeCount, badgeLabel);
     }
     existing.delete(tab.id);
-    button.setAttribute('aria-selected', tab.id === model.selected ? 'true' : 'false');
-    button.tabIndex = tab.id === model.selected ? 0 : -1;
+    attributeIfChanged(button, 'aria-selected', tab.id === model.selected ? 'true' : 'false');
+    propertyIfChanged(button, 'tabIndex', tab.id === model.selected ? 0 : -1);
     // Phone bars show the hull's authored short code; anything with room shows
     // the name. A Station whose hull authored no code keeps its name rather
     // than rendering an empty tab.
     const showCode = labelMode === 'code' && !!tab.code;
     const visibleLabel = button.children[0];
-    visibleLabel.textContent = showCode ? tab.code : tab.name;
-    if (showCode) visibleLabel.setAttribute('aria-hidden', 'true');
-    else visibleLabel.removeAttribute('aria-hidden');
-    button.children[3].textContent = showCode ? tab.name : '';
-    button.title = tab.name;
+    textIfChanged(visibleLabel, showCode ? tab.code : tab.name);
+    attributeIfChanged(visibleLabel, 'aria-hidden', showCode ? 'true' : null);
+    textIfChanged(button.children[3], showCode ? tab.name : '');
+    propertyIfChanged(button, 'title', tab.name);
     const healthEl = button.children[1];
     const healthFill = healthEl.querySelector('.station-tab-health-fill');
     const healthLabel = healthEl.querySelector('.station-tab-health-label');
     const healthPct = typeof tab.health === 'number'
       ? Math.round(Math.max(0, Math.min(1, tab.health)) * 100)
       : null;
-    healthFill.hidden = healthPct == null;
-    healthFill.style.width = healthPct === 0 ? '2px' : `${healthPct || 0}%`;
-    healthFill.style.setProperty('--station-health-pct', `${healthPct || 0}%`);
-    healthFill.style.setProperty('--station-health-loss-pct', `${100 - (healthPct || 0)}%`);
-    healthLabel.textContent = healthPct == null
+    propertyIfChanged(healthFill, 'hidden', healthPct == null);
+    styleIfChanged(healthFill, 'width', healthPct === 0 ? '2px' : `${healthPct || 0}%`);
+    styleIfChanged(healthFill, '--station-health-pct', `${healthPct || 0}%`);
+    styleIfChanged(healthFill, '--station-health-loss-pct', `${100 - (healthPct || 0)}%`);
+    textIfChanged(healthLabel, healthPct == null
       ? translate('client.hero.health.none')
-      : translate('client.hero.health.readout', { pct: healthPct });
-    button.dataset.health = tab.healthState;
-    button.dataset.healthValue = healthPct == null ? 'none' : String(healthPct);
+      : translate('client.hero.health.readout', { pct: healthPct }));
+    attributeIfChanged(button, 'data-health', tab.healthState);
+    attributeIfChanged(button, 'data-health-value', healthPct == null ? 'none' : String(healthPct));
     // Persistent per-tab importance cue on EVERY tab (AC4): its own glyph token
     // and its own `data-importance`, set UNCONDITIONALLY (even 'none') so health
     // and importance always coexist and neither can suppress the other. Never a
     // sort key — the tab order above is untouched by importance.
-    button.children[2].textContent = translate('client.hero.importance.cue.' + tab.importanceState);
-    button.dataset.importance = tab.importanceState;
+    textIfChanged(button.children[2], translate('client.hero.importance.cue.' + tab.importanceState));
+    attributeIfChanged(button, 'data-importance', tab.importanceState);
     // Unread badge (issue #1373). Hidden outright at zero rather than drawn
     // empty, and `data-badge` states the number for anything asserting on it.
     const badgeEl = button.children[4];
     const badge = Number.isFinite(tab.badge) ? Math.max(0, Math.trunc(tab.badge)) : 0;
-    badgeEl.hidden = badge === 0;
-    badgeEl.querySelector('.station-tab-badge-count').textContent = badge === 0 ? '' : String(badge);
-    badgeEl.querySelector('.station-tab-badge-label').textContent = badge === 0
-      ? '' : translate('client.hero.badge.unread', { count: badge });
-    button.dataset.badge = String(badge);
+    propertyIfChanged(badgeEl, 'hidden', badge === 0);
+    textIfChanged(badgeEl.querySelector('.station-tab-badge-count'), badge === 0 ? '' : String(badge));
+    textIfChanged(badgeEl.querySelector('.station-tab-badge-label'), badge === 0
+      ? '' : translate('client.hero.badge.unread', { count: badge }));
+    attributeIfChanged(button, 'data-badge', String(badge));
     button.onclick = () => onActivate(tab.id, tab.kind || 'station');
     button.onkeydown = event => {
       const target = heroBarKeyTarget(ids, tab.id, event.key);
@@ -427,14 +444,14 @@ export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
     if (childAtIndex !== button) tabsEl.insertBefore(button, childAtIndex || null);
   }
   const selected = model.tabs.find(tab => tab.id === model.selected) || model.tabs[0];
-  titleEl.textContent = selected.name;
-  ratingEl.hidden = !selected.rating;
-  ratingEl.textContent = selected.rating
+  textIfChanged(titleEl, selected.name);
+  propertyIfChanged(ratingEl, 'hidden', !selected.rating);
+  textIfChanged(ratingEl, selected.rating
     ? translate('client.hero.rating', { rating: selected.rating })
-    : '';
+    : '');
   const aiNames = model.aiStations.map(station => station.name).join(', ');
-  aiEl.hidden = !aiNames;
-  aiEl.textContent = aiNames ? translate('client.hero.ai_status', { stations: aiNames }) : '';
+  propertyIfChanged(aiEl, 'hidden', !aiNames);
+  textIfChanged(aiEl, aiNames ? translate('client.hero.ai_status', { stations: aiNames }) : '');
 }
 
 if (typeof window !== 'undefined') {

@@ -357,8 +357,9 @@ export class ClientSimState {
             .map(entry => [entry.station, entry]),
         );
         // Update live positions/hull/shield of known entities IN PLACE — never append.
+        const entitiesById = new Map(this.world.entities.map(entity => [entity.uuid, entity]));
         for (const st of (snap.entity_states || [])) {
-          const entity = this.world.entities.find(e => e.uuid === st.uuid);
+          const entity = entitiesById.get(st.uuid);
           if (!entity) continue;
           if (st.position != null) entity.position = st.position;
           if (st.yaw != null) entity.yaw = st.yaw;

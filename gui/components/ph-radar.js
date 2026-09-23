@@ -27,7 +27,6 @@ export class PhRadar extends PhElement {
   // and nothing touches `#state` during `onTemplate()` — the first draw is
   // deferred to a rAF, so this field is always installed before it is read.
   #state = null;
-  #offscreen = null;
   #icons = {};
   #projectedBlips = [];
 
@@ -186,15 +185,7 @@ export class PhRadar extends PhElement {
     this.#px = (rect && rect.width > 0) ? (W / rect.width) : 1;
     const px = this.#px;
 
-    let octx = this.ctx;
-    if (typeof document !== 'undefined') {
-      if (!this.#offscreen || this.#offscreen.width !== W || this.#offscreen.height !== H) {
-        this.#offscreen = document.createElement('canvas');
-        this.#offscreen.width = W;
-        this.#offscreen.height = H;
-      }
-      octx = this.#offscreen.getContext('2d');
-    }
+    const octx = this.ctx;
 
     octx.fillStyle = phColor(this, 'var(--surface-abyss)');
     octx.fillRect(0, 0, W, H);
@@ -222,12 +213,12 @@ export class PhRadar extends PhElement {
     // Rings before contacts, so a blip is never drawn under its own scale.
     this.#drawRangeRings(octx, cx, cy, R, px, state.range);
 
-    if (this.#offscreen) {
-      this.ctx.drawImage(this.#offscreen, 0, 0);
-    }
-
     const blips = state.blips || [];
-    if (blips.length === 0) { this.needsRender = false; return; }
+    if (blips.length === 0) {
+      this.#projectedBlips = [];
+      this.needsRender = false;
+      return;
+    }
 
     // Queried live, once per frame (issue #1424): a real OS/browser toggle a
     // player can flip while Phoenix is running, not a Phoenix setting cached
@@ -318,9 +309,6 @@ export class PhRadar extends PhElement {
 
     this.#drawLabels(octx, labels, px);
 
-    if (this.#offscreen) {
-      this.ctx.drawImage(this.#offscreen, 0, 0);
-    }
 
     this.needsRender = false;
   }

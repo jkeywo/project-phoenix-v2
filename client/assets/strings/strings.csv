@@ -1,4 +1,21 @@
 id,context,en
+server.gm.tree.group_summary,GM group summary,{id} · {count} entities
+server.gm.station.controlling,GM live station status,Live · Controlling station
+server.gm.station.observing,GM live station status,Live · Observation only — take over to enable commands
+server.gm.station.releasing,GM station release status,Releasing station control…
+server.gm.station.release_failed,GM station release recovery,Release was not confirmed. The console remains open; retry Release before leaving.
+server.gm.station.loading,GM station loading status,Loading live station console…
+server.gm.station.load_failed,GM station load failure,Station console did not become ready. Reopen this console to retry.
+server.gm.tree.title,GM entity tree title,Entity Tree
+server.gm.tree.search,GM tree filter,Search entities and stations
+server.gm.tree.unassigned,GM tree runtime group,Runtime / Unassigned
+server.gm.tree.no_faction,GM tree faction group,No faction
+server.gm.tree.expand,GM tree expansion control,Expand {name}
+server.gm.tree.collapse,GM tree expansion control,Collapse {name}
+server.gm.session.title,GM consolidated session panel,Session
+server.gm.activity.source,GM activity source filter,Record source
+server.gm.layout.restore_previous,GM layout recovery action,Restore previous layout
+server.gm.layout.toggle_density,GM layout density action,Toggle compact / touch controls
 settings.language,Phone settings — private display-language heading,[Language]
 settings.language.private_hint,Phone settings — explains locale privacy,[Saved only on this device. It is never sent to the host.]
 workshop.localisation.title,Workshop panel title,[Localisation]

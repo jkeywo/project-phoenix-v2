@@ -402,6 +402,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   let pillSignature = null;
   let stationProjection = { ships: [] };
   let rosterSignature = '';
+  const segmentDisposers = [];
   const segments = [get('gm-role-preset-select'), modes].filter(Boolean).map(select => {
     const group = element('span'); group.className = 'gm-segment';
     select.after(group); select.classList.add('gm-segment-source');
@@ -426,6 +427,14 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       group.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.value === select.value)));
     }
     select.addEventListener('change', paint);
+    // Authored presets arrive after mount. Observe only their option source,
+    // not every projection-driven mutation throughout the workspace.
+    const optionsObserver = new win.MutationObserver(paint);
+    optionsObserver.observe(select, { childList: true, subtree: true, characterData: true });
+    segmentDisposers.push(() => {
+      optionsObserver.disconnect();
+      select.removeEventListener('change', paint);
+    });
     return paint;
   });
   const label = value => has(value) ? t(value) : value;
@@ -690,6 +699,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   rootObserver.observe(doc.documentElement, { attributes: true, attributeFilter: ['class'] });
   return {
     dispose() {
+      segmentDisposers.forEach(dispose => dispose());
       restoreDockedNodes();
       liveLayout?.dispose();
       observer.disconnect();

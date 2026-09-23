@@ -53,6 +53,8 @@ test('GM named checkpoints stay readable and operable at 200% text on 1280x720',
     await expect(panel).toBeVisible();
 
     // Touch/pointer reach at this size, before anything is typed.
+    await page.evaluate(() => window.__hostGmConfirmationProfile.setDensity('touch'));
+    await expect(page.locator('#gm-console')).toHaveAttribute('data-density', 'touch');
     const bookmarkButton = page.locator('#gm-checkpoint-bookmark');
     await expect(bookmarkButton).toBeEnabled();
     expect((await bookmarkButton.boundingBox()).height).toBeGreaterThanOrEqual(44);

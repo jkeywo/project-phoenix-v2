@@ -92,7 +92,8 @@ fn npc_capability_is_shared_fail_closed_and_resolves_instance_overrides() {
     });
     let (entity, uuid) = npc(&mut app);
     app.insert_resource(phoenix::gm_projection::BrowserGameMaster);
-    app.world_mut().run_schedule(FixedLast);
+    // Presentation is published once after all fixed ticks in the frame.
+    app.world_mut().run_schedule(PostUpdate);
     let projections: Vec<_> = app
         .world_mut()
         .resource_mut::<Messages<phoenix::console_bridge::GmStationProjectionChanged>>()

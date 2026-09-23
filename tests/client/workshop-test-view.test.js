@@ -50,7 +50,7 @@ describe('the disposable Test view', () => {
     const refusePause = vi.fn(window.__hostSetSessionPaused);
     window.__hostSetSessionPaused = refusePause;
     window.__hostLocalGm = () => ({ id: 'test-only', name: 'Test only', connected: true });
-    first.channel('gm_session', JSON.stringify({ paused: false, results: [] }));
+    first.channel('gm_session', JSON.stringify({ phase: 'InProgress', paused: false, results: [] }));
     first.setRolePresets(payload);
     const select = document.getElementById('gm-role-preset-select');
     expect(document.querySelector('label[for="gm-role-preset-select"]')).not.toBeNull();

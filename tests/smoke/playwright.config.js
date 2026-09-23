@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'path';
 
-const distDir = path.resolve(__dirname, '../../dist');
+const distDir = process.env.PHOENIX_SMOKE_DIST
+  ? path.resolve(process.env.PHOENIX_SMOKE_DIST)
+  : path.resolve(__dirname, '../../dist');
 
 // Which port the built dist/ is served on.
 //

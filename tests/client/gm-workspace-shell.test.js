@@ -64,6 +64,23 @@ it('docks the desk when the page BECOMES a Game Master page, not only when it lo
     .toBe(true);
 });
 
+it('updates compact preset buttons when authored options arrive after mount', async () => {
+  const { shell } = mount();
+  const select = document.getElementById('gm-role-preset-select');
+  select.append(new Option('Tactical', 'tactical'));
+  const button = () => document.querySelector('#gm-role-preset-select + .gm-segment [data-value="tactical"]');
+  await vi.waitFor(() => expect(button()?.textContent).toBe('Tactical'));
+  button().click();
+  expect(select.value).toBe('tactical');
+  expect(button().getAttribute('aria-pressed')).toBe('true');
+  select.options[select.selectedIndex].textContent = 'Updated tactical';
+  await vi.waitFor(() => expect(button()?.textContent).toBe('Updated tactical'));
+  shell.dispose();
+  select.options[select.selectedIndex].textContent = 'After disposal';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(button().textContent).toBe('Updated tactical');
+});
+
 it('lays the desk out as one region: the dock workspace IS the desk', () => {
   mount();
   // Issues #1502-#1509 migrated every panel the desk held into the dock.

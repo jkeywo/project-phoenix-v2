@@ -1,4 +1,5 @@
-import { test, expect, waitForWasmReady, captureServerPageErrors } from './fixtures';
+import { test, expect, waitForWasmReady, captureServerPageErrors,
+  createTestClient, readHostPeerId, waitForJoinCode } from './fixtures';
 import { ts } from './strings';
 import { revealGmPanel, floatGmPanel } from './dock-helpers.js';
 
@@ -26,7 +27,8 @@ test('a GM picks a place and a direction on the docked map', { tag: '@core' }, a
   if (await ship.isVisible()) await ship.click();
   await waitForWasmReady(page);
   await page.waitForFunction(() => !!window.__hostLocalGm?.());
-  await page.locator('#gm-session-start').click();
+  await revealGmPanel(page, 'readiness');
+  await page.locator('#gm-force-start-btn').click();
   await page.locator('#gm-action-confirmation [data-confirmation-accept]').click();
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
@@ -40,9 +42,9 @@ test('a GM picks a place and a direction on the docked map', { tag: '@core' }, a
   // A second floating panel, to watch it go away and come back. The journal is
   // an inactive tab of the records group, so it is brought to the front first —
   // its float control is only there to press once its frame is the shown one.
-  await revealGmPanel(page, 'journal');
-  await floatGmPanel(page, 'journal');
-  const journal = page.locator('[data-panel="journal"].is-floating');
+  await revealGmPanel(page, 'activity');
+  await floatGmPanel(page, 'activity');
+  const journal = page.locator('[data-panel="activity"].is-floating');
   await expect(journal).toBeVisible();
 
   // Two floats now, and the newer one opened over the draft. Bringing the draft
@@ -96,22 +98,31 @@ test('a GM picks a place and a direction on the docked map', { tag: '@core' }, a
  * that a place picked in metres arrives in the draft as the canonical integer
  * millimetres the field has always taken — refused, not clamped, if it cannot.
  */
-test('a GM places a ghost contact on the docked map', { tag: '@core' }, async ({ page }) => {
+test('a GM places a ghost contact on the docked map', { tag: '@core' }, async ({ page, context }) => {
   test.setTimeout(180_000);
   const errors = captureServerPageErrors(page);
-  await page.goto('/');
-  await page.locator('#landing-menu [data-landing-entry="host_gm"]').click();
-  const worlds = page.locator('#world-list .world-btn[data-scenario-id]');
-  await expect(worlds.first()).toBeVisible({ timeout: 60_000 });
-  await worlds.first().click();
-  const ship = page.locator('ph-ship-picker .ship-card').first();
-  await Promise.race([ship.waitFor({ state: 'visible', timeout: 60_000 }),
-    page.locator('#landing-panel').waitFor({ state: 'hidden', timeout: 60_000 })]);
-  if (await ship.isVisible()) await ship.click();
+  // GM-only entry does not create a player hull. A real fleet ship is the
+  // recipient; the GM's own simulation remains hull-less.
+  const scenario = 'assets/worlds/combat_test.toml';
+  const owner = await context.newPage();
+  const ownerErrors = captureServerPageErrors(owner);
+  await owner.goto(`/?scenario=${scenario}&ship=assets/entities/alliance_cruiser.toml`);
+  await waitForWasmReady(owner);
+  const crew = await createTestClient(context, await readHostPeerId(owner), { name: 'Ghost witness' });
+  await crew.send('SelectStation', { station: 'Captain' });
+  await owner.evaluate(() => window.__hostFleetOpen());
+  await waitForJoinCode(owner, 'fleet-code');
+  const code = await owner.locator('#fleet-code').textContent();
+  await page.goto(`/?gm=1&scenario=${scenario}`);
   await waitForWasmReady(page);
-  await page.waitForFunction(() => !!window.__hostLocalGm?.());
-  await page.locator('#gm-session-start').click();
-  await page.locator('#gm-action-confirmation [data-confirmation-accept]').click();
+  await page.locator('#server-settings-btn').click();
+  await page.locator('.server-settings-tab[data-tab="gameplay"]').click();
+  await page.locator('[data-control="fleet-code"]').fill(code);
+  await page.locator('[data-control="fleet-join"]').click();
+  await page.waitForFunction(() => window.__hostGmStartState?.().admitted);
+  await page.locator('#server-settings-btn').click();
+  await crew.send('SetReady', { ready: true });
+  await page.locator('#gm-header-ready').click();
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
   // Placing a ghost IS placing: the same draft, the same palette, the same
@@ -158,4 +169,5 @@ test('a GM places a ghost contact on the docked map', { tag: '@core' }, async ({
   await listed.locator('button[data-role="remove"]').click();
   await expect(listed).toHaveCount(0, { timeout: 30_000 });
   expect(errors).toEqual([]);
+  expect(ownerErrors).toEqual([]);
 });

@@ -21,7 +21,8 @@ test('a running GM opens retained authored source through the Workshop control',
   if (await ship.isVisible()) await ship.click();
   await waitForWasmReady(page);
   await page.waitForFunction(() => !!window.__hostLocalGm?.());
-  await page.locator('#gm-session-start').click();
+  await revealGmPanel(page, 'readiness');
+  await page.locator('#gm-force-start-btn').click();
   await page.locator('#gm-action-confirmation [data-confirmation-accept]').click();
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
   // The handoff is a dock panel since issue #1505, and not the shown tab of its

@@ -1,13 +1,18 @@
 import { expect } from './fixtures';
 
 export async function revealGmPanel(page, panel) {
+  panel = { objective: 'mission', station: 'station-console', join: 'readiness',
+    health: 'readiness', journal: 'activity', 'session-history': 'activity' }[panel] || panel;
   const settings = page.locator('#server-settings-overlay');
   if (await settings.isVisible()) {
     await page.keyboard.press('Escape');
     await settings.waitFor({ state: 'hidden' });
   }
-  await page.locator(`#gm-live-layout .workshop-panel-switcher [data-layout-panel="${panel}"]`)
-    .evaluate(control => control.click());
+  const menu = page.locator('#gm-live-layout .workshop-window-menu').filter({
+    has: page.locator(`[data-layout-panel="${panel}"]`),
+  });
+  if (!(await menu.evaluate(node => node.open))) await menu.locator('summary').click();
+  await menu.locator(`[data-layout-panel="${panel}"]`).click();
   // The tab is pressed; the panel is what the caller is about to touch. A
   // scroll or press that lands while the dock is still bringing it forward
   // races the repaint, so wait for the panel to actually be on screen.
@@ -30,7 +35,9 @@ export async function openGmDraft(page, panel, keepOpenId) {
 }
 
 export async function clickGmControl(page, controlId, panel = 'readiness') {
-  await revealGmPanel(page, panel);
+  if (!['gm-session-pause', 'gm-session-resume', 'gm-header-ready'].includes(controlId)) {
+    await revealGmPanel(page, panel);
+  }
   await page.locator(`#${controlId}`).evaluate(control => control.click());
 }
 

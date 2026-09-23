@@ -15,6 +15,7 @@
 
 import { test, expect, waitForWasmReady } from './fixtures';
 import { ts } from './strings';
+import { revealGmPanel } from './dock-helpers.js';
 import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
 
 // The GM console's smallest supported landscape surface and the top of the
@@ -68,7 +69,8 @@ test('the Host as GM route reaches a live desk, not a disabled one',
       .toMatchObject({ id: 'gm-1', connected: true });
 
     // ── Start the mission through the desk's own control ─────────────────
-    const start = page.locator('#gm-session-start');
+    await revealGmPanel(page, 'readiness');
+    const start = page.locator('#gm-force-start-btn');
     await expect(start).toBeVisible({ timeout: 60_000 });
     await start.click();
     await page.locator('#gm-action-confirmation [data-confirmation-accept]').click();
@@ -95,9 +97,10 @@ test('the Host as GM route reaches a live desk, not a disabled one',
     // These are the ones gated on ADMISSION alone: a control that also needs a
     // selection or a typed field is a different sentence and stays disabled
     // until the GM has chosen something, which is not what was reported.
-    for (const id of ['gm-session-pause', 'gm-session-resume']) {
-      await expect(page.locator(`#${id}`)).toBeEnabled();
-    }
+    await expect(page.locator('#gm-session-pause')).toBeEnabled();
+    await expect(page.locator('#gm-session-pause')).toBeVisible();
+    await expect(page.locator('#gm-session-resume')).toBeHidden();
+    await expect(page.locator('#gm-session-resume')).toBeDisabled();
 
     // And the whole console, counted the way the report counted it. The
     // remaining disabled controls must be a small selection-dependent minority,
@@ -107,7 +110,8 @@ test('the Host as GM route reaches a live desk, not a disabled one',
         .filter((button) => !!button.offsetParent);
       return { visible: visible.length, disabled: visible.filter((b) => b.disabled).length };
     });
-    expect(tally.visible).toBeGreaterThan(40);
+    // The compact desk mounts four panes, not every tool in the menu.
+    expect(tally.visible).toBeGreaterThan(0);
     expect(tally.disabled).toBeLessThan(tally.visible / 3);
 
     // A standalone session names its operator in the persistent station bar;
@@ -139,7 +143,10 @@ test('the Host as GM route reaches a live desk, not a disabled one',
     await page.evaluate((scale) => document.documentElement.style
       .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
 
-    for (const id of ['gm-session-pause', 'gm-session-resume']) {
+    await page.evaluate(() => window.__hostGmConfirmationProfile.setDensity('touch'));
+    await expect(page.locator('#gm-console')).toHaveAttribute('data-density', 'touch');
+    await expect(page.locator('#gm-session-pause')).toBeHidden();
+    for (const id of ['gm-session-resume']) {
       const button = page.locator(`#${id}`);
       await expect(button).toBeEnabled();
       expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);

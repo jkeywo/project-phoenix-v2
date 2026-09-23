@@ -292,7 +292,7 @@ describe('migration and reconnect preserve the operator choice', () => {
     // save catalogue can reach the record a reconnect reloads.
     expect(Object.keys(snapshot).sort()).toEqual([
       'accessibility', 'audio', 'authoringLayout', 'bindings', 'feedback', 'gamepad',
-      'gmConfirmations', 'kind', 'liveLayout', 'testLayout', 'version',
+      'gmConfirmations', 'gmDensity', 'kind', 'liveLayout', 'previousLiveLayout', 'testLayout', 'version',
     ]);
   });
 });

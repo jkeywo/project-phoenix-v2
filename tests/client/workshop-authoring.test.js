@@ -694,7 +694,7 @@ describe('Workshop Authoring browser surface', () => {
     edit('[global\n');
     await evaluated('export');
     expect(download).not.toHaveBeenCalled();
-    expect(document.activeElement.className).toBe('workshop-findings');
+    expect(document.activeElement.classList.contains('workshop-findings')).toBe(true);
     expect(byId('source').value).toBe('[global\n');
     expect(document.querySelector('[data-action-id="editor.mod.export"]').dataset.state).toBe('Refused');
     expect(byId('dirty').textContent).toBe(t('workshop.dirty'));

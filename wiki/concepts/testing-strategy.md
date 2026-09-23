@@ -3,7 +3,7 @@ title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
 sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, src/sim_sets/order.rs, src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
-updated: 2026-09-21
+updated: 2026-09-23
 ---
 
 # Testing Strategy
@@ -88,6 +88,14 @@ seam). The normal project
 checks message flow and DOM behavior without a GPU. The render project uses
 SwiftShader and includes a pixel-level viewscreen check so a clean-console
 render-graph failure cannot silently produce a blank scene.
+
+GM smoke fixtures open tools through the categorised menu and explicitly keep
+multi-action pop-ups open. Session controls follow authoritative phase rather
+than role presets; detailed Station readings require a visible selected console.
+Tests needing a player ship must supply one rather than assuming GM-only entry
+installs a hull. Touch-target checks select the persisted touch density.
+`PHOENIX_SMOKE_DIST` selects an isolated built bundle (for example the exact CI
+artifact); pair it with `PHOENIX_SMOKE_PORT` to avoid adopting a stale server.
 
 ## PASM
 

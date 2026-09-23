@@ -76,7 +76,7 @@ test('prepared GM event admits crew and delivers Comms to both live Fleet hulls'
   const text = 'Prepared Fleet Comms receipt';
   // Comms shares the desk's centre region with the activity feed and the
   // action log behind one tab strip (the post-M5 screen).
-  await gm.locator('[role="tab"][data-layout-panel="comms"]').click();
+  await revealGmPanel(gm, 'comms');
   await gm.locator('#gm-comms-route').selectOption('starbase-selected');
   await gm.locator('#gm-comms-recipients').selectOption(recipients.map(row => row.id));
   await gm.locator('#gm-comms-text').fill(text);
@@ -125,7 +125,10 @@ test('equal GMs apply authored NPC doctrine through real AI and reject stale or 
     }
     throw new Error(`NPC map did not select ${name}`);
   }
-  for (const page of [first, second]) await revealGmPanel(page, 'npc');
+  for (const page of [first, second]) {
+    await revealGmPanel(page, 'npc');
+    await page.locator('[data-popup-keep="npc"]').check();
+  }
   await select(first, 'Incompatible station'); await expect(first.locator('#gm-npc-apply')).toBeDisabled();
   for (const page of [first, second]) {
     await select(page, 'Directive courier');
@@ -269,7 +272,7 @@ test('GM Comms preserves exact text and recipient dialogue through ordinary crew
   const crewFrame = crewPage.frameLocator('#comms-iframe');
   const send = async (page, recipients, text) => {
     // Comms shares the centre region behind one tab strip (post-M5 screen).
-    await page.locator('[role="tab"][data-layout-panel="comms"]').click();
+    await revealGmPanel(page, 'comms');
     await page.locator('#gm-comms-route').selectOption('selected');
     await page.locator('#gm-comms-recipients').selectOption(recipients);
     await page.locator('#gm-comms-text').fill(text);
@@ -306,7 +309,7 @@ test('GM Comms preserves exact text and recipient dialogue through ordinary crew
   await otherGm.waitForFunction(correlation => window.__hostGmCommsState().results
     .some(row => row.correlation === correlation && row.outcome === 'applied'), second.correlation);
 
-  await gm.locator('[role="tab"][data-layout-panel="comms"]').click();
+  await revealGmPanel(gm, 'comms');
   await gm.locator('#gm-comms-recipients').selectOption([alpha]);
   await gm.locator('#gm-comms-hail').selectOption('offer');
   const beforeHail = await gm.evaluate(() => window.__hostGmCommsState().results
@@ -461,6 +464,7 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
     throw new Error(`Map keyboard selection did not reach ${name}: ${JSON.stringify(state)}`);
   };
   await revealGmPanel(page, 'despawn');
+  await page.locator('[data-popup-keep="despawn"]').check();
   for (const name of ['Protected courier', 'Foundational hazard']) {
     await select(name);
     await expect(page.locator('#gm-despawn-preview')).toBeDisabled();
@@ -499,6 +503,7 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
   await page.waitForFunction(() => document.getElementById('gm-entity-map').state.regions.some(r => r.name.startsWith('removable_hazard')));
   const hazardName = await page.evaluate(() => document.getElementById('gm-entity-map').state.regions.find(r => r.name.startsWith('removable_hazard')).name);
   await select(hazardName);
+  await revealGmPanel(page, 'despawn');
   await expect(page.locator('#gm-despawn-preview')).toBeEnabled();
   await page.locator('#gm-despawn-preview').click(); await page.locator('[data-confirmation-accept]').click();
   await expect(page.locator('#gm-despawn-results li[data-outcome="applied"]')).toHaveCount(3);
@@ -1197,6 +1202,7 @@ test('a GM disables and restores a real System without changing its hull', { tag
   const target = await gm.evaluate(() => Object.entries(window.__hostGmSystemState().controls).find(([, rows]) => rows.some(row => row.system_id === 'red-alert'))[0]);
   await gm.evaluate(target => document.querySelector('#gm-entity-map').navigationSelect({ uuid: target }), target);
   await revealGmPanel(gm, 'system');
+  await gm.locator('[data-popup-keep="system"]').check();
   await gm.locator('#gm-system-select').selectOption('red-alert');
   const hullBefore = await gm.locator('#gm-entity-hull').getAttribute('value');
   for (const [verb, disabled] of [['disable', true], ['restore', false]]) {
@@ -1231,6 +1237,7 @@ test('a GM changes Reveal Conceal Normal for one real observing fleet ship', { t
   await clickGmControl(gm, 'gm-ready-btn');
   await Promise.all([ship.waitForFunction(() => window.__saveSlotsPhase === 'InProgress'), gm.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')]);
   await revealGmPanel(gm, 'contact');
+  await gm.locator('[data-popup-keep="contact"]').check();
   await gm.waitForFunction(() => document.querySelectorAll('#gm-contact-observer option').length > 1);
   const observer = await gm.locator('#gm-contact-observer option').nth(1).getAttribute('value');
   await gm.locator('#gm-contact-observer').selectOption(observer);
@@ -1312,6 +1319,8 @@ test('a GM compares Truth and Crew Knowledge for the one connected fleet ship', 
     }),
   ]);
 
+  await revealGmPanel(gm, 'inspector');
+  await gm.locator('#gm-tab-difference').click();
   await gm.waitForFunction(() => {
     const panel = document.getElementById('gm-knowledge-panel');
     return !!panel && !panel.hidden && !!window.__hostGmKnowledgeState?.().selectedShipId;
@@ -3067,12 +3076,12 @@ test(
     // the start exactly as it was.
     await expect(page.locator('#gm-map-panel')).toBeVisible();
     await expect(page.locator('#gm-inspector')).toBeVisible();
-    await expect(page.locator('#gm-session-resume')).toBeVisible();
+    await expect(page.locator('#gm-session-resume')).toBeHidden();
+    await expect(page.locator('#gm-session-pause')).toBeVisible();
 
-    // Live-switch to Tactical through the real <select>. gm-inspector and the
-    // gm-session-resume quick action are hidden -- neither is in Tactical's
-    // authored lists -- while gm-map-panel, which IS authored, stays visible.
-    await page.selectOption('#gm-role-preset-select', 'tactical');
+    // The compact desk presents presets as a segmented control. Presets
+    // filter tools, while the authoritative session widget owns its buttons.
+    await page.locator('#gm-role-preset-select + .gm-segment [data-value="tactical"]').click();
     await expect(page.locator('#gm-inspector')).toBeHidden();
     // The dock stops offering it too: it reads the preset's `hidden` and drops
     // the panel's frame, tab and switcher button rather than framing nothing.
@@ -3096,6 +3105,9 @@ test(
       { timeout: 15_000 },
     );
     expect(await page.evaluate(() => window.wasm_is_paused())).toBe(true);
+    // Session state, not the preset's quick-action list, owns this strip.
+    await expect(page.locator('#gm-session-pause')).toBeHidden();
+    await expect(page.locator('#gm-session-resume')).toBeVisible();
 
     expect(errors).toEqual([]);
   },
@@ -3159,6 +3171,8 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
   await Promise.all([ship, ...gms].map(page => page.waitForFunction(
     () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 },
   )));
+  // Detailed readings are subscribed only while the console is visible.
+  await revealGmPanel(gms[0], 'station-console');
   await gms[0].waitForFunction(() => window.__hostGmStationState?.().projection?.ships
     ?.some(ship => ship.blackboards.length > 0), undefined, { timeout: 30_000 });
   await captain.send('SetStationRating', { rating_name: 'Std' });
@@ -3300,8 +3314,16 @@ test('two equal GMs operate a compatible NPC Helm and recover without stale targ
   await Promise.all([owner, ...gms].map(page => page.waitForFunction(
     () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 },
   )));
-  await gms[0].waitForFunction(() => window.__hostGmStationState?.().projection.ships
-    .some(ship => ship.ship_config.helm_radar_range === 173), undefined, { timeout: 30_000 });
+  // Select the fixture's sole NPC from topology before asking for its detail.
+  await revealGmPanel(gms[0], 'station-console');
+  const npcChoice = await gms[0].evaluate(() => {
+    const row = window.__hostGmStationState().projection.ships.find(ship =>
+      ship.stations.length === 1 && ship.stations[0].station_id === 'helm');
+    return `${row.ship_id}\u0000helm`;
+  });
+  await gms[0].locator('#gm-station-select').selectOption(npcChoice);
+  await gms[0].waitForFunction(() => window.__hostGmStationState?.().selectedRow?.ship.ship_config.helm_radar_range === 173,
+    undefined, { timeout: 30_000 });
   const npc = await gms[0].evaluate(() => window.__hostGmStationState().projection.ships
     .find(ship => ship.ship_config.helm_radar_range === 173).ship_id);
   const selectNpc = async page => {
@@ -3398,7 +3420,16 @@ test('two equal GMs operate a compatible NPC Helm and recover without stale targ
   await returning.waitForFunction(id => window.__hostGmStationState?.().projection.ships.some(ship => ship.ship_id === id), npc);
   await selectNpc(returning);
   await toggle(returning);
-  await members(returning, 2);
+  try { await members(returning, 2); } catch (error) {
+    const states = await Promise.all([gms[0], returning].map(page => page.evaluate(() => {
+      const station = window.__hostGmStationState();
+      return { operator: window.__hostLocalGm(), selected: station.selectedKey,
+        station: station.selectedRow?.station, activity: station.projection.activity.slice(-8),
+        session: window.__hostGmSessionState(), start: window.__hostGmStartState(),
+        confirmation: document.getElementById('gm-action-confirmation')?.hidden };
+    })));
+    throw new Error(`Reconnect station takeover: ${JSON.stringify(states)}`, { cause: error });
+  }
   // The browser adapter acknowledges a typed request entering its queue. The
   // frame-driven authority boundary subsequently publishes its actual refusal.
   const refused = (correlation, reason) => returning.waitForFunction(

@@ -83,6 +83,13 @@ if (typeof window !== 'undefined') {
     install(presentation) {
       const installed = installCataloguePresentation(presentation);
       applyToDom(document);
+      const refresh = (root) => {
+        for (const element of root.querySelectorAll('*')) {
+          element.refreshLocale?.();
+          if (element.shadowRoot) refresh(element.shadowRoot);
+        }
+      };
+      refresh(document);
       return installed;
     },
     presentation: getCataloguePresentation,

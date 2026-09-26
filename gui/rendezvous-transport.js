@@ -100,7 +100,7 @@
  */
 
 import './strings-boot.js';
-import { localiseTree, setOverlayCatalogues } from './strings.js';
+import { localiseTree, rememberRawDeliveredMessage, setOverlayCatalogues } from './strings.js';
 import {
   NAMESPACE_CLIENT,
   parseJoinCode,
@@ -135,7 +135,7 @@ export function localiseDeliveredMessage(msg) {
   if (msg?.type === 'Welcome') {
     setOverlayCatalogues(msg.data?.string_catalogues || []);
   }
-  return localiseTree(msg);
+  return rememberRawDeliveredMessage(localiseTree(msg), msg);
 }
 
 /**

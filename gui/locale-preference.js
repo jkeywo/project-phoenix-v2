@@ -1,5 +1,6 @@
 import {
-  applyToDom, getCataloguePresentation, getLocale, setLocale,
+  applyToDom, getCataloguePresentation, getLocale, localiseTree,
+  rawDeliveredMessage, setLocale,
 } from './strings.js';
 
 export const LOCALE_STORAGE_KEY = 'phoenix-private-locale';
@@ -35,6 +36,7 @@ export function installPresentationInIframe(iframe, presentation = getCatalogueP
     const install = iframe?.contentWindow?.phStringCatalogue?.install;
     if (typeof install !== 'function') return false;
     install(presentation);
+    if (!reload) iframe.contentWindow.__languageSwitchPending = true;
     if (reload && typeof iframe.contentWindow?.location?.reload === 'function') {
       iframe.contentWindow.location.reload();
     }
@@ -55,6 +57,8 @@ export function installPresentationInConsoles(doc, presentation = getCataloguePr
 export function createLocalePreference({ doc = document, nav = navigator, storage = localStorage,
   onChange = () => {}, findConsoles = null } = {}) {
   let requested = loadPrivateLocale(storage, nav);
+  let rawComms = null;
+  let rawObjectives = null;
   setLocale(requested);
   const apply = ({ reload = false } = {}) => {
     setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
@@ -71,11 +75,39 @@ export function createLocalePreference({ doc = document, nav = navigator, storag
     apply,
     locale: getLocale,
     presentation: getCataloguePresentation,
+    /** Capture only full-replacement presentation payloads, never authority. */
+    capture(delivered) {
+      const raw = rawDeliveredMessage(delivered);
+      if (raw?.type === 'Welcome') {
+        rawComms = null;
+        rawObjectives = null;
+      } else if (raw?.type === 'CommsState') {
+        rawComms = raw;
+        rawObjectives = raw;
+      } else if (raw?.type === 'ObjectiveSummary') {
+        rawObjectives = raw;
+      }
+    },
+    /** Re-render retained prose without replaying commands or reducer effects. */
+    relocaliseRetained({ simState, commsState } = {}) {
+      if (rawComms) {
+        const data = localiseTree(rawComms).data || {};
+        if (commsState) {
+          commsState.messages = data.messages || [];
+          commsState.objectives = data.objectives || [];
+          commsState.contacts = data.contacts || [];
+          commsState.version += 1;
+        }
+      }
+      if (rawObjectives && simState) {
+        simState.objectives = localiseTree(rawObjectives).data?.objectives || [];
+      }
+    },
     select(next) {
       requested = String(next || 'en');
-      const selected = setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
+      setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
       persistPrivateLocale(storage, requested);
-      return apply({ reload: true });
+      return apply();
     },
     installIframe(iframe) { return installPresentationInIframe(iframe); },
   };

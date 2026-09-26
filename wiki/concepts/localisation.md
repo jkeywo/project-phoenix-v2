@@ -24,7 +24,10 @@ adds diagnostic markers to player text. `<locale>_source` records the exact
 English value translated and `<locale>_provenance` records its origin.
 The phone's browser/private choice is installed in the shell and every Console
 iframe realm before component construction, then repeated on iframe reload and
-reconnect. Workshop consumes the retained report in its Localisation panel and
+reconnect. A live choice updates mounted realms in place; raw semantic
+Objective/Comms snapshots retained beside resolved delivery are rendered again
+in the new locale without replaying game messages. Console edits, focus and
+scroll are restored around that presentation repaint. Workshop consumes the retained report in its Localisation panel and
 offers the only freshness mutation: an explicit source-metadata refresh that
 enters the ordinary undo/save/export document flow.
 

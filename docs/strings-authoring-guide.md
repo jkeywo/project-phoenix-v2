@@ -73,7 +73,10 @@ use and exposes every available catalogue locale under Settings → Gameplay.
 An explicit choice is stored only on that device. The shell installs both the
 choice and the ordered Welcome catalogues into each same-origin Console realm
 before its components register, and repeats the install after every iframe
-mount/reload and reconnect. No locale preference crosses the game wire.
+mount/reload and reconnect. Switching while connected updates mounted Console
+realms in place and re-renders retained Objective/Comms copy from its semantic
+String Ids and parameters. Literal player-authored Comms text is left intact;
+the switch does not send a message to the host or reload a Console.
 
 ## Square brackets mean "not reviewed yet"
 

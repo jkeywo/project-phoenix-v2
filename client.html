@@ -2303,7 +2303,11 @@
     import { createLocalePreference } from './gui/locale-preference.js';
     window.phStrings = { t, has, applyToDom, wireText };
     window.phLocale = createLocalePreference({ doc: document, nav: navigator,
-      storage: window.localStorage });
+      storage: window.localStorage,
+      onChange: () => window.phLocale?.relocaliseRetained?.({
+        simState: window.simState, commsState: window.commsState,
+      }),
+    });
     applyToDom(document);
   </script>
 
@@ -4457,6 +4461,7 @@
     // -- Incoming message handler --------------------------------
 
     function handleMessage(msg) {
+      window.phLocale?.capture?.(msg);
       // The host has said something, so the console's panels are showing real
       // numbers rather than their empty shape — it may leave CONNECTING (PRD
       // #1023 user story 15). Any message counts: the point is that the link
@@ -4779,12 +4784,17 @@
           getLocales: () => window.phLocale?.presentation?.().locales || ['en'],
           getLocale: () => window.phLocale?.locale?.() || 'en',
           onLocale: (locale) => {
+            const settingsOverlay = document.getElementById('settings-overlay');
+            const scrollTop = settingsOverlay?.scrollTop || 0;
+            const focusedLanguage = document.activeElement?.getAttribute?.('data-control') === 'private-locale';
             window.phLocale?.select?.(locale);
             scheduleRender();
             for (const station of uiState.shipStations?.stations || []) {
               pushConsoleStateFor(station.id, pushCause().RENDER);
             }
             settingsPanel?.rebuildContent?.();
+            if (settingsOverlay) settingsOverlay.scrollTop = scrollTop;
+            if (focusedLanguage) settingsOverlay?.querySelector('[data-control="private-locale"]')?.focus();
           },
           // The Accessibility tab's write path (issue #1102): update the
           // client-local profile, persist it privately, and re-apply to the

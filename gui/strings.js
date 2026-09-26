@@ -76,6 +76,19 @@ let baseCatalogue = null;
 let overlayCatalogues = [];
 let locale = 'en';
 let catalogueReport = { entries: new Map(), diagnostics: [], locales: ['en'] };
+const rawDeliveredMessages = new WeakMap();
+
+/** Keep the semantic wire payload beside its resolved copy for live relocalisation. */
+export function rememberRawDeliveredMessage(resolved, raw) {
+  if (resolved && typeof resolved === 'object' && raw && typeof raw === 'object') {
+    rawDeliveredMessages.set(resolved, raw);
+  }
+  return resolved;
+}
+
+export function rawDeliveredMessage(resolved) {
+  return rawDeliveredMessages.get(resolved) || resolved;
+}
 
 /** Warn once per missing id — a re-rendering console would otherwise spam. */
 const warned = new Set();

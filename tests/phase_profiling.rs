@@ -157,6 +157,7 @@ fn phase_proof_child() {
             .all(|(name, _)| !name.contains("Enable the debug feature")));
         let capture = sampler.finish("phase-proof", perf::profile("headless-native"));
         for phase in [
+            SimSet::Membership,
             SimSet::Input,
             SimSet::Physics,
             SimSet::Damage,

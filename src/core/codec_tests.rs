@@ -670,6 +670,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessageDiscriminants::ObjectiveSummary,
             ServerMessage::ObjectiveSummary {
                 objectives: vec![ObjectiveSnapshot {
+                    unassigned: false,
                     id: "obj-1".into(),
                     text: "Destroy the convoy".into(),
                     text_params: Default::default(),
@@ -2030,6 +2031,7 @@ fn an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire() {
     let encoded = JsonCodec
         .encode_server(&ServerMessage::ObjectiveSummary {
             objectives: vec![ObjectiveSnapshot {
+                unassigned: false,
                 id: "obj-a3-window".into(),
                 text: "world.falling_skyway.objective.window.text".into(),
                 text_params: Default::default(),
@@ -2083,6 +2085,7 @@ fn objective_text_params_ride_the_wire_in_sorted_key_order() {
     let encoded = JsonCodec
         .encode_server(&ServerMessage::ObjectiveSummary {
             objectives: vec![ObjectiveSnapshot {
+                unassigned: false,
                 id: "obj".into(),
                 text: "some.id".into(),
                 text_params: params,

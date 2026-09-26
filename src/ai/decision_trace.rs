@@ -211,6 +211,7 @@ mod tests {
             source: ObjectiveSource::Doctrine,
             relevance: vec![SystemAffinity::Helm],
             snapshot: ObjectiveSnapshot {
+                unassigned: false,
                 id: id.to_string(),
                 text: String::new(),
                 text_params: BTreeMap::new(),

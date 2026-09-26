@@ -30,7 +30,7 @@ pub struct ObjectiveInstanceSpec {
     pub recipients: Vec<RecipientSelector>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PlayerShipMembership {
     pub ship_id: String,
     pub slot_id: String,
@@ -71,6 +71,11 @@ pub enum ActivationRefusal {
     EmptyRecipients,
     UnknownShipSlot(String),
     UnknownFaction(String),
+    StaticShipSlotConflict {
+        objective_id: String,
+        slot_id: String,
+        instance_ids: Vec<String>,
+    },
     Conflict(AssignmentConflict),
 }
 
@@ -86,6 +91,11 @@ pub struct ObjectiveInstanceManager {
     instances: Vec<ObjectiveInstanceRecord>,
     /// Frozen per-ship last-known views, keyed by Objective definition.
     history: BTreeMap<String, BTreeMap<String, ShipObjectiveInstanceView>>,
+    /// Last fleet whose membership was accepted. This is retained through a
+    /// snapshot so an ambiguous faction change can be rolled back atomically
+    /// after restore as well as during uninterrupted play.
+    #[serde(default)]
+    accepted_fleet: Vec<PlayerShipMembership>,
     #[serde(skip)]
     dirty: bool,
     /// Transient story edges. Deliberately excluded from save data so restore
@@ -114,6 +124,31 @@ impl ObjectiveInstanceManager {
                     return Err(ActivationRefusal::UnknownFaction(faction.clone()));
                 }
                 _ => {}
+            }
+        }
+        // An authored slot present in two instances of one Objective always
+        // ties at the highest specificity whenever that slot launches. This
+        // can be rejected before any ship exists; faction overlaps may be
+        // hidden by a more specific slot and remain a live-fleet check.
+        for row in &self.instances {
+            if row.spec.key.objective_id != spec.key.objective_id || row.spec.key == spec.key {
+                continue;
+            }
+            for selector in &spec.recipients {
+                if let RecipientSelector::ShipSlot(slot_id) = selector {
+                    if row.spec.recipients.contains(selector) {
+                        let mut instance_ids = vec![
+                            row.spec.key.instance_id.clone(),
+                            spec.key.instance_id.clone(),
+                        ];
+                        instance_ids.sort();
+                        return Err(ActivationRefusal::StaticShipSlotConflict {
+                            objective_id: spec.key.objective_id.clone(),
+                            slot_id: slot_id.clone(),
+                            instance_ids,
+                        });
+                    }
+                }
             }
         }
         self.activate(spec, fleet)
@@ -270,7 +305,15 @@ impl ObjectiveInstanceManager {
             self.history = next;
             self.dirty = true;
         }
+        if self.accepted_fleet != fleet {
+            self.accepted_fleet = fleet.to_vec();
+            self.dirty = true;
+        }
         Ok(())
+    }
+
+    pub fn accepted_fleet(&self) -> &[PlayerShipMembership] {
+        &self.accepted_fleet
     }
 
     pub fn view_for_ship(&self, ship_id: &str) -> Vec<&ShipObjectiveInstanceView> {
@@ -278,6 +321,13 @@ impl ObjectiveInstanceManager {
             .get(ship_id)
             .map(|rows| rows.values().collect())
             .unwrap_or_default()
+    }
+
+    /// A departed instance is retained for display, never for Captain control.
+    pub fn is_unassigned_display_key(&self, ship_id: &str, id: &str) -> bool {
+        self.view_for_ship(ship_id)
+            .into_iter()
+            .any(|view| !view.assigned && display_key(&view.key) == id)
     }
 
     pub fn records(&self) -> &[ObjectiveInstanceRecord] {
@@ -336,6 +386,7 @@ impl ObjectiveInstanceManager {
                 // `assigned` controls current actionability, not history.
                 snapshot.id = display_key(&view.key);
                 snapshot.status = view.status.clone();
+                snapshot.unassigned = !view.assigned;
                 Some(snapshot)
             })
             .collect()
@@ -495,35 +546,51 @@ pub fn player_ship_memberships(world: &mut World) -> Vec<PlayerShipMembership> {
     fleet
 }
 
-pub fn reconcile_memberships(
-    mut manager: ResMut<crate::world::server::ObjectiveInstanceManagerRes>,
-    registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    ships: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &crate::ship_slots::AuthoredShipSlotId,
-            Option<&crate::entities::spawner::FactionComponent>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-) {
-    let mut fleet: Vec<_> = ships
-        .iter()
-        .map(|(uuid, slot, faction)| PlayerShipMembership {
-            ship_id: uuid.0.clone(),
-            slot_id: slot.0.clone(),
-            faction: faction
-                .and_then(|faction| {
-                    registry
-                        .as_ref()
-                        .and_then(|registry| registry.get(&faction.0))
-                })
-                .map(|faction| faction.name.clone())
-                .unwrap_or_default(),
-        })
-        .collect();
-    fleet.sort_by(|a, b| a.ship_id.cmp(&b.ship_id).then(a.slot_id.cmp(&b.slot_id)));
-    if let Err(conflict) = manager.0.reconcile(&fleet) {
+pub fn reconcile_memberships(world: &mut World) {
+    let fleet = player_ship_memberships(world);
+    let refused = {
+        let mut manager = world.resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>();
+        manager
+            .0
+            .reconcile(&fleet)
+            .err()
+            .map(|conflict| (conflict, manager.0.accepted_fleet().to_vec()))
+    };
+    if let Some((conflict, accepted)) = refused {
+        // The manager refused the candidate without changing its history. A
+        // live faction edit must likewise leave the ship on its old faction;
+        // otherwise combat and Objectives would disagree about membership.
+        // Use an exclusive system so the rollback lands before any later
+        // fixed-step reader, rather than through deferred Commands.
+        let restore: BTreeMap<_, _> = accepted
+            .iter()
+            .map(|member| {
+                let faction = world
+                    .get_resource::<crate::entities::config_cache::FactionRegistryResource>()
+                    .and_then(|registry| registry.uuid_by_name(&member.faction));
+                (member.ship_id.as_str(), faction)
+            })
+            .collect();
+        let mut query = world.query_filtered::<(Entity, &crate::entities::spawner::EntityUuid), With<crate::server_app::Ship>>();
+        let entities: Vec<_> = query
+            .iter(world)
+            .filter_map(|(entity, uuid)| {
+                restore
+                    .get(uuid.0.as_str())
+                    .map(|faction| (entity, *faction))
+            })
+            .collect();
+        for (entity, faction) in entities {
+            if let Some(faction) = faction {
+                world
+                    .entity_mut(entity)
+                    .insert(crate::entities::spawner::FactionComponent(faction));
+            } else {
+                world
+                    .entity_mut(entity)
+                    .remove::<crate::entities::spawner::FactionComponent>();
+            }
+        }
         bevy::log::warn!(
             "Objective instance reconciliation refused: objective '{}' is ambiguous for ship '{}' across {:?}",
             conflict.objective_id,
@@ -691,9 +758,11 @@ pub fn apply_command(world: &mut World, command: crate::world::dispatch::ActionC
 mod tests {
     use super::*;
     use crate::core::messages::ObjectiveSource;
+    use bevy::ecs::system::RunSystemOnce;
 
     fn snapshot(id: &str) -> ObjectiveSnapshot {
         ObjectiveSnapshot {
+            unassigned: false,
             id: id.into(),
             text: format!("objective.{id}"),
             text_params: Default::default(),
@@ -803,6 +872,153 @@ mod tests {
     }
 
     #[test]
+    fn live_faction_conflict_restores_the_ship_and_keeps_frozen_progress() {
+        let alpha = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
+        let beta = uuid::Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap();
+        let mut registry = crate::ai::faction::FactionRegistry::new();
+        for (uuid, name) in [(alpha, "alpha"), (beta, "beta")] {
+            registry.insert(crate::ai::faction::FactionConfig {
+                uuid,
+                name: name.into(),
+                display_name: None,
+                enemies: Vec::new(),
+                compliance: None,
+            });
+        }
+        let original = [ship("ship-a", "lead", "alpha")];
+        let mut manager = ObjectiveInstanceManager::default();
+        manager
+            .activate(
+                spec("alpha", vec![RecipientSelector::Faction("alpha".into())]),
+                &original,
+            )
+            .unwrap();
+        manager
+            .activate(
+                spec("beta-one", vec![RecipientSelector::Faction("beta".into())]),
+                &original,
+            )
+            .unwrap();
+        manager
+            .activate(
+                spec("beta-two", vec![RecipientSelector::Faction("beta".into())]),
+                &original,
+            )
+            .unwrap();
+        manager.set_progress(&key("alpha"), 0.6);
+        let restored: ObjectiveInstanceManager =
+            serde_json::from_str(&serde_json::to_string(&manager).unwrap()).unwrap();
+        // Save data intentionally excludes transient story edges and dirty.
+        let before = restored.clone();
+        let peer_manager = restored.clone();
+        let peer_registry = registry.clone();
+
+        let mut world = World::new();
+        world.insert_resource(crate::entities::config_cache::FactionRegistryResource(
+            registry,
+        ));
+        world.insert_resource(crate::world::server::ObjectiveInstanceManagerRes(restored));
+        let entity = world
+            .spawn((
+                crate::server_app::Ship,
+                crate::entities::spawner::EntityUuid("ship-a".into()),
+                crate::ship_slots::AuthoredShipSlotId("lead".into()),
+                crate::entities::spawner::FactionComponent(beta),
+            ))
+            .id();
+
+        world.run_system_once(reconcile_memberships).unwrap();
+        assert_eq!(
+            world
+                .get::<crate::entities::spawner::FactionComponent>(entity)
+                .unwrap()
+                .0,
+            alpha
+        );
+        assert_eq!(
+            world
+                .resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+                .0,
+            before
+        );
+        assert_eq!(
+            world
+                .resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+                .0
+                .view_for_ship("ship-a")[0]
+                .progress,
+            0.6
+        );
+
+        // A second deterministic host applies the same candidate against a
+        // restored manager. Both reject the faction edit and retain identical
+        // projections, including the previous accepted membership.
+        let mut peer = World::new();
+        peer.insert_resource(crate::entities::config_cache::FactionRegistryResource(
+            peer_registry,
+        ));
+        peer.insert_resource(crate::world::server::ObjectiveInstanceManagerRes(
+            peer_manager,
+        ));
+        let peer_entity = peer
+            .spawn((
+                crate::server_app::Ship,
+                crate::entities::spawner::EntityUuid("ship-a".into()),
+                crate::ship_slots::AuthoredShipSlotId("lead".into()),
+                crate::entities::spawner::FactionComponent(beta),
+            ))
+            .id();
+        peer.run_system_once(reconcile_memberships).unwrap();
+        assert_eq!(
+            peer.get::<crate::entities::spawner::FactionComponent>(peer_entity)
+                .unwrap()
+                .0,
+            alpha
+        );
+        assert_eq!(
+            peer.resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+                .0,
+            world
+                .resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+                .0,
+        );
+    }
+
+    #[test]
+    fn switching_instances_replaces_displayed_progress_without_leaking_old_updates() {
+        let alpha = [ship("ship-a", "lead", "alpha")];
+        let beta = [ship("ship-a", "lead", "beta")];
+        let outside = [ship("ship-a", "lead", "outside")];
+        let mut manager = ObjectiveInstanceManager::default();
+        manager
+            .activate(
+                spec("alpha", vec![RecipientSelector::Faction("alpha".into())]),
+                &alpha,
+            )
+            .unwrap();
+        manager
+            .activate(
+                spec("beta", vec![RecipientSelector::Faction("beta".into())]),
+                &alpha,
+            )
+            .unwrap();
+        manager.set_progress(&key("alpha"), 0.25);
+        manager.set_progress(&key("beta"), 0.75);
+
+        manager.reconcile(&beta).unwrap();
+        assert_eq!(manager.view_for_ship("ship-a")[0].key, key("beta"));
+        assert_eq!(manager.view_for_ship("ship-a")[0].progress, 0.75);
+        manager.set_progress(&key("alpha"), 0.9);
+        assert_eq!(manager.view_for_ship("ship-a")[0].progress, 0.75);
+
+        manager.reconcile(&outside).unwrap();
+        assert!(!manager.view_for_ship("ship-a")[0].assigned);
+        assert_eq!(manager.view_for_ship("ship-a")[0].progress, 0.75);
+        manager.set_progress(&key("beta"), 0.8);
+        assert_eq!(manager.view_for_ship("ship-a")[0].progress, 0.75);
+    }
+
+    #[test]
     fn multi_ship_activation_refuses_empty_and_dangling_selectors() {
         let fleet = [ship("a", "lead", "alliance")];
         let slots = BTreeSet::from(["lead".to_string()]);
@@ -825,6 +1041,36 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_explicit_slot_is_rejected_before_that_ship_joins() {
+        let slots = BTreeSet::from(["lead".to_string()]);
+        let mut manager = ObjectiveInstanceManager::default();
+        assert_eq!(
+            manager.activate_validated(
+                spec("one", vec![RecipientSelector::ShipSlot("lead".into())]),
+                &[],
+                &slots,
+                &BTreeSet::new(),
+            ),
+            Ok(true)
+        );
+        let before = manager.clone();
+        assert_eq!(
+            manager.activate_validated(
+                spec("two", vec![RecipientSelector::ShipSlot("lead".into())]),
+                &[],
+                &slots,
+                &BTreeSet::new(),
+            ),
+            Err(ActivationRefusal::StaticShipSlotConflict {
+                objective_id: "survive".into(),
+                slot_id: "lead".into(),
+                instance_ids: vec!["one".into(), "two".into()],
+            })
+        );
+        assert_eq!(manager, before);
+    }
+
+    #[test]
     fn multi_ship_projection_preserves_unrelated_legacy_and_frozen_history() {
         let fleet = [ship("a", "lead", "alliance")];
         let mut manager = ObjectiveInstanceManager::default();
@@ -839,6 +1085,7 @@ mod tests {
             manager.project_snapshots_for_ship("a", vec![snapshot("survive"), snapshot("legacy")]);
         assert_eq!(projected.len(), 2);
         assert_eq!(projected[0].id, "survive::lead");
+        assert!(!projected[0].unassigned);
         assert_eq!(projected[1].id, "legacy");
 
         manager
@@ -847,6 +1094,8 @@ mod tests {
         let projected = manager.project_snapshots_for_ship("a", vec![snapshot("survive")]);
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].id, "survive::lead");
+        assert!(projected[0].unassigned);
+        assert!(manager.is_unassigned_display_key("a", "survive::lead"));
     }
 
     #[test]

@@ -3516,6 +3516,7 @@ fn blackboards_with_patrol(
                     source: crate::core::messages::ObjectiveSource::Doctrine,
                     relevance: vec![crate::core::messages::SystemAffinity::Helm],
                     snapshot: crate::core::messages::ObjectiveSnapshot {
+                        unassigned: false,
                         id: id.to_string(),
                         text: "Patrol".to_string(),
                         text_params: Default::default(),
@@ -3559,6 +3560,7 @@ fn blackboards_with_destroy_pool(
                             source: crate::core::messages::ObjectiveSource::Doctrine,
                             relevance: vec![crate::core::messages::SystemAffinity::Helm],
                             snapshot: crate::core::messages::ObjectiveSnapshot {
+                                unassigned: false,
                                 id: id.to_string(),
                                 text: "Destroy".to_string(),
                                 text_params: Default::default(),
@@ -3605,6 +3607,7 @@ fn with_reach_objective(
                 source: crate::core::messages::ObjectiveSource::Doctrine,
                 relevance: vec![crate::core::messages::SystemAffinity::Helm],
                 snapshot: crate::core::messages::ObjectiveSnapshot {
+                    unassigned: false,
                     id: id.to_string(),
                     text: "Reach".to_string(),
                     text_params: Default::default(),
@@ -3799,6 +3802,7 @@ fn reach_objective_cursor_advances_to_terminal_on_arrival() {
                     source: crate::core::messages::ObjectiveSource::Mission,
                     relevance: vec![crate::core::messages::SystemAffinity::Helm],
                     snapshot: crate::core::messages::ObjectiveSnapshot {
+                        unassigned: false,
                         id: "reach-dock".to_string(),
                         text: "Reach the dock".to_string(),
                         text_params: Default::default(),

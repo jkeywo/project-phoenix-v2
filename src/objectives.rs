@@ -1020,6 +1020,7 @@ impl ObjectiveManager {
 
 fn record_to_snapshot(r: &ObjectiveRecord) -> ObjectiveSnapshot {
     ObjectiveSnapshot {
+        unassigned: false,
         id: r.id.clone(),
         text: r.text.clone(),
         text_params: r.text_params.clone(),
@@ -1116,6 +1117,7 @@ mod tests {
             source: ObjectiveSource::Mission,
             relevance,
             snapshot: ObjectiveSnapshot {
+                unassigned: false,
                 id: id.into(),
                 text: String::new(),
                 text_params: BTreeMap::new(),

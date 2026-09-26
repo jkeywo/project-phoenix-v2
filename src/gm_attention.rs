@@ -1502,6 +1502,7 @@ mod tests {
             source: crate::core::messages::ObjectiveSource::Doctrine,
             relevance: Vec::new(),
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "patrol".into(),
                 text: "patrol".into(),
                 text_params: Default::default(),

@@ -1119,6 +1119,7 @@ fn a_secure_directive_names_a_target_by_name_and_promotes_its_authored_work() {
                 source: crate::core::messages::ObjectiveSource::Mission,
                 relevance: vec![SystemAffinity::Security],
                 snapshot: crate::core::messages::ObjectiveSnapshot {
+                    unassigned: false,
                     id: "secure_the_derelict".into(),
                     text: "world.test.objective.secure".into(),
                     text_params: Default::default(),

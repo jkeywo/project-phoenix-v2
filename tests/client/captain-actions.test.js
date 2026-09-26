@@ -228,4 +228,24 @@ describe('real Captain Red Alert semantic adapter', () => {
       expect.objectContaining({ id: 'two' }),
     );
   });
+
+  it('does not select frozen unassigned history through a direct or cycle action', () => {
+    const sendAction = vi.fn();
+    const registry = captainRegistry({
+      getState: () => ({
+        objectives: [{ id: 'departed', unassigned: true }, { id: 'current' }],
+        boosted_objective_id: null,
+      }),
+      sendAction,
+    });
+    expect(registry.activate(CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID, {
+      context: CAPTAIN_ACTION_CONTEXT,
+      detail: { id: 'departed' },
+    }).handled).toBe(false);
+    expect(sendAction).not.toHaveBeenCalled();
+    registry.activate(CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID, {
+      context: CAPTAIN_ACTION_CONTEXT,
+    });
+    expect(sendAction).toHaveBeenCalledWith('set_objective_priority', expect.objectContaining({ id: 'current' }));
+  });
 });

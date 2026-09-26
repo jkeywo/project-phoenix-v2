@@ -5,6 +5,9 @@ pub(crate) use order::{configure_fixed_order, FixedStep};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub enum SimSet {
+    /// Resolve fleet membership before any gameplay reader sees a proposed
+    /// faction edit. An ambiguous edit is rolled back in this phase.
+    Membership,
     Input,
     Physics,
     Damage,

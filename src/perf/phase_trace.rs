@@ -21,7 +21,8 @@ use tracing_subscriber::{
 };
 use vellum_perf::Recorder;
 
-const PHASES: [SimSet; 7] = [
+const PHASES: [SimSet; 8] = [
+    SimSet::Membership,
     SimSet::Input,
     SimSet::Physics,
     SimSet::Damage,

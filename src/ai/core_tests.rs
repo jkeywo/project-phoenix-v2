@@ -264,6 +264,7 @@ fn patrol_pool() -> Vec<crate::core::messages::ScoredObjective> {
         source: crate::core::messages::ObjectiveSource::Doctrine,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "patrol".into(),
             text: "Patrol".into(),
             text_params: Default::default(),
@@ -305,6 +306,7 @@ fn two_waypoint_patrol() -> (
         source: crate::core::messages::ObjectiveSource::Doctrine,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "patrol".into(),
             text: "".into(),
             text_params: Default::default(),
@@ -337,6 +339,7 @@ fn reach_pool(anchor: &str, score: f32) -> Vec<crate::core::messages::ScoredObje
         source: crate::core::messages::ObjectiveSource::Doctrine,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "reach".into(),
             text: "".into(),
             text_params: Default::default(),
@@ -594,6 +597,7 @@ fn destroy_then_patrol_pool(
                 crate::core::messages::SystemAffinity::Captain,
             ],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "destroy-wave-1".into(),
                 text: "Destroy wave 1".into(),
                 text_params: Default::default(),
@@ -613,6 +617,7 @@ fn destroy_then_patrol_pool(
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "patrol-base".into(),
                 text: "Patrol".into(),
                 text_params: Default::default(),
@@ -865,6 +870,7 @@ fn destroy_vs_patrol_scene() -> (
             crate::core::messages::SystemAffinity::Captain,
         ],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "destroy-wave-1".into(),
             text: "Destroy".into(),
             text_params: Default::default(),
@@ -891,6 +897,7 @@ fn retreat_pool(anchor: &str, score: f32) -> Vec<crate::core::messages::ScoredOb
         source: crate::core::messages::ObjectiveSource::Doctrine,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "retreat".into(),
             text: "Retreat".into(),
             text_params: Default::default(),
@@ -1037,6 +1044,7 @@ fn destroy_pool_for(
             crate::core::messages::SystemAffinity::Weapons,
         ],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "destroy-target".into(),
             text: "".into(),
             text_params: Default::default(),
@@ -1251,6 +1259,7 @@ fn helm_destroy_holding_station_does_not_fall_through_to_patrol() {
         source: crate::core::messages::ObjectiveSource::Doctrine,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "patrol-base".into(),
             text: "Patrol".into(),
             text_params: Default::default(),

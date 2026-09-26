@@ -5926,6 +5926,10 @@ pub struct ObjectiveSnapshot {
     /// Mandatory objectives must be completed; optional are bonus.
     pub mandatory: bool,
     pub status: ObjectiveStatus,
+    /// Retained last-known instance history after this ship leaves its
+    /// recipient set. It remains visible but cannot be acted on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unassigned: bool,
     /// Entity names this objective is associated with. Each named entity is
     /// marked on the nav radar with an objective ring. May reference real
     /// entities (stations, ships) or invisible `objective_marker` beacons

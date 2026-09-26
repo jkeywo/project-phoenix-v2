@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Explicitly Shared Objective Instances
-      summary: "Issue #1523: named instances of one Objective carry independent progress and lifecycle. TOML and Rhai address the same typed instance commands. Recipient selectors resolve live authored ship-slot, faction or all-player membership with explicit-slot > faction > all specificity; equal matches refuse atomically. Completion captures members once, while later joins inherit terminal state without replaying effects or credit."
+      summary: "Issues #1523 and #1528: named instances of one Objective carry independent progress and lifecycle. TOML and Rhai address the same typed instance commands. Recipient selectors resolve live authored ship-slot, faction or all-player membership with explicit-slot > faction > all specificity; duplicate explicit-slot matches reject before a ship joins, and other equal matches refuse atomically. A refused live faction edit restores the ship's last accepted faction in the Membership phase before gameplay Input. Completion captures members once, while later joins inherit terminal state without replaying effects or credit."
     architecture:
       kind: authoritative-state-machine
       authority: authoritative
@@ -21,7 +21,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective Instance State and Attribution
-      summary: Ordered named instance records plus each ship's authored slot identity, per-ship frozen last-known projections and immutable completion membership, captured and restored together. The digest folds authored slot identity beside the ship's stable entity UUID.
+      summary: Ordered named instance records plus each ship's authored slot identity, accepted fleet membership, per-ship frozen last-known projections and immutable completion membership, captured and restored together. The digest folds authored slot identity beside the ship's stable entity UUID.
     architecture:
       classification: authoritative
       owner: objective-instance-contract

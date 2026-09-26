@@ -340,13 +340,14 @@ fn an_order_dependent_system_pair_produces_different_results_when_flipped() {
 // FixedUpdate-membership guard (issue #1182)
 // ─────────────────────────────────────────────────────────────────────────
 
-/// The seven `SimSet`-chain variants (`src/sim_sets.rs`). Every system that is
+/// The eight `SimSet`-chain variants (`src/sim_sets.rs`). Every system that is
 /// a member of one of these must run in `FixedUpdate`: there `Res<Time>` is the
 /// deterministic fixed clock, whereas in `Update`/`PostUpdate` the very same
 /// `Res<Time>` is silently the frame-paced virtual clock. That substitution is
 /// invisible at the type level (`Res<Time>` in both) — it is the `Res<Time>`
 /// trap the ~62 time-reading sim systems live one misregistration away from.
-const SIM_SETS: [SimSet; 7] = [
+const SIM_SETS: [SimSet; 8] = [
+    SimSet::Membership,
     SimSet::Input,
     SimSet::Physics,
     SimSet::Damage,

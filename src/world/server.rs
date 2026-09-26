@@ -933,7 +933,7 @@ impl Plugin for WorldPlugin {
         .add_systems(
             FixedUpdate,
             crate::objective_instances::reconcile_memberships
-                .in_set(crate::sim_sets::SimSet::Modifiers),
+                .in_set(crate::sim_sets::SimSet::Membership),
         )
         // The scripted-callback drain (issue #984, Rhai M6 phase 2b):
         // `after(n, |ctx| …)` callbacks that scripted handlers scheduled are

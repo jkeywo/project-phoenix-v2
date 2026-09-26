@@ -1474,6 +1474,7 @@ component.navigation_map.keyboard_help,Accessible keyboard help for free waypoin
 component.navigation_map.place_prompt,Toast shown on the chart while a Game Master placement gesture is armed (issue #1305),[PRESS MAP TO PLACE — DRAG TO AIM]
 component.objectives.empty,Objective list when the mission has no objectives yet,NO OBJECTIVES
 component.objectives.label,Accessible name (aria-label) for the mission objective list — the keyboard/pointer priority selector (issue #1178),Mission objectives
+component.objectives.unassigned,Label appended to retained objective history after a ship leaves its recipient set,No longer assigned
 component.tutorial.heading,Contextual tutorial overlay card (issue #916): eyebrow label above the tip title,TUTORIAL
 component.tutorial.dismiss,Contextual tutorial overlay card: dismiss button — marks the tip as read forever,GOT IT
 component.tutorial.more,Contextual tutorial overlay card: count of further tips queued behind the current one. {n} is that count,+{n} MORE

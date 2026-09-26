@@ -2649,6 +2649,7 @@ fn helm_ai_stays_zero_when_destroy_target_missing() {
             source: ObjectiveSource::Mission,
             relevance: vec![SystemAffinity::Helm],
             snapshot: ObjectiveSnapshot {
+                unassigned: false,
                 id: "destroy-pirates".into(),
                 text: "Destroy pirates".into(),
                 text_params: Default::default(),

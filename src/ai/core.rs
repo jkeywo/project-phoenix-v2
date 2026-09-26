@@ -680,6 +680,7 @@ pub fn score_doctrine_pool(
                 source: crate::core::messages::ObjectiveSource::Doctrine,
                 relevance,
                 snapshot: crate::core::messages::ObjectiveSnapshot {
+                    unassigned: false,
                     id: d.id.clone(),
                     text: d.text.clone(),
                     // Doctrine text is authored on the hull and names no runtime

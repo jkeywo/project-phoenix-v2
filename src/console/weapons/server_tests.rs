@@ -8335,6 +8335,7 @@ fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) 
                 SystemAffinity::Captain,
             ],
             snapshot: ObjectiveSnapshot {
+                unassigned: false,
                 id: format!("obj-destroy-{target}"),
                 text: format!("Destroy {target}"),
                 text_params: Default::default(),
@@ -8380,6 +8381,7 @@ fn insert_operate_objective_blackboard(app: &mut App, target: &str, score: f32) 
             source: ObjectiveSource::Mission,
             relevance: vec![SystemAffinity::Engineering],
             snapshot: ObjectiveSnapshot {
+                unassigned: false,
                 id: format!("obj-tow-{target}"),
                 text: format!("Tow {target}"),
                 text_params: Default::default(),
@@ -8423,6 +8425,7 @@ fn insert_field_repair_objective_blackboard(app: &mut App, target: &str, score: 
             source: ObjectiveSource::Mission,
             relevance: vec![SystemAffinity::Repair],
             snapshot: ObjectiveSnapshot {
+                unassigned: false,
                 id: format!("obj-field-repair-{target}"),
                 text: format!("Field repair {target}"),
                 text_params: Default::default(),

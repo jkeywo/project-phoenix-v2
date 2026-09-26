@@ -522,6 +522,7 @@ pub fn reach_scored_objective(anchor: &str, score: f32) -> crate::core::messages
         source: crate::core::messages::ObjectiveSource::Mission,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: format!("reach-{anchor}"),
             text: format!("Reach {anchor}"),
             text_params: Default::default(),
@@ -546,6 +547,7 @@ pub fn retreat_scored_objective(
         source: crate::core::messages::ObjectiveSource::Mission,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: format!("retreat-{anchor}"),
             text: format!("Retreat to {anchor}"),
             text_params: Default::default(),
@@ -637,6 +639,7 @@ pub fn patrol_scored_objective(
         source: crate::core::messages::ObjectiveSource::Mission,
         relevance: vec![crate::core::messages::SystemAffinity::Helm],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: "obj-defend".into(),
             text: "Defend Starbase Alpha".into(),
             text_params: Default::default(),
@@ -665,6 +668,7 @@ pub fn destroy_scored_objective(
             crate::core::messages::SystemAffinity::Captain,
         ],
         snapshot: crate::core::messages::ObjectiveSnapshot {
+            unassigned: false,
             id: format!("destroy-{target}"),
             text: format!("Destroy {target}"),
             text_params: Default::default(),

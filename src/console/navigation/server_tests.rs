@@ -887,6 +887,7 @@ fn civilian_order_ai_emits_the_console_order_through_admission() {
             source: ObjectiveSource::Mission,
             relevance: vec![SystemAffinity::Navigation],
             snapshot: ObjectiveSnapshot {
+                unassigned: false,
                 id: "order-hauler".into(),
                 text: "world.test.objective.order_hauler".into(),
                 text_params: Default::default(),
@@ -1059,6 +1060,7 @@ fn operate_navigation_ai_destroy_sets_anchored_waypoint_and_emits_navigate_to() 
                 crate::core::messages::SystemAffinity::Weapons,
             ],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "destroy-test".into(),
                 text: "Destroy target".into(),
                 text_params: Default::default(),
@@ -1125,6 +1127,7 @@ fn operate_navigation_ai_reach_sets_free_waypoint_and_emits_navigate_to() {
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "reach-test".into(),
                 text: "Reach base".into(),
                 text_params: Default::default(),
@@ -1227,6 +1230,7 @@ fn navigate_to_clearance_is_issued_once_per_generation_not_per_tick() {
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "reach-test".into(),
                 text: "Reach base".into(),
                 text_params: Default::default(),
@@ -1388,6 +1392,7 @@ fn operate_navigation_ai_patrol_sets_free_waypoint() {
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "patrol-test".into(),
                 text: "Patrol area".into(),
                 text_params: Default::default(),
@@ -1443,6 +1448,7 @@ fn operate_navigation_ai_patrol_follows_the_objective_cursor() {
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "patrol-test".into(),
                 text: "Patrol area".into(),
                 text_params: Default::default(),
@@ -1535,6 +1541,7 @@ fn inject_destroy_objective(app: &mut App, target: &str) {
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "destroy-far".into(),
                 text: "Destroy far target".into(),
                 text_params: Default::default(),
@@ -1648,6 +1655,7 @@ fn operate_navigation_ai_human_controlled_does_not_set_waypoint() {
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "reach-human".into(),
                 text: "Reach".into(),
                 text_params: Default::default(),
@@ -1729,6 +1737,7 @@ fn operate_navigation_ai_replaces_waypoint_when_objective_changes() {
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Helm],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                unassigned: false,
                 id: "reach".into(),
                 text: "Reach".into(),
                 text_params: Default::default(),

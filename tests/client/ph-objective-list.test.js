@@ -154,6 +154,27 @@ describe('PhObjectiveList', () => {
     );
   });
 
+  it('keeps unassigned history visible without a Captain action', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
+    el.state = {
+      objectives: [{ id: 'obj-1', text: 'Hold the line', unassigned: true }],
+      boosted_objective_id: 'obj-1',
+    };
+    const row = el.shadowRoot.querySelector('.row');
+    expect(row.textContent).toContain(t('component.objectives.unassigned'));
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.getAttribute('aria-selected')).toBe('false');
+    expect(row.tabIndex).toBe(-1);
+    row.click();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
+
+    el.state = { objectives: [{ id: 'obj-1', text: 'Hold the line', unassigned: false }] };
+    expect(row.getAttribute('aria-disabled')).toBe('false');
+    row.click();
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+  });
+
   it('does not throw when semantic activation is unavailable and row is clicked', () => {
     const { el } = setup();
     el.state = {

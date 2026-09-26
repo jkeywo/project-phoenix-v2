@@ -10,7 +10,8 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use vellum_perf::{Recorder, Unit};
 
-const PHASES: [SimSet; 7] = [
+const PHASES: [SimSet; 8] = [
+    SimSet::Membership,
     SimSet::Input,
     SimSet::Physics,
     SimSet::Damage,
@@ -92,6 +93,7 @@ impl std::error::Error for ReductionError {}
 
 pub fn observed_metric(phase: SimSet) -> &'static str {
     match phase {
+        SimSet::Membership => "sim.phase.membership.observed",
         SimSet::Input => "sim.phase.input.observed",
         SimSet::Physics => "sim.phase.physics.observed",
         SimSet::Damage => "sim.phase.damage.observed",

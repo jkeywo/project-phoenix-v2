@@ -361,6 +361,7 @@ fn handle_set_objective_priority(
         With<crate::server_app::LocalShip>,
     >,
     mut boost: ResMut<crate::server_app::CaptainPriorityBoost>,
+    instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
@@ -374,6 +375,12 @@ fn handle_set_objective_priority(
         crate::server_app::CaptainPriorityBoost::scope_key(uuid.map(|u| u.0.as_str())).to_string();
     for cmd in admitted.for_target(crate::ship::system_registry::CAPTAIN_SYSTEM_ID) {
         if let SystemControlPayload::SetObjectivePriority { id } = &cmd.payload {
+            if instances.as_ref().is_some_and(|manager| {
+                uuid.is_some_and(|uuid| manager.0.is_unassigned_display_key(&uuid.0, id))
+            }) {
+                finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Refused);
+                continue;
+            }
             boost.toggle(&scope, id);
             finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
         }

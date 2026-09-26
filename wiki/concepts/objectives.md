@@ -78,6 +78,10 @@ progress and lifecycle. Its recipient selectors match ship slots, live faction
 membership, or all player ships. Slot beats faction, faction beats all, and an
 equal-specificity match across instances is refused atomically rather than
 resolved by declaration order.
+Two instances naming the same explicit ship slot are rejected even before
+that slot launches. A live faction edit that would make the current fleet
+ambiguous restores the ship's previous faction before gameplay Input; the
+accepted fleet is captured with the instance state for restore.
 
 Crew history stores the last effective instance for each Objective definition.
 Leaving marks that view unassigned and freezes it; joining another instance

@@ -289,6 +289,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.configure_sets(
         FixedUpdate,
         (
+            crate::sim_sets::SimSet::Membership,
             crate::sim_sets::SimSet::Input,
             crate::sim_sets::SimSet::Physics,
             crate::sim_sets::SimSet::Damage,

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
-  parseCsv, buildTable, setTable, getTable, t, has, applyToDom, localiseTree, wireText,
+  parseCsv, buildTable, setTable, getTable, t, tPlural, has, applyToDom, localiseTree, wireText,
+  setBaseCatalogue, setOverlayCatalogues, setLocale,
 } from '../../gui/strings.js';
 
 describe('parseCsv', () => {
@@ -136,7 +137,12 @@ describe('t', () => {
   });
 
   it('leaves unsupplied placeholders intact rather than blanking them', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(t('one_param', {})).toBe('[{n} CONTACTS]');
+    expect(t('one_param')).toBe('[{n} CONTACTS]');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("strings: missing parameter 'n' for 'one_param'");
+    warn.mockRestore();
   });
 
   it('ignores params for a string with no placeholders', () => {
@@ -156,6 +162,60 @@ describe('t', () => {
     t('nope.missing');
     t('nope.missing');
     expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+});
+
+describe('typed locale presentation', () => {
+  const core = 'id,en\n'
+    + 'coordination.frequency_hint.body,Tune to {frequency}\n'
+    + 'console.comms.messages.one,{n} MESSAGE\n'
+    + 'console.comms.messages.other,{n} MESSAGES\n'
+    + 'clock,At {when}\n';
+  const german = 'id,de,de_source\n'
+    + 'coordination.frequency_hint.body,Auf {frequency} einstellen,Tune to {frequency}\n'
+    + 'console.comms.messages.one,{n} Nachricht,{n} MESSAGE\n'
+    + 'console.comms.messages.other,{n} Nachrichten,{n} MESSAGES\n'
+    + 'clock,Um {when},At {when}\n';
+
+  beforeEach(() => {
+    setBaseCatalogue(core);
+    setOverlayCatalogues([{ source: 'de-fixture', csv: german }]);
+    setLocale('de');
+  });
+  afterEach(() => {
+    setLocale('en');
+    setOverlayCatalogues([]);
+  });
+
+  it('formats the real numeric Coordination message from its typed wire value', () => {
+    const message = { presentation: {
+      body: 'coordination.frequency_hint.body', body_params: { frequency: 1234.5 },
+    } };
+    expect(localiseTree(message).presentation.body).toBe('Auf 1.234,5 einstellen');
+    expect(message.presentation.body_params.frequency).toBe(1234.5);
+  });
+
+  it('uses German plural selection and number formatting for the Comms footer', () => {
+    expect(tPlural('console.comms.messages', 1)).toBe('1 Nachricht');
+    expect(tPlural('console.comms.messages', 2)).toBe('2 Nachrichten');
+    expect(tPlural('console.comms.messages', 1200)).toBe('1.200 Nachrichten');
+  });
+
+  it('falls back to English when a locale needs an unauthored plural category', () => {
+    setBaseCatalogue('id,en\nitems.one,{n} item\nitems.other,{n} items\n');
+    setOverlayCatalogues([{ source: 'ru-fixture', csv: 'id,ru,ru_source\n'
+      + 'items.one,{n} предмет,{n} item\nitems.other,{n} предметов,{n} items\n' }]);
+    setLocale('ru');
+    expect(tPlural('items', 2)).toBe('2 items'); // Russian requires `.few`.
+  });
+
+  it('formats semantic UTC date/time values without parsing prose', () => {
+    expect(t('clock', { when: { kind: 'datetime', value: '2026-09-27T13:45:00Z' } }))
+      .toContain('27.09.2026');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(t('clock', { when: { kind: 'date', value: 'next Tuesday' } })).toBe('Um —');
+    expect(warn).toHaveBeenCalledWith('strings: invalid typed presentation parameter');
     warn.mockRestore();
   });
 });

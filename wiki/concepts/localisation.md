@@ -35,6 +35,11 @@ lands inside the sentence instead of only on a panel beside it. A script authors
 it as an optional `params` / `text_params` key; an empty table is not sent at
 all, so payloads that name a figure-free string are unchanged.
 `TEXT_PARAMS_SUFFIX` in `src/core/messages.rs` is the contract.
+Numeric presentation parameters format with `Intl.NumberFormat` in the private
+locale; typed ISO date/time values use `Intl.DateTimeFormat`. Counted interface
+text uses `.one`/`.other` String Id families through `tPlural()` and
+`Intl.PluralRules`. Catalogue composition reports missing or invalid plural
+forms while the renderer falls back to effective English.
 
 English text wrapped in `[square brackets]` is agent-drafted placeholder copy;
 a human removes the brackets (and edits freely) to approve a line. Re-running

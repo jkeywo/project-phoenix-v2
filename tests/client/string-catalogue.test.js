@@ -17,6 +17,20 @@ const GERMAN = 'id,context,de,de_source,de_provenance\n'
   + 'console.helm.multiline,status,"Zeile eins\nZeile zwei","Line one\nLine two",machine\n';
 
 describe('ordinary mod String Table composition', () => {
+  it('diagnoses missing and placeholder-invalid plural forms while retaining English fallback', () => {
+    const core = 'id,en\ncount.one,{n} item\ncount.other,{n} items\n';
+    const partial = 'id,de,de_source\ncount.one,Eins,{n} item\ncount.other,{n} Dinge,{n} items\n';
+    const report = composeStringCatalogues([
+      { source: 'core', text: core }, { source: 'de-pack', text: partial },
+    ], 'de');
+    expect(report.table.get('count.one')).toBe('{n} item');
+    expect(report.table.get('count.other')).toBe('{n} Dinge');
+    expect(report.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'invalid-translation', id: 'count.one' }),
+      expect.objectContaining({ category: 'invalid-plural-form', id: 'count.one' }),
+    ]));
+  });
+
   it('advertises only actual presentation locales, never the structural id column', () => {
     setBaseCatalogue(CORE);
     setOverlayCatalogues([]);

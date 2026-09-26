@@ -262,6 +262,28 @@ export function composeStringCatalogues(inputs, locale = 'en') {
     });
   }
 
+  // A plural family is declared by its English `.one` and `.other` rows.
+  // Every category required by the selected locale must have an authored
+  // variant. A missing or invalid translation is retained for the author and
+  // the effective English variant remains the player's safe fallback.
+  const pluralFamilies = new Set([...byId.keys()]
+    .filter((id) => id.endsWith('.one') || id.endsWith('.other'))
+    .map((id) => id.slice(0, id.lastIndexOf('.'))));
+  let requiredForms;
+  try { requiredForms = new Intl.PluralRules(locale).resolvedOptions().pluralCategories; }
+  catch { requiredForms = new Intl.PluralRules('en').resolvedOptions().pluralCategories; }
+  for (const family of pluralFamilies) {
+    if (!byId.has(`${family}.one`) || !byId.has(`${family}.other`)) continue;
+    for (const form of requiredForms) {
+      const variant = `${family}.${form}`;
+      const entry = entries.get(variant);
+      if (!entry || (locale !== 'en' && entry.status !== 'current')) {
+        diagnostics.push(finding('invalid-plural-form', entry?.translationSource || entry?.englishSource || '',
+          variant, locale, entry ? `using English fallback for ${form}` : `missing ${form} plural form`));
+      }
+    }
+  }
+
   return { table, entries, diagnostics, locales: [...localeSet].sort() };
 }
 

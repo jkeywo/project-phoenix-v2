@@ -79,6 +79,7 @@ let catalogueReport = { entries: new Map(), diagnostics: [], locales: ['en'] };
 
 /** Warn once per missing id — a re-rendering console would otherwise spam. */
 const warned = new Set();
+const warnedParams = new Set();
 
 /**
  * Install a table. Called by gui/strings-boot.js at startup, and directly by
@@ -88,6 +89,7 @@ const warned = new Set();
 export function setTable(next) {
   table = next;
   warned.clear();
+  warnedParams.clear();
 }
 
 function rebuildCatalogue() {
@@ -184,13 +186,68 @@ export function t(id, params) {
     return `⟨${id}⟩`;
   }
 
-  if (params) {
-    text = text.replace(/\{(\w+)\}/g, (match, key) =>
-      Object.prototype.hasOwnProperty.call(params, key) ? String(params[key]) : match,
-    );
-  }
+  return interpolate(text, id, params);
+}
 
-  return text;
+function interpolate(text, id, params) {
+  return text.replace(/\{(\w+)\}/g, (match, key) => {
+    if (params && Object.prototype.hasOwnProperty.call(params, key)) return formatParameter(params[key]);
+    const warning = `${id}:${key}`;
+    if (!warnedParams.has(warning)) {
+      warnedParams.add(warning);
+      console.warn(`strings: missing parameter '${key}' for '${id}'`);
+    }
+    return match;
+  });
+}
+
+/** Format semantic presentation values without guessing a type from prose. */
+function formatParameter(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Intl.NumberFormat(safeLocale(), { maximumFractionDigits: 9 }).format(value);
+  }
+  if (value && typeof value === 'object') {
+    if (value.kind === 'number' && typeof value.value === 'number' && Number.isFinite(value.value)) {
+      const digits = value.fractionDigits;
+      if (digits === undefined || (Number.isInteger(digits) && digits >= 0 && digits <= 9)) {
+        const options = digits === undefined ? { maximumFractionDigits: 9 }
+          : { minimumFractionDigits: digits, maximumFractionDigits: digits };
+        return new Intl.NumberFormat(safeLocale(), options).format(value.value);
+      }
+    }
+    if ((value.kind === 'date' || value.kind === 'time' || value.kind === 'datetime')
+      && typeof value.value === 'string'
+      && /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?Z)?$/.test(value.value)
+      && !Number.isNaN(Date.parse(value.value))) {
+      const options = value.kind === 'date' ? { dateStyle: 'medium', timeZone: 'UTC' }
+        : value.kind === 'time' ? { timeStyle: 'short', timeZone: 'UTC' }
+          : { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' };
+      return new Intl.DateTimeFormat(safeLocale(), options).format(new Date(value.value));
+    }
+    console.warn('strings: invalid typed presentation parameter');
+    return '—';
+  }
+  return String(value);
+}
+
+function safeLocale() {
+  try { return Intl.getCanonicalLocales(locale)[0] || 'en'; }
+  catch { return 'en'; }
+}
+
+/** Choose a locale-specific plural variant of an authored String Id family. */
+export function tPlural(id, count, params = {}) {
+  if (typeof count !== 'number' || !Number.isFinite(count)) {
+    console.warn(`strings: invalid plural count for '${id}'`);
+    return has(`${id}.other`) ? t(`${id}.other`, { ...params, n: '—' }) : `⟨${id}⟩`;
+  }
+  const category = new Intl.PluralRules(safeLocale()).select(count);
+  const selected = `${id}.${category}`;
+  const fallback = `${id}.other`;
+  if (has(selected)) return t(selected, { ...params, n: count });
+  const english = catalogueReport.entries.get(fallback)?.english;
+  return english ? interpolate(english, fallback, { ...params, n: count })
+    : t(fallback, { ...params, n: count });
 }
 
 /** @returns {boolean} whether an id exists — for callers that want a fallback */

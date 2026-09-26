@@ -119,9 +119,23 @@ re-running is safe and only picks up what is new.
 concatenation — `[HEADING {deg}]` rather than `'HEADING ' + deg` — because word
 order differs between languages.
 
-There is no plural rule. Use two ids (`.one` and `.other`) and pick between them
-at the call site. This is deliberate: a real plural system is only worth it once
-a language with non-binary plurals is actually on the roadmap.
+For counted interface text, author a family of ids such as `messages.one` and
+`messages.other`, then call `tPlural('messages', count)`. It selects the form with
+`Intl.PluralRules` for the private presentation locale and inserts the semantic
+count as `{n}` through `Intl.NumberFormat`. Add any other categories required by
+that locale (`zero`, `two`, `few`, `many`); catalogue diagnostics report missing
+or invalid forms. Each variant has its own freshness and provenance metadata.
+
+Numeric wire parameters remain numbers, as in Coordination presentations. They
+format in the viewer's locale without changing the underlying gameplay value or
+unit. A typed parameter may instead be `{ kind: 'number', value: 1200.5,
+fractionDigits: 1 }`, or `{ kind: 'date' | 'time' | 'datetime', value:
+'2026-09-27T13:45:00Z' }`. Dates and times require an ISO date or UTC timestamp;
+the resolver never guesses a type from a preformatted string. Plain string
+parameters remain literal or String Ids. Missing parameters stay visible as
+`{name}` with a console diagnostic; invalid typed values render an em dash and
+also warn. Use semantic values only in presentation fields: identifiers and
+authoritative simulation values must keep their original wire shape.
 
 ### Placeholders in text the SERVER sends
 

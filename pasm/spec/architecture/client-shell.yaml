@@ -12,6 +12,7 @@ entities:
         - "[ai] The locale preference is private device presentation: browser-derived until explicitly selected, stored locally, and copied with the ordered catalogue stack into every Console iframe realm before component registration and again on reload/reconnect."
         - "[ai] Workshop consumes the retained composition report. Its Localisation panel shows missing/invalid/stale/conflict counts and per-id winner/source/provenance, while Refresh source metadata is an explicit undoable edit carried by ordinary Save/Export."
         - "[ai] Invalid and stale values remain in the author report while the player lookup uses English. Diagnostics therefore do not leak into Console copy and translators do not lose the work they must refresh."
+        - "[ai] Numeric presentation parameters are formatted in the viewer's private locale from JSON numbers, while explicit typed ISO date/time envelopes format in UTC. Counted String Id families select a locale plural category before interpolation, and incomplete or invalid translated forms keep author diagnostics plus effective-English fallback. This changes presentation only: protocol identities, gameplay quantities and simulation state retain their original values."
     architecture:
       kind: client-presentation-service
       authority: non-authoritative

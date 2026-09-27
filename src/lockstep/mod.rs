@@ -74,6 +74,7 @@ pub mod continuation_systems;
 pub mod crew;
 pub mod frame;
 pub mod host_loss;
+pub mod diagnostics;
 pub mod recovery;
 pub mod recovery_plan;
 pub mod session;

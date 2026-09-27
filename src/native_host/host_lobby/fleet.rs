@@ -252,6 +252,7 @@ impl NativeFleetEvents {
 
 #[derive(Serialize)]
 struct NativeFleetUpdate {
+    recovery: serde_json::Value,
     continuation_result: Option<NativeContinuationResult>,
     health: Option<crate::gm_health::GmHealthProjection>,
     ship: serde_json::Value,
@@ -958,6 +959,18 @@ fn publish_state(world: &mut World) {
         .unwrap_or_default();
     let validation = world.contains_resource::<crate::world::config::WorldConfig>();
     let update = NativeFleetUpdate {
+        recovery: crate::lockstep::diagnostics::recovery_status(
+            world
+                .get_resource::<crate::lockstep::PendingHostLoss>()
+                .map_or(&[], |losses| losses.records()),
+            world
+                .get_resource::<crate::lockstep::recovery::RecoveryLog>()
+                .and_then(|log| log.last()),
+            world
+                .get_resource::<crate::lockstep::SlotRecoveryLog>()
+                .and_then(|log| log.last()),
+            world.get_resource::<crate::lockstep::FleetRoster>(),
+        ),
         continuation_result: continuation_result(world),
         health: world
             .get_resource::<crate::gm_health::GmHealthWatch>()

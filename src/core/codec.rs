@@ -1990,6 +1990,7 @@ pub fn encode_mesh_status(
     diagnostics: &crate::lockstep::MeshDiagnostics,
     agreement: &crate::lockstep::MeshAgreement,
     peers: &[u32],
+    recovery: &serde_json::Value,
 ) -> String {
     let disagreement = agreement.first_disagreement().map(|found| {
         serde_json::json!({
@@ -2000,6 +2001,7 @@ pub fn encode_mesh_status(
         })
     });
     serde_json::json!({
+        "recovery": recovery,
         "in_fleet": in_fleet,
         "slot": slot,
         "tick": tick,

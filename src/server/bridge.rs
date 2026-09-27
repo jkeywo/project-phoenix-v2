@@ -1890,6 +1890,7 @@ fn flush_mesh_outbound(mut outbox: ResMut<crate::lockstep::MeshOutbox>) {
 
 /// Keep the fleet-status mirror honest, each frame.
 #[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
 fn publish_mesh_status(
     session: Option<Res<crate::lockstep::FleetLockstep>>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
@@ -1897,8 +1898,17 @@ fn publish_mesh_status(
     agreement: Res<crate::lockstep::MeshAgreement>,
     delay: Res<crate::command_admission::CommandDelay>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    losses: Option<Res<crate::lockstep::PendingHostLoss>>,
+    recovery_log: Option<Res<crate::lockstep::recovery::RecoveryLog>>,
+    slot_log: Option<Res<crate::lockstep::SlotRecoveryLog>>,
 ) {
     let tick = sim_tick.map_or(0, |t| t.0);
+    let recovery = crate::lockstep::diagnostics::recovery_status(
+        losses.as_deref().map_or(&[], |losses| losses.records()),
+        recovery_log.as_deref().and_then(|log| log.last()),
+        slot_log.as_deref().and_then(|log| log.last()),
+        roster.as_deref(),
+    );
     let status = match session {
         Some(session) => crate::core::codec::encode_mesh_status(
             true,
@@ -1908,6 +1918,7 @@ fn publish_mesh_status(
             &diagnostics,
             &agreement,
             &session.peers().map(|slot| slot.0).collect::<Vec<_>>(),
+            &recovery,
         ),
         None => crate::core::codec::encode_mesh_status(
             false,
@@ -1917,6 +1928,7 @@ fn publish_mesh_status(
             &diagnostics,
             &agreement,
             &[],
+            &recovery,
         ),
     };
     edge::publish_mesh_status(status);

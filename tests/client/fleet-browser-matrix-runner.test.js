@@ -4,7 +4,7 @@ import { optionsFrom, verifyEvidence, verifyImpairment } from '../../scripts/fle
 function evidence(route = 'direct') {
   const state = (i = 0) => ({ fleet: { role: i < 4 ? 'ship' : 'gm' }, phase: 'InProgress', mesh: { slot: i + 1, in_fleet: true, peers: [1, 2, 3, 4, 5], peers_heard: [1, 2, 3, 4, 5], samples: 1, agreed: true },
     fleetHealth: { visible: route !== 'direct', text: route === 'direct' ? '' : 'Peer: carried by the join service', role: 'status', ariaLive: 'polite', tabIndex: 0 },
-    fleetHealthHistory: route === 'automatic-fallback' ? ['Peer: connecting or retrying (attempt 4).'] : [],
+    fleetHealthHistory: [], fleetHealthMilestones: { attempts: route === 'automatic-fallback' ? [1, 2, 3, 4] : [], relaySeen: route !== 'direct' },
     outcomes: [{ correlation: 'matrix-1-captain-0', outcome: 'Applied' }],
     relayFrames: 20, signalOffersSent: route === 'ws-relay' ? 0 : 1, relayReady: route === 'direct' ? 0 : 1,
     rtc: route === 'direct' ? [{ connectionState: 'connected', selected: [{ state: 'succeeded', localType: 'host', remoteType: 'host', bytesReceived: 10 }] }] : [] });
@@ -41,7 +41,7 @@ describe('real browser matrix evidence gates', () => {
   it('requires the actual operator DOM to show relay and retry states', () => {
     const relay = evidence('ws-relay'); relay.peers[2].state.fleetHealth.text = '';
     expect(() => verifyEvidence(relay)).toThrow('does not explain the relay route');
-    const fallback = evidence('automatic-fallback'); fallback.peers[1].state.fleetHealthHistory = [];
+    const fallback = evidence('automatic-fallback'); fallback.peers[1].state.fleetHealthMilestones.attempts = [];
     expect(() => verifyEvidence(fallback)).toThrow('never displayed exhausted direct retries');
     const inaccessible = evidence(); inaccessible.peers[0].state.fleetHealth.ariaLive = null;
     expect(() => verifyEvidence(inaccessible)).toThrow('absent from the operator DOM');

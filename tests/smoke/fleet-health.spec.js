@@ -17,9 +17,9 @@ async function host(context, { gm = false, relay = false } = {}) {
 }
 
 async function join(page, code, { gm = false } = {}) {
-  // Smoke pages share localStorage; separate real GM hosts do not. Reusing the
-  // previous reconnect proof would reclaim its slot instead of admitting one.
-  if (gm) await page.evaluate(() => localStorage.removeItem('phoenix.fleet.gm-identity.v1'));
+  // Smoke pages share localStorage; separate real hosts do not. The stored GM
+  // proof can turn even a new ship page into a GM reconnect unless cleared.
+  await page.evaluate(() => localStorage.removeItem('phoenix.fleet.gm-identity.v1'));
   await page.evaluate(value => window.__hostFleetJoin(value), code);
   await page.waitForFunction(() => window.__hostFleetState?.().open, undefined, { timeout: 30_000 });
   if (gm) await page.waitForFunction(() => {
@@ -55,6 +55,7 @@ test('operator sees forced fallback and a non-blocking warning beyond the suppor
 
   const fifthShip = await host(context);
   await join(fifthShip, code);
+  await expect.poll(() => lead.locator('#fleet-slots li').count()).toBe(5);
   await expect(status).toContainText(ts('server.fleet.health.capacity', { ships: 5, gms: 2 }));
   const thirdGm = await host(context, { gm: true });
   await join(thirdGm, code, { gm: true });

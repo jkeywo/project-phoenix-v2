@@ -56,7 +56,7 @@ export function verifyEvidence(result) {
       throw new Error(`${peer.label}: actual operator DOM does not explain the relay route`);
     }
     if (result.route === 'automatic-fallback' && peer.label !== 'ship-1'
-        && !peer.state.fleetHealthHistory.some(text => text.includes('attempt 4'))) {
+        && !peer.state.fleetHealthMilestones?.attempts?.includes(4)) {
       throw new Error(`${peer.label}: operator DOM never displayed exhausted direct retries`);
     }
   }
@@ -134,7 +134,8 @@ async function stopProcess(child) {
 export function observeBrowser({ render, directProfile }, impairChannel) {
   if (render) Object.defineProperty(navigator, 'webdriver', { get: () => false });
   window.addEventListener('PhoenixReady', () => { window.__matrixPhoenixReady = true; });
-  const evidence = window.__matrixEvidence = { counts: {}, outcomes: [], relayReady: 0, relayFrames: 0, rtcCreated: 0, rtcOffers: 0, signalOffersSent: 0, directImpairment: {}, fleetHealthHistory: [] };
+  const evidence = window.__matrixEvidence = { counts: {}, outcomes: [], relayReady: 0, relayFrames: 0, rtcCreated: 0, rtcOffers: 0, signalOffersSent: 0, directImpairment: {},
+    fleetHealthHistory: [], fleetHealthHistoryOmitted: 0, fleetHealthMilestones: { attempts: [], relaySeen: false } };
   const fleetHealth = () => {
     const region = document.querySelector('[data-fleet-health]');
     return region && { visible: !region.hidden, text: region.textContent || '',
@@ -142,9 +143,23 @@ export function observeBrowser({ render, directProfile }, impairChannel) {
   };
   const rememberFleetHealth = () => {
     const state = fleetHealth();
-    if (!state?.visible || evidence.fleetHealthHistory.at(-1) === state.text) return;
+    if (!state?.visible) return;
+    // Health can change on every delayed tick. Preserve the transition facts
+    // independently of the bounded recent-text window, so a long six-peer
+    // admission cannot erase the retry ladder before the final readback.
+    for (const match of state.text.matchAll(/\battempt (\d+)\b/g)) {
+      const attempt = Number(match[1]);
+      if (attempt >= 1 && attempt <= 5 && !evidence.fleetHealthMilestones.attempts.includes(attempt)) {
+        evidence.fleetHealthMilestones.attempts.push(attempt);
+      }
+    }
+    if (state.text.includes('carried by the join service')) evidence.fleetHealthMilestones.relaySeen = true;
+    if (evidence.fleetHealthHistory.at(-1) === state.text) return;
     evidence.fleetHealthHistory.push(state.text);
-    if (evidence.fleetHealthHistory.length > 64) evidence.fleetHealthHistory.shift();
+    if (evidence.fleetHealthHistory.length > 64) {
+      evidence.fleetHealthHistory.shift();
+      evidence.fleetHealthHistoryOmitted++;
+    }
   };
   document.addEventListener('DOMContentLoaded', () => {
     new MutationObserver(rememberFleetHealth).observe(document.documentElement,

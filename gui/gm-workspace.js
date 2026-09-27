@@ -57,7 +57,8 @@ import {
   emitActionFeedbackTransition,
 } from './action-feedback.js';
 import { createHostActionRegistry } from './host-actions.js';
-import { t, has } from './strings.js';
+import { t, has, applyToDom } from './strings.js';
+import { preserveLocaleEditContext } from './locale-edit-context.js';
 import { mountGmWorkspaceShell } from './gm-workspace-shell.js';
 import { mountWorkshopSourceLink } from './workshop-source-link.js';
 import { createPrivateAudio, attachPrivateAudioLifecycle, privateFeedbackReceiver } from './private-audio.js';
@@ -782,6 +783,21 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
+    refreshLanguage() {
+      const active = doc.activeElement;
+      const activeId = active?.id;
+      preserveLocaleEditContext(doc, () => {
+        applyToDom(doc.getElementById('gm-console'));
+        gmActivity.refreshLanguage();
+        gmMissionPanel.refreshLanguage();
+        gmObjectivePanel.refreshLanguage();
+        gmCommsPanel.refreshLanguage();
+        gmSessionControls.refreshAdmission();
+        sessionWidget.render();
+        shell.refresh();
+      });
+      if (activeId && active !== doc.activeElement) doc.getElementById(activeId)?.focus?.({ preventScroll: true });
+    },
     // The live host and disposable Workshop Test both feed the same ordinary
     // presentation controller. Keeping this on the workspace avoids a second
     // parser or widget renderer in the Test adapter.

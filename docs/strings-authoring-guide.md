@@ -78,6 +78,16 @@ realms in place and re-renders retained Objective/Comms copy from its semantic
 String Ids and parameters. Literal player-authored Comms text is left intact;
 the switch does not send a message to the host or reload a Console.
 
+The browser Game Master and standalone Workshop each have their own private
+language choice, initially from that browser's language. Their selectors use
+the same composed catalogue as the Console but separate local storage keys, so
+choosing German in Workshop cannot change a crew member's or GM's choice.
+The GM repaints retained action results and activity from semantic ids. Workshop
+repaints its mounted editor, preserving the draft and selected source. Its
+`window.phWorkshopLanguage.preview(locale)` and `.restore()` are a temporary
+presentation seam for translation previews; only `.select(locale)` saves a
+choice. Preview never changes the pack, host, or saved locale.
+
 ## Square brackets mean "not reviewed yet"
 
 Text an agent wrote is wrapped in `[square brackets]`. It renders bracketed in

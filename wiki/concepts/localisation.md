@@ -2,8 +2,8 @@
 title: Localisation
 type: concept
 tags: [localisation, strings, client, display-text]
-sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
-updated: 2026-09-21
+sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
+updated: 2026-09-27
 ---
 
 # Localisation
@@ -27,7 +27,11 @@ iframe realm before component construction, then repeated on iframe reload and
 reconnect. A live choice updates mounted realms in place; raw semantic
 Objective/Comms snapshots retained beside resolved delivery are rendered again
 in the new locale without replaying game messages. Console edits, focus and
-scroll are restored around that presentation repaint. Workshop consumes the retained report in its Localisation panel and
+scroll are restored around that presentation repaint. The browser GM and
+Workshop each keep a separate private locale. The GM repaints retained semantic
+activity and action state; Workshop repaints its mounted editor without
+replacing the draft and exposes a temporary preview choice for translation
+tooling. Workshop consumes the retained report in its Localisation panel and
 offers the only freshness mutation: an explicit source-metadata refresh that
 enters the ordinary undo/save/export document flow.
 

@@ -10,7 +10,7 @@ import {
   parseGmActivityFeed,
   reduceGmActivityFeed,
 } from '../../gui/gm-activity-feed.js';
-import { buildTable, setTable, wireText } from '../../gui/strings.js';
+import { buildTable, setTable, wireText, setBaseCatalogue, setOverlayCatalogues, setLocale, t } from '../../gui/strings.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -294,7 +294,7 @@ function payload(entries, capacity = 128) {
 
 function mount({
   available = new Set([SHIP, SOURCE, OTHER_SHIP]),
-  selectEntity = vi.fn(() => true),
+  selectEntity = vi.fn(() => true), translate = (id, params = {}) => `${id}:${Object.values(params).join('/')}`,
 } = {}) {
   document.body.innerHTML = `
     <section id="gm-activity"><h2 id="gm-activity-heading"></h2>
@@ -311,7 +311,7 @@ function mount({
     </section>`;
   const feed = createGmActivityFeed({
     doc: document,
-    t: (id, params = {}) => `${id}:${Object.values(params).join('/')}`,
+    t: translate,
     displayText: wireText,
     containsEntity: (id) => available.has(id),
     selectEntity,
@@ -562,6 +562,34 @@ describe('GM activity feed presentation and selection links', () => {
   beforeEach(() => {
     setTable(realStrings);
     harness = mount();
+  });
+
+  it('repaints a retained refusal in German while keeping its filter and payload', () => {
+    setBaseCatalogue(read('assets/strings/strings.csv'));
+    setLocale('en');
+    const source = '[Showing {shown} of {total} retained events. Capacity {capacity}.]';
+    setOverlayCatalogues([{ source: 'de-fixture', csv: `id,de,de_source\nserver.gm.activity.status,{shown} von {total} Ereignissen. Kapazität {capacity}.,${source}\n`
+      + 'server.gm.activity.action_outcome.refused,Abgelehnt,[Refused]\n'
+      + 'server.gm.activity.action_reason.wrong-phase,In dieser Phase nicht verfügbar,[Action is unavailable in this phase]\n' }]);
+    harness = mount({ translate: t });
+    const row = gmAction('refused', { ships: [ship], links: [{ role: 'ship', entity: ship }] });
+    expect(harness.feed.update(payload([row], 16))).toBe(true);
+    const filter = document.getElementById('gm-activity-category-filter');
+    filter.value = 'gm_action';
+    filter.dispatchEvent(new Event('change'));
+    document.querySelector('.gm-activity-link').focus();
+    const before = harness.feed.state();
+    setLocale('de');
+    harness.feed.refreshLanguage();
+    expect(document.getElementById('gm-activity-status').textContent).toContain('1 von 1 Ereignissen');
+    expect(document.querySelector('.gm-activity-entry').textContent).toContain('Abgelehnt');
+    expect(document.querySelector('.gm-activity-entry').textContent).toContain('In dieser Phase nicht verfügbar');
+    expect(filter.value).toBe('gm_action');
+    expect(document.querySelectorAll('.gm-activity-entry')).toHaveLength(1);
+    expect(document.activeElement.dataset.entityId).toBe(SHIP);
+    expect(harness.feed.state()).toEqual(before);
+    setLocale('en');
+    setOverlayCatalogues([]);
   });
 
   it('renders every category and exact operator outcome', () => {

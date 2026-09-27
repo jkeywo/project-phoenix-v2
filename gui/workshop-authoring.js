@@ -27,7 +27,7 @@ import { applyAccessibilityProfile, EXPLICIT_OFF, EXPLICIT_ON, FOLLOW_OS,
   profileWithPresentation, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP } from './accessibility-profile.js';
 import { loadOperatorProfile, applyOperatorProfile, saveOperatorProfile } from './operator-profile.js';
 import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
-import { t } from './strings.js';
+import { applyToDom, t } from './strings.js';
 import { renderInspectorMetadata, validInspectorDescriptor } from './inspector-field.js';
 import { mountWorkshopLayout } from './workshop-layout-renderer.js';
 import { workshopTestLayoutModel } from './workshop-test-layout-model.js';
@@ -54,14 +54,18 @@ const NATIVE_COPY = {
 };
 
 export function mountWorkshopAuthoring({ root, win = window, download = downloadZip, provider = null, launch = null,
-  runtime = provider?.runtime || createWorkshopRuntime(), recovery = provider?.recovery || createWorkshopRecovery({ indexedDB: win.indexedDB }) } = {}) {
+  languageControl = null, runtime = provider?.runtime || createWorkshopRuntime(), recovery = provider?.recovery || createWorkshopRecovery({ indexedDB: win.indexedDB }) } = {}) {
   const doc = root.ownerDocument;
   const translate = (id, params) => t(provider?.save ? (NATIVE_COPY[id] || id) : id, params);
   const errorText = error => ERROR_STRING_IDS[error?.code]
     ? translate(ERROR_STRING_IDS[error.code]) : String(error?.message ?? error);
   function el(tag, textId, attrs = {}) {
     const node = doc.createElement(tag);
-    if (textId) node.textContent = translate(textId);
+    if (textId) {
+      node.dataset.workshopStaticId = provider?.save ? (NATIVE_COPY[textId] || textId) : textId;
+      node.textContent = translate(textId);
+      node.dataset.workshopStaticText = node.textContent;
+    }
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
     return node;
   }
@@ -196,11 +200,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let testLayoutMount = null;
   let localisationPanel = null;
   const feedbackRows = new Map();
-  const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
-    emitActionFeedbackTransition(win, value);
-    if (!value.isCurrent) return;
-    if (value.cancelled || !value.state) feedbackRows.delete(value.actionId);
-    else feedbackRows.set(value.actionId, value);
+  let lastFinding = null;
+  function renderFeedbackRows() {
     feedback.replaceChildren(...[...feedbackRows.values()].map(entry => {
       const row = el('span', null, { 'data-action-id': entry.actionId, 'data-correlation': entry.correlation,
         'data-state': entry.state });
@@ -209,6 +210,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       });
       return row;
     }));
+  }
+  const lifecycle = new ActionFeedbackLifecycle({ onTransition(value) {
+    emitActionFeedbackTransition(win, value);
+    if (!value.isCurrent) return;
+    if (value.cancelled || !value.state) feedbackRows.delete(value.actionId);
+    else feedbackRows.set(value.actionId, value);
+    renderFeedbackRows();
     if (value.state === ACTION_FEEDBACK_STATE.PRESSED) layoutMount?.reveal('feedback');
   } });
   const actions = createModActionRegistry({
@@ -373,6 +381,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   });
   function renderSettings() {
     settingsBody.replaceChildren();
+    if (languageControl) { languageControl.refresh(); settingsBody.append(languageControl.root); }
     const accessibility = el('section');
     accessibility.append(el('h2', 'settings.tab.accessibility'), el('p', 'settings.accessibility.local_hint'));
     const presentation = profile.accessibility.presentation;
@@ -418,6 +427,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   win.addEventListener('phoenix-operator-storage-status', nativeStorageStatus);
 
   function show(id, details = [], refused = false, actionId = null, correlation = null, { reveal = refused } = {}) {
+    lastFinding = { id, details: [...details] };
     findings.textContent = [translate(id), ...details].join('\n');
     findings.setAttribute('role', refused ? 'alert' : 'status');
     findings.dataset.outcome = refused ? 'refused' : 'applied';
@@ -1049,7 +1059,29 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       recoveryStatus.textContent = translate('workshop.recovery_available');
     } catch { recoveryStatus.textContent = translate('workshop.recovery_invalid'); }
   })();
-  return { ready, dispose() {
+  return { ready,
+    /** Repaint from semantic ids without remounting or altering the draft. */
+    refreshLanguage() {
+      const activeId = doc.activeElement?.id;
+      const scrollTop = root.scrollTop;
+      renderSettings();
+      refresh();
+      applyToDom(root);
+      for (const node of root.querySelectorAll('[data-workshop-static-id]')) {
+        if (node.textContent !== node.dataset.workshopStaticText) continue;
+        node.textContent = t(node.dataset.workshopStaticId);
+        node.dataset.workshopStaticText = node.textContent;
+      }
+      if (selected) sourceLabel.textContent = translate('workshop.source_path', { path: selected });
+      if (lastFinding && findings.firstChild?.nodeType === 3) {
+        findings.firstChild.textContent = [translate(lastFinding.id), ...lastFinding.details].join('\n');
+      }
+      renderFeedbackRows();
+      root.scrollTop = scrollTop;
+      const previousFocus = activeId && doc.getElementById(activeId);
+      if (previousFocus && root.contains(previousFocus)) previousFocus.focus({ preventScroll: true });
+    },
+    dispose() {
     disposed = true;
     testLayoutMount?.dispose();
     testPanel.dispose();

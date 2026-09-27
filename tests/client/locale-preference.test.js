@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createLocalePreference, installPresentationInIframe, LOCALE_STORAGE_KEY,
+  GM_LOCALE_STORAGE_KEY, WORKSHOP_LOCALE_STORAGE_KEY,
 } from '../../gui/locale-preference.js';
+import { mountSurfaceLanguage } from '../../gui/surface-language.js';
 import {
   installCataloguePresentation, setBaseCatalogue, setLocale, setOverlayCatalogues,
 } from '../../gui/strings.js';
@@ -24,6 +26,31 @@ afterEach(() => {
 });
 
 describe('private locale delivery to console realms', () => {
+  it('keeps GM and Workshop choices separate and previews without persisting', () => {
+    setBaseCatalogue('id,en\nsettings.language,Language\nsettings.language.private_hint,Private\n');
+    setOverlayCatalogues([{ source: 'fixture', csv: 'id,de,de_source\nsettings.language,Sprache,Language\n' }]);
+    const gm = createLocalePreference({ doc: document, nav: { language: 'en' },
+      storage: localStorage, storageKey: GM_LOCALE_STORAGE_KEY, findConsoles: () => [] });
+    const control = mountSurfaceLanguage({ doc: document, id: 'gm-language', preference: gm });
+    document.body.append(control.root);
+    control.select.value = 'de';
+    control.select.dispatchEvent(new Event('change'));
+    expect(control.root.querySelector('label').textContent).toBe('Sprache');
+    expect(document.activeElement).toBe(control.select);
+    expect(localStorage.getItem(GM_LOCALE_STORAGE_KEY)).toBe('de');
+    expect(localStorage.getItem(WORKSHOP_LOCALE_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBeNull();
+    const workshop = createLocalePreference({ doc: document, nav: { language: 'en' },
+      storage: localStorage, storageKey: WORKSHOP_LOCALE_STORAGE_KEY, findConsoles: () => [] });
+    workshop.apply();
+    expect(workshop.locale()).toBe('en');
+    workshop.preview('de');
+    expect(workshop.locale()).toBe('de');
+    expect(localStorage.getItem(WORKSHOP_LOCALE_STORAGE_KEY)).toBeNull();
+    workshop.apply();
+    expect(workshop.locale()).toBe('en');
+    expect(localStorage.getItem(GM_LOCALE_STORAGE_KEY)).toBe('de');
+  });
   it('uses the browser language, persists an explicit choice, and installs the ordered stack', () => {
     setBaseCatalogue(CORE);
     setOverlayCatalogues([{ source: 'de-pack', csv: DE }]);

@@ -805,6 +805,7 @@ export function createGmMissionPanel({
     update,
     reset,
     refreshAdmission,
+    refreshLanguage() { renderEvents(); renderLog(); refreshAdmission(); },
     state: () => ({
       events: events.length,
       fireable: events.filter(eventIsFireable).length,

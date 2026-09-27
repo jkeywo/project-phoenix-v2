@@ -269,5 +269,6 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
   });
   renderRows();
   return { update, confirm, reset, refreshAdmission, select, focusObjective,
+    refreshLanguage() { renderRows(); renderResults(); },
     state: () => ({ ...projection, preview, pending, scope: scopeShip ? scopeShip.id : null }) };
 }

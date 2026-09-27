@@ -73,6 +73,7 @@
       const on = wanted !== false;
       window.__phoenixGmPage = on;
       document.documentElement.classList.toggle('phoenix-gm-page', on);
+      window.dispatchEvent(new Event('phoenix-gm-page-changed'));
       if (on) document.documentElement.dataset.phoenixBootRequest = 'browser-game-master';
       else delete document.documentElement.dataset.phoenixBootRequest;
     };
@@ -2123,6 +2124,7 @@
         <header>
           <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
           <p data-i18n="server.gm.console.local_truth"></p>
+          <div id="gm-language-control"></div>
           <!-- Presentation-only role preset (issue #1319): filters which
                panels/quick actions THIS browser shows. Never authority --
                see gui/gm-role-presets.js. Defaults to the built-in All, which
@@ -3295,11 +3297,13 @@
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
     import { mountGmWorkspace } from './gui/gm-workspace.js';
+    import { mountGmLanguage } from './gui/gm-language.js';
     import { mountSensorReport } from './gui/sensor-report.js';
     window.__renderSensorReport = mountSensorReport(document);
     window.__renderSensorReport(window.__sensorReport);
     import { t, has, localiseTree } from './gui/strings.js';
     const gmWorkspace = mountGmWorkspace({ win: window, doc: document });
+    mountGmLanguage({ doc: document, win: window, workspace: gmWorkspace });
     const hostChannelDispatch = createHostChannel({
       handlers: {
         hud:          function(p) { window.__updateHud(p); },

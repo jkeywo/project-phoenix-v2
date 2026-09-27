@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { mountNativeGmWorkspace } from '../../gui/native-gm-workspace.js';
-import { t } from '../../gui/strings.js';
+import { t, setBaseCatalogue, setLocale, setOverlayCatalogues } from '../../gui/strings.js';
 
 function mount(overrides = {}) {
   let operator = { id: 'native-gm', name: 'GM', connected: true, ready: false };
@@ -35,6 +36,29 @@ describe('native GM workspace over the shared GM presenters', () => {
         <button id="gm-session-pause"></button><button id="gm-session-resume"></button>
         <p id="gm-session-state"></p><p id="gm-session-feedback"></p>
         <h3 id="gm-session-log-heading"></h3><ol id="gm-session-log"></ol></section>`;
+  });
+
+  it('repaints a mounted GM desk while retaining a pending Comms draft and caret', () => {
+    setBaseCatalogue(readFileSync('assets/strings/strings.csv', 'utf8'));
+    setOverlayCatalogues([{ source: 'de-fixture', csv:
+      'id,de,de_source\nserver.gm.console.title,Spielleitung,[Game Master]\n' }]);
+    setLocale('en');
+    document.body.insertAdjacentHTML('beforeend',
+      '<h1 data-i18n="server.gm.console.title">[Game Master]</h1>'
+      + '<section id="gm-comms-panel"><textarea id="gm-comms-text"></textarea></section>');
+    const app = mount();
+    const input = document.getElementById('gm-comms-text');
+    input.value = 'Änderung pending';
+    input.focus(); input.setSelectionRange(3, 8);
+    setLocale('de');
+    app.view.workspace.refreshLanguage();
+    expect(document.querySelector('[data-i18n="server.gm.console.title"]').textContent).toBe('Spielleitung');
+    expect(document.getElementById('gm-comms-text').value).toBe('Änderung pending');
+    expect(document.activeElement).toBe(document.getElementById('gm-comms-text'));
+    expect(document.activeElement.selectionStart).toBe(3);
+    expect(document.activeElement.selectionEnd).toBe(8);
+    app.view.dispose();
+    setLocale('en'); setOverlayCatalogues([]);
   });
 
   it('sends classification through the real native GM adapter without changing operator scope', () => {

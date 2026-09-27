@@ -663,6 +663,19 @@ export function createGmActivityFeed({
 
   return {
     update,
+    refreshLanguage() {
+      const focused = list?.contains(doc.activeElement) && doc.activeElement?.classList.contains('gm-activity-link')
+        ? { row: [...list.children].indexOf(doc.activeElement.closest('.gm-activity-entry')),
+          link: [...doc.activeElement.closest('.gm-activity-entry').querySelectorAll('.gm-activity-link')]
+            .indexOf(doc.activeElement) } : null;
+      renderedSignature = '';
+      entryNodes = new Map();
+      list?.replaceChildren();
+      render({ rebuildShips: false });
+      if (focused && focused.row >= 0) {
+        list.children[focused.row]?.querySelectorAll('.gm-activity-link')[focused.link]?.focus({ preventScroll: true });
+      }
+    },
     clearFilters,
     reconcileAvailability,
     state: () => ({ capacity: state.capacity, entries: [...state.entries] }),

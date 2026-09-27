@@ -4,22 +4,24 @@ import {
 } from './strings.js';
 
 export const LOCALE_STORAGE_KEY = 'phoenix-private-locale';
+export const GM_LOCALE_STORAGE_KEY = 'phoenix-private-gm-locale';
+export const WORKSHOP_LOCALE_STORAGE_KEY = 'phoenix-private-workshop-locale';
 
 function browserLocale(nav) {
   const raw = nav?.languages?.[0] || nav?.language || 'en';
   return String(raw).trim() || 'en';
 }
 
-export function loadPrivateLocale(storage, nav) {
+export function loadPrivateLocale(storage, nav, key = LOCALE_STORAGE_KEY) {
   try {
-    const saved = storage?.getItem(LOCALE_STORAGE_KEY);
+    const saved = storage?.getItem(key);
     if (saved) return saved;
   } catch (_) { /* private storage may be unavailable */ }
   return browserLocale(nav);
 }
 
-export function persistPrivateLocale(storage, locale) {
-  try { storage?.setItem(LOCALE_STORAGE_KEY, locale); } catch (_) { /* session still works */ }
+export function persistPrivateLocale(storage, locale, key = LOCALE_STORAGE_KEY) {
+  try { storage?.setItem(key, locale); } catch (_) { /* session still works */ }
 }
 
 export function matchAvailableLocale(requested, locales) {
@@ -55,13 +57,13 @@ export function installPresentationInConsoles(doc, presentation = getCataloguePr
 
 /** Owns the private language choice and fans it into every same-origin realm. */
 export function createLocalePreference({ doc = document, nav = navigator, storage = localStorage,
-  onChange = () => {}, findConsoles = null } = {}) {
-  let requested = loadPrivateLocale(storage, nav);
+  onChange = () => {}, findConsoles = null, storageKey = LOCALE_STORAGE_KEY } = {}) {
+  let requested = loadPrivateLocale(storage, nav, storageKey);
   let rawComms = null;
   let rawObjectives = null;
   setLocale(requested);
-  const apply = ({ reload = false } = {}) => {
-    setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
+  const apply = ({ reload = false, preview = null } = {}) => {
+    setLocale(matchAvailableLocale(preview || requested, getCataloguePresentation().locales));
     const presentation = getCataloguePresentation();
     applyToDom(doc);
     const consoleRoot = typeof findConsoles === 'function'
@@ -106,9 +108,11 @@ export function createLocalePreference({ doc = document, nav = navigator, storag
     select(next) {
       requested = String(next || 'en');
       setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
-      persistPrivateLocale(storage, requested);
+      persistPrivateLocale(storage, requested, storageKey);
       return apply();
     },
+    /** Temporary presentation for an editor preview; leaves the saved choice alone. */
+    preview(next) { return apply({ preview: next }); },
     installIframe(iframe) { return installPresentationInIframe(iframe); },
   };
 }

@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { mountWorkshopAuthoring } from '../../gui/workshop-authoring.js';
 import { readStoreZip, createStoreZip } from '../../editor/mod-pack-export.js';
 import { workshopPack, WORKSHOP_MANIFEST, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { OPERATOR_PROFILE_KEY, createOperatorProfileSnapshot } from '../../gui/operator-profile.js';
-import { t } from '../../gui/strings.js';
+import { t, setBaseCatalogue, setLocale, setOverlayCatalogues } from '../../gui/strings.js';
+import { createLocalePreference, WORKSHOP_LOCALE_STORAGE_KEY } from '../../gui/locale-preference.js';
+import { mountSurfaceLanguage } from '../../gui/surface-language.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 import { createNativeWorkshopProvider } from '../../editor/workshop-provider.js';
 
@@ -39,11 +42,62 @@ beforeEach(() => {
 });
 afterEach(() => {
   mounted.dispose();
+  setLocale('en');
+  setOverlayCatalogues([]);
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
   vi.restoreAllMocks();
 });
 
 describe('Workshop Authoring browser surface', () => {
+  it('switches a live draft and validation refusal to German without losing editing context', async () => {
+    mounted.dispose();
+    document.body.innerHTML = '<main id="root"></main>';
+    setBaseCatalogue(readFileSync('assets/strings/strings.csv', 'utf8'));
+    setOverlayCatalogues([{ source: 'de-fixture', csv: 'id,de,de_source\n'
+      + 'workshop.title,Werkstatt,[Phoenix Workshop]\n'
+      + 'workshop.check_refused,Prüfung fehlgeschlagen. Entwurf erhalten.,[Validation failed. Your draft is retained.]\n'
+      + 'settings.language,Sprache,[Language]\n' }]);
+    let editor;
+    const preference = createLocalePreference({ doc: document, nav: { language: 'en' },
+      storage: localStorage, storageKey: WORKSHOP_LOCALE_STORAGE_KEY, findConsoles: () => [],
+      onChange: () => editor?.refreshLanguage() });
+    const languageControl = mountSurfaceLanguage({ doc: document, id: 'workshop-language', preference });
+    editor = mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download,
+      runtime, languageControl });
+    await importBytes();
+    select(WORKSHOP_WORLD);
+    const changed = `${WORKSHOP_WORLD_TEXT}# Entwurf\n`;
+    edit(changed);
+    runtime.validate.mockResolvedValueOnce({ accepted: false, findings: [
+      { severity: 'error', message: 'bad source', file: WORKSHOP_WORLD },
+    ] });
+    await evaluated('check');
+    const source = byId('source');
+    const editedValue = source.value;
+    source.focus();
+    source.setSelectionRange(4, 9);
+    const control = document.getElementById('workshop-language');
+    preference.select('de');
+    expect(preference.locale()).toBe('de');
+    expect(t('workshop.title')).toBe('Werkstatt');
+    expect(document.querySelector('#root h1').textContent).toBe('Werkstatt');
+    expect(document.querySelector('.workshop-findings').textContent).toContain('Prüfung fehlgeschlagen');
+    expect(document.querySelector('.workshop-findings').textContent).toContain('bad source');
+    expect(source.value).toBe(editedValue);
+    expect(document.activeElement).toBe(source);
+    expect(source.selectionStart).toBe(4);
+    expect(source.selectionEnd).toBe(9);
+    expect(byId('files').value).toBe(WORKSHOP_WORLD);
+    expect(control.value).toBe('de');
+    expect(localStorage.getItem(WORKSHOP_LOCALE_STORAGE_KEY)).toBe('de');
+    preference.preview('en');
+    expect(document.querySelector('#root h1').textContent).toBe('[Phoenix Workshop]');
+    expect(control.value).toBe('en');
+    expect(localStorage.getItem(WORKSHOP_LOCALE_STORAGE_KEY)).toBe('de');
+    preference.apply();
+    expect(document.querySelector('#root h1').textContent).toBe('Werkstatt');
+    expect(control.value).toBe('de');
+  });
   it('retains an empty legacy launch until import resolves exact file, model, star or planet selections', async () => {
     const model = 'assets/models/migrated.glb';
     const sidecar = 'assets/models/migrated.model.toml';
@@ -655,7 +709,7 @@ describe('Workshop Authoring browser surface', () => {
     await mounted.ready;
     select(path);
     expect(byId('source').disabled).toBe(true);
-    expect(byId('source').value).toContain('400000000');
+    expect(byId('source').value).toContain('400,000,000');
     select(WORKSHOP_WORLD); edit(`${WORKSHOP_WORLD_TEXT}# native draft\n`);
     await vi.waitFor(() => expect(request.mock.calls.some(([value]) => value.op === 'recovery-save')).toBe(true));
     const record = JSON.parse(request.mock.calls.filter(([value]) => value.op === 'recovery-save').at(-1)[0].record);

@@ -2,7 +2,7 @@
 title: Networking
 type: concept
 tags: [networking, webrtc, rendezvous, join-code, session-token, gm, star-topology, datachannel, snapshot, fleet, host-mesh, lockstep, ws-relay, diagnostics]
-sources: [gui/fleet-crew.js, src/lockstep/crew.rs, src/lobby/session.rs, src/session_connections.rs, src/session_connections/browser.rs, server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/gm_join.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/transfer.rs, src/lockstep/snapshot_relay.rs, src/lockstep/mod.rs, src/core/codec.rs, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/world_setup.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
+sources: [scripts/fleet-browser-matrix.mjs, scripts/fleet-channel-impairment.mjs, docs/acceptance/1530-six-peer-matrix.md, gui/fleet-crew.js, src/lockstep/crew.rs, src/lobby/session.rs, src/session_connections.rs, src/session_connections/browser.rs, server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/gm_join.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/transfer.rs, src/lockstep/snapshot_relay.rs, src/lockstep/mod.rs, src/core/codec.rs, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/world_setup.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
 updated: 2026-09-27
 ---
 
@@ -316,6 +316,14 @@ It also carries `window.__wasmReady` (set once the host page has both opened its
 `tests/smoke/transport-fixture.js` is the single seam every transport assumption lives behind — `fixtures.js` and the ~40 specs importing `readHostPeerId`/`createTestClient` know nothing about it. See `tests/smoke/transport-shim.spec.js` (the stand-in itself), `rendezvous-join.spec.js` (typed join, QR link, distinct refusals), `multi-client-crew.spec.js` (four phones on one code) and `snapshot-channel.spec.js` (the delivery-class split and its per-token fallback), plus [Testing Strategy](./testing-strategy.md).
 
 ## Related
+
+`scripts/fleet-browser-matrix.mjs` runs four real browser WASM ships, two GM peers
+and twelve active Station documents against loopback rendezvous, checking
+command receipts, GM pause/resume, digest exchange and observed direct/relay/
+fallback routes. Optional bounded application-frame delay and snapshot loss
+record actual write/drop counters. Default webdriver execution disables Bevy
+rendering; short browser evidence does not establish native, mixed, mobile or
+endurance acceptance. See [the runtime ledger](../../docs/acceptance/1530-six-peer-matrix.md).
 
 `tests/client/fleet-matrix-harness.js` supplies reusable six-peer protocol cases
 for direct, forced WebSocket relay and automatic RTC exhaustion. These use

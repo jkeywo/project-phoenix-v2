@@ -19,6 +19,43 @@ They are neither real-browser/native workload measurements nor observations of
 mobile networks. Their Station clients are published readiness/Rating inputs;
 they do not run twelve client documents or the simulations.
 
+## Real browser runner
+
+Build the host with Trunk and then run `node scripts/build-client.mjs` so
+`dist/client/index.html` exists. Install `tests/smoke` Playwright dependencies
+and Chromium. The runner loads Playwright directly, with no smoke transport
+fixture. Use a fresh output directory for each invocation:
+
+```powershell
+node scripts/fleet-browser-matrix.mjs --out target/browser-matrix-clean --dist dist --seconds 10 --timeout 120
+node scripts/fleet-browser-matrix.mjs --out target/browser-matrix-impaired --dist dist --seconds 10 --timeout 120 --delay-ms 20 --loss-percent 10 --seed 1530
+```
+
+Each invocation runs direct, forced WebSocket relay and automatic fallback.
+`--routes direct,ws-relay` selects a subset. Fallback suppresses real outgoing
+RTC offers at the local rendezvous, then observes the ordinary retry ladder.
+The runner launches four ship WASM documents, two GM WASM documents and twelve
+full Station documents, seats Captain/Helm/Engineering, readies everyone and
+waits for automatic launch. Every Station sends receipt-checked commands;
+Helm also sends continuous thrust. Both GMs operate pause/resume. Final gates
+require every command wave's receipt, all six live roles/slots, a complete
+observed digest exchange without disagreement, and actual route traffic on
+all seventeen links. Browser exceptions fail the run.
+
+The delay/loss profile applies to application frames, not IP packets: direct
+uses the actual RTCDataChannel.send boundary; relay uses the local service's
+outgoing frame boundary. Reliable frames retain ordering; only snapshot frames
+are sampled for loss. Seeded sampling is repeatable for a given frame sequence;
+scheduling and resulting frame counts can vary. Observed write delays and drops
+must support the requested profile. Counters measure local handoff, not remote
+acknowledgement. Queues are bounded and overflow fails acceptance.
+
+Artifacts include manifest/source and bundle hashes, machine/browser facts,
+per-page route/receipt/digest state, GM action observations, bounded logs and
+failure screenshots. Shutdown is bounded. Default webdriver execution runs the
+real simulation with Bevy rendering disabled. `--render` requests software
+rendering but remains unvalidated; it is not a passed rendered cell.
+
 ## Native ship membership
 
 A built native host can join a selected ship to an existing fleet:
@@ -48,7 +85,7 @@ a mixed session can contain direct browser links and native relay links.
 
 | Runtime | Direct-capable links | Forced relay | Automatic fallback | Status |
 | --- | --- | --- | --- | --- |
-| Six browser peers | All host links | All host links | Block RTC, retain WebSocket | Not run |
+| Six browser peers, renderer disabled | All 17 links observed | All 17 links observed | Offers suppressed; real retry ladder | Short local subset passed; see evidence below |
 | Six Windows native peers | Not available in native fleet transport | All host links | Native advertises relay immediately | Not run |
 | Mixed browser/native | Browser links where negotiated | All host links | Browser RTC failure plus native relay | Not run |
 
@@ -58,9 +95,34 @@ for ordinary internet, mobile hotspot and separate mobile networks. Do not call
 a controlled impairment a real mobile observation. The one-hour mixed run and
 shorter-run durations/limits remain governed by #1543 and #1090.
 
-At this checkpoint, no real-runtime matrix cell is passed. Native ship admission
-and bounded protocol coverage are prerequisites; the full runtime/workload
-matrix remains outstanding for #1530.
+### Browser evidence, 2026-09-27
+
+[Retained browser summary](1530-browser-runtime-2026-09-27.json) records the
+actual cases, artifact hashes, runtime bounds, command counts and impairment
+observations. The six route/profile combinations passed on Windows with
+Chromium 147.0.7727.15. Each command interval was ten wall-clock seconds, plus
+startup/fallback and waiting for the first complete digest exchange. These are
+short local checks, not performance or endurance results.
+
+The bundle reused the existing WASM artifact (SHA-256 recorded), with a fresh
+client build and an exact scratch-bundle mirror of the server module-readiness
+fix. No matching Rust build receipt was available, so this is artifact-level
+evidence, not proof of a newly rebuilt integrated revision. Host/client build
+stamp admission succeeded. Hashes of every retained bundle file, including
+authored data and presentation assets, are retained separately; GPU/SDK
+evidence is not applicable to this unrendered
+browser subset. Main dist was not edited.
+
+The first real-browser attempt exposed a production boot race: Trunk could
+start content loading before the independent content-fetch module evaluated.
+The fix explicitly imports and awaits that module. The regression fails with
+`registerContentFetch is not a function` against the original bundle and passes
+with the fix. Original failure artifacts remain under
+`target/1530-browser-real-4` and `target/1530-browser-real-5`; later harness
+errors and their artifacts are also retained, rather than overwritten.
+
+Native, mixed, rendered browser, mobile/internet, recovery and endurance
+acceptance remain outstanding. This evidence does not close #1530.
 
 ## Operator feedback controls
 

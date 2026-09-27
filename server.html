@@ -8291,8 +8291,11 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {
     // Step 1: Set up the config request callback
     window.set_config_request_callback = wasmBindings.set_config_request_callback;
     set_config_request_callback(handleConfigRequest);
-    window.registerContentFetch(wasmBindings, settleContentPreload);
-    await window.preloadSoundCatalog(wasmBindings);
+    // Trunk can finish before independently loaded module scripts evaluate.
+    // Await the actual content module before installing its preload callbacks.
+    const contentFetch = await import('./gui/host-content-fetch.js');
+    contentFetch.registerContentFetch(wasmBindings, settleContentPreload);
+    await contentFetch.preloadSoundCatalog(wasmBindings);
 
     // Step 2: Fetch and load the unified world TOML (map + scenario in one file)
     let worldToml = wasmBindings.wasm_preload_world_source(scenarioPath);

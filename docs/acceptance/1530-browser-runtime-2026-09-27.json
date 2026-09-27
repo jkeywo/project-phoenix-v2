@@ -1,0 +1,4335 @@
+{
+  "kind": "bounded real-browser workload; incomplete issue 1530 acceptance",
+  "sourceBase": "178d2274acddb9052746c713c872857f1c6e4fc4",
+  "sourcePatch": "diff --git a/server.html b/server.html\nindex b8a3280c..4612c776 100644\n--- a/server.html\n+++ b/server.html\n@@ -8291,8 +8291,11 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {\n     // Step 1: Set up the config request callback\n     window.set_config_request_callback = wasmBindings.set_config_request_callback;\n     set_config_request_callback(handleConfigRequest);\n-    window.registerContentFetch(wasmBindings, settleContentPreload);\n-    await window.preloadSoundCatalog(wasmBindings);\n+    // Trunk can finish before independently loaded module scripts evaluate.\n+    // Await the actual content module before installing its preload callbacks.\n+    const contentFetch = await import('./gui/host-content-fetch.js');\n+    contentFetch.registerContentFetch(wasmBindings, settleContentPreload);\n+    await contentFetch.preloadSoundCatalog(wasmBindings);\n \n     // Step 2: Fetch and load the unified world TOML (map + scenario in one file)\n     let worldToml = wasmBindings.wasm_preload_world_source(scenarioPath);",
+  "bundleHashFile": "1530-browser-bundle-2026-09-27.json",
+  "bundleHashFileSha256": "c193f5c25947279cfeef300619ab4e765422f51571d00927f1e8c56b1fe923fe",
+  "provenance": "Existing main dist WASM reused; no matching Rust build receipt. Server HTML exact mirror of awaited content-module fix; client generated in isolated worktree. Earlier manifests omitted junction-directory inputs; this complete manifest follows junctions and was captured after runs from the same retained bundle.",
+  "environment": {
+    "os": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "cpus": "Intel(R) Core(TM) Ultra 9 275HX",
+      "ramBytes": 68112736256
+    },
+    "node": "v24.13.0",
+    "browser": "147.0.7727.15",
+    "rendering": false,
+    "gpu": "not measured; rendering disabled",
+    "nativeSDK": "not applicable"
+  },
+  "composition": {
+    "shipSimulations": 4,
+    "gmSimulations": 2,
+    "stationDocuments": 12
+  },
+  "limits": [
+    "Single-machine loopback",
+    "Bevy renderer disabled by webdriver",
+    "Six route/profile cells used ten-second command intervals, followed by first complete digest exchange",
+    "Additional one-second direct impaired cell validates reviewed cleanup changes",
+    "No native/mixed, recovery, mobile/internet, performance or endurance acceptance",
+    "Application-frame delay and seeded snapshot drops are not IP packet impairment",
+    "Final stricter gates were rerun against retained artifacts without overwriting their original status"
+  ],
+  "cases": [
+    {
+      "artifactDirectory": "C:/Coding/project-phoenix-v2/target/1530-browser-real-9/direct",
+      "resultSha256": "d2a842b913b424c26ff90cfcf275aaf6710f6383ddaf77d7f0d3263ace9c93bd",
+      "manifestSha256": "3100dbb09c596ef190796e121014667dd8c3b3e54fd3234f5c75ea83aa115d70",
+      "route": "direct",
+      "profile": {
+        "delayMs": 0,
+        "lossPercent": 0,
+        "seed": null,
+        "note": "No deliberate impairment; legacy runner manifest predates impairment options."
+      },
+      "status": "passed",
+      "startedUtc": "2026-09-27T09:10:55.202Z",
+      "finishedUtc": "2026-09-27T09:11:43.776Z",
+      "commandSeconds": 10,
+      "commandWaves": 17,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "runnerSha256": "f2d5d10e4bdf73934b2d1f0fcf0a36ee0cb0e04704719631c734f645efaa66af",
+      "peers": [
+        {
+          "label": "ship-1",
+          "role": "ship",
+          "slot": 1,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 419723,
+                  "bytesReceived": 112207,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 417350,
+                  "bytesReceived": 112075,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 413828,
+                  "bytesReceived": 112658,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 421513,
+                  "bytesReceived": 95738,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 418507,
+                  "bytesReceived": 94580,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1323495,
+                  "bytesReceived": 38579,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1324082,
+                  "bytesReceived": 41245,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1338133,
+                  "bytesReceived": 41502,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-2",
+          "role": "ship",
+          "slot": 2,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 112207,
+                  "bytesReceived": 419723,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1112755,
+                  "bytesReceived": 33849,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1113260,
+                  "bytesReceived": 36496,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1127270,
+                  "bytesReceived": 36738,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-3",
+          "role": "ship",
+          "slot": 3,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 112075,
+                  "bytesReceived": 417350,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1151589,
+                  "bytesReceived": 34066,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1152195,
+                  "bytesReceived": 36766,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1166240,
+                  "bytesReceived": 36989,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-4",
+          "role": "ship",
+          "slot": 4,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "agreed": true,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 112658,
+                  "bytesReceived": 413828,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 989080,
+                  "bytesReceived": 31667,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 989635,
+                  "bytesReceived": 34313,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1003632,
+                  "bytesReceived": 34536,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "gm-1",
+          "role": "gm",
+          "slot": 5,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "agreed": true,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 95738,
+                  "bytesReceived": 421513,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "gm-2",
+          "role": "gm",
+          "slot": 6,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "agreed": true,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 94580,
+                  "bytesReceived": 418507,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "clients": [
+        {
+          "label": "ship-1-captain",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 38579,
+                  "bytesReceived": 1323495,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-1-helm",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 41245,
+                  "bytesReceived": 1324082,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-1-engineering",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 41502,
+                  "bytesReceived": 1338133,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-2-captain",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 33849,
+                  "bytesReceived": 1112755,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-2-helm",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 36496,
+                  "bytesReceived": 1113260,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-2-engineering",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 36738,
+                  "bytesReceived": 1127270,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-3-captain",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 34066,
+                  "bytesReceived": 1151589,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-3-helm",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 36766,
+                  "bytesReceived": 1152195,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-3-engineering",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 37039,
+                  "bytesReceived": 1167190,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-4-captain",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 31667,
+                  "bytesReceived": 990030,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-4-helm",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 34313,
+                  "bytesReceived": 990585,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "ship-4-engineering",
+          "appliedReceipts": 17,
+          "relayReady": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 34536,
+                  "bytesReceived": 1004582,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "impairment": {
+        "error": "not-found"
+      },
+      "uncaughtBrowserErrors": []
+    },
+    {
+      "artifactDirectory": "C:/Coding/project-phoenix-v2/target/1530-browser-real-11/ws-relay",
+      "resultSha256": "b77bd7cc502be67639b9736b16b74af20fa14fe847ed484de00298d1d193ffec",
+      "manifestSha256": "4338e8840734883bbdc56ab19de27952f92335d431704abcc24bbe35a502e182",
+      "route": "ws-relay",
+      "profile": {
+        "delayMs": 0,
+        "lossPercent": 0,
+        "seed": 1530
+      },
+      "status": "passed",
+      "startedUtc": "2026-09-27T09:18:49.054Z",
+      "finishedUtc": "2026-09-27T09:19:05.567Z",
+      "commandSeconds": 10,
+      "commandWaves": 7,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "serviceSha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0",
+      "runnerSha256": "6aa5d9365450698dcb8bc33b699fce00f5b3ae83af5ce28d94018429d5fafc08",
+      "peers": [
+        {
+          "label": "ship-1",
+          "role": "ship",
+          "slot": 1,
+          "tick": 400,
+          "samples": 1,
+          "peersHeard": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2088,
+          "incomingRelayPeers": 8,
+          "relayReady": 0,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-2",
+          "role": "ship",
+          "slot": 3,
+          "tick": 399,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2149,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3",
+          "role": "ship",
+          "slot": 2,
+          "tick": 399,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2151,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4",
+          "role": "ship",
+          "slot": 4,
+          "tick": 399,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2139,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "gm-1",
+          "role": "gm",
+          "slot": 5,
+          "tick": 399,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2089,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "gm-2",
+          "role": "gm",
+          "slot": 6,
+          "tick": 399,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "agreed": true,
+          "relayFrames": 2085,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        }
+      ],
+      "clients": [
+        {
+          "label": "ship-2-captain",
+          "appliedReceipts": 7,
+          "relayFrames": 508,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-2-helm",
+          "appliedReceipts": 7,
+          "relayFrames": 505,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-2-engineering",
+          "appliedReceipts": 7,
+          "relayFrames": 633,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4-captain",
+          "appliedReceipts": 7,
+          "relayFrames": 507,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4-helm",
+          "appliedReceipts": 7,
+          "relayFrames": 506,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4-engineering",
+          "appliedReceipts": 7,
+          "relayFrames": 636,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-1-captain",
+          "appliedReceipts": 7,
+          "relayFrames": 509,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-1-helm",
+          "appliedReceipts": 7,
+          "relayFrames": 506,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-1-engineering",
+          "appliedReceipts": 7,
+          "relayFrames": 636,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3-captain",
+          "appliedReceipts": 7,
+          "relayFrames": 507,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3-helm",
+          "appliedReceipts": 7,
+          "relayFrames": 506,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3-engineering",
+          "appliedReceipts": 7,
+          "relayFrames": 636,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 13085,
+          "relay_reliable_written": 13085,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 6211,
+          "relay_snapshot_written": 6211,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "uncaughtBrowserErrors": []
+    },
+    {
+      "artifactDirectory": "C:/Coding/project-phoenix-v2/target/1530-browser-real-11/automatic-fallback",
+      "resultSha256": "fea7c1d6970da856407644cd816afced6c509556240ac1234a27741a00d1a29e",
+      "manifestSha256": "4338e8840734883bbdc56ab19de27952f92335d431704abcc24bbe35a502e182",
+      "route": "automatic-fallback",
+      "profile": {
+        "delayMs": 0,
+        "lossPercent": 0,
+        "seed": 1530
+      },
+      "status": "passed",
+      "startedUtc": "2026-09-27T09:19:05.570Z",
+      "finishedUtc": "2026-09-27T09:23:40.803Z",
+      "commandSeconds": 10,
+      "commandWaves": 10,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "serviceSha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0",
+      "runnerSha256": "6aa5d9365450698dcb8bc33b699fce00f5b3ae83af5ce28d94018429d5fafc08",
+      "peers": [
+        {
+          "label": "ship-1",
+          "role": "ship",
+          "slot": 1,
+          "tick": 448,
+          "samples": 1,
+          "peersHeard": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2357,
+          "incomingRelayPeers": 8,
+          "relayReady": 0,
+          "signalOffersSent": 0,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-2",
+          "role": "ship",
+          "slot": 2,
+          "tick": 448,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2437,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3",
+          "role": "ship",
+          "slot": 4,
+          "tick": 448,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2425,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4",
+          "role": "ship",
+          "slot": 3,
+          "tick": 450,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2433,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "gm-1",
+          "role": "gm",
+          "slot": 6,
+          "tick": 450,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "agreed": true,
+          "relayFrames": 2361,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "gm-2",
+          "role": "gm",
+          "slot": 5,
+          "tick": 449,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 2366,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        }
+      ],
+      "clients": [
+        {
+          "label": "ship-1-captain",
+          "appliedReceipts": 10,
+          "relayFrames": 570,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-1-helm",
+          "appliedReceipts": 10,
+          "relayFrames": 571,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-1-engineering",
+          "appliedReceipts": 10,
+          "relayFrames": 718,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-2-captain",
+          "appliedReceipts": 10,
+          "relayFrames": 573,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-2-helm",
+          "appliedReceipts": 10,
+          "relayFrames": 568,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-2-engineering",
+          "appliedReceipts": 10,
+          "relayFrames": 722,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3-captain",
+          "appliedReceipts": 10,
+          "relayFrames": 573,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3-helm",
+          "appliedReceipts": 10,
+          "relayFrames": 572,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-3-engineering",
+          "appliedReceipts": 10,
+          "relayFrames": 720,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4-captain",
+          "appliedReceipts": 10,
+          "relayFrames": 574,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4-helm",
+          "appliedReceipts": 10,
+          "relayFrames": 573,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        },
+        {
+          "label": "ship-4-engineering",
+          "appliedReceipts": 10,
+          "relayFrames": 718,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": []
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1,
+          "block_rtc_offers": true
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 14877,
+          "relay_reliable_written": 14877,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 7049,
+          "relay_snapshot_written": 7049,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 68,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "uncaughtBrowserErrors": []
+    },
+    {
+      "artifactDirectory": "C:/Coding/project-phoenix-v2/target/1530-browser-impaired-1/direct",
+      "resultSha256": "bcb5f1085584c40e2ad6c2ad00c7d3c8fbe788fdf678bdc5f9acec3e92f400b6",
+      "manifestSha256": "cec89242fc6e108dd80772e589e2f5a6a25b06722cc0e75f42aa769effa96b5c",
+      "route": "direct",
+      "profile": {
+        "delayMs": 20,
+        "lossPercent": 10,
+        "seed": 1530,
+        "boundary": "actual RTCDataChannel.send",
+        "unit": "application frames; not IP packets"
+      },
+      "status": "passed",
+      "startedUtc": "2026-09-27T09:22:07.196Z",
+      "finishedUtc": "2026-09-27T09:22:53.908Z",
+      "commandSeconds": 10,
+      "commandWaves": 18,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "serviceSha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0",
+      "runnerSha256": "1ea4142cc9f53f92993b84bb0163805347e006bb5c4315d40386dcc0863454c1",
+      "peers": [
+        {
+          "label": "ship-1",
+          "role": "ship",
+          "slot": 1,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 417693,
+                  "bytesReceived": 107426,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 415128,
+                  "bytesReceived": 108068,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 413976,
+                  "bytesReceived": 108816,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 411382,
+                  "bytesReceived": 92629,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 417887,
+                  "bytesReceived": 121971,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 926157,
+                  "bytesReceived": 36467,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 932245,
+                  "bytesReceived": 34493,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 932480,
+                  "bytesReceived": 31866,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 8394,
+              "written": 8390,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 8390,
+                "min": 20,
+                "max": 285.29999999701977,
+                "total": 278859.60000129044
+              }
+            },
+            "pending": 4,
+            "peakPending": 139,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1217,
+              "written": 1088,
+              "dropped": 129,
+              "cancelled": 0,
+              "delay": {
+                "count": 1088,
+                "min": 20,
+                "max": 101.30000001192093,
+                "total": 32444.500000104308
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2",
+          "role": "ship",
+          "slot": 2,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 107476,
+                  "bytesReceived": 418017,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 889910,
+                  "bytesReceived": 33951,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 890824,
+                  "bytesReceived": 32168,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 889857,
+                  "bytesReceived": 29391,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 452,
+              "written": 451,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 451,
+                "min": 20,
+                "max": 250.8999999910593,
+                "total": 14296.699999928474
+              }
+            },
+            "pending": 4,
+            "peakPending": 45,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1220,
+              "written": 1088,
+              "dropped": 129,
+              "cancelled": 0,
+              "delay": {
+                "count": 1088,
+                "min": 20,
+                "max": 102.20000000298023,
+                "total": 35554.300000309944
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3",
+          "role": "ship",
+          "slot": 3,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 108168,
+                  "bytesReceived": 415614,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 894428,
+                  "bytesReceived": 33143,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 893909,
+                  "bytesReceived": 29788,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 892359,
+                  "bytesReceived": 33221,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 450,
+              "written": 450,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 450,
+                "min": 20,
+                "max": 223.29999999701977,
+                "total": 13786.500000059605
+              }
+            },
+            "pending": 0,
+            "peakPending": 38,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1217,
+              "written": 1088,
+              "dropped": 129,
+              "cancelled": 0,
+              "delay": {
+                "count": 1088,
+                "min": 20,
+                "max": 104.70000000298023,
+                "total": 34404.00000041723
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-4",
+          "role": "ship",
+          "slot": 4,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 109078,
+                  "bytesReceived": 414512,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 820556,
+                  "bytesReceived": 32949,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 818761,
+                  "bytesReceived": 31444,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 817688,
+                  "bytesReceived": 31218,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 450,
+              "written": 450,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 450,
+                "min": 20,
+                "max": 215.59999999403954,
+                "total": 13251.800000116229
+              }
+            },
+            "pending": 0,
+            "peakPending": 45,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1217,
+              "written": 1088,
+              "dropped": 129,
+              "cancelled": 0,
+              "delay": {
+                "count": 1088,
+                "min": 20,
+                "max": 130.20000000298023,
+                "total": 33454.499999791384
+              }
+            }
+          }
+        },
+        {
+          "label": "gm-2",
+          "role": "gm",
+          "slot": 6,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 122071,
+                  "bytesReceived": 418211,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 309,
+              "written": 309,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 309,
+                "min": 20,
+                "max": 315.70000000298023,
+                "total": 11568.600000113249
+              }
+            },
+            "pending": 0,
+            "peakPending": 3,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "gm-1",
+          "role": "gm",
+          "slot": 5,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 92729,
+                  "bytesReceived": 412208,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 309,
+              "written": 309,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 309,
+                "min": 20.099999994039536,
+                "max": 272.20000000298023,
+                "total": 12020.299999803305
+              }
+            },
+            "pending": 0,
+            "peakPending": 3,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        }
+      ],
+      "clients": [
+        {
+          "label": "ship-4-captain",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 32949,
+                  "bytesReceived": 820556,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.299999997019768,
+                "max": 185.20000000298023,
+                "total": 744.8000000268221
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-4-engineering",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 31218,
+                  "bytesReceived": 817688,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.099999994039536,
+                "max": 41,
+                "total": 509.09999999403954
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1-helm",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 34493,
+                  "bytesReceived": 932245,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 41,
+              "written": 41,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 41,
+                "min": 20.099999994039536,
+                "max": 54.5,
+                "total": 956.8999999761581
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-4-helm",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 31494,
+                  "bytesReceived": 819107,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 41,
+              "written": 41,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 41,
+                "min": 20.099999994039536,
+                "max": 50.20000000298023,
+                "total": 913.1999999731779
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1-captain",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 31916,
+                  "bytesReceived": 932822,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.200000002980232,
+                "max": 30.799999997019768,
+                "total": 521.1000000536442
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2-helm",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 32218,
+                  "bytesReceived": 891516,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 41,
+              "written": 41,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 41,
+                "min": 20.100000008940697,
+                "max": 32.19999998807907,
+                "total": 900.1999999880791
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2-engineering",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 34001,
+                  "bytesReceived": 890602,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.399999991059303,
+                "max": 50.400000005960464,
+                "total": 537.6000000089407
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1-engineering",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 36517,
+                  "bytesReceived": 926499,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.099999994039536,
+                "max": 39,
+                "total": 520.6000000089407
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3-helm",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 33143,
+                  "bytesReceived": 894774,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 41,
+              "written": 41,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 41,
+                "min": 20.099999994039536,
+                "max": 52.79999999701977,
+                "total": 979.100000038743
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2-captain",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 29441,
+                  "bytesReceived": 890549,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.099999994039536,
+                "max": 27.5,
+                "total": 502.399999961257
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3-captain",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 29788,
+                  "bytesReceived": 894255,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.299999997019768,
+                "max": 49.79999999701977,
+                "total": 524.3999999910593
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3-engineering",
+          "appliedReceipts": 18,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 33221,
+                  "bytesReceived": 892705,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 23,
+              "written": 23,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 23,
+                "min": 20.19999998807907,
+                "max": 94.09999999403954,
+                "total": 582.0999999642372
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 0,
+          "relay_reliable_written": 0,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "uncaughtBrowserErrors": []
+    },
+    {
+      "artifactDirectory": "C:/Coding/project-phoenix-v2/target/1530-browser-impaired-1/ws-relay",
+      "resultSha256": "82c9c6131ceb39a14dde34a617bd934338c00cecfa8272b10475c5ba4f71c945",
+      "manifestSha256": "cec89242fc6e108dd80772e589e2f5a6a25b06722cc0e75f42aa769effa96b5c",
+      "route": "ws-relay",
+      "profile": {
+        "delayMs": 20,
+        "lossPercent": 10,
+        "seed": 1530,
+        "boundary": "loopback rendezvous outgoing relay frames",
+        "unit": "application frames; not IP packets"
+      },
+      "status": "passed",
+      "startedUtc": "2026-09-27T09:22:53.913Z",
+      "finishedUtc": "2026-09-27T09:23:27.623Z",
+      "commandSeconds": 10,
+      "commandWaves": 14,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "serviceSha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0",
+      "runnerSha256": "1ea4142cc9f53f92993b84bb0163805347e006bb5c4315d40386dcc0863454c1",
+      "peers": [
+        {
+          "label": "ship-1",
+          "role": "ship",
+          "slot": 1,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1637,
+          "incomingRelayPeers": 8,
+          "relayReady": 0,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2",
+          "role": "ship",
+          "slot": 2,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1713,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3",
+          "role": "ship",
+          "slot": 4,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1705,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4",
+          "role": "ship",
+          "slot": 3,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1707,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-1",
+          "role": "gm",
+          "slot": 5,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1623,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-2",
+          "role": "gm",
+          "slot": 6,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "agreed": true,
+          "relayFrames": 1621,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        }
+      ],
+      "clients": [
+        {
+          "label": "ship-1-captain",
+          "appliedReceipts": 14,
+          "relayFrames": 374,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1-helm",
+          "appliedReceipts": 14,
+          "relayFrames": 365,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1-engineering",
+          "appliedReceipts": 14,
+          "relayFrames": 449,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2-captain",
+          "appliedReceipts": 14,
+          "relayFrames": 381,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2-helm",
+          "appliedReceipts": 14,
+          "relayFrames": 368,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2-engineering",
+          "appliedReceipts": 14,
+          "relayFrames": 461,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3-captain",
+          "appliedReceipts": 14,
+          "relayFrames": 383,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3-engineering",
+          "appliedReceipts": 14,
+          "relayFrames": 473,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3-helm",
+          "appliedReceipts": 14,
+          "relayFrames": 374,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4-captain",
+          "appliedReceipts": 14,
+          "relayFrames": 377,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4-helm",
+          "appliedReceipts": 14,
+          "relayFrames": 374,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4-engineering",
+          "appliedReceipts": 14,
+          "relayFrames": 462,
+          "relayReady": 1,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 10537,
+          "relay_reliable_written": 10532,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4835,
+          "relay_snapshot_written": 4378,
+          "relay_snapshot_dropped": 454,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 14918,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 8,
+          "peak_pending": 86,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 10532,
+              "min": 20.032900000001973,
+              "max": 54.72910000000047,
+              "total": 274504.8297000017
+            },
+            "snapshot": {
+              "count": 4378,
+              "min": 20.00749999999971,
+              "max": 52.29999999999927,
+              "total": 113899.30989999966
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "uncaughtBrowserErrors": []
+    },
+    {
+      "artifactDirectory": "C:/Coding/project-phoenix-v2/target/1530-browser-impaired-2/automatic-fallback",
+      "resultSha256": "a2ec109c43040b31b231cd518f6c5c36c6ae15856748b452f8bc41c3b89a6c1f",
+      "manifestSha256": "2fa180be6b4857f69fe1a38706882d651cb0c53454ae6732c01dc8779a4cadfa",
+      "route": "automatic-fallback",
+      "profile": {
+        "delayMs": 20,
+        "lossPercent": 10,
+        "seed": 1530,
+        "boundary": "loopback rendezvous outgoing relay frames",
+        "unit": "application frames; not IP packets"
+      },
+      "status": "passed",
+      "startedUtc": "2026-09-27T09:27:01.496Z",
+      "finishedUtc": "2026-09-27T09:31:40.157Z",
+      "commandSeconds": 10,
+      "commandWaves": 8,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "serviceSha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0",
+      "runnerSha256": "54d109376fd561e6530f7adb1a376102562f91fd27c299c0c4b1c6c2a9c9d54b",
+      "peers": [
+        {
+          "label": "ship-1",
+          "role": "ship",
+          "slot": 1,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1619,
+          "incomingRelayPeers": 8,
+          "relayReady": 0,
+          "signalOffersSent": 0,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2",
+          "role": "ship",
+          "slot": 2,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1703,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3",
+          "role": "ship",
+          "slot": 3,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1697,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4",
+          "role": "ship",
+          "slot": 4,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1696,
+          "incomingRelayPeers": 3,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-1",
+          "role": "gm",
+          "slot": 6,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "agreed": true,
+          "relayFrames": 1639,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-2",
+          "role": "gm",
+          "slot": 5,
+          "tick": 302,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 1641,
+          "incomingRelayPeers": 0,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        }
+      ],
+      "clients": [
+        {
+          "label": "ship-2-captain",
+          "appliedReceipts": 8,
+          "relayFrames": 352,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2-helm",
+          "appliedReceipts": 8,
+          "relayFrames": 364,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2-engineering",
+          "appliedReceipts": 8,
+          "relayFrames": 447,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3-captain",
+          "appliedReceipts": 8,
+          "relayFrames": 364,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3-helm",
+          "appliedReceipts": 8,
+          "relayFrames": 356,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-3-engineering",
+          "appliedReceipts": 8,
+          "relayFrames": 465,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4-captain",
+          "appliedReceipts": 8,
+          "relayFrames": 366,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4-helm",
+          "appliedReceipts": 8,
+          "relayFrames": 359,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-4-engineering",
+          "appliedReceipts": 8,
+          "relayFrames": 444,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1-captain",
+          "appliedReceipts": 8,
+          "relayFrames": 368,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1-helm",
+          "appliedReceipts": 8,
+          "relayFrames": 356,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1-engineering",
+          "appliedReceipts": 8,
+          "relayFrames": 458,
+          "relayReady": 1,
+          "signalOffersSent": 4,
+          "connectedRTC": [],
+          "directImpairment": {}
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": true
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 10435,
+          "relay_reliable_written": 10410,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4760,
+          "relay_snapshot_written": 4308,
+          "relay_snapshot_dropped": 443,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 14752,
+          "signal_offers_dropped": 68,
+          "queue_overflow_closes": 0,
+          "pending": 34,
+          "peak_pending": 82,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 10410,
+              "min": 20.02780000003986,
+              "max": 44.859700000000885,
+              "total": 269606.0696999967
+            },
+            "snapshot": {
+              "count": 4308,
+              "min": 20.039199999999255,
+              "max": 37.43660000001546,
+              "total": 108830.52379999898
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "uncaughtBrowserErrors": []
+    },
+    {
+      "artifactDirectory": "C:/Coding/project-phoenix-v2/target/1530-browser-final-direct/direct",
+      "resultSha256": "327a43eca5f8222309c58bab9cf1839251b977ab79ff288c70aef79829edcdbf",
+      "manifestSha256": "d0bf7359cf6a8305885481daee3c143e963d141beb46245cc60b53fed09ee6c3",
+      "route": "direct",
+      "profile": {
+        "delayMs": 20,
+        "lossPercent": 10,
+        "seed": 1530,
+        "boundary": "actual RTCDataChannel.send",
+        "unit": "application frames; not IP packets"
+      },
+      "status": "passed",
+      "startedUtc": "2026-09-27T09:30:58.745Z",
+      "finishedUtc": "2026-09-27T09:31:21.865Z",
+      "commandSeconds": 1,
+      "commandWaves": 2,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "serviceSha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0",
+      "runnerSha256": "e3497220618ba94de67f6f68c13403c98b19d37ecd066e0779d4053a6069e5ca",
+      "peers": [
+        {
+          "label": "ship-1",
+          "role": "ship",
+          "slot": 1,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 0,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 369368,
+                  "bytesReceived": 95892,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 368480,
+                  "bytesReceived": 96468,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 365154,
+                  "bytesReceived": 96441,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 358986,
+                  "bytesReceived": 91818,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 357606,
+                  "bytesReceived": 91802,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 735889,
+                  "bytesReceived": 22219,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 735561,
+                  "bytesReceived": 21981,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 734704,
+                  "bytesReceived": 23909,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 8282,
+              "written": 8270,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 8270,
+                "min": 20,
+                "max": 150,
+                "total": 201263.30000063777
+              }
+            },
+            "pending": 12,
+            "peakPending": 174,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1169,
+              "written": 1052,
+              "dropped": 117,
+              "cancelled": 0,
+              "delay": {
+                "count": 1052,
+                "min": 20,
+                "max": 39,
+                "total": 22696.199999898672
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2",
+          "role": "ship",
+          "slot": 4,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 96441,
+                  "bytesReceived": 365154,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 722355,
+                  "bytesReceived": 21548,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 722018,
+                  "bytesReceived": 21902,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 719229,
+                  "bytesReceived": 23374,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 402,
+              "written": 401,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 401,
+                "min": 20,
+                "max": 119.1000000089407,
+                "total": 8930.299999848008
+              }
+            },
+            "pending": 4,
+            "peakPending": 45,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1169,
+              "written": 1049,
+              "dropped": 117,
+              "cancelled": 0,
+              "delay": {
+                "count": 1049,
+                "min": 20,
+                "max": 54.70000000298023,
+                "total": 23007.599999651313
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3",
+          "role": "ship",
+          "slot": 2,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 95892,
+                  "bytesReceived": 369368,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 732036,
+                  "bytesReceived": 22153,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 730985,
+                  "bytesReceived": 23824,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 732495,
+                  "bytesReceived": 21865,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 403,
+              "written": 402,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 402,
+                "min": 20,
+                "max": 129.20000000298023,
+                "total": 9100.70000000298
+              }
+            },
+            "pending": 4,
+            "peakPending": 45,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1172,
+              "written": 1052,
+              "dropped": 117,
+              "cancelled": 0,
+              "delay": {
+                "count": 1052,
+                "min": 20,
+                "max": 69.70000000298023,
+                "total": 23122.099999412894
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-4",
+          "role": "ship",
+          "slot": 3,
+          "tick": 303,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            4,
+            5,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 96468,
+                  "bytesReceived": 368480,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 731921,
+                  "bytesReceived": 22254,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 730848,
+                  "bytesReceived": 23825,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 732008,
+                  "bytesReceived": 21816,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 404,
+              "written": 404,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 404,
+                "min": 20,
+                "max": 118.30000001192093,
+                "total": 9068.499999850988
+              }
+            },
+            "pending": 0,
+            "peakPending": 45,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 1169,
+              "written": 1052,
+              "dropped": 117,
+              "cancelled": 0,
+              "delay": {
+                "count": 1052,
+                "min": 20,
+                "max": 36.20000000298023,
+                "total": 22812.000000178814
+              }
+            }
+          }
+        },
+        {
+          "label": "gm-1",
+          "role": "gm",
+          "slot": 5,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            6
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 92030,
+                  "bytesReceived": 359326,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 309,
+              "written": 309,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 309,
+                "min": 20,
+                "max": 167.59999999403954,
+                "total": 6960.699999988079
+              }
+            },
+            "pending": 0,
+            "peakPending": 3,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "gm-2",
+          "role": "gm",
+          "slot": 6,
+          "tick": 304,
+          "samples": 1,
+          "peersHeard": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "agreed": true,
+          "relayFrames": 0,
+          "incomingRelayPeers": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 92014,
+                  "bytesReceived": 357946,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 309,
+              "written": 309,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 309,
+                "min": 20,
+                "max": 162.20000000298023,
+                "total": 7040.999999880791
+              }
+            },
+            "pending": 0,
+            "peakPending": 3,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        }
+      ],
+      "clients": [
+        {
+          "label": "ship-2-captain",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 21598,
+                  "bytesReceived": 722701,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.5,
+                "max": 32.79999999701977,
+                "total": 160.1999999731779
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2-helm",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 21952,
+                  "bytesReceived": 722364,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 9,
+              "written": 9,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 9,
+                "min": 20.5,
+                "max": 53.8999999910593,
+                "total": 225
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2-engineering",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 23374,
+                  "bytesReceived": 719575,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.099999994039536,
+                "max": 24.200000002980232,
+                "total": 149.20000000298023
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1-captain",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 21981,
+                  "bytesReceived": 735561,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.400000005960464,
+                "max": 22,
+                "total": 147.8000000268221
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1-helm",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 22219,
+                  "bytesReceived": 735889,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 9,
+              "written": 9,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 9,
+                "min": 20.200000002980232,
+                "max": 27,
+                "total": 203.60000002384186
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1-engineering",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 23909,
+                  "bytesReceived": 735046,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.399999991059303,
+                "max": 21.700000002980232,
+                "total": 146.80000001192093
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3-captain",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 21915,
+                  "bytesReceived": 732841,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.5,
+                "max": 22.099999994039536,
+                "total": 146.8999999910593
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3-helm",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 22203,
+                  "bytesReceived": 732382,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 9,
+              "written": 9,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 9,
+                "min": 20.099999994039536,
+                "max": 23.400000005960464,
+                "total": 190.90000000596046
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-3-engineering",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 23824,
+                  "bytesReceived": 731331,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.30000001192093,
+                "max": 21.799999997019768,
+                "total": 146.00000001490116
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-4-captain",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 21866,
+                  "bytesReceived": 732354,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.200000002980232,
+                "max": 22.200000002980232,
+                "total": 148.1000000089407
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-4-helm",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 22304,
+                  "bytesReceived": 732267,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 9,
+              "written": 9,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 9,
+                "min": 20.599999994039536,
+                "max": 25.399999991059303,
+                "total": 195.50000001490116
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-4-engineering",
+          "appliedReceipts": 2,
+          "relayFrames": 0,
+          "relayReady": 0,
+          "signalOffersSent": 1,
+          "connectedRTC": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 23825,
+                  "bytesReceived": 731194,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "directImpairment": {
+            "reliable": {
+              "seen": 7,
+              "written": 7,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 7,
+                "min": 20.200000002980232,
+                "max": 21.700000002980232,
+                "total": 145.6999999731779
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 0,
+          "relay_reliable_written": 0,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "uncaughtBrowserErrors": []
+    }
+  ]
+}

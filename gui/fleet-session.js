@@ -819,11 +819,12 @@ export function createFleetOwner(opts) {
             return;
           }
           if (!authenticateFrame(envelope.body?.raw, authSlot)) return;
-          const fresh = continuation.receive(envelope.body, authSlot);
-          if (fresh) {
+          const deliverAndRelay = fresh => {
             onSimulationFrame(fresh, authSlot);
             for (const [peer, other] of links) if (peer !== conn.peer) sendContinuationWire(value => other.send(value), raw);
-          }
+          };
+          const fresh = continuation.receive(envelope.body, authSlot, deliverAndRelay);
+          if (fresh) deliverAndRelay(fresh);
           return;
         }
         const frame = decodeHostFrame(raw);
@@ -1229,7 +1230,7 @@ export function createFleetMember(opts) {
     factories,
   } = opts;
 
-  const receiveContinuationWire = createContinuationWireReceiver();
+  let receiveContinuationWire = createContinuationWireReceiver();
   let mine = null;
   let continuation = null;
   let promoted = null;
@@ -1380,6 +1381,10 @@ export function createFleetMember(opts) {
     localise: false,
     onAccepted: ({ generation } = {}) => {
       const realGeneration = Number.isInteger(generation) ? generation : null;
+      if (realGeneration !== acceptedTransportGeneration) {
+        // A fragment belongs to one authenticated connection, never its replacement.
+        receiveContinuationWire = createContinuationWireReceiver();
+      }
       const reconnected = realGeneration !== null
         && acceptedTransportGeneration !== null
         && realGeneration !== acceptedTransportGeneration;
@@ -1623,6 +1628,10 @@ export function createFleetMember(opts) {
     get canDecideGmJoin() { return !gmJoinCandidate && !!mine; },
     get code() { if (promoted) return promoted.code; return joiner.failed ? null : { suffix: joiner.suffix, full: joiner.full }; },
     roster: () => roster,
+    freeze() { return promoted?.freeze(); },
+    setAdmission(state) { return promoted?.setAdmission(state); },
+    rotate() { return promoted?.rotate(); },
+    completeGmJoin(id, status, reason = null) { return promoted?.completeGmJoin(id, status, reason) || false; },
 
     /** Existing admitted peers may answer the visible request; candidates may not. */
     decideGmJoin(id, accepted) {

@@ -65,3 +65,49 @@ it('never acknowledges replay or commits after the core rejects a retained row',
   expect(stages).not.toContainEqual([3,'replayed']);
   expect(stages.some(([,op])=>op==='commit')).toBe(false);
 });
+
+it('buffers resumed egress and fans out early peer streams across a delayed coordinator commit acknowledgement', async () => {
+  const participants=[1,2,3,4],peers=new Map(),wire=[],errors=[],delivered=[],pending=[];
+  let resolveCoordinator;
+  const coordinatorCommit=new Promise(resolve=>{resolveCoordinator=resolve;});
+  for(const local of participants.slice(1))peers.set(local,createOwnerContinuation({
+    local,owner:1,participants,
+    request:async request=>request.op==='commit'&&local===2?coordinatorCommit:
+      {status:{begin:'held',replayed:'replayed',commit:'committed'}[request.op],loss_tick:101},
+    replayFrame:()=>true,deliver:raw=>delivered.push([local,raw]),
+    send:(target,raw)=>wire.push([local,target,JSON.parse(raw)]),
+    onError:(_,detail)=>errors.push(detail),
+  }));
+  const flush=async()=>{
+    for(let round=0;round<20;round++){
+      while(wire.length){
+        const [source,target,message]=wire.shift();
+        if(message.kind!=='stream'){pending.push(peers.get(target).control(message.kind,message.body,source));continue;}
+        const deliverAndRelay=raw=>{
+          delivered.push([target,raw]);
+          if(target===2)for(const sibling of [3,4])if(sibling!==source)wire.push([2,sibling,message]);
+        };
+        const fresh=peers.get(target).receive(message.body,message.body.origin,deliverAndRelay);
+        if(fresh)deliverAndRelay(fresh);
+      }
+      await Promise.resolve();
+    }
+  };
+  await Promise.all([...peers.values()].map(peer=>peer.begin(1)));
+  for(const peer of peers.values())await peer.connected();
+  await flush();
+  expect(peers.get(2).phase).toBe('replayed');
+  expect(peers.get(3).phase).toBe('live');
+  expect(peers.get(4).phase).toBe('live');
+  expect(peers.get(2).broadcast('new-coordinator-tick')).toBeNull();
+  const early=peers.get(3).broadcast('early-member-tick');
+  wire.push([3,2,JSON.parse(early)]);await flush();
+  expect(delivered).toEqual([]);
+  expect(errors).toEqual([]);
+  resolveCoordinator({status:'committed',loss_tick:101});
+  await flush();await Promise.all(pending);await flush();
+  expect(errors).toEqual([]);
+  expect(delivered.filter(([target])=>target===2)).toEqual([[2,'early-member-tick']]);
+  expect(delivered.filter(([target])=>target===3)).toEqual([[3,'new-coordinator-tick']]);
+  expect(delivered.filter(([target])=>target===4)).toEqual([[4,'early-member-tick'],[4,'new-coordinator-tick']]);
+});

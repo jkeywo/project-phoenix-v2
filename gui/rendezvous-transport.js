@@ -1246,6 +1246,8 @@ export function createRendezvousJoiner(opts) {
   let continuation = initialContinuation;
   let continuationHold = false;
   let ownerLost = null;
+  let mediaFailedBeforeNotice = false;
+  let ownerStateTimer = null;
   /** True once the host has ACCEPTED this build at least once. */
   let established = false;
   let generation = 0;
@@ -1285,6 +1287,7 @@ export function createRendezvousJoiner(opts) {
   const socketIsTheLink = () => mode === 'ws-relay';
 
   function clearTimers() {
+    if (ownerStateTimer) { clearTimeout(ownerStateTimer); ownerStateTimer = null; }
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
   }
@@ -1314,15 +1317,37 @@ export function createRendezvousJoiner(opts) {
    * its pre-acceptance attempts, goes back to the page; anything else is the
    * reconnect loop.
    */
-  function fail(gen, reason, detail) {
+  function fail(gen, reason, detail, preserveDelegation = true) {
     if (closed || gen !== generation || gen === failedGeneration) return;
-    if (continuation && ownerLost && established && reason === 'unreachable') {
+    if (preserveDelegation && continuation && established && reason === 'unreachable'
+        && socket?.readyState === 1) {
       continuationHold = true;
-      clearTimers();
-      onStatus('disconnected');
-      onFleetControl({ ...ownerLost, mediaFailed: true });
+      if (!mediaFailedBeforeNotice) {
+        mediaFailedBeforeNotice = true;
+        clearTimers();
+        onStatus('disconnected');
+        if (!ownerLost) {
+          // ICE can fail before the service observes owner death. Keep this
+          // authenticated membership for at most the configured reclaim budget.
+          // This bounds observation; it is not a service heartbeat guarantee.
+          // A still-present owner never authorizes promotion.
+          ownerStateTimer = setTimeout(() => {
+            ownerStateTimer = null;
+            fail(gen, reason, detail, false);
+          }, (data?.limits?.reclaim_grace_seconds || 120) * 1000);
+          socket.send(frame('fleet-state', { code: parsed.full, namespace,
+            continuation: { slot: continuation.slot, capability: continuation.capability } }));
+        }
+      }
+      if (ownerLost) {
+        clearTimers();
+        onFleetControl({ ...ownerLost, mediaFailed: true });
+      }
       return;
     }
+    mediaFailedBeforeNotice = false;
+    continuationHold = false;
+    ownerLost = null;
     failedGeneration = gen;
     teardown();
     // The direct ladder is spent and there is one rung left: let the service
@@ -1625,7 +1650,7 @@ export function createRendezvousJoiner(opts) {
       case 'fleet-owner-lost':
         if (namespace === NAMESPACE_SERVER && continuation) {
           ownerLost = msg;
-          if (socketIsTheLink()) {
+          if (socketIsTheLink() || mediaFailedBeforeNotice) {
             continuationHold = true;
             clearTimers();
             onStatus('disconnected');
@@ -1633,9 +1658,19 @@ export function createRendezvousJoiner(opts) {
           }
         }
         break;
+      case 'fleet-state':
+        if (continuation && mediaFailedBeforeNotice) {
+          if (!msg.available) {
+            ownerLost = { type: 'fleet-owner-lost', epoch: msg.epoch };
+            clearTimers();
+            onFleetControl({ ...ownerLost, mediaFailed: true });
+          } else if (msg.epoch > continuation.epoch) {
+            onFleetControl({ type: 'fleet-owner-changed', epoch: msg.epoch, slot: msg.owner_slot });
+          }
+        }
+        break;
       case 'fleet-takeover-grant':
       case 'fleet-takeover-wait':
-      case 'fleet-state':
       case 'fleet-owner-changed':
         if (namespace === NAMESPACE_SERVER && continuation) onFleetControl(msg);
         break;
@@ -1770,6 +1805,7 @@ export function createRendezvousJoiner(opts) {
       continuation = { ...continuation, epoch };
       continuationHold = false;
       ownerLost = null;
+      mediaFailedBeforeNotice = false;
       clearTimers();
       attempt();
       return true;

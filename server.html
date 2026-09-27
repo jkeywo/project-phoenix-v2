@@ -6208,6 +6208,11 @@
         onSimulationFrame: receiveMeshFrame,
         onContinuation: continueFleetOwner,
         onContinuationFrame: receiveFleetContinuationFrame,
+        // A member can become the transport owner without replacing its handle.
+        onBeginGmJoin: beginFleetGmJoin,
+        onRefuseGmJoin: refuseFleetGmJoin,
+        onHostLost: slot => window.wasm_host_departed?.(slot),
+        onSlotClaimed: slot => window.wasm_claim_slot?.(slot),
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
         // tearing the link down would evict a member for touching its loadout.

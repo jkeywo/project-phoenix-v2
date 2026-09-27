@@ -115,10 +115,10 @@ export function createContinuationJournal({local,participants,limits=CONTINUATIO
 }
 
 /** Every live participant must report its frozen delivery frontier. */
-export function reconcileContinuation({participants,departed,tails,limits=CONTINUATION_LIMITS}) {
+export function reconcileContinuation({participants,departed,tails,coordinator=Math.min(...participants.filter(slot=>slot!==departed)),limits=CONTINUATION_LIMITS}) {
   const members=membersOf(participants),survivors=members.filter(slot=>slot!==departed);
   if(!members.includes(departed) || !Array.isArray(tails) || tails.length!==survivors.length || new Set(tails.map(tail=>tail.local)).size!==survivors.length)throw new Error('incomplete-continuation-survivors');
-  const rows=new Map(),frontier=Object.fromEntries(members.map(slot=>[slot,0]));
+  const rows=new Map(),authorizedRows=new Map(),frontier=Object.fromEntries(members.map(slot=>[slot,0]));
   let bytes=0;
   for(const tail of tails){
     if(!survivors.includes(tail.local) || JSON.stringify(tail.participants)!==JSON.stringify(members) || !validVector(tail.seen,members) || !Array.isArray(tail.rows))throw new Error('invalid-continuation-tail');
@@ -129,16 +129,22 @@ export function reconcileContinuation({participants,departed,tails,limits=CONTIN
       const key=keyOf(row),previous=rows.get(key);
       if(previous && previous.raw!==row.raw)throw new Error('conflicting-continuation-frame');
       if(!previous){rows.set(key,clone(row));bytes+=rowBytes(row);}
+      // Preserve the existing star trust boundary. A survivor may prove its
+      // own stream; only the elected successor's locally authenticated history
+      // can prove a departed owner's row. A foreign carrier is not its origin.
+      if(tail.local===(row.origin===departed?coordinator:row.origin))authorizedRows.set(key,clone(row));
       if(rows.size>limits.frames || bytes>limits.bytes)throw new Error('continuation-tail-overflow');
     }
   }
+  const coordinatorTail=tails.find(tail=>tail.local===coordinator);
+  if(!coordinatorTail || frontier[departed]>coordinatorTail.seen[departed])throw new Error('unverifiable-owner-suffix');
   const targets=tails.map(tail=>{
     const missing=[];
     for(const origin of members)for(let sequence=tail.seen[origin]+1;sequence<=frontier[origin];sequence++){
       // The frame bound also bounds adversarially large advertised gaps.
       if(missing.length>=limits.frames)throw new Error('continuation-tail-overflow');
-      const row=rows.get(`${origin}:${sequence}`);
-      if(!row)throw new Error('missing-continuation-frame');
+      const row=authorizedRows.get(`${origin}:${sequence}`);
+      if(!row)throw new Error(rows.has(`${origin}:${sequence}`)?'unverifiable-origin-suffix':'missing-continuation-frame');
       missing.push(row);
     }
     return {local:tail.local,before:{...tail.seen},rows:missing};

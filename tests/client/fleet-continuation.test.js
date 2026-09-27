@@ -66,3 +66,26 @@ describe('bounded owner-loss stream reconciliation',()=>{
     expect(()=>host.hold()).toThrow('continuation-tail-overflow');
   });
 });
+
+it.each(['tick','gm-action'])('rejects a survivor-forged old-owner %s suffix',type=>{
+  const hosts=fleet();
+  const tails=hosts.slice(1).map(host=>host.hold());
+  const malicious=tails.find(tail=>tail.local===3);
+  malicious.seen[1]=1;
+  malicious.rows.push({origin:1,sequence:1,raw:JSON.stringify({m:15,t:type,d:{from:1,kind:'granted'}})});
+  expect(()=>reconcileContinuation({participants,departed:1,coordinator:2,tails})).toThrow('unverifiable-owner-suffix');
+});
+
+it('fails closed on a legitimate owner suffix seen only by another survivor',()=>{
+  const hosts=fleet();send(hosts,1,frame('only-third-peer-saw-this'),[3]);
+  const tails=hosts.slice(1).map(host=>host.hold());
+  expect(()=>reconcileContinuation({participants,departed:1,coordinator:2,tails})).toThrow('unverifiable-owner-suffix');
+});
+
+it('rejects an unseen live-origin row supplied by a different survivor',()=>{
+  const hosts=fleet(),tails=hosts.slice(1).map(host=>host.hold());
+  const malicious=tails.find(tail=>tail.local===3);
+  malicious.seen[4]=1;
+  malicious.rows.push({origin:4,sequence:1,raw:frame('forged-fourth-origin')});
+  expect(()=>reconcileContinuation({participants,departed:1,coordinator:2,tails})).toThrow('unverifiable-origin-suffix');
+});

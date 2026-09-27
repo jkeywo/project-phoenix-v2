@@ -1,4 +1,4 @@
-import { createContinuationJournal, reconcileContinuation } from './fleet-continuation.js';
+import { CONTINUATION_LIMITS, createContinuationJournal, reconcileContinuation } from './fleet-continuation.js';
 
 // This private envelope travels only on the authenticated server namespace.
 export const CONTINUATION_WIRE = 'phoenix-fleet-continuation-v1';
@@ -15,6 +15,8 @@ export function createOwnerContinuation({ local, owner, participants, request, d
   let beginPromise = null;
   let eligible = true;
   let replayedStatus = null;
+  const pendingEgress = [];
+  let pendingEgressBytes = 0, bufferedBytes = 0;
   const refuse = error => {
     phase = 'refused';
     const reason = error instanceof Error ? error.message : String(error);
@@ -52,9 +54,21 @@ export function createOwnerContinuation({ local, owner, participants, request, d
     owner = successor;
     phase = 'live';
     onCommit({ owner, epoch, departed: body.previous_owner, loss_tick: body.loss_tick });
+    bufferedBytes = 0;
     for (const item of buffered.splice(0)) {
       const raw = api.receive(item.envelope, item.origin);
-      if (raw) deliver(raw, owner);
+      if (raw) {
+        if (item.onDeferred) item.onDeferred(raw);
+        else deliver(raw, owner);
+      }
+    }
+    pendingEgressBytes = 0;
+    for (const raw of pendingEgress.splice(0)) {
+      const wire = api.broadcast(raw);
+      if (!wire) continue;
+      if (local === owner) {
+        for (const slot of survivors) if (slot !== local) send(slot, wire);
+      } else send(owner, wire);
     }
   }
   async function acceptAck(slot, body) {
@@ -75,7 +89,7 @@ export function createOwnerContinuation({ local, owner, participants, request, d
     if (tails.has(slot)) throw new Error('duplicate-continuation-tail');
     tails.set(slot, tail);
     if (tails.size !== survivors.length) return;
-    plan = reconcileContinuation({ participants, departed: owner, tails: [...tails.values()] });
+    plan = reconcileContinuation({ participants, departed: owner, coordinator: local, tails: [...tails.values()] });
     for (const target of plan.targets) if (target.local !== local) {
       outgoing(target.local, 'replay', { epoch, departed: owner, frontier: plan.frontier, targets: [target] });
     }
@@ -97,17 +111,28 @@ export function createOwnerContinuation({ local, owner, participants, request, d
     },
     broadcast(raw) {
       if (phase === 'refused') return null;
+      if (['held', 'replaying', 'replayed'].includes(phase)) {
+        const bytes = raw.length * 2;
+        if (pendingEgress.length >= CONTINUATION_LIMITS.frames
+            || pendingEgressBytes + bytes > CONTINUATION_LIMITS.bytes) {
+          refuse('continuation-egress-overflow'); return null;
+        }
+        pendingEgress.push(raw); pendingEgressBytes += bytes;
+        return null;
+      }
       // During pending begin, Rust can still drain already minted frames. They
       // enter the tail even though the failed transport cannot forward them.
       let row;
       try { row = journal.record(raw); } catch (error) { refuse(error); return null; }
       return phase === 'live' ? continuationEnvelope('stream', row) : null;
     },
-    receive(envelope, origin) {
+    receive(envelope, origin, onDeferred = null) {
       if (phase === 'refused') return null;
       if (phase === 'replaying' || phase === 'replayed') {
-        if (buffered.length >= 64) return refuse('continuation-pending-overflow');
-        buffered.push({ envelope, origin });
+        const bytes = (envelope?.raw?.length || 0) * 2;
+        if (buffered.length >= 64 || bufferedBytes + bytes > CONTINUATION_LIMITS.bytes) return refuse('continuation-pending-overflow');
+        bufferedBytes += bytes;
+        buffered.push({ envelope, origin, onDeferred });
         return null;
       }
       try { return journal.receive(envelope, origin); } catch (error) { refuse(error); return null; }

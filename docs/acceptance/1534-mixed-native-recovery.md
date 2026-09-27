@@ -354,3 +354,53 @@ restore, connected-holder, transport-route and six-peer digest checks are
 unchanged. Focused fake-clock tests exercise independent deadlines and every
 phase timeout; they provide no new browser recovery acceptance. The retained
 d032 automatic-fallback cell remains inconclusive until the new runner is run.
+
+
+### Same-process candidate Pause on the solo f2ed run
+
+The sequential run at `target/1534-native-gm-redial-relay-f2ed6da8-solo`
+passed its healthy baseline and triggered GM 2 redial at 20:38:03.358 UTC on
+2026-09-27. Generation 1 opened at 20:38:03.501 and capability/operator/slot
+comparisons remained true. Survivors applied HostLoss at 605 and entered
+Transferring at the owner-authored pause boundary 610. The returning GM stayed
+at tick 603 with idle GM join progress. This is a recovery stall after the
+trigger, unlike the earlier concurrent-build run's unhealthy precondition. The
+bounded run ended without Commit; retain its matrix SHA-256
+`0b18e15e4042fff888f54fb58a86dc9af6551d3e2c26d3d765e72b6b4a9fe83f`.
+
+The same handle retained its admitted roster/session, so the JavaScript bridge
+correctly skipped fresh roster bootstrap. Rust's candidate Pause path required
+GmJoinBootstrap anyway and silently ignored that Pause. The correction accepts
+an owner-authenticated reconnect Pause against the exact retained local GM
+identity, owner and approver; first-time joins still require their bootstrap.
+No roster is adopted twice or removed. The same-handle integration regression
+retains FleetRoster/FleetLockstep before Pause, then requires real canonical
+command/GM history restore, digest-proven Commit, explicit Resume and continued
+digest agreement. Corrected live runtime proof remains outstanding.
+
+The first focused run after accepting that Pause reached restore and Commit but
+then exposed a stale retained-session frontier: the candidate waited at tick 96
+for an owner watermark of 12. Commit had called rejoin on the candidate's own
+slot, which is intentionally inert. The correction rebases its existing live
+peer watermarks to the proven commit tick plus delay, retaining departed-peer
+exclusions, before explicit Resume. The integration regression asserts this
+frontier as well as subsequent digest agreement; the failed intermediate run
+is retained in `target/1534-same-handle-bootstrap-green.log`.
+
+Focused validation of the completed correction:
+
+- `cargo test --features headless --test lockstep_snapshot_transfer gm_reconnect`:
+  3/3 pass, including the retained-process native bridge case through 24 rounds
+  of continued digest agreement. Log: `target/1534-same-handle-bootstrap-green-v2.log`.
+- `cargo test --lib --features headless gm_join::tests`: 23/23 pass, including
+  wrong identity/owner/approver and first-time rejection, plus canonical frontier
+  rebase retaining departed exclusions. Log:
+  `target/1534-same-handle-bootstrap-unit-green.log`.
+- The same-handle integration case first failed the missing pause hold on the
+  old implementation; retain `target/1534-same-handle-bootstrap-red.log`.
+- PASM validate, scan and traceability all exit 0 on the final contract; logs
+  are `target/1534-same-handle-bootstrap-pasm-*-v3.log`.
+
+These targeted checks do not replace the corrected six-process active-workload
+runtime run. In particular, live GM actions during a pending transfer still
+need the resulting canonical history and digest agreement observed end to end.

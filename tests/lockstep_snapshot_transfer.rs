@@ -660,15 +660,20 @@ fn first_time_gm_join_commits_three_apps_only_after_digest_then_typed_resume() {
 /// the survivor's typed transaction is the only canonical source.
 #[test]
 fn departed_gm_reconnect_restores_owner_history_and_digest_before_rejoin_and_resume() {
-    gm_reconnect_restores_owner_history(false);
+    gm_reconnect_restores_owner_history(false, false);
 }
 
 #[test]
 fn native_bridge_gm_reconnect_restores_history_before_authoritative_commit() {
-    gm_reconnect_restores_owner_history(true);
+    gm_reconnect_restores_owner_history(true, false);
 }
 
-fn gm_reconnect_restores_owner_history(native_bridge: bool) {
+#[test]
+fn same_handle_gm_reconnect_preserves_adoption_and_restores_history_before_commit() {
+    gm_reconnect_restores_owner_history(true, true);
+}
+
+fn gm_reconnect_restores_owner_history(native_bridge: bool, same_handle: bool) {
     use project_phoenix::ai::cadence::{AiBaseInterval, AiSnapshotReady, AiTickReady};
     use project_phoenix::gm_action::{
         GmAction, GmActionId, GmActionJournal, GmActionRequest, GmActionSubmission,
@@ -722,13 +727,22 @@ fn gm_reconnect_restores_owner_history(native_bridge: bool) {
         .has_departed(HostSlot(2)));
 
     // A crashed/reloaded GM page may carry a stale local world, but it is not a
-    // live mesh peer. Strip the obsolete wait-set and install only the private
-    // bootstrap topology; no digest/election lane can see slot 2 before Commit.
-    returning.world_mut().remove_resource::<FleetLockstep>();
-    returning.world_mut().remove_resource::<FleetRoster>();
-    prepare_candidate_bootstrap(returning.world_mut(), existing_join_roster(HostSlot(2))).unwrap();
-    assert!(returning.world().get_resource::<FleetRoster>().is_none());
-    assert!(returning.world().get_resource::<FleetLockstep>().is_none());
+    // live mesh peer. A fresh reload gets private bootstrap topology; a
+    // same-handle redial keeps its original admitted roster and wait-set.
+    if !same_handle {
+        returning.world_mut().remove_resource::<FleetLockstep>();
+        returning.world_mut().remove_resource::<FleetRoster>();
+        prepare_candidate_bootstrap(returning.world_mut(), existing_join_roster(HostSlot(2)))
+            .unwrap();
+    }
+    assert_eq!(
+        returning.world().contains_resource::<FleetRoster>(),
+        same_handle
+    );
+    assert_eq!(
+        returning.world().contains_resource::<FleetLockstep>(),
+        same_handle
+    );
 
     let commands = vec![
         historical_command(boundary_base - 20, 1, "helm"),
@@ -826,8 +840,26 @@ fn gm_reconnect_restores_owner_history(native_bridge: bool) {
     owner.update();
     returning.update();
     assert!(owner.world().resource::<GmJoinPauseHold>().active());
-    assert!(returning.world().get_resource::<FleetRoster>().is_none());
-    assert!(returning.world().get_resource::<FleetLockstep>().is_none());
+    assert!(returning.world().resource::<GmJoinPauseHold>().active());
+    assert_eq!(
+        returning.world().contains_resource::<FleetRoster>(),
+        same_handle
+    );
+    assert_eq!(
+        returning.world().contains_resource::<FleetLockstep>(),
+        same_handle
+    );
+    if same_handle {
+        assert_eq!(
+            returning.world().resource::<FleetRoster>(),
+            &existing_join_roster(HostSlot(2))
+        );
+        assert_eq!(returning.world().resource::<FleetLockstep>().delay(), delay);
+        assert_eq!(returning.world().resource::<SimTick>().0, stale_tick);
+        assert!(!returning
+            .world()
+            .contains_resource::<project_phoenix::gm_join::GmJoinBootstrap>());
+    }
     assert_ne!(
         world_digest(returning.world()),
         world_digest(owner.world()),
@@ -883,6 +915,14 @@ fn gm_reconnect_restores_owner_history(native_bridge: bool) {
         returning.world().resource::<FleetRoster>(),
         &existing_join_roster(HostSlot(2)),
         "the same row is restored rather than appended"
+    );
+    assert_eq!(
+        returning
+            .world()
+            .resource::<FleetLockstep>()
+            .watermark_of(HostSlot(1)),
+        Some(approval.apply_tick + delay),
+        "Commit seeds the retained candidate's peer frontier at the proven boundary",
     );
     assert_eq!(
         returning.world().resource::<CommandLog>().entries(),

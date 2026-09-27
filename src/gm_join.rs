@@ -1127,6 +1127,20 @@ fn commit_roster(world: &mut World, commit: &GmJoinCommit) -> Result<(), GmJoinR
         {
             pending.set_origin(local);
         }
+    } else if local == commit.candidate.host {
+        // A retained session still has pre-disconnect peer watermarks. Rebase
+        // only after digest-proven Commit, just as new_at seeds a fresh
+        // candidate. Keep its identity, delay and departed-peer exclusions.
+        let ready = commit
+            .tick
+            .checked_add(delay)
+            .ok_or(GmJoinRefusal::InvalidCandidate)?;
+        if let Some(mut session) = world.get_resource_mut::<crate::lockstep::FleetLockstep>() {
+            let peers: Vec<_> = session.peers().collect();
+            for peer in peers {
+                session.rejoin(peer, ready);
+            }
+        }
     } else if let Some(mut session) = world.get_resource_mut::<crate::lockstep::FleetLockstep>() {
         match commit.kind {
             GmJoinKind::FirstTime => session.admit_peer(commit.candidate.host, commit.tick),
@@ -1207,15 +1221,28 @@ pub fn drive_join(world: &mut World) {
                             .map(|bootstrap| bootstrap.candidate.host)
                     });
                 let adopted = if local == Some(approval.candidate.host) {
-                    let Some(bootstrap) = world.get_resource::<GmJoinBootstrap>() else {
-                        continue;
-                    };
-                    if bootstrap.validates(&approval) {
+                    if let Some(bootstrap) = world.get_resource::<GmJoinBootstrap>() {
+                        if bootstrap.validates(&approval) {
+                            runtime
+                                .coordinator
+                                .adopt_candidate(bootstrap.topology(), approval.clone())
+                        } else {
+                            Err(GmJoinRefusal::InvalidCandidate)
+                        }
+                    } else if approval.kind == GmJoinKind::Reconnect
+                        && world.contains_resource::<crate::lockstep::FleetLockstep>()
+                    {
+                        // A same-process redial retains its admitted topology.
+                        // The owner-authenticated Pause validates that exact GM
+                        // identity without a second bootstrap/adoption or reset.
+                        let Some(roster) = world.get_resource::<FleetRoster>() else {
+                            continue;
+                        };
                         runtime
                             .coordinator
-                            .adopt_candidate(bootstrap.topology(), approval.clone())
+                            .adopt_candidate(roster, approval.clone())
                     } else {
-                        Err(GmJoinRefusal::InvalidCandidate)
+                        continue;
                     }
                 } else {
                     let Some(roster) = world.get_resource::<FleetRoster>() else {
@@ -1256,13 +1283,15 @@ pub fn drive_join(world: &mut World) {
                         // only after the record passes its version/content gate.
                         set_join_pause(world);
                     }
-                    // Both join kinds arrive as private Lobby worlds. Their
+                    // Fresh candidates arrive as private Lobby worlds. Their
                     // canonical record must stage the original GameStart UUIDs
                     // before requesting InProgress; otherwise a named authored
                     // row can mint a different identity and a by-UUID restore
                     // can never become ready. Reconnect engages its pause above
                     // immediately because its local clock may be arbitrarily
-                    // stale; a first-time candidate still reaches the one
+                    // stale. A same-process reconnect retains its existing
+                    // GameStart identities; the restore gate stages them only
+                    // when absent. A first-time candidate still reaches the one
                     // owner-authored pause boundary normally.
                     world
                         .resource_mut::<crate::lockstep::MeshRestoreArm>()
@@ -1867,6 +1896,40 @@ mod tests {
     }
 
     #[test]
+    fn retained_candidate_commit_rebases_live_frontier_without_resurrecting_departed_peers() {
+        let retained = first_time_candidate_roster();
+        let mut session =
+            crate::lockstep::LockstepSession::new_at(HostSlot(3), retained.participants(), 6, 7)
+                .unwrap();
+        session.observe(HostSlot(1), 1200);
+        session.depart(HostSlot(2));
+        let mut world = World::new();
+        world.insert_resource(retained.clone());
+        world.insert_resource(crate::lockstep::FleetLockstep(session));
+        world.insert_resource(GmJoinPauseHold::default());
+        let commit = GmJoinCommit {
+            id: GmJoinId(8),
+            kind: GmJoinKind::Reconnect,
+            owner: HostSlot(1),
+            candidate: GmJoinCandidate {
+                host: HostSlot(3),
+                operator_id: "gm-2".into(),
+            },
+            tick: 84,
+            digest: 0x1294,
+        };
+        commit_roster(&mut world, &commit).unwrap();
+        assert_eq!(world.resource::<FleetRoster>(), &retained);
+        let session = world.resource::<crate::lockstep::FleetLockstep>();
+        assert_eq!(session.local(), HostSlot(3));
+        assert_eq!(session.delay(), 6);
+        assert_eq!(session.watermark_of(HostSlot(1)), Some(90));
+        assert_eq!(session.watermark_of(HostSlot(2)), None);
+        assert!(session.has_departed(HostSlot(2)));
+        assert_eq!(session.peers().collect::<Vec<_>>(), vec![HostSlot(1)]);
+    }
+
+    #[test]
     fn reconnect_candidate_bootstrap_stays_private_and_keeps_the_existing_row() {
         let provisional = roster(HostSlot(2));
         let mut world = World::new();
@@ -1944,6 +2007,48 @@ mod tests {
         assert!(arm.bootstraps_join_candidate());
         assert!(!world.contains_resource::<FleetRoster>());
         assert!(!world.contains_resource::<crate::lockstep::FleetLockstep>());
+    }
+
+    #[test]
+    fn admitted_reconnect_pause_rejects_wrong_identity_owner_and_first_time() {
+        for invalid in ["operator", "owner", "approver", "first-time"] {
+            let mut world = World::new();
+            let retained = roster(HostSlot(2));
+            world.insert_resource(retained.clone());
+            world.insert_resource(crate::lockstep::FleetLockstep(
+                crate::lockstep::LockstepSession::new_at(
+                    HostSlot(2),
+                    retained.participants(),
+                    2,
+                    7,
+                )
+                .unwrap(),
+            ));
+            world.insert_resource(crate::lockstep::MeshRestoreArm::default());
+            world.insert_resource(GmJoinPauseHold::default());
+            let mut approval = reconnect_approval();
+            match invalid {
+                "operator" => approval.candidate.operator_id = "other-gm".into(),
+                "owner" => approval.owner = HostSlot(9),
+                "approver" => approval.approved_by = HostSlot(9),
+                "first-time" => approval.kind = GmJoinKind::FirstTime,
+                _ => unreachable!(),
+            }
+            let mut inbox = GmJoinInbox::default();
+            inbox.push(GmJoinFrame::Pause(approval));
+            world.insert_resource(inbox);
+            drive_join(&mut world);
+            assert!(
+                !world
+                    .resource::<crate::lockstep::MeshRestoreArm>()
+                    .is_armed(),
+                "{invalid}"
+            );
+            assert!(!world.resource::<GmJoinPauseHold>().active(), "{invalid}");
+            assert_eq!(world.resource::<FleetRoster>(), &retained);
+            assert!(world.contains_resource::<crate::lockstep::FleetLockstep>());
+            assert!(!world.contains_resource::<GmJoinBootstrap>());
+        }
     }
 
     #[test]

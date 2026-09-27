@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { main as browserMatrix } from './fleet-browser-matrix.mjs';
 import { replacementHook } from './fleet-browser-replacement.mjs';
+import { createEffectWitness } from './fleet-effect-witness.mjs';
 
 export const FAILURES = ['ship', 'leader', 'gm'];
 export function failureOutcome(evidence) {
@@ -89,6 +90,7 @@ export function captureDirectEffect({entity,correlation}) {
   const activity=window.__hostGmActivityState?.();
   const journal=window.__hostGmJournalState?.();
   return {capacity:activity?.capacity,oldestTick:activity?.entries?.[0]?.tick,
+    continuous:window.__recoveryEffectWitness?.read(),
     events:(activity?.entries || []).filter(row=>row.category==='damage'
       && row.detail?.type==='damage' && row.detail.data?.weapon==='gm.direct'
       && row.links?.some(link=>link.role==='victim' && link.entity?.entity_id===entity)),
@@ -116,11 +118,19 @@ export function directEffectOutcome(evidence) {
   const snapshots=[...(evidence.effectSamples || []),after];
   return snapshots.every(rows=>rows.length===2 && baseline.every(before=>{
     const current=rows.find(row=>row.label===before.label);
-    return current && Number.isSafeInteger(current.oldestTick)
-      // Strictly earlier evidence rules out partial eviction of same-tick duplicates.
-      && current.oldestTick<before.events[0].tick
-      && JSON.stringify(current.events)===JSON.stringify(before.events)
-      && JSON.stringify(current.journal)===JSON.stringify(before.journal);
+    if (!current || JSON.stringify(current.journal)!==JSON.stringify(before.journal)) return false;
+    if (evidence.effectWitnessRequired) {
+      const initial=before.continuous, observed=current.continuous;
+      return initial && observed && !initial.error && !observed.error
+        && Number.isSafeInteger(initial.samples) && initial.samples>0
+        && Number.isSafeInteger(observed.samples) && observed.samples>=initial.samples
+        && observed.throughTick>=before.events[0].tick
+        && JSON.stringify(initial.events)===JSON.stringify(before.events)
+        && JSON.stringify(observed.events)===JSON.stringify(before.events);
+    }
+    // Legacy diagnostic callers still need the entire original tick retained.
+    return Number.isSafeInteger(current.oldestTick) && current.oldestTick<before.events[0].tick
+      && JSON.stringify(current.events)===JSON.stringify(before.events);
   }));
 }
 export async function awaitDirectEffectBaseline(evidence, readEffects, {
@@ -194,49 +204,58 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
     evidence.effectRequest={entity:evidence.identityBefore[0].ship,correlation:'1534-divergence-effect-once',amount_milli_hp:5000};
     const readEffects=()=>Promise.all(gms.map(async(page,index)=>({label:`gm-${index+1}`,
       ...await page.evaluate(captureDirectEffect,evidence.effectRequest)})));
-    const submitted=await gms[0].evaluate(request=>window.__hostApplyDirectEffect({
-      ...request,effect:'damage',scope:'entity',scope_id:null}),evidence.effectRequest);
-    if(!submitted)throw new Error('One-time GM direct-damage request was not submitted');
-    await Promise.all(gms.map(page=>page.waitForFunction(correlation=>
-      window.__hostGmJournalState?.().entries.some(row=>row.correlation===correlation && row.outcome==='applied'),
-      evidence.effectRequest.correlation)));
-    if(!await awaitDirectEffectBaseline(evidence,readEffects))
-      throw new Error('Missing one actual GM damage event with retained earlier history within 10s');
-    await gms[0].evaluate(() => {
-      const receive = window.wasm_receive_mesh_frame;
-      window.wasm_receive_mesh_frame = (source, raw) => {
-        const frame = JSON.parse(raw);
-        const command = frame.t === 'tick' && frame.d.from === 1
-          && frame.d.commands.find(command=>command.payload?.type==='SetThrust');
-        if (command && !window.__recoveryEvidence.injected) {
-          const original = command.payload.data.value;
-          command.payload.data.value = -.7;
-          window.__recoveryEvidence.injected = { from:frame.d.from, tick:command.tick,
-            seq:command.seq,ship:command.ship,target:command.target,original,changed:-.7 };
-          return receive(source, JSON.stringify(frame));
-        }
-        return receive(source, raw);
-      };
-    });
-    const firstHelm = clients.find(row=>row.ship===1 && row.station==='helm');
-    await firstHelm.page.evaluate(()=>window.dispatchConsoleAction({action:'set_helm_thrust',value:.8},
-      (type,data)=>window.phoenixLink.send(type,data,'reliable')));
-    await gms[0].waitForFunction(()=>!!window.__recoveryEvidence.injected);
-    step('recorded one GM damage effect, then changed one authenticated incoming SetThrust frame on gm-1');
-    const deadline=Date.now()+faultSeconds*1000;
-    let checkedIdentity=false;
-    do {
-      await new Promise(resolve=>setTimeout(resolve,500));
-      evidence.after=await Promise.all(peers.map(read));
-      evidence.injected=evidence.after.find(peer=>peer.label===evidence.victim).injected;
-      evidence.effectAfter=await readEffects();evidence.effectSamples.push(evidence.effectAfter);
-      evidence.samples.push(evidence.after.map(({label,mesh})=>({label,mesh})));
-      evidence.outcome=divergenceOutcome(evidence);
-      if(evidence.after.some(peer=>peer.overflow))throw new Error('Recovery observer overflow');
-      if(evidence.outcome.recovered && !checkedIdentity){ checkedIdentity=true;await thrust(.5); }
-      if(evidence.outcome.passed)return;
-    } while(Date.now()<deadline);
-    throw new Error('Divergence did not restore with stable ship identities, one retained reducer effect, unique command orders and two matching checkpoints');
+    evidence.effectWitnessRequired=true;
+    await Promise.all(gms.map(page=>page.evaluate(createEffectWitness,{...evidence.effectRequest,observe:true})));
+    try {
+      const submitted=await gms[0].evaluate(request=>window.__hostApplyDirectEffect({
+        ...request,effect:'damage',scope:'entity',scope_id:null}),evidence.effectRequest);
+      if(!submitted)throw new Error('One-time GM direct-damage request was not submitted');
+      await Promise.all(gms.map(page=>page.waitForFunction(correlation=>
+        window.__hostGmJournalState?.().entries.some(row=>row.correlation===correlation && row.outcome==='applied'),
+        evidence.effectRequest.correlation)));
+      if(!await awaitDirectEffectBaseline(evidence,readEffects))
+        throw new Error('Missing one actual GM damage event with retained earlier history within 10s');
+      await gms[0].evaluate(() => {
+        const receive = window.wasm_receive_mesh_frame;
+        window.wasm_receive_mesh_frame = (source, raw) => {
+          const frame = JSON.parse(raw);
+          const command = frame.t === 'tick' && frame.d.from === 1
+            && frame.d.commands.find(command=>command.payload?.type==='SetThrust');
+          if (command && !window.__recoveryEvidence.injected) {
+            const original = command.payload.data.value;
+            command.payload.data.value = -.7;
+            window.__recoveryEvidence.injected = { from:frame.d.from, tick:command.tick,
+              seq:command.seq,ship:command.ship,target:command.target,original,changed:-.7 };
+            return receive(source, JSON.stringify(frame));
+          }
+          return receive(source, raw);
+        };
+      });
+      const firstHelm = clients.find(row=>row.ship===1 && row.station==='helm');
+      await firstHelm.page.evaluate(()=>window.dispatchConsoleAction({action:'set_helm_thrust',value:.8},
+        (type,data)=>window.phoenixLink.send(type,data,'reliable')));
+      await gms[0].waitForFunction(()=>!!window.__recoveryEvidence.injected);
+      step('recorded one GM damage effect, then changed one authenticated incoming SetThrust frame on gm-1');
+      const deadline=Date.now()+faultSeconds*1000;
+      let checkedIdentity=false;
+      do {
+        await new Promise(resolve=>setTimeout(resolve,500));
+        evidence.after=await Promise.all(peers.map(read));
+        evidence.injected=evidence.after.find(peer=>peer.label===evidence.victim).injected;
+        evidence.effectAfter=await readEffects();evidence.effectSamples.push(evidence.effectAfter);
+        evidence.samples.push(evidence.after.map(({label,mesh})=>({label,mesh})));
+        evidence.outcome=divergenceOutcome(evidence);
+        if(evidence.after.some(peer=>peer.overflow))throw new Error('Recovery observer overflow');
+        if(evidence.outcome.recovered && !checkedIdentity){ checkedIdentity=true;await thrust(.5); }
+        if(evidence.outcome.passed)return;
+      } while(Date.now()<deadline);
+      throw new Error('Divergence did not restore with stable ship identities, one continuously witnessed reducer effect, unique command orders and two matching checkpoints');
+    } finally {
+      evidence.effectObserverLogs=await Promise.all(gms.map(async(page,index)=>({label:`gm-${index+1}`,
+        ...await page.evaluate(()=>window.__recoveryEffectWitness.stop())})));
+      const invalid=evidence.effectObserverLogs.find(row=>row.error);
+      if(invalid)throw new Error(`Continuous effect witness failed on ${invalid.label}: ${invalid.error}`);
+    }
   };
 }
 
@@ -249,6 +268,7 @@ export async function main(args = process.argv.slice(2)) {
   return browserMatrix(copy, {kind:'phoenix-real-browser-recovery-v1', provenance:{failure,
     faultSeconds:['divergence','replacement'].includes(failure)?90:60,
     runnerSha256:createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex'),
+    effectWitnessHelperSha256:failure==='divergence'?createHash('sha256').update(readFileSync(new URL('./fleet-effect-witness.mjs',import.meta.url))).digest('hex'):null,
     replacementHelperSha256:failure==='replacement'?createHash('sha256').update(readFileSync(new URL('./fleet-browser-replacement.mjs',import.meta.url))).digest('hex'):null}, afterHealthy});
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().then(()=>process.exit(process.exitCode || 0),error=>{console.error(error);process.exit(1);});

@@ -299,3 +299,35 @@ reproduced the exact stream-gap error before correction
 including ordinary owner handoff, continuation, fleet admission and native
 adapter tests. These are protocol fixtures; corrected native runtime recovery
 still needs a new source-attributed run.
+
+## Browser replacement rerun on d032d604
+
+The source-matched browser replacement matrix at
+`target/1534-browser-replacement-d032d604` passed direct WebRTC and forced
+WebSocket relay. Each admitted exactly one contender, restored at boundary 900,
+refused the loser's later connected-holder challenge, and agreed at checkpoints
+1200 and 1500 across the six resulting peers. Result SHA-256 values:
+
+- `direct/result.json`: `5cb8620d7fe87d43a528a4e54652bc284b60d44c9f00d5d63b98a2f9d2c55cb1`.
+- `ws-relay/result.json`: `2efdfe7d54a3b0c1032315e3da29945cd4c437cdf3a448cff28f4681879e6491`.
+
+Automatic fallback failed the runner's 90-second total deadline during canonical
+restore. Retain `automatic-fallback/result.json`, SHA-256
+`fce5c39b078414188dc20038dafcd001dad4f5cd6edd9ba75bba679a08de5337`.
+The victim's agreed loss was tick 410. Replacement 2 won slot 3 and the other
+contender was refused; the winner was still in Lobby at tick 148 when the five
+survivors had reached about 3411. No recovery commit or slot-claim egress was
+observed, so this is not a passing recovery cell.
+
+The runner's single deadline includes both admission and recovery. Production
+first-join fallback spends 8, 16, 30 and 30 seconds on direct attempts, plus
+backoff; initial admissions in this run took about 86 seconds. The replacement
+was at tick 7 in the first admitted race observation and tick 148 at timeout,
+leaving only about five seconds of post-admission observation. The later
+connected-holder challenge would need another fallback admission ladder too.
+The current total budget is therefore inadequate for this route. This evidence
+does not establish that a longer wait alone fixes the absent recovery: rerun
+with separately bounded admission, restore and challenge phases, retaining
+phase timestamps and slot-claim observations. Keep the failed artifact and the
+cell open until canonical restore, holder protection and digest agreement are
+actually observed.

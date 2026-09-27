@@ -33,6 +33,8 @@ pub(crate) enum FixedStep {
     DrainLobbyOutbox,
     CheckDestroyedAsteroids,
     UpdateAsteroidWindow,
+    PreAdmissionPruneStationPuppets,
+    ReplicateLocalCrewRatings,
     ReconcileStationPuppetControl,
     AdmitSystemCommands,
     AiTorpedoLoad,
@@ -485,6 +487,24 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
     // Keep identity, lobby projection, output and streaming at their
     // captured pre-admission boundaries. Empty headless-only markers add no
     // systems or run conditions to native and browser hosts.
+    // Membership rollback must precede every pre-Input reader too, not only
+    // the gameplay phase chain. These execution-only edges leave the existing
+    // deferred barriers intact and do not reorder those owners among themselves.
+    for owner in [
+        UnregisterOnDespawn,
+        EmitPhaseChangeBalanceEvents,
+        ReconcileRuntimeEntities,
+        SimProcessingAnchor,
+        CheckDestroyedAsteroids,
+        PreAdmissionPruneStationPuppets,
+        ReplicateLocalCrewRatings,
+    ] {
+        order.before(super::SimSet::Membership, owner);
+    }
+    order.before(
+        super::SimSet::Membership,
+        crate::command_admission::AdmissionSet,
+    );
     order.before(UnregisterOnDespawn, RegisterAiTokensOnSpawn);
     order.before(
         RegisterAiTokensOnSpawn,

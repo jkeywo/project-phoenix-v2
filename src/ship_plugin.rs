@@ -378,7 +378,8 @@ impl Plugin for ShipPlugin {
         app.add_systems(
             FixedUpdate,
             (
-                crate::gm_puppet::prune_removed_station_puppets,
+                crate::gm_puppet::prune_removed_station_puppets
+                    .in_set(crate::sim_sets::FixedStep::PreAdmissionPruneStationPuppets),
                 crate::gm_puppet::prepare_station_puppet_fidelity,
                 crate::gm_puppet::reconcile_station_puppet_control
                     .in_set(crate::sim_sets::FixedStep::ReconcileStationPuppetControl),

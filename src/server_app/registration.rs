@@ -1250,6 +1250,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // admission reads the injected command, so it is stamped and staged
             // to the mesh on the tick the change happened.
             crate::lobby::crew_replication::replicate_local_crew_ratings
+                .in_set(crate::sim_sets::FixedStep::ReplicateLocalCrewRatings)
                 .after(crate::lobby::LobbySystemSet)
                 .before(crate::command_admission::AdmissionSet),
             // Applies the admitted command on every peer's copy of the ship.

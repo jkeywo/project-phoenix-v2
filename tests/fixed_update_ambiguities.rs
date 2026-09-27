@@ -163,6 +163,63 @@ fn live_debt_is_a_subset_and_the_allowlist_does_not_grow() {
 }
 
 fn inert_registration_probe() {}
+
+#[test]
+fn membership_rollback_precedes_pre_input_lifecycle_and_admission() {
+    let mut app = simulation();
+    let graph =
+        project_phoenix::headless::determinism_audit::graph::fixed_update_graph(&mut app).unwrap();
+    let membership = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.kind == "system"
+                && node.name == "project_phoenix::objective_instances::reconcile_memberships"
+        })
+        .expect("membership rollback is installed");
+    let mut reachable = std::collections::BTreeSet::new();
+    let mut pending = vec![membership.id.as_str()];
+    while let Some(node) = pending.pop() {
+        if reachable.insert(node) {
+            pending.extend(
+                graph
+                    .effective_dependency
+                    .iter()
+                    .filter(|edge| edge[0] == node)
+                    .map(|edge| edge[1].as_str()),
+            );
+        }
+    }
+    for name in [
+        "project_phoenix::ai::server::register_ai_tokens_on_spawn",
+        "project_phoenix::ai::server::unregister_on_despawn",
+        "project_phoenix::asteroids::lifecycle::check_destroyed_asteroids",
+        "project_phoenix::gm_puppet::prepare_station_puppet_fidelity",
+        "project_phoenix::gm_puppet::prune_removed_station_puppets",
+        "project_phoenix::lobby::crew_replication::replicate_local_crew_ratings",
+        "project_phoenix::lobby::server::drain_lobby_outbox",
+        "project_phoenix::server_app::broadcast_publish::broadcast_world_setup_on_start",
+        "project_phoenix::server_app::broadcast_publish::emit_phase_change_balance_events",
+        "project_phoenix::server_app::broadcast_publish::reconcile_runtime_entities",
+        "project_phoenix::server_app::broadcast_publish::refresh_caches_on_midgame_reconnect",
+        "project_phoenix::server_app::components::sim_processing_anchor",
+        "project_phoenix::command_admission::admit_system_commands",
+    ] {
+        let readers: Vec<_> = graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == "system" && node.name == name)
+            .collect();
+        assert!(!readers.is_empty(), "expected reader {name}");
+        assert!(
+            readers
+                .iter()
+                .all(|node| reachable.contains(node.id.as_str())),
+            "membership rollback must precede every instance of {name}"
+        );
+    }
+}
+
 #[test]
 fn inert_registration_does_not_change_the_actual_census() {
     let mut ordinary = simulation();

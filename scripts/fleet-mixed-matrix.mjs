@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { observeBrowser, bundleHashes, ROUTES } from './fleet-browser-matrix.mjs';
 import { impairDataChannel } from './fleet-channel-impairment.mjs';
-import { readVerifiedWasmReceipt } from './fleet-wasm-build-receipt.mjs';
+import { readVerifiedWasmReceipt, sourceState } from './fleet-wasm-build-receipt.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nativeIds = ['ship-3', 'ship-4', 'gm-2'];
 const browserIds = ['ship-1', 'ship-2', 'gm-1'];
@@ -136,7 +136,7 @@ export function verifyMixedImpairment(result,options){
 async function runCase(browser,o,route,runNativeProbe,hooks={}){
   const directory=path.join(o.out,route);await fs.mkdir(directory);
   const result={route,startedUtc:new Date().toISOString(),status:'running',browser:[],nativeEvents:{},steps:[]};
-  const contexts=[],pages=[],nativeRuns=[],nativeCommands=[];const stoppedNative=new Set(),nativeById=new Map();let stop=false,nativeFailure;
+  const contexts=[],pages=[],nativeRuns=[],nativeCommands=[];const stoppedNative=new Set(),nativeById=new Map(),fleetCommands=new Map();let stop=false,nativeFailure;
   const base=`http://127.0.0.1:${o.port}`,rendezvous=`http://127.0.0.1:${o.rendezvousPort}`;
   const script=o['service-script']||path.join(root,'scripts/rendezvous-dev-server.mjs');
   const args=[script,'--port',String(o.rendezvousPort),'--delay-ms',String(o.delayMs),'--loss-percent',String(o.lossPercent),'--seed',String(o.seed),...(route==='automatic-fallback'?['--block-rtc-offers']:[])];
@@ -152,16 +152,18 @@ async function runCase(browser,o,route,runNativeProbe,hooks={}){
   try{
     await wait(async()=>{if(service.exitCode!==null)throw new Error('Rendezvous exited');try{return(await fetch(rendezvous+'/v1/health',{signal:AbortSignal.timeout(2000)})).ok;}catch{return false;}},'service');step('service ready');
     const owner=await page('ship-1');await owner.goto(`${base}/?${query}&scenario=assets/worlds/probe_fleet_six_peer.toml&ship=assets/entities/alliance_cruiser.toml`);await owner.waitForFunction(()=>window.__matrixPhoenixReady&&window.__matrixEvidence.counts.hosted>0);await evaluate(owner,()=>window.__hostFleetOpen());await owner.waitForFunction(()=>window.__hostFleetState?.().suffix);const code=await evaluate(owner,()=>window.__hostFleetState().suffix);step('browser owner ready');
-    const launchNative=(id,{claim=null}={})=>{
+    const launchNative=(id,{claim=null,deferJoin=false}={})=>{
       if(nativeById.has(id))throw new Error('Duplicate native probe '+id);
-      result.nativeEvents[id]=[];
+      result.nativeEvents[id]=[];fleetCommands.set(id,[]);
       const run=runNativeProbe({binary:o.binary,bundle:o.bundle,source:o.source,out:path.join(directory,id),rendezvous,origin:base,
-        seconds:mixedNativeSeconds(o.deadline),role:id.startsWith('gm')?'gm':'ship','fleet-code':code,claim,workload:true,
+        seconds:mixedNativeSeconds(o.deadline),role:id.startsWith('gm')?'gm':'ship','fleet-code':code,claim,deferJoin,workload:true,
+        nextFleetCommand:hooks.afterHealthy?()=>fleetCommands.get(id).shift():undefined,
         deferGmReady:id==='gm-2',nextCommand:()=>id==='gm-2'?nativeCommands.shift():null,
         shouldStop:()=>stop||stoppedNative.has(id),onEvent:event=>{
           if(!stop&&!stoppedNative.has(id)){
             result.nativeEvents[id].push(event);
-            if(['fleet_fault','page-error','page-rejection','configure-error','station-error','gm-control-error','observer-error','observer-overflow'].includes(event.kind))nativeFailure=id+': '+event.kind+' '+JSON.stringify(event.value);
+            if(['fleet_fault','page-error','page-rejection','configure-error','station-error','gm-control-error','observer-error','observer-overflow'].includes(event.kind)
+              &&!(claim&&event.kind==='fleet_fault'&&event.value.reason==='slot-taken'))nativeFailure=id+': '+event.kind+' '+JSON.stringify(event.value);
           }
         }}).then(r=>{if(!stop&&!stoppedNative.has(id))nativeFailure=id+': native process ended before mixed verdict';return r;})
         .catch(e=>{nativeFailure=id+': '+e;return {failure:String(e)};});
@@ -189,7 +191,10 @@ async function runCase(browser,o,route,runNativeProbe,hooks={}){
     result.digestAfter=new Date().toISOString();step('active commands and browser GM actions complete');
     await wait(async()=>{result.browser=await capture();result.outcome=mixedOutcome(result.browser,result.nativeEvents,{route,digestAfter:result.digestAfter,commandWaves:wave});if(result.outcome.commonDigests.some(d=>!d.agreed))throw new Error('Observed mixed runtime digest disagreement');if(Object.values(result.outcome.native).some(p=>p.errors.length)||result.browser.some(p=>p.errors.length))throw new Error('Observed mixed runtime error');if(!result.outcome.passed)await sleep(850);return result.outcome.passed;},'post-workload six-peer digest agreement');
     result.impairment=await(await fetch(rendezvous+'/__impairment',{signal:AbortSignal.timeout(5000)})).json();verifyMixedImpairment(result,o);step('two matching post-workload digests observed');
-    if(hooks.afterHealthy)await hooks.afterHealthy({result,peers:pages.filter(row=>!row.label.includes('/')),clients,step,stopNative,launchNative,wait,deadline,code,base,query,directory,evaluate});
+    if(hooks.afterHealthy)await hooks.afterHealthy({result,peers:pages.filter(row=>!row.label.includes('/')),clients,step,stopNative,launchNative,
+      commandNative:(id,command)=>fleetCommands.get(id).push(command),
+      commandGm:(id,command)=>{if(id!=='gm-2')throw new Error('Unknown native GM');nativeCommands.push(command);},
+      wait,deadline,code,base,query,directory,evaluate});
     result.status='passed';
   }catch(e){result.status='failed';result.error=String(e.stack||e);result.browser=await capture();result.outcome=mixedOutcome(result.browser,result.nativeEvents,{route,digestAfter:result.digestAfter||result.startedUtc,commandWaves:result.commandWaves||1});}
   finally{
@@ -208,7 +213,10 @@ export async function main(argv=process.argv.slice(2),hooks={}){
   const adapter=o['native-adapter']?pathToFileURL(o['native-adapter']).href:new URL('./fleet-native-probe.mjs',import.meta.url).href;
   const {runNativeProbe}=await import(adapter);const require=createRequire(path.join(o.dependencies,'package.json'));const {chromium}=require('@playwright/test');
   const manifest={kind:hooks.kind||'real mixed browser/native fleet matrix',recoveryProvenance:hooks.provenance||null,status:'running',options:o,sourceRevision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),sourcePatch:execFileSync('git',['diff','HEAD'],{cwd:root,encoding:'utf8'}),runnerSha256:sha(await fs.readFile(fileURLToPath(import.meta.url))),browserHarnessSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-browser-matrix.mjs'))),channelImpairmentSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-channel-impairment.mjs'))),nativeAdapterSha256:sha(await fs.readFile(fileURLToPath(adapter))),binarySha256:sha(await fs.readFile(o.binary)),browserBundleHashes:await bundleHashes(o.dist),nativeBundleHashes:await bundleHashes(o.bundle),limits:['Single-machine loopback',mixedBrowserRuntime(o).limitation,'Six embedded native Station documents plus six browser Station documents','Application-frame impairment; not IP packet loss',hooks.afterHealthy?'Recovery is gated separately in each result.recovery; no mobile/endurance/performance acceptance':'Bounded acceptance subset; no mobile/endurance/performance/recovery acceptance'],results:[]};
-  if(o['build-receipt']){const raw=await fs.readFile(o['build-receipt']);const receipt=JSON.parse(raw);manifest.nativeBuildReceipt={path:o['build-receipt'],sha256:sha(raw),receipt,binaryMatchesRecordedReceipt:receipt.binarySha256===manifest.binarySha256};if(!manifest.nativeBuildReceipt.binaryMatchesRecordedReceipt)throw new Error('Native binary does not match build receipt');}
+  manifest.runnerRevision=manifest.sourceRevision;manifest.runnerPatch=manifest.sourcePatch;
+  Object.assign(manifest,sourceState(o.source));
+  if(o['build-receipt']){const raw=await fs.readFile(o['build-receipt']);const receipt=JSON.parse(raw);manifest.nativeBuildReceipt={path:o['build-receipt'],sha256:sha(raw),receipt,binaryMatchesRecordedReceipt:receipt.binarySha256===manifest.binarySha256};if(!manifest.nativeBuildReceipt.binaryMatchesRecordedReceipt
+    ||manifest.sourcePatch||receipt.dirtyDiff?.length||receipt.sourceRevision!==manifest.sourceRevision||receipt.libraryMtimeRefreshedWithoutByteChange!==true)throw new Error('Native source/binary do not match clean build receipt');}
   if(o['wasm-build-receipt'])manifest.wasmBuildReceipt=await readVerifiedWasmReceipt(o['wasm-build-receipt'],o.source,manifest.browserBundleHashes);
   const save=()=>fs.writeFile(path.join(o.out,'manifest.json'),JSON.stringify(manifest,null,2));await save();let server,browser,browserServer;
   try{server=await serve(o.dist,o.port);browserServer=await chromium.launchServer(mixedBrowserRuntime(o).launch);browser=await chromium.connect(browserServer.wsEndpoint(),{timeout:30000});manifest.browser=browser.version();await save();for(const route of o.routes){const r=await runCase(browser,o,route,runNativeProbe,hooks);manifest.results.push({route,status:r.status,error:r.error});await save();if(r.status!=='passed')break;}manifest.status=manifest.results.every(r=>r.status==='passed')?'passed':'failed';}

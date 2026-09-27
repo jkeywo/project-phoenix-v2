@@ -65,6 +65,29 @@ describe('bounded native runtime bootstrap probe', () => {
     expect(() => instrumentNativeFleetModule('export const changed = true;', 'http://localhost')).toThrow();
     expect(() => instrumentNativeFleetModule('export function createNativeFleetPeer() {}\nexport function createNativeFleetPeer() {}', 'http://localhost')).toThrow();
   });
+  it('holds two-stage claims until scheduled and changes exactly one authenticated incoming command when armed',async()=>{
+    const reports=[],calls=[],controls=[],timers=[];let poll,receiver;
+    const source=`export function createNativeFleetPeer(options) { globalThis.receive=options.send;
+      return {configure(){},update(){},join(...args){globalThis.joinCalls.push(args);return true;}}; }`;
+    const context=vm.createContext({joinCalls:calls,window:{addEventListener(){}},navigator:{userAgent:'test'},
+      setInterval:fn=>{poll=fn;},setTimeout:fn=>{timers.push(fn);},
+      fetch:url=>{if(url.endsWith('/fleet-control'))return Promise.resolve({ok:true,json:async()=>controls.shift()||null});
+        reports.push(JSON.parse(new URL(url).searchParams.get('event')));return Promise.resolve({ok:true});}});
+    vm.runInContext(instrumentNativeFleetModule(source,'http://localhost/token',{claim:'slot-3',deferJoin:true,recoveryControl:true})
+      .replace('export function createNativeFleetPeer','function createNativeFleetPeer'),context);
+    const received=[],peer=context.createNativeFleetPeer({send:row=>received.push(row)});
+    expect(peer.join('secret-code',{},null,'ship')).toBe(true);expect(calls).toHaveLength(0);
+    for(const attempt of ['race','challenge']){controls.push({kind:'join',startAt:Date.now()+1000,attempt});await poll();expect(timers).toHaveLength(1);timers.shift()();}
+    expect(calls).toHaveLength(2);expect(calls[0][2].claim).toBe('slot-3');
+    expect(reports.filter(row=>row.kind==='join-call').map(row=>row.value.attempt)).toEqual(['race','challenge']);
+    controls.push({kind:'diverge'});await poll();receiver=context.receive;
+    const input=()=>({kind:'fleet_frame',authenticated_slot:1,frame:JSON.stringify({t:'tick',d:{from:1,commands:[{origin:1,seq:3,tick:900,ship:'same-ship',payload:{type:'SetBoost',data:{active:true}}}]}})});
+    receiver(input());receiver(input());
+    expect(JSON.parse(received[0].frame).d.commands[0].payload.data.active).toBe(false);
+    expect(JSON.parse(received[1].frame).d.commands[0].payload.data.active).toBe(true);
+    expect(reports.filter(row=>row.kind==='divergence-injected')).toHaveLength(1);
+    expect(JSON.stringify(reports)).not.toContain('secret-code');
+  });
 });
 
 describe('bounded native child cleanup',()=>{

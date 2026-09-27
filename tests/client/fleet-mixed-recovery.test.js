@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {nativeRecoveryPeer,mixedRecoveryOutcome,mixedReplacementOutcome,mixedFailureHook,mixedRecoveryOptions,main} from '../../scripts/fleet-mixed-recovery.mjs';
+import {nativeRecoveryPeer,mixedRecoveryOutcome,mixedReplacementOutcome,mixedDivergenceOutcome,mixedFailureHook,mixedRecoveryOptions,main} from '../../scripts/fleet-mixed-recovery.mjs';
 const labels=['ship-1','ship-2','ship-3','ship-4','gm-1','gm-2'];
 const digest=(slot,tick,value='0123456789abcdef')=>({t:'digest',d:{from:slot,tick,digest:value}});
 function fixture(failure='ship') {
@@ -28,10 +28,35 @@ describe('mixed recovery evidence',()=>{
   for(const peer of e.afterReplacement){peer.frames=[digest(peer.slot,1800),digest(peer.slot,2100)];peer.recovery={replacement:{slot:3,leader:1,boundary_tick:1500,claim_seq:1,result:peer===replacement?'recovered':peer.slot===1?'led':'witnessed'}};}
   e.afterReplacement[0].controlFrames=[{t:'slot-claim',d:{from:1,slot:3,claim_seq:1}}];
   expect(mixedReplacementOutcome(e).passed).toBe(true);
+  e.raceRequired=true;e.winner='ship-replacement';replacement.routes=['ws-relay'];
+  e.race=[{label:'ship-replacement',admitted:true,attempt:{accepted:true,startedMs:1000}},
+    {label:'loser',refused:true,attempt:{accepted:true,startedMs:1050}}];
+  e.challengeTick=1600;e.challenger={label:'loser',refused:true,attempt:{accepted:true,startedMs:2000}};
+  expect(mixedReplacementOutcome(e).passed).toBe(true);
+  e.challenger.refused=false;expect(mixedReplacementOutcome(e).passed).toBe(false);e.challenger.refused=true;
+  e.race[1].attempt.startedMs=1500;expect(mixedReplacementOutcome(e).passed).toBe(false);e.race[1].attempt.startedMs=1050;
   replacement.commands[0].seq=1;expect(mixedReplacementOutcome(e).duplicateOrders).toHaveLength(1);replacement.commands[0].seq=2;
   replacement.commands[0].ship='reset-ship';expect(mixedReplacementOutcome(e).passed).toBe(false);
   replacement.commands[0].ship='ship-3';e.afterReplacement[0].controlFrames.push(e.afterReplacement[0].controlFrames[0]);expect(mixedReplacementOutcome(e).passed).toBe(false);
  });
+});
+
+it('requires native restored state, exact agreement, original ship controls and continuous actual effects together',()=>{
+ const before=fixture().before,after=before.map(peer=>({...structuredClone(peer),frames:[digest(peer.slot,1500),digest(peer.slot,1800)],
+   commands:peer.label.startsWith('ship-')?[...peer.commands,{origin:peer.slot,seq:2,tick:1600,ship:peer.commands[0].ship}]:[],
+   recovery:{divergence:{leader:1,boundary_tick:1200,result:peer.slot===6?'recovered':peer.slot===1?'led':'witnessed'}},errors:[]}));
+ const effectRequest={entity:'ship-1',correlation:'effect',amount_milli_hp:5000};
+ const effects=['gm-1','gm-2'].map(label=>{
+   const events=[{tick:400,category:'damage',detail:{type:'damage',data:{weapon:'gm.direct',amount:5,hull_damage:5}},links:[{role:'victim',entity:{entity_id:'ship-1'}}]}];
+   return {label,oldestTick:5,events,journal:[{correlation:'effect',action_kind:'direct-effect',tick:400,sequence:1,outcome:'applied'}],
+     continuous:{error:null,samples:10,throughTick:1800,events:structuredClone(events)}};
+ });
+ const e={before,after,victim:'gm-2',injected:{from:1,authenticatedSlot:1,tick:800},effectRequest,effectWitnessRequired:true,effectBefore:effects,effectAfter:structuredClone(effects)};
+ expect(mixedDivergenceOutcome(e).passed).toBe(true);
+ for(const mutate of [v=>v.injected.authenticatedSlot=2,v=>v.after[0].frames[0].d.digest='ffffffffffffffff',
+   v=>v.after[1].commands[1].ship='reset',v=>v.effectAfter[1].continuous.error='sampling-gap']){
+   const bad=structuredClone(e);mutate(bad);expect(mixedDivergenceOutcome(bad).passed).toBe(false);
+ }
 });
 
 it('parses opt-in post-fault windows without consuming matrix options or changing defaults',()=>{

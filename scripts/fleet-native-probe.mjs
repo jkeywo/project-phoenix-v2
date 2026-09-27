@@ -37,7 +37,7 @@ export function parseNativeProbeArgs(argv) {
 
 // Wrap only the exported adapter's callbacks. The shipped transport, admission,
 // bridge queues, simulation and renderer remain the code under observation.
-export function instrumentNativeFleetModule(source, endpoint, { gmJoinCode = null, claim = null } = {}) {
+export function instrumentNativeFleetModule(source, endpoint, { gmJoinCode = null, claim = null, recoveryControl = false, deferJoin = false } = {}) {
   const declaration = 'export function createNativeFleetPeer(';
   if (source.split(declaration).length !== 2) throw new Error('Native fleet factory declaration changed');
   return source.replace(declaration, 'function observedNativeFleetPeer(') + `
@@ -48,6 +48,7 @@ export function createNativeFleetPeer(options = {}) {
   window.addEventListener('error', event => report('page-error', {message:event.message,stack:event.error?.stack}));
   window.addEventListener('unhandledrejection', event => report('page-rejection', {message:String(event.reason)}));
   let lastHealth = 0;
+  let armedDivergence = false, injected = false;
   const wrap = name => value => {
     if (name !== 'onHealth' || Date.now() - lastHealth > 1000) { report(name,value); if (name === 'onHealth') lastHealth = Date.now(); }
     return options[name]?.(value);
@@ -55,6 +56,17 @@ export function createNativeFleetPeer(options = {}) {
   const peer = observedNativeFleetPeer({...options,
     onRoster:wrap('onRoster'), onDiag:wrap('onDiag'), onHealth:wrap('onHealth'),
     send(record) {
+      if (armedDivergence && !injected && record.kind === 'fleet_frame') {
+        const frame = typeof record.frame === 'string' ? JSON.parse(record.frame) : record.frame;
+        const command = frame.t === 'tick' && frame.d.commands?.find(row => row.payload?.type === 'SetBoost');
+        if (command) {
+          const original = command.payload.data.active;
+          command.payload.data.active = !original; injected = true;
+          report('divergence-injected',{from:frame.d.from,authenticatedSlot:record.authenticated_slot,
+            origin:command.origin,seq:command.seq,tick:command.tick,ship:command.ship,original,changed:!original});
+          record = {...record,frame:typeof record.frame === 'string' ? JSON.stringify(frame) : frame};
+        }
+      }
       // Never write reconnect capabilities or the unrestricted wire payload.
       if (record.kind === 'fleet_roster') {
         try {
@@ -95,7 +107,32 @@ export function createNativeFleetPeer(options = {}) {
   };
   const join = peer.join;
   const replacementClaim = ${JSON.stringify(claim)};
-  peer.join = (...args) => { if (replacementClaim) args[2] = {...args[2],claim:replacementClaim}; const result = join.apply(peer, args); report('join-call', {role:args[3], accepted:result === true}); return result; };
+  let deferredArgs = null;
+  const executeJoin = (args,attempt=null) => {
+    if (replacementClaim) args[2] = {...args[2],claim:replacementClaim};
+    const startedMs=Date.now(),result=join.apply(peer,args);
+    report('join-call',{role:args[3],accepted:result===true,startedMs,attempt}); return result;
+  };
+  peer.join = (...args) => {
+    if (${JSON.stringify(deferJoin)}) { deferredArgs=args; report('join-deferred',{role:args[3]}); return true; }
+    return executeJoin(args);
+  };
+  ${recoveryControl ? `let controlBusy=false;
+  setInterval(async()=>{
+    if(controlBusy)return; controlBusy=true;
+    try {
+      const response=await fetch(endpoint+'/fleet-control');
+      if(!response.ok)throw new Error('Fleet control HTTP '+response.status);
+      const command=await response.json();
+      if(command?.kind==='join') {
+        if(!deferredArgs)throw new Error('No deferred native join');
+        const args=[...deferredArgs];
+        setTimeout(()=>executeJoin(args,command.attempt),Math.max(0,command.startAt-Date.now()));
+      }
+      if(command?.kind==='diverge') {armedDivergence=true; report('divergence-armed',{});}
+    } catch(error){report('observer-error',{reason:error.message});}
+    finally {controlBusy=false;}
+  },100);` : ''}
   const gmJoinCode = ${JSON.stringify(gmJoinCode)};
   if (gmJoinCode) setTimeout(() => {
     window.phoenixHostLobbyOut.send(JSON.stringify({kind:'join_peer',code:gmJoinCode}));
@@ -169,7 +206,8 @@ export async function runNativeProbe(options) {
   const harnessRoot = path.dirname(fileURLToPath(import.meta.url));
   fs.mkdirSync(path.join(output,'harness'));
   const harnessHashes = {};
-  for (const name of ['fleet-native-probe.mjs','fleet-native-matrix.mjs','fleet-native-workload.mjs']) {
+  for (const name of ['fleet-native-probe.mjs','fleet-native-matrix.mjs','fleet-native-workload.mjs',
+    'fleet-native-recovery.mjs','fleet-mixed-recovery.mjs','fleet-effect-witness.mjs','fleet-browser-recovery.mjs']) {
     const file = path.join(harnessRoot,name);
     fs.copyFileSync(file,path.join(output,'harness',name));
     harnessHashes[name] = fileHash(file);
@@ -188,6 +226,9 @@ export async function runNativeProbe(options) {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (req.method === 'GET' && url.pathname === eventPath + '/control') {
       res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}).end(JSON.stringify(options.nextCommand?.() || null)); return;
+    }
+    if (req.method === 'GET' && url.pathname === eventPath + '/fleet-control') {
+      res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}).end(JSON.stringify(options.nextFleetCommand?.() || null)); return;
     }
     if (req.method !== 'GET' || url.pathname !== eventPath) { res.writeHead(404).end(); return; }
     if ((req.url?.length || 0) > 65536 || events.length >= 20000) {
@@ -236,7 +277,8 @@ export async function runNativeProbe(options) {
       else if (entry.isDirectory()) fs.symlinkSync(input, target, 'junction');
       else if (entry.name === 'index.html') fs.copyFileSync(input, target);
     }
-    const instrumented = instrumentNativeFleetModule(fleetSource, endpoint, {gmJoinCode: options.role === 'gm' ? options['fleet-code'] : null, claim: options.claim || null});
+    const instrumented = instrumentNativeFleetModule(fleetSource, endpoint, {gmJoinCode: options.role === 'gm' ? options['fleet-code'] : null,
+      claim: options.claim || null,recoveryControl:!!options.nextFleetCommand,deferJoin:options.deferJoin===true});
     fs.writeFileSync(path.join(scratchBundle, 'gui/native-fleet-peer.js'), instrumented);
     if (options.workload) {
       const gmPath = path.join(scratchBundle, 'gui/native-gm-workspace.js');

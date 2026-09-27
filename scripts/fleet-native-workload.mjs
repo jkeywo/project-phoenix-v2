@@ -2,6 +2,8 @@
 // They use the normal participant and private-GM adapters, including admission
 // and correlated terminal feedback. No authoritative state is written here.
 // Every telemetry producer has the same explicit size/pending/HTTP failure path.
+import { createEffectWitness } from './fleet-effect-witness.mjs';
+import { captureDirectEffect } from './fleet-browser-recovery.mjs';
 export function nativeObserverReporterScript(endpoint) {
   return `const observerEndpoint = ${JSON.stringify(endpoint)};
   const observerPending = new Set();
@@ -81,6 +83,17 @@ export function mountNativeGmWorkspace(options) {
   let phase = 'Lobby', readyAllowed = ${JSON.stringify(!deferReady)}, readyConfirmed = false, sequence = 0, busy = false;
   let lastMetadata = '';
   const observedActions = new Set();
+  let effectRequest=null;
+  // The embedded engine may lack structuredClone; activity projections contain
+  // only JSON data, so this local copy has the same value semantics.
+  const structuredClone = value => JSON.parse(JSON.stringify(value));
+  const createEffectWitness = ${createEffectWitness.toString()};
+  const captureDirectEffect = ${captureDirectEffect.toString()};
+  setInterval(()=>{
+    if(!effectRequest)return;
+    try { report('effect-witness',captureDirectEffect(effectRequest)); }
+    catch(error){report('observer-error',{reason:'effect-witness: '+error.message});}
+  },500);
   const tryReady = () => {
     if (readyAllowed && !readyConfirmed && phase === 'Lobby' && bridge.getOperator()?.connected) {
       bridge.setReady(true); report('gm-ready-requested',{});
@@ -121,6 +134,15 @@ export function mountNativeGmWorkspace(options) {
       if (command?.kind === 'ready') readyAllowed = true;
       tryReady();
       if (command?.kind === 'force-start') { bridge.forceStart(); report('gm-force-start-requested',{}); }
+      if (command?.kind === 'effect-observe') {
+        effectRequest=command.request;
+        createEffectWitness({...effectRequest,observe:true,maxDurationMs:600000,maxSamples:14000,maxBytes:32*1024*1024});
+        report('effect-observer-started',{});
+      }
+      if (command?.kind === 'effect-apply') {
+        const accepted=window.__hostApplyDirectEffect({...command.request,effect:'damage',scope:'entity',scope_id:null});
+        report('effect-requested',{accepted});
+      }
     } catch (error) { report('gm-control-error',{message:error.message}); }
     finally { busy = false; }
     if (phase !== 'InProgress' || !bridge.getOperator()?.connected) return;

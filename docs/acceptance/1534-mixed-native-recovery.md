@@ -14,11 +14,14 @@ and both build receipts. Keep them unchanged for the run. For example:
 node scripts/fleet-mixed-recovery.mjs --failure ship --routes ws-relay --render --seconds 3 --deadline 295 --binary <phoenix-host.exe> --bundle <native-dist> --dist <browser-dist> --source <source-checkout> --build-receipt <native-receipt.json> --wasm-build-receipt <wasm-receipt.json> --out <new-artifact-directory>
 ```
 
-Repeat with `--failure gm`, `leader`, or `replacement` in new output directories.
+Repeat with `--failure gm`, `leader`, `replacement`, or `divergence` in new output directories.
 The `ship` and `gm` cases terminate native ship 3 or native GM 2; `leader` closes
 the browser owner's simulation page. `replacement` first verifies native ship 3
-loss, then starts a fresh native process whose ordinary fleet join requests the
-same technical slot. The observer supplies the existing `join` API's claim
+loss, then releases two prebooted native contenders to request the same technical
+slot within 250 ms. Exactly one must be admitted and the other refused with
+`slot-taken`. After restoration the loser challenges the connected winner and
+must again be refused; two matching checkpoints must follow that challenge.
+The observer supplies the existing `join` API's claim
 argument; it does not change admission or write simulation state. Each process
 has a private identity-store directory. No reconnect credential is logged.
 
@@ -53,6 +56,12 @@ buffers remain bounded; overflow fails the run.
   and claim sequence, one authoritative SlotClaim, the original technical slot,
   the old ship entity ID in a new post-restore command, and two fresh matching
   six-peer checkpoints.
+- Divergence changes exactly one incoming authenticated `SetBoost` command on
+  native GM 2. Both GMs continuously witness one earlier 5 HP direct damage
+  effect with the shared bounded-ring reducer. Recovery requires the agreed
+  snapshot boundary, two matching later checkpoints, original ship controls,
+  no repeated outgoing orders and unchanged effect/journal evidence. A sampling
+  gap or witness overflow fails the case.
 
 Raw native events, process manifests, source/bundle/binary hashes, browser
 observations, relay counters and recovery verdicts remain in the ignored output
@@ -61,14 +70,35 @@ directory. Overflow is a failure. A missing observation never becomes a pass.
 ## Limits
 
 This is one-machine loopback, with rendered browser WASM and real native
-Bevy/Ultralight. The native replacement case has one candidate; the separate
-browser replacement helper owns the simultaneous race and connected-holder
-challenge. This runner does not claim native owner promotion (its original
-owner is a browser), arbitrary packet-loss tolerance, divergence restoration,
-endurance, physical-network behavior or complete effect-count auditing.
+Bevy/Ultralight. Its original owner is a browser; the all-native runner below
+exercises native owner promotion. These runners do not claim arbitrary
+packet-loss tolerance, endurance, physical-network behavior or complete
+effect-count auditing beyond the single witnessed damage effect.
 An old-owner suffix retained only by a non-successor has no transferable origin
 proof and intentionally remains held/refused. A failed owner-continuation cell
 must retain that evidence rather than weaken the provenance gate.
+
+## All-native recovery
+
+Start the ordinary loopback rendezvous development service separately and keep
+its log. Run six actual native hosts with a retained clean source/binary build
+receipt, twelve embedded Station documents and two embedded GM workspaces:
+
+```powershell
+node scripts/fleet-native-recovery.mjs --failure ship --binary <phoenix-host.exe> --bundle <native-dist> --source <clean-source-checkout> --build-receipt <native-receipt.json> --out <new-artifact-directory> --rendezvous http://127.0.0.1:18441 --origin http://127.0.0.1:18440 --seconds 900 --workload true
+```
+
+Repeat for `gm`, `leader`, `replacement` and `divergence`. Native transport is
+relay only; native direct WebRTC and automatic RTC fallback are N/A. Mixed runs
+still cover direct, forced relay and fallback on their browser legs. The native
+runner uses the same actual recovery projection and evidence gates as the mixed
+runner; it never supplies a synthetic native tick or phase. Its `healthy` record
+is captured before the fault; `recoveryPassed` is the post-fault verdict.
+
+Runner source can be a reviewed harness commit newer than the built product.
+The mixed manifest records runner revision/patch separately from the explicit
+product source checkout, both receipt hashes and all instrumented helper hashes.
+No runtime pass follows from implementing or testing these hooks alone.
 
 ## First rendered mixed measurement
 

@@ -66,25 +66,31 @@ export function nativeMatrixOutcome(events, {digestAfter = 0} = {}) {
       && gms.every(gm => gm.applied >= 2) && commonDigests.length >= 2 && commonDigests.every(row => row.agreed)};
 }
 
-export async function runNativeAdmissionMatrix(options) {
+export async function runNativeAdmissionMatrix(options, hooks = {}) {
   const output = path.resolve(options.out);
   if (fs.existsSync(output)) throw new Error('Matrix output already exists');
   fs.mkdirSync(output, {recursive:true});
-  const events = new Map(), commands = new Map(), promises = [];
+  const events = new Map(), commands = new Map(), fleetCommands = new Map(), promises = [], runsById = new Map(), stopped = new Set();
+  const result = {nativeEvents:{},steps:[]};
+  const step = name => { result.steps.push({name,utc:new Date().toISOString()}); process.stderr.write(name+'\n'); };
   let fleetCode, failure, stop = false, stage = 'owner';
   let forceRequested = false, digestAfter = 0;
   const started = Date.now(), deadline = started + options.seconds * 1000;
-  const launch = (id,role,code) => {
-    events.set(id,[]); commands.set(id,[]);
-    const promise = runNativeProbe({...options,role,'fleet-code':code,out:path.join(output,id),shouldStop:() => stop,
+  const launch = (id,role,code,extra = {}) => {
+    if (runsById.has(id)) throw new Error('Duplicate native probe '+id);
+    events.set(id,[]); commands.set(id,[]); fleetCommands.set(id,[]);
+    result.nativeEvents[id] = events.get(id);
+    const promise = runNativeProbe({...options,...extra,role,'fleet-code':code,out:path.join(output,id),shouldStop:() => stop || stopped.has(id),
       nextCommand:() => commands.get(id).shift(),
-      onEvent:event => { if (stop) return; events.get(id).push(event); if (['fleet_fault','page-error','page-rejection','configure-error','station-error','gm-control-error','observer-overflow','observer-error'].includes(event.kind)) failure = `${id}: ${event.kind} ${JSON.stringify(event.value)}`; if (id === 'ship-1' && event.kind === 'fleet_code') fleetCode = event.value.code; },
-    }).then(result => { if (!stop && !result.outcome?.bootstrapObserved) failure = `${id} stopped before successful admission`; return result; })
+      nextFleetCommand:hooks.afterHealthy ? () => fleetCommands.get(id).shift() : undefined,
+      onEvent:event => { if (stop || stopped.has(id)) return; events.get(id).push(event); if (['fleet_fault','page-error','page-rejection','configure-error','station-error','gm-control-error','observer-overflow','observer-error'].includes(event.kind)
+        && !(extra.claim && event.kind==='fleet_fault' && event.value.reason==='slot-taken')) failure = `${id}: ${event.kind} ${JSON.stringify(event.value)}`; if (id === 'ship-1' && event.kind === 'fleet_code') fleetCode = event.value.code; },
+    }).then(result => { if (!stop && !stopped.has(id)) failure = `${id} stopped before matrix verdict`; return result; })
       .catch(error => { failure = `${id}: ${error.message}`; return {failure}; });
-    promises.push(promise);
+    promises.push(promise); runsById.set(id,promise); return promise;
   };
   const waitFor = async predicate => {
-    while (!predicate()) {
+    while (!(await predicate())) {
       if (failure) throw new Error(failure);
       if (Date.now() >= deadline) throw new Error(`Native matrix deadline expired during ${stage}`);
       await new Promise(resolve => setTimeout(resolve,100));
@@ -121,6 +127,24 @@ export async function runNativeAdmissionMatrix(options) {
       digestAfter = Date.now();
       stage = 'matching native digests after authoritative action receipts';
       await waitFor(() => nativeMatrixOutcome(events,{digestAfter}).sixPeerWorkloadPassed);
+      result.healthy = nativeMatrixOutcome(events,{digestAfter});
+      step('six native peers healthy with two post-workload checkpoints');
+      if (hooks.afterHealthy) {
+        stage = 'recovery';
+        await hooks.afterHealthy({result,peers:[],step,deadline,wait:waitFor,
+          stopNative:async id => {
+            if (!runsById.has(id) || stopped.has(id)) throw new Error('Native probe is not running: '+id);
+            stopped.add(id);
+            const run = await runsById.get(id);
+            if (run.failure || !run.cleanupExitObserved) throw new Error('Native fault exit unverified: '+id);
+            return {id,cleanupExitObserved:true,finishedAt:run.finishedAt,binarySha256:run.binary.sha256};
+          },
+          launchNative:(id,extra) => launch(id,id.startsWith('gm')?'gm':'ship',fleetCode,extra),
+          commandNative:(id,command) => fleetCommands.get(id).push(command),
+          commandGm:(id,command) => commands.get(id).push(command),
+          evaluate:() => { throw new Error('Native hook cannot evaluate a browser page'); },
+        });
+      }
     }
   } catch (error) { failure = error.message; }
   finally { stop = true; }
@@ -129,6 +153,7 @@ export async function runNativeAdmissionMatrix(options) {
   const runs = await Promise.all(promises);
   const outcome = nativeMatrixOutcome(events,{digestAfter});
   const summary = {kind:options.workload ? 'native-six-peer-workload' : 'native-six-peer-admission',elapsedMs:Date.now()-started,
+    ...result,recoveryPassed:hooks.afterHealthy ? !failure && (result.recovery?.replacementOutcome || result.recovery?.outcome)?.passed === true : undefined,
     failure:failure || null,lastStage:stage,forceRequested,digestAfter:digestAfter ? new Date(digestAfter).toISOString() : null,...outcome,
     sixPeerAdmissionPassed:!failure && outcome.sixPeersAdmitted && outcome.observedRelay && Object.values(outcome.peers).every(peer => !peer.errors.length) && runs.length === 6 && runs.every(run => !run.failure && run.outcome?.bootstrapObserved),
     sixPeerWorkloadPassed:!failure && outcome.sixPeerWorkloadPassed && runs.length === 6 && runs.every(run => !run.failure && run.outcome?.bootstrapObserved),

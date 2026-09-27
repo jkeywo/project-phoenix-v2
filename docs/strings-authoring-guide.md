@@ -276,6 +276,7 @@ one over an allowlist of wire-visible `src/` modules:
 | a text node in markup, whether in an `.html` file or a component's template literal | `<span class="bar-label">Station</span>` | `scripts/strings-markup.mjs` |
 | a text-bearing attribute | `<ph-station-damage label="Core">` | `scripts/strings-markup.mjs` |
 | prose composed in Rust in a wire-visible module (production region only) | `format!("Designating target: {label}")` | `scripts/strings-rust.mjs` |
+| a literal passed directly to the host save/recovery status sink | `showSnapshotStatus(false, 'Resume failed')` | `scripts/strings-literals.mjs` |
 
 The attribute allowlist is `alt`, `aria-label`, `data-screen-label`, `label`,
 `placeholder`, `title`. It is an **allowlist by design**: a denylist would
@@ -328,7 +329,11 @@ The gate reports the tag itself; write `${t('id')}` in the template.
   verifies the ids it can discover. The generic JS scanner hole itself remains,
   so a *future* unrelated helper that
   concatenates English into `norm.title` would still slip through — prefer
-  `t(id)` at the composition site.
+  `t(id)` at the composition site. The host snapshot status sink also catches
+  direct literal arguments; `src/server/bridge.rs` sends semantic outcomes to
+  `gui/snapshot-status.js`, which resolves translated copy at display time.
+  Browser storage and version details remain visible as technical parameters
+  inside translated diagnostic frames.
 - **Any DOM property or attribute other than `textContent` set from JS**
   (`el.title = 'Close'`, `el.setAttribute('placeholder', 'Your name')`), and
   `.innerHTML` built by concatenation rather than by a template literal.

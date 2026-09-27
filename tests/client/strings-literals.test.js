@@ -4,7 +4,17 @@ import {
   isTokenTest,
   literalRuns,
   untranslatedTextContent,
+  untranslatedSnapshotStatus,
 } from '../../scripts/strings-literals.mjs';
+
+describe('host save status literals', () => {
+  it('reports a literal recovery sentence passed through a helper', () => {
+    expect(untranslatedSnapshotStatus("showSnapshotStatus(false, 'Resume failed');"))
+      .toEqual(['Resume failed']);
+    expect(untranslatedSnapshotStatus("showSnapshotStatus(false, t('server.snapshot.no_run'));"))
+      .toEqual([]);
+  });
+});
 
 describe('literalRuns', () => {
   it('reads a single-quoted run', () => {

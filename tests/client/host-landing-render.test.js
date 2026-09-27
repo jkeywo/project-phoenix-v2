@@ -571,9 +571,9 @@ describe('renderHostLanding — the mod-pack shelf (issue #1366)', () => {
     renderHostLanding(doc, shelfVm({
       packs: { ...SHELF, offered: [], scan_error: 'mods: not found' },
     }), t);
-    // The id says which emptiness; the host's own sentence names the path.
+    // The translated frame retains the host's own filesystem detail.
     expect(text(doc, 'landing-packs-empty'))
-      .toBe('server.landing.packs.scan_failed mods: not found');
+      .toBe('server.landing.packs.scan_failed_detail:{"detail":"mods: not found"}');
     // …and it goes away entirely the moment there is something to list.
     renderHostLanding(doc, shelfVm(), t);
     expect(el(doc, 'landing-packs-empty').style.display).toBe('none');
@@ -651,6 +651,23 @@ describe('renderHostLanding — the mod-pack shelf (issue #1366)', () => {
     expect(drawn[1]).toContain('scenarios.toml');
     expect(drawn[1]).toContain('missing its required scenarios.toml manifest');
     expect(doc.querySelector('.landing-note-bad')).not.toBe(null);
+  });
+
+  it('uses stable ids for native shelf refusals while preserving file and OS detail', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: {
+        ...SHELF,
+        findings: [
+          { severity: 'error', category: 'unknown-pack', file: 'gone.zip', message: 'old English' },
+          { severity: 'error', category: 'unreadable-archive', file: 'locked.zip', message: 'access denied' },
+        ],
+      },
+    }), t);
+    const drawn = notes(doc).join(' ');
+    expect(drawn).toContain('server.landing.packs.unknown_pack:{"file":"gone.zip"}');
+    expect(drawn).toContain('server.landing.packs.unreadable_archive:{"file":"locked.zip","detail":"access denied"}');
+    expect(drawn).not.toContain('old English');
   });
 
   it('names which pack won a path two of them carry', () => {

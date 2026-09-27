@@ -3094,7 +3094,11 @@ fn drain_snapshot_requests(world: &mut World) {
         }
         let intent = edge::complete_save_intent(&token);
         let source = intent.as_ref().map_or(SNAPSHOT_SAVE, intent_source);
-        set_snapshot_status(false, source, "there is no run in progress to save");
+        set_snapshot_status(
+            false,
+            source,
+            serde_json::json!({"kind": "no_run"}).to_string(),
+        );
     }
 }
 
@@ -3128,15 +3132,11 @@ fn drain_lifecycle_saves(world: &mut World) {
             continue;
         };
         let source = intent_source(&intent);
-        let message = match refusal.reason {
-            crate::save_slots::ManualSaveRefusalReason::PhaseChanged { .. } => {
-                "there is no run in progress to save"
-            }
-            crate::save_slots::ManualSaveRefusalReason::StartupRestorePending => {
-                "the save request was cancelled while a local session restore was starting"
-            }
+        let kind = match refusal.reason {
+            crate::save_slots::ManualSaveRefusalReason::PhaseChanged { .. } => "no_run",
+            crate::save_slots::ManualSaveRefusalReason::StartupRestorePending => "restore_starting",
         };
-        set_snapshot_status(false, source, message);
+        set_snapshot_status(false, source, serde_json::json!({"kind": kind}).to_string());
     }
 
     loop {
@@ -3154,7 +3154,7 @@ fn drain_lifecycle_saves(world: &mut World) {
                     set_snapshot_status(
                         false,
                         SNAPSHOT_SAVE,
-                        format!("the save could not be written: {error:?}"),
+                        serde_json::json!({"kind": "write_failed", "params": {"detail": format!("{error:?}")}}).to_string(),
                     );
                 }
             }
@@ -3190,12 +3190,18 @@ fn drain_lifecycle_saves(world: &mut World) {
                 };
                 match written {
                     Ok(()) => {
-                        set_snapshot_status(true, source, format!("saved at tick {tick}"));
+                        set_snapshot_status(
+                            true,
+                            source,
+                            serde_json::json!({"kind": "saved_at_tick", "params": {"tick": tick}})
+                                .to_string(),
+                        );
                     }
                     Err(error) => set_snapshot_status(
                         false,
                         source,
-                        format!("the save could not be written: {error}"),
+                        serde_json::json!({"kind": "write_failed", "params": {"detail": error}})
+                            .to_string(),
                     ),
                 }
             }
@@ -3216,26 +3222,30 @@ fn drain_snapshot_restore(world: &mut World) {
         return;
     };
     let (ok, message) = match outcome {
-        RestoreOutcome::Applied { tick } => (true, format!("resumed at tick {tick}")),
-        RestoreOutcome::Failed(failure) => (false, match failure {
-            RestoreFailure::NoSnapshot => {
-                "that save carries no captured state to resume from".to_string()
-            }
-            RestoreFailure::LayerFailed { path } => format!(
-                "the save requires world layer '{path}', but that layer could not be reconstructed"
-            ),
-            RestoreFailure::NotReady { tick, entities } => format!(
-                "this session never built the world that save was taken in (the save wanted {entities} ship(s) at tick {tick})"
-            ),
-            RestoreFailure::DigestMismatch { expected, actual } => format!(
-                "the save did not restore cleanly (recorded {expected:016x}, restored {actual:016x})"
-            ),
-            RestoreFailure::Incomplete { tick, gaps } => {
-                format!("resumed at tick {tick} with {gaps} missing entities")
-            }
-        }),
+        RestoreOutcome::Applied { tick } => (
+            true,
+            serde_json::json!({"kind": "resumed_at_tick", "params": {"tick": tick}}),
+        ),
+        RestoreOutcome::Failed(failure) => (
+            false,
+            match failure {
+                RestoreFailure::NoSnapshot => serde_json::json!({"kind": "no_state"}),
+                RestoreFailure::LayerFailed { path } => {
+                    serde_json::json!({"kind": "layer_failed", "params": {"path": path}})
+                }
+                RestoreFailure::NotReady { tick, entities } => {
+                    serde_json::json!({"kind": "not_ready", "params": {"tick": tick, "entities": entities}})
+                }
+                RestoreFailure::DigestMismatch { expected, actual } => {
+                    serde_json::json!({"kind": "digest_mismatch", "params": {"expected": format!("{expected:016x}"), "actual": format!("{actual:016x}")}})
+                }
+                RestoreFailure::Incomplete { tick, gaps } => {
+                    serde_json::json!({"kind": "incomplete", "params": {"tick": tick, "gaps": gaps}})
+                }
+            },
+        ),
     };
-    set_snapshot_status(ok, SNAPSHOT_RESUME, message);
+    set_snapshot_status(ok, SNAPSHOT_RESUME, message.to_string());
 }
 
 /// Set one host diagnostic surface by its catalogue-owned wire name.

@@ -15,6 +15,7 @@ entities:
         - "[ai] Workshop consumes the retained composition report. Its Localisation panel shows missing/invalid/stale/conflict counts and per-id winner/source/provenance, while Refresh source metadata is an explicit undoable edit carried by ordinary Save/Export."
         - "[ai] Invalid and stale values remain in the author report while the player lookup uses English. Diagnostics therefore do not leak into Console copy and translators do not lose the work they must refresh."
         - "[ai] Numeric presentation parameters are formatted in the viewer's private locale from JSON numbers, while explicit typed ISO date/time envelopes format in UTC. Counted String Id families select a locale plural category before interpolation, and incomplete or invalid translated forms keep author diagnostics plus effective-English fallback. This changes presentation only: protocol identities, gameplay quantities and simulation state retain their original values."
+        - "[ai] Browser host setup, save and restore diagnostics use semantic outcome kinds from the local Rust bridge. The host resolves String Ids at its display edge; technical browser storage and version details remain explicit parameters. This presentation bridge does not change snapshot admission or captured state."
     architecture:
       kind: client-presentation-service
       authority: non-authoritative
@@ -22,8 +23,8 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/native-gm-workspace.js, gui/native-workshop.js, gui/viewscreen-hud.html, src/native_host/viewscreen_locale.rs, src/native_host/panes/operator_storage.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, editor/mod-pack-export.js, editor/mod-pack-workspace.js, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
-      tests: [npx vitest run tests/client/string-catalogue.test.js tests/client/locale-preference.test.js tests/client/extract-strings.test.js editor/tests/workshop-localisation.test.js editor/tests/mod-pack-export.test.js]
+      paths: [gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/native-gm-workspace.js, gui/native-workshop.js, gui/viewscreen-hud.html, src/native_host/viewscreen_locale.rs, src/native_host/panes/operator_storage.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, server.html, src/server/bridge.rs, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, editor/mod-pack-export.js, editor/mod-pack-workspace.js, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
+      tests: [npx vitest run tests/client/string-catalogue.test.js tests/client/locale-preference.test.js tests/client/extract-strings.test.js tests/client/host-journey-localisation.test.js tests/client/snapshot-status.test.js editor/tests/workshop-localisation.test.js editor/tests/mod-pack-export.test.js]
 
   - component: client-console-registry
     core:

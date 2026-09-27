@@ -210,8 +210,16 @@ test('failed startup verification reports once and releases browser save capture
   await page.bringToFront();
   await page.waitForFunction(() => !window.wasm_resume_pending(), null, { timeout: 30_000 });
   await expect.poll(() => page.evaluate(() =>
-    window.__restoreOutcomes.filter((value) => value.split('\t')[1] === 'resume')))
-    .toEqual([expect.stringContaining('error\tresume\tthe save did not restore cleanly')]);
+    window.__restoreOutcomes
+      .filter((value) => value.split('\t')[1] === 'resume')
+      .map((value) => {
+        const [status, source, ...payload] = value.split('\t');
+        return { status, source, ...JSON.parse(payload.join('\t')) };
+      })))
+    .toEqual([expect.objectContaining({
+      status: 'error', source: 'resume', kind: 'digest_mismatch',
+      params: expect.objectContaining({ expected: expect.any(String), actual: expect.any(String) }),
+    })]);
   const after = await createNamedSave(page, 'After failed restore');
   expect(Number(after.capture_tick)).toBeGreaterThanOrEqual(Number(saved.capture_tick));
   const terminal = await page.evaluate(() =>
@@ -389,7 +397,7 @@ test('local save slots complete their browser lifecycle and restore only in a fr
   catalogue.off('console', rememberConsole);
 
   // Preserve every status paint across the four-second visual fade. The Rust
-  // bridge emits `ok/resumed at tick N` only after applying the snapshot,
+  // bridge emits an `ok/resume` semantic outcome only after applying the snapshot,
   // recomputing the authoritative world digest, matching the recorded digest,
   // and finding no restore gaps. Refusal, corruption and abandonment all emit
   // `failed` instead, so none can satisfy the assertion below.
@@ -447,7 +455,9 @@ test('local save slots complete their browser lifecycle and restore only in a fr
   );
   const restoreOutcome = await restoreOutcomeHandle.jsonValue();
   expect(restoreOutcome.className.split(/\s+/)).toContain('ok');
-  expect(restoreOutcome.text).toBe(`resumed at tick ${saved.tick}`);
+  expect(restoreOutcome.text).toBe(await catalogue.evaluate(
+    (tick) => window.phStrings.t('server.snapshot.resumed_at_tick', { tick }), saved.tick,
+  ));
 
   // The saved non-default state came back through an authoritative blackboard,
   // while the mirrored logical tick resumed at (or just after) the exact tick

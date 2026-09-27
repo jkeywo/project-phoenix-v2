@@ -847,7 +847,7 @@ fn apply_mod_pack_choice(
                     findings: vec![packs::PackFinding::error(
                         "unreadable-archive",
                         &pack.file,
-                        format!("{} could not be read: {e}", path.display()),
+                        e.to_string(),
                     )],
                 },
                 Ok(bytes) => {

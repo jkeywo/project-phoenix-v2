@@ -43,7 +43,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildTable, parseCsv } from '../gui/strings.js';
 import { rowLineNumbers } from './strings-csv.mjs';
-import { untranslatedTextContent } from './strings-literals.mjs';
+import { untranslatedTextContent, untranslatedSnapshotStatus } from './strings-literals.mjs';
 import { lineOf, untranslatedMarkup } from './strings-markup.mjs';
 import { isLocalisable } from './strings-rules.mjs';
 import { coordinationPresentationIds, proseLiterals } from './strings-rust.mjs';
@@ -392,6 +392,12 @@ for (const file of codeFiles) {
   for (const text of untranslatedTextContent(src)) {
     if (devFacing.some((d) => text.includes(d))) continue;
     warnings.push(`${rel(file)}: hardcoded textContent "${text}" — not localised`);
+  }
+
+  if (rel(file) === 'server.html') {
+    for (const text of untranslatedSnapshotStatus(src)) {
+      warnings.push(`${rel(file)}: hardcoded save/recovery status "${text}" — not localised`);
+    }
   }
 
   for (const found of untranslatedMarkup(src, file.endsWith('.html'))) {

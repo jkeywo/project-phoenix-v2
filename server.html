@@ -1579,13 +1579,9 @@
     // version gate. Neither can return its answer to the caller, so both post
     // it and the host page collects it here.
     //
-    // The one rule that matters: the message is Rust's, rendered verbatim. For
-    // a refused resume it is `vellum_save::Moved`'s own sentence, which names
-    // WHICH version dimension moved; for a failed save it is the browser's own
-    // exception text, which is how a host learns the word QuotaExceededError.
-    // Paraphrasing either here would throw away the only part worth reading —
-    // which is also why these strings are not string-table ids: they are
-    // composed in Rust at the moment of failure, not chosen from a list.
+    // Rust sends a semantic outcome and parameters; translate it at this
+    // display edge. External storage and version details remain visible inside
+    // a translated frame, including useful names such as QuotaExceededError.
     var _snapshotStatusTimer = null;
     function showSnapshotStatus(ok, message) {
       var el = document.getElementById('snapshot-status');
@@ -1610,7 +1606,7 @@
     }
 
     // Poll the drained status. Rust hands back "" (nothing to report) or
-    // "<ok|error>\t<save|resume>\t<sentence>"; taking it on read is what makes
+    // "<ok|error>\t<save|resume>\t<outcome>"; taking it on read is what makes
     // a poll safe — each outcome is delivered exactly once.
     function pollSnapshotStatus() {
       if (typeof wasm_snapshot_status !== 'function') return;
@@ -1622,7 +1618,7 @@
       var ok = parts[0] === 'ok';
       // Only the message may contain a tab, so everything past the second one
       // is rejoined rather than dropped.
-      var message = parts.slice(2).join('\t');
+      var message = window.phSnapshotStatus.snapshotDiagnosticText(parts.slice(2).join('\t'));
       showSnapshotStatus(ok, message);
       if (parts[1] === 'save') {
         if (window.phSaveSlotsController) {
@@ -2979,6 +2975,8 @@
     // mechanics of both are in a module so vitest can reach them.
     import * as snapshotTransfer from './gui/snapshot-transfer.js';
     window.phSnapshotTransfer = snapshotTransfer;
+    import * as snapshotStatus from './gui/snapshot-status.js';
+    window.phSnapshotStatus = snapshotStatus;
     import * as saveSlots from './gui/save-slots.js';
     window.phSaveSlots = saveSlots;
     // Peer-local Store identity is an async serialized claim (Web Lock first,
@@ -8924,12 +8922,10 @@ async function startServer() {
         ? window.phSaveSlots.startPreparationResult(refusal)
         : { ok: !refusal, message: refusal };
       if (!startAnswer.ok) {
-        // `vellum_save::Moved`'s own sentence, verbatim — it names which
-        // version dimension moved, which no phoenix-invented status would.
         // Shown, not logged: the host is about to play a session they think
         // they resumed, and a console.warn tells nobody who is not looking at
         // DevTools (issue #862 AC4).
-        showSnapshotStatus(false, startAnswer.message);
+        showSnapshotStatus(false, t('server.snapshot.resume_refused', { detail: startAnswer.message }));
         console.warn('[Phoenix] the saved session was refused: ' + startAnswer.message);
       }
       // Strip the parameter either way. It has been consumed — a refused
@@ -8946,7 +8942,7 @@ async function startServer() {
     }
   } catch (e) {
     console.error('[Phoenix] resume preparation failed:', e);
-    showSnapshotStatus(false, 'the saved session could not be prepared: ' + e);
+    showSnapshotStatus(false, t('server.snapshot.prepare_resume_failed', { detail: String(e) }));
   }
 
   // The IMPORT half of the same gate (issue #866), at the same point and for
@@ -8971,7 +8967,7 @@ async function startServer() {
     }
   } catch (e) {
     console.error('[Phoenix] save import failed:', e);
-    showSnapshotStatus(false, 'the saved game could not be prepared: ' + e);
+    showSnapshotStatus(false, t('server.snapshot.prepare_import_failed', { detail: String(e) }));
   }
 
   // This is the first point at which every local prerequisite has succeeded:
@@ -9059,7 +9055,7 @@ window.addEventListener('TrunkApplicationStarted', () => {
     // same way, so they say it in one place rather than in two copies that can
     // drift (issue #866 added the second caller).
     function reportNoSimulationToSave() {
-      showSnapshotStatus(false, 'the simulation is not running yet, so there is nothing to save');
+      showSnapshotStatus(false, t('server.snapshot.no_run'));
     }
     window.__hostSaveSnapshot = function() {
       // Fire-and-forget: the capture itself is taken by a Bevy system on the

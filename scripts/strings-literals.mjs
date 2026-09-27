@@ -143,3 +143,13 @@ export function untranslatedTextContent(src) {
   }
   return found;
 }
+
+/** Literal messages passed to the host's save/recovery status sink. */
+export function untranslatedSnapshotStatus(src) {
+  const found = [];
+  const calls = /showSnapshotStatus\s*\(\s*(?:true|false)\s*,\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g;
+  for (const match of src.matchAll(calls)) {
+    if (isDisplayText(match[2])) found.push(match[2]);
+  }
+  return found;
+}

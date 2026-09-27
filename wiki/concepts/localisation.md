@@ -2,7 +2,7 @@
 title: Localisation
 type: concept
 tags: [localisation, strings, client, display-text]
-sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md]
+sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, src/server/bridge.rs, server.html, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md, docs/acceptance/1538-localised-host-journey.md]
 updated: 2026-09-27
 ---
 
@@ -14,6 +14,10 @@ the wire untouched, and the client resolves them once at the message boundary
 (`localiseTree()` in `gui/strings.js`, applied in `gui/connection-manager.js`).
 Client-side chrome resolves through `t(id, params)` and `data-i18n` attributes,
 loaded at boot by `gui/strings-boot.js`.
+The browser host's one-shot save and restore status bridge is a separate
+presentation edge: Rust sends an outcome kind and typed parameters, and
+`gui/snapshot-status.js` resolves its String Id at the host page. External
+storage and version error details remain parameters within translated frames.
 
 Ordinary mods can carry a partial `assets/strings/strings.csv`. Welcome projects
 those catalogues in load order and `gui/string-catalogue.js` composes them over

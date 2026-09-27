@@ -340,7 +340,10 @@ facts alongside the public `GmHealthProjection` on browser and native fleet
 surfaces. Its stable polite live region preserves focus across updates. The
 four-ship/two-GM support threshold produces a warning; it does not refuse larger
 fleets. The separate transport allocation bound is 32 peers. Public health is
-published for ordinary fleet ships as well as GM-presenting peers.
+published for ordinary fleet ships as well as GM-presenting peers. Peer health
+rows resolve GM correlation ids through the public operator-name projection
+before rendering, while the real-browser matrix records the visible status
+region and retry transitions from its running documents.
 
 - [Architecture](./architecture.md) · [Message Flow](./message-flow.md)
 - [Player](../entities/player.md) · [Session](../entities/session.md)

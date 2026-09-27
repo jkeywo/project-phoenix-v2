@@ -3,6 +3,8 @@ import { optionsFrom, verifyEvidence, verifyImpairment } from '../../scripts/fle
 
 function evidence(route = 'direct') {
   const state = (i = 0) => ({ fleet: { role: i < 4 ? 'ship' : 'gm' }, phase: 'InProgress', mesh: { slot: i + 1, in_fleet: true, peers: [1, 2, 3, 4, 5], peers_heard: [1, 2, 3, 4, 5], samples: 1, agreed: true },
+    fleetHealth: { visible: route !== 'direct', text: route === 'direct' ? '' : 'Peer: carried by the join service', role: 'status', ariaLive: 'polite', tabIndex: 0 },
+    fleetHealthHistory: route === 'automatic-fallback' ? ['Peer: connecting or retrying (attempt 4).'] : [],
     outcomes: [{ correlation: 'matrix-1-captain-0', outcome: 'Applied' }],
     relayFrames: 20, signalOffersSent: route === 'ws-relay' ? 0 : 1, relayReady: route === 'direct' ? 0 : 1,
     rtc: route === 'direct' ? [{ connectionState: 'connected', selected: [{ state: 'succeeded', localType: 'host', remoteType: 'host', bytesReceived: 10 }] }] : [] });
@@ -35,6 +37,14 @@ describe('real browser matrix evidence gates', () => {
   it('requires an attempted RTC connection before claiming automatic fallback', () => {
     const row = evidence('automatic-fallback'); row.peers[1].state.signalOffersSent = 0;
     expect(() => verifyEvidence(row)).toThrow('never attempted RTC');
+  });
+  it('requires the actual operator DOM to show relay and retry states', () => {
+    const relay = evidence('ws-relay'); relay.peers[2].state.fleetHealth.text = '';
+    expect(() => verifyEvidence(relay)).toThrow('does not explain the relay route');
+    const fallback = evidence('automatic-fallback'); fallback.peers[1].state.fleetHealthHistory = [];
+    expect(() => verifyEvidence(fallback)).toThrow('never displayed exhausted direct retries');
+    const inaccessible = evidence(); inaccessible.peers[0].state.fleetHealth.ariaLive = null;
+    expect(() => verifyEvidence(inaccessible)).toThrow('absent from the operator DOM');
   });
   it('requires real roles, distinct slots and an exchanged digest', () => {
     const row = evidence(); row.peers[5].state.fleet.role = 'ship';

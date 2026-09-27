@@ -75,4 +75,19 @@ describe('fleet operator health', () => {
     expect(document.body.textContent).toContain(t('server.gm.health.state.recovering'));
     expect(document.body.textContent).not.toContain(t('server.gm.health.state.stale'));
   });
+
+  it('uses public GM names while keeping correlation ids out of the displayed health', () => {
+    const view = panel();
+    view.health({ tick: 31, alerts: [],
+      operators: [{ id: 'gm-internal-correlation', name: 'Morgan', state: 'disconnected' }],
+      peers: [{ id: 'public-gm', operators: ['gm-internal-correlation'], state: 'disconnected' }],
+    });
+    const region = document.querySelector('[data-fleet-health]');
+    expect(region.textContent).toContain('Morgan');
+    expect(region.textContent).not.toContain('gm-internal-correlation');
+    view.health({ tick: 32, alerts: [], peers: [{ id: 'public-gm',
+      operators: ['gm-internal-correlation'], state: 'recovering' }] });
+    expect(region.textContent).toContain(t('server.fleet.health.link'));
+    expect(region.textContent).not.toContain('gm-internal-correlation');
+  });
 });

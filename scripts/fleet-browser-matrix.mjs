@@ -48,6 +48,17 @@ export function verifyEvidence(result) {
     if (!peer.state?.mesh?.in_fleet || peer.state.mesh.peers.length !== 5 || peer.state.phase !== 'InProgress') throw new Error(`${peer.label}: incomplete actual fleet launch`);
     if (!peer.state.mesh.samples || peer.state.mesh.peers_heard?.length !== 5) throw new Error(`${peer.label}: no complete digest exchange`);
     if (!peer.state.mesh.agreed || peer.state.mesh.disagreement) throw new Error(`${peer.label}: observed simulation disagreement`);
+    const status = peer.state.fleetHealth;
+    if (!status || status.role !== 'status' || status.ariaLive !== 'polite' || status.tabIndex !== 0) {
+      throw new Error(`${peer.label}: fleet health is absent from the operator DOM`);
+    }
+    if (result.route !== 'direct' && (!status.visible || !status.text.includes('carried by the join service'))) {
+      throw new Error(`${peer.label}: actual operator DOM does not explain the relay route`);
+    }
+    if (result.route === 'automatic-fallback' && peer.label !== 'ship-1'
+        && !peer.state.fleetHealthHistory.some(text => text.includes('attempt 4'))) {
+      throw new Error(`${peer.label}: operator DOM never displayed exhausted direct retries`);
+    }
   }
   for (const client of result.clients) {
     if (client.state?.phase !== 'InProgress') throw new Error(`${client.label}: client did not enter play`);
@@ -123,7 +134,22 @@ async function stopProcess(child) {
 export function observeBrowser({ render, directProfile }, impairChannel) {
   if (render) Object.defineProperty(navigator, 'webdriver', { get: () => false });
   window.addEventListener('PhoenixReady', () => { window.__matrixPhoenixReady = true; });
-  const evidence = window.__matrixEvidence = { counts: {}, outcomes: [], relayReady: 0, relayFrames: 0, rtcCreated: 0, rtcOffers: 0, signalOffersSent: 0, directImpairment: {} };
+  const evidence = window.__matrixEvidence = { counts: {}, outcomes: [], relayReady: 0, relayFrames: 0, rtcCreated: 0, rtcOffers: 0, signalOffersSent: 0, directImpairment: {}, fleetHealthHistory: [] };
+  const fleetHealth = () => {
+    const region = document.querySelector('[data-fleet-health]');
+    return region && { visible: !region.hidden, text: region.textContent || '',
+      role: region.getAttribute('role'), ariaLive: region.getAttribute('aria-live'), tabIndex: region.tabIndex };
+  };
+  const rememberFleetHealth = () => {
+    const state = fleetHealth();
+    if (!state?.visible || evidence.fleetHealthHistory.at(-1) === state.text) return;
+    evidence.fleetHealthHistory.push(state.text);
+    if (evidence.fleetHealthHistory.length > 64) evidence.fleetHealthHistory.shift();
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    new MutationObserver(rememberFleetHealth).observe(document.documentElement,
+      { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden'] });
+  }, { once: true });
   const peers = [];
   function message(raw) {
     try {
@@ -174,7 +200,7 @@ export function observeBrowser({ render, directProfile }, impairChannel) {
       }
       rtc.push({ connectionState: peer.connectionState, selected });
     }
-    return { ...evidence, rtc, mesh: window.__hostMeshStatus?.(), fleet: window.__hostFleetState?.(),
+    return { ...evidence, rtc, fleetHealth: fleetHealth(), mesh: window.__hostMeshStatus?.(), fleet: window.__hostFleetState?.(),
       gm: window.__hostGmStartState?.(), gmSession: window.__hostGmSessionState?.(), phase: window.__saveSlotsPhase || window.lobbyState?.phase,
       station: window.lobbyState?.players?.filter(player => player.connected).map(player => ({ name: player.name, station: player.station, ready: player.ready })),
       alert: window.simState?.redAlert };

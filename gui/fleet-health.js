@@ -24,9 +24,14 @@ export function fleetHealthLines({ roster, links = [], health }, t) {
   }
   const projection = parseGmHealthProjection(health);
   if (projection) {
+    const operatorNames = new Map(projection.operators.map(operator => [operator.id, operator.name]));
     for (const peer of projection.peers) {
       if (peer.state === 'live') continue;
-      const name = peer.ship ? label(peer.ship.name) : peer.operators.join(', ') || t('server.fleet.health.link');
+      // Peer rows carry operator ids for correlation. Only their public display
+      // names belong in the operator-facing sentence.
+      const publicOperators = peer.operators.map(id => operatorNames.get(id)).filter(Boolean);
+      const name = peer.ship ? label(peer.ship.name)
+        : publicOperators.join(', ') || t('server.fleet.health.link');
       lines.push(t('server.fleet.health.peer_state', {
         name, state: t(healthStateLabelId(peer.state)),
       }));

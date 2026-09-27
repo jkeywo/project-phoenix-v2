@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { FORMAT, summarize } from '../../scripts/fleet-performance-evidence.mjs';
 import { installBrowserPerformanceObserver, installHostPerformanceObserver } from '../../scripts/fleet-performance-observer.mjs';
-import { captureOptions, verifyObservedRecoveryRows } from '../../scripts/fleet-performance-capture.mjs';
+import { captureOptions, main as captureMain, verifyObservedRecoveryRows } from '../../scripts/fleet-performance-capture.mjs';
 
 const provenance = { revision: 'a'.repeat(40), content: 'probe@1', runtime: { browser: 'test' },
   artifactHashes: { bundle: 'b'.repeat(64) }, profile: { route: 'direct' } };
@@ -150,5 +153,22 @@ describe('T5 performance evidence', () => {
       .toThrow('loss_detected');
     expect(() => verifyObservedRecoveryRows('ship-1', rows.filter(row => row.kind !== 'tick'), 'loss'))
       .toThrow('tick interval');
+  });
+
+  it('reports the matrix artifact when the shared runner returns no value', async () => {
+    const output = await mkdtemp(path.join(tmpdir(), 'phoenix-performance-test-'));
+    try {
+      const manifest = await captureMain(['--out', output, '--wasm-build-receipt', 'fixture.json'],
+        async () => { await writeFile(path.join(output, 'manifest.json'), JSON.stringify({
+          status: 'failed', revision: 'a'.repeat(40), results: [{ route: 'direct', status: 'failed',
+            error: 'the actual matrix failure' }],
+        })); });
+      expect(manifest.results[0].error).toBe('the actual matrix failure');
+    } finally {
+      if (!path.resolve(output).startsWith(path.resolve(tmpdir()) + path.sep)) {
+        throw new Error('Refusing to remove a test directory outside the temp root');
+      }
+      await rm(output, { recursive: true, force: true });
+    }
   });
 });

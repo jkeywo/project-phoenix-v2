@@ -111,7 +111,7 @@ export async function captureHook({ result, ships, gms, clients, step, options }
   return measured;
 }
 
-export async function main(args = process.argv.slice(2)) {
+export async function main(args = process.argv.slice(2), runMatrix = browserMatrix) {
   const { matrix, measureSeconds, faultSeconds } = captureOptions(args);
   if (!matrix.includes('--seconds')) matrix.push('--seconds', '1');
   if (!matrix.includes('--routes')) matrix.push('--routes', 'direct');
@@ -122,7 +122,7 @@ export async function main(args = process.argv.slice(2)) {
     throw new Error('Choose an output outside the source checkout so the WASM receipt stays valid');
   }
   const captures = new Map();
-  const manifest = await browserMatrix(matrix, {
+  await runMatrix(matrix, {
     kind: 'phoenix-t5-browser-performance-capture-v1',
     provenance: { measureSeconds, faultSeconds },
     afterHealthy: async context => {
@@ -130,6 +130,10 @@ export async function main(args = process.argv.slice(2)) {
       captures.set(context.result.route, captured);
     },
   });
+  // The shared matrix writes its manifest as the evidence artifact and does
+  // not return it. Read the final record so a failed matrix remains the
+  // reported failure instead of becoming an unrelated wrapper TypeError.
+  const manifest = JSON.parse(await readFile(path.join(output, 'manifest.json'), 'utf8'));
   const runnerHash = sha(await readFile(fileURLToPath(import.meta.url)));
   const observerHash = sha(await readFile(path.join(root, 'scripts/fleet-performance-observer.mjs')));
   const reducerHash = sha(await readFile(path.join(root, 'scripts/fleet-performance-evidence.mjs')));

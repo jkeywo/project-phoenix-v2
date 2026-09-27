@@ -74,6 +74,12 @@ pub fn run(args: &crate::delivery::args::HostArgs) -> Result<(), String> {
         let html = std::fs::read_to_string(bundle.join("workshop.html"))
             .map_err(|e| format!("Cannot read built Workshop page: {e}"))?;
         let html = document::build_document(&html)?;
+        let html = super::panes::document::inject_head_script(
+            &html,
+            &super::panes::os_prefs::os_locale_script(
+                super::panes::os_prefs::query_os_locale().as_deref(),
+            ),
+        );
         let private = directories::BaseDirs::new()
             .ok_or("Workshop private storage unavailable")?
             .data_local_dir()

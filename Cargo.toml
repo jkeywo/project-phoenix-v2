@@ -540,7 +540,7 @@ directories = "6"
 [target.'cfg(target_os = "windows")'.dependencies]
 # Safe WinRT preference reads. Already locked transitively; host-only so the
 # platform adapter adds no API surface to ordinary simulation or WASM builds.
-windows = { version = "0.62.2", optional = true, features = ["UI_ViewManagement", "Devices_Enumeration", "Media_Capture_Frames", "Media_MediaProperties", "Graphics_Imaging", "Storage_Streams"] }
+windows = { version = "0.62.2", optional = true, features = ["UI_ViewManagement", "Devices_Enumeration", "Media_Capture_Frames", "Media_MediaProperties", "Graphics_Imaging", "Storage_Streams", "System_UserProfile"] }
 windows-future = { version = "0.3.2", optional = true }
 
 # WASM: no parallel, uses single-threaded runtime

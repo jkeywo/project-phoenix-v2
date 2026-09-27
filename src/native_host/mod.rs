@@ -149,6 +149,7 @@ pub mod session_role;
 /// CI-tested.
 pub mod setup_accessibility;
 pub mod transport;
+pub mod viewscreen_locale;
 /// This machine's own **viewscreen presentation settings** (issue #1427): the
 /// text size and contrast an operator chose at the shared display, saved beside
 /// the bridge layouts so the room comes back up the way it was left. Endpoint

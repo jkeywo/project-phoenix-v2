@@ -390,7 +390,9 @@ impl LocalHostLobby {
         let saved = super::viewscreen_presentation::ViewscreenPresentationStore::user()
             .map(|store| store.load())
             .unwrap_or_default();
-        self.publish_with_presentation(host_index_html, documents, saved)
+        let saved_locale =
+            super::viewscreen_locale::ViewscreenLocaleStore::user().and_then(|store| store.load());
+        self.publish_with_presentation(host_index_html, documents, saved, saved_locale)
     }
 
     /// [`Self::publish`] with this display's saved record already in hand.
@@ -405,6 +407,7 @@ impl LocalHostLobby {
         host_index_html: &str,
         documents: &HostedDocuments,
         saved: super::viewscreen_presentation::ViewscreenPresentation,
+        saved_locale: Option<String>,
     ) -> Result<(), HostLobbyDocumentError> {
         // The effects the RENDERER and the HUD overlay own, seeded FIRST —
         // before the document is assembled, because the camera shake this
@@ -441,6 +444,15 @@ impl LocalHostLobby {
             &build_host_lobby_document(host_index_html)?,
             &prefs,
         );
+        let os_locale = super::panes::os_prefs::query_os_locale();
+        let locale_script = super::panes::os_prefs::os_locale_script(os_locale.as_deref());
+        let body = super::panes::document::inject_head_script(&body, &locale_script);
+        self.bridge
+            .set_hud_locale(saved_locale.as_deref().or(os_locale.as_deref()));
+        let body = super::panes::document::inject_head_script(
+            &body,
+            &super::viewscreen_locale::locale_script(saved_locale.as_deref()),
+        );
         // The operator's own override of that OS layer, seeded the same way and
         // for a stronger reason: an Ultralight view's storage session is
         // ephemeral, so the page has nowhere of its own to remember this, and
@@ -453,7 +465,10 @@ impl LocalHostLobby {
         documents.publish(self.path(), body);
         documents.publish(
             super::native_gm::document::document_path(&self.nonce),
-            super::native_gm::document::build_document(host_index_html),
+            super::panes::document::inject_head_script(
+                &super::native_gm::document::build_document(host_index_html),
+                &locale_script,
+            ),
         );
         Ok(())
     }
@@ -1377,6 +1392,22 @@ pub(crate) fn drain_surface_records(
                         "host lobby: this machine names no settings directory, so this \
                          display's presentation settings apply for this session only"
                     ),
+                }
+                continue;
+            }
+            HostLobbyRecord::SetLocale { locale } => {
+                if !super::viewscreen_locale::valid_locale(&locale) {
+                    continue;
+                }
+                bridge.0.set_hud_locale(Some(&locale));
+                if let Some(store) = super::viewscreen_locale::ViewscreenLocaleStore::user() {
+                    if let Err(error) = store.save(&locale) {
+                        crate::pwarn!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: Viewscreen language could not be saved ({error})"
+                        );
+                    }
                 }
                 continue;
             }
@@ -2988,6 +3019,7 @@ mod tests {
             "<html><body></body></html>",
             &crate::delivery::serve::HostedDocuments::default(),
             store.load(),
+            None,
         );
 
         let (shake, flash, decorative) = published_effect_intensities();

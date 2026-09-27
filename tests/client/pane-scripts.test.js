@@ -177,6 +177,22 @@ describe('pane_boot.js — the identity comes out of the fragment', () => {
     window.PhoenixNativeGamepad.select(2);
     expect(JSON.parse(sent[1])).toEqual({ type: 'NativeOperator', operation: 'select', index: 2 });
   });
+  it('persists the Station language in its own operator profile across recreation', () => {
+    runBoot(fragment('station-one', 'Ada'), false);
+    const sent = installOutQueue();
+    window.__phoenixOperatorReply({ operation: 'load', status: 'ok',
+      profile: '{"kind":"project-phoenix/operator-profile","version":1,"locale":"de"}' });
+    expect(window.PhoenixLocaleStorage.getItem('phoenix-private-locale')).toBe('de');
+    window.PhoenixLocaleStorage.setItem('phoenix-private-locale', 'en');
+    expect(JSON.parse(JSON.parse(sent[0]).profile).locale).toBe('en');
+    window.PhoenixOperatorStorage.setItem('phoenix-operator-profile-v1',
+      '{"kind":"project-phoenix/operator-profile","version":1,"gamepad":{}}');
+    expect(JSON.parse(JSON.parse(sent[1]).profile).locale).toBe('en');
+    runBoot(fragment('station-one', 'Ada'), false);
+    installOutQueue();
+    window.__phoenixOperatorReply({ operation: 'load', status: 'ok', profile: JSON.parse(sent[1]).profile });
+    expect(window.PhoenixLocaleStorage.getItem('phoenix-private-locale')).toBe('en');
+  });
   it('carries a native station assignment through bootstrap without locking participant panes', () => {
     runBoot(fragment('screen', 'Helm') + '&station=helm');
     expect(window.__PHOENIX_ASSIGNED_STATION__).toBe('helm');

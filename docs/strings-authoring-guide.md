@@ -88,6 +88,17 @@ repaints its mounted editor, preserving the draft and selected source. Its
 presentation seam for translation previews; only `.select(locale)` saves a
 choice. Preview never changes the pack, host, or saved locale.
 
+Native Station panes, the native Game Master screen and native Workshop expose
+the same language control. Their choices are saved in the corresponding
+host-backed operator profiles so a recreated Ultralight view resumes the chosen
+language. The native Viewscreen saves its own choice separately and applies it
+to both the lobby surface and its HUD overlay. An unset native surface starts
+from the available OS/browser language, then English if that language is not
+in the catalogue. Changing language repaints retained semantic text without
+rejoining a Station or changing a Workshop draft. See
+[`1537-native-locales.md`](acceptance/1537-native-locales.md) for the native
+screen check.
+
 ## Square brackets mean "not reviewed yet"
 
 Text an agent wrote is wrapped in `[square brackets]`. It renders bracketed in

@@ -140,6 +140,46 @@ pub fn os_defaults_script(prefs: &OsAccessibilityPrefs) -> String {
     )
 }
 
+/// Best-effort OS locale. Native browser engines can also supply
+/// `navigator.language`; this seed takes precedence when the host environment
+/// declares a language and otherwise leaves that browser value in charge.
+pub fn query_os_locale() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    if let Ok(languages) = windows::System::UserProfile::GlobalizationPreferences::Languages() {
+        if let Ok(language) = languages.GetAt(0) {
+            if let Some(locale) = normalise_os_locale(&language.to_string()) {
+                return Some(locale);
+            }
+        }
+    }
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .find_map(|value| normalise_os_locale(&value))
+}
+
+fn normalise_os_locale(value: &str) -> Option<String> {
+    let raw = value.split(['.', '@']).next()?.replace('_', "-");
+    (raw != "C"
+        && raw != "POSIX"
+        && !raw.is_empty()
+        && raw.len() <= 35
+        && raw
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
+    .then_some(raw)
+}
+
+/// Injection safe because normalise_os_locale accepts ASCII language-tag
+/// characters only; no quote, slash, newline or script terminator can enter.
+pub fn os_locale_script(locale: Option<&str>) -> String {
+    let value = locale
+        .and_then(normalise_os_locale)
+        .map(|value| format!("\"{value}\""))
+        .unwrap_or_else(|| "null".to_owned());
+    format!("window.PhoenixOsLocale = {value};")
+}
+
 /// Format a scale as a JS number literal with no trailing `.0` noise but always
 /// a valid number (`1` and `1.25`, never `1.` or an empty string).
 fn format_scale(scale: f32) -> String {
@@ -200,6 +240,20 @@ pub fn query_os_accessibility_prefs() -> OsAccessibilityPrefs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn os_locale_is_normalised_for_native_page_injection() {
+        assert_eq!(normalise_os_locale("de_DE.UTF-8"), Some("de-DE".into()));
+        assert_eq!(normalise_os_locale("C"), None);
+        assert_eq!(
+            os_locale_script(Some("de-DE")),
+            "window.PhoenixOsLocale = \"de-DE\";"
+        );
+        assert_eq!(
+            os_locale_script(Some("de';alert(1)")),
+            "window.PhoenixOsLocale = null;"
+        );
+    }
 
     #[test]
     fn independent_reads_preserve_success_and_report_unavailable_fields() {

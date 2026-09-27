@@ -8,7 +8,7 @@ export const GM_LOCALE_STORAGE_KEY = 'phoenix-private-gm-locale';
 export const WORKSHOP_LOCALE_STORAGE_KEY = 'phoenix-private-workshop-locale';
 
 function browserLocale(nav) {
-  const raw = nav?.languages?.[0] || nav?.language || 'en';
+  const raw = nav?.nativeLocale || nav?.languages?.[0] || nav?.language || 'en';
   return String(raw).trim() || 'en';
 }
 
@@ -109,6 +109,11 @@ export function createLocalePreference({ doc = document, nav = navigator, storag
       requested = String(next || 'en');
       setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
       persistPrivateLocale(storage, requested, storageKey);
+      return apply();
+    },
+    /** A host-backed native profile may arrive after the page first paints. */
+    reloadStored() {
+      requested = loadPrivateLocale(storage, nav, storageKey);
       return apply();
     },
     /** Temporary presentation for an editor preview; leaves the saved choice alone. */

@@ -31,7 +31,7 @@ import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { applyToDom, getTable, localiseTree, setTable, t } from '../../gui/strings.js';
+import { applyToDom, getTable, localiseTree, setBaseCatalogue, setLocale, setTable, t } from '../../gui/strings.js';
 import {
   EFFECT_ATTRIBUTES,
   EFFECT_IDS,
@@ -91,7 +91,7 @@ const IMPORTED = [...MODULE.matchAll(/^\s*import\s*\{([^}]*)\}/gm)]
   .sort();
 
 /** What `runIsland` binds those names to, in declaration order. */
-const BINDINGS = { applyToDom, getTable, localiseTree, t, localiseHostPayload, gameOverView, createPresentationCard, mountSensorReport, createAudioLiveEquivalents, createComputerMessageBanner };
+const BINDINGS = { applyToDom, getTable, localiseTree, setLocale, t, localiseHostPayload, gameOverView, createPresentationCard, mountSensorReport, createAudioLiveEquivalents, createComputerMessageBanner };
 
 /**
  * Run the island's body with its imports bound to the real gui/ modules.
@@ -222,6 +222,7 @@ beforeEach(() => {
   document.body.innerHTML = '';
   delete window.__phoenixHud;
   delete window.__updateHud;
+  delete window.__phoenixHudLocale;
   document.documentElement.style.removeProperty('--a11y-text-scale');
   document.documentElement.removeAttribute('data-contrast');
 });
@@ -243,7 +244,27 @@ it('accepts the real native reading scripts before module load and retains them 
 afterEach(() => {
   window.__phoenixHud?.audioEquivalent?.dispose();
   vi.useRealTimers();
+  setLocale('en');
   setTable(REAL_TABLE);
+});
+
+it('repaints retained HUD state when this Viewscreen changes language', () => {
+  const shipped = readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8');
+  try {
+    setBaseCatalogue('id,context,en,de,de_source\nserver.hud_nav,,Nav,Navigation,Nav\nserver.hud_clear,,CLEAR,FREI,CLEAR\nserver.hud_heading,,HDG {deg},KURS {deg},HDG {deg}\n');
+    mountPage();
+    push({ heading: 90 });
+    // The host can send its saved preference before the module is ready.
+    window.__phoenixSetHudLocale('de');
+    runIsland();
+    expect(slotLabel('server.hud_nav')).toBe('Navigation');
+    expect(text('v-nav')).toBe('KURS 090');
+    window.__phoenixSetHudLocale('en');
+    expect(slotLabel('server.hud_nav')).toBe('Nav');
+    expect(text('v-nav')).toBe('HDG 090');
+  } finally {
+    setBaseCatalogue(shipped);
+  }
 });
 
 describe('the page localises itself from the String Table', () => {

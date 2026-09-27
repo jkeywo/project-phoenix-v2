@@ -2302,12 +2302,14 @@
     import { t, has, applyToDom, wireText } from './gui/strings.js';
     import { createLocalePreference } from './gui/locale-preference.js';
     window.phStrings = { t, has, applyToDom, wireText };
-    window.phLocale = createLocalePreference({ doc: document, nav: navigator,
-      storage: window.localStorage,
+    window.phLocale = createLocalePreference({ doc: document,
+      nav: window.PhoenixOsLocale ? { nativeLocale: window.PhoenixOsLocale } : navigator,
+      storage: window.PhoenixLocaleStorage || window.localStorage,
       onChange: () => window.phLocale?.relocaliseRetained?.({
         simState: window.simState, commsState: window.commsState,
       }),
     });
+    window.addEventListener('phoenix-native-locale-loaded', () => window.phLocale?.reloadStored?.());
     applyToDom(document);
   </script>
 

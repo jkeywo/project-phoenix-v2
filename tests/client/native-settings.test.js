@@ -112,6 +112,24 @@ describe('nativeSettingsView', () => {
 // ── The mount ──────────────────────────────────────────────────────────────
 
 describe('mountNativeSettings', () => {
+  it('switches the Viewscreen language in its Display tab and keeps focus on repaint', () => {
+    const doc = document;
+    doc.body.innerHTML = '';
+    let current = 'en';
+    const language = { locales: () => ['en', 'de'], locale: () => current,
+      select: value => { current = value; panel.refresh(); } };
+    const panel = mountNativeSettings(doc, { language }, { t });
+    panel.open();
+    panel.selectTab('presentation');
+    const select = doc.querySelector('.native-settings-language');
+    expect(select.value).toBe('en');
+    select.focus();
+    select.value = 'de';
+    select.dispatchEvent(new Event('change'));
+    expect(current).toBe('de');
+    expect(doc.querySelector('.native-settings-language').value).toBe('de');
+    expect(doc.activeElement).toBe(doc.querySelector('.native-settings-language'));
+  });
   it('find-or-creates the kit’s cog and modal, closed and named', () => {
     const doc = freshDoc();
     const panel = mountNativeSettings(doc, {}, { t });

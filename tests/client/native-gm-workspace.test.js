@@ -38,6 +38,27 @@ describe('native GM workspace over the shared GM presenters', () => {
         <h3 id="gm-session-log-heading"></h3><ol id="gm-session-log"></ol></section>`;
   });
 
+  it('restores the GM profile language and switches only its private preference', () => {
+    setBaseCatalogue(readFileSync('assets/strings/strings.csv', 'utf8'));
+    setOverlayCatalogues([{ source: 'de-fixture', csv:
+      'id,de,de_source\nserver.gm.console.title,Spielleitung,[Game Master]\n' }]);
+    document.body.insertAdjacentHTML('beforeend',
+      '<div id="gm-language-control"></div><h1 data-i18n="server.gm.console.title"></h1>');
+    const storage = { getItem: vi.fn(() => 'de'), setItem: vi.fn() };
+    window.PhoenixLocaleStorage = storage;
+    const app = mount();
+    expect(document.querySelector('[data-i18n="server.gm.console.title"]').textContent)
+      .toBe('Spielleitung');
+    const select = document.querySelector('#gm-language-control select');
+    select.value = 'en'; select.dispatchEvent(new Event('change'));
+    expect(storage.setItem).toHaveBeenCalledWith('phoenix-private-gm-locale', 'en');
+    expect(document.querySelector('[data-i18n="server.gm.console.title"]').textContent)
+      .toBe('[Game Master]');
+    app.view.dispose();
+    delete window.PhoenixLocaleStorage;
+    setLocale('en'); setOverlayCatalogues([]);
+  });
+
   it('repaints a mounted GM desk while retaining a pending Comms draft and caret', () => {
     setBaseCatalogue(readFileSync('assets/strings/strings.csv', 'utf8'));
     setOverlayCatalogues([{ source: 'de-fixture', csv:

@@ -366,6 +366,10 @@ pub enum HostLobbyRecord {
     /// spellings are the layout row's alone and are historical (see
     /// [`SetViewscreen`](Self::SetViewscreen)).
     ToggleFullscreen,
+    /// This native Viewscreen's language, stored separately from Station profiles.
+    SetLocale {
+        locale: String,
+    },
     /// Endpoint-local audio controls. No command admission or simulation state.
     SetAudioBus {
         bus: String,
@@ -534,6 +538,9 @@ mod tests {
                 pack: "thin-margin.zip".into(),
             },
             HostLobbyRecord::ToggleFullscreen,
+            HostLobbyRecord::SetLocale {
+                locale: "de".into(),
+            },
             HostLobbyRecord::SetPresentation {
                 text_scale_percent: Some(150),
                 contrast: Some(true),

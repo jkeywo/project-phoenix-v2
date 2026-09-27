@@ -11,9 +11,20 @@ window.__phoenixNativeWorkshopKey = record => {
 };
 const profileKey = 'phoenix-operator-profile-v1';
 let profile = null;
+let localeChoice = null;
+const withLocale = json => {
+  let next; try { next = JSON.parse(json || 'null'); } catch { next = null; }
+  if (!next || typeof next !== 'object') next = {kind:'project-phoenix/operator-profile',version:1};
+  if (localeChoice) next.locale = localeChoice;
+  return JSON.stringify(next);
+};
 const loaded = new Promise(resolve => {
   window.__phoenixOperatorReply = reply => {
-    if (reply.operation === 'load') { profile = typeof reply.profile === 'string' ? reply.profile : null; resolve(); }
+    if (reply.operation === 'load') {
+      profile = typeof reply.profile === 'string' ? reply.profile : null;
+      try { localeChoice = JSON.parse(profile || 'null')?.locale || null; } catch { localeChoice = null; }
+      resolve();
+    }
     window.PhoenixOperatorStorageStatus = reply.status === 'error' ? reply : null;
     window.dispatchEvent(new Event('phoenix-operator-storage-status'));
   };
@@ -22,7 +33,16 @@ window.PhoenixOperatorStorage = {
   getItem: key => key === profileKey ? profile : null,
   setItem(key, value) {
     if (key !== profileKey) throw new Error('Unsupported Workshop preference');
-    profile = String(value);
+    profile = withLocale(String(value));
+    window.__phoenixNativeWorkshopSend(JSON.stringify({ type: 'NativeOperator', operation: 'save', profile }));
+  },
+};
+window.PhoenixLocaleStorage = {
+  getItem: () => localeChoice,
+  setItem(_key, value) {
+    if (typeof value !== 'string' || !/^[A-Za-z0-9-]{1,35}$/.test(value)) throw Error('Invalid private language');
+    localeChoice = value;
+    profile = withLocale(profile);
     window.__phoenixNativeWorkshopSend(JSON.stringify({ type: 'NativeOperator', operation: 'save', profile }));
   },
 };

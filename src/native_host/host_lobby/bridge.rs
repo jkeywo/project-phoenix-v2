@@ -133,6 +133,7 @@ struct Inner {
     audio: Option<String>,
     last_accepted_audio: Option<String>,
     hud_reading: Option<String>,
+    hud_locale: Option<String>,
     fleet_config: Option<String>,
     fleet_update: Option<String>,
     /// Ordered reliable rendezvous frames for the native fleet control plane.
@@ -177,7 +178,22 @@ impl HostLobbyBridge {
     }
 
     pub fn hud_reading_script(&self) -> Option<String> {
-        self.lock().hud_reading.clone()
+        let inner = self.lock();
+        if inner.hud_reading.is_none() && inner.hud_locale.is_none() {
+            return None;
+        }
+        Some(format!(
+            "{}{}",
+            inner.hud_reading.as_deref().unwrap_or(""),
+            inner.hud_locale.as_deref().unwrap_or("")
+        ))
+    }
+
+    pub fn set_hud_locale(&self, locale: Option<&str>) {
+        self.lock().hud_locale = Some(format!(
+            "window.__phoenixSetHudLocale?.({});",
+            crate::native_host::viewscreen_locale::locale_script_value(locale),
+        ));
     }
 
     /// Used by the typed SetPresentation handler before its best-effort file

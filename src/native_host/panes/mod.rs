@@ -244,6 +244,10 @@ impl LocalPanes {
             &document::build_pane_document_with(client_index_html, options)?,
             &os_prefs,
         );
+        let body = document::inject_head_script(
+            &body,
+            &os_prefs::os_locale_script(os_prefs::query_os_locale().as_deref()),
+        );
         self.bus.attach_documents(documents.clone());
         // Arm recreation with the same body and host address every pane loaded
         // from, so a pane brought back after a crash (issue #1125) rebuilds an

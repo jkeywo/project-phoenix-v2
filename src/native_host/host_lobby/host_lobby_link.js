@@ -37,7 +37,8 @@
 // listener at the bottom has no counterpart in server.html and no shared module
 // to live in.
 import './gui/strings-boot.js';
-import { t, localiseTree, applyToDom } from './gui/strings.js';
+import { t, localiseTree, applyToDom, getCataloguePresentation } from './gui/strings.js';
+import { createLocalePreference, LOCALE_STORAGE_KEY } from './gui/locale-preference.js';
 import { localiseHostPayload } from './gui/host-channel.js';
 import {
   hostLobbyViewModel,
@@ -74,7 +75,30 @@ import { createFleetHealth } from './gui/fleet-health.js';
 // "SELECT A WORLD" heading and the AI-launch button — is substituted once here,
 // exactly as server.html's own module island does it. Everything data-driven is
 // resolved per render by `t` below.
-applyToDom(document);
+const viewscreenLocaleStorage = {
+  getItem(key) { return key === LOCALE_STORAGE_KEY ? window.PhoenixViewscreenLocale : null; },
+  setItem(key, value) {
+    if (key !== LOCALE_STORAGE_KEY) return;
+    window.PhoenixViewscreenLocale = value;
+    send({ kind: 'set_locale', locale: value });
+  },
+};
+let nativeSettings;
+const locale = createLocalePreference({
+  doc: document,
+  nav: { nativeLocale: window.PhoenixOsLocale, language: navigator.language },
+  storage: viewscreenLocaleStorage,
+  onChange: () => {
+    const lobby = window.__phoenixHostLobby;
+    lobby.paint();
+    lobby.paintJoin();
+    lobby.paintScenario();
+    lobby.paintLanding();
+    lobby.paintPacks();
+    nativeSettings?.refresh();
+  },
+});
+locale.apply();
 
 // `hostLobbyViewModel`'s second argument is the phase seen on the previous
 // call: it is what makes the Loading -> InProgress edge distinguishable from
@@ -607,7 +631,7 @@ const presentation = createViewscreenPresentation({
 // it must come up at that size rather than when somebody opens the menu.
 presentation.apply();
 
-mountNativeSettings(document, {
+nativeSettings = mountNativeSettings(document, {
   audio: createNativeAudio({ win: window, send }),
   // The row's verb, forwarded — never a name this file decides.
   run: (action) => {
@@ -616,6 +640,11 @@ mountNativeSettings(document, {
     else send({ kind: action });
   },
   presentation,
+  language: {
+    locales: () => getCataloguePresentation().locales,
+    locale: locale.locale,
+    select: locale.select,
+  },
 }, { t });
 
 /**

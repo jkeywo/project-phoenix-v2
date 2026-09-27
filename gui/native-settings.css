@@ -192,6 +192,20 @@
   border-color: var(--cyan);
   color: var(--signal);
 }
+.native-settings-language {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--control-hit-min);
+  padding: var(--control-pad-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--edge-control);
+  color: var(--ink);
+  font: inherit;
+}
+.native-settings-language:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
 /* The chosen option in a tri-state group (issue #1427's contrast row). Border
    AND background, never colour alone, so the selection survives a contrast
    change and a forced-colour palette — which is the point of the control the

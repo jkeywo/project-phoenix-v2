@@ -18,11 +18,28 @@ const drain = () => window.__phoenixNativeWorkshopDrain().split('\n').filter(Boo
 afterEach(() => {
   window.dispatchEvent(new Event('pagehide'));
   for (const key of ['__phoenixNativeWorkshopSend', '__phoenixNativeWorkshopDrain', '__phoenixNativeWorkshopReply', '__phoenixNativeWorkshopKey',
-    '__phoenixOperatorReply', 'PhoenixOperatorStorage', 'PhoenixOperatorStorageStatus']) delete window[key];
+    '__phoenixOperatorReply', 'PhoenixOperatorStorage', 'PhoenixLocaleStorage', 'PhoenixOperatorStorageStatus']) delete window[key];
   vi.restoreAllMocks();
 });
 
 describe('native Workshop shared boot', () => {
+  it('restores Workshop language and preserves it through operator profile edits', async () => {
+    document.body.innerHTML = '<main id="workshop"></main>';
+    window.eval(queue);
+    const pending = runBoot(window, document,
+      () => ({ ready: Promise.resolve(), receive: vi.fn(), dispose: vi.fn() }), vi.fn());
+    drain();
+    window.__phoenixOperatorReply({ operation: 'load', status: 'ok',
+      profile: '{"kind":"project-phoenix/operator-profile","version":1,"locale":"de"}' });
+    await pending;
+    drain(); // NativeWorkshopReady
+    expect(window.PhoenixLocaleStorage.getItem('phoenix-private-workshop-locale')).toBe('de');
+    window.PhoenixOperatorStorage.setItem('phoenix-operator-profile-v1',
+      '{"kind":"project-phoenix/operator-profile","version":1,"gamepad":{}}');
+    expect(JSON.parse(JSON.parse(drain()[0]).profile).locale).toBe('de');
+    window.PhoenixLocaleStorage.setItem('phoenix-private-workshop-locale', 'en');
+    expect(JSON.parse(JSON.parse(drain()[0]).profile).locale).toBe('en');
+  });
   it('loads durable preferences before mounting and reports live only after source startup settles', async () => {
     document.body.innerHTML = '<main id="workshop"></main>';
     window.eval(queue);

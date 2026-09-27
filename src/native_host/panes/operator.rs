@@ -2082,6 +2082,17 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
         return Err("Unsupported operator profile".into());
     }
     let mut safe = fields(&raw, &["kind", "version"]);
+    // A native pane's language is presentation state on this operator's own
+    // host-backed profile. Keep it out of command and simulation records.
+    if let Some(locale) = raw["locale"].as_str().filter(|value| {
+        !value.is_empty()
+            && value.len() <= 35
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    }) {
+        safe["locale"] = json!(locale);
+    }
     safe["accessibility"] = json!({
         "presentation": fields(&raw["accessibility"]["presentation"], &[
             "textScale", "contrast", "reducedMotion", "shake", "flash", "decorativeMotion"
@@ -2441,6 +2452,21 @@ mod tests {
             ),
             other => other.clone(),
         }
+    }
+
+    #[test]
+    fn private_language_survives_profile_sanitising_without_script_content() {
+        let source = json!({"kind":"project-phoenix/operator-profile", "version":1,
+            "locale":"de-DE", "unknown":"not saved"});
+        let saved: Value =
+            serde_json::from_str(&sanitize_profile(&source.to_string()).unwrap()).unwrap();
+        assert_eq!(saved["locale"], "de-DE");
+        assert!(saved.get("unknown").is_none());
+        let injected = json!({"kind":"project-phoenix/operator-profile", "version":1,
+            "locale":"de'; alert(1)"});
+        let saved: Value =
+            serde_json::from_str(&sanitize_profile(&injected.to_string()).unwrap()).unwrap();
+        assert!(saved.get("locale").is_none());
     }
 
     #[test]

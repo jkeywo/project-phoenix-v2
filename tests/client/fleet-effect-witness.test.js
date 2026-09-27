@@ -67,11 +67,33 @@ describe('continuous actual-effect witness',()=>{
     ['changed complete tick',[row(3,'changed'),damage(),row(4),row(5)]],
     ['backward oldest',[row(0),row(1),row(2)]],
     ['backward newest',[row(1),row(2),row(3)]],
-    ['backdated new fact',[row(1),row(2,'late'),row(3),damage(),row(4),row(5)]],
   ])('rejects %s instead of guessing continuity',(_name,entries)=>{
     const observer=make();baseline(observer);
     expect(observer.sample(feed(entries),100).error).toBeTruthy();
     expect(evict(observer).error).toBeTruthy();
+  });
+  it('retains the target through late unrelated rows before and within an old tick',()=>{
+    const observer=make();
+    observer.sample(feed([row(1),row(2),damage(),row(4),row(10)],8),0);
+    expect(observer.sample(feed([
+      row(0,'late-before'),row(1),row(2),row(2,'late-same-tick'),
+      row(3,'late-between'),damage(),row(4),row(10),
+    ],8),50)).toMatchObject({error:null,events:[damage()]});
+    expect(observer.finish().trace[1].added).toEqual([
+      row(0,'late-before'),row(2,'late-same-tick'),row(3,'late-between'),
+    ]);
+  });
+  it('rejects a target effect inserted behind a later retained bootstrap event',()=>{
+    const observer=make();
+    observer.sample(feed([row(1),damage(),row(10)],8),0);
+    expect(observer.sample(feed([row(1),damage(3),damage(),row(10)],8),50).error)
+      .toBe('backdated-target-effect');
+  });
+  it('rejects an impossible eviction of a newer row by a late older insertion',()=>{
+    const observer=make();
+    observer.sample(feed([row(1,'old'),damage(),row(10)],3),0);
+    expect(observer.sample(feed([row(0,'late'),damage(),row(10)],3),50).error)
+      .toBe('changed-or-partially-evicted-tick');
   });
   it('rejects removal within the latest tick, even if another equal row survives',()=>{
     const observer=make();observer.sample(feed([row(1),row(2),row(2)]),0);

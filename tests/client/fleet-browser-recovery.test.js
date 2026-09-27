@@ -125,8 +125,8 @@ it('starts continuous observation from an established effect despite later boots
   const later={...activity[0],entries:[...activity[0].entries.slice(0,-1),{tick:401,category:'connection'},activity[0].entries.at(-1)]};
   witnesses[0].sample(later,50);
   proof.effectAfter[0].continuous=witnesses[0].read();
-  expect(proof.effectAfter[0].continuous.error).toBe('backdated-history');
-  expect(directEffectOutcome(proof)).toBe(false);
+  expect(proof.effectAfter[0].continuous.error).toBeNull();
+  expect(directEffectOutcome(proof)).toBe(true);
 });
 it('refuses to start without two actual baseline effects and rejects a changed initial witness',async()=>{
   const missing=directEffectEvidence();missing.effectBefore[1].events=[];

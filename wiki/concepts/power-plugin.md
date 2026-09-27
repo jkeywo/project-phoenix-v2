@@ -2,7 +2,7 @@
 title: Power Runtime
 type: concept
 tags: [power, battery, brownout, modifiers, ai, semantic-actions, feedback]
-sources: [src/ship/power.rs, src/modifiers/power_system.rs, src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/snapshot.rs, tests/snapshot_resume.rs, src/console_ai/server.rs, src/server_app/registration.rs, src/modifiers/coordination.rs, src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/components/ph-strike-reserve.js, gui/action-map.js]
+sources: [src/ship/power.rs, src/modifiers/power_system.rs, src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/snapshot.rs, tests/snapshot_resume.rs, src/console_ai/server.rs, src/server_app/registration.rs, src/modifiers/coordination.rs, src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/components/ph-strike-reserve.js, gui/action-map.js, assets/entities/dynasty_player_cruiser.toml, pasm/spec/design/dynasty-balance.yaml]
 updated: 2026-09-27
 ---
 
@@ -48,3 +48,5 @@ The authored `strike_reserve` policy in the Dynasty player hull stores explicitl
 `modifiers/strike_reserve.rs` owns pure attack-time accounting. The admitted toggle adapter is `console/weapons/strike.rs`; firing adapters spend after their no-fire gates. Paid beam and torpedo damage bonuses travel with active attacks through `snapshot.rs`, while blaster bolts retain their boosted damage in the existing projectile state. Gunnery and Power expose the same reserve readout; `gui/components/ph-strike-reserve.js` supplies the shared status and Gunnery toggle.
 
 Dynasty's authored Backfill coordinates charging with that same switch: Power charges while boost is off, then yields the charging allocation during a strike. Gunnery re-enables at its authored threshold. The Engines and Steering state machines use `strike_boost_enabled` in their transition guards to move through charge, approach, attack and recovery; these states remain visible in ordinary AI policy inspection. `seed_strike_reserve_facts` supplies own-ship charge and switch observations to Power evaluation and Helm transitions. The full two-peer outcome test is `tests/dynasty_backfill.rs`.
+
+Playable Dynasty tuning lives only in `assets/entities/dynasty_player_cruiser.toml`; the NPC cruiser keeps its separate content. `scripts/balance-dynasty.mjs` evaluates the fixed duel and team matrix using scenario result flags and the simulation limit. The evaluation rule and reproducible evidence are indexed by [the cruiser evaluation guide](../../docs/balance/dynasty-evaluation.md).

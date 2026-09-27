@@ -515,19 +515,19 @@ level = 2
 
 [power.strike_reserve.weapons.phaser-fore]
 cost = 12
-damage_multiplier = 1.5
+damage_multiplier = 1.15
 [power.strike_reserve.weapons.phaser-aft]
 cost = 12
-damage_multiplier = 1.5
+damage_multiplier = 1.15
 [power.strike_reserve.weapons.torpedo-tube-fore-port]
 cost = 8
-damage_multiplier = 1.5
+damage_multiplier = 1.15
 [power.strike_reserve.weapons.torpedo-tube-fore-starboard]
 cost = 8
-damage_multiplier = 1.5
+damage_multiplier = 1.15
 [power.strike_reserve.weapons.torpedo-tube-aft]
 cost = 8
-damage_multiplier = 1.5
+damage_multiplier = 1.15
 
 # Four ordinary Backfill phases share the live reserve switch with Gunnery.
 # Policy arrays replace the inherited broadside machine; actuator verbs remain shared.

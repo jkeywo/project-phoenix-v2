@@ -47,9 +47,15 @@ Station with the remaining Stations and ships on Backfill.
 
 `scripts/balance-dynasty.mjs` records the source revision and Rust source patch,
 executable and runner SHA-256, hashes of all authored TOML/Rhai/CSV/JSON assets,
+the exact authored content patch for any uncommitted tuning candidate,
 generated world hashes, exact arguments, seeds, every source AAR and log,
 report hashes, counts and rates. Retain each batch in a fresh output directory.
 `--limit` is for diagnosis and cannot produce an accepted batch.
+
+Only the scenario's simultaneous-elimination flag is a draw. An unfinished
+fight at the full 600-second limit is a timeout, including a low-activity AAR
+that the generic headless classifier labels `draw`. A premature unfinished
+report or contradictory terminal flags invalidate the run.
 
 ```powershell
 cargo build --release --features headless --bin phoenix-headless
@@ -63,9 +69,10 @@ expensive Cargo commands with the other implementation tasks.
 ## Evidence status
 
 The rule is a recorded human decision. The matrix and runner implement that
-decision. **No balance success or crew acceptance is claimed before the batch
-is run.** Final counts, hashes, tested revision, tuning and 2v2 follow-up belong
-in the #1550 result record.
+decision. The [27 September 2026 result record](dynasty-results-2026-09-27.md)
+contains the completed batches, final tuning, 43%/57% duel result, strongly
+Alliance-favoured team follow-up and reproducible evidence. Numerical success
+does not establish crew acceptance.
 
 Crew checks remain in `docs/acceptance/1549-cruiser-elimination.md` and the Dynasty
 Console acceptance work. Existing `assets/entities/ship_harrow_cruiser.toml` and

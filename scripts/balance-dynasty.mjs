@@ -63,7 +63,10 @@ export function classifyReport(report) {
   if (!Array.isArray(flags)) throw new Error('Missing scenario flag telemetry');
   const results = ['alliance_victory', 'dynasty_victory', 'match_draw']
     .filter(name => flags.some(flag => flag.name === name && flag.value === 1));
-  if (report.outcome === 'timeout' && results.length === 0) return 'timeout';
+  // The generic AAR calls an inactive unfinished fight a draw. This scenario
+  // reserves draws for simultaneous elimination; reaching its limit is a timeout.
+  if (report.final_phase === 'InProgress' && results.length === 0
+      && ['timeout', 'draw'].includes(report.outcome) && report.sim_seconds >= SIM_SECONDS) return 'timeout';
   if (report.final_phase !== 'GameOver' || results.length !== 1) throw new Error('Missing or contradictory terminal result');
   return results[0] === 'match_draw' ? 'draw' : results[0].replace('_victory', '');
 }
@@ -144,6 +147,7 @@ async function main() {
   }
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   const provenance = { revision: git(['rev-parse', 'HEAD']), sourcePatch: git(['diff', 'HEAD', '--', 'src', 'build.rs', 'Cargo.toml', 'Cargo.lock', '.cargo']),
+    contentPatch: git(['diff', 'HEAD', '--', 'assets']),
     binary, binarySha256: sha(await readFile(binary)), runnerSha256: sha(await readFile(fileURLToPath(import.meta.url))),
     content: await contentHashes(root), conditions: CONDITIONS, seeds: SEEDS, simSeconds: SIM_SECONDS,
     denominator: '200 duels; each draw or simulation timeout contributes half a win to each cruiser; process failures invalidate the batch',

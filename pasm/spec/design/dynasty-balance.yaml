@@ -8,8 +8,8 @@ entities:
       rationale:
         - "Five range/heading conditions, twenty explicit seeds and two mirrored placements make comparisons repeatable without requiring identical playstyles. A further twenty mirrored reference team fights expose interactions outside a duel."
         - "Fixed authored crew slots preserve each hull's faction and ordinary Backfill controls. The runner records source revision/patch, binary and runner hashes, authored content hashes, generated worlds, arguments, raw reports and counts. Fresh output directories prevent stale reports from satisfying a new run."
-        - "Only the distinct playable Dynasty variant may be tuned. Existing NPC cruiser content and the Alliance baseline remain unchanged. A numerical pass is not human crew acceptance; unrun evaluation remains explicitly unverified."
+        - "Only the distinct playable Dynasty variant may be tuned. Existing NPC cruiser content and the Alliance baseline remain unchanged. The recorded final 1.15 strike multiplier produced 86 Alliance and 114 Dynasty wins across all 200 duels, with no draws/timeouts/failures. The team follow-up produced 16 Alliance wins, 2 Dynasty wins and 2 timeouts; this strong team asymmetry remains explicit. Numerical success is not human crew acceptance."
     implementation:
       status: declared
-      paths: [scripts/balance-dynasty.mjs, tests/client/balance-dynasty.test.js, docs/balance/dynasty-evaluation.md]
+      paths: [scripts/balance-dynasty.mjs, tests/client/balance-dynasty.test.js, docs/balance/dynasty-evaluation.md, docs/balance/dynasty-results-2026-09-27.md, assets/entities/dynasty_player_cruiser.toml]
       tests: [npx vitest run tests/client/balance-dynasty.test.js]

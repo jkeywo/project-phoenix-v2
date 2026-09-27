@@ -53,7 +53,10 @@ describe('ratified Dynasty balance evaluation', () => {
     expect(classifyReport(report('alliance_victory'))).toBe('alliance');
     expect(classifyReport(report('dynasty_victory'))).toBe('dynasty');
     expect(classifyReport(report('match_draw'))).toBe('draw');
-    expect(classifyReport({ final_phase: 'InProgress', outcome: 'timeout', scenario: { flags: [] } })).toBe('timeout');
+    for (const outcome of ['timeout', 'draw']) {
+      expect(classifyReport({ final_phase: 'InProgress', outcome, sim_seconds: 600, scenario: { flags: [] } })).toBe('timeout');
+      expect(() => classifyReport({ final_phase: 'InProgress', outcome, sim_seconds: 599, scenario: { flags: [] } })).toThrow();
+    }
     expect(() => classifyReport({ ...report('alliance_victory'), scenario: { flags: [] } })).toThrow();
     expect(() => classifyReport({ outcome: 'timeout' })).toThrow();
   });

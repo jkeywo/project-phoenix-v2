@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {nativeRecoveryPeer,mixedRecoveryOutcome,mixedReplacementOutcome,mixedDivergenceOutcome,mixedFailureHook,mixedRecoveryOptions,main} from '../../scripts/fleet-mixed-recovery.mjs';
+import {nativeRecoveryPeer,mixedRecoveryOutcome,mixedReplacementOutcome,mixedDivergenceOutcome,mixedDivergenceHook,mixedFailureHook,mixedRecoveryOptions,main} from '../../scripts/fleet-mixed-recovery.mjs';
 const labels=['ship-1','ship-2','ship-3','ship-4','gm-1','gm-2'];
 const digest=(slot,tick,value='0123456789abcdef')=>({t:'digest',d:{from:slot,tick,digest:value}});
 function fixture(failure='ship') {
@@ -57,6 +57,19 @@ it('requires native restored state, exact agreement, original ship controls and 
    v=>v.after[1].commands[1].ship='reset',v=>v.effectAfter[1].continuous.error='sampling-gap']){
    const bad=structuredClone(e);mutate(bad);expect(mixedDivergenceOutcome(bad).passed).toBe(false);
  }
+});
+
+it('waits when native observer activation precedes its first evidence projection',async()=>{
+ const result={nativeEvents:Object.fromEntries(labels.map((id,index)=>[id,[
+  {kind:'simulation-roster',value:{generation:1,local:index+1}},
+  {kind:'state',value:{roster_result:{generation:1,accepted:true}}},
+  ...(id.startsWith('ship')?[{kind:'recovery-command',value:{ship:id}}]:[]),
+ ]]))};
+ const hook=mixedDivergenceHook({nativeLabels:labels});
+ await expect(hook({result,peers:[],step(){},deadline:Date.now()+10000,
+  commandGm(id,command){if(command.kind==='effect-observe')result.nativeEvents[id].push({kind:'effect-observer-started',value:{}});},
+  async wait(predicate,label){const ready=await predicate();if(label==='one actual GM damage baseline'){expect(ready).toBe(false);throw new Error('baseline remains pending');}expect(ready).toBe(true);},
+ })).rejects.toThrow('baseline remains pending');
 });
 
 it('parses opt-in post-fault windows without consuming matrix options or changing defaults',()=>{

@@ -204,7 +204,7 @@ export function mixedDivergenceHook({faultSeconds=600,nativeLabels=nativeIds}={}
     commandGm(nativeGms[0],{kind:'effect-apply',request:evidence.effectRequest});
     const effects=async()=>{
       const rows=[...await Promise.all(browserGms.map(async peer=>({label:peer.label,...await evaluate(peer.page,captureDirectEffect,evidence.effectRequest)}))),
-        ...nativeGms.map(id=>({label:id,...last(result.nativeEvents[id],'effect-witness')}))];
+        ...nativeGms.map(id=>({label:id,events:[],journal:[],...last(result.nativeEvents[id],'effect-witness')}))];
       const invalid=rows.find(row=>row.continuous?.error);
       if(invalid)throw new Error(invalid.label+' continuous effect witness failed: '+invalid.continuous.error);
       return rows;

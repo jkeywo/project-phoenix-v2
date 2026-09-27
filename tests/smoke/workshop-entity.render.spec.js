@@ -153,6 +153,7 @@ test('the entity panel materialises an inherited value through the real runtime 
     await revealWorkshopPanel(page, 'entity');
     await byId(page, 'refresh').click();
     await expect(byId(page, 'status')).toHaveText(ts('workshop.entity.refreshed'));
+    await page.locator('#workshop-test-world').selectOption(WORLD);
     await expect.poll(() => page.locator('#workshop-test-ship')
       .evaluate(select => [...select.options].filter(option => !option.disabled).map(option => option.value)),
     { timeout: 60_000, message: 'the Test catalogue offers the composed hull' }).toContain(HULL);
@@ -160,7 +161,6 @@ test('the entity panel materialises an inherited value through the real runtime 
     await expect(byId(page, 'status')).toHaveText(ts('workshop.entity.testing', { path: HULL }));
     await expect(page.locator('#workshop-test-ship')).toHaveValue(HULL);
 
-    await page.locator('#workshop-test-world').selectOption(WORLD);
     await page.locator('#workshop-test-seed').fill('4');
     await expect(page.locator('#workshop-test-start')).toBeEnabled();
     await page.locator('#workshop-test-start').click();

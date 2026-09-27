@@ -198,7 +198,9 @@ console documents is recorded below. Its receipt bound, host tick cadence and
 ship-loss recovery observations are real but do not establish the proposed
 application-latency or unplanned-stall limits. Rendered, native, mixed, external
 network, repeatability and one-hour evidence remain outstanding. User
-ratification remains pending.
+ratification remains pending. After reviewing the bounded single-machine result
+on 2026-09-27, the user chose to keep the numerical limits provisional until
+representative multi-device and rendered measurements are available.
 
 ## Trace capture and reducer
 

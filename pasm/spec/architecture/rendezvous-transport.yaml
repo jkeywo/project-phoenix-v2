@@ -41,6 +41,8 @@ entities:
         issue and lifecycle, admission state, presence and the WebRTC signalling relay. A sibling
         Cloudflare Worker to the stateless TURN-credential worker, with the live registry in a
         Durable Object and the whole protocol in a transport-free state machine beside it.
+        An opted-in frozen fleet can delegate replacement ownership of its existing server code
+        to an authenticated surviving member without transferring simulation authority to the service.
       rationale:
         - One registry instance sees both typed namespaces and every active release at once, which is the only way unknown, wrong-type and version-mismatch stay three answers instead of one.
         - The Worker adapter decides nothing, so the contract tests drive the shipped protocol without wrangler, miniflare or a socket.
@@ -56,6 +58,10 @@ entities:
         - "[ai] The diagnostics snapshot carries no suffix. The suffix IS the private client code; a view that includes it is one route away from publishing every live session."
         - "[ai] Since #1113 it also carries the GAME, for a joiner whose direct ladder is spent and for a native host that has no WebRTC at all — worker-rendezvous/src/relay.js, a bounded mailbox hub with its own authored [limits]. That is a genuinely different resource profile from signalling (a signalling peer exchanges two SDP blobs and then costs nothing; a relayed crew member costs every command and every snapshot for the mission), which is why it is a separate module with bounds of its own rather than more verbs on the registry."
         - "[ai] A Durable Object's WebSocket exposes no bufferedAmount, so the hub's queue depths only bite while a target socket is unwritable and the backpressure half that meets a real backlog belongs to the SENDERS (the browser's and tungstenite's, which do report one). relay.js's header says so rather than implying a bound it cannot enforce."
+        - "[ai] #1534 adds bounded frozen-fleet delegation only in the server namespace. The current owner attests exact admitted connection ids and distinct technical slots; the registry privately mints independent member capabilities, including one for the owner. Guest knowledge of the join code or ordinary transport presence alone grants no takeover authority."
+        - "[ai] Owner socket loss retains delegated join sockets and emits owner-lost before relay-closed. No automatic promotion follows signalling loss: after ordinary link/simulation liveness decides recovery is necessary, only the lowest currently connected delegated slot may reserve a one-use takeover grant. Reservation blocks reclaim, successful host binding advances the ownership epoch and rotates the reclaim secret, and the original grace deadline still bounds the operation."
+        - "[ai] A valid member continuation proves its frozen slot to the new host through peer-joined and relay-peer metadata without exposing the private capability. It can pass closed admission, but cannot displace a connected holder; racing replacements have one winner. The same code, typed namespace and admission state survive takeover. Explicit teardown and Durable Object eviction still destroy the record."
+        - "[ai] Authoring/integration guidance: arm delegation only after the real admitted roster is frozen; never derive proofs from a code/reclaim secret or place them in the public fleet roster, simulation snapshot, diagnostics or logs. The service does not choose agreed simulation watermarks, merge frame prefixes, restore snapshots, or promise partition reunification. Browser/native runtime recovery remains an adapter and lockstep obligation rather than a result of these service contract tests."
     architecture:
       kind: signalling-service
       authority: non-authoritative
@@ -67,6 +73,7 @@ entities:
     implementation:
       status: declared
       paths:
+        - gui/rendezvous-protocol.js
         - worker-rendezvous/src/registry.js
         - worker-rendezvous/src/relay.js
         - worker-rendezvous/src/index.js
@@ -74,6 +81,7 @@ entities:
         - worker-rendezvous/wrangler.demo.toml
       symbols: [createRegistry, RendezvousRegistry, createRelayHub]
       tests:
+        - tests/client/rendezvous-fleet-takeover.test.js
         - tests/client/rendezvous-registry.test.js
         - tests/client/rendezvous-worker.test.js
         - tests/client/rendezvous-relay.test.js
@@ -90,7 +98,7 @@ entities:
       rationale:
         - p2p-human-readable-join-namespaces forbids a join code being stored in authoritative simulation state or shared between hosts; keeping the registry outside every host process is what makes that structural rather than a rule to remember.
         - A host's code dies with its socket in #1111. Rotation, stale-record invalidation and rebinding a code to a replacement host are #1115 and #1120.
-        - "[ai] The record's suffix leaves the registry in exactly one frame — the `hosted` code issued to the host that minted it. Not in the diagnostics view, not in a joiner's `joined`, and never over the crew channel."
+        - "[ai] The record suffix is issued privately in hosted and, for an explicitly delegated frozen fleet, in the elected successor's one-use takeover grant. Member capabilities and pending grants remain bounded transport-plane state; diagnostics and public owner-change notifications contain none of these secrets."
     architecture:
       classification: transport
       owner: rendezvous-service
@@ -109,9 +117,13 @@ entities:
       summary: >-
         The versioned JSON vocabulary between a host or client page and the rendezvous service —
         host-open, host-admission, host-close, resolve, join, signal, leave, relay-open, relay,
-        relay-close inbound; hosted, resolved, joined, peer-joined, peer-left, signal, closed,
+        relay-close, fleet-successors, fleet-takeover and authenticated fleet-state inbound;
+        hosted, resolved, joined, peer-joined, peer-left, signal, closed,
         error, relay-ready, relay-peer, relay, relay-peer-left, relay-closed, relay-degraded
-        outbound. Every frame carries its protocol revision and a frame from another revision is
+        plus private fleet-capability/takeover-grant, public fleet-owner-lost/owner-changed,
+        fleet-successors-set, fleet-takeover-wait and authenticated fleet-state outbound.
+        host-open can carry a one-use takeover proof, and join can carry a fixed-slot continuation.
+        Every frame carries its protocol revision and a frame from another revision is
         refused rather than guessed at.
       rationale:
         - Deliberately NOT a ClientMessage/ServerMessage variant — p2p-delta-transport-is-a-star-today forbids layering transport concerns onto the crew protocol, which is unchanged by this work.

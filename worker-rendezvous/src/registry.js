@@ -73,8 +73,8 @@
  * `reclaim_grace_seconds`: no live host to relay signalling to (a `join`
  * against it answers the retryable `unreachable`, same as any other transient
  * link failure), but the suffix, its secret, its admission state and its
- * presence all survive untouched. `hostOpen`'s `resume` handling is the only
- * way back in before the deadline; a secret that does not match burns the
+ * presence all survive untouched. Ordinary records return through `hostOpen`'s
+ * `resume` handling before the deadline; a secret that does not match burns the
  * grace-held record outright (denying further guesses) and falls through to
  * an ordinary fresh mint, exactly as if `resume` had never been sent.
  *
@@ -89,8 +89,10 @@
  * All state here is IN MEMORY, in one Durable Object instance: records die
  * with the instance, and nothing is written to storage. A code therefore
  * cannot survive a worker redeploy or a Durable Object eviction, and it cannot
- * be rebound to a REPLACEMENT host — only reclaimed by the one that minted it,
- * within the grace window above. The `record_ttl_seconds` sweep below is a
+ * be recovered across eviction. A frozen fleet may pre-authorize bounded
+ * replacement ownership within the same grace window (#1534); the exact private
+ * capability and continuation vocabulary lives in gui/rendezvous-protocol.js.
+ * Ordinary crew records remain reclaimable only by the host that minted them. The `record_ttl_seconds` sweep below is a
  * SEPARATE, much longer backstop for a DIFFERENT case: an idle timeout measured
  * from `lastSeen`, refreshed by every inbound frame from the record's own host,
  * not from when the record was created — so a host that has been live for days
@@ -144,6 +146,9 @@ const recordKey = (project, version, suffix) =>
  * every real host sends. Deliberately strict — this is the one host-supplied
  * value the registry stores and indexes on.
  */
+const CAPABILITY = /^[0-9a-f]{32}$/;
+const validSlot = slot => Number.isInteger(slot) && slot > 0 && slot <= 0xffffffff;
+
 const RELEASE_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The transports a host may claim. Anything else is dropped, not relayed. */
@@ -169,7 +174,8 @@ function defaultRandomInt(n) {
 }
 
 /**
- * A fresh reclaim secret for one record (issue #1115): 32 lowercase hex
+ * A fresh transport capability: reclaim (#1115), delegated membership or a
+ * one-use fleet takeover grant (#1534). Each is independently minted: 32 lowercase hex
  * characters, the same shape AGENTS.md rule 2 uses for a session token.
  * Deliberately NOT drawn through the injectable `randomInt` the suffix mint
  * uses — that seam exists so tests can SCRIPT an exact, often deliberately
@@ -181,8 +187,8 @@ function defaultRandomInt(n) {
  * own fallback, keeps the two fully independent.
  *
  * Transport-plane only, same doctrine as the join code itself: never touches
- * simulation state or a snapshot, never sent to a joiner, handed to the
- * record's own host exactly once — in the `hosted` frame that mints or
+ * simulation state or a snapshot. A reclaim secret is never sent to a joiner;
+ * it is handed to the record's own host exactly once — in the `hosted` frame that mints or
  * revives it — and never repeated on a later `hosted` (an admission ACK's
  * reuse of {@link codeOf}, for instance) because the host is expected to
  * remember it from that first frame.
@@ -405,6 +411,7 @@ export function createRegistry({
     // retried against the same suffix, and this same host presenting the
     // same wrong secret again gets a fresh code exactly as a first-time host
     // would.
+    if (frame.takeover !== undefined) return bindFleetTakeover(connId, frame, namespace, project, version);
     const resume = frame.resume;
     if (resume && typeof resume === 'object'
         && typeof resume.suffix === 'string' && typeof resume.secret === 'string') {
@@ -418,21 +425,30 @@ export function createRegistry({
       const capped = chargeLookup(conn, connId, 'host-open');
       if (capped) return capped;
       const held = records.get(recordKey(project, version, resume.suffix));
+      if (held?.fleet && held.graceUntil === null) return [fail(connId, 'host-open', 'host-present')];
       if (held && held.namespace === namespace
           && held.graceUntil !== null && held.graceUntil > now()) {
+        if (held.fleet?.pending) return [fail(connId, 'host-open', 'takeover-pending')];
         if (held.secret === resume.secret) {
           held.host = connId;
           held.graceUntil = null;
           held.lastSeen = now();
           conn.key = held.key;
+          const ownerMember = held.fleet?.members.get(held.fleet.ownerSlot);
+          if (ownerMember) ownerMember.peer = connId;
           return [
             out(connId, {
               type: 'hosted',
               code: { ...codeOf(held), secret: held.secret },
               admission: held.admission,
+              ...(ownerMember ? { fleet: { epoch: held.fleet.epoch, slot: ownerMember.slot, capability: ownerMember.capability } } : {}),
             }),
+            ...(held.fleet ? [...held.peers].map(peer => out(peer, {
+              type: 'fleet-owner-changed', epoch: held.fleet.epoch, slot: held.fleet.ownerSlot,
+            })) : []),
           ];
         }
+        if (held.fleet) return [fail(connId, 'host-open', 'forbidden-resume')];
         records.delete(held.key);
       }
     }
@@ -485,6 +501,135 @@ export function createRegistry({
         admission: record.admission,
       }),
     ];
+  }
+
+  // Frozen fleet continuity (#1534). The host attests its admitted roster;
+  // this service binds transport identities, never simulation facts or ticks.
+  function fleetSuccessors(connId, frame) {
+    const record = recordFor(connId);
+    if (!record || record.host !== connId || record.namespace !== NAMESPACE_SERVER) {
+      return [fail(connId, 'fleet-successors', 'not-hosting-fleet')];
+    }
+    if (frame.frozen !== true || frame.epoch !== 0 || !validSlot(frame.owner_slot)
+        || !Array.isArray(frame.members) || !frame.members.length || frame.members.length > maxPeers) {
+      return [fail(connId, 'fleet-successors', 'malformed')];
+    }
+    const peers = new Set([connId]), slots = new Set([frame.owner_slot]);
+    for (const member of frame.members) {
+      if (!member || typeof member.peer !== 'string' || !validSlot(member.slot)
+          || !record.peers.has(member.peer) || !conns.has(member.peer)
+          || peers.has(member.peer) || slots.has(member.slot)) {
+        return [fail(connId, 'fleet-successors', 'invalid-member')];
+      }
+      peers.add(member.peer); slots.add(member.slot);
+    }
+    const declared = [{ peer: connId, slot: frame.owner_slot },
+      ...frame.members.map(({ peer, slot }) => ({ peer, slot }))]
+      .sort((a, b) => a.slot - b.slot);
+    if (record.fleet) {
+      const existing = [...record.fleet.members.values()].map(({ peer, slot }) => ({ peer, slot }));
+      if (record.fleet.epoch !== 0 || JSON.stringify(existing) !== JSON.stringify(declared)) {
+        return [fail(connId, 'fleet-successors', 'already-configured')];
+      }
+    } else {
+      record.fleet = { epoch: 0, ownerSlot: frame.owner_slot, pending: null,
+        members: new Map(declared.map(member => [member.slot, { ...member, capability: mintSecret() }])) };
+    }
+    return [out(connId, { type: 'fleet-successors-set', epoch: 0 }),
+      ...[...record.fleet.members.values()].map(member => out(member.peer, {
+        type: 'fleet-capability', epoch: 0, slot: member.slot, capability: member.capability,
+      }))];
+  }
+
+  const liveFleetMember = (record, member) => {
+    const conn = conns.get(member.peer);
+    return conn && conn.key === record.key
+      && (record.host === member.peer || record.peers.has(member.peer));
+  };
+  const fleetStateFrame = record => ({ type: 'fleet-state', epoch: record.fleet.epoch,
+    owner_slot: record.fleet.ownerSlot, available: !!record.host });
+  const continuationMember = (record, proof) => {
+    if (!record.fleet || !proof || !validSlot(proof.slot)
+        || typeof proof.capability !== 'string' || !CAPABILITY.test(proof.capability)) return null;
+    const member = record.fleet.members.get(proof.slot);
+    return member && member.capability === proof.capability ? member : null;
+  };
+
+  function fleetState(connId, frame) {
+    const conn = conns.get(connId);
+    if (!conn || conn.role !== ROLE_CLIENT) return [fail(connId, 'fleet-state', 'forbidden-role')];
+    const capped = chargeLookup(conn, connId, 'fleet-state');
+    if (capped) return capped;
+    const found = resolveRequest(frame.code, askedNamespace(frame));
+    if (!found.ok || found.record.namespace !== NAMESPACE_SERVER
+        || !continuationMember(found.record, frame.continuation)) {
+      return [fail(connId, 'fleet-state', 'forbidden-continuation')];
+    }
+    return [out(connId, fleetStateFrame(found.record))];
+  }
+
+  function fleetTakeover(connId, frame) {
+    const conn = conns.get(connId), record = recordFor(connId);
+    if (!conn || conn.role !== ROLE_CLIENT || !record?.fleet) {
+      return [fail(connId, 'fleet-takeover', 'forbidden-takeover')];
+    }
+    const capped = chargeLookup(conn, connId, 'fleet-takeover');
+    if (capped) return capped;
+    const member = [...record.fleet.members.values()].find(candidate => candidate.peer === connId);
+    if (!member || member.capability !== frame.capability || !liveFleetMember(record, member)) {
+      return [fail(connId, 'fleet-takeover', 'forbidden-takeover')];
+    }
+    if (frame.epoch !== record.fleet.epoch) {
+      return [out(connId, fleetStateFrame(record)), fail(connId, 'fleet-takeover', 'stale-fleet-epoch')];
+    }
+    if (record.host || record.graceUntil === null) return [fail(connId, 'fleet-takeover', 'host-present')];
+    const elected = record.fleet.pending?.slot
+      ?? [...record.fleet.members.values()].find(candidate => liveFleetMember(record, candidate))?.slot;
+    if (member.slot !== elected) return [out(connId, { type: 'fleet-takeover-wait', epoch: record.fleet.epoch, slot: elected })];
+    if (!record.fleet.pending) {
+      record.fleet.pending = { slot: member.slot, peer: connId, epoch: record.fleet.epoch + 1, capability: mintSecret() };
+    }
+    const pending = record.fleet.pending;
+    return [out(connId, { type: 'fleet-takeover-grant', epoch: pending.epoch, slot: pending.slot,
+      suffix: record.suffix, capability: pending.capability })];
+  }
+
+  function bindFleetTakeover(connId, frame, namespace, project, version) {
+    const conn = conns.get(connId), proof = frame.takeover;
+    const capped = chargeLookup(conn, connId, 'host-open');
+    if (capped) return capped;
+    if (namespace !== NAMESPACE_SERVER || !proof || typeof proof.suffix !== 'string'
+        || proof.suffix.length !== data.suffix.length || !Number.isSafeInteger(proof.epoch)
+        || typeof proof.capability !== 'string' || !CAPABILITY.test(proof.capability)) {
+      return [fail(connId, 'host-open', 'forbidden-takeover')];
+    }
+    const record = records.get(recordKey(project, version, proof.suffix));
+    const pending = record?.fleet?.pending;
+    if (!pending || record.host || record.graceUntil === null || record.graceUntil <= now()
+        || pending.epoch !== proof.epoch || pending.capability !== proof.capability) {
+      return [fail(connId, 'host-open', 'forbidden-takeover')];
+    }
+    const member = record.fleet.members.get(pending.slot);
+    const formerPeer = member.peer;
+    const changed = [...record.peers].map(peer => out(peer, {
+      type: 'fleet-owner-changed', epoch: pending.epoch, slot: pending.slot,
+    }));
+    record.peers.delete(formerPeer);
+    const formerConn = conns.get(formerPeer);
+    if (formerConn) formerConn.key = null;
+    relay.detach(formerPeer);
+    member.peer = connId;
+    record.host = connId;
+    record.fleet.epoch = pending.epoch;
+    record.fleet.ownerSlot = pending.slot;
+    record.fleet.pending = null;
+    record.graceUntil = null;
+    record.lastSeen = now();
+    record.secret = mintSecret();
+    record.transports = sanitiseTransports(frame.transports);
+    conn.key = record.key;
+    return [out(connId, { type: 'hosted', code: { ...codeOf(record), secret: record.secret }, admission: record.admission,
+      fleet: { epoch: record.fleet.epoch, slot: member.slot, capability: member.capability } }), ...changed];
   }
 
   function hostAdmission(connId, frame) {
@@ -663,13 +808,18 @@ export function createRegistry({
    * is `dropRecord`'s per-relay-peer teardown, applied WITHOUT dropping the
    * record or touching its direct peers.
    */
+  // Delegated frozen-fleet members are the bounded exception: lose the relay
+  // mailbox, retain the authenticated join socket for explicit takeover.
   function detachGraceRelays(record) {
-    const frames = [];
+    const frames = record.fleet ? [...record.peers].filter(peer =>
+      [...record.fleet.members.values()].some(member => member.peer === peer))
+      .map(peer => out(peer, { type: 'fleet-owner-lost', epoch: record.fleet.epoch })) : [];
     for (const peer of [...record.peers]) {
       if (relay.keyFor(peer) !== record.key) continue;
       frames.push(out(peer, { type: 'relay-closed', reason: 'host-gone' }));
-      frames.push(out(peer, { type: 'closed', reason: 'host-gone' }));
       relay.detach(peer);
+      if (record.fleet && [...record.fleet.members.values()].some(member => member.peer === peer)) continue;
+      frames.push(out(peer, { type: 'closed', reason: 'host-gone' }));
       record.peers.delete(peer);
       const c = conns.get(peer);
       if (c) c.key = null;
@@ -721,7 +871,17 @@ export function createRegistry({
     // mid-reconnect just keeps retrying on its own backoff until either the
     // original host reclaims it or the grace window runs out for good.
     if (!record.host) return [fail(connId, 'join', 'unreachable')];
-    if (record.admission !== 'open') return [fail(connId, 'join', 'admission-closed')];
+    let continuation = null;
+    if (frame.continuation !== undefined) {
+      const member = continuationMember(record, frame.continuation);
+      if (!member) return [fail(connId, 'join', 'forbidden-continuation')];
+      if (frame.continuation.epoch !== record.fleet.epoch) {
+        return [out(connId, fleetStateFrame(record)), fail(connId, 'join', 'stale-fleet-epoch')];
+      }
+      if (member.peer !== connId && liveFleetMember(record, member)) return [fail(connId, 'join', 'slot-connected')];
+      continuation = member;
+    }
+    if (!continuation && record.admission !== 'open') return [fail(connId, 'join', 'admission-closed')];
     // A full crew list reads to the guest exactly like a closed one, and it is
     // the same sentence on their phone. The cap is not a party size — it is
     // the bound that stops one record holding unbounded presence.
@@ -732,6 +892,8 @@ export function createRegistry({
     const left = conn.key && conn.key !== record.key ? leave(connId) : [];
     conn.key = record.key;
     record.peers.add(connId);
+    conn.fleetContinuation = continuation ? { epoch: record.fleet.epoch, slot: continuation.slot } : null;
+    if (continuation) continuation.peer = connId;
 
     return [
       ...left,
@@ -743,11 +905,13 @@ export function createRegistry({
         // skips the whole direct ladder instead of spending ninety seconds
         // discovering the same thing (issue #1113).
         transports: record.transports,
+        ...(continuation ? { continuation: { epoch: record.fleet.epoch, slot: continuation.slot } } : {}),
       }),
       // Presence only. The joiner's build identity travels in-band on the
       // DataChannel, to the host that actually decides on it — relaying a copy
       // through here was ignored by the host and only widened the surface.
-      out(record.host, { type: 'peer-joined', peer: connId }),
+      out(record.host, { type: 'peer-joined', peer: connId,
+        ...(continuation ? { continuation: { epoch: record.fleet.epoch, slot: continuation.slot } } : {}) }),
     ];
   }
 
@@ -772,7 +936,7 @@ export function createRegistry({
   function leave(connId, { viaDisconnect = false } = {}) {
     const record = recordFor(connId);
     const conn = conns.get(connId);
-    if (conn) conn.key = null;
+    if (conn) { conn.key = null; conn.fleetContinuation = null; }
     if (!record) {
       // A relay attachment with no record left is bookkeeping from a record
       // that has already gone (issue #1113); drop it rather than leaking a
@@ -875,7 +1039,11 @@ export function createRegistry({
     const record = recordFor(connId);
     if (!conn || conn.role !== ROLE_CLIENT) return [fail(connId, 'relay-open', 'forbidden-role')];
     if (!record || !record.peers.has(connId)) return [fail(connId, 'relay-open', 'not-joined')];
-    if (record.admission !== 'open') return [fail(connId, 'relay-open', 'admission-closed')];
+    if (!record.host) return [fail(connId, 'relay-open', 'unreachable')];
+    const proof = conn.fleetContinuation;
+    const continued = proof && proof.epoch === record.fleet?.epoch
+      && record.fleet.members.get(proof.slot)?.peer === connId;
+    if (!continued && record.admission !== 'open') return [fail(connId, 'relay-open', 'admission-closed')];
 
     const attached = relay.attach(connId, record.key);
     if (!attached.ok) return [fail(connId, 'relay-open', attached.reason)];
@@ -891,7 +1059,8 @@ export function createRegistry({
     // adapter that dispatches a batch synchronously (the contract tests, and
     // tests/smoke/rendezvous-shim.js).
     return [
-      out(record.host, { type: 'relay-peer', peer: connId, limits: relayAdvice() }),
+      out(record.host, { type: 'relay-peer', peer: connId, limits: relayAdvice(),
+        ...(continued ? { continuation: { ...proof } } : {}) }),
       out(connId, {
         type: 'relay-ready',
         peer: connId,
@@ -1052,6 +1221,9 @@ export function createRegistry({
         }
         switch (frame.type) {
           case 'host-open': return hostOpen(connId, frame);
+          case 'fleet-successors': return fleetSuccessors(connId, frame);
+          case 'fleet-takeover': return fleetTakeover(connId, frame);
+          case 'fleet-state': return fleetState(connId, frame);
           case 'host-admission': return hostAdmission(connId, frame);
           case 'rotate': return hostRotate(connId);
           case 'host-close': return hostClose(connId);

@@ -12,6 +12,7 @@ import { buildPowerConsoleState, buildWeaponsConsoleState } from '../../gui/cons
 import '../../gui/components/ph-tutorial-overlay.js';
 import { createTacticalActionRegistry } from '../../gui/stations/tactical-actions.js';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
+import { renderHelm, renderPower, renderDamageControl } from '../../gui/dynasty-cruiser/console.js';
 import { createGamepadInputRuntime } from '../../gui/gamepad-input.js';
 import {
   createOperatorProfileSnapshot, serializeOperatorProfile,
@@ -43,6 +44,52 @@ function journey(stationId) {
 }
 
 describe('authored Dynasty onboarding', () => {
+  it('exposes authored Dock and recovery gear on their human Stations', () => {
+    const helmDoc = new DOMParser().parseFromString(readFileSync('gui/dynasty-cruiser/helm.html', 'utf8'), 'text/html');
+    const damageDoc = new DOMParser().parseFromString(readFileSync('gui/dynasty-cruiser/damage-control.html', 'utf8'), 'text/html');
+    applyToDom(helmDoc);
+    applyToDom(damageDoc);
+    expect(helmDoc.querySelector('script[type="module"]').textContent).toContain('HELM_DOCK_ACTION_ID');
+    expect(damageDoc.querySelector('script[type="module"]').textContent).toContain("'engineering'");
+    renderHelm({
+      system_ids: ['dock'], system_families: { dock: 'helm' },
+      systems: { dock: { dock: { system_id: 'dock', available: true, available_target_name: 'Berth' },
+        tow_load: { active: true, target_name: 'Freighter' } } },
+    }, helmDoc);
+    expect(helmDoc.getElementById('dock-panel').hidden).toBe(false);
+    expect(helmDoc.getElementById('dock-btn').dataset.systemId).toBe('dock');
+    expect(helmDoc.getElementById('dock-status').textContent).toContain('Berth');
+    expect(helmDoc.getElementById('tow-load-panel').hidden).toBe(false);
+    renderDamageControl({
+      system_ids: ['tractor', 'umbilical'],
+      system_families: { tractor: 'tractor', umbilical: 'umbilical' },
+      systems: { tractor: { system_id: 'tractor', engaged: true },
+        umbilical: { system_id: 'umbilical', running: true } },
+    }, damageDoc);
+    expect(damageDoc.getElementById('tractor-panel').hidden).toBe(false);
+    expect(damageDoc.getElementById('tractor-btn').classList.contains('engaged')).toBe(true);
+    expect(damageDoc.getElementById('umbilical-panel').hidden).toBe(false);
+    expect(damageDoc.getElementById('umbilical-btn').classList.contains('engaged')).toBe(true);
+  });
+
+  it.each([
+    ['command', 'captain'], ['gunnery', 'tactical'], ['damage-control', 'engineering'],
+  ])('%s uses its shared action context for keyboard and gamepad input', (station, context) => {
+    const html = readFileSync(`gui/dynasty-cruiser/${station}.html`, 'utf8');
+    expect(html).toContain(`getActionContext:()=> '${context}'`);
+  });
+
+  it('shows battery and reserve together on Power so allocation costs remain readable', () => {
+    const doc = new DOMParser().parseFromString(readFileSync('gui/dynasty-cruiser/power.html', 'utf8'), 'text/html');
+    const power = { battery_charge: 30, battery_max: 60,
+      strike_reserve: { charge: 8, capacity: 20, charging: true } };
+    renderPower({ system_ids: ['power-reactor'],
+      system_families: { 'power-reactor': 'power' },
+      systems: { 'power-reactor': power } }, doc);
+    expect(doc.getElementById('battery-bar').state.level_pct).toBe(50);
+    expect(doc.getElementById('strike-reserve').state).toEqual(power.strike_reserve);
+  });
+
   it('renders all six authored manual overviews as prose and preserves literal mod overviews', () => {
     for (const station of stations) {
       const panel = renderStationPanel(document, { overview: station.manual_overview, sections: [] });

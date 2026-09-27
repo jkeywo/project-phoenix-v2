@@ -43,6 +43,25 @@
 .dynasty-power > ph-power-controls {
   flex: 1 0 18rem;
 }
+.dynasty-aux-panel {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--edge);
+  padding-block: .6rem;
+  line-height: 1.5;
+}
+.dynasty-aux-panel[hidden], .dynasty-aux-panel [hidden] { display: none; }
+.dynasty-aux-panel h2 { margin: 0 0 .4rem; }
+.dynasty-aux-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.dynasty-aux-row button {
+  min-height: var(--control-hit-min);
+  min-width: var(--control-hit-min);
+  padding: .35rem .65rem;
+  border: 1px solid var(--edge);
+  background: var(--surface-panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+.dynasty-aux-row button:focus-visible { outline: 3px solid var(--cyan); outline-offset: 2px; }
 @media (orientation: portrait) {
   .dynasty-layout:not(.dynasty-power) {
     grid-template-rows: auto minmax(24rem, 1fr) minmax(24rem, 1fr);
@@ -51,4 +70,6 @@
 @media (forced-colors: active) {
   .dynasty-guidance { border-color: CanvasText; background: Canvas; color: CanvasText; }
   .dynasty-guidance summary:focus-visible { outline-color: Highlight; }
+  .dynasty-aux-row button { border-color: ButtonText; background: ButtonFace; color: ButtonText; }
+  .dynasty-aux-row button:focus-visible { outline-color: Highlight; }
 }

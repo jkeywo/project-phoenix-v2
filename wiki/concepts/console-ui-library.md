@@ -59,6 +59,9 @@ shortcut never silently selects the field.
 
 The six documents in `gui/dynasty-cruiser/` retain shared controls and semantic
 actions while `gui/themes/dynasty-cruiser.css` supplies their common identity.
+Helm reuses the shared contextual Dock and tow-load presenters; Damage Control
+reuses the shared Tractor and Umbilical presenters and their semantic actions.
+Power presents the shared battery readout beside allocation and strike reserve.
 Each carries a reopenable role/attack-cycle guide. The hull's authored tutorials
 use the shared `gui/tutorial-state.js` evaluator: Power observes charging and
 depletion, Gunnery observes available charge, enabled boost and depletion.

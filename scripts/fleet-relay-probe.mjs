@@ -12,6 +12,12 @@ import { transportLeversFromLocation } from '../gui/transport-levers.js';
 
 const port = Number(process.env.PHOENIX_RELAY_PROBE_PORT || 18788);
 const base = `http://127.0.0.1:${port}`;
+const rounds = Number(process.env.PHOENIX_RELAY_PROBE_ROUNDS || 200);
+const warmupRounds = Number(process.env.PHOENIX_RELAY_PROBE_WARMUP_ROUNDS || 20);
+if (!Number.isSafeInteger(rounds) || rounds < 1 || rounds > 10_000
+    || !Number.isSafeInteger(warmupRounds) || warmupRounds < 0 || warmupRounds > 10_000) {
+  throw new Error('Probe round counts must be bounded nonnegative integers (measured rounds > 0)');
+}
 const data = JSON.parse(readFileSync('assets/join/join-codes.json', 'utf8'));
 setJoinCodeData(data);
 const service = spawn(process.execPath, ['scripts/rendezvous-dev-server.mjs', '--port', String(port)],
@@ -65,7 +71,9 @@ try {
   }
   owner.freeze();
   await wait(() => members.every(member => member.roster()?.frozen));
-  for (let round = 0; round < 20; round++) {
+  let measuredAt;
+  for (let round = 0; round < warmupRounds + rounds; round++) {
+    if (round === warmupRounds) { samples.length = 0; measuredAt = performance.now(); }
     for (let index = 0; index < members.length; index++) {
       const slot = index + 2;
       const id = `${slot}-${round}`;
@@ -75,6 +83,7 @@ try {
     }
   }
   const sorted = samples.map(sample => sample.round_trip_ms).sort((a, b) => a - b);
+  const measuredDurationMs = performance.now() - measuredAt;
   const percentile = p => sorted[Math.ceil(p * sorted.length) - 1];
   const sourcePaths = ['gui/fleet-session.js', 'gui/rendezvous-transport.js',
     'worker-rendezvous/src/registry.js', 'assets/join/join-codes.json',
@@ -89,7 +98,8 @@ try {
     hashes, composition: { ship_protocol_peers: 4, gm_protocol_peers: 2,
       simulations: 0, station_client_documents: 0 },
     profile: { address: 'loopback', added_delay_ms: 0, added_loss_percent: 0 },
-    routes, count: samples.length, p50_ms: percentile(.5), p95_ms: percentile(.95),
+    routes, warmup_rounds: warmupRounds, measured_rounds: rounds, measured_duration_ms: measuredDurationMs,
+    count: samples.length, p50_ms: percentile(.5), p95_ms: percentile(.95),
     p99_ms: percentile(.99), max_ms: sorted.at(-1), samples,
     limitations: 'Synthetic frames; no authoritative command application, stalls, recovery, rendering or real-network acceptance.',
   }, null, 2) + '\n');

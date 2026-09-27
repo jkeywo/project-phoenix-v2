@@ -1,4 +1,4 @@
-# T5 performance acceptance proposal — awaiting measurements and ratification
+# T5 performance acceptance proposal — local measurements, ratification pending
 
 This is the reusable plan for #1543. The user chose to decide the numerical
 limits after seeing measurements. Nothing below is a ratified limit or a passing
@@ -23,6 +23,11 @@ machines or for a minimum supported specification. Record the active renderer,
 power mode, thermal state, display resolution, browser version and native SDK
 version for every actual run; those were not measured by this inventory.
 
+The updated inventory in `1543-measurements-2026-09-27/hardware.json` also records
+High performance power mode, both display modes, Node v24.13.0 and rustc 1.95.0.
+Ethernet was connected at 1 Gbps, but neither local measurement exercised it.
+Thermal state and ordinary background application activity were not controlled.
+
 ## Measured loopback protocol probe
 
 `node scripts/fleet-relay-probe.mjs` ran on this machine with Node v24.13.0
@@ -45,6 +50,90 @@ documents, no rendering and no authoritative command application. The source
 was the dirty scale worktree based on `ea9acfb316c80a52ccbf586d07c3a5ecdfa853e4`.
 It is not a comparable supported-workload baseline, a network acceptance cell,
 or evidence that the proposed command/stall/recovery limits pass.
+
+## Repeated local diagnostics (2026-09-27)
+
+The raw evidence and reproducibility manifest are retained under
+`1543-measurements-2026-09-27/`. Both instruments ran against runtime revision
+`8aa756807d50a12819c2d44e6f40dd59082662d8` with the retained instrumentation patch.
+The manifest pins the executable, runner, authored content and source patch.
+These are repetitions of one local baseline, not a before/after comparison.
+
+### Six simulations in one process
+
+The ignored `six_peer_local_measurement` test ran three fresh fleets, each with
+120 warm-up ticks and 600 measured ticks, paced at 60 Hz. Every fleet contained
+four ship Apps, two GM Apps and twelve synthetic admitted Station sessions.
+They shared one process and an in-memory mesh. No browser documents, native
+surfaces or renderers were present. CommandDelay was fixed at two ticks; seed
+was 1519006 and the world was `probe_fleet_six_peer.toml` with Alliance cruisers.
+
+| Measurement (milliseconds) | Run | p50 | p95 | p99 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sequential six-App step | 1 | 5.851 | 7.495 | 8.345 | 10.098 |
+| Sequential six-App step | 2 | 5.939 | 7.715 | 8.754 | 10.416 |
+| Sequential six-App step | 3 | 5.655 | 7.380 | 8.947 | 10.143 |
+| Cycle including digest checks | 1 | 6.450 | 8.297 | 9.089 | 11.275 |
+| Cycle including digest checks | 2 | 6.491 | 8.487 | 9.665 | 11.530 |
+| Cycle including digest checks | 3 | 6.195 | 8.075 | 9.831 | 11.249 |
+| Wave start to observed command application | 1 | 40.038 | 42.830 | 42.832 | 42.832 |
+| Wave start to observed command application | 2 | 40.506 | 41.520 | 41.522 | 41.522 |
+| Wave start to observed command application | 3 | 39.507 | 40.590 | 40.593 | 40.593 |
+
+Each run lasted 10.000–10.001 measured seconds, applied 80 crew commands and
+seven GM grants, compared 945 NPC decisions and completed 600 all-peer digest
+checks. There were zero digest mismatches and zero cycles without tick progress.
+Commands were sent in five waves of sixteen: the 80 observations are correlated,
+and their p99 is the sample maximum, not a robust long-tail estimate. One clock
+measured from the beginning of each wave to the end of the six-App cycle that
+contained application. This conservative observation includes scheduling and
+the other Apps; it is not a phone-to-host latency or an individual peer's cost.
+Quantiles use nearest rank. The build/run log retains the existing audio warning
+and repeated-App global logger warnings; both occur outside measured cycles.
+
+### Loopback WebSocket relay
+
+Three sequential repetitions used twenty warm-up rounds and 200 measured rounds
+across five member-to-owner-to-member links: 1,000 timed echoes per repetition.
+All six protocol peers used the real shipped registry and WebSocket relay, with
+zero added delay/loss. There were zero simulations and zero console documents.
+
+| Run | Measured seconds | p50 ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 16.635 | 0.515 | 0.803 | 0.950 | 1.649 |
+| 2 | 16.649 | 0.515 | 0.799 | 0.952 | 1.708 |
+| 3 | 16.668 | 0.489 | 0.806 | 0.946 | 1.765 |
+
+The probe deliberately spaces echoes through a polling loop; its duration is
+not a saturation-throughput result. Other agents confirmed their build and PASM
+processes had stopped before these final repetitions. An earlier three-run
+series overlapped PASM validation and is retained separately as
+`relay-background-validation-*.json`, excluded from this table. The historical
+100-echo run above used an older revision and shorter sampling configuration;
+its difference from these runs is not a measured improvement.
+
+### Interpretation and reproduction
+
+These samples establish a reproducible local diagnostic baseline. They do not
+justify tightening the proposed acceptance limits: the actual devices,
+renderers, network profiles, recovery events and hour-long workload remain
+unmeasured. The proposed durations and limits below therefore remain unchanged
+and explicitly await the user's decision.
+
+```powershell
+$env:CARGO_TARGET_DIR = 'C:\Coding\project-phoenix-v2\target'
+$env:PHOENIX_T5_ARTIFACT_DIR = '<fresh evidence directory>'
+$env:PHOENIX_T5_MEASURE_SECONDS = '10'
+$env:PHOENIX_T5_MEASURE_REPETITIONS = '3'
+# Refresh src/lib.rs mtime when switching a shared target between worktrees.
+cargo test --features headless --test lockstep_six_peer six_peer_local_measurement -- --ignored --exact --nocapture
+$env:PHOENIX_RELAY_PROBE_ROUNDS = '200'
+$env:PHOENIX_RELAY_PROBE_WARMUP_ROUNDS = '20'
+node scripts/fleet-relay-probe.mjs # Repeat three times; retain each JSON output.
+```
+
+This diagnostic ten-second duration is not a substitute for the proposed
+ten-minute acceptance runs or the retained one-hour mixed session.
 
 ## Proposed shorter runs and repeatable profiles
 

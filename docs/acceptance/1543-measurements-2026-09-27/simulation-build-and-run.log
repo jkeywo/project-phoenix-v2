@@ -1,0 +1,42 @@
+   Compiling project-phoenix v0.1.0 (C:\Users\jkeyw\.codex\worktrees\recipient-actions\project-phoenix-v2)
+warning: methods `take_authored` and `take_computer` are never used
+   --> src\native_host\audio\mod.rs:104:8
+    |
+103 | impl Control {
+    | ------------ methods in this implementation
+104 |     fn take_authored(
+    |        ^^^^^^^^^^^^^
+...
+126 |     fn take_computer(&mut self, now: Instant) -> Option<String> {
+    |        ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `project-phoenix` (lib) generated 1 warning
+    Finished `test` profile [optimized + debuginfo] target(s) in 3m 57s
+     Running tests\lockstep_six_peer.rs (C:\Coding\project-phoenix-v2\target\debug\deps\lockstep_six_peer-4891e68d454822d9.exe)
+
+running 1 test
+2026-09-27T03:09:30.167981Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:30.233404Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:30.297763Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:30.361778Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:30.426613Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+measurement retained: C:\Users\jkeyw\.codex\worktrees\recipient-actions\project-phoenix-v2\docs\acceptance\1543-measurements-2026-09-27\six-app-measurement-1.json
+2026-09-27T03:09:42.941431Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:43.009333Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:43.073499Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:43.139832Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:43.202981Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:43.265372Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+measurement retained: C:\Users\jkeyw\.codex\worktrees\recipient-actions\project-phoenix-v2\docs\acceptance\1543-measurements-2026-09-27\six-app-measurement-2.json
+2026-09-27T03:09:55.506582Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:55.568534Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:55.630233Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:55.693839Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:55.755704Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:09:55.816946Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+measurement retained: C:\Users\jkeyw\.codex\worktrees\recipient-actions\project-phoenix-v2\docs\acceptance\1543-measurements-2026-09-27\six-app-measurement-3.json
+test six_peer_local_measurement ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 38.14s

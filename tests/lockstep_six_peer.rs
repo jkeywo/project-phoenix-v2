@@ -494,3 +494,135 @@ fn six_peer_one_hour_endurance_workload() {
     let npc_commands = run_workload(&mut hosts, ticks, true);
     assert!(npc_commands > 0, "the endurance run observed no NPC output");
 }
+
+/// Local simulation measurement, NOT the real-runtime/network acceptance gate.
+/// Six Apps share one process, one CPU scheduler and an in-memory mesh. The
+/// twelve clients are synthetic admitted inputs; no client documents render.
+#[test]
+#[ignore = "manual local simulation measurement; no CI timing threshold"]
+fn six_peer_local_measurement() {
+    let seconds: u64 = std::env::var("PHOENIX_T5_MEASURE_SECONDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(10);
+    let repetitions: u64 = std::env::var("PHOENIX_T5_MEASURE_REPETITIONS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(3);
+    assert!(seconds > 0 && repetitions > 0);
+    let directory = PathBuf::from(
+        std::env::var_os("PHOENIX_T5_ARTIFACT_DIR")
+            .expect("choose an explicit measurement output directory"),
+    );
+    std::fs::create_dir_all(&directory).unwrap();
+    let measured_ticks = seconds.checked_mul(60).unwrap();
+    let frame = Duration::from_nanos(16_666_667);
+    for repetition in 0..repetitions {
+        let mut hosts = build_fleet();
+        run_workload(&mut hosts, 120, true);
+        let mut command_cursor = hosts[0]
+            .app
+            .world()
+            .resource::<project_phoenix::command_admission::CommandLog>()
+            .len();
+        let commands_before = command_cursor;
+        let gm_before = hosts[0]
+            .app
+            .world()
+            .resource::<GmActionJournal>()
+            .grants()
+            .len();
+        let started = Instant::now();
+        let mut deadline = started;
+        let mut step_ms = Vec::new();
+        let mut cycle_ms = Vec::new();
+        let mut command_samples = Vec::new();
+        let mut wave_start: Option<Instant> = None;
+        let mut wave_remaining = 0;
+        let mut stalled_cycles = 0;
+        let mut npc_commands = 0;
+        for offset in 0..measured_ticks {
+            let tick = 120 + offset;
+            let cycle_start = Instant::now();
+            if tick % 120 == 30 {
+                assert_eq!(
+                    wave_remaining, 0,
+                    "a prior wave never reached authoritative application"
+                );
+                wave_start = Some(Instant::now());
+                wave_remaining = 16;
+                crew_wave(&mut hosts, tick / 120);
+            }
+            if tick % 90 == 30 {
+                let wave = tick / 90;
+                gm_wave(
+                    &mut hosts,
+                    GM_SLOTS[(wave as usize) % GM_SLOTS.len()],
+                    !wave.is_multiple_of(2),
+                    wave,
+                );
+            }
+            let before_tick = hosts[0].tick();
+            let step_start = Instant::now();
+            step(&mut hosts);
+            step_ms.push(step_start.elapsed().as_secs_f64() * 1000.0);
+            if hosts[0].tick() == before_tick {
+                stalled_cycles += 1;
+            }
+            // The log records applied commands, not queued future commands.
+            // One clock observes the end of the six-App cycle containing apply;
+            // this is a conservative observation boundary, not per-device RTT.
+            let log = hosts[0]
+                .app
+                .world()
+                .resource::<project_phoenix::command_admission::CommandLog>();
+            for command in &log.entries()[command_cursor..] {
+                let elapsed = wave_start
+                    .expect("only injected crew traffic enters this log")
+                    .elapsed()
+                    .as_secs_f64()
+                    * 1000.0;
+                command_samples.push(
+                    serde_json::json!({ "tick": command.tick, "order": command.order,
+                    "target": command.target, "wave_to_observed_apply_ms": elapsed }),
+                );
+                wave_remaining -= 1;
+            }
+            command_cursor = log.len();
+            npc_commands += assert_equivalent(&mut hosts);
+            cycle_ms.push(cycle_start.elapsed().as_secs_f64() * 1000.0);
+            deadline += frame;
+            std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+        }
+        assert_eq!(wave_remaining, 0);
+        assert!(!command_samples.is_empty());
+        let elapsed_seconds = started.elapsed().as_secs_f64();
+        let gm_after = hosts[0]
+            .app
+            .world()
+            .resource::<GmActionJournal>()
+            .grants()
+            .len();
+        let result = serde_json::json!({
+            "kind": "single-process-six-app-simulation-only", "revision": revision(),
+            "measurement_source_hash": content_hash("tests/lockstep_six_peer.rs"),
+            "measurement_source_patch": String::from_utf8(std::process::Command::new("git")
+                .args(["diff", "--", "tests/lockstep_six_peer.rs"]).output().unwrap().stdout).unwrap(),
+            "seed": SEED, "world": WORLD, "world_content_hash": content_hash(WORLD),
+            "ship": SHIP, "ship_content_hash": content_hash(SHIP), "repetition": repetition + 1,
+            "warmup_ticks": 120, "measured_ticks": measured_ticks, "requested_seconds": seconds,
+            "elapsed_seconds": elapsed_seconds, "ship_apps": 4, "gm_apps": 2,
+            "synthetic_station_clients": 12, "client_documents": 0,
+            "command_delay_ticks": project_phoenix::lockstep::authored_delay(hosts[0].app.world()),
+            "applied_crew_commands": command_cursor - commands_before, "gm_grants": gm_after - gm_before,
+            "npc_commands": npc_commands, "digest_comparisons": measured_ticks,
+            "digest_mismatches": 0, "stalled_cycles": stalled_cycles,
+            "six_app_step_ms": step_ms, "cycle_including_digest_ms": cycle_ms,
+            "command_samples": command_samples,
+            "limitations": "In-memory mesh; sequential Apps; no renderer, browser, native surface, network impairment, owner loss or recovery. Not the supported-workload acceptance matrix or one-hour run."
+        });
+        let path = directory.join(format!("six-app-measurement-{}.json", repetition + 1));
+        std::fs::write(&path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+        eprintln!("measurement retained: {}", path.display());
+    }
+}

@@ -2,8 +2,8 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, src/sim_sets/order.rs, src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
-updated: 2026-09-23
+sources: [scripts/fleet-relay-probe.mjs, docs/acceptance/1543-performance-proposal.md, AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, src/sim_sets/order.rs, src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
+updated: 2026-09-27
 ---
 
 # Testing Strategy
@@ -32,6 +32,15 @@ CI. The ignored wall-clock form uses a non-ending test-only world for the
 one-hour acceptance run and retains replay-rich first-divergence JSON. The
 commands and evidence boundary are in
 [Six-peer deterministic endurance](../../docs/acceptance/1519-six-peer-endurance.md).
+
+The same binary's ignored `six_peer_local_measurement` records sequential
+six-App cycle costs and command-wave application observations, with raw samples,
+source/content provenance and per-tick digest comparison. It is a local
+simulation measurement: the twelve Station inputs are synthetic and its mesh
+is in memory. `scripts/fleet-relay-probe.mjs` separately records real loopback
+WebSocket echo timings without a simulation. Neither replaces the browser,
+native, impaired-network or one-hour acceptance matrix; the proposed numerical
+limits in `docs/acceptance/1543-performance-proposal.md` remain unratified.
 
 The manual Falling Skyway timeline tests keep scenario damage and terminal
 outcomes live. Fixtures observing late dialogue or campaign records shelter

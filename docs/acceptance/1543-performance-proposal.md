@@ -2,9 +2,10 @@
 
 This is the reusable plan for #1543. The user chose to decide the numerical
 limits after seeing measurements. Nothing below is a ratified limit or a passing
-runtime result. Four ship peers, two GM peers, twelve active Station clients and
-two active GM consoles remain the workload; the one-hour mixed session remains
-required. The protocol checks in `1530-six-peer-matrix.md` are separate evidence.
+performance acceptance result. Four ship peers, two GM peers, twelve active
+Station clients and two active GM consoles remain the workload; the one-hour
+mixed session remains required. The protocol checks in
+`1530-six-peer-matrix.md` are separate evidence.
 
 ## Available machine provenance
 
@@ -115,8 +116,8 @@ its difference from these runs is not a measured improvement.
 ### Interpretation and reproduction
 
 These samples establish a reproducible local diagnostic baseline. They do not
-justify tightening the proposed acceptance limits: the actual devices,
-renderers, network profiles, recovery events and hour-long workload remain
+justify tightening the proposed acceptance limits: the separate devices,
+rendered viewscreens, external network profiles and hour-long workload remain
 unmeasured. The proposed durations and limits below therefore remain unchanged
 and explicitly await the user's decision.
 
@@ -191,11 +192,15 @@ p50/p95/p99/max summaries and first-divergence artifacts. Report changes against
 baseline beside absolute values. A baseline from a different build profile,
 content set or network profile is not a comparable baseline.
 
-Current measurement ledger: **no supported-workload latency, stall, recovery or
-one-hour runtime measurements captured**. Owner transport handover (#1534) and
-the actual runtime matrix remain outstanding. User ratification remains pending.
+Current measurement ledger: one bounded browser/loopback run with four ship
+simulations, two GM simulations, twelve active Station documents and two GM
+console documents is recorded below. Its receipt bound, host tick cadence and
+ship-loss recovery observations are real but do not establish the proposed
+application-latency or unplanned-stall limits. Rendered, native, mixed, external
+network, repeatability and one-hour evidence remain outstanding. User
+ratification remains pending.
 
-## Prepared trace reducer (no new runtime measurements)
+## Trace capture and reducer
 
 `scripts/fleet-performance-observer.mjs` is an opt-in browser page observer for
 the existing real matrix clients. After `observeBrowser` has installed its
@@ -235,8 +240,8 @@ progress and digest verification as separate intervals and list restore commits
 without subtracting another peer's timestamp. Missing events remain visible
 as incomplete pairs. Run it with
 `node scripts/fleet-performance-evidence.mjs trace.json summary.json` after
-capturing a real workload trace. These tools have unit coverage, but no
-browser/native/mixed supported-workload trace has yet been captured with them.
+capturing a real workload trace. The browser lane below used these tools; native
+and mixed traces remain outstanding.
 
 `scripts/fleet-performance-capture.mjs` connects those instruments to the
 actual browser matrix and its existing ship-loss recovery gate. It requires a
@@ -267,3 +272,80 @@ recorded on each survivor before the browser victim is closed, so its recovery
 interval includes the close operation. This is a bounded browser/loopback
 measurement lane only. Native, mixed, external-network, one-hour and human
 ratification evidence remain separate and unmeasured until actually run.
+
+## Bounded browser observation (2026-09-27)
+
+Application bundle revision `b16122a02414ed67cd5d396d0bed889ae275cc82`
+had a clean source tree and a verified source-and-bundle receipt at
+`target/browser-wasm-receipt-b16122a0.json` (SHA-256
+`cc247306f53280ca0f0b168d83c5a8e2b73465b0b7b1fbb1515df4e193cdf377`).
+The capture wrapper fix was a separate, reviewed `0a334c35` overlay, SHA-256
+`09dfcc5482654de15f43647aaea7ca0313fa20a63543a32bb2863da62931f2d9`;
+the trace records this as its runner hash, rather than claiming the wrapper was
+part of the clean application revision. The final ignored local evidence is in
+`target/1543-performance-b16122a0-run3/`, copied byte-for-byte from the fresh
+temporary run output. Its manifest records Chromium 147.0.7727.15, Node
+v24.13.0, Windows 10.0.26200, Intel Core Ultra 9 275HX, 68,112,736,256 bytes
+RAM, content `phoenix-base@1:probe_fleet_six_peer`, world hash, seed 1530 and
+the full bundle hash inventory. The observed route was direct WebRTC at the
+actual `RTCDataChannel.send` boundary on one machine; there was zero added
+application-frame delay/loss and no IP-level shaping.
+
+The rendered attempt used
+`node scripts/fleet-performance-capture.mjs --out C:\Users\jkeyw\AppData\Local\Temp\phoenix-1543-b16122a0-run2 --dist dist --wasm-build-receipt C:\Coding\project-phoenix-v2\target\browser-wasm-receipt-b16122a0.json --render`.
+Its temporary output is retained at that path. It failed the matrix's
+90-second digest-sample wait after six hosts and twelve clients launched. All
+clients had two Applied receipts, but the hosts recorded no digest samples.
+The original wrapper then masked the matrix failure with an undefined manifest
+status; `0a334c35` corrects that return path. Run 2 remains a diagnostic failure,
+with no latency or recovery sample. It does not establish a rendered performance
+result or an underlying product defect.
+
+The successful non-render run used this command from the clean application
+checkout; the overlay changed only its relative imports to run from `target`:
+
+```powershell
+node target/fleet-performance-capture-overlay-0a334c35.mjs `
+  --out C:\Users\jkeyw\AppData\Local\Temp\phoenix-1543-b16122a0-run3 `
+  --dist dist --wasm-build-receipt target/browser-wasm-receipt-b16122a0.json
+```
+
+The matrix passed with four ship and two GM WASM simulations, twelve Station
+documents and two GM console documents (18 browser documents total), and its
+ship-loss digest recovery gate passed. Bevy viewscreen rendering was disabled.
+Over ten measured seconds, twenty command waves produced 240 correlated Applied
+receipts and zero incomplete pairs. Same-document input-to-**Applied receipt**
+duration, which includes return delivery and is an upper bound on application
+time, was p50 **101.8 ms**, p95 **136.3 ms**, p99 **141.7 ms**, maximum
+**141.9 ms** (nearest rank). The authoritative application timestamp is on a
+different clock, so exact input-to-application latency is unavailable.
+
+Pre-fault host tick observations span 10.436–10.471 seconds per host. Against a
+60 Hz expected tick interval, the worst host's excess-time fraction was **60.43%**
+and its longest single excess was **92.3 ms**. These are cadence deficits, not
+measured unplanned-stall time: steady slow ticks contribute excess. The
+separately retained `direct/pre-fault-stalls.json` excludes each host's fault
+window; the full-run stall summary includes the deliberate fault and must not
+be used for acceptance.
+
+Ship 2 loss was applied at tick 560. Five survivors proved Backfill and matching
+digests at ticks 600 and 900. Across their same-page clocks, fault marker to
+loss detection was p50 **15.626 s**, p95/maximum **15.651 s**; to resumed
+progress p50 **16.601 s**, p95/maximum **16.605 s**; to verified agreement
+p50 **28.153 s**, p95/maximum **28.153 s**. These intervals start before victim
+close and include browser close plus observation delay. They are not a
+divergence-recovery measurement or a p95 estimate across independent runs.
+
+SHA-256 of the retained `manifest.json` is
+`40fd5aa754d7805c0442cc7ac5cbcafe80449555589e8416e4f1a1ac99ffd529`;
+`direct/result.json` is
+`d4778f3488043f704932f347818bc0d1b10e48e2135cc8d4d2b78d8e6817d74e`;
+`direct/performance-trace.json` is
+`9f31377743007ada20205f5f2487dcc0bfa8ee1ba70620b1a19754a6ed3694e3`;
+`direct/performance-summary.json` is
+`5c1ad1fe68894a0e26f7f913ce46d7318c712c756e8289892fc18c513ca5b9d4`;
+and `direct/pre-fault-stalls.json` is
+`5d8db3ebfdc03ca6b4db0389c26977ac044ec9a5982b5d719a32e447a003f44b`.
+This is one short browser/loopback sample on one machine. Rendered, native,
+mixed, mobile, separate-device, repeatability and one-hour evidence remain
+pending, as does the user's numerical ratification.

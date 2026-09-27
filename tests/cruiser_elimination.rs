@@ -63,9 +63,9 @@ fn boot(seed: u64, human: bool) -> App {
         );
         assert!(
             if dynasty {
-                physics.yaw.cos() < -0.99
+                phoenix::simmath::cos(physics.yaw) < -0.99
             } else {
-                physics.yaw.cos() > 0.99
+                phoenix::simmath::cos(physics.yaw) > 0.99
             },
             "{} must retain its authored heading: {}",
             slot.0,

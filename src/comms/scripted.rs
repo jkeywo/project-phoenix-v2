@@ -345,7 +345,7 @@ pub(crate) fn open_scripted_comms_threads(
                 let compatible =
                     matches
                         .next()
-                        .is_some_and(|(_, hailable, _, _, range, hull, _, ..)| {
+                        .is_some_and(|(_, hailable, _, _, range, hull, ..)| {
                             hailable.is_some()
                                 && range
                                 && hull.is_none_or(|h| h.0.total_current() > 0.0)

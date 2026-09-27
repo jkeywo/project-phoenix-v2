@@ -428,7 +428,7 @@ fn instance_grant(
     verb: ObjectiveVerb,
 ) -> GmActionGrant {
     let mut value = grant(sequence, 42, id, verb, vec![]);
-    value.operator_id = if sequence % 2 == 0 {
+    value.operator_id = if sequence.is_multiple_of(2) {
         "gm-two"
     } else {
         "gm-one"

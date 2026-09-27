@@ -18532,7 +18532,7 @@ fn alliance_convoy_seeded_arrivals_losses_and_last_escort_loss() {
             std::fs::write(&path, world).unwrap();
             let dt = 1.0 / 60.0;
             let args = HeadlessArgs {
-                world_path: path.to_string_lossy().to_string().into(),
+                world_path: path.to_string_lossy().to_string(),
                 ship_path: "assets/entities/alliance_destroyer.toml".into(),
                 dt,
                 max_ticks: ticks_for_sim_seconds(60.0, dt),
@@ -18620,7 +18620,7 @@ fn alliance_convoy_launch_scale_and_optional_outcomes() {
         std::fs::write(&path, world).unwrap();
         let dt = 1.0 / 60.0;
         let args = HeadlessArgs {
-            world_path: path.to_string_lossy().to_string().into(),
+            world_path: path.to_string_lossy().to_string(),
             ship_path: "assets/entities/alliance_destroyer.toml".into(),
             dt,
             max_ticks: ticks_for_sim_seconds(90.0, dt),

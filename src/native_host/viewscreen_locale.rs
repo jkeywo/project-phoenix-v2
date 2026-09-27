@@ -82,7 +82,11 @@ mod tests {
 
     #[test]
     fn locale_round_trips_and_rejects_script_content() {
-        let dir = std::env::temp_dir().join(format!("phoenix-locale-{}", uuid::Uuid::new_v4()));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("phoenix-locale-{nonce}"));
         let store = ViewscreenLocaleStore::at(&dir);
         assert_eq!(store.load(), None);
         store.save("de-DE").unwrap();

@@ -615,7 +615,7 @@ impl EntityConfig {
                 ship.power_groups
                     .get(&crate::core::messages::PowerGroupId(reserve.group.clone()))
             });
-            if !group.is_some_and(|group| group.min_level == 0) {
+            if group.is_none_or(|group| group.min_level != 0) {
                 return Err(SerdeError::custom(
                     "strike reserve must name an authored power group with min_level = 0",
                 ));

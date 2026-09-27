@@ -4942,6 +4942,12 @@ fn submit_bound(
     request: GmActionRequest,
     native: bool,
 ) -> Result<GmActionSubmission, GmActionRefusalReason> {
+    if world
+        .get_resource::<crate::lockstep::continuation_systems::OwnerContinuation>()
+        .is_some_and(|lane| lane.held())
+    {
+        return Err(GmActionRefusalReason::WrongPhase);
+    }
     let now = world
         .get_resource::<crate::sim_tick::SimTick>()
         .map_or(0, |tick| tick.0);

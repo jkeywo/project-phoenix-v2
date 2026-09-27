@@ -69,6 +69,8 @@ use crate::command_admission::log::{
 };
 use crate::logging::LogCat;
 
+pub mod continuation;
+pub mod continuation_systems;
 pub mod crew;
 pub mod frame;
 pub mod host_loss;
@@ -432,6 +434,16 @@ impl FleetRoster {
         } else {
             self.owner
         }
+    }
+
+    /// Transfer only the coordinator identity after survivor reconciliation.
+    /// Hulls, crew, participant identities and local ownership remain frozen.
+    pub(crate) fn transfer_owner(&mut self, previous: HostSlot, next: HostSlot) -> bool {
+        if self.owner() != previous || next == previous || !self.is_member(next) {
+            return false;
+        }
+        self.owner = next;
+        true
     }
 
     /// Whether `host` is the slot this host projects to its own crew.
@@ -932,6 +944,10 @@ pub fn register_lockstep(app: &mut App) {
             // seeds, and those are folded like anything else.
             .declare_state::<FleetLockstep>(StateClass::Timer, "fleet-lockstep-state")
             .declare_state::<FleetRoster>(StateClass::Timer, "fleet-lockstep-state")
+            .declare_state::<continuation_systems::OwnerContinuation>(
+                StateClass::Timer,
+                "fleet-lockstep-state",
+            )
             // Which host flies this hull. `Timer` for the same reason and one
             // more: it is written once at spawn from the frozen roster and never
             // again, so it carries no run state to fold. Every host holds the
@@ -1062,6 +1078,7 @@ pub fn register_lockstep(app: &mut App) {
     }
     app.init_resource::<FleetRoster>()
         .init_resource::<MeshInbox>()
+        .init_resource::<continuation_systems::OwnerContinuation>()
         .init_resource::<SlotClaimSequence>()
         .init_resource::<MeshOutbox>()
         .init_resource::<MeshDiagnostics>()
@@ -1100,13 +1117,14 @@ pub fn register_lockstep(app: &mut App) {
             // rather than a change to it.
             (
                 apply_mesh_inbox,
+                continuation_systems::drain_after_mesh,
                 crate::gm_contact::prune,
                 crate::gm_presentation::prune,
                 // Mirror the peer count and live seating the reducer's own
                 // parameter budget cannot reach, immediately before it reads
                 // them (issue #1446).
                 crate::gm_restore::publish_restore_context,
-                crate::gm_action::apply_due_actions,
+                crate::gm_action::apply_due_actions.run_if(continuation_systems::not_held),
                 // The live-restore driver (issue #1446) sits immediately after
                 // the reducer that arms it and before the barrier, for the same
                 // reason #1118's does: it needs the freshest canonical state,
@@ -1386,6 +1404,7 @@ pub fn leave_fleet(world: &mut World) -> Result<(), FleetLeaveError> {
     world.remove_resource::<FleetLockstep>();
     world.insert_resource(FleetRoster::default());
     world.insert_resource(MeshInbox::default());
+    world.insert_resource(continuation_systems::OwnerContinuation::default());
     world.insert_resource(MeshOutbox::default());
     world.insert_resource(MeshAgreement::new(0));
     world.insert_resource(MeshDiagnostics::default());
@@ -1455,6 +1474,7 @@ pub fn authored_delay(world: &World) -> u64 {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct StartGrantAdmission<'w, 's> {
+    continuation: Option<ResMut<'w, continuation_systems::OwnerContinuation>>,
     phase: Option<Res<'w, State<crate::core::messages::GamePhase>>>,
     next_phase: Option<Res<'w, NextState<crate::core::messages::GamePhase>>>,
     managed: Option<Res<'w, crate::lobby::server::FleetManagedLobby>>,
@@ -1641,7 +1661,7 @@ pub fn apply_mesh_inbox(
     for (frame, origin) in sim_frames {
         match frame {
             MeshFrame::Tick(tick) => {
-                if tick.from == session.local() {
+                if tick.from == session.local() || session.has_departed(tick.from) {
                     continue;
                 }
                 if let Some(grant) = tick.start_grant.as_ref() {
@@ -1764,7 +1784,7 @@ pub fn apply_mesh_inbox(
                 session.observe(tick.from, tick.ready_through);
             }
             MeshFrame::Digest(digest) => {
-                if digest.from == session.local() {
+                if digest.from == session.local() || session.has_departed(digest.from) {
                     continue;
                 }
                 if let Some(found) =
@@ -1785,6 +1805,21 @@ pub fn apply_mesh_inbox(
                     .record(digest.tick, digest.digest);
             }
             MeshFrame::HostLoss(hl) => {
+                // Owner loss is committed once all survivors have reconciled.
+                // An eager transport observation must not discard its watermark.
+                if start_admission.continuation.as_deref().is_some_and(|lane| {
+                    lane.state
+                        .transaction
+                        .as_ref()
+                        .is_some_and(|tx| tx.previous_owner == hl.lost)
+                        || lane
+                            .state
+                            .committed
+                            .as_ref()
+                            .is_some_and(|tx| tx.previous_owner == hl.lost)
+                }) {
+                    continue;
+                }
                 let lost = hl.lost;
                 // This host cannot be told it is itself lost, and a host does not
                 // report its own loss — either is somebody else's confusion.
@@ -1954,7 +1989,7 @@ pub fn apply_mesh_inbox(
                         // every GM lane variant symmetrically once that boundary
                         // is pending so a co-arriving Proposal cannot recreate a
                         // refusal projection or outbound decision after reset.
-                        if !gm_run_active {
+                        if !gm_run_active || session.has_departed(proposal.from) {
                             continue;
                         }
                         let bound = roster
@@ -1974,7 +2009,12 @@ pub fn apply_mesh_inbox(
                         let owner = roster.as_deref().map_or(lead, FleetRoster::owner);
                         // The star relays opaque proposals to every peer. Only the
                         // technical owner turns one into a canonical decision.
-                        if session.local() != owner {
+                        if session.local() != owner
+                            || start_admission
+                                .continuation
+                                .as_deref()
+                                .is_some_and(|lane| lane.held())
+                        {
                             continue;
                         }
                         let now = sim_tick.as_deref().map_or(0, |tick| tick.0);
@@ -2063,6 +2103,13 @@ pub fn apply_mesh_inbox(
                             start_admission.gm_paused.0,
                             grant,
                         ) {
+                            if let Some(lane) = start_admission
+                                .continuation
+                                .as_deref_mut()
+                                .filter(|lane| lane.held())
+                            {
+                                lane.state.refuse("retained-gm-grant-refused");
+                            }
                             crate::pwarn!(
                                 log,
                                 LogCat::Admit,
@@ -2128,12 +2175,14 @@ pub fn gate_lockstep_ticks(
     virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut diagnostics: ResMut<MeshDiagnostics>,
+    continuation: Option<Res<continuation_systems::OwnerContinuation>>,
     recovery_hold: Option<Res<recovery::RecoveryHold>>,
     slot_recovery_hold: Option<Res<slot_recovery::SlotRecoveryHold>>,
     start_tracker: Option<Res<crate::lobby::server::StartGrantTracker>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
-    let model_rig_hold = model_rigs.is_some_and(|rigs| rigs.blocks_simulation());
+    let model_rig_hold = model_rigs.is_some_and(|rigs| rigs.blocks_simulation())
+        || continuation.is_some_and(|lane| lane.held());
     // `Option` for the same reason `SimTick` is taken as one in admission: a
     // bare-`App` fixture with no `TimePlugin` would otherwise fail Bevy's
     // parameter validation and skip this system entirely, which is a silent

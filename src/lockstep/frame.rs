@@ -83,7 +83,7 @@ use crate::lockstep::transfer::SnapshotChunk;
 // symptom, which is exactly the class of change this revision refuses whole.
 // Revision 14 adds one technical peer carrying both ship and GM capabilities.
 // Revision 13 peers would collapse it to one role or count two simulations.
-pub const HOST_MESH_PROTOCOL: u32 = 14;
+pub const HOST_MESH_PROTOCOL: u32 = 15;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 14,
+            HOST_MESH_PROTOCOL, 15,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

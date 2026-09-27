@@ -1143,6 +1143,7 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
                 publish_instagib,
                 publish_pause_mirror,
                 publish_gm_join_status,
+                publish_continuation_status,
                 // The snapshot seam (issues #862 and #865). FixedLast already
                 // captured every due run at its exact logical tick; PostUpdate
                 // performs only peer-local storage/export and fresh-app restore,
@@ -1546,6 +1547,25 @@ fn clear_fleet_bridge_latches(world: &mut World) {
 
 #[cfg(target_arch = "wasm32")]
 fn drain_mesh_inbound(world: &mut World) {
+    if let Some(request) = edge::take_continuation() {
+        crate::lockstep::continuation_systems::enqueue(world, request);
+    }
+
+    if edge::take_continuation_frame_error() {
+        crate::lockstep::continuation_systems::refuse(world, "retained-frame-invalid-or-capacity");
+    }
+    for (epoch, source, raw) in edge::take_continuation_frames() {
+        if let Some(frame) = crate::core::codec::decode_mesh_frame(&raw) {
+            crate::lockstep::continuation_systems::enqueue_frame(
+                world,
+                epoch,
+                crate::command_admission::HostSlot(source),
+                frame,
+            );
+        } else {
+            crate::lockstep::continuation_systems::refuse(world, "unreadable-retained-frame");
+        }
+    }
     let bootstraps = edge::drain_pending_gm_join_bootstraps();
     for pending in bootstraps {
         if let Err(reason) =
@@ -4999,6 +5019,32 @@ fn flush_host_channels(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "bridge_resume_content_tests.rs"]
 mod resume_content_tests;
+
+/// Local host transport callback, with the retained authenticated source.
+/// This adds no network handler; the JS host owns the authenticated peer map.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_fleet_continuation_frame(epoch: u64, source: u32, json: &str) -> bool {
+    edge::enqueue_continuation_frame(epoch, source, json)
+}
+
+/// Authenticated host-transport control; never exposed through crew ingress.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_fleet_continuation(json: &str) -> String {
+    edge::enqueue_continuation(json)
+}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_fleet_continuation_status() -> String {
+    edge::continuation_status()
+}
+#[cfg(target_arch = "wasm32")]
+fn publish_continuation_status(
+    lane: Res<crate::lockstep::continuation_systems::OwnerContinuation>,
+) {
+    edge::publish_continuation(lane.status());
+}
 
 #[cfg(test)]
 mod tests {

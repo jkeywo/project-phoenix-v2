@@ -57,6 +57,12 @@ thread_local! {
     /// the same reason `SIM_PAUSED` is one: the settings cog asks between
     /// frames, when there is no world handle to ask.
     static MESH_STATUS: RefCell<String> = const { RefCell::new(String::new()) };
+    static CONTINUATION_REQUEST: RefCell<Option<crate::lockstep::continuation::ContinuationRequest>> = const { RefCell::new(None) };
+    static CONTINUATION_FRAMES: RefCell<Vec<(u64, u32, String)>> = const { RefCell::new(Vec::new()) };
+    static CONTINUATION_FRAME_ERROR: RefCell<bool> = const { RefCell::new(false) };
+
+    static CONTINUATION_STATUS: RefCell<crate::lockstep::continuation::ContinuationStatus> = RefCell::new(crate::lockstep::continuation::ContinuationStatus::default());
+
 
     /// A fleet the page has joined but Bevy has not adopted yet: the encoded
     /// roster, applied once on the next frame. Deferred for the same reason
@@ -762,6 +768,10 @@ pub(super) fn clear_mesh_outbound() {
 }
 
 pub(super) fn clear_mesh_inbound() {
+    CONTINUATION_FRAMES.with(|frames| frames.borrow_mut().clear());
+    CONTINUATION_FRAME_ERROR.with(|error| *error.borrow_mut() = false);
+    CONTINUATION_REQUEST.with(|pending| pending.borrow_mut().take());
+    CONTINUATION_STATUS.with(|status| *status.borrow_mut() = Default::default());
     MESH_INBOUND.with(|value| value.borrow_mut().clear());
 }
 
@@ -1335,4 +1345,81 @@ pub(super) fn retry_fleet_lobby_inputs(generation: u64, inputs: VecDeque<FleetLo
             pending.push_front(PendingFleetLobbyInput { generation, input });
         }
     });
+}
+
+/// One pending operation at a time; JS waits for its matching readback.
+pub(super) fn enqueue_continuation(json: &str) -> String {
+    let request = match crate::core::codec::decode_fleet_continuation(json) {
+        Ok(request) => request,
+        Err(reason) => {
+            return crate::core::codec::encode_fleet_continuation_status(
+                &crate::lockstep::continuation::ContinuationStatus {
+                    status: crate::lockstep::continuation::ContinuationPhase::Refused,
+                    reason: Some(reason),
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_default()
+        }
+    };
+    CONTINUATION_REQUEST.with(|pending| {
+        if pending.borrow().is_some() {
+            return crate::core::codec::encode_fleet_continuation_status(
+                &crate::lockstep::continuation::ContinuationStatus {
+                    status: crate::lockstep::continuation::ContinuationPhase::Refused,
+                    reason: Some("continuation-operation-pending".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_default();
+        }
+        *pending.borrow_mut() = Some(request);
+        CONTINUATION_STATUS.with(|status| {
+            let mut status = status.borrow_mut();
+            status.generation = status.generation.saturating_add(1);
+            status.status = crate::lockstep::continuation::ContinuationPhase::Pending;
+            status.reason = None;
+            crate::core::codec::encode_fleet_continuation_status(&status).unwrap_or_default()
+        })
+    })
+}
+pub(super) fn take_continuation() -> Option<crate::lockstep::continuation::ContinuationRequest> {
+    CONTINUATION_REQUEST.with(|pending| pending.borrow_mut().take())
+}
+pub(super) fn publish_continuation(status: &crate::lockstep::continuation::ContinuationStatus) {
+    CONTINUATION_STATUS.with(|current| *current.borrow_mut() = status.clone());
+}
+pub(super) fn continuation_status() -> String {
+    CONTINUATION_STATUS.with(|status| {
+        crate::core::codec::encode_fleet_continuation_status(&status.borrow()).unwrap_or_default()
+    })
+}
+
+pub(super) fn enqueue_continuation_frame(epoch: u64, source: u32, json: &str) -> bool {
+    let valid = epoch != 0
+        && source != 0
+        && json.len() <= 1024 * 1024
+        && crate::core::codec::decode_mesh_frame(json).is_some();
+    let accepted = valid
+        && CONTINUATION_FRAMES.with(|frames| {
+            let mut frames = frames.borrow_mut();
+            if frames.len() >= 4096
+                || frames.iter().map(|(_, _, raw)| raw.len()).sum::<usize>() + json.len()
+                    > 16 * 1024 * 1024
+            {
+                return false;
+            }
+            frames.push((epoch, source, json.to_owned()));
+            true
+        });
+    if !accepted {
+        CONTINUATION_FRAME_ERROR.with(|error| *error.borrow_mut() = true);
+    }
+    accepted
+}
+pub(super) fn take_continuation_frame_error() -> bool {
+    CONTINUATION_FRAME_ERROR.with(|error| std::mem::take(&mut *error.borrow_mut()))
+}
+pub(super) fn take_continuation_frames() -> Vec<(u64, u32, String)> {
+    CONTINUATION_FRAMES.with(|frames| std::mem::take(&mut *frames.borrow_mut()))
 }

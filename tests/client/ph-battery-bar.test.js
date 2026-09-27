@@ -49,6 +49,18 @@ describe('PhBatteryBar', () => {
     expect(fill.className).toBe('fill red');
   });
 
+  it('announces empty strike reserve without a reactor emergency', () => {
+    const { el } = setup('<ph-battery-bar id="test-panel" reserve></ph-battery-bar>');
+    el.state = { level_pct: 0, charging: false, emergency_threshold_pct: 20 };
+    expect(el.shadowRoot.getElementById('bar-fill').className).toBe('fill');
+    expect(el.shadowRoot.getElementById('threshold-marker').hidden).toBe(true);
+    expect(el.getAttribute('aria-label')).toBe(t('dynasty.reserve.title'));
+    expect(el.getAttribute('aria-valuenow')).toBe('0');
+    el.state = { level_pct: 25, charging: true };
+    expect(el.shadowRoot.getElementById('charging-indicator').style.display).toBe('flex');
+    expect(el.getAttribute('aria-valuenow')).toBe('25');
+  });
+
   it('renders amber fill when near threshold (within 10pp)', () => {
     const { el } = setup();
     el.state = { level_pct: 28, emergency_threshold_pct: 20 };

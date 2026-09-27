@@ -945,10 +945,18 @@ pub(crate) fn publish_power_blackboard(
 
     let ship_config = ship_config_q.single().ok();
 
-    let entries: Vec<PowerGroupEntry> = POWER_GROUP_ORDER
+    let entries: Vec<PowerGroupEntry> = power
+        .0
         .iter()
-        .map(|name| PowerGroupId(name.to_string()))
-        .filter(|gid| multipliers.multipliers.contains_key(gid))
+        .map(|(gid, _)| gid.clone())
+        .filter(|gid| {
+            multipliers.multipliers.contains_key(gid)
+                || config
+                    .0
+                    .strike_reserve
+                    .as_ref()
+                    .is_some_and(|r| r.group == gid.0)
+        })
         .map(|gid| {
             let max_level = multipliers
                 .multipliers
@@ -973,7 +981,17 @@ pub(crate) fn publish_power_blackboard(
                 .unwrap_or_else(crate::ship::config::default_min_power_level);
             PowerGroupEntry {
                 id: gid.0.clone(),
-                label: power_group_label(gid.0.as_str()).into(),
+                label: ship_config
+                    .filter(|_| {
+                        config
+                            .0
+                            .strike_reserve
+                            .as_ref()
+                            .is_some_and(|r| r.group == gid.0)
+                    })
+                    .and_then(|sc| sc.0.power_groups.get(&gid))
+                    .map(|group| group.label.clone())
+                    .unwrap_or_else(|| power_group_label(gid.0.as_str()).into()),
                 level: power_level_for(&power.0, &gid),
                 // The standing order, so the panel's +/- can step from what was
                 // ASKED for rather than from what a battery floor has left the

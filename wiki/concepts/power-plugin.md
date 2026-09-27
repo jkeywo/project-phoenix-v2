@@ -39,3 +39,7 @@ Power does not write `ShipModifiers` directly. `translate_power_modifiers` in `s
 - [Modifier Coordination](./modifier-coordination.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
 - [AI Ship Unification](./ai-ship-unification.md)
+
+## Strike reserve policy
+
+The authored `strike_reserve` policy in the Dynasty player hull stores explicitly allocated generation in the same reactor continuation. Its authored charging group shares the demand budget; zero charging preserves charge and an empty reserve does not lock Power. Unallocated generation is not captured. Existing allocation controls and Backfill are shared. The entity digest folds strike-reserve reactor continuation, including allocation order and stored charge; other reactor policies retain their existing digest scope.

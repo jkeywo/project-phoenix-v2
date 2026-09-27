@@ -455,6 +455,46 @@ fn power_blackboard(app: &mut App) -> PowerBlackboard {
 }
 
 #[test]
+fn strike_reserve_allocation_is_published_with_its_authored_label_and_zero_floor() {
+    use bevy::ecs::system::RunSystemOnce;
+    let hull = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/dynasty_player_cruiser.toml",
+    )
+    .unwrap();
+    let authored = hull.power.unwrap();
+    let config = PowerConfig {
+        strike_reserve: authored.strike_reserve,
+        capacity: authored.capacity,
+        rates: authored.rates,
+        sustainable_total: authored.sustainable_total,
+        max_commanded_total: authored.max_commanded_total,
+        emergency_threshold: authored.emergency_threshold,
+    };
+    let ship = hull.ship_config.unwrap();
+    let seed = authored_power_group_seed(&ship.power_groups);
+    let mut app = App::new();
+    app.world_mut().spawn((
+        crate::server_app::LocalShip,
+        ShipPowerSystem(PowerSystem::from_authored_groups(&config, &seed)),
+        PowerConfigResource(config),
+        crate::ship_plugin::ShipConfigComponent(ship),
+        crate::server_app::ShipSystemBlackboards::default(),
+    ));
+    app.world_mut()
+        .run_system_once(publish_power_blackboard)
+        .unwrap();
+    let bb = power_blackboard(&mut app);
+    let reserve = bb
+        .groups
+        .iter()
+        .find(|group| group.id == "strike-reserve")
+        .expect("charging control is visible");
+    assert_eq!(reserve.label, "dynasty.reserve.title");
+    assert_eq!((reserve.min_level, reserve.commanded_level), (0, 0));
+    assert!(!bb.charging, "an unallocated reserve does not charge");
+}
+
+#[test]
 fn publish_power_blackboard_contains_correct_data() {
     let mut app = test_app();
     start_game(&mut app);

@@ -1,8 +1,7 @@
 # T5's crewed Dynasty cruiser is a distinct selectable hull.  It deliberately
 # composes the proven player-cruiser equipment baseline rather than exposing or
 # changing ship_harrow_cruiser.toml: the latter remains the NPC encounter hull.
-# Issue #1521 only establishes the six-role bridge; strike reserve and weapon
-# boost specialise this variant in later slices.
+# The six-role bridge uses an authored generation-backed strike reserve.
 includes = ["alliance_cruiser.toml"]
 
 name = "entity.dynasty_player_cruiser.name"
@@ -264,3 +263,85 @@ station = "damage-control"
 [[system]]
 id = "umbilical"
 station = "damage-control"
+
+# Charging is a fourth explicit allocation competing for the SAME eight pips.
+# Unallocated generation is not captured. Turning charging to zero holds charge.
+[power]
+capacity = 90
+sustainable_total = 6
+max_commanded_total = 8
+rates = [6, 5, 4, 2, -2, -6]
+emergency_threshold = 0
+
+[power.strike_reserve]
+group = "strike-reserve"
+units_per_level = 2
+
+[power_groups.strike-reserve]
+label = "dynasty.reserve.title"
+default_level = 0
+min_level = 0
+max_level = 4
+
+[power.ai_policy.param]
+reserve_full = 100.0
+reserve_empty = 0.0
+
+[[power.ai_policy.rule]]
+priority = 20
+channel = "strike-reserve"
+when = "fact(battery_pct) >= param(reserve_empty) and fact(battery_pct) < param(reserve_full)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 21
+channel = "strike-reserve"
+when = "fact(battery_pct) >= param(reserve_full)"
+verb = "set_power_group_allocation"
+level = 0
+
+# Rule arrays replace inherited arrays: retain the ordinary demand rules.
+# Demand elevations remain ordinary authored allocation bids.
+
+[[power.ai_policy.rule]]
+priority = 15
+channel = "helm"
+when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_release_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 10
+channel = "helm"
+when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_restore_helm)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "helm"
+when = "fact(battery_pct) >= param(min_reserve_baseline)"
+verb = "set_power_group_allocation"
+level = 2
+
+[[power.ai_policy.rule]]
+priority = 15
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(power_weapons) >= 3 and fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 10
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "weapons"
+when = "fact(battery_pct) >= param(min_reserve_baseline)"
+verb = "set_power_group_allocation"
+level = 2

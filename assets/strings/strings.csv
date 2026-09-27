@@ -4436,3 +4436,6 @@ entity.dynasty_player_cruiser.station.damage_control.tutorial.text,Dynasty cruis
 world.combat_test.available_ships.dynasty_cruiser.label,Combat Test Dynasty player cruiser picker label,[Dynasty Cruiser]
 station.gunnery.name,Dynasty player cruiser derived Gunnery station name,[Gunnery]
 station.damage-control.name,Dynasty player cruiser derived Damage Control station name,[Damage Control]
+
+dynasty.reserve.title,Dynasty Power reserve heading,[Strike reserve]
+dynasty.reserve.guidance,Dynasty Power charging tradeoff,[Allocate power to Strike reserve to charge it. These points compete with Helm and weapons and shields. Zero charging holds stored charge until Gunnery spends it. Empty charge never locks these controls.]

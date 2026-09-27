@@ -608,6 +608,7 @@ mod tests {
                  allocation load-bearing"
             );
             let power_config = crate::modifiers::power_system::PowerConfig {
+                strike_reserve: reactor.strike_reserve.clone(),
                 capacity: reactor.capacity,
                 rates: reactor.rates,
                 sustainable_total: reactor.sustainable_total,
@@ -832,6 +833,7 @@ mod tests {
                 .power
                 .as_ref()
                 .map(|p| crate::modifiers::power_system::PowerConfig {
+                    strike_reserve: p.strike_reserve.clone(),
                     capacity: p.capacity,
                     rates: p.rates,
                     sustainable_total: p.sustainable_total,

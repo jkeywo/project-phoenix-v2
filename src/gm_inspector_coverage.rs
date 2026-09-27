@@ -883,6 +883,7 @@ mod tests {
         exhaustive_struct!(
             power_schema,
             crate::entities::config::PowerConfigSection,
+            strike_reserve,
             capacity,
             rates,
             sustainable_total,

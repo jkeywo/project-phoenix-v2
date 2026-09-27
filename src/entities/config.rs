@@ -585,6 +585,44 @@ impl EntityConfig {
 
             config.ship_config = Some(ship_config);
         }
+        if let Some(reserve) = config
+            .power
+            .as_ref()
+            .and_then(|p| p.strike_reserve.as_ref())
+        {
+            let group = config.ship_config.as_ref().and_then(|ship| {
+                ship.power_groups
+                    .get(&crate::core::messages::PowerGroupId(reserve.group.clone()))
+            });
+            if !group.is_some_and(|group| group.min_level == 0) {
+                return Err(SerdeError::custom(
+                    "strike reserve must name an authored power group with min_level = 0",
+                ));
+            }
+            if config.ship_config.as_ref().is_some_and(|ship| {
+                ship.systems.iter().any(|system| {
+                    system
+                        .power_group
+                        .as_ref()
+                        .is_some_and(|group| group.0 == reserve.group)
+                })
+            }) {
+                return Err(SerdeError::custom(
+                    "strike reserve charging group cannot also supply equipment",
+                ));
+            }
+            if config.ship_config.as_ref().is_some_and(|ship| {
+                ship.power_groups
+                    .values()
+                    .map(|group| u16::from(group.default_level))
+                    .sum::<u16>()
+                    > u16::from(config.power.as_ref().unwrap().max_commanded_total)
+            }) {
+                return Err(SerdeError::custom(
+                    "strike reserve initial allocations exceed the generation budget",
+                ));
+            }
+        }
 
         // Validation: region entity with effects but no shape is an error.
         if let Some(ref effects) = config.effects {
@@ -1339,6 +1377,16 @@ fn validate_power_config(power: &PowerConfigSection) -> Result<(), String> {
             "power.sustainable_total {} must fall within the rates ladder {}..={}",
             power.sustainable_total, minimum, power.max_commanded_total
         ));
+    }
+    if let Some(reserve) = &power.strike_reserve {
+        if !power.capacity.is_finite()
+            || power.capacity <= 0.0
+            || reserve.group.is_empty()
+            || !reserve.units_per_level.is_finite()
+            || reserve.units_per_level <= 0.0
+        {
+            return Err("strike reserve requires positive finite capacity and units_per_level and a charging group".into());
+        }
     }
     for (offset, rate) in power.rates.iter().enumerate() {
         let total = minimum + offset as u8;

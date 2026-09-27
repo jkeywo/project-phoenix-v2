@@ -184,6 +184,7 @@ pub struct PowerSystem {
     locked: bool,
     /// The ship-wide allocation budget copied from its authored reactor config.
     max_commanded_total: u8,
+    reserve_group: Option<PowerGroupId>,
     pub battery_charge: f32,
 }
 
@@ -227,8 +228,17 @@ impl AuthoredPowerGroup {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrikeReserveConfig {
+    pub group: String,
+    pub units_per_level: f32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PowerConfig {
+    /// An explicitly allocated group stores generation for attacks.
+    pub strike_reserve: Option<StrikeReserveConfig>,
     pub capacity: f32,
     pub rates: [f32; 6],
     /// Highest allocation total that must leave the reserve non-draining.
@@ -284,6 +294,7 @@ pub const GROUP_LEVEL_MAX: u8 = crate::ship::config::default_max_power_level();
 impl Default for PowerConfig {
     fn default() -> Self {
         Self {
+            strike_reserve: None,
             capacity: 100.0,
             rates: [6.0, 5.0, 4.0, 2.0, -2.0, -6.0],
             sustainable_total: 6,
@@ -334,7 +345,15 @@ impl PowerSystem {
             order,
             locked: false,
             max_commanded_total: config.max_commanded_total,
-            battery_charge: config.capacity,
+            reserve_group: config
+                .strike_reserve
+                .as_ref()
+                .map(|r| PowerGroupId(r.group.clone())),
+            battery_charge: if config.strike_reserve.is_some() {
+                0.0
+            } else {
+                config.capacity
+            },
         }
     }
 
@@ -377,7 +396,15 @@ impl PowerSystem {
             order,
             locked: false,
             max_commanded_total: config.max_commanded_total,
-            battery_charge: config.capacity,
+            reserve_group: config
+                .strike_reserve
+                .as_ref()
+                .map(|r| PowerGroupId(r.group.clone())),
+            battery_charge: if config.strike_reserve.is_some() {
+                0.0
+            } else {
+                config.capacity
+            },
         }
     }
 
@@ -597,6 +624,10 @@ impl PowerSystem {
     /// the total allocation. Negative means the ship is spending its reserve
     /// faster than the reactor makes it.
     pub fn battery_rate(&self, config: &PowerConfig) -> f32 {
+        if let Some(reserve) = &config.strike_reserve {
+            return f32::from(self.level_for(&PowerGroupId(reserve.group.clone())))
+                * reserve.units_per_level;
+        }
         let minimum = config.minimum_rated_total();
         let total = self.total().clamp(minimum, self.max_commanded_total) as usize;
         config.rates[total - minimum as usize]
@@ -632,6 +663,12 @@ impl PowerSystem {
     ///
     /// Returns `true` if the `locked` state changed this tick.
     pub fn tick(&mut self, dt: f32, config: &PowerConfig) -> bool {
+        if config.strike_reserve.is_some() {
+            self.battery_charge = (self.battery_charge
+                + self.battery_rate(config).max(0.0) * dt.max(0.0))
+            .clamp(0.0, config.capacity);
+            return false;
+        }
         let prev_locked = self.locked;
         let rate = self.battery_rate(config);
         self.battery_charge = (self.battery_charge + rate * dt).clamp(0.0, config.capacity);
@@ -800,6 +837,10 @@ fn bid_want(bid: &AllocationBid) -> u8 {
 ///
 /// # The AI never raises a cold group
 ///
+/// The authored reserve charging group is not equipment. Zero means no
+/// generation assigned to storage, so its own Backfill rule may restart it.
+/// The exception is identified by the authored policy, never a hull name.
+///
 /// **Decision (issue #1395).** A group at level 0 is not a group running low;
 /// it is a group somebody switched OFF, and switching it back on is an order,
 /// not a default. So a bid for a cold group is dropped here and the group falls
@@ -842,7 +883,13 @@ pub fn plan_allocation(power: &PowerSystem, bids: &[AllocationBid]) -> Vec<(Powe
     // reservation path below, at no cost to the budget.
     let mut ranked: Vec<&AllocationBid> = bids
         .iter()
-        .filter(|b| power.has_group(&b.group) && !power.is_group_cold(&b.group))
+        // Zero charging is not cold equipment: Backfill may explicitly restart
+        // storage through its authored allocation rule after a full reserve.
+        .filter(|b| {
+            power.has_group(&b.group)
+                && (!power.is_group_cold(&b.group)
+                    || power.reserve_group.as_ref() == Some(&b.group))
+        })
         .collect();
 
     // Groups nothing bid for hold what they were last commanded to, and that
@@ -950,8 +997,79 @@ mod tests {
         PowerGroupId(SHIELDS_POWER_GROUP.into())
     }
 
-    /// A config with a battery that never moves on its own, for tests that
-    /// want to place the charge by hand and tick once.
+    #[test]
+    fn strike_reserve_conserves_explicit_allocations_and_resumes_without_decay() {
+        let reserve = PowerGroupId("strike-reserve".into());
+        let config = PowerConfig {
+            strike_reserve: Some(StrikeReserveConfig {
+                group: reserve.0.clone(),
+                units_per_level: 2.0,
+            }),
+            ..PowerConfig::default()
+        };
+        let groups = [
+            AuthoredPowerGroup::at_default_floor(helm(), 2),
+            AuthoredPowerGroup::at_default_floor(weapons(), 2),
+            AuthoredPowerGroup::at_default_floor(shields(), 2),
+            AuthoredPowerGroup {
+                id: reserve.clone(),
+                level: 0,
+                floor: 0,
+            },
+        ];
+        let mut power = PowerSystem::from_authored_groups(&config, &groups);
+        power.tick(10.0, &config);
+        assert_eq!(
+            power.battery_charge, 0.0,
+            "unused generation is not passive capture"
+        );
+        power.set_group_allocation(&reserve, 4).unwrap();
+        assert_eq!(
+            power.level_for(&reserve),
+            2,
+            "demands leave only two charging pips"
+        );
+        power.tick(1.0, &config);
+        assert_eq!(power.battery_charge, 4.0);
+        power.set_group_allocation(&helm(), 1).unwrap();
+        power.set_group_allocation(&reserve, 3).unwrap();
+        power.tick(2.0, &config);
+        assert_eq!(
+            power.battery_charge, 16.0,
+            "reducing propulsion funds faster charging"
+        );
+        power.set_group_allocation(&reserve, 0).unwrap();
+        power.tick(500.0, &config);
+        assert_eq!(power.battery_charge, 16.0, "zero charging holds reserve");
+        let saved = power.capture_continuation();
+        let mut resumed = PowerSystem::from_authored_groups(&config, &groups);
+        resumed.restore_continuation(&saved);
+        let bids = [AllocationBid {
+            group: reserve.clone(),
+            want: 3,
+            max_level: 4,
+            floor: 0,
+            rule_priority: 20,
+        }];
+        for (id, level) in plan_allocation(&power, &bids) {
+            power.set_group_allocation(&id, level).unwrap();
+            resumed.set_group_allocation(&id, level).unwrap();
+        }
+        assert_eq!(
+            power.level_for(&reserve),
+            3,
+            "Backfill can restart zero charging"
+        );
+        power.tick(3.0, &config);
+        resumed.tick(3.0, &config);
+        assert_eq!(power.capture_continuation(), resumed.capture_continuation());
+        power.tick(500.0, &config);
+        assert_eq!(power.battery_charge, config.capacity);
+        power.battery_charge = 0.0;
+        assert!(!power.tick(0.0, &config));
+        assert!(!power.locked());
+    }
+    /// A battery that does not move on its own, for explicit charge fixtures.
     fn still_config() -> PowerConfig {
         PowerConfig {
             rates: [0.0; 6],
@@ -1093,6 +1211,7 @@ mod tests {
     #[test]
     fn alliance_reactor_has_six_free_pips_and_refuses_a_ninth() {
         let config = PowerConfig {
+            strike_reserve: None,
             capacity: 70.0,
             rates: [5.0, 4.0, 3.0, 2.0, -2.0, -5.0],
             sustainable_total: 6,
@@ -1382,6 +1501,7 @@ mod tests {
     #[test]
     fn custom_config() {
         let config = PowerConfig {
+            strike_reserve: None,
             capacity: 50.0,
             rates: [1.0, 1.0, 1.0, -1.0, -2.0, -3.0],
             sustainable_total: 5,

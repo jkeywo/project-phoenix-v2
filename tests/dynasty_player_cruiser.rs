@@ -124,3 +124,60 @@ fn the_new_hull_is_selectable_without_rewriting_the_npc_cruiser() {
     );
     assert!(npc.tags.iter().any(|tag| tag == "npc"));
 }
+
+#[test]
+fn dynasty_reserve_uses_explicit_ordinary_allocation() {
+    use project_phoenix::core::messages::PowerGroupId;
+    use project_phoenix::modifiers::power_system::{PowerConfig, PowerSystem};
+    let hull = load_entity_config(PLAYER_HULL).unwrap();
+    let reactor = hull.power.unwrap();
+    assert!(reactor.strike_reserve.is_some());
+    let config = PowerConfig {
+        strike_reserve: reactor.strike_reserve.clone(),
+        capacity: reactor.capacity,
+        rates: reactor.rates,
+        sustainable_total: reactor.sustainable_total,
+        max_commanded_total: reactor.max_commanded_total,
+        emergency_threshold: reactor.emergency_threshold,
+    };
+    let ship = hull.ship_config.unwrap();
+    let seed = project_phoenix::ship::power::authored_power_group_seed(&ship.power_groups);
+    let mut power = PowerSystem::from_authored_groups(&config, &seed);
+    assert_eq!(power.battery_charge, 0.0);
+    power.tick(1.0, &config);
+    assert_eq!(power.battery_charge, 0.0, "no passive capture");
+    power
+        .set_group_allocation(&PowerGroupId("strike-reserve".into()), 2)
+        .unwrap();
+    power.tick(1.0, &config);
+    let nominal_charge = power.battery_charge;
+    power
+        .set_group_allocation(&PowerGroupId("helm".into()), 1)
+        .unwrap();
+    power
+        .set_group_allocation(&PowerGroupId("strike-reserve".into()), 3)
+        .unwrap();
+    power.tick(1.0, &config);
+    assert!(power.battery_charge - nominal_charge > nominal_charge);
+    let serialized = serde_json::to_string(&power.capture_continuation()).unwrap();
+    let mut restored = PowerSystem::from_authored_groups(&config, &seed);
+    restored.restore_continuation(&serde_json::from_str(&serialized).unwrap());
+    for _ in 0..30 {
+        power.tick(1.0 / 60.0, &config);
+        restored.tick(1.0 / 60.0, &config);
+        assert_eq!(
+            power.capture_continuation(),
+            restored.capture_continuation()
+        );
+    }
+    assert!(
+        reactor.ai_policy.is_some(),
+        "ordinary Power Backfill remains authored"
+    );
+    assert!(load_entity_config(NPC_HULL)
+        .unwrap()
+        .power
+        .unwrap()
+        .strike_reserve
+        .is_none());
+}

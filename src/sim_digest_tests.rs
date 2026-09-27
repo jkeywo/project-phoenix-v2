@@ -2464,3 +2464,37 @@ fn objective_instance_progress_membership_and_completion_credit_move_the_digest(
         .unwrap();
     assert_ne!(reassigned, world_digest(&world));
 }
+
+#[test]
+fn reactor_charge_and_allocation_move_the_digest() {
+    use crate::ship::power::ShipPowerSystem;
+    let mut world = fold_world();
+    let entity = world
+        .spawn((
+            EntityUuid("reserve-ship".into()),
+            ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
+            crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
+                strike_reserve: Some(crate::modifiers::power_system::StrikeReserveConfig {
+                    group: "reserve".into(),
+                    units_per_level: 2.0,
+                }),
+                ..Default::default()
+            }),
+        ))
+        .id();
+    let initial = world_digest(&world);
+    world
+        .get_mut::<ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .battery_charge -= 1.0;
+    let spent = world_digest(&world);
+    assert_ne!(initial, spent);
+    world
+        .get_mut::<ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .set_group_allocation(&crate::core::messages::PowerGroupId("helm".into()), 1)
+        .unwrap();
+    assert_ne!(spent, world_digest(&world));
+}

@@ -1659,6 +1659,7 @@ fn insert_player_power_state(
     // the global Resource for legacy readers.
     let power_config = if let Some(pc) = &config.power {
         PowerConfigResource(crate::modifiers::power_system::PowerConfig {
+            strike_reserve: pc.strike_reserve.clone(),
             capacity: pc.capacity,
             rates: pc.rates,
             sustainable_total: pc.sustainable_total,

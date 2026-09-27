@@ -1310,12 +1310,13 @@ chart pushed to the viewscreen.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `capacity` | f32 | **required** | Total battery capacity. |
-| `rates` | `[f32; 6]` | **required** | Per-level drain/regen rates (level 0..5). Negative = recharge. |
+| `rates` | `[f32; 6]` | **required** | Charge units per second at allocation totals `max_commanded_total - 5` through `max_commanded_total`. Positive charges; negative drains. |
+| `strike_reserve` | table | absent | Alternative storage policy: `group` names an authored power group with `min_level = 0`; `units_per_level` is its positive finite charge rate per allocated point. Charging consumes the same allocation budget as equipment demands. Starts empty, retains charge until spent, and has no exhaustion lock. Unallocated generation is not captured. |
 | `emergency_threshold` | f32 | **required** | Recovery threshold, in the same ABSOLUTE units as `capacity`. A reactor locked out by a flat battery stays locked until the charge climbs back to this level. Also published on `PowerBatteryBlackboard` so the gauge can paint the reserve band. |
 
 ##### The exhaustion lock
 
-There are no per-group battery floors. When the battery is drained to **empty**,
+For the default battery policy there are no per-group battery floors. When the battery is drained to **empty**,
 the reactor browns out completely: every group is forced to level 1 and the
 allocation controls freeze (both increase and decrease no-op) until the charge
 recovers past `emergency_threshold`. A player who mismanages power loses the lot

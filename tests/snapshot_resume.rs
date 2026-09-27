@@ -217,6 +217,49 @@ fn duel() -> bevy::prelude::App {
     boot(&args(DUEL, ("cruiser", "destroyer")))
 }
 
+#[test]
+fn dynasty_strike_reserve_backfill_resumes_through_the_complete_schedule() {
+    let config = args(
+        DUEL,
+        ("assets/entities/dynasty_player_cruiser.toml", "destroyer"),
+    );
+    let mut live = boot(&config);
+    step(&mut live, CAPTURE_AT);
+    let has_charged_reserve = live
+        .world_mut()
+        .query::<(
+            &project_phoenix::ship::power::ShipPowerSystem,
+            &project_phoenix::ship::power::PowerConfigResource,
+        )>()
+        .iter(live.world())
+        .any(|(power, config)| config.0.strike_reserve.is_some() && power.0.battery_charge > 0.0);
+    assert!(has_charged_reserve, "ordinary Backfill charges the reserve");
+    let mut replay = boot(&config);
+    step(&mut replay, CAPTURE_AT);
+    assert_eq!(
+        world_digest(replay.world()),
+        world_digest(live.world()),
+        "same seeded Backfill reproduces reserve state"
+    );
+    let payload = capture(live.world());
+    let mut resumed = boot_to_restore_point(&config, &payload);
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    for frame in 0..30 {
+        assert_eq!(
+            world_digest(resumed.world()),
+            world_digest(live.world()),
+            "resumed frame {frame}"
+        );
+        assert_eq!(
+            power_continuation_frontier(resumed.world_mut()),
+            power_continuation_frontier(live.world_mut())
+        );
+        live.update();
+        resumed.update();
+    }
+}
+
 fn power_continuation_frontier(
     world: &mut bevy::prelude::World,
 ) -> std::collections::BTreeMap<String, (project_phoenix::snapshot::PowerState, [f32; 4])> {

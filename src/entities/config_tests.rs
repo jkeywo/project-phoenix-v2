@@ -908,6 +908,20 @@ fn power_section_omitted_when_not_in_toml() {
 }
 
 #[test]
+fn strike_reserve_rejects_invalid_storage_and_missing_charge_group() {
+    let source = "[power]\ncapacity = 90.0\nsustainable_total = 6\nmax_commanded_total = 8\nrates = [6.0, 5.0, 4.0, 2.0, -2.0, -6.0]\nemergency_threshold = 0.0\n[power.strike_reserve]\ngroup = 'reserve'\nunits_per_level = 2.0\n[power_groups.reserve]\nlabel = 'reserve'\ndefault_level = 0\nmin_level = 0\nmax_level = 4\n";
+    assert!(EntityConfig::from_toml(source).is_ok());
+    for invalid in [
+        source.replace("90.0", "0.0"),
+        source.replace("90.0", "nan"),
+        source.replace("units_per_level = 2.0", "units_per_level = -1.0"),
+        source.replace("group = 'reserve'", "group = 'missing'"),
+        source.replace("min_level = 0", "min_level = 1"),
+    ] {
+        assert!(EntityConfig::from_toml(&invalid).is_err(), "{invalid}");
+    }
+}
+#[test]
 fn alliance_hulls_author_the_six_plus_two_reactor_budget() {
     for path in [
         "assets/entities/alliance_courier.toml",

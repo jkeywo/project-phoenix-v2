@@ -1399,6 +1399,7 @@ fn shipped_hull_power_app_inner(path: &str, clear_admitted: bool) -> (App, Entit
         .unwrap_or_default();
     let power_config =
         crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
+            strike_reserve: reactor.strike_reserve.clone(),
             capacity: reactor.capacity,
             rates: reactor.rates,
             sustainable_total: reactor.sustainable_total,

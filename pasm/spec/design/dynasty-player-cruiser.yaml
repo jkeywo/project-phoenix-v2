@@ -14,3 +14,16 @@ entities:
       status: declared
       paths: [assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/, tests/dynasty_player_cruiser.rs]
       tests: [cargo test --test dynasty_player_cruiser]
+  - decision: dynasty-strike-reserve-allocation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Dynasty Strike Reserve Allocation
+      summary: "The authored strike_reserve reactor policy stores generation explicitly assigned to its charging group in the ordinary per-ship battery continuation. Charging shares the demand allocation budget, so raising it reduces the budget available to Helm, weapons and shields. Zero charging holds stored charge; unallocated generation is not captured. No decay, cooldown or empty-reserve allocation lock applies. Existing reactors retain their battery drain and brownout rules."
+      rationale:
+        - "Power operates the existing admitted SetPowerGroupAllocation controls and bounded gauge. Ordinary authored Power Backfill uses that same applier. The reserve is not a second independently writable storage pool."
+        - "The charging group must be authored with a zero floor. Units per allocated level and capacity must be positive and finite. Backfill can restart a zero charging group through ordinary allocation commands; zero on an equipment demand still preserves the cold-order rule. Strike-reserve allocation and charge participate in snapshot continuation and the entity digest; existing reactor digest scope is unchanged."
+    implementation:
+      status: declared
+      paths: [src/modifiers/power_system.rs, src/entities/config/power.rs, src/sim_digest.rs, assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/power.html]
+      tests: [cargo test --lib strike_reserve_conserves, cargo test --test dynasty_player_cruiser]

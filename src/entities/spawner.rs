@@ -694,6 +694,7 @@ fn insert_power_state(
     let power_config = match &config.power {
         Some(pc) => {
             crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
+                strike_reserve: pc.strike_reserve.clone(),
                 capacity: pc.capacity,
                 rates: pc.rates,
                 sustainable_total: pc.sustainable_total,

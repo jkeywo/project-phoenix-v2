@@ -172,7 +172,8 @@
 //! `NpcFrequencyMatchStates`, `CurrentPhaserMode` and `TrackedEntities`
 //! resources. Snapshot format 14 carries their stable projections (including
 //! process-local Entity keys projected through `EntityUuid`) together with the
-//! exact `Time<Fixed>` overstep. Weapons state machines, power allocation,
+//! exact `Time<Fixed>` overstep. Strike-reserve reactors fold their saved
+//! allocation and charge in the entity namespace. Weapons state machines, other power allocation,
 //! modifier caches, the per-system blackboards, and
 //! `WorldContentRuntime::pending_delayed_actions` (the one scenario field issue
 //! #1086 could not take — the payload refuses to carry it, and folding what a
@@ -1686,6 +1687,7 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         Option<ShipPhysics>,
         Option<SystemHull>,
         Option<bool>,
+        Option<crate::modifiers::power_system::PowerState>,
     );
     let Some(mut query) = world.try_query::<(
         Entity,
@@ -1705,6 +1707,14 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                 physics.copied(),
                 hull.map(|h| h.0.clone()),
                 alert.map(|a| a.0),
+                world
+                    .get::<crate::ship::power::ShipPowerSystem>(entity)
+                    .filter(|_| {
+                        world
+                            .get::<crate::ship::power::PowerConfigResource>(entity)
+                            .is_some_and(|c| c.0.strike_reserve.is_some())
+                    })
+                    .map(|p| p.0.capture_continuation()),
             )
         })
         .collect();
@@ -1713,10 +1723,14 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
     acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, physics, hull, alert) in rows {
+    for (key, _, physics, hull, alert, power) in rows {
         acc = fold_str(acc, &key.id);
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());
+        if let Some(power) = power {
+            acc = fold_str(acc, "strike-reserve");
+            acc = fold_serde(acc, &power);
+        }
         acc = match alert {
             Some(active) => fold_u64(fold_u64(acc, 1), u64::from(active)),
             None => fold_u64(acc, 0),

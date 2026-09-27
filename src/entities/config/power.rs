@@ -4,6 +4,9 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PowerConfigSection {
+    /// Alternative storage policy with an explicitly allocated charging group.
+    #[serde(default)]
+    pub strike_reserve: Option<crate::modifiers::power_system::StrikeReserveConfig>,
     pub capacity: f32,
     pub rates: [f32; 6],
     #[serde(default = "default_sustainable_power_total")]

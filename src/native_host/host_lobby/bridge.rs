@@ -574,6 +574,11 @@ fn is_fleet_record(json: &str) -> bool {
                 | super::HostLobbyRecord::FleetHostLost { .. }
                 | super::HostLobbyRecord::FleetSlotClaimed { .. }
                 | super::HostLobbyRecord::FleetWireSend { .. }
+                | super::HostLobbyRecord::FleetWireAdopt
+                | super::HostLobbyRecord::FleetWireOpen { .. }
+                | super::HostLobbyRecord::FleetWireClose { .. }
+                | super::HostLobbyRecord::FleetContinuation { .. }
+                | super::HostLobbyRecord::FleetContinuationFrame { .. }
                 | super::HostLobbyRecord::FleetFault { .. }
                 | super::HostLobbyRecord::FleetIdentity { .. }
                 | super::HostLobbyRecord::FleetGmBootstrap { .. }

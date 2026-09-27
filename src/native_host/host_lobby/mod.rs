@@ -1447,6 +1447,11 @@ pub(crate) fn drain_surface_records(
             | HostLobbyRecord::FleetHostLost { .. }
             | HostLobbyRecord::FleetSlotClaimed { .. }
             | HostLobbyRecord::FleetWireSend { .. }
+            | HostLobbyRecord::FleetWireAdopt
+            | HostLobbyRecord::FleetWireOpen { .. }
+            | HostLobbyRecord::FleetWireClose { .. }
+            | HostLobbyRecord::FleetContinuation { .. }
+            | HostLobbyRecord::FleetContinuationFrame { .. }
             | HostLobbyRecord::FleetFault { .. }
             | HostLobbyRecord::FleetIdentity { .. }
             | HostLobbyRecord::FleetGmBootstrap { .. }

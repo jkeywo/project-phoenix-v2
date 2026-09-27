@@ -41,6 +41,37 @@ pub struct NativeFleetEvents(Vec<NativeFleetEvent>);
 #[derive(Resource)]
 pub struct NativeFleetWire(pub Box<dyn RelaySocket>);
 
+/// Generation zero adopts the boot socket. At most two live role sockets may
+/// overlap while a member binds its delegated successor host connection.
+#[derive(Resource, Default)]
+struct NativeFleetRoleWires {
+    sockets: std::collections::BTreeMap<u64, Box<dyn RelaySocket>>,
+    opening: std::collections::BTreeMap<u64, NativeFleetDial>,
+    last_generation: u64,
+    primary_closed: bool,
+    adopted: bool,
+    terminal: bool,
+}
+
+struct NativeFleetDial {
+    receiver: std::sync::Mutex<std::sync::mpsc::Receiver<Result<Box<dyn RelaySocket>, String>>>,
+    started: std::time::Instant,
+    cancelled: bool,
+}
+impl Drop for NativeFleetRoleWires {
+    fn drop(&mut self) {
+        for socket in self.sockets.values_mut() {
+            socket.close();
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct NativeContinuationResult {
+    generation: u64,
+    status: serde_json::Value,
+}
+
 #[derive(Resource, Default)]
 pub struct NativeFleetForceRequest(pub bool);
 
@@ -50,6 +81,7 @@ struct NativeFleetPublication {
     last_update: String,
     roster_result: Option<NativeRosterResult>,
     join_request: Option<NativeFleetJoinRequest>,
+    continuation_result: Option<NativeContinuationResult>,
 }
 
 /// Own public identity from the authenticated owner's admitted-member welcome.
@@ -94,7 +126,25 @@ pub enum NativeFleetEvent {
     StartGrant(serde_json::Value),
     HostLost(u32),
     SlotClaimed(u32),
-    WireSend(String),
+    WireSend {
+        generation: u64,
+        frame: String,
+    },
+    WireAdopt,
+    WireOpen {
+        generation: u64,
+        role: String,
+    },
+    WireClose(u64),
+    Continuation {
+        generation: u64,
+        request: serde_json::Value,
+    },
+    ContinuationFrame {
+        epoch: u64,
+        source: u32,
+        raw: String,
+    },
     Fault {
         reason: String,
         detail: String,
@@ -134,9 +184,38 @@ impl NativeFleetEvents {
             HostLobbyRecord::FleetSlotClaimed { slot } => {
                 Some(NativeFleetEvent::SlotClaimed(*slot))
             }
-            HostLobbyRecord::FleetWireSend { frame } => {
-                Some(NativeFleetEvent::WireSend(frame.clone()))
+            HostLobbyRecord::FleetWireSend { generation, frame } => {
+                Some(NativeFleetEvent::WireSend {
+                    generation: *generation,
+                    frame: frame.clone(),
+                })
             }
+            HostLobbyRecord::FleetWireAdopt => Some(NativeFleetEvent::WireAdopt),
+            HostLobbyRecord::FleetWireOpen { generation, role } => {
+                Some(NativeFleetEvent::WireOpen {
+                    generation: *generation,
+                    role: role.clone(),
+                })
+            }
+            HostLobbyRecord::FleetWireClose { generation } => {
+                Some(NativeFleetEvent::WireClose(*generation))
+            }
+            HostLobbyRecord::FleetContinuation {
+                generation,
+                request,
+            } => Some(NativeFleetEvent::Continuation {
+                generation: *generation,
+                request: request.clone(),
+            }),
+            HostLobbyRecord::FleetContinuationFrame {
+                epoch,
+                source,
+                frame,
+            } => Some(NativeFleetEvent::ContinuationFrame {
+                epoch: *epoch,
+                source: *source,
+                raw: frame.clone(),
+            }),
             HostLobbyRecord::FleetFault { reason, detail } => Some(NativeFleetEvent::Fault {
                 reason: reason.clone(),
                 detail: detail.clone(),
@@ -173,6 +252,7 @@ impl NativeFleetEvents {
 
 #[derive(Serialize)]
 struct NativeFleetUpdate {
+    continuation_result: Option<NativeContinuationResult>,
     health: Option<crate::gm_health::GmHealthProjection>,
     ship: serde_json::Value,
     ship_ready: bool,
@@ -192,6 +272,7 @@ impl Plugin for NativeFleetPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NativeFleetEvents>()
             .init_resource::<NativeFleetPublication>()
+            .init_resource::<NativeFleetRoleWires>()
             .init_resource::<NativeFleetForceRequest>()
             .insert_resource(crate::native_host::fleet_identity::NativeFleetIdentityStore::user())
             .add_systems(PreUpdate, poll_wire.before(super::drain_surface_records))
@@ -445,16 +526,84 @@ fn apply_events(world: &mut World) {
                     .resource_mut::<crate::lockstep::MeshOutbox>()
                     .push(frame);
             }
-            NativeFleetEvent::WireSend(frame) => {
-                if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
-                    wire.0.send(frame);
+            NativeFleetEvent::WireAdopt => {
+                let lanes = world.resource::<NativeFleetRoleWires>();
+                if lanes.adopted || lanes.terminal {
+                    world.resource_mut::<NativeFleetRoleWires>().terminal = true;
+                    close_all_role_wires(world);
+                    wire_event(
+                        world,
+                        0,
+                        "fault",
+                        Some("native-fleet-surface-reloaded".into()),
+                    );
+                } else {
+                    world.resource_mut::<NativeFleetRoleWires>().adopted = true;
+                }
+            }
+            NativeFleetEvent::WireOpen { generation, role } => {
+                open_role_wire(world, generation, &role)
+            }
+            NativeFleetEvent::WireClose(generation) => close_role_wire(world, generation),
+            NativeFleetEvent::WireSend { generation, frame } => {
+                if world.resource::<NativeFleetRoleWires>().terminal {
+                    continue;
+                }
+                if generation == 0 && !world.resource::<NativeFleetRoleWires>().primary_closed {
+                    if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
+                        wire.0.send(frame);
+                    }
+                } else if let Some(wire) = world
+                    .resource_mut::<NativeFleetRoleWires>()
+                    .sockets
+                    .get_mut(&generation)
+                {
+                    wire.send(frame);
+                }
+            }
+            NativeFleetEvent::Continuation {
+                generation,
+                request,
+            } => {
+                let status = match serde_json::from_value::<
+                    crate::lockstep::continuation::ContinuationRequest,
+                >(request)
+                {
+                    Ok(request) => serde_json::to_value(
+                        crate::lockstep::continuation_systems::enqueue(world, request),
+                    )
+                    .unwrap(),
+                    Err(_) => {
+                        crate::lockstep::continuation_systems::refuse(
+                            world,
+                            "malformed-continuation-request",
+                        );
+                        serde_json::json!({"status":"refused","reason":"malformed-continuation-request"})
+                    }
+                };
+                world
+                    .resource_mut::<NativeFleetPublication>()
+                    .continuation_result = Some(NativeContinuationResult { generation, status });
+            }
+            NativeFleetEvent::ContinuationFrame { epoch, source, raw } => {
+                if let Some(frame) = crate::core::codec::decode_mesh_frame(&raw) {
+                    crate::lockstep::continuation_systems::enqueue_frame(
+                        world,
+                        epoch,
+                        crate::command_admission::HostSlot(source),
+                        frame,
+                    );
+                } else {
+                    crate::lockstep::continuation_systems::refuse(
+                        world,
+                        "malformed-continuation-frame",
+                    );
                 }
             }
             NativeFleetEvent::Fault { reason, detail } => {
+                world.resource_mut::<NativeFleetRoleWires>().terminal = true;
                 world.remove_resource::<NativeFleetGmAdmission>();
-                if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
-                    wire.0.close();
-                }
+                close_all_role_wires(world);
                 if world
                     .get_resource::<crate::native_host::session_role::NativeSessionRoleState>()
                     .is_some_and(|role| {
@@ -533,30 +682,215 @@ fn apply_pending_gm_bootstrap(world: &mut World) {
     }
 }
 
+fn wire_event(world: &World, generation: u64, event: &str, frame: Option<String>) {
+    if let Some(bridge) = world.get_resource::<HostLobbyBridgeResource>() {
+        bridge.0.push_fleet_wire(serde_json::json!({"native_wire":{"generation":generation,"event":event,"frame":frame}}).to_string());
+    }
+}
+
+fn close_role_wire(world: &mut World, generation: u64) {
+    if generation == 0 {
+        world.resource_mut::<NativeFleetRoleWires>().primary_closed = true;
+        if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
+            wire.0.close();
+        }
+    } else {
+        let mut lanes = world.resource_mut::<NativeFleetRoleWires>();
+        if let Some(mut wire) = lanes.sockets.remove(&generation) {
+            wire.close();
+        }
+        if let Some(dial) = lanes.opening.get_mut(&generation) {
+            dial.cancelled = true;
+        }
+    }
+}
+
+fn close_all_role_wires(world: &mut World) {
+    close_role_wire(world, 0);
+    let lanes = world.resource::<NativeFleetRoleWires>();
+    let generations: Vec<_> = lanes
+        .sockets
+        .keys()
+        .chain(lanes.opening.keys())
+        .copied()
+        .collect();
+    for generation in generations {
+        close_role_wire(world, generation);
+    }
+}
+
+fn open_role_wire(world: &mut World, generation: u64, role: &str) {
+    let lanes = world.resource::<NativeFleetRoleWires>();
+    let count = lanes.sockets.len()
+        + lanes.opening.len()
+        + usize::from(!lanes.primary_closed && world.contains_resource::<NativeFleetWire>());
+    if lanes.terminal
+        || generation == 0
+        || generation <= lanes.last_generation
+        || count >= 2
+        || !matches!(role, "host" | "join")
+    {
+        wire_event(world, generation, "close", None);
+        return;
+    }
+    world.resource_mut::<NativeFleetRoleWires>().last_generation = generation;
+    let Some(config) = world.get_resource::<NativeFleetConfig>() else {
+        wire_event(world, generation, "close", None);
+        return;
+    };
+    let (base, origin, role) = (config.base.clone(), config.origin.clone(), role.to_owned());
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    // A TCP/TLS first dial may block. Never stall the Bevy thread or its
+    // continuation hold; retain timed-out jobs in the same two-socket budget
+    // until they finish, so retry storms cannot create unbounded threads.
+    let spawned = std::thread::Builder::new()
+        .name("fleet-role-dial".into())
+        .spawn(move || {
+            let result = connect_role_wire(&base, &origin, &role);
+            if let Err(std::sync::mpsc::SendError(Ok(mut socket))) = sender.send(result) {
+                socket.close();
+            }
+        });
+    if spawned.is_err() {
+        wire_event(world, generation, "close", None);
+        return;
+    }
+    world.resource_mut::<NativeFleetRoleWires>().opening.insert(
+        generation,
+        NativeFleetDial {
+            receiver: std::sync::Mutex::new(receiver),
+            started: std::time::Instant::now(),
+            cancelled: false,
+        },
+    );
+}
+
+#[cfg(feature = "host")]
+fn connect_role_wire(base: &str, origin: &str, role: &str) -> Result<Box<dyn RelaySocket>, String> {
+    let result = if role == "host" {
+        crate::native_host::relay_socket::WsRelaySocket::connect(base, origin)
+    } else {
+        crate::native_host::relay_socket::WsRelaySocket::connect_join(base, origin)
+    };
+    result
+        .map(|wire| Box::new(wire) as Box<dyn RelaySocket>)
+        .map_err(|error| error.to_string())
+}
+#[cfg(not(feature = "host"))]
+fn connect_role_wire(
+    _base: &str,
+    _origin: &str,
+    _role: &str,
+) -> Result<Box<dyn RelaySocket>, String> {
+    Err("this build has no native WebSocket adapter".into())
+}
+
+fn poll_role_dials(world: &mut World) {
+    let mut completed = Vec::new();
+    let mut expired = Vec::new();
+    {
+        let mut lanes = world.resource_mut::<NativeFleetRoleWires>();
+        for (generation, dial) in &mut lanes.opening {
+            match dial.receiver.lock().unwrap().try_recv() {
+                Ok(result) => completed.push((*generation, dial.cancelled, result)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    completed.push((*generation, dial.cancelled, Err("dial-ended".into())))
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    if !dial.cancelled
+                        && dial.started.elapsed() >= std::time::Duration::from_secs(15)
+                    {
+                        dial.cancelled = true;
+                        expired.push(*generation);
+                    }
+                }
+            }
+        }
+    }
+    for generation in expired {
+        wire_event(world, generation, "close", None);
+    }
+    for (generation, cancelled, result) in completed {
+        world
+            .resource_mut::<NativeFleetRoleWires>()
+            .opening
+            .remove(&generation);
+        match result {
+            Ok(mut socket) if cancelled => socket.close(),
+            Ok(socket) => {
+                world
+                    .resource_mut::<NativeFleetRoleWires>()
+                    .sockets
+                    .insert(generation, socket);
+                wire_event(world, generation, "open", None);
+            }
+            Err(_) if !cancelled => wire_event(world, generation, "close", None),
+            Err(_) => {}
+        }
+    }
+}
+
 fn poll_wire(world: &mut World) {
-    // The Rust socket may receive its initial `ready` immediately. Leave it in
-    // the socket queue until the configuration has been published; otherwise
-    // the retained page has no synthetic socket yet and would discard the one
-    // frame that prompts `host-open`.
     if !world.resource::<NativeFleetPublication>().configured {
         return;
     }
-    let frames = world
-        .get_resource_mut::<NativeFleetWire>()
-        .map(|mut wire| wire.0.poll())
-        .unwrap_or_default();
-    if frames.is_empty() {
-        return;
+    poll_role_dials(world);
+    let mut events = Vec::new();
+    if !world.resource::<NativeFleetRoleWires>().primary_closed {
+        if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
+            events.extend(
+                wire.0
+                    .poll()
+                    .into_iter()
+                    .map(|frame| (0, "frame", Some(frame))),
+            );
+            if !wire.0.is_open() {
+                events.push((0, "close", None));
+            }
+        }
     }
-    let Some(bridge) = world.get_resource::<HostLobbyBridgeResource>().cloned() else {
-        return;
-    };
-    for frame in frames {
-        bridge.0.push_fleet_wire(frame);
+    for (generation, wire) in &mut world.resource_mut::<NativeFleetRoleWires>().sockets {
+        events.extend(
+            wire.poll()
+                .into_iter()
+                .map(|frame| (*generation, "frame", Some(frame))),
+        );
+        if !wire.is_open() {
+            events.push((*generation, "close", None));
+        }
     }
-    if bridge.0.fleet_faulted() {
-        world.resource_mut::<NativeFleetWire>().0.close();
+    for (generation, event, frame) in events {
+        wire_event(world, generation, event, frame);
+        if event == "close" {
+            close_role_wire(world, generation);
+        }
     }
+    if world
+        .get_resource::<HostLobbyBridgeResource>()
+        .is_some_and(|bridge| bridge.0.fleet_faulted())
+    {
+        close_all_role_wires(world);
+    }
+}
+
+fn continuation_result(world: &World) -> Option<NativeContinuationResult> {
+    let mut result = world
+        .resource::<NativeFleetPublication>()
+        .continuation_result
+        .clone()?;
+    if let Some(lane) =
+        world.get_resource::<crate::lockstep::continuation_systems::OwnerContinuation>()
+    {
+        if result
+            .status
+            .get("generation")
+            .and_then(serde_json::Value::as_u64)
+            == Some(lane.status().generation)
+        {
+            result.status = serde_json::to_value(lane.status()).unwrap();
+        }
+    }
+    Some(result)
 }
 
 fn publish_state(world: &mut World) {
@@ -624,6 +958,7 @@ fn publish_state(world: &mut World) {
         .unwrap_or_default();
     let validation = world.contains_resource::<crate::world::config::WorldConfig>();
     let update = NativeFleetUpdate {
+        continuation_result: continuation_result(world),
         health: world
             .get_resource::<crate::gm_health::GmHealthWatch>()
             .and_then(|watch| watch.last())
@@ -678,6 +1013,220 @@ fn publication_owner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct TestWire(std::sync::Arc<std::sync::Mutex<(Vec<String>, bool)>>);
+    impl RelaySocket for TestWire {
+        fn poll(&mut self) -> Vec<String> {
+            assert!(!self.0.lock().unwrap().1, "closed primary was polled");
+            Vec::new()
+        }
+        fn send(&mut self, text: String) {
+            self.0.lock().unwrap().0.push(text);
+        }
+        fn is_open(&self) -> bool {
+            !self.0.lock().unwrap().1
+        }
+        fn close(&mut self) {
+            self.0.lock().unwrap().1 = true;
+        }
+    }
+    fn wire_world() -> World {
+        let mut world = World::new();
+        world.init_resource::<NativeFleetEvents>();
+        world.init_resource::<NativeFleetPublication>();
+        world.init_resource::<NativeFleetRoleWires>();
+        world
+    }
+    #[test]
+    fn generation_scoped_wire_send_and_close_do_not_cross_role_sockets() {
+        let mut world = wire_world();
+        let initial = TestWire::default();
+        let replacement = TestWire::default();
+        world.insert_resource(NativeFleetWire(Box::new(initial.clone())));
+        world
+            .resource_mut::<NativeFleetRoleWires>()
+            .sockets
+            .insert(1, Box::new(replacement.clone()));
+        world.resource_mut::<NativeFleetEvents>().0 = vec![
+            NativeFleetEvent::WireSend {
+                generation: 0,
+                frame: "join".into(),
+            },
+            NativeFleetEvent::WireSend {
+                generation: 1,
+                frame: "host".into(),
+            },
+            NativeFleetEvent::WireClose(0),
+            NativeFleetEvent::WireSend {
+                generation: 0,
+                frame: "stale".into(),
+            },
+            NativeFleetEvent::WireSend {
+                generation: 1,
+                frame: "live".into(),
+            },
+        ];
+        apply_events(&mut world);
+        assert_eq!(*initial.0.lock().unwrap(), (vec!["join".to_string()], true));
+        assert_eq!(
+            *replacement.0.lock().unwrap(),
+            (vec!["host".to_string(), "live".to_string()], false)
+        );
+        // Reused generations are rejected before dial.
+        world.resource_mut::<NativeFleetRoleWires>().last_generation = 1;
+        open_role_wire(&mut world, 1, "host");
+        assert!(world.resource::<NativeFleetRoleWires>().opening.is_empty());
+    }
+    #[test]
+    fn surface_reload_is_terminal_and_old_primary_is_never_polled_or_sent() {
+        let mut world = wire_world();
+        let primary = TestWire::default();
+        world.insert_resource(NativeFleetWire(Box::new(primary.clone())));
+        world.resource_mut::<NativeFleetEvents>().0 = vec![
+            NativeFleetEvent::WireAdopt,
+            NativeFleetEvent::WireAdopt,
+            NativeFleetEvent::WireSend {
+                generation: 0,
+                frame: "stale".into(),
+            },
+        ];
+        apply_events(&mut world);
+        assert!(world.resource::<NativeFleetRoleWires>().terminal);
+        assert_eq!(*primary.0.lock().unwrap(), (Vec::<String>::new(), true));
+        // A closed primary is skipped even if it still has unread old frames.
+        world.resource_mut::<NativeFleetPublication>().configured = true;
+        poll_wire(&mut world);
+        open_role_wire(&mut world, 1, "host");
+        assert!(world.resource::<NativeFleetRoleWires>().opening.is_empty());
+        assert_eq!(world.resource::<NativeFleetRoleWires>().last_generation, 0);
+    }
+    #[test]
+    fn active_and_outstanding_role_sockets_share_one_two_socket_budget() {
+        let mut world = wire_world();
+        world.insert_resource(NativeFleetWire(Box::new(TestWire::default())));
+        world
+            .resource_mut::<NativeFleetRoleWires>()
+            .sockets
+            .insert(1, Box::new(TestWire::default()));
+        open_role_wire(&mut world, 2, "host");
+        assert_eq!(world.resource::<NativeFleetRoleWires>().last_generation, 0);
+        assert!(world.resource::<NativeFleetRoleWires>().opening.is_empty());
+    }
+    #[test]
+    fn timed_out_role_dial_stays_bounded_and_closes_late_success() {
+        let mut world = wire_world();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        world.resource_mut::<NativeFleetRoleWires>().opening.insert(
+            1,
+            NativeFleetDial {
+                receiver: std::sync::Mutex::new(receiver),
+                started: std::time::Instant::now() - std::time::Duration::from_secs(16),
+                cancelled: false,
+            },
+        );
+        poll_role_dials(&mut world);
+        assert!(world.resource::<NativeFleetRoleWires>().opening[&1].cancelled);
+        let late = TestWire::default();
+        assert!(sender
+            .send(Ok(Box::new(late.clone()) as Box<dyn RelaySocket>))
+            .is_ok());
+        poll_role_dials(&mut world);
+        assert!(late.0.lock().unwrap().1);
+        assert!(world.resource::<NativeFleetRoleWires>().opening.is_empty());
+        assert!(world.resource::<NativeFleetRoleWires>().sockets.is_empty());
+    }
+    #[test]
+    fn continuation_records_publish_runtime_refusal_under_the_request_generation() {
+        let mut world = wire_world();
+        let record = HostLobbyRecord::decode(r#"{"kind":"fleet_continuation","generation":91,"request":{"op":"begin","epoch":1,"previous_owner":1,"next_owner":2,"participants":[2,3]}}"#).unwrap();
+        assert!(world.resource_mut::<NativeFleetEvents>().record(&record));
+        apply_events(&mut world);
+        let result = continuation_result(&world).unwrap();
+        assert_eq!(result.generation, 91);
+        assert_eq!(result.status["status"], "refused");
+        assert_eq!(result.status["reason"], "not-in-fleet");
+    }
+    #[test]
+    fn malformed_retained_frame_refusal_survives_the_replayed_request() {
+        use crate::command_admission::HostSlot;
+        use crate::lockstep::continuation_systems::OwnerContinuation;
+        let mut world = wire_world();
+        world.init_resource::<OwnerContinuation>();
+        world
+            .resource_mut::<OwnerContinuation>()
+            .state
+            .begin(
+                1,
+                HostSlot(1),
+                HostSlot(2),
+                vec![HostSlot(2), HostSlot(3)],
+                HostSlot(1),
+                HostSlot(2),
+                vec![HostSlot(1), HostSlot(2), HostSlot(3)],
+            )
+            .unwrap();
+        world.resource_mut::<NativeFleetEvents>().0 = vec![
+            NativeFleetEvent::ContinuationFrame {
+                epoch: 1,
+                source: 3,
+                raw: "malformed".into(),
+            },
+            NativeFleetEvent::Continuation {
+                generation: 11,
+                request: serde_json::json!({"op":"replayed","epoch":1}),
+            },
+        ];
+        apply_events(&mut world);
+        let result = continuation_result(&world).unwrap();
+        assert_eq!(result.generation, 11);
+        assert_eq!(result.status["status"], "refused");
+        assert_eq!(result.status["reason"], "malformed-continuation-frame");
+        assert!(world.resource::<OwnerContinuation>().held());
+    }
+    #[test]
+    fn continuation_publication_follows_only_its_runtime_generation() {
+        use crate::lockstep::continuation::{ContinuationPhase, ContinuationStatus};
+        use crate::lockstep::continuation_systems::OwnerContinuation;
+        let mut world = wire_world();
+        world.init_resource::<OwnerContinuation>();
+        let pending = ContinuationStatus {
+            generation: 7,
+            epoch: 1,
+            status: ContinuationPhase::Pending,
+            reason: None,
+            loss_tick: None,
+        };
+        world
+            .resource_mut::<NativeFleetPublication>()
+            .continuation_result = Some(NativeContinuationResult {
+            generation: 91,
+            status: serde_json::to_value(&pending).unwrap(),
+        });
+        world.resource_mut::<OwnerContinuation>().state.status = pending;
+        assert_eq!(
+            continuation_result(&world).unwrap().status["status"],
+            "pending"
+        );
+        {
+            let mut lane = world.resource_mut::<OwnerContinuation>();
+            lane.state.status.status = ContinuationPhase::Replayed;
+            lane.state.status.loss_tick = Some(72);
+        }
+        let result = continuation_result(&world).unwrap();
+        assert_eq!(result.generation, 91);
+        assert_eq!(result.status["status"], "replayed");
+        assert_eq!(result.status["loss_tick"], 72);
+        world
+            .resource_mut::<OwnerContinuation>()
+            .state
+            .status
+            .generation = 8;
+        assert_eq!(
+            continuation_result(&world).unwrap().status["status"],
+            "pending"
+        );
+    }
 
     #[test]
     fn rendezvous_override_does_not_commit_an_undecided_landing_to_ownership() {

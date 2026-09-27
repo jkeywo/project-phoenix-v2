@@ -134,7 +134,7 @@ describe('native technical fleet peer', () => {
     socket.send('{"type":"host-open"}');
     peer.receive('{"type":"ready"}');
     await Promise.resolve();
-    expect(sent).toContainEqual({ kind: 'fleet_wire_send', frame: '{"type":"host-open"}' });
+    expect(sent).toContainEqual({ kind: 'fleet_wire_send', generation: 0, frame: '{"type":"host-open"}' });
     expect(received).toHaveBeenCalledWith({ data: '{"type":"ready"}' });
   });
 
@@ -202,5 +202,88 @@ describe('native technical fleet peer', () => {
     peer.update({ roster_result: { generation: 1, accepted: true }, force_start: true });
     await expect(bootstrap).resolves.toBe(true);
     expect(handle.forceStart).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('native continuation bridge', () => {
+  function rig() {
+    const sent = [];
+    let options;
+    const handle = { update() {}, setCrewReadiness() {}, setGmReady() {}, setStartValidation() {}, broadcast() {}, close() {} };
+    const peer = createNativeFleetPeer({ send: record => sent.push(record), createMember: opts => { options = opts; return handle; } });
+    peer.configure({ base: 'https://fleet.test', owner: false, credentials: ['one'], stamp: '4/base/1', stamp_valid: true });
+    peer.join('CODE', {}, null, 'ship');
+    return { peer, sent, options };
+  }
+  const wire = (peer, generation, event, frame) => peer.receive(JSON.stringify({native_wire:{generation,event,frame}}));
+  it('opens a host socket beside the member and isolates delayed frames by generation', async () => {
+    const { peer, sent, options } = rig();
+    wire(peer, 0, 'frame', 'early');
+    const joined = options.factories.socket('wss://fleet.test/v1/join');
+    joined.onmessage = vi.fn();
+    await Promise.resolve();
+    expect(joined.onmessage).toHaveBeenCalledWith({data:'early'});
+    const host = options.factories.socket('wss://fleet.test/v1/host');
+    host.onmessage = vi.fn(); host.onopen = vi.fn();
+    expect(host.readyState).toBe(0);
+    expect(sent).toContainEqual({kind:'fleet_wire_open',generation:1,role:'host'});
+    expect(() => options.factories.socket('wss://fleet.test/v1/join')).toThrow('socket limit');
+    wire(peer, 1, 'open');
+    host.send('takeover');
+    expect(sent).toContainEqual({kind:'fleet_wire_send',generation:1,frame:'takeover'});
+    joined.close();
+    wire(peer, 0, 'frame', 'stale');
+    wire(peer, 1, 'frame', 'hosted');
+    expect(joined.onmessage).toHaveBeenCalledTimes(1);
+    expect(host.onmessage).toHaveBeenCalledExactlyOnceWith({data:'hosted'});
+    expect(host.onopen).toHaveBeenCalledTimes(1);
+    expect(sent).toContainEqual({kind:'fleet_wire_close',generation:0});
+  });
+  it('refuses a role socket to a different service and reports a failed open once', async () => {
+    const { peer, options } = rig();
+    options.factories.socket('wss://fleet.test/v1/join');
+    expect(() => options.factories.socket('wss://elsewhere.test/v1/host')).toThrow('socket endpoint');
+    const host = options.factories.socket('wss://fleet.test/v1/host');
+    host.onclose = vi.fn();
+    wire(peer, 2, 'close'); wire(peer, 2, 'close');
+    expect(host.readyState).toBe(3);
+    expect(host.onclose).toHaveBeenCalledTimes(1);
+  });
+  it('waits for the matching completed Rust stage and retains the watermark', async () => {
+    const { peer, sent, options } = rig();
+    let resolved = false;
+    const result = options.onContinuation({op:'replayed',epoch:1}).then(value => {resolved=true; return value;});
+    expect(sent).toContainEqual({kind:'fleet_continuation',generation:1,request:{op:'replayed',epoch:1}});
+    await expect(options.onContinuation({op:'commit',epoch:1})).resolves.toMatchObject({status:'refused'});
+    peer.update({continuation_result:{generation:1,status:{status:'pending'}}});
+    peer.update({continuation_result:{generation:1,status:{status:'idle'}}});
+    peer.update({continuation_result:{generation:2,status:{status:'replayed',loss_tick:71}}});
+    await Promise.resolve(); expect(resolved).toBe(false);
+    peer.update({continuation_result:{generation:1,status:{status:'replayed',loss_tick:71}}});
+    await expect(result).resolves.toEqual({status:'replayed',loss_tick:71});
+    options.onContinuationFrame('mesh', 3, 1);
+    expect(sent).toContainEqual({kind:'fleet_continuation_frame',frame:'mesh',source:3,epoch:1});
+    options.onHostLost(2); options.onSlotClaimed(4);
+    expect(sent).toContainEqual({kind:'fleet_host_lost',slot:2});
+    expect(sent).toContainEqual({kind:'fleet_slot_claimed',slot:4});
+    expect(options.checkStamp('4/base/1')).toEqual({ok:true});
+    expect(options.checkStamp('')).toEqual({ok:false,code:'version-mismatch'});
+  });
+  it('propagates authoritative malformed replay refusal and a terminal reload fault', async () => {
+    const { peer, sent, options } = rig();
+    const result = options.onContinuation({op:'replayed',epoch:1});
+    peer.update({continuation_result:{generation:1,status:{status:'refused',reason:'malformed-continuation-frame'}}});
+    await expect(result).resolves.toEqual({status:'refused',reason:'malformed-continuation-frame'});
+    options.factories.socket('wss://fleet.test/v1/join');
+    wire(peer, 0, 'fault', 'native-fleet-surface-reloaded');
+    expect(sent).toContainEqual({kind:'fleet_wire_adopt'});
+    expect(sent).toContainEqual({kind:'fleet_fault',reason:'native-fleet-surface-reloaded',detail:''});
+  });
+  it('resolves outstanding continuation as refused when the fleet closes', async () => {
+    const {peer,options} = rig();
+    const result = options.onContinuation({op:'begin',epoch:1});
+    peer.close();
+    await expect(result).resolves.toEqual({status:'refused',reason:'fleet-closed'});
   });
 });

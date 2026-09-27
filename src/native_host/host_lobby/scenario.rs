@@ -182,6 +182,25 @@ pub enum HostLobbyRecord {
         slot: u32,
     },
     FleetWireSend {
+        #[serde(default)]
+        generation: u64,
+        frame: String,
+    },
+    FleetWireAdopt,
+    FleetWireOpen {
+        generation: u64,
+        role: String,
+    },
+    FleetWireClose {
+        generation: u64,
+    },
+    FleetContinuation {
+        generation: u64,
+        request: serde_json::Value,
+    },
+    FleetContinuationFrame {
+        epoch: u64,
+        source: u32,
         frame: String,
     },
     FleetFault {

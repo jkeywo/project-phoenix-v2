@@ -1,4 +1,5 @@
 import { createFleetMember, createFleetOwner } from './fleet-session.js';
+import { socketUrl } from './rendezvous-transport.js';
 import { transportLeversFromLocation } from './transport-levers.js';
 import { HOST_ROLE_GM, HOST_ROLE_SHIP, HOST_ROLE_SHIP_GM } from './host-mesh.js';
 
@@ -13,33 +14,61 @@ export function createNativeFleetPeer({
 } = {}) {
   let handle = null;
   let configured = false;
-  let socket = null;
+  let nextWireGeneration = 0;
+  const sockets = new Map();
   let nextRosterGeneration = 1;
   const pendingRosters = new Map();
+  let nextContinuationGeneration = 1;
+  const pendingContinuations = new Map();
   let config = null;
+  let credentials = [];
   const publishedControl = new Map();
   let latestControl = null;
   const pendingWire = [];
-  let wireReady = false;
   let wireFailed = false;
 
-  const bridgeSocket = () => {
-    wireReady = false;
-    let messageHandler = null;
+  const bridgeSocket = url => {
+    const generation = nextWireGeneration++;
+    if (sockets.size >= 2) throw new Error('native fleet socket limit');
+    const role = url === socketUrl(config.base, '/v1/host') ? 'host'
+      : url === socketUrl(config.base, '/v1/join') ? 'join' : null;
+    if (generation > 0 && !role) throw new Error('native fleet socket endpoint');
+    let messageHandler = null, opened = false;
+    const queued = generation === 0 ? pendingWire.splice(0) : [];
     const drainWire = () => {
-      if (!wireReady || typeof messageHandler !== 'function') return;
-      while (pendingWire.length && value.readyState === 1) {
-        messageHandler({ data: pendingWire.shift() });
-      }
+      if (!opened || typeof messageHandler !== 'function') return;
+      while (queued.length && value.readyState === 1) messageHandler({ data: queued.shift() });
     };
     const value = {
-      readyState: wireFailed ? 3 : 1,
+      readyState: wireFailed ? 3 : generation === 0 ? 1 : 0,
       bufferedAmount: 0,
-      send(frame) { send({ kind: 'fleet_wire_send', frame }); },
+      send(frame) {
+        if (value.readyState !== 1) throw new Error('native fleet socket is not open');
+        send({ kind: 'fleet_wire_send', generation, frame });
+      },
       close() {
         if (value.readyState === 3) return;
+        send({ kind: 'fleet_wire_close', generation });
+        value.ended();
+      },
+      ended() {
         value.readyState = 3;
+        queued.length = 0;
+        sockets.delete(generation);
         value.onclose?.();
+      },
+      opened() {
+        if (opened || value.readyState === 3) return;
+        value.readyState = 1;
+        opened = true;
+        value.onopen?.();
+        drainWire();
+      },
+      receive(frame) {
+        if (value.readyState === 3) return;
+        if (queued.length >= 64) return failWire();
+        queued.push(frame);
+        drainWire();
       },
       onopen: null,
       get onmessage() { return messageHandler; },
@@ -47,16 +76,39 @@ export function createNativeFleetPeer({
       onerror: null,
       onclose: null,
     };
-    socket = value;
-    queueMicrotask(() => {
-      if (value.readyState !== 1) return;
-      value.onopen?.();
-      wireReady = true;
-      drainWire();
-    });
+    sockets.set(generation, value);
+    if (generation === 0) {
+      send({ kind: 'fleet_wire_adopt' });
+      queueMicrotask(() => value.opened());
+    }
+    else send({ kind: 'fleet_wire_open', generation, role });
     return value;
   };
+  const failWire = (reason = 'pending-frame-overflow') => {
+    if (wireFailed) return;
+    wireFailed = true;
+    pendingWire.length = 0;
+    for (const socket of [...sockets.values()]) socket.close();
+    send({ kind: 'fleet_fault', reason, detail: '' });
+  };
+  const continuation = request => {
+    if (pendingContinuations.size) return Promise.resolve({ status: 'refused', reason: 'continuation-operation-pending' });
+    const generation = nextContinuationGeneration++;
+    return new Promise(resolve => {
+      pendingContinuations.set(generation, resolve);
+      send({ kind: 'fleet_continuation', generation, request });
+    });
+  };
+  const continuationFrame = (frame, source, epoch) => {
+    send({ kind: 'fleet_continuation_frame', frame, source, epoch });
+    return true; // Rust validates ingress before acknowledging replayed.
+  };
 
+  const mintCredential = () => {
+    const credential = credentials.shift();
+    if (!credential) throw new Error('native fleet GM credential pool is exhausted');
+    return credential;
+  };
   const emit = (record) => send(record);
   const authenticateFrame = (raw, slot) => {
     try {
@@ -94,7 +146,7 @@ export function createNativeFleetPeer({
       if (configured) return false;
       try { config = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) { return false; }
       if (!config || typeof config.base !== 'string' || !config.base) return false;
-      const credentials = Array.isArray(config.credentials) ? [...config.credentials] : [];
+      credentials = Array.isArray(config.credentials) ? [...config.credentials] : [];
       if (!credentials.length) return false;
       configured = true;
       // Older/native-owner configurations predate the explicit mode field;
@@ -113,17 +165,15 @@ export function createNativeFleetPeer({
         maxShipPathLength: config.max_ship_path_length,
         role: HOST_ROLE_SHIP_GM,
         ownerOperatorId: config.operator_id,
-        credentialFactory: () => {
-          const credential = credentials.shift();
-          if (!credential) throw new Error('native fleet GM credential pool is exhausted');
-          return credential;
-        },
+        credentialFactory: mintCredential,
         name: config.ship_name || config.gm_name || 'GM',
         ship: { template_path: config.ship_path || null, name: config.ship_name || '' },
         checkStamp: (stamp) => sameStamp(stamp)
           ? { ok: true }
           : { ok: false, code: 'version-mismatch' },
         authenticateFrame,
+        onContinuation: continuation,
+        onContinuationFrame: continuationFrame,
         onCode: (code) => emit({ kind: 'fleet_code', code: code.full, suffix: code.suffix }),
         onRoster,
         onDiag,
@@ -162,6 +212,18 @@ export function createNativeFleetPeer({
           peer: () => { throw new Error('native fleet is relay-only'); },
         },
         role,
+        maxSlots: config.max_slots,
+        maxNameLength: config.max_name_length,
+        maxShipPathLength: config.max_ship_path_length,
+        credentialFactory: mintCredential,
+        onCode: code => emit({ kind: 'fleet_code', code: code.full, suffix: code.suffix }),
+        onStartGrant: grant => emit({ kind: 'fleet_start_grant', grant }),
+        checkStamp: stamp => sameStamp(stamp) ? { ok: true } : { ok: false, code: 'version-mismatch' },
+        authenticateFrame,
+        onContinuation: continuation,
+        onContinuationFrame: continuationFrame,
+        onHostLost: slot => emit({ kind: 'fleet_host_lost', slot }),
+        onSlotClaimed: slot => emit({ kind: 'fleet_slot_claimed', slot }),
         onRoster,
         onDiag,
         ship: role === HOST_ROLE_SHIP
@@ -225,6 +287,14 @@ export function createNativeFleetPeer({
             ? true : (state.roster_result.reason || 'fleet-adoption-refused'));
         }
       }
+      const result = state.continuation_result;
+      if (result && ['held', 'replayed', 'committed', 'refused'].includes(result.status?.status)) {
+        const resolve = pendingContinuations.get(result.generation);
+        if (resolve) {
+          pendingContinuations.delete(result.generation);
+          resolve(result.status);
+        }
+      }
       for (const frame of state.frames || []) handle.broadcast(frame);
       if (state.force_start) handle.forceStart?.();
       return true;
@@ -237,23 +307,35 @@ export function createNativeFleetPeer({
       latestControl = null;
       configured = false;
       pendingWire.length = 0;
-      wireReady = false;
+      for (const socket of [...sockets.values()]) socket.close();
+      for (const resolve of pendingContinuations.values()) resolve({ status: 'refused', reason: 'fleet-closed' });
+      pendingContinuations.clear();
       wireFailed = false;
-      socket = null;
     },
 
     receive(frame) {
       if (wireFailed) return;
-      if (wireReady && socket?.readyState === 1 && typeof socket.onmessage === 'function') {
-        socket.onmessage({ data: frame });
-      } else if (pendingWire.length < 64) {
-        pendingWire.push(frame);
-      } else {
-        wireFailed = true;
-        pendingWire.length = 0;
-        socket?.close();
-        emit({ kind: 'fleet_fault', reason: 'pending-frame-overflow', detail: '' });
+      let event = null;
+      try { event = JSON.parse(frame)?.native_wire; } catch (_) { /* legacy raw frame */ }
+      if (event) {
+        if (event.event === 'fault') { failWire(event.frame || 'native-fleet-wire-fault'); return; }
+        const socket = sockets.get(event.generation);
+        if (!socket) {
+          if (event.generation === 0 && nextWireGeneration === 0 && event.event === 'frame') {
+            if (pendingWire.length < 64) pendingWire.push(event.frame);
+            else failWire();
+          }
+          return; // closed generations never reach their replacement
+        }
+        if (event.event === 'open') socket.opened();
+        else if (event.event === 'close') socket.ended();
+        else if (event.event === 'frame') socket.receive(event.frame);
+        return;
       }
+      const socket = sockets.get(0);
+      if (socket) socket.receive(frame);
+      else if (nextWireGeneration === 0 && pendingWire.length < 64) pendingWire.push(frame);
+      else if (nextWireGeneration === 0) failWire();
     },
 
     get role() { return handle?.role || HOST_ROLE_SHIP_GM; },

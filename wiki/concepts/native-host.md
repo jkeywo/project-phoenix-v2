@@ -2603,6 +2603,25 @@ audio device. An optional source contact applies the shared M7 suppression rule
 in the effective Sensors view before either sound or equivalent is emitted.
 Normal GM command attribution remains intact; audio has no history or replay.
 
+### Native fleet owner continuation
+
+`gui/native-fleet-peer.js` sends private continuation requests and retained mesh
+frames through `HostLobbyRecord`. `host_lobby/fleet.rs` calls the shared lockstep
+continuation API and publishes its completed status under the requesting bridge
+generation, including the replay watermark. The JavaScript coordinator waits for
+that result before committing the successor; ordinary crew messages cannot enter
+this bridge lane.
+
+Native rendezvous sockets carry separate generations. Generation zero adopts the
+boot connection; a member can open the host endpoint beside its joining socket
+for a delegated takeover. At most two active or outstanding dial attempts exist.
+New dials run off the simulation thread, time out after fifteen seconds, and
+close any late result. Closed-generation frames never reach a replacement socket. A retained-page reload
+cannot restart its generation counter within the active fleet: a second boot-wire
+adoption closes the sockets and reports a terminal surface-reloaded fault.
+This adapter wiring is covered by focused bridge tests; actual recovery runtime
+acceptance is recorded separately from the six-peer baseline below.
+
 ### Native fleet runtime verification
 
 `host_lobby/fleet.rs` defers an explicit rendezvous owner's configuration until

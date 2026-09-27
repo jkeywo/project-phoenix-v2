@@ -324,7 +324,9 @@ command receipts, GM pause/resume, digest exchange and observed direct/relay/
 fallback routes. Optional bounded application-frame delay and snapshot loss
 record actual write/drop counters. Default webdriver execution disables Bevy
 rendering; short browser evidence does not establish native, mixed, mobile or
-endurance acceptance. See [the runtime ledger](../../docs/acceptance/1530-six-peer-matrix.md).
+endurance acceptance. Separate browser, native and mixed measurements with
+source-matched receipts are indexed by the
+[current-source ledger](../../docs/acceptance/1530-current-source-runtime.md).
 
 `tests/client/fleet-matrix-harness.js` supplies reusable six-peer protocol cases
 for direct, forced WebSocket relay and automatic RTC exhaustion. These use

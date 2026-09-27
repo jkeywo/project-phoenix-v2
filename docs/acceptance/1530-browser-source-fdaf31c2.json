@@ -1,0 +1,230 @@
+{
+  "kind": "source-matched-browser-six-cell-summary",
+  "revision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+  "sourcePatch": "",
+  "receiptPath": "C:\\Coding\\project-phoenix-v2\\target\\browser-wasm-receipt-fdaf31c2.json",
+  "receiptSha256": "0e9db95783ac258f626f22462b76c1db8ea18e9deb1bfed3fd639d4b0285e136",
+  "wasmSha256": {
+    "assets/texture-codecs/basis/basis_transcoder.wasm": "6cf17dc889352c42e9acf8897107978d127005fe3386c36a0e3845e27967630a",
+    "project-phoenix-b9ac3ee75351bfdd_bg.wasm": "2102dc304038244b25f0aae532b5c993f355869d567048fd318f77220c72d1e1"
+  },
+  "browser": "147.0.7727.15",
+  "os": {
+    "platform": "win32",
+    "release": "10.0.26200",
+    "cpus": "Intel(R) Core(TM) Ultra 9 275HX",
+    "ramBytes": 68112736256
+  },
+  "manifests": [
+    {
+      "profile": "clean",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-clean-fdaf31c2\\manifest.json",
+      "sha256": "8706756db8179676ee252c47ed2692c5e4136dfc373a0e3abdbdbb39408096a4",
+      "status": "passed",
+      "sourceAndBundleVerified": true,
+      "cleanupErrors": null
+    },
+    {
+      "profile": "impaired",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-impaired-fdaf31c2\\manifest.json",
+      "sha256": "409c6274431e0da1995189f3328535b3687be25ed6dc1719aaaf90f4382661c7",
+      "status": "passed",
+      "sourceAndBundleVerified": true,
+      "cleanupErrors": null
+    }
+  ],
+  "cases": [
+    {
+      "profile": "clean",
+      "route": "direct",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-clean-fdaf31c2\\direct\\result.json",
+      "sha256": "ac8cf21697c2ce06e6f97606ab9294b929dabeceb3ebfdd94869c34ddf1b385e",
+      "status": "passed",
+      "startedUtc": "2026-09-27T13:06:19.651Z",
+      "finishedUtc": "2026-09-27T13:06:36.982Z",
+      "seconds": 17.331,
+      "shipPeers": 4,
+      "gmPeers": 2,
+      "stationDocuments": 12,
+      "commandWaves": 11,
+      "minimumAppliedReceipts": 11.0,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "allPeersAgreed": true,
+      "minimumDigestSamples": 1.0,
+      "configuredProfile": {
+        "delayMs": 0,
+        "lossPercent": 0,
+        "seed": 1530,
+        "boundary": "actual RTCDataChannel.send",
+        "unit": "application frames; not IP packets"
+      },
+      "snapshotDrops": 0.0,
+      "suppressedOffers": 0,
+      "cleanupError": null
+    },
+    {
+      "profile": "clean",
+      "route": "ws-relay",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-clean-fdaf31c2\\ws-relay\\result.json",
+      "sha256": "99dd3c18bb218fbc6924b4485fd464058f45f4fd0e67576e721bbc4ad3f64e15",
+      "status": "passed",
+      "startedUtc": "2026-09-27T13:06:36.986Z",
+      "finishedUtc": "2026-09-27T13:06:53.05Z",
+      "seconds": 16.064,
+      "shipPeers": 4,
+      "gmPeers": 2,
+      "stationDocuments": 12,
+      "commandWaves": 12,
+      "minimumAppliedReceipts": 12.0,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "allPeersAgreed": true,
+      "minimumDigestSamples": 1.0,
+      "configuredProfile": {
+        "delayMs": 0,
+        "lossPercent": 0,
+        "seed": 1530,
+        "boundary": "loopback rendezvous outgoing relay frames",
+        "unit": "application frames; not IP packets"
+      },
+      "snapshotDrops": 0,
+      "suppressedOffers": 0,
+      "cleanupError": null
+    },
+    {
+      "profile": "clean",
+      "route": "automatic-fallback",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-clean-fdaf31c2\\automatic-fallback\\result.json",
+      "sha256": "004929aad17946b251ef0d71a88898c43087332bb1859021a3c71226dbb5e20b",
+      "status": "passed",
+      "startedUtc": "2026-09-27T13:06:53.054Z",
+      "finishedUtc": "2026-09-27T13:11:25.797Z",
+      "seconds": 272.743,
+      "shipPeers": 4,
+      "gmPeers": 2,
+      "stationDocuments": 12,
+      "commandWaves": 6,
+      "minimumAppliedReceipts": 6.0,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "allPeersAgreed": true,
+      "minimumDigestSamples": 1.0,
+      "configuredProfile": {
+        "delayMs": 0,
+        "lossPercent": 0,
+        "seed": 1530,
+        "boundary": "loopback rendezvous outgoing relay frames",
+        "unit": "application frames; not IP packets"
+      },
+      "snapshotDrops": 0,
+      "suppressedOffers": 68,
+      "cleanupError": null
+    },
+    {
+      "profile": "impaired",
+      "route": "direct",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-impaired-fdaf31c2\\direct\\result.json",
+      "sha256": "d80ce98163375fb216f6ef9a70d62416fc413290eca764e680c81973bb03001a",
+      "status": "passed",
+      "startedUtc": "2026-09-27T13:11:45.438Z",
+      "finishedUtc": "2026-09-27T13:12:10.765Z",
+      "seconds": 25.327,
+      "shipPeers": 4,
+      "gmPeers": 2,
+      "stationDocuments": 12,
+      "commandWaves": 8,
+      "minimumAppliedReceipts": 8.0,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "allPeersAgreed": true,
+      "minimumDigestSamples": 1.0,
+      "configuredProfile": {
+        "delayMs": 20,
+        "lossPercent": 10,
+        "seed": 1530,
+        "boundary": "actual RTCDataChannel.send",
+        "unit": "application frames; not IP packets"
+      },
+      "snapshotDrops": 482.0,
+      "suppressedOffers": 0,
+      "cleanupError": null
+    },
+    {
+      "profile": "impaired",
+      "route": "ws-relay",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-impaired-fdaf31c2\\ws-relay\\result.json",
+      "sha256": "01a02657fad41eafe0f1d2be48ec9bd1af657804f01bcacf664ed6ac6ed2d643",
+      "status": "passed",
+      "startedUtc": "2026-09-27T13:12:10.771Z",
+      "finishedUtc": "2026-09-27T13:12:42.134Z",
+      "seconds": 31.363,
+      "shipPeers": 4,
+      "gmPeers": 2,
+      "stationDocuments": 12,
+      "commandWaves": 8,
+      "minimumAppliedReceipts": 8.0,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "allPeersAgreed": true,
+      "minimumDigestSamples": 1.0,
+      "configuredProfile": {
+        "delayMs": 20,
+        "lossPercent": 10,
+        "seed": 1530,
+        "boundary": "loopback rendezvous outgoing relay frames",
+        "unit": "application frames; not IP packets"
+      },
+      "snapshotDrops": 450,
+      "suppressedOffers": 0,
+      "cleanupError": null
+    },
+    {
+      "profile": "impaired",
+      "route": "automatic-fallback",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-browser-impaired-fdaf31c2\\automatic-fallback\\result.json",
+      "sha256": "dd923f63c10ef0888f0a066185b02e8fa7294f5395811fb142411bc00a154667",
+      "status": "passed",
+      "startedUtc": "2026-09-27T13:12:42.144Z",
+      "finishedUtc": "2026-09-27T13:17:23.391Z",
+      "seconds": 281.247,
+      "shipPeers": 4,
+      "gmPeers": 2,
+      "stationDocuments": 12,
+      "commandWaves": 13,
+      "minimumAppliedReceipts": 13.0,
+      "gmActions": [
+        "gm-1 pause observed by both GMs",
+        "gm-2 resume observed by both GMs"
+      ],
+      "allPeersAgreed": true,
+      "minimumDigestSamples": 1.0,
+      "configuredProfile": {
+        "delayMs": 20,
+        "lossPercent": 10,
+        "seed": 1530,
+        "boundary": "loopback rendezvous outgoing relay frames",
+        "unit": "application frames; not IP packets"
+      },
+      "snapshotDrops": 450,
+      "suppressedOffers": 68,
+      "cleanupError": null
+    }
+  ],
+  "limitations": [
+    "Browser WASM rendering disabled",
+    "Single-machine loopback, not mobile/internet",
+    "Ten-second commanded workload plus startup/fallback and one complete digest exchange",
+    "No native, rendered, recovery, performance, or endurance acceptance"
+  ]
+}

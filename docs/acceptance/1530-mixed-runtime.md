@@ -6,7 +6,8 @@ Engineering Station documents: six browser pages and six native Ultralight
 panes. Native Bevy and the retained Ultralight fleet/GM surfaces run normally.
 Browser webdriver execution defaults to WASM with Bevy rendering disabled.
 `--render` requests the same SwiftShader software rendering mode as the browser
-matrix runner. That mode remains unvalidated by the retained evidence below.
+matrix runner. See the [current-source ledger](1530-current-source-runtime.md)
+for the representative rendered result and its limits.
 
 ## Run
 
@@ -35,7 +36,9 @@ Output directories must be new. `--routes direct`, `--routes ws-relay` or
 `--seconds` controls the browser command interval (default ten seconds);
 `--deadline` bounds the case's polling stages (default 290 seconds). Individual
 browser operations and teardown have separate bounds. Each native child also
-has its own 300-second lifetime bound. Native binaries create real windows;
+has its own 300-second lifetime bound at deadlines through 295 seconds. An
+opt-in deadline can reach 900 seconds; longer cases give native children
+`deadline + 60` seconds, capped at 960. Native binaries create real windows;
 run one native/mixed matrix at a time on the rig.
 
 The default native probe import is repo-relative. `--native-adapter` is an
@@ -89,7 +92,16 @@ responses and bounded-queue overflow, fail the mixed case. The corrected
 observer emits each attributed GM action once and compact session state,
 avoiding an ever-growing GET URL. The runner records the selected adapter hash.
 
-## Evidence status
+## Current source-matched evidence
+
+All six clean/impaired route cells passed on clean `fdaf31c2`, using matching
+release WASM and Ultralight-native build receipts. The [current-source ledger](1530-current-source-runtime.md)
+and [portable mixed summary](1530-mixed-source-fdaf31c2.json) retain exact
+artifacts, hashes, applied receipts, two matching checkpoints per cell and
+confirmed native exits. These supersede the earlier provenance limits for
+current acceptance; original attempts below remain historical evidence.
+
+## Earlier evidence
 
 The first actual direct-capable mixed attempt on 2026-09-27 failed admission.
 Native peers presented a JSON delivery stamp, while the browser host's strict
@@ -164,6 +176,7 @@ An optional build receipt is retained verbatim with its hash; a binary mismatch
 refuses the run. That comparison does not independently certify every source
 claim in an external receipt. Browser WASM provenance must likewise be stated.
 
-This bounded loopback runner does not establish rendered-browser, physical LAN,
-internet/mobile, recovery, performance or endurance acceptance. It cannot close
-#1530 by itself.
+The six route/profile cells above disable browser rendering. The separate
+current-source rendered representative has its own result and limits. No
+loopback cell establishes physical LAN, internet/mobile, recovery, sustained
+performance or endurance acceptance.

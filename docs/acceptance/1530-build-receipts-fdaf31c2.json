@@ -1,0 +1,72 @@
+{
+  "receipts": [
+    {
+      "kind": "native",
+      "originalPath": "C:\\Coding\\project-phoenix-v2\\target\\native-build-receipt-fdaf31c2.json",
+      "originalSha256": "373a3a59e8fe0f0445f1fb74e85c3713f9d18e83948bfba2e458e1d5b0d523f9",
+      "receipt": {
+        "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+        "dirtyDiff": [],
+        "buildCommand": "cargo build --features ultralight --bin phoenix-host",
+        "buildResult": "exit 0; dev profile optimized + debuginfo; 2m 24s",
+        "binarySha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+        "binaryPath": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+        "binaryModifiedUtc": "2026-09-27T13:22:17.1149345Z",
+        "builtUtc": "2026-09-27T13:24:48.6387965Z",
+        "libraryMtimeRefreshedWithoutByteChange": true,
+        "features": "[\"default\", \"host\", \"server\", \"ultralight\"]",
+        "fingerprintPath": "C:\\Coding\\project-phoenix-v2\\target\\debug\\.fingerprint\\project-phoenix-849936fee5edfbb5\\lib-project_phoenix.json",
+        "fingerprintSha256": "1be68d2687723184ee8a16a1117ff88869e7f1c15873c2ccebdc59bf5699b7b0",
+        "libraryDependencyRecordPath": "C:\\Coding\\project-phoenix-v2\\target\\debug\\deps\\project_phoenix.d",
+        "libraryDependencyRecordSha256": "5bc5f11549902a9d2fc731883e110b73c8b6efc618384e1e09712a30b94d5677",
+        "dependencyRecordPath": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.d",
+        "dependencyRecordSha256": "4c5149404a59138357d0561b3d4e2fc40b9b5a6268626818b7818dfc7b9cd0d4",
+        "dependencyRecordModifiedUtc": "2026-09-27T13:22:17.9918062Z",
+        "sdk": [
+          {
+            "name": "Ultralight.dll",
+            "sha256": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa"
+          },
+          {
+            "name": "UltralightCore.dll",
+            "sha256": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693"
+          },
+          {
+            "name": "WebCore.dll",
+            "sha256": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70"
+          },
+          {
+            "name": "AppCore.dll",
+            "sha256": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "browser-wasm",
+      "originalPath": "C:\\Coding\\project-phoenix-v2\\target\\browser-wasm-receipt-fdaf31c2.json",
+      "originalSha256": "0e9db95783ac258f626f22462b76c1db8ea18e9deb1bfed3fd639d4b0285e136",
+      "receipt": {
+        "format": "phoenix-browser-wasm-build-v1",
+        "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+        "sourcePatch": "",
+        "builtUtc": "2026-09-27T13:02:21.709Z",
+        "buildCommands": [
+          "trunk build --release",
+          "node scripts/build-client.mjs"
+        ],
+        "wasmSha256": {
+          "assets/texture-codecs/basis/basis_transcoder.wasm": "6cf17dc889352c42e9acf8897107978d127005fe3386c36a0e3845e27967630a",
+          "project-phoenix-b9ac3ee75351bfdd_bg.wasm": "2102dc304038244b25f0aae532b5c993f355869d567048fd318f77220c72d1e1"
+        },
+        "bundleFileCount": 1662,
+        "bundleHashesSha256": "fe6b5755480e1edd9f4adcc51acd5bce1f6b1a8c6d6750e486209aa9a9203edd",
+        "bundleHashesEncoding": "SHA-256 of compact UTF-8 JSON, preserving original key order"
+      }
+    }
+  ],
+  "limits": [
+    "Browser bundle file hashes remain in the original receipt; the full receipt hash identifies those exact bytes.",
+    "Native dependency/fingerprint hashes were observed immediately after build. Subsequent coordinated Cargo test overwrote shared records before byte archival; native host.d and receipt were archived, executable hash reverified unchanged."
+  ]
+}

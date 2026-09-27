@@ -1,0 +1,769 @@
+{
+  "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+  "nativeReceipt": {
+    "path": "C:\\Coding\\project-phoenix-v2\\target\\native-build-receipt-fdaf31c2.json",
+    "sha256": "373a3a59e8fe0f0445f1fb74e85c3713f9d18e83948bfba2e458e1d5b0d523f9"
+  },
+  "wrapper": {
+    "path": "C:\\Coding\\project-phoenix-v2\\target\\run-native-source-fdaf31c2.mjs",
+    "sha256": "5b696fb1fa4ca209e520b07378b40c563270ae5b03d96e92621b529179be9d83"
+  },
+  "limits": [
+    "Single-machine loopback native Bevy/Ultralight",
+    "Four ships/two separate GM peers; owner retains extra local GM operator",
+    "Normal Force Start control used; not automatic all-ready launch",
+    "No snapshot-class frames; configured10% snapshot loss unexercised",
+    "Native transport has no WebRTC; direct and retry fallback N/A",
+    "No Internet/mobile/performance/endurance/recovery acceptance"
+  ],
+  "rows": [
+    {
+      "profile": "clean",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\matrix.json",
+      "sha256": "bf579adb429d94b0d63212c82de1c031481a55b460516f49aec6725c748fcded",
+      "attributionPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\attribution.json",
+      "attributionSha256": "4b4e14a987ee387f6fe4fe60e7163448396938c5cdf5cb8d4e2f10a46b083477",
+      "passed": true,
+      "failure": null,
+      "seconds": 108.309,
+      "forceRequested": true,
+      "sixDistinctAdoptedSlots": true,
+      "observedRelay": true,
+      "stations": [
+        {
+          "peer": "ship-1",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 54,
+          "applied": 54
+        },
+        {
+          "peer": "ship-1",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 54,
+          "applied": 54
+        },
+        {
+          "peer": "ship-1",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 54,
+          "applied": 54
+        },
+        {
+          "peer": "ship-2",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 53,
+          "applied": 53
+        },
+        {
+          "peer": "ship-2",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 53,
+          "applied": 53
+        },
+        {
+          "peer": "ship-2",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 53,
+          "applied": 53
+        },
+        {
+          "peer": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 53,
+          "applied": 53
+        },
+        {
+          "peer": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 53,
+          "applied": 53
+        },
+        {
+          "peer": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 53,
+          "applied": 53
+        },
+        {
+          "peer": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 54,
+          "applied": 53
+        },
+        {
+          "peer": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 54,
+          "applied": 53
+        },
+        {
+          "peer": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 54,
+          "applied": 53
+        }
+      ],
+      "gms": [
+        {
+          "peer": "gm-1",
+          "operator": "gm-2",
+          "requests": 27,
+          "applied": 27
+        },
+        {
+          "peer": "gm-2",
+          "operator": "gm-3",
+          "requests": 27,
+          "applied": 27
+        }
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "a937ba38c07e4ff3",
+            "ship-2": "a937ba38c07e4ff3",
+            "ship-3": "a937ba38c07e4ff3",
+            "ship-4": "a937ba38c07e4ff3",
+            "gm-1": "a937ba38c07e4ff3",
+            "gm-2": "a937ba38c07e4ff3"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "e522859fa033beac",
+            "ship-2": "e522859fa033beac",
+            "ship-3": "e522859fa033beac",
+            "ship-4": "e522859fa033beac",
+            "gm-1": "e522859fa033beac",
+            "gm-2": "e522859fa033beac"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 18785,
+          "relay_reliable_written": 18785,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "serviceCleanup": {
+        "cleanupExitObserved": true
+      },
+      "peers": [
+        {
+          "id": "ship-1",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\ship-1\\manifest.json",
+          "sha256": "988531c72fa16e2183be001e763e82e905e5dea65f3d9101e8f76f507eeb52e3",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:44:05.281416Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "ship-2",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\ship-2\\manifest.json",
+          "sha256": "09c998b136df5e8eea85f81ee230a7e4f4ea858170a2eb15a2cb22ccaff0ef4b",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:44:14.420229Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "ship-3",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\ship-3\\manifest.json",
+          "sha256": "80bcbf43d9866e2e0babb17d818d2a11944bfeece6d20b292090368a0ef46bb1",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:44:14.598542Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "ship-4",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\ship-4\\manifest.json",
+          "sha256": "27dd6a4c03c884fdfff1975cfced3d8830a16e12dcaf533a9d0828fff9fbac76",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:44:14.862166Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "gm-1",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\gm-1\\manifest.json",
+          "sha256": "32fe0af2fdf56dffad3c094e016fd5d79fb1b3fffba545a52f847cb1aada04da",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:44:36.787206Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "gm-2",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-clean-fdaf31c2\\gm-2\\manifest.json",
+          "sha256": "560877d543874a76cec74d264976ee41913e976f0de7f188f223519bb5b7b9f1",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:44:42.883823Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        }
+      ]
+    },
+    {
+      "profile": "delayed",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\matrix.json",
+      "sha256": "87a3c3707dad0257b8488ef31272321c37210ab291e2180ed6020d2dd1657bcb",
+      "attributionPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\attribution.json",
+      "attributionSha256": "330cc1630695e5ae8060d062fd401ff0d606c5ec193056190e0e3c0eab09777a",
+      "passed": true,
+      "failure": null,
+      "seconds": 125.338,
+      "forceRequested": true,
+      "sixDistinctAdoptedSlots": true,
+      "observedRelay": true,
+      "stations": [
+        {
+          "peer": "ship-1",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 66,
+          "applied": 66
+        },
+        {
+          "peer": "ship-1",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 66,
+          "applied": 66
+        },
+        {
+          "peer": "ship-1",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 66,
+          "applied": 66
+        },
+        {
+          "peer": "ship-2",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 67,
+          "applied": 66
+        },
+        {
+          "peer": "ship-2",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 67,
+          "applied": 66
+        },
+        {
+          "peer": "ship-2",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 67,
+          "applied": 66
+        },
+        {
+          "peer": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 67,
+          "applied": 66
+        },
+        {
+          "peer": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 67,
+          "applied": 66
+        },
+        {
+          "peer": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 67,
+          "applied": 66
+        },
+        {
+          "peer": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 66,
+          "applied": 66
+        },
+        {
+          "peer": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 66,
+          "applied": 66
+        },
+        {
+          "peer": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 66,
+          "applied": 66
+        }
+      ],
+      "gms": [
+        {
+          "peer": "gm-1",
+          "operator": "gm-2",
+          "requests": 33,
+          "applied": 33
+        },
+        {
+          "peer": "gm-2",
+          "operator": "gm-3",
+          "requests": 34,
+          "applied": 34
+        }
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "d2c9d715d9cd118b",
+            "ship-2": "d2c9d715d9cd118b",
+            "ship-3": "d2c9d715d9cd118b",
+            "ship-4": "d2c9d715d9cd118b",
+            "gm-1": "d2c9d715d9cd118b",
+            "gm-2": "d2c9d715d9cd118b"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "beecb00756507adb",
+            "ship-2": "beecb00756507adb",
+            "ship-3": "beecb00756507adb",
+            "ship-4": "beecb00756507adb",
+            "gm-1": "beecb00756507adb",
+            "gm-2": "beecb00756507adb"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 18961,
+          "relay_reliable_written": 18961,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 18961,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 48,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 18961,
+              "min": 20.03839999999036,
+              "max": 36.82970000000205,
+              "total": 466988.0758999989
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "serviceCleanup": {
+        "cleanupExitObserved": true
+      },
+      "peers": [
+        {
+          "id": "ship-1",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\ship-1\\manifest.json",
+          "sha256": "4c7f422ebcca81f600383e118986b79abab52d9e4091d8f410456bc59f17dc50",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:45:53.886445Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "ship-2",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\ship-2\\manifest.json",
+          "sha256": "1f4ed04cacf0742f1a512de7a0a7dd5dc91aa485cea39954561fcf98a483653b",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:46:03.125106Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "ship-3",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\ship-3\\manifest.json",
+          "sha256": "81a000895a6f99bbdebd428fb4cfe323c664c30e1d366d7be3539a7e1995f78c",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:46:03.302953Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "ship-4",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\ship-4\\manifest.json",
+          "sha256": "dc0e5481529d1acd4627e433b33d89b3c2ce397a42c2a979c6b965b9b9617dd0",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:46:03.549203Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "gm-1",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\gm-1\\manifest.json",
+          "sha256": "31d49ce68ca5f60dab686fade02d0030270f4f1643164b0000d8f70e558eb9c5",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:46:29.061385Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        },
+        {
+          "id": "gm-2",
+          "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-native-delayed-fdaf31c2\\gm-2\\manifest.json",
+          "sha256": "b5b698e140c86ade710807dcd032f0043bd9e1528f905dd2fc4276937d994a2b",
+          "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+          "dirtySource": false,
+          "binary": {
+            "path": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+            "sha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+            "sourceBuildVerified": false
+          },
+          "binaryUnchanged": true,
+          "cleanupExitObserved": true,
+          "hardware": {
+            "os": "Windows 11 Home",
+            "release": "10.0.26200",
+            "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+            "logicalCpus": 24,
+            "ramBytes": 68112736256,
+            "gpuAdapterLog": "2026-09-27T13:46:35.585435Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+          },
+          "sdk": {
+            "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+            "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+            "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+            "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,190 @@
+{
+  "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+  "render": true,
+  "options": {
+    "dist": "C:\\Coding\\project-phoenix-v2\\dist",
+    "dependencies": "C:\\Coding\\project-phoenix-v2\\tests\\smoke",
+    "source": "C:\\Coding\\project-phoenix-v2",
+    "seconds": 10,
+    "timeout": 120,
+    "deadline": 600,
+    "port": 18450,
+    "rendezvousPort": 18451,
+    "delayMs": 0,
+    "lossPercent": 0,
+    "seed": 1530,
+    "render": true,
+    "routes": [
+      "ws-relay"
+    ],
+    "out": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-rendered-fdaf31c2",
+    "binary": "C:\\Coding\\project-phoenix-v2\\target\\debug\\phoenix-host.exe",
+    "bundle": "C:\\Coding\\project-phoenix-v2\\dist",
+    "build-receipt": "C:\\Coding\\project-phoenix-v2\\target\\native-build-receipt-fdaf31c2.json",
+    "wasm-build-receipt": "C:\\Coding\\project-phoenix-v2\\target\\browser-wasm-receipt-fdaf31c2.json"
+  },
+  "status": "passed",
+  "resultPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-rendered-fdaf31c2\\ws-relay\\result.json",
+  "resultSha256": "f29a9bcc2f3bd80ba3faa62adff4cea3c90b7f67500c106743561dbe4f6d5900",
+  "manifestPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-rendered-fdaf31c2\\manifest.json",
+  "manifestSha256": "b474f2e56a439a1a183898bb9cd659941078b5bba030beaa3cc6c68c4c136750",
+  "durationSeconds": 456.709,
+  "commandWaves": 20,
+  "passed": true,
+  "reasons": [],
+  "nativeStations": [
+    {
+      "id": "ship-3",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 380,
+      "applied": 378,
+      "refused": 0
+    },
+    {
+      "id": "ship-3",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 380,
+      "applied": 378,
+      "refused": 0
+    },
+    {
+      "id": "ship-3",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 380,
+      "applied": 378,
+      "refused": 0
+    },
+    {
+      "id": "ship-4",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 380,
+      "applied": 378,
+      "refused": 0
+    },
+    {
+      "id": "ship-4",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 380,
+      "applied": 378,
+      "refused": 0
+    },
+    {
+      "id": "ship-4",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 380,
+      "applied": 378,
+      "refused": 0
+    }
+  ],
+  "nativeGm": {
+    "operator": "gm-2",
+    "requests": 192,
+    "applied": 191
+  },
+  "browserStations": [
+    {
+      "label": "ship-1/captain",
+      "applied": 20
+    },
+    {
+      "label": "ship-1/helm",
+      "applied": 20
+    },
+    {
+      "label": "ship-1/engineering",
+      "applied": 20
+    },
+    {
+      "label": "ship-2/captain",
+      "applied": 20
+    },
+    {
+      "label": "ship-2/helm",
+      "applied": 20
+    },
+    {
+      "label": "ship-2/engineering",
+      "applied": 20
+    }
+  ],
+  "browserGmActions": [
+    "pause observed in both runtimes",
+    "resume observed in both runtimes"
+  ],
+  "digests": [
+    {
+      "tick": 300,
+      "byPeer": {
+        "ship-1": "495ee158bc3219b0",
+        "ship-2": "495ee158bc3219b0",
+        "gm-1": "495ee158bc3219b0",
+        "ship-3": "495ee158bc3219b0",
+        "ship-4": "495ee158bc3219b0",
+        "gm-2": "495ee158bc3219b0"
+      },
+      "agreed": true
+    },
+    {
+      "tick": 600,
+      "byPeer": {
+        "ship-1": "1531eaf825adcf1f",
+        "ship-2": "1531eaf825adcf1f",
+        "gm-1": "1531eaf825adcf1f",
+        "ship-3": "1531eaf825adcf1f",
+        "ship-4": "1531eaf825adcf1f",
+        "gm-2": "1531eaf825adcf1f"
+      },
+      "agreed": true
+    }
+  ],
+  "nativeCleanup": [
+    {
+      "observedExit": true,
+      "binaryUnchanged": true
+    },
+    {
+      "observedExit": true,
+      "binaryUnchanged": true
+    },
+    {
+      "observedExit": true,
+      "binaryUnchanged": true
+    }
+  ],
+  "browser": "147.0.7727.15",
+  "nativeBuildReceiptHash": "373a3a59e8fe0f0445f1fb74e85c3713f9d18e83948bfba2e458e1d5b0d523f9",
+  "wasmBuildReceipt": {
+    "path": "C:\\Coding\\project-phoenix-v2\\target\\browser-wasm-receipt-fdaf31c2.json",
+    "sha256": "0e9db95783ac258f626f22462b76c1db8ea18e9deb1bfed3fd639d4b0285e136",
+    "sourceAndBundleVerified": true,
+    "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+    "wasmSha256": {
+      "assets/texture-codecs/basis/basis_transcoder.wasm": "6cf17dc889352c42e9acf8897107978d127005fe3386c36a0e3845e27967630a",
+      "project-phoenix-b9ac3ee75351bfdd_bg.wasm": "2102dc304038244b25f0aae532b5c993f355869d567048fd318f77220c72d1e1"
+    }
+  },
+  "limits": [
+    "Single clean forced-relay representative with SwiftShader browser rendering enabled",
+    "No visual correctness assessment or performance threshold",
+    "Not full rendered route/profile matrix",
+    "No recovery injection"
+  ]
+}

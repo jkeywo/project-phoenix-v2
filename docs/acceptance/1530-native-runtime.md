@@ -123,7 +123,18 @@ validated with `delivery::check_host_stamp`, then the embedded owner compares
 that canonical field exactly. Two empty identities cannot match; missing or
 JSON-form stamps fail rather than weakening the browser/native boundary.
 
-## Measured native run – 2026-09-27
+## Current source-matched evidence
+
+Clean and delayed relay cells passed from clean `fdaf31c2`, using the freshly
+rebuilt Ultralight binary and an external build receipt verified before launch.
+The [current-source ledger](1530-current-source-runtime.md) and
+[portable native summary](1530-native-source-fdaf31c2.json) retain the six
+source/binary attributions, twelve Station workloads, two separate GM peers,
+matching checkpoints, Force Start use, and observed cleanup. Native direct
+WebRTC and RTC retry fallback remain **N/A**. The delayed cell saw zero snapshot
+frames, so its configured snapshot-loss setting exercised no loss.
+
+## Earlier measured native run – 2026-09-27
 
 The actual Windows/Ultralight six-process workload passed in **107.192 seconds**.
 The portable [result and artifact hashes](1530-native-runtime-result.json) record

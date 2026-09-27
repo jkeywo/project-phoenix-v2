@@ -20,8 +20,10 @@ record actual write/drop counters. Default webdriver execution disables Bevy
 rendering; short browser evidence does not establish native, mixed, mobile or
 endurance acceptance. The mixed runner, `scripts/fleet-mixed-matrix.mjs`, combines
 three browser and three native simulation peers. Both runners accept `--render`
-to request SwiftShader browser rendering; the retained runtime matrix has not
-validated that mode. See [the runtime ledger](../../docs/acceptance/1530-six-peer-matrix.md).
+to request SwiftShader browser rendering. The
+[current-source ledger](../../docs/acceptance/1530-current-source-runtime.md)
+separates the six browser/mixed route cells, native relay cells and rendered
+representative, retaining exact build receipts and limits.
 
 ## Rust
 

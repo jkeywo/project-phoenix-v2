@@ -62,7 +62,8 @@ Artifacts include manifest/source and bundle hashes, machine/browser facts,
 per-page route/receipt/digest state, GM action observations, bounded logs and
 failure screenshots. Shutdown is bounded. Default webdriver execution runs the
 real simulation with Bevy rendering disabled. `--render` requests software
-rendering but remains unvalidated; it is not a passed rendered cell.
+rendering. The current measured rendering outcome is recorded in the
+[source-matched ledger](1530-current-source-runtime.md).
 
 ## Native ship membership
 
@@ -103,7 +104,16 @@ for ordinary internet, mobile hotspot and separate mobile networks. Do not call
 a controlled impairment a real mobile observation. The one-hour mixed run and
 shorter-run durations/limits remain governed by #1543 and #1090.
 
-### Browser evidence, 2026-09-27
+### Current source-matched evidence
+
+The [current-source ledger](1530-current-source-runtime.md) records fresh native
+and release WASM builds from clean `fdaf31c2`, six browser cells, six mixed
+cells, and native-only clean/delayed relay measurements. It supersedes the
+artifact-only provenance limitation of the earlier evidence below. All-native
+direct WebRTC and RTC retry fallback are **N/A**, because native advertises
+relay immediately.
+
+### Earlier browser evidence, 2026-09-27
 
 [Retained browser summary](1530-browser-runtime-2026-09-27.json) records the
 actual cases, artifact hashes, runtime bounds, command counts and impairment
@@ -170,10 +180,10 @@ failures. Actual direct snapshot drops and relay snapshot drops were observed
 in the respective mixed impaired cases; native-only delay has the narrower
 limit stated above.
 
-Rendered-browser, physical/mobile/internet, recovery and endurance acceptance
-remain separate and outstanding. Browser rows also retain their artifact-level
-WASM provenance limit until a source-matched build is measured.
-This evidence does not close #1530.
+The current-source ledger states the rendering result and remaining scope.
+Physical/mobile/internet observations, recovery (#1534), sustained performance
+(#1543), and duration ratification (#1090) remain separate. Earlier artifact-only
+rows above retain their original limits; they are not relabelled source-matched.
 
 ## Operator feedback controls
 

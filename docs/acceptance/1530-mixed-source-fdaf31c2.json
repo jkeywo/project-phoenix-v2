@@ -1,0 +1,1584 @@
+{
+  "sourceRevision": "fdaf31c211ed9396aaa9cc3d16e63912961d590b",
+  "receipts": [
+    {
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\native-build-receipt-fdaf31c2.json",
+      "sha256": "373a3a59e8fe0f0445f1fb74e85c3713f9d18e83948bfba2e458e1d5b0d523f9"
+    },
+    {
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\browser-wasm-receipt-fdaf31c2.json",
+      "sha256": "0e9db95783ac258f626f22462b76c1db8ea18e9deb1bfed3fd639d4b0285e136"
+    }
+  ],
+  "manifests": [
+    {
+      "profile": "clean",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-clean-fdaf31c2\\manifest.json",
+      "sha256": "e1337cbf4e19f7418034c23fcf3c8afc445390ded692507a3dbff931020d87ff"
+    },
+    {
+      "profile": "impaired",
+      "path": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-impaired-fdaf31c2\\manifest.json",
+      "sha256": "05313e437f3dd38d923618bb29e27510da3ddcc05f317243eaa5bb3cce78cd23"
+    }
+  ],
+  "binarySha256": "398e1c90bfb58c5e1faa6853ea47d0e8222e5393a6b7dc64bebf73936880021e",
+  "limits": [
+    "Single-machine loopback",
+    "Browser rendering disabled; native Bevy/Ultralight real",
+    "4 ship peers,2 separate GM peers,12 active Station documents",
+    "Application frame impairment,not IP packet loss",
+    "Native-only transport carries no snapshot frames; snapshot loss here exercised on browser Station delivery",
+    "Not rendered-browser,performance,endurance,mobile,Internet,or recovery acceptance"
+  ],
+  "rows": [
+    {
+      "profile": "clean",
+      "route": "direct",
+      "resultPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-clean-fdaf31c2\\direct\\result.json",
+      "resultSha256": "baad8e1f81161abafd0bf945124568ab481363fd5db84522f6734698a4990c37",
+      "status": "passed",
+      "durationSeconds": 62.648,
+      "commandWaves": 15,
+      "passed": true,
+      "reasons": [],
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 17,
+        "applied": 17
+      },
+      "browserStations": [
+        {
+          "label": "ship-1/captain",
+          "applied": 15
+        },
+        {
+          "label": "ship-2/captain",
+          "applied": 15
+        },
+        {
+          "label": "ship-2/helm",
+          "applied": 15
+        },
+        {
+          "label": "ship-1/helm",
+          "applied": 15
+        },
+        {
+          "label": "ship-2/engineering",
+          "applied": 15
+        },
+        {
+          "label": "ship-1/engineering",
+          "applied": 15
+        }
+      ],
+      "browserGmActions": [
+        "pause observed in both runtimes",
+        "resume observed in both runtimes"
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "3ac14a210ce6aa94",
+            "ship-2": "3ac14a210ce6aa94",
+            "gm-1": "3ac14a210ce6aa94",
+            "ship-3": "3ac14a210ce6aa94",
+            "ship-4": "3ac14a210ce6aa94",
+            "gm-2": "3ac14a210ce6aa94"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "d3312b7af1fb2d60",
+            "ship-2": "d3312b7af1fb2d60",
+            "gm-1": "d3312b7af1fb2d60",
+            "ship-3": "d3312b7af1fb2d60",
+            "ship-4": "d3312b7af1fb2d60",
+            "gm-2": "d3312b7af1fb2d60"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 11354,
+          "relay_reliable_written": 11354,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "directImpairment": [
+        {
+          "label": "ship-1"
+        },
+        {
+          "label": "ship-2"
+        },
+        {
+          "label": "gm-1"
+        },
+        {
+          "label": "ship-1/captain"
+        },
+        {
+          "label": "ship-2/captain"
+        },
+        {
+          "label": "ship-2/helm"
+        },
+        {
+          "label": "ship-1/helm"
+        },
+        {
+          "label": "ship-2/engineering"
+        },
+        {
+          "label": "ship-1/engineering"
+        }
+      ],
+      "nativeCleanup": [
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        }
+      ],
+      "cleanupError": null
+    },
+    {
+      "profile": "clean",
+      "route": "ws-relay",
+      "resultPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-clean-fdaf31c2\\ws-relay\\result.json",
+      "resultSha256": "e3704d7f5df4a2d40604d6b8e32673dbbd522483f91c0a3475f424eda360bed7",
+      "status": "passed",
+      "durationSeconds": 66.777,
+      "commandWaves": 10,
+      "passed": true,
+      "reasons": [],
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 36,
+          "applied": 36,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 36,
+          "applied": 36,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 36,
+          "applied": 36,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 36,
+          "applied": 36,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 36,
+          "applied": 36,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 36,
+          "applied": 36,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 18,
+        "applied": 18
+      },
+      "browserStations": [
+        {
+          "label": "ship-1/captain",
+          "applied": 10
+        },
+        {
+          "label": "ship-2/captain",
+          "applied": 10
+        },
+        {
+          "label": "ship-1/helm",
+          "applied": 10
+        },
+        {
+          "label": "ship-2/helm",
+          "applied": 10
+        },
+        {
+          "label": "ship-1/engineering",
+          "applied": 10
+        },
+        {
+          "label": "ship-2/engineering",
+          "applied": 10
+        }
+      ],
+      "browserGmActions": [
+        "pause observed in both runtimes",
+        "resume observed in both runtimes"
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "9db62acbc56d9e9a",
+            "ship-2": "9db62acbc56d9e9a",
+            "gm-1": "9db62acbc56d9e9a",
+            "ship-3": "9db62acbc56d9e9a",
+            "ship-4": "9db62acbc56d9e9a",
+            "gm-2": "9db62acbc56d9e9a"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "87e92e6a04a3444d",
+            "ship-2": "87e92e6a04a3444d",
+            "gm-1": "87e92e6a04a3444d",
+            "ship-3": "87e92e6a04a3444d",
+            "ship-4": "87e92e6a04a3444d",
+            "gm-2": "87e92e6a04a3444d"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19376,
+          "relay_reliable_written": 19376,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4741,
+          "relay_snapshot_written": 4741,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "directImpairment": [
+        {
+          "label": "ship-1"
+        },
+        {
+          "label": "ship-2"
+        },
+        {
+          "label": "gm-1"
+        },
+        {
+          "label": "ship-1/captain"
+        },
+        {
+          "label": "ship-2/captain"
+        },
+        {
+          "label": "ship-1/helm"
+        },
+        {
+          "label": "ship-2/helm"
+        },
+        {
+          "label": "ship-1/engineering"
+        },
+        {
+          "label": "ship-2/engineering"
+        }
+      ],
+      "nativeCleanup": [
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        }
+      ],
+      "cleanupError": null
+    },
+    {
+      "profile": "clean",
+      "route": "automatic-fallback",
+      "resultPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-clean-fdaf31c2\\automatic-fallback\\result.json",
+      "resultSha256": "7fdd0829e624d90d0a40fef5fff5685150b13a80d0edc92fbfce2b905ed21a8f",
+      "status": "passed",
+      "durationSeconds": 214.164,
+      "commandWaves": 12,
+      "passed": true,
+      "reasons": [],
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 37,
+          "applied": 37,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 37,
+          "applied": 37,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 37,
+          "applied": 37,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 37,
+          "applied": 36,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 37,
+          "applied": 36,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 37,
+          "applied": 36,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-1",
+        "requests": 18,
+        "applied": 18
+      },
+      "browserStations": [
+        {
+          "label": "ship-1/captain",
+          "applied": 12
+        },
+        {
+          "label": "ship-2/captain",
+          "applied": 12
+        },
+        {
+          "label": "ship-1/helm",
+          "applied": 12
+        },
+        {
+          "label": "ship-2/helm",
+          "applied": 12
+        },
+        {
+          "label": "ship-2/engineering",
+          "applied": 12
+        },
+        {
+          "label": "ship-1/engineering",
+          "applied": 12
+        }
+      ],
+      "browserGmActions": [
+        "pause observed in both runtimes",
+        "resume observed in both runtimes"
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "c74996661d625648",
+            "ship-2": "c74996661d625648",
+            "gm-1": "c74996661d625648",
+            "ship-3": "c74996661d625648",
+            "ship-4": "c74996661d625648",
+            "gm-2": "c74996661d625648"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "b0d83aba23e95c80",
+            "ship-2": "b0d83aba23e95c80",
+            "gm-1": "b0d83aba23e95c80",
+            "ship-3": "b0d83aba23e95c80",
+            "ship-4": "b0d83aba23e95c80",
+            "gm-2": "b0d83aba23e95c80"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1530,
+          "block_rtc_offers": true
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19366,
+          "relay_reliable_written": 19366,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4741,
+          "relay_snapshot_written": 4741,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 32,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "directImpairment": [
+        {
+          "label": "ship-1"
+        },
+        {
+          "label": "ship-2"
+        },
+        {
+          "label": "gm-1"
+        },
+        {
+          "label": "ship-1/captain"
+        },
+        {
+          "label": "ship-2/captain"
+        },
+        {
+          "label": "ship-1/helm"
+        },
+        {
+          "label": "ship-2/helm"
+        },
+        {
+          "label": "ship-2/engineering"
+        },
+        {
+          "label": "ship-1/engineering"
+        }
+      ],
+      "nativeCleanup": [
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        }
+      ],
+      "cleanupError": null
+    },
+    {
+      "profile": "impaired",
+      "route": "direct",
+      "resultPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-impaired-fdaf31c2\\direct\\result.json",
+      "resultSha256": "4e96ad63a7a100e1da37d8d7fa873b2e277e009462ce6257d51ec0f3fdb413a9",
+      "status": "passed",
+      "durationSeconds": 79.691,
+      "commandWaves": 10,
+      "passed": true,
+      "reasons": [],
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 51,
+          "applied": 51,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 51,
+          "applied": 51,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 51,
+          "applied": 51,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 51,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 51,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 51,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 26,
+        "applied": 25
+      },
+      "browserStations": [
+        {
+          "label": "ship-1/captain",
+          "applied": 10
+        },
+        {
+          "label": "ship-1/helm",
+          "applied": 10
+        },
+        {
+          "label": "ship-1/engineering",
+          "applied": 10
+        },
+        {
+          "label": "ship-2/captain",
+          "applied": 10
+        },
+        {
+          "label": "ship-2/helm",
+          "applied": 10
+        },
+        {
+          "label": "ship-2/engineering",
+          "applied": 10
+        }
+      ],
+      "browserGmActions": [
+        "pause observed in both runtimes",
+        "resume observed in both runtimes"
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "2ffb3bd03ea302f0",
+            "ship-2": "2ffb3bd03ea302f0",
+            "gm-1": "2ffb3bd03ea302f0",
+            "ship-3": "2ffb3bd03ea302f0",
+            "ship-4": "2ffb3bd03ea302f0",
+            "gm-2": "2ffb3bd03ea302f0"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "768ca072790514a2",
+            "ship-2": "768ca072790514a2",
+            "gm-1": "768ca072790514a2",
+            "ship-3": "768ca072790514a2",
+            "ship-4": "768ca072790514a2",
+            "gm-2": "768ca072790514a2"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 11603,
+          "relay_reliable_written": 11595,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 11603,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 8,
+          "peak_pending": 36,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 11595,
+              "min": 20.03979999999865,
+              "max": 36.297099999996135,
+              "total": 311675.2871000005
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "directImpairment": [
+        {
+          "label": "ship-1",
+          "reliable": {
+            "seen": 6620,
+            "written": 6616,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 6616,
+              "min": 20,
+              "max": 197.30000001192093,
+              "total": 178165.79999873042
+            }
+          },
+          "pending": 4,
+          "peakPending": 55,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 2395,
+            "written": 2168,
+            "dropped": 227,
+            "cancelled": 0,
+            "delay": {
+              "count": 2168,
+              "min": 20,
+              "max": 37.599999994039536,
+              "total": 55271.49999970198
+            }
+          }
+        },
+        {
+          "label": "ship-2",
+          "reliable": {
+            "seen": 746,
+            "written": 746,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 746,
+              "min": 20,
+              "max": 107.90000000596046,
+              "total": 19066.099999964237
+            }
+          },
+          "pending": 0,
+          "peakPending": 45,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 2395,
+            "written": 2168,
+            "dropped": 227,
+            "cancelled": 0,
+            "delay": {
+              "count": 2168,
+              "min": 20,
+              "max": 37.5,
+              "total": 55473.49999862909
+            }
+          }
+        },
+        {
+          "label": "gm-1",
+          "reliable": {
+            "seen": 624,
+            "written": 624,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 624,
+              "min": 20,
+              "max": 149.5,
+              "total": 15844.000000208616
+            }
+          },
+          "pending": 0,
+          "peakPending": 3,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 0,
+            "written": 0,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        {
+          "label": "ship-1/captain",
+          "reliable": {
+            "seen": 15,
+            "written": 15,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 15,
+              "min": 20.19999998807907,
+              "max": 3353.4000000059605,
+              "total": 3685.400000065565
+            }
+          },
+          "pending": 0,
+          "peakPending": 1,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 0,
+            "written": 0,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        {
+          "label": "ship-1/helm",
+          "reliable": {
+            "seen": 25,
+            "written": 25,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 25,
+              "min": 20,
+              "max": 621,
+              "total": 1819.9999999403954
+            }
+          },
+          "pending": 0,
+          "peakPending": 2,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 0,
+            "written": 0,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        {
+          "label": "ship-1/engineering",
+          "reliable": {
+            "seen": 15,
+            "written": 15,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 15,
+              "min": 20.299999982118607,
+              "max": 1001.5999999940395,
+              "total": 1332.5
+            }
+          },
+          "pending": 0,
+          "peakPending": 1,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 0,
+            "written": 0,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        {
+          "label": "ship-2/captain",
+          "reliable": {
+            "seen": 15,
+            "written": 15,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 15,
+              "min": 20.299999982118607,
+              "max": 1732.5,
+              "total": 2060.2999999523163
+            }
+          },
+          "pending": 0,
+          "peakPending": 1,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 0,
+            "written": 0,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        {
+          "label": "ship-2/helm",
+          "reliable": {
+            "seen": 25,
+            "written": 25,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 25,
+              "min": 20.5,
+              "max": 593,
+              "total": 1737.2000000178814
+            }
+          },
+          "pending": 0,
+          "peakPending": 2,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 0,
+            "written": 0,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        {
+          "label": "ship-2/engineering",
+          "reliable": {
+            "seen": 15,
+            "written": 15,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 15,
+              "min": 20.400000005960464,
+              "max": 1330.7999999821186,
+              "total": 1663.9000000059605
+            }
+          },
+          "pending": 0,
+          "peakPending": 1,
+          "overflows": 0,
+          "failures": 0,
+          "snapshot": {
+            "seen": 0,
+            "written": 0,
+            "dropped": 0,
+            "cancelled": 0,
+            "delay": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        }
+      ],
+      "nativeCleanup": [
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        }
+      ],
+      "cleanupError": null
+    },
+    {
+      "profile": "impaired",
+      "route": "ws-relay",
+      "resultPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-impaired-fdaf31c2\\ws-relay\\result.json",
+      "resultSha256": "393e2f478a34f65d3ddefcfcfad6720710a87dfff89dc1ca6e8d1f9c7c97be3a",
+      "status": "passed",
+      "durationSeconds": 81.082,
+      "commandWaves": 9,
+      "passed": true,
+      "reasons": [],
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 49,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 49,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 49,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 50,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 50,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 50,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 25,
+        "applied": 25
+      },
+      "browserStations": [
+        {
+          "label": "ship-1/captain",
+          "applied": 9
+        },
+        {
+          "label": "ship-2/captain",
+          "applied": 9
+        },
+        {
+          "label": "ship-2/helm",
+          "applied": 9
+        },
+        {
+          "label": "ship-1/helm",
+          "applied": 9
+        },
+        {
+          "label": "ship-2/engineering",
+          "applied": 9
+        },
+        {
+          "label": "ship-1/engineering",
+          "applied": 9
+        }
+      ],
+      "browserGmActions": [
+        "pause observed in both runtimes",
+        "resume observed in both runtimes"
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "6f5e7002010c8078",
+            "ship-2": "6f5e7002010c8078",
+            "gm-1": "6f5e7002010c8078",
+            "ship-3": "6f5e7002010c8078",
+            "ship-4": "6f5e7002010c8078",
+            "gm-2": "6f5e7002010c8078"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "b1f6315e88d2955e",
+            "ship-2": "b1f6315e88d2955e",
+            "gm-1": "b1f6315e88d2955e",
+            "ship-3": "b1f6315e88d2955e",
+            "ship-4": "b1f6315e88d2955e",
+            "gm-2": "b1f6315e88d2955e"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19278,
+          "relay_reliable_written": 19265,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4680,
+          "relay_snapshot_written": 4247,
+          "relay_snapshot_dropped": 433,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 23525,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 13,
+          "peak_pending": 66,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 19265,
+              "min": 20.03070000000298,
+              "max": 37.40649999999732,
+              "total": 517301.8654000019
+            },
+            "snapshot": {
+              "count": 4247,
+              "min": 20.052700000000186,
+              "max": 35.865200000000186,
+              "total": 109942.59469999958
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "directImpairment": [
+        {
+          "label": "ship-1"
+        },
+        {
+          "label": "ship-2"
+        },
+        {
+          "label": "gm-1"
+        },
+        {
+          "label": "ship-1/captain"
+        },
+        {
+          "label": "ship-2/captain"
+        },
+        {
+          "label": "ship-2/helm"
+        },
+        {
+          "label": "ship-1/helm"
+        },
+        {
+          "label": "ship-2/engineering"
+        },
+        {
+          "label": "ship-1/engineering"
+        }
+      ],
+      "nativeCleanup": [
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        }
+      ],
+      "cleanupError": null
+    },
+    {
+      "profile": "impaired",
+      "route": "automatic-fallback",
+      "resultPath": "C:\\Coding\\project-phoenix-v2\\target\\1530-source-mixed-impaired-fdaf31c2\\automatic-fallback\\result.json",
+      "resultSha256": "e2d61499decf4a03e320dc906157d35788f635cdd5ad5ab2fd5d8f7ea99bdcee",
+      "status": "passed",
+      "durationSeconds": 227.844,
+      "commandWaves": 12,
+      "passed": true,
+      "reasons": [],
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 51,
+          "applied": 50,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 51,
+          "applied": 50,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 51,
+          "applied": 50,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 50,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 50,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 50,
+          "applied": 50,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-1",
+        "requests": 25,
+        "applied": 25
+      },
+      "browserStations": [
+        {
+          "label": "ship-2/captain",
+          "applied": 12
+        },
+        {
+          "label": "ship-2/helm",
+          "applied": 12
+        },
+        {
+          "label": "ship-2/engineering",
+          "applied": 12
+        },
+        {
+          "label": "ship-1/captain",
+          "applied": 12
+        },
+        {
+          "label": "ship-1/helm",
+          "applied": 12
+        },
+        {
+          "label": "ship-1/engineering",
+          "applied": 12
+        }
+      ],
+      "browserGmActions": [
+        "pause observed in both runtimes",
+        "resume observed in both runtimes"
+      ],
+      "digests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "98a235d996f7d6fa",
+            "ship-2": "98a235d996f7d6fa",
+            "gm-1": "98a235d996f7d6fa",
+            "ship-3": "98a235d996f7d6fa",
+            "ship-4": "98a235d996f7d6fa",
+            "gm-2": "98a235d996f7d6fa"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "68d6158c477dafbf",
+            "ship-2": "68d6158c477dafbf",
+            "gm-1": "68d6158c477dafbf",
+            "ship-3": "68d6158c477dafbf",
+            "ship-4": "68d6158c477dafbf",
+            "gm-2": "68d6158c477dafbf"
+          },
+          "agreed": true
+        }
+      ],
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": true
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19276,
+          "relay_reliable_written": 19268,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4701,
+          "relay_snapshot_written": 4265,
+          "relay_snapshot_dropped": 436,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 23541,
+          "signal_offers_dropped": 32,
+          "queue_overflow_closes": 0,
+          "pending": 8,
+          "peak_pending": 65,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 19268,
+              "min": 20.033000000024913,
+              "max": 37.041399999987334,
+              "total": 509397.31820000143
+            },
+            "snapshot": {
+              "count": 4265,
+              "min": 20.048300000024028,
+              "max": 36.34779999998864,
+              "total": 110581.25760000045
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "directImpairment": [
+        {
+          "label": "ship-1"
+        },
+        {
+          "label": "ship-2"
+        },
+        {
+          "label": "gm-1"
+        },
+        {
+          "label": "ship-2/captain"
+        },
+        {
+          "label": "ship-2/helm"
+        },
+        {
+          "label": "ship-2/engineering"
+        },
+        {
+          "label": "ship-1/captain"
+        },
+        {
+          "label": "ship-1/helm"
+        },
+        {
+          "label": "ship-1/engineering"
+        }
+      ],
+      "nativeCleanup": [
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        },
+        {
+          "observedExit": true,
+          "binaryUnchanged": true
+        }
+      ],
+      "cleanupError": null
+    }
+  ]
+}

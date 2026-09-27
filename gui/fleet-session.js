@@ -812,6 +812,9 @@ export function createFleetOwner(opts) {
         if (!envelope) return;
         raw = JSON.stringify(envelope);
         if (isContinuationEnvelope(envelope)) {
+          // A private GM candidate cannot advance or poison an admitted stream.
+          // Its only ingress is the authenticated raw GM recovery lane below.
+          if (pendingLinks.has(conn.peer)) return;
           const authSlot = connSlots.get(conn.peer);
           if (!continuation || authSlot == null) return;
           if (envelope.kind !== 'stream') {
@@ -1289,7 +1292,7 @@ export function createFleetMember(opts) {
   };
 
   const deliverSimulationRoster = (candidate) => {
-    if (!candidate || !candidate.frozen) return true;
+    if (!candidate || !candidate.frozen || gmJoinCandidate) return true;
     if (!mine) {
       return refuseSimulationRoster('missing-local-slot');
     }
@@ -1530,6 +1533,14 @@ export function createFleetMember(opts) {
         if (!request || !candidateRoster || acceptedRole !== HOST_ROLE_GM) return;
         mine = decoded.d.slot || null;
         gmJoinCandidate = true;
+        if (request.kind === GM_JOIN_RECONNECT) {
+          // Rows minted while this handle was disconnected are not a proven
+          // delivery suffix. Canonical restore replaces the stale simulation;
+          // use the private raw lane until Commit, then Welcome seeds a fresh
+          // journal from the owner's authenticated delivery frontier.
+          continuation = null;
+          streamBaseline = null;
+        }
         roster = candidateRoster;
         operatorId = decoded.d.operator_id || null;
         privateReconnectCredential = decoded.d.reconnect_credential || null;

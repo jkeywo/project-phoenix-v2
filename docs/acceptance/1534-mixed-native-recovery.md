@@ -263,5 +263,39 @@ fresh controls, no duplicate outgoing orders or observer errors, and two exact
 matching post-commit digest checkpoints. Use the existing native invocation,
 matching `--build-receipt`, `--seconds 900 --workload true` and a fresh output
 directory, changing only `--failure gm-redial`. Its recovery wait is bounded at
-600 seconds. This probe is implemented and unit-tested; no live redial result
-is claimed until the source-matched runtime run completes.
+600 seconds. No passing live redial result is established; the first
+source-matched run and its failure are retained below.
+
+
+### Same-handle GM continuation stream failure
+
+The first deterministic native redial ran on clean product
+`d032d604bd2f66957fd22a985a417b0490bc952c`. It reached the six-peer healthy gate,
+closed GM 2's generation 0 at 19:34:44.427 UTC on 2026-09-27, and observed
+native generation 1 open at 19:34:44.572. PID 29044 and its start time remained
+unchanged and live; the private capability, operator and technical slot all
+matched. Five survivors applied HostLoss at tick 606. The owner scheduled a
+reconnect pause at 612, but emitted `owner-continuation-refused` with
+`continuation-stream-gap` at 19:34:45.013. No reconnect commit occurred.
+
+Retain `target/1534-native-gm-redial-relay-d032d604/matrix.json`, SHA-256
+`a3809a3f8e289d5d862ef43b9514ae6f6ea88eea657e8ae7e71a109672e574a6`,
+and its native build receipt SHA-256
+`b26d304b65bbe76e63b6850b2c9b32861046d5cb41c5491c3648101dd451cc01`.
+The 112.532-second run is a concrete recovery failure, not a healthy-gate miss.
+
+The same member handle had kept numbering continuation frames while its socket
+was disconnected. A later pending-candidate envelope entered the owner's
+admitted journal with missing rows. Its retained journal also caused the GM
+to ignore the raw private Pause/snapshot lane. The correction retires that
+stale journal only at authenticated reconnect-pending, rejects candidate
+continuation envelopes at the owner, and recreates the member journal from
+the owner frontier only after terminal Welcome. Admitted-stream gaps still
+fail; no missing simulation history is waived.
+
+The direct and relay regressions in `fleet-gm-redial-stream.test.js` both
+reproduced the exact stream-gap error before correction
+(`target/1534-gm-stream-red.log`). Six focused suites then passed 113/113,
+including ordinary owner handoff, continuation, fleet admission and native
+adapter tests. These are protocol fixtures; corrected native runtime recovery
+still needs a new source-attributed run.

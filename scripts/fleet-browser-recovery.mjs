@@ -108,7 +108,8 @@ export function directEffectOutcome(evidence) {
         && Math.round(event.detail.data.hull_damage*1000)===5000
         && event.links?.some(link=>link.role==='victim' && link.entity?.entity_id===request.entity)
         && entry?.correlation===request.correlation && entry.action_kind==='direct-effect'
-        && entry.outcome==='applied';
+        && entry.outcome==='applied' && Number.isSafeInteger(entry.tick) && entry.tick>0
+        && Number.isSafeInteger(entry.sequence) && entry.sequence>0;
     });
   if(!valid || new Set(baseline.map(row=>row.events[0].tick)).size!==1
     || new Set(baseline.map(row=>`${row.journal[0].tick}:${row.journal[0].sequence}`)).size!==1)return false;

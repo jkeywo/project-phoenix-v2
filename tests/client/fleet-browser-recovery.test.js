@@ -104,3 +104,9 @@ it('waits boundedly for both activity projections after the journal reports appl
     {now:()=>turn*100,wait:async()=>{turn++;},timeoutMs:200})).toBe(false);
   expect(turn).toBe(2);
 });
+
+it('requires a real canonical sequence before calling the reducer effect shared',()=>{
+  const proof=directEffectEvidence();
+  for(const row of [...proof.effectBefore,...proof.effectAfter])delete row.journal[0].sequence;
+  expect(directEffectOutcome(proof)).toBe(false);
+});

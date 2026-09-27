@@ -44,3 +44,58 @@ export function installBrowserPerformanceObserver({ peer, clock }) {
     read() { return events.map(event => ({ ...event })); },
   });
 }
+
+// Host-side observation of the production mesh egress. Every local tick frame
+// is stamped when JS drains it; no tick or applied command is manufactured.
+export function installHostPerformanceObserver({ peer, clock }) {
+  if (!peer || !clock || typeof window.wasm_take_mesh_frames !== 'function'
+      || typeof window.__hostMeshStatus !== 'function') {
+    throw new Error('Install after a real fleet host exposes its mesh egress');
+  }
+  if (window.__fleetHostPerformance) throw new Error('Host performance observer already installed');
+  const events = [];
+  const add = (kind, correlation, tick, agreed) => {
+    const row = { kind, peer, clock, ms: performance.now() };
+    if (correlation !== undefined) row.correlation = correlation;
+    if (tick !== undefined) row.tick = tick;
+    if (agreed !== undefined) row.agreed = agreed;
+    events.push(row);
+  };
+  const localSlot = window.__hostMeshStatus().slot;
+  const take = window.wasm_take_mesh_frames;
+  window.wasm_take_mesh_frames = function (...args) {
+    const raw = take(...args);
+    for (const frame of JSON.parse(raw)) {
+      if (frame.t === 'tick' && frame.d?.from === localSlot && Number.isSafeInteger(frame.d.tick)) {
+        add('tick', undefined, frame.d.tick);
+      }
+    }
+    return raw;
+  };
+  let watch = null;
+  window.__fleetHostPerformance = Object.freeze({
+    fault(correlation, victimSlot, afterTick) {
+      if (watch) throw new Error('Recovery watch already active');
+      add('fault', correlation);
+      let detected = false, resumed = false;
+      watch = setInterval(() => {
+        const state = window.__hostMeshStatus();
+        if (!detected) {
+          const loss = state.recovery?.losses?.find(row => row.slot === victimSlot);
+          if (loss) { add('loss_detected', correlation, loss.tick); detected = true; }
+        }
+        if (!resumed && state.tick > afterTick + 30 && state.peers?.length === 4) {
+          add('progress_resumed', correlation, state.tick); resumed = true;
+        }
+        if (detected && resumed) { clearInterval(watch); watch = null; }
+      }, 25);
+    },
+    verified(correlation) {
+      const state = window.__hostMeshStatus();
+      if (!state.agreed || !Number.isSafeInteger(state.tick)) throw new Error('No verified host digest');
+      add('digest_verified', correlation, state.tick, true);
+    },
+    read() { return events.map(event => ({ ...event })); },
+    stop() { if (watch) clearInterval(watch); watch = null; },
+  });
+}

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FORMAT, summarize } from '../../scripts/fleet-performance-evidence.mjs';
-import { installBrowserPerformanceObserver } from '../../scripts/fleet-performance-observer.mjs';
+import { installBrowserPerformanceObserver, installHostPerformanceObserver } from '../../scripts/fleet-performance-observer.mjs';
+import { captureOptions } from '../../scripts/fleet-performance-capture.mjs';
 
 const provenance = { revision: 'a'.repeat(40), content: 'probe@1', runtime: { browser: 'test' },
   artifactHashes: { bundle: 'b'.repeat(64) }, profile: { route: 'direct' } };
@@ -94,5 +95,49 @@ describe('T5 performance evidence', () => {
       globalThis.window = previousWindow;
       globalThis.performance = previousPerformance;
     }
+  });
+
+  it('timestamps real local egress ticks and observed loss/progress on a host clock', () => {
+    const previousWindow = globalThis.window;
+    const previousPerformance = globalThis.performance;
+    vi.useFakeTimers();
+    let now = 0;
+    let state = { slot: 1, tick: 10, peers: [2, 3, 4, 5, 6], recovery: { losses: [] } };
+    const raw = JSON.stringify([{ t: 'tick', d: { from: 1, tick: 10 } },
+      { t: 'tick', d: { from: 2, tick: 10 } }]);
+    globalThis.window = { wasm_take_mesh_frames: () => raw, __hostMeshStatus: () => state };
+    globalThis.performance = { now: () => now };
+    try {
+      installHostPerformanceObserver({ peer: 'ship-1', clock: 'host-doc-1' });
+      now = 10;
+      expect(window.wasm_take_mesh_frames()).toBe(raw);
+      now = 20;
+      window.__fleetHostPerformance.fault('loss-1', 2, 10);
+      state = { ...state, tick: 42, peers: [3, 4, 5, 6],
+        recovery: { losses: [{ slot: 2, tick: 25 }] }, agreed: true };
+      now = 30;
+      vi.advanceTimersByTime(25);
+      now = 40;
+      window.__fleetHostPerformance.verified('loss-1');
+      expect(window.__fleetHostPerformance.read().map(row => row.kind)).toEqual([
+        'tick', 'fault', 'loss_detected', 'progress_resumed', 'digest_verified',
+      ]);
+      expect(window.__fleetHostPerformance.read()[0].tick).toBe(10);
+    } finally {
+      window.__fleetHostPerformance?.stop();
+      globalThis.window = previousWindow;
+      globalThis.performance = previousPerformance;
+      vi.useRealTimers();
+    }
+  });
+
+  it('requires a source-matched build receipt before a capture can launch', () => {
+    expect(() => captureOptions(['--out', 'evidence'])).toThrow('verified');
+    expect(captureOptions(['--out', 'evidence', '--wasm-build-receipt', 'receipt.json',
+      '--measure-seconds', '15', '--fault-seconds', '75'])).toMatchObject({
+      measureSeconds: 15, faultSeconds: 75,
+    });
+    expect(() => captureOptions(['--wasm-build-receipt', 'receipt.json', '--fault-seconds', '181']))
+      .toThrow('Invalid');
   });
 });

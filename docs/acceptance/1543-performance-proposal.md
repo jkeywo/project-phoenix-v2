@@ -237,3 +237,33 @@ as incomplete pairs. Run it with
 `node scripts/fleet-performance-evidence.mjs trace.json summary.json` after
 capturing a real workload trace. These tools have unit coverage, but no
 browser/native/mixed supported-workload trace has yet been captured with them.
+
+`scripts/fleet-performance-capture.mjs` connects those instruments to the
+actual browser matrix and its existing ship-loss recovery gate. It requires a
+clean, source-matched browser WASM build receipt and a fresh output directory
+outside the source checkout, so evidence creation does not invalidate that
+receipt.
+The default is one direct-route case: the matrix's one-second admission and
+active-command gate, ten additional measured seconds of twelve correlated
+Station command streams, then one ship departure with up to 60 seconds for the
+five survivors to prove loss handling and matching digest progress. Use
+`--measure-seconds` (1–120) and `--fault-seconds` (1–180) to bound a different
+capture; the ordinary matrix `--routes`, `--render` and impairment options
+remain available. For a built checkout:
+
+```powershell
+node scripts/fleet-performance-capture.mjs --out <fresh-directory> `
+  --dist dist --wasm-build-receipt <source-matched-receipt.json> --render
+```
+
+Each case retains the matrix manifest/result, `performance-trace.json` and
+`performance-summary.json`. The trace includes the exact source revision and
+patch, content identity and world hash, complete bundle hash inventory, build
+receipt, runtime/hardware summary and observed route/impairment counters. The
+host tick timestamps are taken as production mesh egress is drained in the
+host document, and the reducer rejects skipped or duplicate tick observations
+instead of calling an incomplete series a stall result. The fault timestamp is
+recorded on each survivor before the browser victim is closed, so its recovery
+interval includes the close operation. This is a bounded browser/loopback
+measurement lane only. Native, mixed, external-network, one-hour and human
+ratification evidence remain separate and unmeasured until actually run.

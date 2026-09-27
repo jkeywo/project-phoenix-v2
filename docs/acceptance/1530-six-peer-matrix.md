@@ -86,8 +86,8 @@ a mixed session can contain direct browser links and native relay links.
 | Runtime | Direct-capable links | Forced relay | Automatic fallback | Status |
 | --- | --- | --- | --- | --- |
 | Six browser peers, renderer disabled | All 17 links observed | All 17 links observed | Offers suppressed; real retry ladder | Short local subset passed; see evidence below |
-| Six Windows native peers | Not available in native fleet transport | All host links | Native advertises relay immediately | Not run |
-| Mixed browser/native | Browser links where negotiated | All host links | Browser RTC failure plus native relay | Not run |
+| Six Windows native peers | Not available in native fleet transport | Five fleet links observed | Native advertises relay immediately | Clean workload and 20 ms reliable-frame delay passed; no snapshot traffic to drop |
+| Mixed browser/native | Eight browser links direct, three native fleet links relay | Eleven network links relay | 32 real offers suppressed before relay | All three clean and impaired short cells passed |
 
 Run each cell with LAN conditions, then reproducible delay/loss. Preserve the
 profile and observed impairment counters beside results; use separate evidence
@@ -121,8 +121,51 @@ with the fix. Original failure artifacts remain under
 `target/1530-browser-real-4` and `target/1530-browser-real-5`; later harness
 errors and their artifacts are also retained, rather than overwritten.
 
-Native, mixed, rendered browser, mobile/internet, recovery and endurance
-acceptance remain outstanding. This evidence does not close #1530.
+### Native and mixed evidence
+
+The [native runtime ledger](1530-native-runtime.md) records six real Windows
+processes, twelve embedded Station documents, two GM process workloads and
+common post-action digest ticks. Its clean relay workload passed in 107.192
+seconds with six distinct slots, applied Station commands, attributed GM
+outcomes and clean child shutdown. Native has no RTC ladder; its five fleet
+links are relay links.
+
+The corrected-observer native impaired run passed in 138.310 seconds: all
+twelve Station documents applied 72–73 commands, the two native GMs retained
+37/36 attributed Applied actions, and all six agreed at ticks 300 and 600.
+The service delayed 19,037 reliable frames; observed writes took 20.045–57.953
+ms. No snapshot-class traffic occurred, so the configured 10% snapshot-loss
+profile exercised no native loss. See the [native impaired summary](1530-native-impaired-result.json).
+
+The [mixed runtime ledger](1530-mixed-runtime.md) records two browser ships,
+two native ships, one browser GM and one native GM, with six browser and six
+embedded native Station documents. All three routes passed with clean transport
+and with 20 ms application-frame delay plus 10% snapshot-loss sampling. Each
+gate requires exact adopted roles/slots, active Station receipts,
+both GM workloads and two matching post-action digest ticks across all six
+runtimes. Run against an Ultralight binary and built host/client bundles:
+
+```powershell
+node scripts/fleet-mixed-matrix.mjs --out target/mixed-clean --binary target/debug/phoenix-host.exe --bundle dist --dist dist --source .
+node scripts/fleet-mixed-matrix.mjs --out target/mixed-impaired --binary target/debug/phoenix-host.exe --bundle dist --dist dist --source . --delay-ms 20 --loss-percent 10 --seed 1530
+```
+
+The first mixed attempt found and retained a native/browser stamp-format
+mismatch. The first mixed fallback attempt exposed premature Ready voting in
+the harness; its failed artifacts remain, and it is not a fallback pass.
+Early clean native/mixed runs retain the required GM receipts but do not claim
+a complete later GM activity history: large observer snapshots could exceed
+the HTTP header limit. Corrected compact telemetry passed representative clean
+and all impaired mixed cases. The [mixed measured summary](1530-mixed-runtime-2026-09-27.json)
+retains route, receipt, digest, build and counter evidence plus both original
+failures. Actual direct snapshot drops and relay snapshot drops were observed
+in the respective mixed impaired cases; native-only delay has the narrower
+limit stated above.
+
+Rendered-browser, physical/mobile/internet, recovery and endurance acceptance
+remain separate and outstanding. Browser rows also retain their artifact-level
+WASM provenance limit until a source-matched build is measured.
+This evidence does not close #1530.
 
 ## Operator feedback controls
 
@@ -131,7 +174,7 @@ diagnostics from the same protocol fixture into the shared browser/native
 renderer, preserves keyboard focus, and admits a fifth ship and third GM with
 the support warning. Its slow/restoring-peer projection case tests rendering;
 the actual delayed-runtime projection and native surface observations remain
-part of the unrun runtime matrix above. The native retained surface is available
+unverified operator-surface acceptance. The native retained surface is available
 through F9 during play; browser fleet warnings remain outside the hidden lobby.
 
 Actual-runtime #1535 feedback acceptance remains unverified.

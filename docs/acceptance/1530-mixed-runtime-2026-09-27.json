@@ -1,0 +1,4090 @@
+{
+  "issue": 1530,
+  "kind": "Measured real browser/native mixed short loopback subset",
+  "status": "Six selected route/profile cells passed; issue remains incomplete",
+  "composition": {
+    "browserShips": 2,
+    "nativeShips": 2,
+    "browserGms": 1,
+    "nativeGms": 1,
+    "browserStationDocuments": 6,
+    "nativeUltralightStationDocuments": 6
+  },
+  "bundleHashes": {
+    "file": "1530-mixed-bundle-hashes.json",
+    "sha256": "9d318ce4fa6f8310354dc1ab136f3de371708227c7c0e60d44aa71ae73f30ea9",
+    "browserFiles": 1656,
+    "nativeFiles": 1656
+  },
+  "nativeBuildReceipt": {
+    "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\.phoenix\\native-build-isolated-stamp-1530.json",
+    "sha256": "8fd5338200f343874a8b85c9ecd73e52cdb9aa8513b74ef654f8eb20e558a6b4",
+    "binaryMatchesRecordedReceipt": true,
+    "receipt": {
+      "sourceRevision": "178d2274acddb9052746c713c872857f1c6e4fc4",
+      "dirtyDiff": [
+        "diff --git a/gui/native-fleet-peer.js b/gui/native-fleet-peer.js",
+        "index f158d70a..acf0c7d6 100644",
+        "--- a/gui/native-fleet-peer.js",
+        "+++ b/gui/native-fleet-peer.js",
+        "@@ -1,4 +1,5 @@",
+        " import { createFleetMember, createFleetOwner } from './fleet-session.js';",
+        "+import { transportLeversFromLocation } from './transport-levers.js';",
+        " import { HOST_ROLE_GM, HOST_ROLE_SHIP, HOST_ROLE_SHIP_GM } from './host-mesh.js';",
+        " ",
+        " /**",
+        "@@ -16,6 +17,7 @@ export function createNativeFleetPeer({",
+        "   let nextRosterGeneration = 1;",
+        "   const pendingRosters = new Map();",
+        "   let config = null;",
+        "+  const publishedControl = new Map();",
+        "   const pendingWire = [];",
+        "   let wireReady = false;",
+        "   let wireFailed = false;",
+        "@@ -63,17 +65,11 @@ export function createNativeFleetPeer({",
+        "       return false;",
+        "     }",
+        "   };",
+        "-  const sameStamp = (left, right) => {",
+        "-    try {",
+        "-      const a = typeof left === 'string' ? JSON.parse(left) : left;",
+        "-      const b = typeof right === 'string' ? JSON.parse(right) : right;",
+        "-      return a?.protocol === b?.protocol",
+        "-        && a?.content_id === b?.content_id",
+        "-        && a?.content_epoch === b?.content_epoch;",
+        "-    } catch (_) {",
+        "-      return false;",
+        "-    }",
+        "-  };",
+        "+  // Both runtime producers use Rust's DeliveryStamp::to_field. Rust also",
+        "+  // validates the native configured identity, so equality needs no second",
+        "+  // parser and cannot admit two matching but unidentified content sets.",
+        "+  const sameStamp = stamp => config.stamp_valid === true",
+        "+    && typeof stamp === 'string' && stamp === config.stamp;",
+        " ",
+        "   return {",
+        "     configure(raw) {",
+        "@@ -106,7 +102,7 @@ export function createNativeFleetPeer({",
+        "         },",
+        "         name: config.ship_name || config.gm_name || 'GM',",
+        "         ship: { template_path: config.ship_path || null, name: config.ship_name || '' },",
+        "-        checkStamp: (stamp) => sameStamp(stamp, config.stamp)",
+        "+        checkStamp: (stamp) => sameStamp(stamp)",
+        "           ? { ok: true }",
+        "           : { ok: false, code: 'version-mismatch' },",
+        "         authenticateFrame,",
+        "@@ -140,6 +136,9 @@ export function createNativeFleetPeer({",
+        "         stamp: config.stamp,",
+        "         iceServers: [],",
+        "         transports: ['ws-relay'],",
+        "+        // Member joiners select transport through levers, including when a",
+        "+        // browser owner also advertises WebRTC that native cannot provide.",
+        "+        levers: transportLeversFromLocation('?transport=ws-relay'),",
+        "         factories: {",
+        "           socket: bridgeSocket,",
+        "           peer: () => { throw new Error('native fleet is relay-only'); },",
+        "@@ -152,7 +151,12 @@ export function createNativeFleetPeer({",
+        "         name: role === HOST_ROLE_SHIP ? config.ship_name || '' : config.gm_name || 'GM',",
+        "         reconnectCredential: reconnect && reconnect.reconnectCredential,",
+        "         claim: reconnect && reconnect.claim,",
+        "-        onWelcome: () => emit({ kind: 'fleet_join_status', status: 'admitted' }),",
+        "+        onWelcome: () => {",
+        "+          // An initial patch may precede transport admission. Republish the",
+        "+          // current snapshot once after Welcome, then resume change-only sends.",
+        "+          publishedControl.clear();",
+        "+          emit({ kind: 'fleet_join_status', status: 'admitted' });",
+        "+        },",
+        "         // createFleetMember can announce identity synchronously while its",
+        "         // factory call is still assigning `handle`. Defer one microtask so the",
+        "         // persisted reconnect claim contains the admitted mesh slot as well as",
+        "@@ -190,10 +194,20 @@ export function createNativeFleetPeer({",
+        "       let state;",
+        "       try { state = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) { return false; }",
+        "       if (state.health) onHealth(state.health);",
+        "-      handle.update({ ship: state.ship, ready: !!state.ship_ready });",
+        "-      handle.setCrewReadiness(state.crew || {}, state.station_ratings || []);",
+        "-      handle.setGmReady(!!state.gm_ready);",
+        "-      handle.setStartValidation(!!state.validation);",
+        "+      // Health ticks and simulation frames are frequent; unchanged lobby",
+        "+      // control values must not fan out fresh roster frames on every tick.",
+        "+      const changed = (key, value, publish) => {",
+        "+        const json = JSON.stringify(value);",
+        "+        if (publishedControl.get(key) === json) return;",
+        "+        publish();",
+        "+        publishedControl.set(key, json);",
+        "+      };",
+        "+      const ship = { ship: state.ship, ready: !!state.ship_ready };",
+        "+      changed('ship', ship, () => handle.update(ship));",
+        "+      const crew = state.crew || {}, ratings = state.station_ratings || [];",
+        "+      changed('crew', [crew, ratings], () => handle.setCrewReadiness(crew, ratings));",
+        "+      changed('gm', !!state.gm_ready, () => handle.setGmReady(!!state.gm_ready));",
+        "+      changed('validation', !!state.validation, () => handle.setStartValidation(!!state.validation));",
+        "       if (state.roster_result) {",
+        "         const resolve = pendingRosters.get(state.roster_result.generation);",
+        "         if (resolve) {",
+        "@@ -210,6 +224,7 @@ export function createNativeFleetPeer({",
+        "     close() {",
+        "       if (handle) handle.close();",
+        "       handle = null;",
+        "+      publishedControl.clear();",
+        "       configured = false;",
+        "       pendingWire.length = 0;",
+        "       wireReady = false;",
+        "diff --git a/src/bin/phoenix_host.rs b/src/bin/phoenix_host.rs",
+        "index 32b4fe85..17651f5a 100644",
+        "--- a/src/bin/phoenix_host.rs",
+        "+++ b/src/bin/phoenix_host.rs",
+        "@@ -766,9 +766,12 @@ fn main() {",
+        "                     base: base.to_string(),",
+        "                     origin: origin.to_string(),",
+        "                     owner: explicit_owner,",
+        "-                    stamp: project_phoenix::core::codec::encode_delivery_stamp(",
+        "+                    stamp: content.manifest.stamp.to_field(),",
+        "+                    stamp_valid: project_phoenix::delivery::check_host_stamp(",
+        "                         &content.manifest.stamp,",
+        "-                    ),",
+        "+                        Some(&content.manifest.stamp.to_field()),",
+        "+                    )",
+        "+                    .is_ok(),",
+        "                     max_slots: table.limits.max_fleet_hosts,",
+        "                     max_name_length: table.limits.max_slot_name_length,",
+        "                     max_ship_path_length: table.limits.max_slot_ship_path_length,",
+        "diff --git a/src/delivery/stamp.rs b/src/delivery/stamp.rs",
+        "index 7b9ea544..f74443cd 100644",
+        "--- a/src/delivery/stamp.rs",
+        "+++ b/src/delivery/stamp.rs",
+        "@@ -44,6 +44,14 @@ pub struct DeliveryStamp {",
+        " }",
+        " ",
+        " impl DeliveryStamp {",
+        "+    /// Canonical field shared by browser and native fleet handshakes.",
+        "+    pub fn to_field(&self) -> String {",
+        "+        format!(",
+        "+            \"{}/{}/{}\",",
+        "+            self.protocol, self.content_id, self.content_epoch",
+        "+        )",
+        "+    }",
+        "+",
+        "     /// The stamp of a host serving `manifest_toml`.",
+        "     ///",
+        "     /// A manifest declaring no `[content]` block yields the same empty identity",
+        "@@ -221,6 +229,18 @@ mod tests {",
+        "         DeliveryStamp::for_manifest(BASE)",
+        "     }",
+        " ",
+        "+    #[test]",
+        "+    fn fleet_field_round_trips_through_the_shared_native_and_browser_checker() {",
+        "+        let stamp = host();",
+        "+        assert_eq!(",
+        "+            crate::delivery::parse_stamp_field(&stamp.to_field()),",
+        "+            Some(stamp.clone())",
+        "+        );",
+        "+        assert!(crate::delivery::check_host_stamp(&stamp, Some(&stamp.to_field())).is_ok());",
+        "+        let missing = DeliveryStamp::for_manifest(\"\");",
+        "+        assert!(crate::delivery::check_host_stamp(&missing, Some(&missing.to_field())).is_err());",
+        "+    }",
+        "+",
+        "     #[test]",
+        "     fn a_host_stamp_pairs_the_compiled_protocol_with_the_served_content() {",
+        "         let s = host();",
+        "diff --git a/src/native_host/fleet_identity.rs b/src/native_host/fleet_identity.rs",
+        "index fc6a80c1..eebbee57 100644",
+        "--- a/src/native_host/fleet_identity.rs",
+        "+++ b/src/native_host/fleet_identity.rs",
+        "@@ -26,10 +26,16 @@ pub struct NativeFleetIdentityStore {",
+        " ",
+        " impl NativeFleetIdentityStore {",
+        "     pub fn user() -> Self {",
+        "-        Self {",
+        "-            root: directories::BaseDirs::new()",
+        "+        let override_dir = std::env::var_os(\"PHOENIX_FLEET_IDENTITY_DIR\");",
+        "+        let root = identity_root(",
+        "+            override_dir.clone(),",
+        "+            directories::BaseDirs::new()",
+        "                 .map(|base| base.data_dir().join(APP_DIR).join(IDENTITIES_DIR)),",
+        "+        );",
+        "+        if override_dir.is_some() && root.is_none() {",
+        "+            eprintln!(\"phoenix-host: PHOENIX_FLEET_IDENTITY_DIR must be absolute; reconnect storage is disabled\");",
+        "         }",
+        "+        Self { root }",
+        "     }",
+        " ",
+        "     #[cfg(test)]",
+        "@@ -67,6 +73,23 @@ impl NativeFleetIdentityStore {",
+        "     }",
+        " }",
+        " ",
+        "+// Windows Known Folders ignores APPDATA changes. A bounded local matrix needs",
+        "+// an explicit root per process so a second GM does not reclaim the first's",
+        "+// saved capability. An invalid override fails closed instead of touching the",
+        "+// ordinary user's store. The normal application path remains unchanged.",
+        "+fn identity_root(",
+        "+    override_dir: Option<std::ffi::OsString>,",
+        "+    default: Option<PathBuf>,",
+        "+) -> Option<PathBuf> {",
+        "+    match override_dir {",
+        "+        Some(path) => {",
+        "+            let path = PathBuf::from(path);",
+        "+            path.is_absolute().then_some(path)",
+        "+        }",
+        "+        None => default,",
+        "+    }",
+        "+}",
+        "+",
+        " /// Stable FNV-1a rather than `DefaultHasher`, whose algorithm is not a storage",
+        " /// format. The code is an index, not the capability; the capability remains in",
+        " /// the private file contents and is never logged.",
+        "@@ -83,6 +106,29 @@ fn code_hash(code: &str) -> u64 {",
+        " mod tests {",
+        "     use super::*;",
+        " ",
+        "+    #[test]",
+        "+    fn matrix_identity_override_is_absolute_and_never_falls_back_to_user_storage() {",
+        "+        let default = std::env::temp_dir().join(\"ordinary-user-identities\");",
+        "+        let isolated = std::env::temp_dir().join(\"isolated-native-peer\");",
+        "+        assert_eq!(",
+        "+            identity_root(None, Some(default.clone())),",
+        "+            Some(default.clone())",
+        "+        );",
+        "+        assert_eq!(",
+        "+            identity_root(",
+        "+                Some(isolated.clone().into_os_string()),",
+        "+                Some(default.clone())",
+        "+            ),",
+        "+            Some(isolated)",
+        "+        );",
+        "+        for invalid in [\"\", \"relative/identities\"] {",
+        "+            assert_eq!(",
+        "+                identity_root(Some(invalid.into()), Some(default.clone())),",
+        "+                None",
+        "+            );",
+        "+        }",
+        "+    }",
+        "+",
+        "     #[test]",
+        "     fn identity_round_trips_under_a_hashed_name() {",
+        "         let root = std::env::temp_dir().join(format!(",
+        "diff --git a/src/native_host/host_lobby/bridge.rs b/src/native_host/host_lobby/bridge.rs",
+        "index fa58b2bd..97053386 100644",
+        "--- a/src/native_host/host_lobby/bridge.rs",
+        "+++ b/src/native_host/host_lobby/bridge.rs",
+        "@@ -22,13 +22,13 @@",
+        " //! the viewscreen\" — a question with no honest answer. So it gets its own",
+        " //! bridge, and the pane bus keeps meaning exactly one thing.",
+        " //!",
+        "-//! # Latest-wins, not a queue",
+        "+//! # Presentation snapshots and ordered fleet traffic",
+        " //!",
+        " //! `pump_pane` carries a *backlog* and is careful never to lose a message,",
+        " //! because `Welcome`/`StationAssigned`/`GameStarted` are one-shot transitions",
+        " //! and a pane that missed one sits in the lobby forever.",
+        " //!",
+        "-//! Nothing here is one-shot. A `LobbyStatePayload` is a snapshot of the whole",
+        "+//! A `LobbyStatePayload` is a snapshot of the whole",
+        " //! lobby, pushed every frame the lobby changes; the scenario-panel state is a",
+        " //! snapshot of the whole picker (issue #1328); the monitor row is a snapshot of",
+        " //! the whole bridge layout (issue #1330); and the reveal flag is a current",
+        "@@ -39,8 +39,11 @@",
+        " //! reveal, the join invitation, the landing screen, the mod-pack shelf, the",
+        " //! picker, the monitor row and the lobby state — at most one push each a frame.",
+        " //!",
+        "-//! The one exception is the QR toggle, which is an *edge* and is counted rather",
+        "+//! The QR toggle is an *edge* and is counted rather",
+        " //! than collapsed — see [`HostLobbyBridge::push_qr_toggle`].",
+        "+//! Fleet updates and wire frames have separate ordered, bounded queues: updates",
+        "+//! carry one-shot join/launch requests and drained simulation frames. Overflow",
+        "+//! faults the fleet explicitly; it must never discard those records as stale paint.",
+        " //!",
+        " //! A push that fails is still not lost: it goes back in its slot unless",
+        " //! something newer has already taken it, which is the same \"the page's modules",
+        "@@ -135,7 +138,7 @@ struct Inner {",
+        "     hud_reading: Option<String>,",
+        "     hud_locale: Option<String>,",
+        "     fleet_config: Option<String>,",
+        "-    fleet_update: Option<String>,",
+        "+    fleet_updates: VecDeque<String>,",
+        "     /// Ordered reliable rendezvous frames for the native fleet control plane.",
+        "     fleet_wire: VecDeque<String>,",
+        "     hud_os_defaults: crate::native_host::panes::os_prefs::OsAccessibilityPrefs,",
+        "@@ -318,7 +321,7 @@ impl HostLobbyBridge {",
+        "     pub fn has_pending(&self) -> bool {",
+        "         let inner = self.lock();",
+        "         inner.fleet_config.is_some()",
+        "-            || inner.fleet_update.is_some()",
+        "+            || !inner.fleet_updates.is_empty()",
+        "             || !inner.fleet_wire.is_empty()",
+        "             || inner.payload.is_some()",
+        "             || inner.reveal.is_some()",
+        "@@ -404,7 +407,7 @@ impl HostLobbyBridge {",
+        "         let mut inner = self.lock();",
+        "         Pending {",
+        "             fleet_config: inner.fleet_config.take(),",
+        "-            fleet_update: inner.fleet_update.take(),",
+        "+            fleet_updates: std::mem::take(&mut inner.fleet_updates),",
+        "             fleet_wire: std::mem::take(&mut inner.fleet_wire),",
+        "             reveal: inner.reveal.take(),",
+        "             join: inner.join.take(),",
+        "@@ -482,7 +485,38 @@ impl HostLobbyBridge {",
+        "         self.lock().fleet_config = Some(json.into());",
+        "     }",
+        "     pub fn push_fleet_update(&self, json: impl Into<String>) {",
+        "-        self.lock().fleet_update = Some(json.into());",
+        "+        let mut inner = self.lock();",
+        "+        if inner.fleet_faulted {",
+        "+            return;",
+        "+        }",
+        "+        if inner.fleet_updates.len() >= RECORD_CAP {",
+        "+            Self::fault_fleet_updates(&mut inner);",
+        "+            return;",
+        "+        }",
+        "+        // Unlike lobby paint snapshots, these updates carry one-shot join and",
+        "+        // launch requests and drained MeshOutbox frames. Keep them in order",
+        "+        // while the asynchronous embedded surface loads or defers a push.",
+        "+        inner.fleet_updates.push_back(json.into());",
+        "+    }",
+        "+    fn restore_fleet_updates(&self, mut updates: VecDeque<String>) {",
+        "+        let mut inner = self.lock();",
+        "+        if inner.fleet_faulted {",
+        "+            return;",
+        "+        }",
+        "+        if updates.len() + inner.fleet_updates.len() > RECORD_CAP {",
+        "+            Self::fault_fleet_updates(&mut inner);",
+        "+            return;",
+        "+        }",
+        "+        updates.append(&mut inner.fleet_updates);",
+        "+        inner.fleet_updates = updates;",
+        "+    }",
+        "+    fn fault_fleet_updates(inner: &mut Inner) {",
+        "+        inner.fleet_updates.clear();",
+        "+        inner.fleet_faulted = true;",
+        "+        inner.records.clear();",
+        "+        inner.records.push_back(",
+        "+            r#\"{\"kind\":\"fleet_fault\",\"reason\":\"bridge-overflow\",\"detail\":\"native fleet update capacity exceeded\"}\"#.to_string(),",
+        "+        );",
+        "     }",
+        "     pub fn push_fleet_wire(&self, frame: impl Into<String>) {",
+        "         let mut inner = self.lock();",
+        "@@ -555,7 +589,7 @@ fn is_fleet_record(json: &str) -> bool {",
+        " /// One frame's worth of everything waiting to cross.",
+        " struct Pending {",
+        "     fleet_config: Option<String>,",
+        "-    fleet_update: Option<String>,",
+        "+    fleet_updates: VecDeque<String>,",
+        "     fleet_wire: VecDeque<String>,",
+        "     audio: Option<String>,",
+        "     reveal: Option<bool>,",
+        "@@ -659,23 +693,25 @@ pub fn pump_host_lobby(",
+        "         }",
+        "     }",
+        " ",
+        "-    if let Some(json) = pending.fleet_update {",
+        "+    let mut unsent_updates = VecDeque::new();",
+        "+    for json in pending.fleet_updates {",
+        "         if failed {",
+        "-            report.deferred += 1;",
+        "-            bridge.push_fleet_update(json);",
+        "-        } else {",
+        "-            match surface.push(&super::document::host_lobby_fleet_update_script(&json)) {",
+        "-                Ok(()) => report.pushed += 1,",
+        "-                Err(e) => {",
+        "-                    report.push_failure = Some(e);",
+        "-                    report.deferred += 1;",
+        "-                    bridge.push_fleet_update(json);",
+        "-                    failed = true;",
+        "-                }",
+        "+            unsent_updates.push_back(json);",
+        "+            continue;",
+        "+        }",
+        "+        match surface.push(&super::document::host_lobby_fleet_update_script(&json)) {",
+        "+            Ok(()) => report.pushed += 1,",
+        "+            Err(e) => {",
+        "+                report.push_failure = Some(e);",
+        "+                unsent_updates.push_back(json);",
+        "+                failed = true;",
+        "             }",
+        "         }",
+        "     }",
+        "-",
+        "+    report.deferred += unsent_updates.len();",
+        "+    if !unsent_updates.is_empty() {",
+        "+        bridge.restore_fleet_updates(unsent_updates);",
+        "+    }",
+        "     if failed {",
+        "         report.deferred += pending.fleet_wire.len();",
+        "         bridge.restore_fleet_wire(pending.fleet_wire);",
+        "@@ -923,6 +959,69 @@ mod tests {",
+        "         assert!(records[0].contains(\"bridge-overflow\"));",
+        "     }",
+        " ",
+        "+    #[test]",
+        "+    fn fleet_join_and_frames_survive_delayed_surface_loading_in_order() {",
+        "+        let bridge = HostLobbyBridge::new();",
+        "+        let updates = [",
+        "+            r#\"{\"join_request\":{\"code\":\"ABCDEFGH\",\"role\":\"ship\"},\"frames\":[]}\"#,",
+        "+            r#\"{\"join_request\":null,\"frames\":[\"tick-first\"]}\"#,",
+        "+            r#\"{\"force_start\":true,\"frames\":[\"tick-second\"]}\"#,",
+        "+            r#\"{\"force_start\":false,\"frames\":[]}\"#,",
+        "+        ];",
+        "+        for update in updates {",
+        "+            bridge.push_fleet_update(update);",
+        "+        }",
+        "+        let mut surface = RecordingSurface::default();",
+        "+        pump_host_lobby(&bridge, &mut surface);",
+        "+        assert!(surface.pushed.is_empty());",
+        "+        surface = RecordingSurface::ready();",
+        "+        assert_eq!(pump_host_lobby(&bridge, &mut surface).pushed, 4);",
+        "+        assert_eq!(",
+        "+            surface.pushed,",
+        "+            updates.map(super::super::document::host_lobby_fleet_update_script)",
+        "+        );",
+        "+    }",
+        "+",
+        "+    #[test]",
+        "+    fn deferred_fleet_updates_precede_newer_updates() {",
+        "+        let bridge = HostLobbyBridge::new();",
+        "+        bridge.push_fleet_update(\"first\");",
+        "+        bridge.push_fleet_update(\"second\");",
+        "+        let mut surface = RecordingSurface::ready();",
+        "+        surface.failing_pushes = 1;",
+        "+        assert_eq!(pump_host_lobby(&bridge, &mut surface).deferred, 2);",
+        "+        bridge.push_fleet_update(\"third\");",
+        "+        pump_host_lobby(&bridge, &mut surface);",
+        "+        assert_eq!(",
+        "+            surface.pushed,",
+        "+            [\"first\", \"second\", \"third\"]",
+        "+                .map(super::super::document::host_lobby_fleet_update_script)",
+        "+        );",
+        "+    }",
+        "+",
+        "+    #[test]",
+        "+    fn fleet_update_overflow_and_concurrent_restore_are_terminal_and_bounded() {",
+        "+        let bridge = HostLobbyBridge::new();",
+        "+        bridge.push_fleet_update(\"in flight\");",
+        "+        let pending = bridge.take_pending();",
+        "+        for _ in 0..RECORD_CAP {",
+        "+            bridge.push_fleet_update(\"queued\");",
+        "+        }",
+        "+        bridge.restore_fleet_updates(pending.fleet_updates);",
+        "+        assert!(bridge.fleet_faulted());",
+        "+        bridge.push_fleet_update(\"refused after fault\");",
+        "+        assert!(bridge.take_pending().fleet_updates.is_empty());",
+        "+        let records = bridge.take_records();",
+        "+        assert_eq!(records.len(), 1);",
+        "+        assert!(records[0].contains(\"bridge-overflow\"));",
+        "+",
+        "+        let bridge = HostLobbyBridge::new();",
+        "+        for _ in 0..=RECORD_CAP {",
+        "+            bridge.push_fleet_update(\"queued\");",
+        "+        }",
+        "+        assert!(bridge.fleet_faulted());",
+        "+        assert!(bridge.take_pending().fleet_updates.is_empty());",
+        "+    }",
+        "     const PLAYING: &str = r#\"{\"phase\":\"InProgress\",\"crew_count\":3}\"#;",
+        " ",
+        "     #[test]",
+        "diff --git a/src/native_host/host_lobby/fleet.rs b/src/native_host/host_lobby/fleet.rs",
+        "index 552a469b..73878b11 100644",
+        "--- a/src/native_host/host_lobby/fleet.rs",
+        "+++ b/src/native_host/host_lobby/fleet.rs",
+        "@@ -12,6 +12,7 @@ pub struct NativeFleetConfig {",
+        "     pub origin: String,",
+        "     pub owner: bool,",
+        "     pub stamp: String,",
+        "+    pub stamp_valid: bool,",
+        "     pub max_slots: usize,",
+        "     pub max_name_length: usize,",
+        "     pub max_ship_path_length: usize,",
+        "@@ -51,6 +52,11 @@ struct NativeFleetPublication {",
+        "     join_request: Option<NativeFleetJoinRequest>,",
+        " }",
+        " ",
+        "+/// Own public identity from the authenticated owner's admitted-member welcome.",
+        "+/// This supports pre-freeze Ready presentation, never simulation membership.",
+        "+#[derive(Resource)]",
+        "+pub(crate) struct NativeFleetGmAdmission(pub crate::gm_roster::GmOperator);",
+        "+",
+        " #[derive(Resource)]",
+        " struct PendingNativeGmBootstrap {",
+        "     id: u64,",
+        "@@ -190,6 +196,7 @@ impl Plugin for NativeFleetPlugin {",
+        "             .insert_resource(crate::native_host::fleet_identity::NativeFleetIdentityStore::user())",
+        "             .add_systems(PreUpdate, poll_wire.before(super::drain_surface_records))",
+        "             .add_systems(PreUpdate, apply_events.after(super::drain_surface_records))",
+        "+            .add_systems(PreUpdate, prepare_managed_lobby.after(apply_events))",
+        "             .add_systems(Update, apply_pending_gm_bootstrap)",
+        "             .add_systems(",
+        "                 PostUpdate,",
+        "@@ -198,11 +205,31 @@ impl Plugin for NativeFleetPlugin {",
+        "     }",
+        " }",
+        " ",
+        "+// Fleet admission precedes frozen-roster adoption. Engage the shared start",
+        "+// policy before FixedUpdate can process a local crew's SetReady, including",
+        "+// while the retained Ultralight page is still loading.",
+        "+fn prepare_managed_lobby(world: &mut World) {",
+        "+    let Some(config) = world.get_resource::<NativeFleetConfig>() else {",
+        "+        return;",
+        "+    };",
+        "+    let selected = (config.owner && world.contains_resource::<crate::world::config::WorldConfig>())",
+        "+        || world",
+        "+            .resource::<NativeFleetPublication>()",
+        "+            .join_request",
+        "+            .is_some();",
+        "+    if selected {",
+        "+        world",
+        "+            .resource_mut::<crate::lobby::FleetManagedLobby>()",
+        "+            .set_enabled(true);",
+        "+    }",
+        "+}",
+        "+",
+        " fn apply_events(world: &mut World) {",
+        "     let events = std::mem::take(&mut world.resource_mut::<NativeFleetEvents>().0);",
+        "     for event in events {",
+        "         match event {",
+        "             NativeFleetEvent::Join { code } => {",
+        "+                world.remove_resource::<NativeFleetGmAdmission>();",
+        "                 let Some(config) = world.get_resource::<NativeFleetConfig>().cloned() else {",
+        "                     continue;",
+        "                 };",
+        "@@ -276,6 +303,7 @@ fn apply_events(world: &mut World) {",
+        "                     accepted",
+        "                 });",
+        "                 if accepted {",
+        "+                    world.remove_resource::<NativeFleetGmAdmission>();",
+        "                     let mut managed = world.resource_mut::<crate::lobby::FleetManagedLobby>();",
+        "                     managed.enabled = true;",
+        "                     managed.validation_passed = true;",
+        "@@ -319,6 +347,10 @@ fn apply_events(world: &mut World) {",
+        "                 >(identity) else {",
+        "                     continue;",
+        "                 };",
+        "+                let Some(operator) = admitted_gm_operator(world, &identity) else {",
+        "+                    continue;",
+        "+                };",
+        "+                world.insert_resource(NativeFleetGmAdmission(operator));",
+        "                 if let Err(error) = world",
+        "                     .resource::<crate::native_host::fleet_identity::NativeFleetIdentityStore>()",
+        "                     .save(&code, &identity)",
+        "@@ -419,6 +451,7 @@ fn apply_events(world: &mut World) {",
+        "                 }",
+        "             }",
+        "             NativeFleetEvent::Fault { reason, detail } => {",
+        "+                world.remove_resource::<NativeFleetGmAdmission>();",
+        "                 if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {",
+        "                     wire.0.close();",
+        "                 }",
+        "@@ -439,6 +472,37 @@ fn apply_events(world: &mut World) {",
+        "     }",
+        " }",
+        " ",
+        "+// Only the private retained surface can emit this record. Its member adapter",
+        "+// emits Identity after Welcome on its single authenticated owner connection.",
+        "+// A stored reconnect claim, unadmitted join or ship identity is insufficient.",
+        "+fn admitted_gm_operator(",
+        "+    world: &World,",
+        "+    identity: &crate::native_host::fleet_identity::NativeFleetIdentity,",
+        "+) -> Option<crate::gm_roster::GmOperator> {",
+        "+    let role = world.get_resource::<crate::native_host::session_role::NativeSessionRoleState>()?;",
+        "+    if role.role() != crate::native_host::session_role::NativeSessionRole::FleetGameMaster",
+        "+        || role.pending_code.is_none()",
+        "+        || role.join_status.as_deref() != Some(\"admitted\")",
+        "+        || identity.role != \"gm\"",
+        "+        || identity.reconnect_credential.is_empty()",
+        "+    {",
+        "+        return None;",
+        "+    }",
+        "+    let claim = identity",
+        "+        .claim",
+        "+        .as_deref()?",
+        "+        .strip_prefix(\"slot-\")?",
+        "+        .parse::<u32>()",
+        "+        .ok()?;",
+        "+    if claim == 0 {",
+        "+        return None;",
+        "+    }",
+        "+    let operator =",
+        "+        crate::gm_roster::GmOperator::new(identity.operator_id.clone()?, \"GM\".into(), false);",
+        "+    crate::gm_roster::GmRoster::try_new(vec![operator.clone()]).ok()?;",
+        "+    Some(operator)",
+        "+}",
+        "+",
+        " #[cfg(feature = \"host\")]",
+        " fn connect_join_wire(base: &str, origin: &str) -> Result<Box<dyn RelaySocket>, String> {",
+        "     crate::native_host::relay_socket::WsRelaySocket::connect_join(base, origin)",
+        "@@ -504,9 +568,23 @@ fn publish_state(world: &mut World) {",
+        "         if configured {",
+        "             // The configuration owns one host record; repeating it would ask",
+        "             // the embedded surface to open the same fleet every frame.",
+        "-        } else if let Ok(json) = serde_json::to_string(config) {",
+        "-            bridge.0.push_fleet_config(json);",
+        "-            world.resource_mut::<NativeFleetPublication>().configured = true;",
+        "+        } else {",
+        "+            let Some(owner) = publication_owner(",
+        "+                config.owner,",
+        "+                world.contains_resource::<crate::world::config::WorldConfig>(),",
+        "+                world",
+        "+                    .resource::<NativeFleetPublication>()",
+        "+                    .join_request",
+        "+                    .is_some(),",
+        "+            ) else {",
+        "+                return;",
+        "+            };",
+        "+            let mut selected = config.clone();",
+        "+            selected.owner = owner;",
+        "+            if let Ok(json) = serde_json::to_string(&selected) {",
+        "+                bridge.0.push_fleet_config(json);",
+        "+                world.resource_mut::<NativeFleetPublication>().configured = true;",
+        "+            }",
+        "         }",
+        "     } else {",
+        "         return;",
+        "@@ -576,3 +654,156 @@ fn publish_state(world: &mut World) {",
+        "         }",
+        "     }",
+        " }",
+        "+",
+        "+/// An explicit rendezvous selects the service, not the landing role. Creating",
+        "+/// its owner handle before a --lobby operator chooses Join as Peer makes that",
+        "+/// ordinary join fail: the embedded adapter already owns a different fleet.",
+        "+/// Wait until world selection commits hosting or an admitted landing request",
+        "+/// selects membership. Existing --world owners and --fleet-code members keep",
+        "+/// their original configuration.",
+        "+fn publication_owner(",
+        "+    explicit_owner: bool,",
+        "+    world_selected: bool,",
+        "+    join_pending: bool,",
+        "+) -> Option<bool> {",
+        "+    if join_pending || !explicit_owner {",
+        "+        Some(false)",
+        "+    } else if world_selected {",
+        "+        Some(true)",
+        "+    } else {",
+        "+        None",
+        "+    }",
+        "+}",
+        "+",
+        "+#[cfg(test)]",
+        "+mod tests {",
+        "+    use super::*;",
+        "+",
+        "+    #[test]",
+        "+    fn rendezvous_override_does_not_commit_an_undecided_landing_to_ownership() {",
+        "+        assert_eq!(publication_owner(true, false, false), None);",
+        "+        // The ordinary accepted JoinPeer request selects a member even when",
+        "+        // the operator provided a local service instead of the public default.",
+        "+        assert_eq!(publication_owner(true, false, true), Some(false));",
+        "+    }",
+        "+",
+        "+    #[test]",
+        "+    fn selected_world_owners_and_explicit_ship_members_keep_their_roles() {",
+        "+        assert_eq!(publication_owner(true, true, false), Some(true));",
+        "+        assert_eq!(publication_owner(false, true, true), Some(false));",
+        "+        assert_eq!(publication_owner(false, false, false), Some(false));",
+        "+        assert_eq!(publication_owner(false, false, true), Some(false));",
+        "+    }",
+        "+    #[test]",
+        "+    fn native_publication_holds_ready_crew_in_lobby_before_page_load_and_freeze() {",
+        "+        use crate::core::messages::{ClientMessage, GamePhase};",
+        "+        use crate::lobby::{CountdownTimer, InboundMessage, LobbyPlugin, Sessions};",
+        "+        for fleet in [",
+        "+            None,",
+        "+            Some((false, false)),",
+        "+            Some((true, false)),",
+        "+            Some((false, true)),",
+        "+        ] {",
+        "+            let mut app = App::new();",
+        "+            app.add_plugins((LobbyPlugin, bevy::time::TimePlugin, NativeFleetPlugin))",
+        "+                .insert_resource(HostLobbyBridgeResource(super::super::HostLobbyBridge::new()))",
+        "+                .insert_resource(crate::world::config::WorldConfig::default());",
+        "+            crate::sim_tick::register_sim_tick(&mut app);",
+        "+            crate::ship::test_support::drive_one_fixed_step_per_update(",
+        "+                &mut app,",
+        "+                std::time::Duration::from_secs(1),",
+        "+            );",
+        "+            if let Some((owner, joining)) = fleet {",
+        "+                app.insert_resource(NativeFleetConfig {",
+        "+                    base: \"http://127.0.0.1:1\".into(),",
+        "+                    origin: \"http://localhost\".into(),",
+        "+                    owner,",
+        "+                    stamp: \"test\".into(),",
+        "+                    stamp_valid: false,",
+        "+                    max_slots: 6,",
+        "+                    max_name_length: 32,",
+        "+                    max_ship_path_length: 256,",
+        "+                    ship_path: String::new(),",
+        "+                    ship_name: String::new(),",
+        "+                    gm_name: String::new(),",
+        "+                    operator_id: \"gm\".into(),",
+        "+                    credentials: vec![],",
+        "+                });",
+        "+                if joining {",
+        "+                    app.world_mut()",
+        "+                        .resource_mut::<NativeFleetPublication>()",
+        "+                        .join_request = Some(NativeFleetJoinRequest {",
+        "+                        code: \"TEST\".into(),",
+        "+                        role: \"ship\",",
+        "+                        reconnect: None,",
+        "+                    });",
+        "+                }",
+        "+            }",
+        "+            app.world_mut()",
+        "+                .resource_mut::<Sessions>()",
+        "+                .0",
+        "+                .register(\"crew\".into(), \"Crew\".into())",
+        "+                .unwrap();",
+        "+            app.world_mut()",
+        "+                .resource_mut::<Messages<InboundMessage>>()",
+        "+                .write(InboundMessage {",
+        "+                    token: \"crew\".into(),",
+        "+                    msg: ClientMessage::SetReady { ready: true },",
+        "+                });",
+        "+            app.update();",
+        "+            if matches!(fleet, Some((true, _)) | Some((_, true))) {",
+        "+                assert!(app.world().resource::<NativeFleetPublication>().configured);",
+        "+                assert_eq!(app.world().resource::<CountdownTimer>().remaining_secs, 0.0);",
+        "+                for _ in 0..6 {",
+        "+                    app.update();",
+        "+                }",
+        "+                assert_eq!(",
+        "+                    app.world().resource::<State<GamePhase>>().get(),",
+        "+                    &GamePhase::Lobby",
+        "+                );",
+        "+                assert!(",
+        "+                    !app.world()",
+        "+                        .resource::<crate::lobby::FleetManagedLobby>()",
+        "+                        .validation_passed",
+        "+                );",
+        "+            } else {",
+        "+                assert!(",
+        "+                    app.world().resource::<CountdownTimer>().remaining_secs > 0.0,",
+        "+                    \"ordinary native crew keeps its local countdown\"",
+        "+                );",
+        "+            }",
+        "+        }",
+        "+    }",
+        "+    #[test]",
+        "+    fn only_an_admitted_own_gm_identity_seeds_prefreeze_presence() {",
+        "+        use crate::native_host::session_role::{NativeSessionRole, NativeSessionRoleState};",
+        "+        let mut world = World::new();",
+        "+        let mut role = NativeSessionRoleState::default();",
+        "+        role.request(NativeSessionRole::FleetGameMaster);",
+        "+        role.pending_code = Some(\"CODE\".into());",
+        "+        let mut identity = crate::native_host::fleet_identity::NativeFleetIdentity {",
+        "+            role: \"gm\".into(),",
+        "+            operator_id: Some(\"gm-2\".into()),",
+        "+            reconnect_credential: \"private\".into(),",
+        "+            role_preset: None,",
+        "+            claim: Some(\"slot-5\".into()),",
+        "+        };",
+        "+        for status in [None, Some(\"pending\"), Some(\"refused\"), Some(\"unreachable\")] {",
+        "+            role.join_status = status.map(str::to_owned);",
+        "+            world.insert_resource(role.clone());",
+        "+            assert!(admitted_gm_operator(&world, &identity).is_none());",
+        "+        }",
+        "+        role.join_status = Some(\"admitted\".into());",
+        "+        world.insert_resource(role.clone());",
+        "+        assert_eq!(admitted_gm_operator(&world, &identity).unwrap().id, \"gm-2\");",
+        "+        identity.role = \"ship\".into();",
+        "+        assert!(admitted_gm_operator(&world, &identity).is_none());",
+        "+        identity.role = \"gm\".into();",
+        "+        identity.operator_id = Some(String::new());",
+        "+        assert!(admitted_gm_operator(&world, &identity).is_none());",
+        "+        identity.operator_id = Some(\"gm-2\".into());",
+        "+        role.request(NativeSessionRole::ShipHost);",
+        "+        world.insert_resource(role);",
+        "+        assert!(admitted_gm_operator(&world, &identity).is_none());",
+        "+    }",
+        "+}",
+        "diff --git a/src/native_host/native_gm/mod.rs b/src/native_host/native_gm/mod.rs",
+        "index 352ac882..2b6e675e 100644",
+        "--- a/src/native_host/native_gm/mod.rs",
+        "+++ b/src/native_host/native_gm/mod.rs",
+        "@@ -333,6 +333,7 @@ fn sync_presence(",
+        "     role: Option<Res<super::session_role::NativeSessionRoleState>>,",
+        "     fleet_roster: Option<Res<crate::lockstep::FleetRoster>>,",
+        "     frozen_ship_slots: Option<Res<crate::ship_slots::FrozenShipSlots>>,",
+        "+    admission: Option<Res<super::host_lobby::fleet::NativeFleetGmAdmission>>,",
+        " ) {",
+        "     let primary_gm = role.as_ref().is_some_and(|state| {",
+        "         state.committed()",
+        "@@ -390,11 +391,24 @@ fn sync_presence(",
+        "     authority.connected = connected;",
+        "     let bound_operator = primary_gm",
+        "         .then(|| {",
+        "-            let fleet = fleet_roster.as_ref()?;",
+        "-            let id = fleet.gm_operator(fleet.local())?;",
+        "-            roster.operators().iter().find(|row| row.id == id).cloned()",
+        "+            if let Some(fleet) = fleet_roster.as_ref().filter(|fleet| !fleet.is_solo()) {",
+        "+                let id = fleet.gm_operator(fleet.local())?;",
+        "+                roster.operators().iter().find(|row| row.id == id).cloned()",
+        "+            } else {",
+        "+                // A GM must be able to Ready before the collective roster freezes.",
+        "+                // Frozen membership always wins; this is only its admitted own row.",
+        "+                admission",
+        "+                    .as_ref()",
+        "+                    .map(|admission| admission.0.clone())",
+        "+                    .or_else(|| {",
+        "+                        let fleet = fleet_roster.as_ref()?;",
+        "+                        let id = fleet.gm_operator(fleet.local())?;",
+        "+                        roster.operators().iter().find(|row| row.id == id).cloned()",
+        "+                    })",
+        "+            }",
+        "         })",
+        "         .flatten();",
+        "+    authority.connected = connected && (!primary_gm || bound_operator.is_some());",
+        "     let operator_id = bound_operator",
+        "         .as_ref()",
+        "         .map(|row| row.id.as_str())",
+        "@@ -597,6 +611,47 @@ mod tests {",
+        "         )));",
+        "     }",
+        " ",
+        "+    #[test]",
+        "+    fn admitted_gm_can_ready_before_freeze_and_frozen_membership_replaces_admission() {",
+        "+        use crate::command_admission::HostSlot;",
+        "+        use crate::native_host::host_lobby::fleet::NativeFleetGmAdmission;",
+        "+        use crate::native_host::session_role::{NativeSessionRole, NativeSessionRoleState};",
+        "+        let mut world = fixture();",
+        "+        let mut role = NativeSessionRoleState::default();",
+        "+        role.request(NativeSessionRole::FleetGameMaster);",
+        "+        role.commit();",
+        "+        world.insert_resource(role);",
+        "+        let bridge = world.resource::<NativeGmSurface>().bridge.clone();",
+        "+        bridge.activate(PaneId(1));",
+        "+        bridge.mark_live();",
+        "+        world.run_system_once(sync_presence).unwrap();",
+        "+        assert!(!world.resource::<NativeGmAuthority>().connected);",
+        "+        assert!(world.resource::<GmRoster>().operators().is_empty());",
+        "+        world.insert_resource(NativeFleetGmAdmission(GmOperator::new(",
+        "+            \"gm-2\".into(),",
+        "+            \"GM\".into(),",
+        "+            false,",
+        "+        )));",
+        "+        world.run_system_once(sync_presence).unwrap();",
+        "+        world.resource_mut::<NativeGmLifecycle>().ready = true;",
+        "+        world.run_system_once(sync_presence).unwrap();",
+        "+        assert!(world.resource::<NativeGmAuthority>().connected);",
+        "+        assert!(world.resource::<GmRoster>().operators()[0].ready);",
+        "+        let roster = crate::lockstep::FleetRoster::with_participants(",
+        "+            vec![crate::lockstep::FleetShip::new(HostSlot(1))],",
+        "+            vec![HostSlot(1), HostSlot(2)],",
+        "+            HostSlot(2),",
+        "+            HostSlot(1),",
+        "+        )",
+        "+        .unwrap();",
+        "+        world.insert_resource(roster);",
+        "+        world.run_system_once(sync_presence).unwrap();",
+        "+        assert!(",
+        "+            !world.resource::<NativeGmAuthority>().connected,",
+        "+            \"frozen membership without this GM must not retain provisional authority\"",
+        "+        );",
+        "+    }",
+        "+",
+        "     #[test]",
+        "     fn loss_retains_identity_and_recovery_never_resumes_the_simulation() {",
+        "         let mut world = fixture();",
+        "diff --git a/src/server/bridge.rs b/src/server/bridge.rs",
+        "index f18e65fa..58d5f6e8 100644",
+        "--- a/src/server/bridge.rs",
+        "+++ b/src/server/bridge.rs",
+        "@@ -4272,10 +4272,7 @@ pub fn wasm_delivery_stamp_field() -> String {",
+        "     let manifest_toml =",
+        "         crate::entities::config_cache::get_scenario_manifest_toml().unwrap_or_default();",
+        "     let stamp = crate::delivery::stamp::DeliveryStamp::for_manifest(&manifest_toml);",
+        "-    format!(",
+        "-        \"{}/{}/{}\",",
+        "-        stamp.protocol, stamp.content_id, stamp.content_epoch",
+        "-    )",
+        "+    stamp.to_field()",
+        " }",
+        " ",
+        " /// Return the Rhai host-fn signature registry for the scenario script editor",
+        "diff --git a/tests/client/native-fleet-peer.test.js b/tests/client/native-fleet-peer.test.js",
+        "index 98a55d38..eb831a72 100644",
+        "--- a/tests/client/native-fleet-peer.test.js",
+        "+++ b/tests/client/native-fleet-peer.test.js",
+        "@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from 'vitest';",
+        " import { createNativeFleetPeer } from '../../gui/native-fleet-peer.js';",
+        " ",
+        " describe('native technical fleet peer', () => {",
+        "+  it('health-only ticks cannot flood control frames while changed state and every edge still publish', () => {",
+        "+    let options;",
+        "+    const handle = {update:vi.fn(),setCrewReadiness:vi.fn(),setGmReady:vi.fn(),setStartValidation:vi.fn(),broadcast:vi.fn(),forceStart:vi.fn(),close:vi.fn()};",
+        "+    const peer = createNativeFleetPeer({send:vi.fn(),createOwner:value => {options=value;return handle;}});",
+        "+    peer.configure({base:'https://fleet.test',owner:true,credentials:['one']});",
+        "+    const state={ship:{template_path:'ship'},ship_ready:true,crew:{connected:3,ready:2},station_ratings:[['helm','Std']],gm_ready:false,validation:true};",
+        "+    for(let tick=0;tick<512;tick++) peer.update({...state,health:{tick},frames:[String(tick)]});",
+        "+    for(const method of ['update','setCrewReadiness','setGmReady','setStartValidation']) expect(handle[method]).toHaveBeenCalledTimes(1);",
+        "+    expect(handle.broadcast.mock.calls.map(args=>args[0])).toEqual(Array.from({length:512},(_,i)=>String(i)));",
+        "+    peer.update({...state,crew:{connected:3,ready:3},validation:false,force_start:true});",
+        "+    peer.update({...state,crew:{connected:3,ready:3},validation:false,force_start:true});",
+        "+    expect(handle.setCrewReadiness).toHaveBeenCalledTimes(2);",
+        "+    expect(handle.setStartValidation).toHaveBeenCalledTimes(2);",
+        "+    expect(handle.forceStart).toHaveBeenCalledTimes(2);",
+        "+    const adopted=options.onSimulationRoster({participants:[]});",
+        "+    peer.update({...state,roster_result:{generation:1,accepted:true}});",
+        "+    peer.update({...state,roster_result:{generation:1,accepted:true}});",
+        "+    return expect(adopted).resolves.toBe(true);",
+        "+  });",
+        "   it('retains reliable frames until the bridge socket handlers are registered', async () => {",
+        "     const received = [];",
+        "     let options;",
+        "@@ -39,17 +58,22 @@ describe('native technical fleet peer', () => {",
+        "       createMember: candidate => { options = candidate; return handle; },",
+        "     });",
+        "     peer.configure({ base: 'https://fleet.test', owner: false,",
+        "-      ship_path: 'assets/entities/alliance_cruiser.toml', credentials: ['configuration'] });",
+        "+      ship_path: 'assets/entities/alliance_cruiser.toml', stamp:'4/phoenix-base/1',stamp_valid:true,credentials: ['configuration'] });",
+        "     expect(peer.join('SERVER-CODE', {}, null, 'ship')).toBe(true);",
+        "     expect(options.role).toBe('ship');",
+        "+    expect(options.stamp).toBe('4/phoenix-base/1');",
+        "     expect(options.ship.template_path).toBe('assets/entities/alliance_cruiser.toml');",
+        "     expect(options.transports).toEqual(['ws-relay']);",
+        "+    if (options.role === 'ship') expect(options.levers).toMatchObject({mode:'ws-relay',wsRelay:'only',pinned:true});",
+        "     options.onWelcome();",
+        "     expect(sent).toContainEqual({ kind: 'fleet_join_status', status: 'admitted' });",
+        "     peer.update({ ship: options.ship, ship_ready: true,",
+        "       crew: { connected: 3, ready: 3 }, station_ratings: [['helm', 'Std']] });",
+        "     expect(handle.setCrewReadiness).toHaveBeenCalledWith(",
+        "       { connected: 3, ready: 3 }, [['helm', 'Std']]);",
+        "+    options.onWelcome();",
+        "+    peer.update({ship:options.ship,ship_ready:true,crew:{connected:3,ready:3},station_ratings:[['helm','Std']]});",
+        "+    expect(handle.update).toHaveBeenCalledTimes(2);",
+        "   });",
+        "   it('opens one relay-only owner carrying ship and GM capabilities', async () => {",
+        "     const sent = [];",
+        "@@ -64,7 +88,7 @@ describe('native technical fleet peer', () => {",
+        "     });",
+        "     expect(peer.configure({",
+        "       base: 'https://fleet.test',",
+        "-      stamp: '{\"protocol\":14,\"content_id\":\"base\",\"content_epoch\":3}', max_slots: 4,",
+        "+      stamp: '14/base/3', stamp_valid:true, max_slots: 4,",
+        "       max_name_length: 48, max_ship_path_length: 160,",
+        "       ship_path: 'assets/entities/ship.toml', gm_name: 'GM', operator_id: 'native-gm',",
+        "       credentials: ['owner-secret', 'join-secret'],",
+        "@@ -74,8 +98,10 @@ describe('native technical fleet peer', () => {",
+        "     expect(options.ship.template_path).toBe('assets/entities/ship.toml');",
+        "     expect(options.ownerOperatorId).toBe('native-gm');",
+        "     expect(options.credentialFactory()).toBe('owner-secret');",
+        "-    expect(options.checkStamp('{\"content_epoch\":3,\"content_id\":\"base\",\"protocol\":14}'))",
+        "-      .toEqual({ ok: true });",
+        "+    expect(options.checkStamp('14/base/3')).toEqual({ok:true});",
+        "+    for (const stamp of [null,'','14//3','15/base/3','14/base/4','14/other/3','{\"protocol\":14,\"content_id\":\"base\",\"content_epoch\":3}']) {",
+        "+      expect(options.checkStamp(stamp).ok).toBe(false);",
+        "+    }",
+        " ",
+        "     options.onCode({ full: 'server_code', suffix: 'CODE' });",
+        "     const adoption = options.onSimulationRoster({ frozen: true, local: 1, participants: [1, 2] });",
+        "@@ -155,7 +181,7 @@ describe('native technical fleet peer', () => {",
+        "     expect(options).toMatchObject({",
+        "       code: 'SERVER-ABCD', role: 'gm', name: 'Morgan',",
+        "       reconnectCredential: 'private-capability', claim: 'slot-2',",
+        "-      transports: ['ws-relay'],",
+        "+      transports: ['ws-relay'], levers:{mode:'ws-relay',wsRelay:'only',pinned:true},",
+        "     });",
+        " ",
+        "     options.onIdentity({",
+        "diff --git a/wiki/concepts/native-host.md b/wiki/concepts/native-host.md",
+        "index e225117b..a9f8e063 100644",
+        "--- a/wiki/concepts/native-host.md",
+        "+++ b/wiki/concepts/native-host.md",
+        "@@ -2,7 +2,7 @@",
+        " title: Native Host",
+        " type: concept",
+        " tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]",
+        "-sources: [assets/audio/reduced-range.toml, src/native_host/audio/range.rs, gui/audio-range.js, tests/smoke/audio-range.spec.js, assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/engine.rs, src/native_host/audio/private.rs, src/native_host/audio/private_tests.rs, src/native_host/panes/operator_storage.js, tests/smoke/native-private-audio.spec.js, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/audio/combat_tests.rs, src/server/audio.rs, tests/smoke/native-combat-audio.spec.js, src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/decoder.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, gui/native-audio.js, tests/client/native-audio.test.js, pasm/spec/architecture/presentation-loading.yaml, src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/viewscreen_presentation.rs, src/native_host/viewscreen_locale.rs, gui/locale-preference.js, src/native_host/host_lobby/host_lobby_link.js, pasm/spec/architecture/client-shell.yaml, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs, src/native_host/audio/private_audition.rs, src/sound_cues.rs, gui/sound-audition-panel.js, src/gm_presentation/sound.rs, src/native_host/audio/authored_tests.rs, tests/smoke/live-authored-audio.spec.js]",
+        "+sources: [src/native_host/fleet_identity.rs, src/delivery/stamp.rs, gui/native-fleet-peer.js, src/native_host/host_lobby/fleet.rs, scripts/fleet-native-matrix.mjs, scripts/fleet-native-probe.mjs, scripts/fleet-native-workload.mjs, assets/audio/reduced-range.toml, src/native_host/audio/range.rs, gui/audio-range.js, tests/smoke/audio-range.spec.js, assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/engine.rs, src/native_host/audio/private.rs, src/native_host/audio/private_tests.rs, src/native_host/panes/operator_storage.js, tests/smoke/native-private-audio.spec.js, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/audio/combat_tests.rs, src/server/audio.rs, tests/smoke/native-combat-audio.spec.js, src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/decoder.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, gui/native-audio.js, tests/client/native-audio.test.js, pasm/spec/architecture/presentation-loading.yaml, src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/viewscreen_presentation.rs, src/native_host/viewscreen_locale.rs, gui/locale-preference.js, src/native_host/host_lobby/host_lobby_link.js, pasm/spec/architecture/client-shell.yaml, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs, src/native_host/audio/private_audition.rs, src/sound_cues.rs, gui/sound-audition-panel.js, src/gm_presentation/sound.rs, src/native_host/audio/authored_tests.rs, tests/smoke/live-authored-audio.spec.js]",
+        " updated: 2026-09-27",
+        " ---",
+        " ",
+        "@@ -2602,3 +2602,36 @@ Informative text uses the existing HUD live-equivalent row independently of the",
+        " audio device. An optional source contact applies the shared M7 suppression rule",
+        " in the effective Sensors view before either sound or equivalent is emitted.",
+        " Normal GM command attribution remains intact; audio has no history or replay.",
+        "+",
+        "+### Native fleet runtime verification",
+        "+",
+        "+`host_lobby/fleet.rs` defers an explicit rendezvous owner's configuration until",
+        "+a world is selected or an accepted landing Join as Peer request chooses",
+        "+membership. This lets a world-less native GM join a local service without first",
+        "+creating a different fleet. `host_lobby/bridge.rs` preserves fleet updates in an",
+        "+ordered, bounded queue because they carry one-shot join/launch requests and",
+        "+drained simulation frames; delayed Ultralight loading cannot replace those",
+        "+with newer presentation state. Overflow closes the fleet with a terminal fault.",
+        "+",
+        "+`scripts/fleet-native-matrix.mjs` runs four native ship processes and two native",
+        "+GM processes with an optional twelve-pane command workload. It observes real",
+        "+relay routes, command receipts, attributed GM outcomes and common digest ticks.",
+        "+The bounded run's evidence and limitations are described in",
+        "+`docs/acceptance/1530-native-runtime.md`; adding the runner does not itself mark",
+        "+any runtime-matrix cell as passed.",
+        "+Selected native fleet owners and joining members engage `FleetManagedLobby`",
+        "+before local fixed-tick lobby handlers. This blocks independent crew countdowns",
+        "+while the retained page loads and until the fleet adopts its shared roster and",
+        "+start grant; merely configuring the default member adapter does not block an",
+        "+ordinary LAN-only host.",
+        "+",
+        "+`gui/native-fleet-peer.js` publishes changed lobby controls independently from",
+        "+frequent health ticks and mesh frames. `NativeFleetGmAdmission` carries only the",
+        "+admitted local GM's public row for pre-freeze Ready; frozen `FleetRoster`",
+        "+membership replaces it and join/fault transitions clear it.",
+        "+",
+        "+The matrix sets an explicit absolute `PHOENIX_FLEET_IDENTITY_DIR` per process",
+        "+because Windows Known Folders does not follow overridden APPDATA variables.",
+        "+Default user reconnect storage remains unchanged. Fleet join stamps come from",
+        "+the same `DeliveryStamp::to_field()` formatter as the browser WASM export;",
+        "+native configured identity validity is checked by `delivery::check_host_stamp`."
+      ],
+      "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+      "command": "cargo build --features ultralight --bin phoenix-host --target-dir C:\\Coding\\project-phoenix-v2\\target",
+      "successful": true,
+      "features": [
+        "default",
+        "host",
+        "server",
+        "ultralight"
+      ],
+      "dependencyRecordNamesSource": true,
+      "sourceHashes": {
+        "src/bin/phoenix_host.rs": "d8a13e26a0acf9d6a37bd36e5b29ad9378ca47fbd3309de86da495c256853141",
+        "src/native_host/host_lobby/fleet.rs": "837ef82f87ba5721a2b5df93140dbba12d038172c0ece388b675c657edba8e3d",
+        "src/server/bridge.rs": "26b871dfc12c11d4a57af4c4e048e8debc7473b784fd558672f2f7f97325c87f",
+        "src/delivery/stamp.rs": "a2328d7a7188461d82fc28285e535a8766156d2564b0ff262349543f687e3dbf",
+        "src/native_host/fleet_identity.rs": "dee7b4f66e4f585e7319b955a820ad033266a562b994c871ee7c2a16ef1cbf07",
+        "src/native_host/native_gm/mod.rs": "4b5046030ae675f6aba002e1b54b5da51b9a8f4270fe28552b4f7eb2487b1a65",
+        "src/native_host/host_lobby/bridge.rs": "5030f26481d37d75c17e1506eb3ca9d75303ab02b7a35300b36eda42158b6da3",
+        "gui/native-fleet-peer.js": "4f1340bf71a852c353a27d945382eedca68a74c1f139d8526ac35655188e655f"
+      },
+      "adapterSha256": "4f1340bf71a852c353a27d945382eedca68a74c1f139d8526ac35655188e655f",
+      "bundleTransportSourceCommit": "2bd24830",
+      "bundleTransportSha256": "a605ca84be51592f9333756844b3d1afc2cd17946f4cd4da11cfcd048fc1b6c7",
+      "recordedUtc": "2026-09-27T10:20:43.1782569Z"
+    }
+  },
+  "limits": [
+    "Browser Bevy rendering disabled; actual WASM simulation and native Bevy/Ultralight run.",
+    "Reused browser WASM has recorded byte identity but no matching source build receipt.",
+    "Single machine loopback, short wall-clock workload; no physical/mobile/internet, rendered-browser, recovery, performance or endurance acceptance.",
+    "Delay and snapshot loss are local application-frame impairment, not IP packet loss or acknowledged delivery. Native fleet relay carries reliable traffic; direct mixed case has no relay snapshot loss to exercise.",
+    "One clean relay case predates bounded compact GM observer; required initial receipts are retained but complete later GM history is not claimed."
+  ],
+  "cases": [
+    {
+      "artifact": "target/1530-mixed-clean-4/direct",
+      "resultSha256": "5398fbc650d11c132870d2c3bb708de1dea4b03054566f8aa85d8a64727241a5",
+      "manifestSha256": "8c9e09f111b15fd9e432afc3679a86dbc78602669461c3c8cf15619998478fe5",
+      "sourceRevision": "1d18455e7e6fe232252d525919d20bb5e1f56623",
+      "sourcePatchSha256": "9d60ea87ffbbd7698760e120aa32e93a1821abb2036e51fdcf3d78bf714cd93e",
+      "runnerSha256": "cfd06cba1b12d34ecb19bbb13de9e39e36fd173a6d20543e33077c17e5f1e0c1",
+      "browserHarnessSha256": "cef93c6ccb9c3d0bf24ca67a4feb0aada0e5c816028b408fd90fb37d5f3dec1f",
+      "channelImpairmentSha256": "ead9ac937bf6bb17dbb36b53c35a8e92fed3cdf84178608550bb7f436d248250",
+      "nativeAdapterSha256": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+      "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+      "browser": "147.0.7727.15",
+      "route": "direct",
+      "status": "passed",
+      "startedUtc": "2026-09-27T10:40:16.940Z",
+      "finishedUtc": "2026-09-27T10:41:50.606Z",
+      "elapsedSeconds": 93.666,
+      "commandWaves": 2,
+      "digestAfter": "2026-09-27T10:41:08.526Z",
+      "telemetryLimit": null,
+      "adoptedNative": {
+        "ship-3": {
+          "localSlot": 6,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "ship-4": {
+          "localSlot": 5,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "gm-2": {
+          "localSlot": 4,
+          "role": "gm",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        }
+      },
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 26,
+        "applied": 26
+      },
+      "commonDigests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "623316df482e5441",
+            "ship-2": "623316df482e5441",
+            "gm-1": "623316df482e5441",
+            "ship-3": "623316df482e5441",
+            "ship-4": "623316df482e5441",
+            "gm-2": "623316df482e5441"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "e741aa027a3e3efa",
+            "ship-2": "e741aa027a3e3efa",
+            "gm-1": "e741aa027a3e3efa",
+            "ship-3": "e741aa027a3e3efa",
+            "ship-4": "e741aa027a3e3efa",
+            "gm-2": "e741aa027a3e3efa"
+          },
+          "agreed": true
+        }
+      ],
+      "browserEvidence": [
+        {
+          "label": "ship-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 1,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 669290,
+                  "bytesReceived": 188672,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 667085,
+                  "bytesReceived": 183697,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1684843,
+                  "bytesReceived": 49069,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1714334,
+                  "bytesReceived": 54117,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1684539,
+                  "bytesReceived": 49169,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayPeers": 3,
+          "relayReady": 0,
+          "relayFrames": 1868,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 2,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 188672,
+                  "bytesReceived": 668950,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1371267,
+                  "bytesReceived": 41781,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1400681,
+                  "bytesReceived": 46768,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1371520,
+                  "bytesReceived": 41902,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "gm",
+          "localSlot": 3,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "gmActions": [
+            "pause observed in both runtimes",
+            "resume observed in both runtimes"
+          ],
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 183747,
+                  "bytesReceived": 667571,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 2,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 49019,
+                  "bytesReceived": 1683191,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 2,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 49119,
+                  "bytesReceived": 1682887,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 2,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 41781,
+                  "bytesReceived": 1371267,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 2,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 54067,
+                  "bytesReceived": 1712682,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 2,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 41902,
+                  "bytesReceived": 1371520,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 2,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 46768,
+                  "bytesReceived": 1400681,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {}
+        }
+      ],
+      "service": {
+        "args": [
+          "C:\\Coding\\project-phoenix-v2\\scripts\\rendezvous-dev-server.mjs",
+          "--port",
+          "18451",
+          "--delay-ms",
+          "0",
+          "--loss-percent",
+          "0",
+          "--seed",
+          "1530"
+        ],
+        "sha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0"
+      },
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 11420,
+          "relay_reliable_written": 11420,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "hardware": {
+        "os": "Windows 11 Home",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+        "logicalCpus": 24,
+        "ramBytes": 68112736256,
+        "gpuAdapterLog": "2026-09-27T10:40:21.437181Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+      },
+      "sdk": {
+        "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+        "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+        "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+        "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+      },
+      "nativeCleanup": [
+        {
+          "sourceRevision": "f54b12ad70fb1b537ffc08c5dd9d47cdb516ca31",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "910d2271c0c61b479169a8bb7709ba506cd444e1173b8fc9146e6fd367586706",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "f54b12ad70fb1b537ffc08c5dd9d47cdb516ca31",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "3008484ff7ab6413602d397963ff2e378cffb7d152cf66c02672e9ce1e99d7fa",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "f54b12ad70fb1b537ffc08c5dd9d47cdb516ca31",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "0cfafc567b68a96bf36d514634d31fead732873b5d0837dc87b1ba0c7f67a279",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        }
+      ]
+    },
+    {
+      "artifact": "target/1530-mixed-clean-3/ws-relay",
+      "resultSha256": "f681012e646aaa8ea25db3c9b39a3fa1d9916bd6fcd315ffc970688d3b7bcbf9",
+      "manifestSha256": "d278668076e715c1ec41b169b2129b5256ff9ec279dbb5d1268cee12cee7fdb3",
+      "sourceRevision": "80e7b43d557ae249d02030b39719814d9c603f02",
+      "sourcePatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runnerSha256": "268bc5bd986a1d9f193d38261db550e3eeed68badb0ec19461a73068ad6840fa",
+      "nativeAdapterSha256": "fcf4e3e6f2ce02928104c8772acdf6ef5bbb995f0c12be05f8d25ea4b245a149",
+      "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+      "browser": "147.0.7727.15",
+      "route": "ws-relay",
+      "status": "passed",
+      "startedUtc": "2026-09-27T10:29:28.270Z",
+      "finishedUtc": "2026-09-27T10:30:28.662Z",
+      "elapsedSeconds": 60.392,
+      "commandWaves": 7,
+      "digestAfter": "2026-09-27T10:30:04.350Z",
+      "telemetryLimit": "Initial required native GM receipts retained; growing later activity could exceed old HTTP observer header limit. Corrected observer measured in all other selected cases.",
+      "adoptedNative": {
+        "ship-3": {
+          "localSlot": 5,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "ship-4": {
+          "localSlot": 6,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "gm-2": {
+          "localSlot": 4,
+          "role": "gm",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        }
+      },
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 34,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 33,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 33,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 34,
+          "applied": 33,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 17,
+        "applied": 3
+      },
+      "commonDigests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "a6aba508d8025cc4",
+            "ship-2": "a6aba508d8025cc4",
+            "gm-1": "a6aba508d8025cc4",
+            "ship-3": "a6aba508d8025cc4",
+            "ship-4": "a6aba508d8025cc4",
+            "gm-2": "a6aba508d8025cc4"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "c84ebdae885dc9ac",
+            "ship-2": "c84ebdae885dc9ac",
+            "gm-1": "c84ebdae885dc9ac",
+            "ship-3": "c84ebdae885dc9ac",
+            "ship-4": "c84ebdae885dc9ac",
+            "gm-2": "c84ebdae885dc9ac"
+          },
+          "agreed": true
+        }
+      ],
+      "browserEvidence": [
+        {
+          "label": "ship-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 1,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 8,
+          "relayReady": 0,
+          "relayFrames": 3198,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 2,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 3,
+          "relayReady": 1,
+          "relayFrames": 3287,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "gm",
+          "localSlot": 3,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "gmActions": [
+            "pause observed in both runtimes",
+            "resume observed in both runtimes"
+          ],
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 3236,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 7,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 765,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 7,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 760,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 7,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 968,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 7,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 765,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 7,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 762,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 7,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 964,
+          "offersSent": 0,
+          "directImpairment": {}
+        }
+      ],
+      "service": {
+        "args": [
+          "C:\\Coding\\project-phoenix-v2\\scripts\\rendezvous-dev-server.mjs",
+          "--port",
+          "18451",
+          "--delay-ms",
+          "0",
+          "--loss-percent",
+          "0",
+          "--seed",
+          "1530"
+        ],
+        "sha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0"
+      },
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19565,
+          "relay_reliable_written": 19565,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4794,
+          "relay_snapshot_written": 4794,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "hardware": {
+        "os": "Windows 11 Home",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+        "logicalCpus": 24,
+        "ramBytes": 68112736256,
+        "gpuAdapterLog": "2026-09-27T10:29:31.124558Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+      },
+      "sdk": {
+        "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+        "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+        "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+        "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+      },
+      "nativeCleanup": [
+        {
+          "sourceRevision": "113b3929409c85ec09e455708cf34c67595886a5",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "fcf4e3e6f2ce02928104c8772acdf6ef5bbb995f0c12be05f8d25ea4b245a149",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "6bbe1398d6c06aeccf6697942b57c0f24dae76f7e945ffe73f047b4c23a0e3d8"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "03c37933e8377510593d223ff8db77f262f16a5a377cc2de894757dd380e6df6",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "113b3929409c85ec09e455708cf34c67595886a5",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "fcf4e3e6f2ce02928104c8772acdf6ef5bbb995f0c12be05f8d25ea4b245a149",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "6bbe1398d6c06aeccf6697942b57c0f24dae76f7e945ffe73f047b4c23a0e3d8"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "ebb77d5948c0d1baa4a5f5a861a4dbb7b242f179e8ac5257f5863d1ac15fe42b",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "113b3929409c85ec09e455708cf34c67595886a5",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "fcf4e3e6f2ce02928104c8772acdf6ef5bbb995f0c12be05f8d25ea4b245a149",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "6bbe1398d6c06aeccf6697942b57c0f24dae76f7e945ffe73f047b4c23a0e3d8"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "ef1f7940887565aa36f9b62ae253086a3f838c0f4bd71e0306a2797a4bd2cfbf",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        }
+      ]
+    },
+    {
+      "artifact": "target/1530-mixed-clean-4/automatic-fallback",
+      "resultSha256": "727c3f190fd1e9cc76954deb9d1d88f2c513949146aac46b7489155a57fa65e6",
+      "manifestSha256": "8c9e09f111b15fd9e432afc3679a86dbc78602669461c3c8cf15619998478fe5",
+      "sourceRevision": "1d18455e7e6fe232252d525919d20bb5e1f56623",
+      "sourcePatchSha256": "9d60ea87ffbbd7698760e120aa32e93a1821abb2036e51fdcf3d78bf714cd93e",
+      "runnerSha256": "cfd06cba1b12d34ecb19bbb13de9e39e36fd173a6d20543e33077c17e5f1e0c1",
+      "browserHarnessSha256": "cef93c6ccb9c3d0bf24ca67a4feb0aada0e5c816028b408fd90fb37d5f3dec1f",
+      "channelImpairmentSha256": "ead9ac937bf6bb17dbb36b53c35a8e92fed3cdf84178608550bb7f436d248250",
+      "nativeAdapterSha256": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+      "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+      "browser": "147.0.7727.15",
+      "route": "automatic-fallback",
+      "status": "passed",
+      "startedUtc": "2026-09-27T10:41:50.620Z",
+      "finishedUtc": "2026-09-27T10:45:34.341Z",
+      "elapsedSeconds": 223.721,
+      "commandWaves": 10,
+      "digestAfter": "2026-09-27T10:45:00.353Z",
+      "telemetryLimit": null,
+      "adoptedNative": {
+        "ship-3": {
+          "localSlot": 3,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "ship-4": {
+          "localSlot": 4,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "gm-2": {
+          "localSlot": 2,
+          "role": "gm",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        }
+      },
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 42,
+          "applied": 42,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 42,
+          "applied": 42,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 43,
+          "applied": 42,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 42,
+          "applied": 42,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 42,
+          "applied": 42,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 42,
+          "applied": 42,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-1",
+        "requests": 21,
+        "applied": 21
+      },
+      "commonDigests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "98fddd72c59a9cba",
+            "ship-2": "98fddd72c59a9cba",
+            "gm-1": "98fddd72c59a9cba",
+            "ship-3": "98fddd72c59a9cba",
+            "ship-4": "98fddd72c59a9cba",
+            "gm-2": "98fddd72c59a9cba"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "6a9af0f5c7687c72",
+            "ship-2": "6a9af0f5c7687c72",
+            "gm-1": "6a9af0f5c7687c72",
+            "ship-3": "6a9af0f5c7687c72",
+            "ship-4": "6a9af0f5c7687c72",
+            "gm-2": "6a9af0f5c7687c72"
+          },
+          "agreed": true
+        }
+      ],
+      "browserEvidence": [
+        {
+          "label": "ship-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 1,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 8,
+          "relayReady": 0,
+          "relayFrames": 3180,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 5,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 3,
+          "relayReady": 1,
+          "relayFrames": 3223,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "gm",
+          "localSlot": 6,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "gmActions": [
+            "pause observed in both runtimes",
+            "resume observed in both runtimes"
+          ],
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 3164,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 10,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 773,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 10,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 813,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 10,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 772,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 10,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 810,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 10,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 974,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 10,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 1049,
+          "offersSent": 4,
+          "directImpairment": {}
+        }
+      ],
+      "service": {
+        "args": [
+          "C:\\Coding\\project-phoenix-v2\\scripts\\rendezvous-dev-server.mjs",
+          "--port",
+          "18451",
+          "--delay-ms",
+          "0",
+          "--loss-percent",
+          "0",
+          "--seed",
+          "1530",
+          "--block-rtc-offers"
+        ],
+        "sha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0"
+      },
+      "impairment": {
+        "profile": {
+          "delay_ms": 0,
+          "loss_percent": 0,
+          "seed": 1530,
+          "block_rtc_offers": true
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19517,
+          "relay_reliable_written": 19517,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4821,
+          "relay_snapshot_written": 4821,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 0,
+          "signal_offers_dropped": 32,
+          "queue_overflow_closes": 0,
+          "pending": 0,
+          "peak_pending": 0,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "hardware": {
+        "os": "Windows 11 Home",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+        "logicalCpus": 24,
+        "ramBytes": 68112736256,
+        "gpuAdapterLog": "2026-09-27T10:41:54.916955Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+      },
+      "sdk": {
+        "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+        "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+        "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+        "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+      },
+      "nativeCleanup": [
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "63c0ce699a09e92ebaa496f1e513de974a3ce40a831b4228a09f7391f2809bcd",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "b8c9cb704594bb4d55592bc39dee52d67cfa4c6a7407355d6b2ad119e625c2e9",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "f62ab53e10a3d09481903de5b53504bcf6ca1ed132e383bfbe251ea9fe9fac3f",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        }
+      ]
+    },
+    {
+      "artifact": "target/1530-mixed-impaired-1/direct",
+      "resultSha256": "5d9832cbd6c2ad7c4f7cc100561673544102fda5b58b2acfd4b01cd3b542f98e",
+      "manifestSha256": "ba6911cb4af38919741a71fc067940f1d59e1b985f3c66b1fd153499ea7e78f2",
+      "sourceRevision": "1d18455e7e6fe232252d525919d20bb5e1f56623",
+      "sourcePatchSha256": "9d60ea87ffbbd7698760e120aa32e93a1821abb2036e51fdcf3d78bf714cd93e",
+      "runnerSha256": "cfd06cba1b12d34ecb19bbb13de9e39e36fd173a6d20543e33077c17e5f1e0c1",
+      "browserHarnessSha256": "cef93c6ccb9c3d0bf24ca67a4feb0aada0e5c816028b408fd90fb37d5f3dec1f",
+      "channelImpairmentSha256": "ead9ac937bf6bb17dbb36b53c35a8e92fed3cdf84178608550bb7f436d248250",
+      "nativeAdapterSha256": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+      "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+      "browser": "147.0.7727.15",
+      "route": "direct",
+      "status": "passed",
+      "startedUtc": "2026-09-27T10:45:59.566Z",
+      "finishedUtc": "2026-09-27T10:47:37.415Z",
+      "elapsedSeconds": 97.849,
+      "commandWaves": 6,
+      "digestAfter": "2026-09-27T10:47:01.596Z",
+      "telemetryLimit": null,
+      "adoptedNative": {
+        "ship-3": {
+          "localSlot": 6,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "ship-4": {
+          "localSlot": 5,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "gm-2": {
+          "localSlot": 4,
+          "role": "gm",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        }
+      },
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 48,
+          "applied": 48,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 25,
+        "applied": 24
+      },
+      "commonDigests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "d6aba477ca982097",
+            "ship-2": "d6aba477ca982097",
+            "gm-1": "d6aba477ca982097",
+            "ship-3": "d6aba477ca982097",
+            "ship-4": "d6aba477ca982097",
+            "gm-2": "d6aba477ca982097"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "d01acbc499f6f30e",
+            "ship-2": "d01acbc499f6f30e",
+            "gm-1": "d01acbc499f6f30e",
+            "ship-3": "d01acbc499f6f30e",
+            "ship-4": "d01acbc499f6f30e",
+            "gm-2": "d01acbc499f6f30e"
+          },
+          "agreed": true
+        }
+      ],
+      "browserEvidence": [
+        {
+          "label": "ship-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 1,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 661340,
+                  "bytesReceived": 185326,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 661625,
+                  "bytesReceived": 177859,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1649307,
+                  "bytesReceived": 48154,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1648936,
+                  "bytesReceived": 48890,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1653223,
+                  "bytesReceived": 52365,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayPeers": 3,
+          "relayReady": 0,
+          "relayFrames": 1852,
+          "offersSent": 0,
+          "directImpairment": {
+            "reliable": {
+              "seen": 6435,
+              "written": 6432,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 6432,
+                "min": 20,
+                "max": 170.59999999403954,
+                "total": 147253.200000152
+              }
+            },
+            "pending": 4,
+            "peakPending": 53,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 2331,
+              "written": 2108,
+              "dropped": 222,
+              "cancelled": 0,
+              "delay": {
+                "count": 2108,
+                "min": 20,
+                "max": 75.09999999403954,
+                "total": 46170.50000065565
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 2,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 185326,
+                  "bytesReceived": 661340,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1320749,
+                  "bytesReceived": 39338,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1323574,
+                  "bytesReceived": 43432,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            },
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 1321829,
+                  "bytesReceived": 40309,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 720,
+              "written": 719,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 719,
+                "min": 20,
+                "max": 190,
+                "total": 16322.400000140071
+              }
+            },
+            "pending": 2,
+            "peakPending": 38,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 2331,
+              "written": 2108,
+              "dropped": 222,
+              "cancelled": 0,
+              "delay": {
+                "count": 2108,
+                "min": 20,
+                "max": 72.59999999403954,
+                "total": 47491.9000005424
+              }
+            }
+          }
+        },
+        {
+          "label": "gm-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "gm",
+          "localSlot": 3,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "gmActions": [
+            "pause observed in both runtimes",
+            "resume observed in both runtimes"
+          ],
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 177859,
+                  "bytesReceived": 661625,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 610,
+              "written": 608,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 608,
+                "min": 20,
+                "max": 238.69999998807907,
+                "total": 15275.50000013411
+              }
+            },
+            "pending": 2,
+            "peakPending": 3,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 6,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 48154,
+                  "bytesReceived": 1649307,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 11,
+              "written": 11,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 11,
+                "min": 20.299999997019768,
+                "max": 1478.4000000059605,
+                "total": 2810.5999999940395
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 6,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 39338,
+                  "bytesReceived": 1320749,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 11,
+              "written": 11,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 11,
+                "min": 20,
+                "max": 1546.2000000029802,
+                "total": 2772.5999999940395
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 6,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 48890,
+                  "bytesReceived": 1648936,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 17,
+              "written": 17,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 17,
+                "min": 20.100000008940697,
+                "max": 2001.7999999970198,
+                "total": 4311.300000011921
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 6,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 40309,
+                  "bytesReceived": 1320489,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 17,
+              "written": 17,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 17,
+                "min": 20.299999997019768,
+                "max": 1077.2999999970198,
+                "total": 3611.9000000059605
+              }
+            },
+            "pending": 0,
+            "peakPending": 2,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-1/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 6,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 52365,
+                  "bytesReceived": 1653223,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 11,
+              "written": 11,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 11,
+                "min": 20.200000002980232,
+                "max": 2376.9000000059605,
+                "total": 2614.2000000178814
+              }
+            },
+            "pending": 0,
+            "peakPending": 1,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "label": "ship-2/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 6,
+          "connectedRtc": [
+            {
+              "connectionState": "connected",
+              "selected": [
+                {
+                  "state": "succeeded",
+                  "bytesSent": 43432,
+                  "bytesReceived": 1322234,
+                  "localType": "host",
+                  "remoteType": "host"
+                }
+              ]
+            }
+          ],
+          "relayReady": 0,
+          "relayFrames": 0,
+          "offersSent": 1,
+          "directImpairment": {
+            "reliable": {
+              "seen": 11,
+              "written": 11,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 11,
+                "min": 20.299999997019768,
+                "max": 1040.4000000059605,
+                "total": 2095.399999961257
+              }
+            },
+            "pending": 0,
+            "peakPending": 1,
+            "overflows": 0,
+            "failures": 0,
+            "snapshot": {
+              "seen": 0,
+              "written": 0,
+              "dropped": 0,
+              "cancelled": 0,
+              "delay": {
+                "count": 0,
+                "min": null,
+                "max": null,
+                "total": 0
+              }
+            }
+          }
+        }
+      ],
+      "service": {
+        "args": [
+          "C:\\Coding\\project-phoenix-v2\\scripts\\rendezvous-dev-server.mjs",
+          "--port",
+          "18451",
+          "--delay-ms",
+          "20",
+          "--loss-percent",
+          "10",
+          "--seed",
+          "1530"
+        ],
+        "sha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0"
+      },
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 11308,
+          "relay_reliable_written": 11299,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 0,
+          "relay_snapshot_written": 0,
+          "relay_snapshot_dropped": 0,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 11308,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 9,
+          "peak_pending": 27,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 11299,
+              "min": 20.034000000014203,
+              "max": 37.61379999999917,
+              "total": 293081.82640000153
+            },
+            "snapshot": {
+              "count": 0,
+              "min": null,
+              "max": null,
+              "total": 0
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "hardware": {
+        "os": "Windows 11 Home",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+        "logicalCpus": 24,
+        "ramBytes": 68112736256,
+        "gpuAdapterLog": "2026-09-27T10:46:03.571704Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+      },
+      "sdk": {
+        "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+        "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+        "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+        "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+      },
+      "nativeCleanup": [
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "53471fd6da4efccbb02f256dd624ba81bdc783c254d40d53c06ab3d84d287d9c",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "a2369a668db09894acec10c180fe443b20868424579bdd5838966b507eb4179f",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "daa509b5e3cb55c6baaf1a00e26ec3d468b3a4613b23515e0135769272246566",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        }
+      ]
+    },
+    {
+      "artifact": "target/1530-mixed-impaired-1/ws-relay",
+      "resultSha256": "2bb42084ae88d4e7ac3c49dbad3eceef90b25b9c64819590538043ba359fd1f8",
+      "manifestSha256": "ba6911cb4af38919741a71fc067940f1d59e1b985f3c66b1fd153499ea7e78f2",
+      "sourceRevision": "1d18455e7e6fe232252d525919d20bb5e1f56623",
+      "sourcePatchSha256": "9d60ea87ffbbd7698760e120aa32e93a1821abb2036e51fdcf3d78bf714cd93e",
+      "runnerSha256": "cfd06cba1b12d34ecb19bbb13de9e39e36fd173a6d20543e33077c17e5f1e0c1",
+      "browserHarnessSha256": "cef93c6ccb9c3d0bf24ca67a4feb0aada0e5c816028b408fd90fb37d5f3dec1f",
+      "channelImpairmentSha256": "ead9ac937bf6bb17dbb36b53c35a8e92fed3cdf84178608550bb7f436d248250",
+      "nativeAdapterSha256": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+      "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+      "browser": "147.0.7727.15",
+      "route": "ws-relay",
+      "status": "passed",
+      "startedUtc": "2026-09-27T10:47:37.425Z",
+      "finishedUtc": "2026-09-27T10:49:00.622Z",
+      "elapsedSeconds": 83.197,
+      "commandWaves": 8,
+      "digestAfter": "2026-09-27T10:48:17.660Z",
+      "telemetryLimit": null,
+      "adoptedNative": {
+        "ship-3": {
+          "localSlot": 5,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "ship-4": {
+          "localSlot": 6,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "gm-2": {
+          "localSlot": 4,
+          "role": "gm",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        }
+      },
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 52,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 52,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 52,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 51,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 51,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 52,
+          "applied": 51,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-2",
+        "requests": 26,
+        "applied": 26
+      },
+      "commonDigests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "40fb6ca4aecc0b33",
+            "ship-2": "40fb6ca4aecc0b33",
+            "gm-1": "40fb6ca4aecc0b33",
+            "ship-3": "40fb6ca4aecc0b33",
+            "ship-4": "40fb6ca4aecc0b33",
+            "gm-2": "40fb6ca4aecc0b33"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "c63ae01c632e3ff4",
+            "ship-2": "c63ae01c632e3ff4",
+            "gm-1": "c63ae01c632e3ff4",
+            "ship-3": "c63ae01c632e3ff4",
+            "ship-4": "c63ae01c632e3ff4",
+            "gm-2": "c63ae01c632e3ff4"
+          },
+          "agreed": true
+        }
+      ],
+      "browserEvidence": [
+        {
+          "label": "ship-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 1,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 8,
+          "relayReady": 0,
+          "relayFrames": 3179,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 2,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 3,
+          "relayReady": 1,
+          "relayFrames": 3278,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "gm",
+          "localSlot": 3,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "gmActions": [
+            "pause observed in both runtimes",
+            "resume observed in both runtimes"
+          ],
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 3223,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 8,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 701,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 8,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 685,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 8,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 689,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 8,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 690,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 8,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 872,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 8,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 857,
+          "offersSent": 0,
+          "directImpairment": {}
+        }
+      ],
+      "service": {
+        "args": [
+          "C:\\Coding\\project-phoenix-v2\\scripts\\rendezvous-dev-server.mjs",
+          "--port",
+          "18451",
+          "--delay-ms",
+          "20",
+          "--loss-percent",
+          "10",
+          "--seed",
+          "1530"
+        ],
+        "sha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0"
+      },
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": false
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19521,
+          "relay_reliable_written": 19509,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4751,
+          "relay_snapshot_written": 4291,
+          "relay_snapshot_dropped": 443,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 23829,
+          "signal_offers_dropped": 0,
+          "queue_overflow_closes": 0,
+          "pending": 29,
+          "peak_pending": 72,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 19509,
+              "min": 20.026200000000244,
+              "max": 42.452799999999115,
+              "total": 508985.83660000254
+            },
+            "snapshot": {
+              "count": 4291,
+              "min": 20.086200000005192,
+              "max": 36.48780000000261,
+              "total": 108287.2064999999
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "hardware": {
+        "os": "Windows 11 Home",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+        "logicalCpus": 24,
+        "ramBytes": 68112736256,
+        "gpuAdapterLog": "2026-09-27T10:47:40.596416Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+      },
+      "sdk": {
+        "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+        "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+        "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+        "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+      },
+      "nativeCleanup": [
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "f89c56d00cf7f7cf5578c5fda637a97e3ed4ee7862d07f57351884861e31f0c7",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "6115c1bc2a20b014e36cdb43b00aaa7e576b95610466133b853f0ddca5b5c7da",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "060e5ff5e3148acd6cf660e46a889cf7ef81ae771435b9a9aa95106aa7c94ea2",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        }
+      ]
+    },
+    {
+      "artifact": "target/1530-mixed-impaired-1/automatic-fallback",
+      "resultSha256": "bb8b4908324f5dc831288b28643fb2705c2c01171e6d50a2729e2267a8b2935a",
+      "manifestSha256": "ba6911cb4af38919741a71fc067940f1d59e1b985f3c66b1fd153499ea7e78f2",
+      "sourceRevision": "1d18455e7e6fe232252d525919d20bb5e1f56623",
+      "sourcePatchSha256": "9d60ea87ffbbd7698760e120aa32e93a1821abb2036e51fdcf3d78bf714cd93e",
+      "runnerSha256": "cfd06cba1b12d34ecb19bbb13de9e39e36fd173a6d20543e33077c17e5f1e0c1",
+      "browserHarnessSha256": "cef93c6ccb9c3d0bf24ca67a4feb0aada0e5c816028b408fd90fb37d5f3dec1f",
+      "channelImpairmentSha256": "ead9ac937bf6bb17dbb36b53c35a8e92fed3cdf84178608550bb7f436d248250",
+      "nativeAdapterSha256": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+      "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+      "browser": "147.0.7727.15",
+      "route": "automatic-fallback",
+      "status": "passed",
+      "startedUtc": "2026-09-27T10:49:00.632Z",
+      "finishedUtc": "2026-09-27T10:52:44.610Z",
+      "elapsedSeconds": 223.978,
+      "commandWaves": 11,
+      "digestAfter": "2026-09-27T10:52:07.859Z",
+      "telemetryLimit": null,
+      "adoptedNative": {
+        "ship-3": {
+          "localSlot": 3,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "ship-4": {
+          "localSlot": 4,
+          "role": "ship",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        },
+        "gm-2": {
+          "localSlot": 2,
+          "role": "gm",
+          "admitted": true,
+          "relay": true,
+          "errors": []
+        }
+      },
+      "nativeStations": [
+        {
+          "id": "ship-3",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 46,
+          "applied": 46,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 46,
+          "applied": 46,
+          "refused": 0
+        },
+        {
+          "id": "ship-3",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 46,
+          "applied": 46,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "captain",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 46,
+          "applied": 46,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "helm",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 46,
+          "applied": 46,
+          "refused": 0
+        },
+        {
+          "id": "ship-4",
+          "station": "engineering",
+          "assigned": true,
+          "ready": true,
+          "started": true,
+          "commands": 46,
+          "applied": 46,
+          "refused": 0
+        }
+      ],
+      "nativeGm": {
+        "operator": "gm-1",
+        "requests": 23,
+        "applied": 23
+      },
+      "commonDigests": [
+        {
+          "tick": 300,
+          "byPeer": {
+            "ship-1": "702b3044996805c9",
+            "ship-2": "702b3044996805c9",
+            "gm-1": "702b3044996805c9",
+            "ship-3": "702b3044996805c9",
+            "ship-4": "702b3044996805c9",
+            "gm-2": "702b3044996805c9"
+          },
+          "agreed": true
+        },
+        {
+          "tick": 600,
+          "byPeer": {
+            "ship-1": "21bb3346341a1909",
+            "ship-2": "21bb3346341a1909",
+            "gm-1": "21bb3346341a1909",
+            "ship-3": "21bb3346341a1909",
+            "ship-4": "21bb3346341a1909",
+            "gm-2": "21bb3346341a1909"
+          },
+          "agreed": true
+        }
+      ],
+      "browserEvidence": [
+        {
+          "label": "ship-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 1,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 8,
+          "relayReady": 0,
+          "relayFrames": 3151,
+          "offersSent": 0,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "ship",
+          "localSlot": 5,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "connectedRtc": [],
+          "relayPeers": 3,
+          "relayReady": 1,
+          "relayFrames": 3209,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "gm-1",
+          "errors": [],
+          "phase": "InProgress",
+          "role": "gm",
+          "localSlot": 6,
+          "agreed": true,
+          "peers": 5,
+          "commandApplied": 0,
+          "gmActions": [
+            "pause observed in both runtimes",
+            "resume observed in both runtimes"
+          ],
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 3142,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 11,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 690,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 11,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 693,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-2/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 11,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 888,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/captain",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 11,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 702,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/helm",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 11,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 687,
+          "offersSent": 4,
+          "directImpairment": {}
+        },
+        {
+          "label": "ship-1/engineering",
+          "errors": [],
+          "phase": "InProgress",
+          "commandApplied": 11,
+          "connectedRtc": [],
+          "relayReady": 1,
+          "relayFrames": 873,
+          "offersSent": 4,
+          "directImpairment": {}
+        }
+      ],
+      "service": {
+        "args": [
+          "C:\\Coding\\project-phoenix-v2\\scripts\\rendezvous-dev-server.mjs",
+          "--port",
+          "18451",
+          "--delay-ms",
+          "20",
+          "--loss-percent",
+          "10",
+          "--seed",
+          "1530",
+          "--block-rtc-offers"
+        ],
+        "sha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0"
+      },
+      "impairment": {
+        "profile": {
+          "delay_ms": 20,
+          "loss_percent": 10,
+          "seed": 1530,
+          "block_rtc_offers": true
+        },
+        "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+        "counters": {
+          "relay_reliable_seen": 19317,
+          "relay_reliable_written": 19308,
+          "relay_reliable_cancelled": 0,
+          "relay_snapshot_seen": 4698,
+          "relay_snapshot_written": 4259,
+          "relay_snapshot_dropped": 436,
+          "relay_snapshot_cancelled": 0,
+          "relay_frames_delayed": 23579,
+          "signal_offers_dropped": 32,
+          "queue_overflow_closes": 0,
+          "pending": 12,
+          "peak_pending": 70,
+          "observed_write_delay_ms": {
+            "reliable": {
+              "count": 19308,
+              "min": 20.031199999997625,
+              "max": 37.00349999999162,
+              "total": 517951.4752000028
+            },
+            "snapshot": {
+              "count": 4259,
+              "min": 20.040199999988545,
+              "max": 37.037899999995716,
+              "total": 110179.04579999897
+            }
+          }
+        },
+        "max_pending_frames": 4096
+      },
+      "hardware": {
+        "os": "Windows 11 Home",
+        "release": "10.0.26200",
+        "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+        "logicalCpus": 24,
+        "ramBytes": 68112736256,
+        "gpuAdapterLog": "2026-09-27T10:49:03.768807Z  INFO bevy_render::renderer: AdapterInfo { name: \"NVIDIA GeForce RTX 5090 Laptop GPU\", vendor: 4318, device: 11288, device_type: DiscreteGpu, driver: \"NVIDIA\", driver_info: \"617.14\", backend: Vulkan }"
+      },
+      "sdk": {
+        "Ultralight.dll": "6317d77c504026731fa38083e163d33942a51432978f0d463be86ebc0d52bfaa",
+        "UltralightCore.dll": "20712378b509d3dd492b094532523f00718e0402df022fd87a85f4da3ff14693",
+        "WebCore.dll": "0722de158b01206e9706c17e2ebbca34b958c68bd3c9a347d07e30647103bd70",
+        "AppCore.dll": "624cfabdf0a0f9019de8adcee3fad169a9c7fa5c9df7d013fcf34d28bd7a39cb"
+      },
+      "nativeCleanup": [
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "636ed1b08c9c19af40effba204d440987261feb812b461ce7f1535c710986dde",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "b988d61d95e6dcd9b35853b58ec6ddb3d7ad64245cef646b3299087b39ba3656",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        },
+        {
+          "sourceRevision": "4639afdb25980ed866402574965e4c0880f24ab2",
+          "dirtySource": false,
+          "harnessHashes": {
+            "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+            "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+            "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+          },
+          "bundle": {
+            "path": "C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-native-runtime\\project-phoenix-v2\\dist",
+            "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+            "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+            "instrumentedModuleSha256": "6291535296b52b8dfbea034e87eba89b8385090f4ab32bcd3ec4e392a30607d5",
+            "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+          },
+          "binaryUnchanged": true,
+          "bootstrapObserved": true,
+          "cleanupExitObserved": true,
+          "terminatedAtBound": true,
+          "failure": null,
+          "nativeEngineUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/615.1.18.100.1 (KHTML, like Gecko) Ultralight/1.4.0 Version/16.4.1 Safari/615.1.18.100.1"
+        }
+      ]
+    }
+  ],
+  "retainedFailures": [
+    {
+      "artifact": "target/1530-mixed-clean-1/direct",
+      "resultSha256": "651d1221f90cb32465c4a69eb4190a019158735580de738557e498f5224a990d",
+      "status": "failed",
+      "reason": "Native/browser handshake stamp format mismatch; terminal refusal, followed by recorded operator stop of owned ship-3 for early cleanup.",
+      "error": "Error: ship-3: native process ended before mixed verdict\n    at wait (file:///C:/Users/jkeyw/.codex/worktrees/fleet-browser-matrix/project-phoenix-v2/scripts/fleet-mixed-matrix.mjs:128:90)\n    at runNextTicks (node:internal/process/task_queues:64:5)\n    at process.processTimers (node:internal/timers:538:9)\n    at async runCase (file:///C:/Users/jkeyw/.codex/worktrees/fleet-browser-matrix/project-phoenix-v2/scripts/fleet-mixed-matrix.mjs:142:5)\n    at async main (file:///C:/Users/jkeyw/.codex/worktrees/fleet-browser-matrix/project-phoenix-v2/scripts/fleet-mixed-matrix.mjs:172:387)"
+    },
+    {
+      "artifact": "target/1530-mixed-clean-3/automatic-fallback",
+      "resultSha256": "a148efb2f27f38f22876c07ba868af0372e0043cd8c3ef776988ed6643177215",
+      "status": "failed",
+      "reason": "Harness auto-Ready let a two-peer roster launch before browser RTC fallback; corrected by deferred ordinary native GM Ready after complete admission.",
+      "error": "page.waitForFunction: Timeout 120000ms exceeded.\n    at C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-browser-matrix\\project-phoenix-v2\\scripts\\fleet-mixed-matrix.mjs:139:511\n    at async runCase (C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-browser-matrix\\project-phoenix-v2\\scripts\\fleet-mixed-matrix.mjs:139:5)\n    at async main (C:\\Users\\jkeyw\\.codex\\worktrees\\fleet-browser-matrix\\project-phoenix-v2\\scripts\\fleet-mixed-matrix.mjs:171:387)"
+    }
+  ]
+}

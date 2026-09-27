@@ -1,0 +1,174 @@
+{
+  "dynasty.boost.toggle": {
+    "en": "[Strike boost]",
+    "de": "Angriffsverstärkung"
+  },
+  "dynasty.boost.enabled": {
+    "en": "[Boost enabled. Firing weapons spend strike reserve for extra damage.]",
+    "de": "Angriffsverstärkung aktiv. Abgefeuerte Waffen verbrauchen Reserveenergie für zusätzlichen Schaden."
+  },
+  "dynasty.boost.disabled": {
+    "en": "[Boost off. Weapons fire normally.]",
+    "de": "Angriffsverstärkung aus. Waffen feuern normal."
+  },
+  "dynasty.boost.depleted": {
+    "en": "[Boost switched off: insufficient charge. The attack fired normally. Recharge then explicitly enable boost.]",
+    "de": "Angriffsverstärkung ausgeschaltet: zu wenig Reserveenergie. Der Angriff wurde normal abgefeuert. Laden Sie die Reserve auf und aktivieren Sie die Verstärkung erneut."
+  },
+  "semantic_action.tactical.strike_boost.label": {
+    "en": "[Strike boost]",
+    "de": "Angriffsverstärkung"
+  },
+  "semantic_action.tactical.strike_boost.accessibility": {
+    "en": "[Toggle ship-wide strike boost]",
+    "de": "Angriffsverstärkung für das ganze Schiff umschalten"
+  },
+  "dynasty.onboarding.guide": {
+    "en": "[Role and attack cycle]",
+    "de": "Rollen und Angriffsablauf"
+  },
+  "dynasty.onboarding.cycle.title": {
+    "en": "[Prepare, approach, strike, recover]",
+    "de": "Vorbereiten, annähern, angreifen, erholen"
+  },
+  "dynasty.onboarding.prepare": {
+    "en": "[Prepare: Power assigns generation to the reserve; Damage Control reports protection and repair needs.]",
+    "de": "Vorbereitung: Energie teilt der Angriffsreserve Erzeugungsleistung zu. Schadenskontrolle meldet Schutz- und Reparaturbedarf."
+  },
+  "dynasty.onboarding.approach": {
+    "en": "[Approach: Command coordinates intent, Sensors identifies targets, and Helm plans the attack and escape.]",
+    "de": "Annäherung: Kommando stimmt den Plan ab, Sensorik erfasst Ziele, und Steuerung plant Angriff und Rückzug."
+  },
+  "dynasty.onboarding.strike": {
+    "en": "[Strike: Gunnery enables ship-wide boost. Fired attacks spend charge for damage only; range, accuracy and cooldown do not change.]",
+    "de": "Angriff: Geschütz aktiviert die Verstärkung für das ganze Schiff. Abgefeuerte Waffen verbrauchen Reserveenergie nur für zusätzlichen Schaden; Reichweite, Treffgenauigkeit und Abklingzeit bleiben unverändert."
+  },
+  "dynasty.onboarding.recover": {
+    "en": "[Recover: an underfunded attack still fires normally and switches boost off. Withdraw, restore the ship and recharge; Gunnery must enable boost again.]",
+    "de": "Erholung: Reicht die Reserveenergie nicht aus, feuert der Angriff normal und die Verstärkung schaltet sich aus. Ziehen Sie sich zurück, reparieren Sie das Schiff und laden Sie die Reserve auf. Geschütz muss die Verstärkung erneut aktivieren."
+  },
+  "dynasty.onboarding.cycle.text": {
+    "en": "[Power prepares charge; Command, Sensors and Helm coordinate the approach; Gunnery enables boost for the attack. If charge cannot fund a shot it fires normally and boost switches off. Withdraw, restore and recharge before enabling boost again.]",
+    "de": "Energie lädt die Angriffsreserve. Kommando, Sensorik und Steuerung koordinieren die Annäherung. Geschütz aktiviert die Verstärkung für den Angriff. Reicht die Reserveenergie für einen Schuss nicht aus, feuert er normal und die Verstärkung schaltet sich aus. Ziehen Sie sich zurück, reparieren Sie das Schiff und laden Sie die Reserve auf, bevor Sie die Verstärkung erneut aktivieren."
+  },
+  "dynasty.onboarding.backfill.title": {
+    "en": "[A smaller crew can still fly]",
+    "de": "Auch eine kleine Besatzung kann fliegen"
+  },
+  "dynasty.onboarding.backfill.text": {
+    "en": "[Unstaffed roles use ordinary Backfill. Take the Stations you need; the other roles continue through the same power, movement and weapon rules. The guide never reserves a Station or waits for six humans.]",
+    "de": "Unbesetzte Rollen übernimmt die normale KI-Besetzung. Besetzen Sie die Stationen, die Sie brauchen; die übrigen Rollen folgen denselben Regeln für Energie, Bewegung und Waffen. Der Leitfaden reserviert keine Station und wartet nicht auf sechs Menschen."
+  },
+  "dynasty.onboarding.inputs.title": {
+    "en": "[Use your own controls]",
+    "de": "Eigene Steuerung verwenden"
+  },
+  "dynasty.onboarding.inputs.text": {
+    "en": "[Keyboard and selected gamepad actions use the shared controls. Open Settings to inspect or rebind actions and save your operator profile. Tutorial progress is personal; reopen this role guide at any time. No lesson requires a default shortcut.]",
+    "de": "Tastatur und ausgewählte Gamepad-Aktionen verwenden die gemeinsamen Steuerelemente. Öffnen Sie Einstellungen, um Aktionen einzusehen oder neu zu belegen und Ihr Operatorprofil zu speichern. Der Lernfortschritt ist persönlich; Sie können diesen Rollenleitfaden jederzeit erneut öffnen. Keine Lektion setzt ein vorgegebenes Tastenkürzel voraus."
+  },
+  "dynasty.onboarding.charging.title": {
+    "en": "[Charging is an allocation decision]",
+    "de": "Aufladen ist eine Zuteilungsentscheidung"
+  },
+  "dynasty.onboarding.charging.text": {
+    "en": "[The reserve is charging from its assigned generation. Raising that allocation leaves less for other groups. Reduce charging to hold stored charge while supplying the attack or recovery.]",
+    "de": "Die Angriffsreserve lädt sich aus der ihr zugeteilten Erzeugungsleistung auf. Eine höhere Zuteilung lässt weniger Energie für andere Gruppen übrig. Senken Sie die Ladezuteilung, um gespeicherte Reserveenergie zu halten und zugleich Angriff oder Erholung zu versorgen."
+  },
+  "dynasty.onboarding.ready.title": {
+    "en": "[Reserve available]",
+    "de": "Reserveenergie verfügbar"
+  },
+  "dynasty.onboarding.ready.text": {
+    "en": "[Stored charge is available, but boosting is a Gunnery decision. Enable ship-wide boost with the ordinary toggle. Each fired weapon pays its own cost; refused fire attempts spend nothing.]",
+    "de": "Reserveenergie ist gespeichert, aber Geschütz entscheidet über die Verstärkung. Aktivieren Sie die schiffsweite Verstärkung mit dem normalen Schalter. Jede abgefeuerte Waffe verbraucht ihre eigenen Kosten; verweigerte Feuerbefehle verbrauchen nichts."
+  },
+  "dynasty.onboarding.enabled.title": {
+    "en": "[Boost is enabled]",
+    "de": "Verstärkung aktiviert"
+  },
+  "dynasty.onboarding.enabled.text": {
+    "en": "[Every firing weapon now attempts to pay its cost for extra damage. Turning boost off preserves the remaining reserve. An underfunded attack fires normally and switches boost off for the whole ship.]",
+    "de": "Jede feuernde Waffe versucht nun, ihre Kosten aus der Angriffsreserve für zusätzlichen Schaden zu bezahlen. Schalten Sie die Verstärkung aus, bleibt die restliche Reserveenergie erhalten. Reicht sie für einen Angriff nicht aus, feuert er normal und die Verstärkung schaltet sich für das ganze Schiff aus."
+  },
+  "dynasty.onboarding.depleted.title": {
+    "en": "[Boost switched off]",
+    "de": "Verstärkung ausgeschaltet"
+  },
+  "dynasty.onboarding.depleted.text": {
+    "en": "[A fired attack could not pay its boost cost, so it fired normally and disabled boost. Any remaining charge is retained. Power can recharge while Helm withdraws and Damage Control repairs; Gunnery must enable boost again.]",
+    "de": "Ein abgefeuerter Angriff konnte seine Verstärkungskosten nicht decken. Er feuerte normal und schaltete die Verstärkung aus. Verbleibende Reserveenergie bleibt erhalten. Energie kann die Reserve aufladen, während Steuerung den Rückzug fliegt und Schadenskontrolle repariert; Geschütz muss die Verstärkung erneut aktivieren."
+  },
+  "dynasty.onboarding.command.role": {
+    "en": "[Set the attack intent and coordinate the bridge. You own the viewscreen, red alert and communications; Helm flies and Gunnery fires.]",
+    "de": "Legen Sie die Angriffsabsicht fest und koordinieren Sie die Brücke. Sie führen den Hauptbildschirm, den Roten Alarm und die Kommunikation; Steuerung fliegt, und Geschütz feuert."
+  },
+  "dynasty.onboarding.helm.role": {
+    "en": "[Plot the approach on Navigation and fly it with thrust, steering, impulse and boost. Keep an escape route ready while Power balances propulsion against reserve charging.]",
+    "de": "Planen Sie die Annäherung auf Navigation und fliegen Sie sie mit Schub, Steuerung, Impuls und Boost. Halten Sie einen Rückzugsweg bereit, während Energie den Antrieb gegen das Aufladen der Angriffsreserve abwägt."
+  },
+  "dynasty.onboarding.gunnery.role": {
+    "en": "[Select targets and operate ordinary weapons. Enable the ship-wide strike boost when ready to spend reserve charge. Every weapon spends its authored cost only when it fires.]",
+    "de": "Wählen Sie Ziele und bedienen Sie die normalen Waffen. Aktivieren Sie die schiffsweite Angriffsverstärkung, wenn Sie Reserveenergie einsetzen wollen. Jede Waffe verbraucht ihre festgelegten Kosten erst beim tatsächlichen Feuern."
+  },
+  "dynasty.onboarding.sensors.role": {
+    "en": "[Detect and scan contacts. Give Command and Gunnery useful target information before the approach, and watch for threats during withdrawal.]",
+    "de": "Erfassen und scannen Sie Kontakte. Geben Sie Kommando und Geschütz vor der Annäherung nützliche Zielinformationen und achten Sie beim Rückzug auf Bedrohungen."
+  },
+  "dynasty.onboarding.power.role": {
+    "en": "[Allocate generation to the strike reserve. Charging competes with propulsion, weapons and shields; it does not collect unused power automatically. Stored charge remains until Gunnery spends it.]",
+    "de": "Teilen Sie der Angriffsreserve Erzeugungsleistung zu. Das Aufladen konkurriert mit Antrieb, Waffen und Schilden; ungenutzte Energie fließt nicht automatisch in die Reserve. Gespeicherte Reserveenergie bleibt, bis Geschütz sie verbraucht."
+  },
+  "dynasty.onboarding.damage_control.role": {
+    "en": "[Focus shields and dispatch repair teams. Report protection and repair needs to Power, and restore the ship while Helm withdraws for the next attack.]",
+    "de": "Richten Sie die Schilde aus und entsenden Sie Reparaturteams. Melden Sie Energie den Schutz- und Reparaturbedarf und stellen Sie das Schiff wieder her, während Steuerung für den nächsten Angriff den Rückzug fliegt."
+  },
+  "dynasty.console.command.title": {
+    "en": "[Project Phoenix — Dynasty Command]",
+    "de": "Project Phoenix — Dynastie-Kommando"
+  },
+  "dynasty.console.command.label": {
+    "en": "[Dynasty Command Console]",
+    "de": "Dynastie-Kommandokonsole"
+  },
+  "dynasty.console.helm.title": {
+    "en": "[Project Phoenix — Dynasty Helm]",
+    "de": "Project Phoenix — Dynastie-Steuerung"
+  },
+  "dynasty.console.helm.label": {
+    "en": "[Dynasty Helm Console]",
+    "de": "Dynastie-Steuerungskonsole"
+  },
+  "dynasty.console.gunnery.title": {
+    "en": "[Project Phoenix — Dynasty Gunnery]",
+    "de": "Project Phoenix — Dynastie-Geschütz"
+  },
+  "dynasty.console.gunnery.label": {
+    "en": "[Dynasty Gunnery Console]",
+    "de": "Dynastie-Geschützkonsole"
+  },
+  "dynasty.console.sensors.title": {
+    "en": "[Project Phoenix — Dynasty Sensors]",
+    "de": "Project Phoenix — Dynastie-Sensorik"
+  },
+  "dynasty.console.sensors.label": {
+    "en": "[Dynasty Sensors Console]",
+    "de": "Dynastie-Sensorikkonsole"
+  },
+  "dynasty.console.power.title": {
+    "en": "[Project Phoenix — Dynasty Power]",
+    "de": "Project Phoenix — Dynastie-Energie"
+  },
+  "dynasty.console.power.label": {
+    "en": "[Dynasty Power Console]",
+    "de": "Dynastie-Energiekonsole"
+  },
+  "dynasty.console.damage_control.title": {
+    "en": "[Project Phoenix — Dynasty Damage Control]",
+    "de": "Project Phoenix — Dynastie-Schadenskontrolle"
+  },
+  "dynasty.console.damage_control.label": {
+    "en": "[Dynasty Damage Control Console]",
+    "de": "Dynastie-Schadenskontrollkonsole"
+  }
+}

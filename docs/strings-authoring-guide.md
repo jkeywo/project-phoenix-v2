@@ -115,6 +115,30 @@ rejoining a Station or changing a Workshop draft. See
 [`1537-native-locales.md`](acceptance/1537-native-locales.md) for the native
 screen check.
 
+## First-party German draft
+
+The shipped first-party table carries `de`, `de_source` and `de_provenance`
+for each current English String Id. The initial German values were generated
+with Argos Translate 1.11.0 and its offline English-to-German model package
+version 1.3. `scripts/german-domain-draft.json` holds source-bound AI-authored
+corrections for ambiguous short labels and scenario names. Their
+provenance is `machine`: they are usable draft copy, **not** fluent editorial
+approval. A human reviewer should check domain terms, role instructions and
+scenario narrative before changing that provenance. The exact English cell,
+including any approval brackets, is retained in `de_source`; changing English
+therefore makes the German value stale and restores English fallback until it
+is reviewed or regenerated. Third-party English-only entries also fall back
+to English. No translation model or service is used at game runtime.
+
+`scripts/generate-german.py` is the one-shot authoring tool. It requires a
+separately installed Argos `en`→`de` model and does not add a runtime
+dependency. It protects `{parameters}`, URLs and issue references before
+translation, keeps existing German values, and can reuse a prior draft only
+where its `de_source` still matches the current English cell. Use
+`scripts/test_generate_german.py` for its focused structural checks and
+`tests/client/german-catalogue.test.js` for shipped coverage, composition,
+freshness and full-catalogue ZIP round-trip evidence.
+
 ## Square brackets mean "not reviewed yet"
 
 Text an agent wrote is wrapped in `[square brackets]`. It renders bracketed in
@@ -124,7 +148,8 @@ When a human approves a line, they **remove the brackets** and edit the text as
 they see fit. Nothing else changes. Re-running the extractor will not undo this:
 it merges by id and never overwrites an existing row.
 
-An unbracketed string on screen means someone signed it off.
+An unbracketed **English** string on screen means someone signed it off.
+German approval is recorded by its provenance; `machine` remains unreviewed.
 
 ## Adding a string
 

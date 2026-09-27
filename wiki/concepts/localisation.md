@@ -2,13 +2,14 @@
 title: Localisation
 type: concept
 tags: [localisation, strings, client, display-text]
-sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-entity-tree.js, gui/gm-direct-effect-panel.js, gui/gm-activity-feed.js, gui/gm-journal-panel.js, gui/game-over-view.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-boot.js, gui/workshop-scripts-panel.js, gui/workshop-test-panel.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, editor/script-editor-view.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, src/server/bridge.rs, server.html, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md, docs/acceptance/1538-localised-host-journey.md]
+sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-entity-tree.js, gui/gm-direct-effect-panel.js, gui/gm-activity-feed.js, gui/gm-journal-panel.js, gui/game-over-view.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-boot.js, gui/workshop-scripts-panel.js, gui/workshop-test-panel.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, editor/script-editor-view.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, src/server/bridge.rs, server.html, scripts/check-strings.mjs, scripts/extract-strings.mjs, scripts/generate-german.py, scripts/german-domain-draft.json, scripts/german-dynasty-draft.json, docs/strings-authoring-guide.md, docs/acceptance/1538-localised-host-journey.md, docs/acceptance/1554-german-catalogue-v1.md]
 updated: 2026-09-27
 ---
 
 # Localisation
 
-All display text lives in `assets/strings/strings.csv` (`id,context,en`). The
+All display text lives in `assets/strings/strings.csv` (`id,context,en` plus
+German value, exact English source and provenance columns). The
 server is localisation-blind: TOML holds string ids, Rust passes them through
 the wire untouched, and the client resolves them once at the message boundary
 (`localiseTree()` in `gui/strings.js`, applied in `gui/connection-manager.js`).
@@ -68,6 +69,9 @@ English text wrapped in `[square brackets]` is agent-drafted placeholder copy;
 a human removes the brackets (and edits freely) to approve a line. Re-running
 `scripts/extract-strings.mjs` merges by id, never overwrites approved rows, and
 preserves every locale and metadata column while appending new English rows.
+`scripts/generate-german.py` creates source-fresh offline machine German drafts
+without adding a game runtime translation dependency. `machine` provenance
+identifies those drafts for later editorial review.
 
 Names that Rust matches as identifiers — `[[station]] name`,
 `[[station.rating]] name`, faction `name` — stay English in TOML;

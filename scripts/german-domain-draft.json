@@ -1,0 +1,126 @@
+{
+  "world.alliance_convoy.global.title": {
+    "en": "Alliance Convoy Escort",
+    "de": "Geleitschutz für den Allianzkonvoi"
+  },
+  "world.alliance_convoy.global.description": {
+    "en": "Protect three civilian transports through hostile space and account for every arrival and loss.",
+    "de": "Schützen Sie drei zivile Transportschiffe auf dem Weg durch feindliches Gebiet und erfassen Sie jede Ankunft und jeden Verlust."
+  },
+  "world.alliance_convoy.slot.lead": {
+    "en": "Convoy command",
+    "de": "Konvoi-Kommando"
+  },
+  "world.alliance_convoy.slot.port": {
+    "en": "Port screen",
+    "de": "Backbord-Eskorte"
+  },
+  "world.alliance_convoy.slot.starboard": {
+    "en": "Starboard screen",
+    "de": "Steuerbord-Eskorte"
+  },
+  "world.alliance_convoy.slot.rear": {
+    "en": "Rear guard",
+    "de": "Nachhut"
+  },
+  "world.alliance_convoy.transport.bell": {
+    "en": "Bell",
+    "de": "Bell"
+  },
+  "world.alliance_convoy.transport.cedar": {
+    "en": "Cedar",
+    "de": "Cedar"
+  },
+  "world.alliance_convoy.raider.second": {
+    "en": "Harrow Ambush Leader",
+    "de": "Harrow-Anführer des Hinterhalts"
+  },
+  "world.alliance_convoy.raider.third": {
+    "en": "Harrow Pursuer",
+    "de": "Harrow-Verfolger"
+  },
+  "world.alliance_convoy.raider.fourth": {
+    "en": "Harrow Outer Guard",
+    "de": "Harrow-Außenwache"
+  },
+  "world.alliance_convoy.escort.lead": {
+    "en": "Alliance Convoy Command",
+    "de": "Allianz-Konvoi-Kommando"
+  },
+  "world.alliance_convoy.escort.port": {
+    "en": "Alliance Port Screen",
+    "de": "Allianz-Backbord-Eskorte"
+  },
+  "world.alliance_convoy.escort.starboard": {
+    "en": "Alliance Starboard Screen",
+    "de": "Allianz-Steuerbord-Eskorte"
+  },
+  "world.alliance_convoy.escort.rear": {
+    "en": "Alliance Rear Guard",
+    "de": "Allianz-Nachhut"
+  },
+  "world.alliance_convoy.recovery_zone": {
+    "en": "Survivor Signal",
+    "de": "Signal der Überlebenden"
+  },
+  "world.alliance_convoy.report.recovery.heading": {
+    "en": "Survivor signal",
+    "de": "Signal der Überlebenden"
+  },
+  "world.alliance_convoy.report.recovery.saved": {
+    "en": "An escort recovered the stranded crew.",
+    "de": "Ein Eskortschiff barg die gestrandete Besatzung."
+  },
+  "world.alliance_convoy.report.recovery.missed": {
+    "en": "The survivor signal went unanswered before the transports' fates were settled.",
+    "de": "Das Signal der Überlebenden blieb unbeantwortet, bis das Schicksal der Transportschiffe feststand."
+  },
+  "world.alliance_convoy.report.pursuit.stopped": {
+    "en": "The interceptor was stopped before it could make another pass.",
+    "de": "Der Abfangjäger wurde gestoppt, bevor er erneut angreifen konnte."
+  },
+  "world.alliance_convoy.report.pursuit.escaped": {
+    "en": "The interceptor remained at large when the convoy mission ended.",
+    "de": "Der Abfangjäger war noch auf freiem Fuß, als die Konvoimission endete."
+  },
+  "world.alliance_convoy.game_over": {
+    "en": "The three transports' fates are settled.",
+    "de": "Über das Schicksal der drei Transportschiffe ist entschieden."
+  },
+  "world.cruiser_elimination.title": {
+    "en": "Cruiser Elimination",
+    "de": "Kreuzergefecht"
+  },
+  "world.cruiser_elimination.description": {
+    "en": "Two Alliance cruisers against two Dynasty strike cruisers. Choose a fixed berth; unclaimed ships use Backfill. Eliminate both opposing cruisers to win. Destroyed crews spectate the remaining fight.",
+    "de": "Zwei Allianz-Kreuzer treten gegen zwei Angriffskreuzer der Dynastie an. Wählen Sie einen festen Platz; unbesetzte Schiffe werden von der KI geführt. Schalten Sie beide gegnerischen Kreuzer aus, um zu gewinnen. Besatzungen zerstörter Schiffe verfolgen den restlichen Kampf als Zuschauer."
+  },
+  "world.cruiser_elimination.alliance_one": {
+    "en": "Alliance One",
+    "de": "Allianz Eins"
+  },
+  "world.cruiser_elimination.alliance_two": {
+    "en": "Alliance Two",
+    "de": "Allianz Zwei"
+  },
+  "world.cruiser_elimination.dynasty_one": {
+    "en": "Dynasty One",
+    "de": "Dynastie Eins"
+  },
+  "world.cruiser_elimination.dynasty_two": {
+    "en": "Dynasty Two",
+    "de": "Dynastie Zwei"
+  },
+  "world.cruiser_elimination.victory": {
+    "en": "Victory — opposing team eliminated",
+    "de": "Sieg — gegnerisches Team ausgeschaltet"
+  },
+  "world.cruiser_elimination.draw": {
+    "en": "Draw — both teams eliminated together",
+    "de": "Unentschieden — beide Teams gleichzeitig ausgeschaltet"
+  },
+  "world.cruiser_elimination.finished": {
+    "en": "The cruiser engagement is complete.",
+    "de": "Das Kreuzergefecht ist beendet."
+  }
+}

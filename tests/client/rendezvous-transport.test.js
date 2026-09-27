@@ -2090,3 +2090,33 @@ describe('the WebSocket game relay', () => {
     joiner.close();
   });
 });
+
+describe('terminal direct peer failure (#1534)', () => {
+  for (const state of ['iceConnectionState', 'connectionState']) it("reports terminal failure once through " + state, async () => {
+    const world = makeWorld();
+    const pcs = [];
+    const factories = { socket: world.socket, peer: makePeerFactory({ configurePeer: pc => pcs.push(pc) }) };
+    const { host, code, announced } = await hostOn(world, { factories });
+    const rogue = await rogueJoin(factories, code.suffix, {
+      onOpen: channel => channel.send(JSON.stringify({ type: 'JoinHandshake', data: {} })),
+    });
+    expect(announced).toHaveLength(1);
+    const connection = announced[0], closed = vi.fn();
+    connection.on('close', closed);
+    const answerer = pcs.find(pc => pc.remoteDescription?.type === 'offer');
+    answerer.iceConnectionState = 'disconnected';
+    answerer.oniceconnectionstatechange();
+    expect(closed).not.toHaveBeenCalled();
+    expect(connection.open).toBe(true);
+    answerer[state] = 'failed';
+    if (state === 'connectionState') answerer.onconnectionstatechange();
+    else answerer.oniceconnectionstatechange();
+    await settle();
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(connection.open).toBe(false);
+    expect(rogue.channel.readyState).toBe('closed');
+    answerer.oniceconnectionstatechange();
+    host.close();
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+});

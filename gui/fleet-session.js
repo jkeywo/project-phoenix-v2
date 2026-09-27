@@ -1444,6 +1444,8 @@ export function createFleetMember(opts) {
         }
         onLog(`[fleet] the fleet refused this host: ${code}`);
         onError(code, detail);
+        closed = true;
+        joiner?.close();
       }
     },
     onStatus: status => {

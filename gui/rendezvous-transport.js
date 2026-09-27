@@ -376,6 +376,7 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
   const onSever = hooks.onSever || (() => {});
   const onLog = hooks.onLog || (() => {});
   const listeners = { data: [], close: [], snapshot: [] };
+  let closeEmitted = false;
   const adapter = {
     peer: peerId,
     peerConnection: pc,
@@ -435,7 +436,13 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
       try { pc.close(); } catch { /* already gone */ }
     },
     on(event, cb) { (listeners[event] || (listeners[event] = [])).push(cb); },
-    emit(event, arg) { for (const cb of listeners[event] || []) cb(arg); },
+    emit(event, arg) {
+      if (event === 'close') {
+        if (closeEmitted) return;
+        closeEmitted = true;
+      }
+      for (const cb of listeners[event] || []) cb(arg);
+    },
     /** Adopt the lossy channel negotiated alongside this one. */
     bindSnapshot(chan) {
       if (adapter.snapshotChannel === chan) return;
@@ -681,7 +688,22 @@ export function createRendezvousHost(opts) {
     pc.onicecandidate = (e) => {
       if (e && e.candidate) signal(id, { candidate: e.candidate });
     };
-    pc.oniceconnectionstatechange = () => onPeerIce(id, pc.iceConnectionState);
+    const closeFailedPeer = () => {
+      // An abruptly terminated browser can leave its DataChannel open even
+      // after ICE has failed. That terminal media failure must reach the same
+      // disconnect lifecycle as channel.close; a transient disconnected state
+      // or a lost signalling socket alone still leaves the live link intact.
+      if ((pc.iceConnectionState !== 'failed' && pc.connectionState !== 'failed') || peers.get(id) !== entry) return;
+      entry.refused = true;
+      if (entry.adapter) entry.adapter.emit('close');
+      else {
+        peers.delete(id);
+        try { pc.close(); } catch { /* already gone */ }
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => { onPeerIce(id, pc.iceConnectionState); closeFailedPeer(); };
+    pc.onconnectionstatechange = closeFailedPeer;
 
     pc.ondatachannel = (e) => {
       const channel = e.channel;

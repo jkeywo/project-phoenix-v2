@@ -4,7 +4,9 @@ This runner combines two real browser ship simulations, two Windows native ship
 simulations, one browser GM and one native GM. Each ship has Captain, Helm and
 Engineering Station documents: six browser pages and six native Ultralight
 panes. Native Bevy and the retained Ultralight fleet/GM surfaces run normally.
-Browser webdriver execution runs WASM with Bevy rendering disabled.
+Browser webdriver execution defaults to WASM with Bevy rendering disabled.
+`--render` requests the same SwiftShader software rendering mode as the browser
+matrix runner. That mode remains unvalidated by the retained evidence below.
 
 ## Run
 
@@ -18,6 +20,10 @@ and preserve its source/build receipt. The native bundle needs a matching
 node scripts/fleet-mixed-matrix.mjs --out target/mixed-clean --binary target/debug/phoenix-host.exe --bundle dist --dist dist --source . --build-receipt path/to/native-build-receipt.json
 node scripts/fleet-mixed-matrix.mjs --out target/mixed-impaired --binary target/debug/phoenix-host.exe --bundle dist --dist dist --source . --build-receipt path/to/native-build-receipt.json --delay-ms 20 --loss-percent 10 --seed 1530
 ```
+
+Add `--render` to either command to request browser rendering. The manifest
+records the option and requested rendering mode. A configured mode alone does
+not establish that the viewscreen drew successfully or passed visual acceptance.
 
 Output directories must be new. `--routes direct`, `--routes ws-relay` or
 `--routes automatic-fallback` selects one case. The default runs all three, stopping at the first failed case.

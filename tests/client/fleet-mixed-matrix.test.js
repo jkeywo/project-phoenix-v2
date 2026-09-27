@@ -1,6 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import vm from 'node:vm';
-import {mixedOptions,mixedOutcome,observeMixedDigests,verifyMixedImpairment} from '../../scripts/fleet-mixed-matrix.mjs';
+import {mixedOptions,mixedBrowserRuntime,mixedOutcome,observeMixedDigests,verifyMixedImpairment} from '../../scripts/fleet-mixed-matrix.mjs';
+import {observeBrowser} from '../../scripts/fleet-browser-matrix.mjs';
 function fixture(route='direct'){
  const ids=['ship-1','ship-2','gm-1'];
  const rtc=()=>({connectionState:'connected',selected:[{state:'succeeded',bytesReceived:10,localType:'host',remoteType:'host'}]});
@@ -22,4 +23,29 @@ describe('mixed runtime evidence gate',()=>{
  it('refuses failed native telemetry even with sufficient captured workload',()=>{const f=fixture();f.events['gm-2'].push({kind:'observer-error',value:{status:431}});expect(mixedOutcome(f.browser,f.events,f.options).passed).toBe(false);});
  it('bounds run options and requires native inputs',()=>{expect(()=>mixedOptions(['--out','unused'])).toThrow('binary');expect(()=>mixedOptions(['--out','unused','--binary','bin','--bundle','dist','--deadline','300'])).toThrow('deadline');});
  it('refuses claimed impairment without actual native relay writes',()=>{expect(()=>verifyMixedImpairment({route:'direct',impairment:{profile:{delay_ms:0,loss_percent:0,seed:1530},counters:{relay_reliable_written:0}}},{delayMs:0,lossPercent:0,seed:1530})).toThrow('native relay traffic');});
+});
+
+describe('mixed browser render mode', () => {
+ const required = ['--out', 'unused', '--binary', 'bin', '--bundle', 'dist'];
+ it.each([0, 2, 6])('accepts the standalone render flag at argument %i without consuming another option', index => {
+  const argv = [...required]; argv.splice(index, 0, '--render');
+  const options = mixedOptions([...argv, '--seconds', '3']);
+  expect(options.render).toBe(true); expect(options.seconds).toBe(3);
+ });
+ it.each([false, true])('sets the webdriver flag used for browser boot selection when render=%s', render => {
+  const options = mixedOptions([...required, ...(render ? ['--render'] : []), '--delay-ms', '20', '--loss-percent', '10']);
+  const runtime = mixedBrowserRuntime(options, 'direct');
+  const context = vm.createContext({ navigator: {webdriver:true}, window: {addEventListener(){}, WebSocket:class {}, RTCPeerConnection:class {}}, observer:runtime.observer });
+  vm.runInContext('('+observeBrowser.toString()+')(observer,()=>{})', context);
+  expect(context.navigator.webdriver).toBe(!render);
+  expect(runtime.launch.args.includes('--use-angle=swiftshader')).toBe(render);
+  expect(runtime.launch.args.includes('--enable-unsafe-swiftshader')).toBe(render);
+  expect(runtime.observer.directProfile).toEqual({delayMs:20,lossPercent:10,seed:1530});
+  expect(mixedBrowserRuntime(options, 'ws-relay').observer.directProfile).toBeNull();
+  expect(runtime.limitation).toContain(render ? 'Software rendering requested' : 'rendering disabled');
+ });
+ it('keeps malformed value options invalid beside the render flag', () => {
+  expect(()=>mixedOptions([...required, '--seconds', '--render'])).toThrow('Incomplete option');
+  expect(()=>mixedOptions([...required, '--render', 'false'])).toThrow('Incomplete option');
+ });
 });

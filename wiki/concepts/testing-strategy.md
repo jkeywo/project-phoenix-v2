@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [scripts/fleet-browser-matrix.mjs, scripts/fleet-channel-impairment.mjs, docs/acceptance/1530-six-peer-matrix.md, scripts/t5-journeys.mjs, tests/t5_journeys.rs, tests/client/t5-journeys.test.js, docs/acceptance/1553-t5-journeys.md, scripts/fleet-relay-probe.mjs, docs/acceptance/1543-performance-proposal.md, AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, src/sim_sets/order.rs, src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
+sources: [scripts/fleet-browser-matrix.mjs, scripts/fleet-mixed-matrix.mjs, scripts/fleet-channel-impairment.mjs, docs/acceptance/1530-six-peer-matrix.md, scripts/t5-journeys.mjs, tests/t5_journeys.rs, tests/client/t5-journeys.test.js, docs/acceptance/1553-t5-journeys.md, scripts/fleet-relay-probe.mjs, docs/acceptance/1543-performance-proposal.md, AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, src/sim_sets/order.rs, src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
 updated: 2026-09-27
 ---
 
@@ -18,7 +18,10 @@ command receipts, GM pause/resume, digest exchange and observed direct/relay/
 fallback routes. Optional bounded application-frame delay and snapshot loss
 record actual write/drop counters. Default webdriver execution disables Bevy
 rendering; short browser evidence does not establish native, mixed, mobile or
-endurance acceptance. See [the runtime ledger](../../docs/acceptance/1530-six-peer-matrix.md).
+endurance acceptance. The mixed runner, `scripts/fleet-mixed-matrix.mjs`, combines
+three browser and three native simulation peers. Both runners accept `--render`
+to request SwiftShader browser rendering; the retained runtime matrix has not
+validated that mode. See [the runtime ledger](../../docs/acceptance/1530-six-peer-matrix.md).
 
 ## Rust
 

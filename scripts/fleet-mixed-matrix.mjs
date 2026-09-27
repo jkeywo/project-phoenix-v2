@@ -16,12 +16,13 @@ const stationNames = ['captain', 'helm', 'engineering'];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const sha = data => createHash('sha256').update(data).digest('hex');
 export function mixedOptions(argv) {
-  const o = {dist:path.join(root,'dist'), dependencies:path.join(root,'tests/smoke'), source:root, seconds:10, timeout:120, deadline:290, port:18450, rendezvousPort:18451, delayMs:0, lossPercent:0, seed:1530, routes:[...ROUTES]};
+  const o = {dist:path.join(root,'dist'), dependencies:path.join(root,'tests/smoke'), source:root, seconds:10, timeout:120, deadline:290, port:18450, rendezvousPort:18451, delayMs:0, lossPercent:0, seed:1530, render:false, routes:[...ROUTES]};
   const paths = ['out','dist','dependencies','binary','bundle','source','native-adapter','service-script','build-receipt'];
   const numbers = {seconds:'seconds',timeout:'timeout',deadline:'deadline',port:'port','rendezvous-port':'rendezvousPort','delay-ms':'delayMs','loss-percent':'lossPercent',seed:'seed'};
-  for (let i=0;i<argv.length;i+=2) {
-    const key=argv[i]?.slice(2),value=argv[i+1];
-    if (!argv[i]?.startsWith('--') || !value || value.startsWith('--')) throw new Error('Incomplete option');
+  for (let i=0;i<argv.length;i++) {
+    if (argv[i] === '--render') { o.render = true; continue; }
+    const key=argv[i]?.slice(2),value=argv[++i];
+    if (!argv[i-1]?.startsWith('--') || !value || value.startsWith('--')) throw new Error('Incomplete option');
     if(paths.includes(key))o[key]=path.resolve(value);
     else if(key==='routes')o.routes=value.split(',');
     else if(numbers[key])o[numbers[key]]=Number(value);
@@ -32,6 +33,18 @@ export function mixedOptions(argv) {
   if(o.port===o.rendezvousPort)throw new Error('Ports must differ');
   if(!o.routes.length||o.routes.some(r=>!ROUTES.includes(r))||new Set(o.routes).size!==o.routes.length)throw new Error('Invalid routes');
   return o;
+}
+// Keep browser startup, observation and the retained mode description together.
+export function mixedBrowserRuntime(options, route) {
+  return {
+    launch: { headless: true, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
+      ...(options.render ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])] },
+    observer: { render: options.render, directProfile: route === 'direct' && (options.delayMs || options.lossPercent)
+      ? { delayMs: options.delayMs, lossPercent: options.lossPercent, seed: options.seed } : null },
+    limitation: options.render
+      ? 'Software rendering requested for browser WASM; native Bevy and Ultralight remain real'
+      : 'Browser WASM rendering disabled; native Bevy and Ultralight remain real',
+  };
 }
 function has(rows,kind,predicate=()=>true){return rows?.some(row=>row.kind===kind&&predicate(row.value))||false;}
 export function mixedOutcome(browserRows,events,{route,digestAfter,commandWaves=1}) {
@@ -126,7 +139,7 @@ async function runCase(browser,o,route,runNativeProbe){
   const deadline=Date.now()+o.deadline*1000;
   const step=name=>{result.steps.push({name,utc:new Date().toISOString()});process.stderr.write(route+': '+name+'\n');};
   const wait=async(predicate,label)=>{while(!(await predicate())){if(nativeFailure)throw new Error(nativeFailure);if(Date.now()>deadline)throw new Error('Mixed deadline: '+label);await sleep(150);}};
-  async function page(label){const context=await browser.newContext();contexts.push(context);await context.addInitScript({content:`(${observeBrowser.toString()})(${JSON.stringify({render:false,directProfile:route==='direct'&&(o.delayMs||o.lossPercent)?{delayMs:o.delayMs,lossPercent:o.lossPercent,seed:o.seed}:null})},${impairDataChannel.toString()});(${observeMixedDigests.toString()})();`});const page=await context.newPage();page.setDefaultTimeout(o.timeout*1000);const row={label,page,errors:[],logs:[]};pages.push(row);page.on('pageerror',e=>{row.errors.push(String(e).slice(0,2000));if(row.errors.length>100)row.errors.shift();});page.on('console',m=>{if(['warning','error'].includes(m.type())){row.logs.push(m.text().slice(0,2000));if(row.logs.length>100)row.logs.shift();}});return page;}
+  async function page(label){const context=await browser.newContext();contexts.push(context);await context.addInitScript({content:`(${observeBrowser.toString()})(${JSON.stringify(mixedBrowserRuntime(o,route).observer)},${impairDataChannel.toString()});(${observeMixedDigests.toString()})();`});const page=await context.newPage();page.setDefaultTimeout(o.timeout*1000);const row={label,page,errors:[],logs:[]};pages.push(row);page.on('pageerror',e=>{row.errors.push(String(e).slice(0,2000));if(row.errors.length>100)row.errors.shift();});page.on('console',m=>{if(['warning','error'].includes(m.type())){row.logs.push(m.text().slice(0,2000));if(row.logs.length>100)row.logs.shift();}});return page;}
   const evaluate=(page,fn,arg)=>within(page.evaluate(fn,arg),o.timeout*1000,'browser evaluation');
   const query=new URLSearchParams({rendezvous,...(route==='automatic-fallback'?{}:{transport:route})});
   const capture=async()=>Promise.all(pages.map(async row=>{const snapshot={label:row.label,errors:[...row.errors],logs:[...row.logs]};try{snapshot.state=await evaluate(row.page,async()=>({...await window.__matrixRead(),mixedDigests:window.__mixedDigests,digestOverflow:window.__mixedDigestOverflow,mixedGmActions:window.__mixedGmActions}));}catch(e){snapshot.readError=String(e);}return snapshot;}));
@@ -166,10 +179,10 @@ export async function main(argv=process.argv.slice(2)){
   const o=mixedOptions(argv);await fs.mkdir(path.dirname(o.out),{recursive:true});await fs.mkdir(o.out);
   const adapter=o['native-adapter']?pathToFileURL(o['native-adapter']).href:new URL('./fleet-native-probe.mjs',import.meta.url).href;
   const {runNativeProbe}=await import(adapter);const require=createRequire(path.join(o.dependencies,'package.json'));const {chromium}=require('@playwright/test');
-  const manifest={kind:'real mixed browser/native fleet matrix',status:'running',options:o,sourceRevision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),sourcePatch:execFileSync('git',['diff','HEAD'],{cwd:root,encoding:'utf8'}),runnerSha256:sha(await fs.readFile(fileURLToPath(import.meta.url))),browserHarnessSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-browser-matrix.mjs'))),channelImpairmentSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-channel-impairment.mjs'))),nativeAdapterSha256:sha(await fs.readFile(fileURLToPath(adapter))),binarySha256:sha(await fs.readFile(o.binary)),browserBundleHashes:await bundleHashes(o.dist),nativeBundleHashes:await bundleHashes(o.bundle),limits:['Single-machine loopback','Browser WASM rendering disabled; native Bevy and Ultralight remain real','Six embedded native Station documents plus six browser Station documents','Application-frame impairment; not IP packet loss','Bounded acceptance subset; no mobile/endurance/performance/recovery acceptance'],results:[]};
+  const manifest={kind:'real mixed browser/native fleet matrix',status:'running',options:o,sourceRevision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),sourcePatch:execFileSync('git',['diff','HEAD'],{cwd:root,encoding:'utf8'}),runnerSha256:sha(await fs.readFile(fileURLToPath(import.meta.url))),browserHarnessSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-browser-matrix.mjs'))),channelImpairmentSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-channel-impairment.mjs'))),nativeAdapterSha256:sha(await fs.readFile(fileURLToPath(adapter))),binarySha256:sha(await fs.readFile(o.binary)),browserBundleHashes:await bundleHashes(o.dist),nativeBundleHashes:await bundleHashes(o.bundle),limits:['Single-machine loopback',mixedBrowserRuntime(o).limitation,'Six embedded native Station documents plus six browser Station documents','Application-frame impairment; not IP packet loss','Bounded acceptance subset; no mobile/endurance/performance/recovery acceptance'],results:[]};
   if(o['build-receipt']){const raw=await fs.readFile(o['build-receipt']);const receipt=JSON.parse(raw);manifest.nativeBuildReceipt={path:o['build-receipt'],sha256:sha(raw),receipt,binaryMatchesRecordedReceipt:receipt.binarySha256===manifest.binarySha256};if(!manifest.nativeBuildReceipt.binaryMatchesRecordedReceipt)throw new Error('Native binary does not match build receipt');}
   const save=()=>fs.writeFile(path.join(o.out,'manifest.json'),JSON.stringify(manifest,null,2));await save();let server,browser,browserServer;
-  try{server=await serve(o.dist,o.port);browserServer=await chromium.launchServer({headless:true,args:['--autoplay-policy=no-user-gesture-required','--disable-background-timer-throttling','--disable-renderer-backgrounding']});browser=await chromium.connect(browserServer.wsEndpoint(),{timeout:30000});manifest.browser=browser.version();await save();for(const route of o.routes){const r=await runCase(browser,o,route,runNativeProbe);manifest.results.push({route,status:r.status,error:r.error});await save();if(r.status!=='passed')break;}manifest.status=manifest.results.every(r=>r.status==='passed')?'passed':'failed';}
+  try{server=await serve(o.dist,o.port);browserServer=await chromium.launchServer(mixedBrowserRuntime(o).launch);browser=await chromium.connect(browserServer.wsEndpoint(),{timeout:30000});manifest.browser=browser.version();await save();for(const route of o.routes){const r=await runCase(browser,o,route,runNativeProbe);manifest.results.push({route,status:r.status,error:r.error});await save();if(r.status!=='passed')break;}manifest.status=manifest.results.every(r=>r.status==='passed')?'passed':'failed';}
   catch(e){manifest.status='failed';manifest.error=String(e.stack||e);}
   finally{const errors=[];for(const close of [()=>browser?.close(),()=>browserServer?.close()])try{await within(Promise.resolve(close()),5000,'browser cleanup');}catch(e){errors.push(String(e));}try{await stopProcess(browserServer?.process());}catch(e){errors.push(String(e));}if(server){server.closeAllConnections();try{await within(new Promise(r=>server.close(r)),3000,'HTTP cleanup');}catch(e){errors.push(String(e));}}if(errors.length){manifest.status='failed';manifest.cleanupErrors=errors;}await save();}
   return manifest;

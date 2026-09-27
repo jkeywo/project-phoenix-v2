@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failureOutcome, divergenceOutcome, observeRecovery } from '../../scripts/fleet-browser-recovery.mjs';
+import { failureOutcome, divergenceOutcome, observeRecovery, directEffectOutcome, awaitDirectEffectBaseline } from '../../scripts/fleet-browser-recovery.mjs';
 
 function evidence() {
   const before = Array.from({length:6}, (_,i)=>({label:`peer-${i+1}`,mesh:{slot:i+1,tick:100}}));
@@ -62,4 +62,45 @@ it('rejects missing digest values and contradictory repeated checkpoints',()=>{
   const contradictory=evidence();
   contradictory.after[0].frames.unshift({t:'digest',d:{...contradictory.after[0].frames[0].d,digest:'ffffffffffffffff'}});
   expect(failureOutcome(contradictory).survivorAgreement).toBe(false);
+});
+
+function directEffectEvidence(){
+  const effectRequest={entity:'stable-ship',correlation:'one-effect',amount_milli_hp:5000};
+  const effectBefore=['gm-1','gm-2'].map(label=>({label,capacity:256,oldestTick:2,
+    events:[{tick:400,category:'damage',detail:{type:'damage',data:{weapon:'gm.direct',amount:5,hull_damage:5}},links:[{role:'victim',entity:{entity_id:'stable-ship'}}]}],
+    journal:[{correlation:'one-effect',action_kind:'direct-effect',tick:400,sequence:3,outcome:'applied'}]}));
+  return {effectRequest,effectBefore,effectAfter:structuredClone(effectBefore),effectSamples:[]};
+}
+it('requires exactly one actual reducer damage event retained across the restore',()=>{
+  const proof=directEffectEvidence();expect(directEffectOutcome(proof)).toBe(true);
+  proof.effectAfter[0].events.push(structuredClone(proof.effectAfter[0].events[0]));
+  expect(directEffectOutcome(proof)).toBe(false);
+  const journalOnly=directEffectEvidence();journalOnly.effectAfter[0].events=[];
+  expect(directEffectOutcome(journalOnly)).toBe(false);
+});
+it('rejects evidence whose bounded feed could have evicted a duplicate or hid an earlier duplicate',()=>{
+  const proof=directEffectEvidence();proof.effectAfter[0].oldestTick=400;
+  expect(directEffectOutcome(proof)).toBe(false);
+  const hidden=directEffectEvidence(),bad=structuredClone(hidden.effectBefore);
+  bad[1].events.push(structuredClone(bad[1].events[0]));hidden.effectSamples.push(bad);
+  expect(directEffectOutcome(hidden)).toBe(false);
+});
+
+it('ties the actual damage event to the requested entity and one shared action order',()=>{
+  const wrong=directEffectEvidence();wrong.effectRequest.entity='another-ship';
+  expect(directEffectOutcome(wrong)).toBe(false);
+  const split=directEffectEvidence();split.effectBefore[1].journal[0].sequence=4;
+  expect(directEffectOutcome(split)).toBe(false);
+});
+
+it('waits boundedly for both activity projections after the journal reports applied',async()=>{
+  const proof=directEffectEvidence(),complete=structuredClone(proof.effectBefore);
+  let turn=0;
+  const read=async()=>complete.map((row,index)=>({...row,events:turn>index?row.events:[]}));
+  expect(await awaitDirectEffectBaseline(proof,read,{now:()=>turn*100,wait:async()=>{turn++;},timeoutMs:500})).toBe(true);
+  expect(turn).toBe(2);expect(directEffectOutcome(proof)).toBe(true);
+  const missing=directEffectEvidence();turn=0;
+  expect(await awaitDirectEffectBaseline(missing,async()=>complete.map(row=>({...row,events:[]})),
+    {now:()=>turn*100,wait:async()=>{turn++;},timeoutMs:200})).toBe(false);
+  expect(turn).toBe(2);
 });

@@ -83,6 +83,60 @@ export function failureHook(failure, { faultSeconds = 60 } = {}) {
     throw new Error(`${failure}: missing matching post-loss digests, agreed applied loss/Backfill, or owner commit across all five survivors within ${faultSeconds}s`);
   };
 }
+// Only the actual direct-damage applier emits this activity fact. The durable
+// action row supplies attribution; it is not itself proof that the reducer ran.
+export function captureDirectEffect({entity,correlation}) {
+  const activity=window.__hostGmActivityState?.();
+  const journal=window.__hostGmJournalState?.();
+  return {capacity:activity?.capacity,oldestTick:activity?.entries?.[0]?.tick,
+    events:(activity?.entries || []).filter(row=>row.category==='damage'
+      && row.detail?.type==='damage' && row.detail.data?.weapon==='gm.direct'
+      && row.links?.some(link=>link.role==='victim' && link.entity?.entity_id===entity)),
+    journal:(journal?.entries || []).filter(row=>row.correlation===correlation)
+      .map(({correlation,action_kind,tick,sequence,outcome})=>({correlation,action_kind,tick,sequence,outcome}))};
+}
+export function directEffectOutcome(evidence) {
+  const baseline=evidence.effectBefore || [],after=evidence.effectAfter || [];
+  const request=evidence.effectRequest;
+  const valid=baseline.length===2 && after.length===2 && request?.amount_milli_hp===5000
+    && new Set(baseline.map(row=>row.label)).size===2 && baseline.every(row=>{
+      const event=row.events?.[0],entry=row.journal?.[0];
+      return row.events.length===1 && row.journal.length===1 && Number.isSafeInteger(event?.tick)
+        && Number.isSafeInteger(row.oldestTick) && row.oldestTick<event.tick
+        && event.category==='damage' && event.detail?.type==='damage'
+        && event.detail.data?.weapon==='gm.direct' && event.detail.data.amount===5
+        && Math.round(event.detail.data.hull_damage*1000)===5000
+        && event.links?.some(link=>link.role==='victim' && link.entity?.entity_id===request.entity)
+        && entry?.correlation===request.correlation && entry.action_kind==='direct-effect'
+        && entry.outcome==='applied';
+    });
+  if(!valid || new Set(baseline.map(row=>row.events[0].tick)).size!==1
+    || new Set(baseline.map(row=>`${row.journal[0].tick}:${row.journal[0].sequence}`)).size!==1)return false;
+  const snapshots=[...(evidence.effectSamples || []),after];
+  return snapshots.every(rows=>rows.length===2 && baseline.every(before=>{
+    const current=rows.find(row=>row.label===before.label);
+    return current && Number.isSafeInteger(current.oldestTick)
+      // Strictly earlier evidence rules out partial eviction of same-tick duplicates.
+      && current.oldestTick<before.events[0].tick
+      && JSON.stringify(current.events)===JSON.stringify(before.events)
+      && JSON.stringify(current.journal)===JSON.stringify(before.journal);
+  }));
+}
+export async function awaitDirectEffectBaseline(evidence, readEffects, {
+  timeoutMs=10000, intervalMs=100, now=Date.now,
+  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+}={}) {
+  const deadline=now()+timeoutMs;
+  do {
+    evidence.effectBefore=await readEffects();
+    evidence.effectAfter=evidence.effectBefore;
+    evidence.effectSamples=[];
+    if(directEffectOutcome(evidence))return true;
+    if(now()>=deadline)return false;
+    await wait(intervalMs);
+  } while(now()<=deadline);
+  return false;
+}
 export function divergenceOutcome(evidence) {
   const peers = evidence.after || [];
   const victim = peers.find(peer => peer.label === evidence.victim);
@@ -114,9 +168,10 @@ export function divergenceOutcome(evidence) {
     && evidence.identityBefore.every(before => peers.find(peer => peer.label === before.label)?.commands
       .filter(command => command.type === 'SetThrust' && command.tick > boundary)
       .some(command => command.ship === before.ship));
-  return { recovered, boundary, common, duplicateCommandOrders, shipIdentityStable,
+  const effectAppliedOnce = directEffectOutcome(evidence);
+  return { recovered, boundary, common, duplicateCommandOrders, shipIdentityStable, effectAppliedOnce,
     passed: peers.length === 6 && recovered && !invalidDigest && common.length >= 2 && common.every(row => row.agreed)
-      && shipIdentityStable && duplicateCommandOrders.length === 0
+      && shipIdentityStable && effectAppliedOnce && duplicateCommandOrders.length === 0
       && peers.every(peer => peer.phase === 'InProgress' && peer.mesh.tick > boundary) };
 }
 
@@ -133,9 +188,20 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
     await thrust(.4);
     await Promise.all(ships.map(page=>page.waitForFunction(()=>window.__recoveryEvidence.commands.some(command=>command.type==='SetThrust'))));
     const before = await Promise.all(peers.map(read));
-    const evidence = result.recovery = { failure:'divergence', victim:'ship-2', before,
+    const evidence = result.recovery = { failure:'divergence', victim:'gm-1', before,
       identityBefore:before.filter(peer=>peer.label.startsWith('ship-')).map(peer=>({label:peer.label,ship:peer.commands.find(command=>command.type==='SetThrust').ship})), samples:[] };
-    await ships[1].evaluate(() => {
+    evidence.effectRequest={entity:evidence.identityBefore[0].ship,correlation:'1534-divergence-effect-once',amount_milli_hp:5000};
+    const readEffects=()=>Promise.all(gms.map(async(page,index)=>({label:`gm-${index+1}`,
+      ...await page.evaluate(captureDirectEffect,evidence.effectRequest)})));
+    const submitted=await gms[0].evaluate(request=>window.__hostApplyDirectEffect({
+      ...request,effect:'damage',scope:'entity',scope_id:null}),evidence.effectRequest);
+    if(!submitted)throw new Error('One-time GM direct-damage request was not submitted');
+    await Promise.all(gms.map(page=>page.waitForFunction(correlation=>
+      window.__hostGmJournalState?.().entries.some(row=>row.correlation===correlation && row.outcome==='applied'),
+      evidence.effectRequest.correlation)));
+    if(!await awaitDirectEffectBaseline(evidence,readEffects))
+      throw new Error('Missing one actual GM damage event with retained earlier history within 10s');
+    await gms[0].evaluate(() => {
       const receive = window.wasm_receive_mesh_frame;
       window.wasm_receive_mesh_frame = (source, raw) => {
         const frame = JSON.parse(raw);
@@ -154,21 +220,22 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
     const firstHelm = clients.find(row=>row.ship===1 && row.station==='helm');
     await firstHelm.page.evaluate(()=>window.dispatchConsoleAction({action:'set_helm_thrust',value:.8},
       (type,data)=>window.phoenixLink.send(type,data,'reliable')));
-    await ships[1].waitForFunction(()=>!!window.__recoveryEvidence.injected);
-    step('changed one authenticated incoming SetThrust frame on ship-2');
+    await gms[0].waitForFunction(()=>!!window.__recoveryEvidence.injected);
+    step('recorded one GM damage effect, then changed one authenticated incoming SetThrust frame on gm-1');
     const deadline=Date.now()+faultSeconds*1000;
     let checkedIdentity=false;
     do {
       await new Promise(resolve=>setTimeout(resolve,500));
       evidence.after=await Promise.all(peers.map(read));
-      evidence.injected=evidence.after.find(peer=>peer.label==='ship-2').injected;
+      evidence.injected=evidence.after.find(peer=>peer.label===evidence.victim).injected;
+      evidence.effectAfter=await readEffects();evidence.effectSamples.push(evidence.effectAfter);
       evidence.samples.push(evidence.after.map(({label,mesh})=>({label,mesh})));
       evidence.outcome=divergenceOutcome(evidence);
       if(evidence.after.some(peer=>peer.overflow))throw new Error('Recovery observer overflow');
       if(evidence.outcome.recovered && !checkedIdentity){ checkedIdentity=true;await thrust(.5); }
       if(evidence.outcome.passed)return;
     } while(Date.now()<deadline);
-    throw new Error('Divergence did not restore with stable ship identities, unique command orders and two matching checkpoints');
+    throw new Error('Divergence did not restore with stable ship identities, one retained reducer effect, unique command orders and two matching checkpoints');
   };
 }
 

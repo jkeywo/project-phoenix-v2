@@ -20,9 +20,9 @@ function shippedEditorModules() {
   return new Set([...list[1].matchAll(/'([^']+)'/g)].map(match => match[1]));
 }
 
-function reachableModules() {
+function reachableModules(entries = ENTRY_POINTS, bareImports = new Set()) {
   const seen = new Set();
-  const queue = ENTRY_POINTS.map(entry => path.join(ROOT, entry));
+  const queue = entries.map(entry => path.join(ROOT, entry));
   while (queue.length) {
     const file = queue.pop();
     const relative = path.relative(ROOT, file).replace(/\\/g, '/');
@@ -31,9 +31,9 @@ function reachableModules() {
     const source = readFileSync(file, 'utf8');
     for (const match of source.matchAll(IMPORT)) {
       const specifier = match[1];
-      // Bare specifiers (smol-toml) are vendored by the same build script and
-      // are not this test's concern; only the repo's own relative modules are.
-      if (!specifier.startsWith('.')) continue;
+      // A copied module's bare import still needs a map on that page. Keep it
+      // per entry point: Workshop's map does not reach its child iframe.
+      if (!specifier.startsWith('.')) { bareImports.add(specifier); continue; }
       const target = path.resolve(path.dirname(file), specifier);
       const targetRelative = path.relative(ROOT, target).replace(/\\/g, '/');
       if (/^(gui|editor)\//.test(targetRelative) && targetRelative.endsWith('.js')) queue.push(target);
@@ -59,6 +59,23 @@ describe('the Workshop build ships every editor module its pages import', () => 
       'editor/workshop-composition.js', 'editor/workshop-entity.js', 'editor/workshop-presets.js',
       'editor/workshop-test-runtime.js', 'editor/workshop-preview-runtime.js']) {
       expect(reached.has(file), file).toBe(true);
+    }
+  });
+
+  it('maps every bare module import in each Workshop page, including the Test child', () => {
+    for (const [page, entry] of [
+      ['workshop.html', 'gui/workshop-boot.js'],
+      ['workshop-test.html', 'gui/workshop-test-boot.js'],
+      ['workshop-preview.html', 'gui/workshop-preview-boot.js'],
+    ]) {
+      const bare = new Set();
+      reachableModules([entry], bare);
+      const html = readFileSync(path.join(ROOT, page), 'utf8');
+      const importMap = /<script type="importmap">([\s\S]*?)<\/script>/.exec(html);
+      const imports = importMap ? JSON.parse(importMap[1]).imports : {};
+      for (const specifier of bare) {
+        expect(imports?.[specifier], `${page} must map ${specifier}`).toBe(`./vendor/${specifier}/index.js`);
+      }
     }
   });
 });

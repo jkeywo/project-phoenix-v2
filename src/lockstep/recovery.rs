@@ -395,11 +395,15 @@ fn begin_recovery(world: &mut World, local: HostSlot, delay: u64) {
     {
         return;
     }
+    // Every technical participant folds the world, including GM-only hosts.
+    // Frozen ship rows outlive departure for Backfill, so the live electorate
+    // must use the session's authoritative departed set rather than ship rows.
+    let session = world.resource::<FleetLockstep>();
     let fleet: Vec<HostSlot> = world
         .resource::<FleetRoster>()
-        .ships()
-        .iter()
-        .map(|ship| ship.host)
+        .participants()
+        .into_iter()
+        .filter(|slot| !session.has_departed(*slot))
         .collect();
     let decision = {
         let agreement = world.resource::<MeshAgreement>();
@@ -824,6 +828,77 @@ pub fn register_recovery(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drive the actual adapter from each local viewpoint: four ship hosts and
+    /// two GM-only hosts share the same six folds, with only GM slot 5 divergent.
+    fn gm_divergence_plans(departed: Option<HostSlot>) -> Vec<recovery_plan::RecoveryPlan> {
+        let participants: Vec<_> = (1..=6).map(HostSlot).collect();
+        let mut plans = Vec::new();
+        for &local in participants.iter().filter(|slot| Some(**slot) != departed) {
+            let mut world = World::new();
+            world.insert_resource(
+                FleetRoster::with_participants(
+                    (1..=4)
+                        .map(|slot| super::super::FleetShip::new(HostSlot(slot)))
+                        .collect(),
+                    participants.clone(),
+                    local,
+                    HostSlot(1),
+                )
+                .expect("four ships and two GM-only participants"),
+            );
+            let mut session = super::super::LockstepSession::new(local, participants.clone(), 6);
+            if let Some(slot) = departed {
+                session.depart(slot);
+            }
+            world.insert_resource(FleetLockstep(session));
+            world.init_resource::<RecoveryState>();
+            world.init_resource::<MeshRestoreArm>();
+            let mut agreement = MeshAgreement::new(300);
+            for &slot in participants.iter().filter(|slot| Some(**slot) != departed) {
+                let mut ledger = crate::sim_digest::DigestLedger::new(300);
+                ledger.record(300, 0xAA);
+                ledger.record(600, if slot == HostSlot(5) { 0xBB } else { 0xAA });
+                if slot == local {
+                    agreement.local = ledger;
+                } else {
+                    agreement.peers.insert(slot, ledger);
+                }
+            }
+            world.insert_resource(agreement);
+            begin_recovery(&mut world, local, 6);
+            let Some(ActiveRecovery::InProgress { plan, role, .. }) =
+                world.resource::<RecoveryState>().active.as_ref()
+            else {
+                panic!("GM divergence must open recovery on {local:?}");
+            };
+            assert_eq!(*role, plan.role_of(local));
+            assert_eq!(plan.leader, HostSlot(1));
+            assert_eq!(plan.recovering, vec![HostSlot(5)]);
+            assert_eq!(plan.divergence_tick, 600);
+            assert_eq!(plan.last_agreed_tick, Some(300));
+            assert_eq!(plan.digests.len(), if departed.is_some() { 5 } else { 6 });
+            if let Some(slot) = departed {
+                assert!(!plan.digests.contains_key(&slot));
+            }
+            plans.push(plan.clone());
+        }
+        plans
+    }
+
+    #[test]
+    fn gm_only_divergence_opens_the_same_recovery_on_all_six_participants() {
+        let plans = gm_divergence_plans(None);
+        assert_eq!(plans.len(), 6);
+        assert!(plans.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+
+    #[test]
+    fn divergence_electorate_excludes_a_departed_frozen_ship_without_its_digest() {
+        let plans = gm_divergence_plans(Some(HostSlot(4)));
+        assert_eq!(plans.len(), 5);
+        assert!(plans.windows(2).all(|pair| pair[0] == pair[1]));
+    }
 
     fn gm_grant(sequence: u64, apply_tick: u64) -> GmActionGrant {
         let from = HostSlot(2);

@@ -14,6 +14,7 @@ import { createGmObjectivePanel } from './gm-objective-panel.js';
 import { createGmCommsPanel } from './gm-comms-panel.js';
 import { createGmSpawnPanel } from './gm-spawn-panel.js';
 import { createGmSystemPanel } from './gm-system-panel.js';
+import { createGmRecipientDiagnostics } from './gm-recipient-diagnostics.js';
 import { createGmContactPanel } from './gm-contact-panel.js';
 import { createGmPresentationPanel } from './gm-presentation-panel.js';
 import { createGmDespawnPanel } from './gm-despawn-panel.js';
@@ -604,6 +605,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submit: request => privateSubmit('gm.system', request, () => win.__hostSetSystemDisabled(request)),
   });
   win.__hostGmSystemState = gmSystem.state;
+  const recipientDiagnostics = createGmRecipientDiagnostics({ doc, t });
   gmContact = createGmContactPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
@@ -699,7 +701,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   win.__hostGmPresentationFieldsState = gmPresentationFields.state;
   win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); gmRegionFields.reset(); gmPresentationFields.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); recipientDiagnostics.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); gmRegionFields.reset(); gmPresentationFields.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -713,6 +715,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmSpawnPanel.updateContacts(p);
       gmPresentation.update(p);
       gmSystem.update(p);
+      recipientDiagnostics.update(p);
       gmNpc.update(p);
       updateReading('entity-fields', gmEntityFields, p);
       updateReading('world-fields', gmWorldFields, p);

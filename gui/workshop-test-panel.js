@@ -197,6 +197,9 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   let traceSignature = '';
   const callbackKind = kind => kind === 'callback-scheduled' || kind === 'callback-fired';
   const traceEventText = record => {
+    if (record.kind === 'recipient-diagnostic') return t('workshop.test_trace_recipient', {
+      action: record.action, message: record.message,
+    });
     if (record.kind === 'host-call') return t('workshop.test_trace_call', { function: record.function });
     if (record.kind === 'flag-mutation') return t('workshop.test_trace_flag', {
       name: record.name, before: String(record.before), after: String(record.after),

@@ -1651,6 +1651,22 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
         if let Some(recipient) = &open.recipient_ship {
             acc = fold_str(fold_str(acc, "recipient-ship"), &recipient.0);
         }
+        if let Some(recipients) = &open.recipients {
+            acc = fold_str(acc, "recipient-selection");
+            acc = fold_u64(acc, recipients.selectors.len() as u64);
+            for selector in &recipients.selectors {
+                use crate::objective_instances::RecipientSelector;
+                acc = match selector {
+                    RecipientSelector::ShipSlot(id) => fold_str(fold_str(acc, "slot"), id),
+                    RecipientSelector::Faction(id) => fold_str(fold_str(acc, "faction"), id),
+                    RecipientSelector::AllPlayerShips => fold_str(acc, "all-player-ships"),
+                };
+            }
+            acc = fold_u64(acc, recipients.objective_instances.len() as u64);
+            for key in &recipients.objective_instances {
+                acc = fold_str(fold_str(acc, &key.objective_id), &key.instance_id);
+            }
+        }
     }
     acc
 }

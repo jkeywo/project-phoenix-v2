@@ -3572,6 +3572,195 @@ fn ai_events_apply_modifier_lands_on_target_entity_not_player() {
     );
 }
 
+fn recipient_action_app(script: &str) -> (App, Entity, Entity, Entity) {
+    use crate::sim_rng::InstallSimRng;
+    let mut app = ai_trigger_test_app();
+    app.insert_sim_rng(crate::sim_rng::SimRng::new(
+        1533,
+        crate::sim_rng::SeedSource::World,
+    ));
+    app.init_resource::<ObjectiveInstanceManagerRes>();
+    let (npc, lead) = spawn_two_modifier_targets(&mut app);
+    app.world_mut().entity_mut(lead).insert((
+        crate::server_app::Ship,
+        crate::ship_slots::AuthoredShipSlotId("lead".into()),
+    ));
+    let wing = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::ship_slots::AuthoredShipSlotId("wing".into()),
+            EntityUuid("wing-uuid".into()),
+            crate::modifiers::ShipModifiers::new(),
+        ))
+        .id();
+    let mut config = crate::world::config::WorldConfig::default();
+    config.ship_slots = ["lead", "wing", "absent"]
+        .into_iter()
+        .map(|id| crate::world::config::ShipSlotConfig {
+            id: id.into(),
+            label: None,
+            ships: vec![],
+            default_ship: "fixture.toml".into(),
+            unclaimed: crate::world::config::UnclaimedSlotPolicy::Absent,
+        })
+        .collect();
+    app.insert_resource(config);
+    let mut sr = compile_fixture_scripts(&format!("[script]\nsetup = '''{script}'''"));
+    {
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        merge_script_triggers(&mut runtime, &mut sr, None);
+        runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+    }
+    app.insert_resource(sr);
+    (app, npc, lead, wing)
+}
+
+#[test]
+fn addressed_script_uses_just_activated_instance_members_and_shared_modifier_dispatch() {
+    let run = || {
+        let (mut app, npc, lead, wing) = recipient_action_app(
+            r#"
+            on_world_loaded("workshop_addressed_escort_boost");
+            fn workshop_addressed_escort_boost(ctx) {
+                ctx.effects.add_objective(#{ id: "escort", instance_id: "pair", text: "Escort",
+                    recipient_ship_slots: ["wing"] });
+                ctx.effects.addressed(#{ type: "apply_modifier", slot: "MaxSpeed", tag: "escort_boost",
+                    bonus: flt("1.5"), recipient_ship_slots: ["lead"],
+                    recipient_objective_instances: [#{ objective_id: "escort", instance_id: "pair" }] });
+            }
+        "#,
+        );
+        app.update();
+        let speed = |entity: Entity| {
+            app.world()
+                .entity(entity)
+                .get::<crate::modifiers::ShipModifiers>()
+                .unwrap()
+                .get(&crate::core::messages::ModifierSlot::MaxSpeed)
+        };
+        assert_eq!(speed(npc), 1.0);
+        assert_eq!(speed(lead), 2.5);
+        assert_eq!(speed(wing), 2.5);
+        crate::sim_digest::world_digest(app.world())
+    };
+    assert_eq!(
+        run(),
+        run(),
+        "same authored actions and stable recipient order replay identically"
+    );
+}
+
+#[test]
+fn addressed_actions_exclude_retained_zero_hull_crew_without_erasing_identity() {
+    let (mut app, _, lead, wing) = recipient_action_app(
+        r#"
+        on_world_loaded("run");
+        fn run(ctx) { ctx.effects.addressed(#{ type: "apply_modifier", slot: "MaxSpeed", tag: "live", bonus: 4, all_player_ships: true }); }
+    "#,
+    );
+    app.world_mut()
+        .entity_mut(lead)
+        .insert(crate::entities::spawner::EntitySystemHull(
+            crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("hull".into()),
+                0.0,
+            )]),
+        ));
+    app.update();
+    assert!(app.world().get::<crate::server_app::Ship>(lead).is_some());
+    assert_eq!(
+        app.world()
+            .get::<crate::ship_slots::AuthoredShipSlotId>(lead)
+            .unwrap()
+            .0,
+        "lead"
+    );
+    for (entity, speed) in [(lead, 1.0), (wing, 5.0)] {
+        assert_eq!(
+            app.world()
+                .get::<crate::modifiers::ShipModifiers>(entity)
+                .unwrap()
+                .get(&crate::core::messages::ModifierSlot::MaxSpeed),
+            speed
+        );
+    }
+}
+
+#[test]
+fn addressed_and_legacy_removal_keep_authored_execution_order() {
+    let addressed = r#"ctx.effects.addressed(#{ type: "apply_modifier", slot: "MaxSpeed", tag: "ordered", bonus: 4, recipient_ship_slots: ["lead"] });"#;
+    let removal = r#"ctx.effects.destroy_entity("player_ship");"#;
+    for remove_first in [false, true] {
+        let body = if remove_first {
+            format!("{removal} {addressed}")
+        } else {
+            format!("{addressed} {removal}")
+        };
+        let (mut app, _, lead, _) = recipient_action_app(&format!(
+            "on_world_loaded(\"run\"); fn run(ctx) {{ {body} }}"
+        ));
+        app.update();
+        assert!(app.world().get_entity(lead).is_err());
+        let count = app
+            .world()
+            .get_resource::<crate::recipients::RecipientDiagnostics>()
+            .map_or(0, |diagnostics| diagnostics.0.len());
+        assert_eq!(
+            count,
+            usize::from(remove_first),
+            "only a removal authored first leaves an empty selection"
+        );
+    }
+}
+
+#[test]
+fn addressed_empty_and_invalid_dynamic_selection_do_not_widen_and_report_source() {
+    let (mut app, npc, lead, wing) = recipient_action_app(
+        r#"
+        on_world_loaded("run");
+        fn missing() { ["typo"] }
+        fn run(ctx) {
+            ctx.effects.addressed(#{ type: "apply_modifier", slot: "MaxSpeed", tag: "empty", bonus: 4,
+                recipient_ship_slots: ["absent"] });
+            ctx.effects.addressed(#{ type: "apply_modifier", slot: "MaxSpeed", tag: "invalid", bonus: 4,
+                recipient_ship_slots: missing(), all_player_ships: true });
+        }
+    "#,
+    );
+    app.init_resource::<crate::workshop::test_trace::TestTrace>();
+    app.update();
+    for entity in [npc, lead, wing] {
+        assert_eq!(
+            app.world()
+                .entity(entity)
+                .get::<crate::modifiers::ShipModifiers>()
+                .unwrap()
+                .get(&crate::core::messages::ModifierSlot::MaxSpeed),
+            1.0
+        );
+    }
+    let diagnostics = &app
+        .world()
+        .resource::<crate::recipients::RecipientDiagnostics>()
+        .0;
+    assert_eq!(diagnostics.len(), 2);
+    assert!(diagnostics[0].message.contains("No current"));
+    assert!(diagnostics[1].message.contains("typo"));
+    assert!(diagnostics
+        .iter()
+        .all(|row| row.source.is_some() && row.line.is_some()));
+    assert!(app
+        .world()
+        .resource::<crate::workshop::test_trace::TestTrace>()
+        .records()
+        .iter()
+        .any(|row| matches!(
+            row.kind,
+            crate::workshop::test_protocol::TestTraceKind::RecipientDiagnostic { .. }
+        )));
+}
+
 #[test]
 fn ai_events_remove_modifier_undoes_only_the_target_entity() {
     let mut app = ai_trigger_test_app();

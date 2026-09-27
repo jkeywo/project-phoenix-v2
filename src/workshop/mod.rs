@@ -321,6 +321,34 @@ fn validate_world(path: &str, sources: &Sources, report: &mut WorkshopValidation
             report.extend(compiled.findings.clone());
         }
     }
+    let mut recipient_catalog = crate::recipients::RecipientCatalog {
+        ship_slots: root
+            .config
+            .effective_ship_slots()
+            .into_iter()
+            .map(|slot| slot.id)
+            .collect(),
+        factions: sources
+            .0
+            .iter()
+            .filter(|(path, _)| path.starts_with("assets/factions/") && path.ends_with(".toml"))
+            .filter_map(|(_, source)| crate::ai::faction::parse_faction_config(source).ok())
+            .map(|faction| faction.name)
+            .collect(),
+        ..Default::default()
+    };
+    for world in std::iter::once(&root).chain(children.iter().map(|(_, child)| child)) {
+        if let Some(compiled) = &world.scripts {
+            recipient_catalog
+                .objective_instances
+                .extend(compiled.recipient_references.declarations.iter().cloned());
+        }
+    }
+    for world in std::iter::once(&root).chain(children.iter().map(|(_, child)| child)) {
+        if let Some(compiled) = &world.scripts {
+            report.extend(compiled.recipient_references.validate(&recipient_catalog));
+        }
+    }
     // Keep the source records separate from the borrowed validation views.
     let root_text = WorldReader::read(sources, path).unwrap_or_default();
     let mut root_source = WorldSource::new(path, &root_text, &root.config);

@@ -4555,3 +4555,6 @@ dynasty.console.power.label,Dynasty role and attack-cycle onboarding,[Dynasty Po
 dynasty.onboarding.damage_control.role,Dynasty role and attack-cycle onboarding,"[Focus shields and dispatch repair teams. Report protection and repair needs to Power, and restore the ship while Helm withdraws for the next attack.]"
 dynasty.console.damage_control.title,Dynasty role and attack-cycle onboarding,[Project Phoenix — Dynasty Damage Control]
 dynasty.console.damage_control.label,Dynasty role and attack-cycle onboarding,[Dynasty Damage Control Console]
+gm.recipients.diagnostics,GM recipient selection authoring feedback,[Recipient diagnostics]
+gm.recipients.diagnostic_at,GM recipient diagnostic source action and tick,[Tick {tick}: {action}]
+workshop.test_trace_recipient,Workshop recipient selection execution diagnostic,[{action}: {message}]

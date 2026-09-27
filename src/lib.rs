@@ -195,6 +195,7 @@ pub mod objective_instances;
 pub mod objectives;
 pub mod radar;
 pub mod radar_config;
+pub mod recipients;
 /// The viewscreen's reference grid: the authored `[reference_grid]` table, its
 /// validation, and the world-lattice maths `assets/shaders/reference_grid.wgsl`
 /// mirrors. Bevy-free and unit-tested here; the render half is

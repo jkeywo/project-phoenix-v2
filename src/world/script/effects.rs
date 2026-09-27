@@ -1098,6 +1098,13 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         },
     );
     engine.register_fn(
+        "addressed",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(addressed_action(&spec).map_err(raise)?);
+            Ok(())
+        },
+    );
+    engine.register_fn(
         "add_objective",
         |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
             // Read the script map into a `RawActionEntry` and run the SHARED
@@ -1444,6 +1451,84 @@ fn presentation_action(
     })
 }
 
+fn addressed_action(spec: &Map) -> Result<TriggerAction, String> {
+    let recipients = crate::recipients::RecipientSelection::from_rhai_map(spec)?
+        .ok_or("addressed requires an explicit recipient selection")?;
+    // Preserve integer values for typed tick counts and integer modifiers;
+    // the spawn-override converter intentionally converts numbers to floats.
+    fn json(value: &Dynamic) -> Result<serde_json::Value, String> {
+        if let Some(value) = value.clone().try_cast::<RealLit>() {
+            return serde_json::Number::from_f64(value.0)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| "addressed action fractional values must be finite".to_string());
+        }
+        if let Some(value) = value.clone().try_cast::<ImmutableString>() {
+            return Ok(serde_json::Value::String(value.to_string()));
+        }
+        if let Some(value) = value.clone().try_cast::<bool>() {
+            return Ok(value.into());
+        }
+        if let Some(value) = value.clone().try_cast::<i64>() {
+            return Ok(value.into());
+        }
+        if let Some(values) = value.clone().try_cast::<rhai::Array>() {
+            return values
+                .iter()
+                .map(json)
+                .collect::<Result<Vec<_>, _>>()
+                .map(serde_json::Value::Array);
+        }
+        if let Some(values) = value.clone().try_cast::<Map>() {
+            return values
+                .iter()
+                .map(|(key, value)| Ok((key.to_string(), json(value)?)))
+                .collect::<Result<serde_json::Map<_, _>, String>>()
+                .map(serde_json::Value::Object);
+        }
+        Err(
+            "addressed action fields must contain strings, integers, flt literals, booleans, arrays, or maps"
+                .into(),
+        )
+    }
+    let mut fields = serde_json::Map::new();
+    for (key, value) in spec {
+        match key.as_str() {
+            "recipient_ship_slots"
+            | "recipient_factions"
+            | "all_player_ships"
+            | "recipient_objective_instances" => continue,
+            "type"
+            | "id"
+            | "state"
+            | "target"
+            | "tag"
+            | "slot"
+            | "bonus"
+            | "int_bonus"
+            | "kind"
+            | "presentation"
+            | "contact_information" => {
+                fields.insert(key.to_string(), json(value)?);
+            }
+            _ => return Err(format!("unsupported addressed action field `{key}`")),
+        }
+    }
+    // An internal alias is replaced before dispatch. Authors cannot provide an
+    // entity beside selectors and thereby accidentally choose two destinations.
+    fields.insert("entity".into(), "addressed_recipient".into());
+    let raw = serde_json::from_value::<RawActionEntry>(fields.into())
+        .map_err(|error| format!("invalid addressed action: {error}"))?;
+    if raw.bonus.is_some_and(|value| !value.is_finite()) {
+        return Err("addressed modifier bonus must be finite".into());
+    }
+    let action = parse_action_entry(&raw)?;
+    crate::recipients::retarget_action(&action, "addressed_recipient")?;
+    Ok(TriggerAction::Addressed {
+        recipients,
+        action: Box::new(action),
+    })
+}
+
 fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
     const KNOWN_FIELDS: &[&str] = &[
         "id",
@@ -1720,6 +1805,7 @@ fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
     Ok(OpenCommsRequest {
         sender_uuid: None,
         recipient_ship: None,
+        recipients: crate::recipients::RecipientSelection::from_rhai_map(spec)?,
         from,
         root_fn,
         display_name: map_str(spec, "display_name"),
@@ -1738,6 +1824,30 @@ mod tests {
     use crate::world::script::engine::runtime_engine;
     use crate::world::script::flags::Flags;
     use rhai::{Dynamic, Map};
+
+    #[test]
+    fn addressed_fractional_modifier_uses_the_ordinary_typed_parser() {
+        let effects = run_buffered(
+            r#"fn f(ctx) {
+            ctx.effects.addressed(#{ type: "apply_modifier", tag: "escort",
+                slot: "MaxSpeed", bonus: flt("1.5"), recipient_ship_slots: ["lead"] });
+        }"#,
+            "f",
+        );
+        let BufferedEffect::Action(TriggerAction::Addressed { recipients, action }) = &effects[0]
+        else {
+            panic!("expected addressed ordinary action");
+        };
+        assert_eq!(
+            recipients.selectors,
+            vec![crate::objective_instances::RecipientSelector::ShipSlot(
+                "lead".into()
+            )]
+        );
+        assert!(
+            matches!(action.as_ref(), TriggerAction::ApplyModifier { bonus, .. } if *bonus == 1.5)
+        );
+    }
 
     /// Build the `#{ effects, flags }` context one call reads. Flags share the one
     /// ordered buffer (issue #981) so a flag write lands in `sink` alongside
@@ -3078,6 +3188,7 @@ mod tests {
             vec![OpenCommsRequest {
                 sender_uuid: None,
                 recipient_ship: None,
+                recipients: None,
                 from: "axiom".to_string(),
                 root_fn: "hail_axiom".to_string(),
                 display_name: Some("Axiom Control".to_string()),
@@ -3103,6 +3214,7 @@ mod tests {
             vec![OpenCommsRequest {
                 sender_uuid: None,
                 recipient_ship: None,
+                recipients: None,
                 from: "axiom".to_string(),
                 root_fn: "hail".to_string(),
                 display_name: None,

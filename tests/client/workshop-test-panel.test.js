@@ -92,6 +92,8 @@ it('renders bounded runtime order as filtered non-colour records with source nav
       source: { path: `${WORKSHOP_WORLD}#script.main` } },
     { tick: 7, order: 3, kind: 'flag-mutation', name: 'fleet_ready', before: 0, after: 1,
       source: {} },
+    { tick: 7, order: 4, kind: 'recipient-diagnostic', action: 'addressed', message: 'No current ships',
+      source: { path: WORKSHOP_WORLD, line: 9 } },
   ];
   const run = { running: true, starting: false, paused: false, tick: 7, multiplier: 1,
     ships: [{ entity: 'ship-2', name: 'Second ship' }], view: { view: 'ship', entity: null }, trace };
@@ -103,12 +105,15 @@ it('renders bounded runtime order as filtered non-colour records with source nav
     busy: () => false, openSource });
   await vi.waitFor(() => expect(document.getElementById('workshop-test-start').disabled).toBe(false));
   document.getElementById('workshop-test-start').click();
-  await vi.waitFor(() => expect(document.querySelectorAll('#workshop-test-trace-list li')).toHaveLength(4));
+  await vi.waitFor(() => expect(document.querySelectorAll('#workshop-test-trace-list li')).toHaveLength(5));
   expect([...document.querySelectorAll('.workshop-test-trace-identity')].map(node => node.textContent))
     .toEqual([t('workshop.test_trace_identity', { tick: '7', order: '0' }),
       t('workshop.test_trace_identity', { tick: '7', order: '1' }),
       t('workshop.test_trace_identity', { tick: '7', order: '2' }),
-      t('workshop.test_trace_identity', { tick: '7', order: '3' })]);
+      t('workshop.test_trace_identity', { tick: '7', order: '3' }),
+      t('workshop.test_trace_identity', { tick: '7', order: '4' })]);
+  expect(document.querySelector('[data-kind="recipient-diagnostic"] .workshop-test-trace-event').textContent)
+    .toBe(t('workshop.test_trace_recipient', { action: 'addressed', message: 'No current ships' }));
   const flagEvents = [...document.querySelectorAll('[data-kind="flag-mutation"] .workshop-test-trace-event')]
     .map(node => node.textContent);
   expect(flagEvents[0])
@@ -126,7 +131,7 @@ it('renders bounded runtime order as filtered non-colour records with source nav
   view.dispatchEvent(new Event('change'));
   await vi.waitFor(() => expect(provider.test.control).toHaveBeenCalled());
   panel.refresh();
-  expect(document.querySelectorAll('#workshop-test-trace-list li')).toHaveLength(4);
+  expect(document.querySelectorAll('#workshop-test-trace-list li')).toHaveLength(5);
   filter.value = 'callback'; filter.dispatchEvent(new Event('change'));
   document.querySelector('.workshop-test-trace-source').click();
   await vi.waitFor(() => expect(openSource).toHaveBeenCalledWith(`${WORKSHOP_WORLD}#script.main`, undefined));

@@ -52,6 +52,8 @@ use crate::world::server::{
 /// and `balance_events` is the ledger the shared apply path writes.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct ScriptedCommsAux<'w> {
+    recipient_catalog: Option<Res<'w, crate::recipients::RecipientCatalog>>,
+    objective_instances: Option<Res<'w, crate::world::server::ObjectiveInstanceManagerRes>>,
     id_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Entity as usize }>,
     message_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Message as usize }>,
     balance_events:
@@ -121,6 +123,8 @@ pub(crate) fn open_scripted_comms_threads(
         Has<crate::comms::component::CommsRange>,
         Option<&crate::entities::spawner::EntitySystemHull>,
         Option<&crate::ship::components::ShipConfigComponent>,
+        Option<&crate::ship_slots::AuthoredShipSlotId>,
+        Option<&crate::entities::spawner::FactionComponent>,
     )>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
     mut ai_query: Query<
@@ -204,6 +208,133 @@ pub(crate) fn open_scripted_comms_threads(
     let runtime = &mut *runtime;
 
     for req in requests {
+        let source_line = sr
+            .function_lines
+            .get(&req.script_path)
+            .and_then(|lines| lines.get(&req.root_fn))
+            .copied();
+        let diagnostic = |commands: &mut Commands, message: String| {
+            crate::recipients::queue_report(
+                commands,
+                now_tick,
+                &req.script_path,
+                source_line,
+                "open_comms",
+                message,
+            );
+        };
+        let mut recipients = if let Some(selection) = &req.recipients {
+            if req.recipient_ship.is_some() {
+                bevy::log::warn!("open_comms cannot combine a bound recipient with selectors");
+                diagnostic(
+                    &mut commands,
+                    "Cannot combine a bound recipient with selectors".into(),
+                );
+                continue;
+            }
+            let mut catalog = aux
+                .recipient_catalog
+                .as_deref()
+                .cloned()
+                .unwrap_or_default();
+            catalog
+                .objective_instances
+                .extend(sr.recipient_declarations.iter().cloned());
+            if let Some(config) = world_layers.base_world_config.as_deref() {
+                catalog.ship_slots.extend(
+                    config
+                        .effective_ship_slots()
+                        .into_iter()
+                        .map(|slot| slot.id),
+                );
+            }
+            if let Some(registry) = faction_dispatch.registry.as_deref() {
+                catalog
+                    .factions
+                    .extend(registry.iter().map(|faction| faction.name.clone()));
+            }
+            let empty = crate::objective_instances::ObjectiveInstanceManager::default();
+            let instances = aux
+                .objective_instances
+                .as_deref()
+                .map(|manager| &manager.0)
+                .unwrap_or(&empty);
+            catalog
+                .objective_instances
+                .extend(instances.records().iter().map(|row| row.spec.key.clone()));
+            let fleet = routed_endpoints
+                .iter()
+                .filter_map(|(uuid, _, is_ship, _, _, _, _, slot, faction)| {
+                    if !is_ship {
+                        return None;
+                    }
+                    let slot = slot?;
+                    Some(crate::objective_instances::PlayerShipMembership {
+                        ship_id: uuid.0.clone(),
+                        slot_id: slot.0.clone(),
+                        faction: faction
+                            .and_then(|faction| {
+                                faction_dispatch
+                                    .registry
+                                    .as_deref()
+                                    .and_then(|registry| registry.get(&faction.0))
+                            })
+                            .map(|faction| faction.name.clone())
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            match selection.resolve(&catalog, &fleet, instances) {
+                Ok(ships) if ships.is_empty() => {
+                    bevy::log::warn!("open_comms selected no current player ships");
+                    diagnostic(
+                        &mut commands,
+                        "No current player ships matched; no dialogue was opened".into(),
+                    );
+                    continue;
+                }
+                Ok(ships) => ships
+                    .into_iter()
+                    .map(|ship| Some(crate::command_admission::log::ShipKey(ship)))
+                    .collect::<Vec<_>>(),
+                Err(error) => {
+                    bevy::log::warn!("open_comms recipients refused: {error}");
+                    diagnostic(&mut commands, error.to_string());
+                    continue;
+                }
+            }
+        } else {
+            vec![req.recipient_ship.clone()]
+        };
+        if req.recipients.is_some() {
+            recipients.retain(|recipient| {
+                recipient.as_ref().is_some_and(|ship| {
+                    let mut matches = routed_endpoints
+                        .iter()
+                        .filter(|(uuid, ..)| uuid.0 == ship.0);
+                    let compatible = matches.next().is_some_and(
+                        |(_, _, is_ship, fleet, _, hull, config, ..)| {
+                            is_ship
+                                && fleet
+                                && hull.is_none_or(|h| h.0.total_current() > 0.0)
+                                && config.is_some_and(|c| {
+                                    c.0.system(&crate::ship::system_registry::comms_system_id())
+                                        .is_some()
+                                })
+                        },
+                    );
+                    compatible && matches.next().is_none()
+                })
+            });
+            if recipients.is_empty() {
+                bevy::log::warn!("open_comms selected no available receiving player ships");
+                diagnostic(
+                    &mut commands,
+                    "No selected player ship has available Comms; no dialogue was opened".into(),
+                );
+                continue;
+            }
+        }
         // An explicit identity is immutable across queueing, restore and name
         // reuse. A vanished recipient never widens to the rest of the fleet.
         if req.sender_uuid.as_ref().is_some_and(|sender| {
@@ -214,7 +345,7 @@ pub(crate) fn open_scripted_comms_threads(
                 let compatible =
                     matches
                         .next()
-                        .is_some_and(|(_, hailable, _, _, range, hull, _)| {
+                        .is_some_and(|(_, hailable, _, _, range, hull, _, ..)| {
                             hailable.is_some()
                                 && range
                                 && hull.is_none_or(|h| h.0.total_current() > 0.0)
@@ -228,7 +359,7 @@ pub(crate) fn open_scripted_comms_threads(
             let compatible =
                 matches
                     .next()
-                    .is_some_and(|(_, _, is_ship, fleet, _, hull, config)| {
+                    .is_some_and(|(_, _, is_ship, fleet, _, hull, config, ..)| {
                         is_ship
                             && fleet
                             && hull.is_none_or(|h| h.0.total_current() > 0.0)
@@ -425,53 +556,70 @@ pub(crate) fn open_scripted_comms_threads(
             continue;
         };
 
-        let thread_id = req.thread_id.clone().unwrap_or_else(|| {
-            crate::world_id::mint_live_id_with(
+        // Enter the root and apply its effects once, then materialise one
+        // independently addressed dialogue per recipient in stable UUID order.
+        for recipient in recipients {
+            let thread_id = req
+                .thread_id
+                .as_ref()
+                .map(|thread| {
+                    if let Some(ship) = recipient.as_ref().filter(|_| req.recipients.is_some()) {
+                        // Keep repricing on this receiver's stable thread. Sharing
+                        // an authored id across the fan-out would let another
+                        // receiver's copy supersede its Backfill response.
+                        format!("recipient:{}:{}:{thread}", ship.0.len(), ship.0)
+                    } else {
+                        thread.clone()
+                    }
+                })
+                .unwrap_or_else(|| {
+                    crate::world_id::mint_live_id_with(
+                        aux.message_mint.as_deref(),
+                        crate::world_id::IdNamespace::Message,
+                    )
+                });
+            let (wire_node, on_pick) = project_node(&node);
+            let msg_id = crate::world_id::mint_live_id_with(
                 aux.message_mint.as_deref(),
                 crate::world_id::IdNamespace::Message,
-            )
-        });
-        let (wire_node, on_pick) = project_node(&node);
-        let msg_id = crate::world_id::mint_live_id_with(
-            aux.message_mint.as_deref(),
-            crate::world_id::IdNamespace::Message,
-        );
-        // The FLEET's reading, not this host's (issue #1343): this stamp is
-        // stored on the message for its whole life and folded by `sim_digest`
-        // (both `sender_in_range` and the per-response `available` it drives),
-        // so taking it from `LocalShip` — a different hull on each host — writes
-        // a folded field two peers disagree about. `CommsInboxRes` is one
-        // resource for the whole fleet, so the fleet-wide reading is the one
-        // that matches what is being stamped.
-        let available = crate::comms::server::sender_in_range_for_fleet(&comms, &sender_uuid);
-        let responses = response_views(&wire_node.responses, available);
-        let mut msg = CommsMessage::injected(
-            msg_id.clone(),
-            sender_uuid,
-            sender_name,
-            wire_node.body.clone(),
-            wire_node.body_params.clone(),
-            responses,
-            thread_id.clone(),
-            available,
-            req.effective_priority(),
-        );
-        msg.recipient_ship = req.recipient_ship.clone();
-        channel2_writer.write(CommsChannel2Event::scripted_dialogue(msg));
-        comms.active_dialogues.insert(
-            msg_id,
-            ActiveDialogue {
-                current_node: wire_node,
-                thread_id,
-                script: ScriptedDialogue {
-                    recipient_ship: req.recipient_ship.clone(),
-                    script_path: req.script_path.clone(),
-                    origin_layer: req.origin_layer.clone(),
-                    node_fn: req.root_fn.clone(),
-                    on_pick,
+            );
+            // The FLEET's reading, not this host's (issue #1343): this stamp is
+            // stored on the message for its whole life and folded by `sim_digest`
+            // (both `sender_in_range` and the per-response `available` it drives),
+            // so taking it from `LocalShip` — a different hull on each host — writes
+            // a folded field two peers disagree about. `CommsInboxRes` is one
+            // resource for the whole fleet, so the fleet-wide reading is the one
+            // that matches what is being stamped.
+            let available = crate::comms::server::sender_in_range_for_fleet(&comms, &sender_uuid);
+            let responses = response_views(&wire_node.responses, available);
+            let mut msg = CommsMessage::injected(
+                msg_id.clone(),
+                sender_uuid.clone(),
+                sender_name.clone(),
+                wire_node.body.clone(),
+                wire_node.body_params.clone(),
+                responses,
+                thread_id.clone(),
+                available,
+                req.effective_priority(),
+            );
+            msg.recipient_ship = recipient.clone();
+            channel2_writer.write(CommsChannel2Event::scripted_dialogue(msg));
+            comms.active_dialogues.insert(
+                msg_id,
+                ActiveDialogue {
+                    current_node: wire_node,
+                    thread_id,
+                    script: ScriptedDialogue {
+                        recipient_ship: recipient.clone(),
+                        script_path: req.script_path.clone(),
+                        origin_layer: req.origin_layer.clone(),
+                        node_fn: req.root_fn.clone(),
+                        on_pick,
+                    },
                 },
-            },
-        );
+            );
+        }
     }
 }
 

@@ -98,7 +98,7 @@ impl Plugin for CommsConsolePlugin {
 
 // ── Blackboard publish ────────────────────────────────────────────────────────
 
-fn publish_comms_blackboard(
+pub(crate) fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
     runtime: Option<Res<CommsRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,

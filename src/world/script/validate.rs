@@ -308,7 +308,7 @@ pub fn validate_deadline_handlers(
 /// mistaken for code, while an authored string like an `on_pick` fn name is
 /// still readable as data ([`Tok::Str`]).
 #[derive(Debug, PartialEq, Eq)]
-enum Tok {
+pub(super) enum Tok {
     /// An identifier run (`flags`, `score`, `ctx`, `increment`, …).
     Ident(String),
     /// A string or char literal, carrying its contents. Whatever is inside is
@@ -334,9 +334,9 @@ enum Tok {
 }
 
 /// A token plus the 1-based source line it starts on (for locating a finding).
-struct Token {
-    kind: Tok,
-    line: usize,
+pub(super) struct Token {
+    pub(super) kind: Tok,
+    pub(super) line: usize,
 }
 
 /// If a compound-assignment operator starts at `chars[i]`, its length in chars
@@ -371,13 +371,24 @@ fn opassign_len(chars: &[char], i: usize) -> Option<usize> {
 /// string/char literals (mirroring Rhai's tokenizer so a `+=` in a comment or
 /// string is invisible here).
 fn lex_significant(source: &str) -> Vec<Token> {
+    lex_significant_raw(source)
+        .into_iter()
+        .map(|(token, _)| token)
+        .collect()
+}
+
+/// Preserve exact literal spelling for source-aware recipient validation.
+/// Existing callers continue to consume the same significant token stream.
+pub(super) fn lex_significant_raw(source: &str) -> Vec<(Token, String)> {
     let chars: Vec<char> = source.chars().collect();
     let n = chars.len();
     let mut tokens = Vec::new();
+    let mut output = Vec::new();
     let mut i = 0usize;
     let mut line = 1usize;
 
     while i < n {
+        let token_start = i;
         let c = chars[i];
         match c {
             '\n' => {
@@ -560,9 +571,11 @@ fn lex_significant(source: &str) -> Vec<Token> {
                 }
             }
         }
+        for token in tokens.drain(..) {
+            output.push((token, chars[token_start..i].iter().collect()));
+        }
     }
-
-    tokens
+    output
 }
 
 /// Best-effort 1-based definition lines for named Rhai functions.

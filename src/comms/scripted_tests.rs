@@ -41,6 +41,7 @@ fn request(root_fn: &str, from: &str) -> OpenCommsRequest {
     OpenCommsRequest {
         sender_uuid: None,
         recipient_ship: None,
+        recipients: None,
         from: from.to_string(),
         root_fn: root_fn.to_string(),
         display_name: None,
@@ -50,6 +51,287 @@ fn request(root_fn: &str, from: &str) -> OpenCommsRequest {
         script_path: PATH.to_string(),
         origin_layer: None,
     }
+}
+
+fn recipient_comms_app() -> App {
+    use crate::sim_rng::InstallSimRng;
+    let mut app = scripted_comms_app();
+    // These run-scope resources are always present in a real session and are
+    // explicitly restored even when empty; absence has a distinct digest.
+    app.init_resource::<crate::gm_action::SimulationPaused>()
+        .init_resource::<crate::core::report::MissionReport>()
+        .init_resource::<crate::gm_action::GmActionJournal>()
+        .init_resource::<crate::gm_puppet::StationPuppets>()
+        .init_resource::<crate::gm_puppet::PendingGmStationCommands>();
+    // The production plugin graph registers every optional capture column.
+    // A small fixture must register them too: World::try_query cannot build
+    // the entity snapshot query while one component type is unknown.
+    app.world_mut()
+        .register_component::<crate::ship::state::ShipPhysics>();
+    app.world_mut()
+        .register_component::<crate::entities::spawner::EntitySystemHull>();
+    app.world_mut()
+        .register_component::<crate::ship::state::ShipRedAlert>();
+    app.world_mut()
+        .register_component::<crate::console::command::server::ShipStationStances>();
+    app.world_mut()
+        .register_component::<crate::ship_plugin::ShipSystemControlSources>();
+    // Restore prepares the asteroid query even when the world has no rocks.
+    // Keep the same registered-but-empty namespace on the uninterrupted peer.
+    app.world_mut()
+        .register_component::<crate::server_app::AsteroidUuid>();
+    app.world_mut().register_component::<Transform>();
+    app.insert_sim_rng(crate::sim_rng::SimRng::new(
+        1533,
+        crate::sim_rng::SeedSource::World,
+    ));
+    let factions = crate::entities::config_cache::get_faction_registry();
+    let alliance = factions.uuid_by_name("Alliance").unwrap();
+    let pirate = factions.uuid_by_name("Pirate").unwrap();
+    app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
+        factions,
+    ));
+    app.init_resource::<crate::world::server::ObjectiveInstanceManagerRes>();
+    app.insert_resource(crate::recipients::RecipientCatalog {
+        ship_slots: ["lead", "wing", "absent"].map(String::from).into(),
+        factions: ["Alliance", "Pirate"].map(String::from).into(),
+        ..Default::default()
+    });
+    app.add_systems(
+        PostUpdate,
+        crate::console::comms::server::publish_comms_blackboard,
+    );
+    for (index, slot, faction) in [(1, "lead", alliance), (2, "wing", pirate)] {
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            EntityUuid(slot.into()),
+            crate::ship_slots::AuthoredShipSlotId(slot.into()),
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot(index)),
+            crate::entities::spawner::FactionComponent(faction),
+            crate::ship::components::ShipConfigComponent::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+        ));
+    }
+    app.world_mut()
+        .insert_world_id_mint(crate::world_id::WorldIdMint::default());
+    app.insert_resource(compile_fixture(
+        r#"
+        fn hail(ctx) { ctx.flags.increment("root_calls", 1);
+            #{ message: "Private orders", responses: [#{ text: "Acknowledge", on_pick: "ack" }] } }
+        fn ack(ctx) { ctx.flags.increment("answers", 1); }
+    "#,
+    ));
+    app
+}
+
+fn recipient_messages(app: &mut App, ship: &str) -> Vec<crate::core::messages::CommsMessage> {
+    let mut query = app
+        .world_mut()
+        .query::<(&EntityUuid, &crate::server_app::ShipSystemBlackboards)>();
+    query
+        .iter(app.world())
+        .find_map(|(uuid, boards)| {
+            if uuid.0 != ship {
+                return None;
+            }
+            let crate::core::messages::SystemBlackboard::Comms(board) = boards
+                .0
+                .get(&crate::ship::system_registry::comms_system_id())?
+            else {
+                return None;
+            };
+            Some(board.messages.clone())
+        })
+        .unwrap()
+}
+
+#[test]
+fn addressed_comms_runs_root_once_and_uses_ordinary_ship_projection() {
+    let mut app = recipient_comms_app();
+    app.world_mut()
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_comms_opens
+        .push(OpenCommsRequest {
+            recipients: crate::recipients::RecipientSelection::from_fields(
+                Some(vec!["lead".into()]),
+                None,
+                Some(true),
+                None,
+            )
+            .unwrap(),
+            ..request("hail", "control")
+        });
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("root_calls"),
+        1
+    );
+    let lead = recipient_messages(&mut app, "lead");
+    let wing = recipient_messages(&mut app, "wing");
+    assert_eq!(lead.len(), 1);
+    assert_eq!(wing.len(), 1);
+    assert_ne!(lead[0].id, wing[0].id);
+    assert!(!lead[0].is_for_ship(Some("wing")));
+    assert!(!wing[0].is_for_ship(Some("lead")));
+    assert_eq!(
+        app.world()
+            .resource::<CommsRuntime>()
+            .active_dialogues
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn addressed_comms_authored_threads_are_private_and_stable_on_reopen() {
+    let mut app = recipient_comms_app();
+    let open = OpenCommsRequest {
+        thread_id: Some("escort-orders".into()),
+        recipients: crate::recipients::RecipientSelection::from_fields(
+            None,
+            None,
+            Some(true),
+            None,
+        )
+        .unwrap(),
+        ..request("hail", "control")
+    };
+    for _ in 0..2 {
+        app.world_mut()
+            .resource_mut::<WorldScriptRuntime>()
+            .pending_comms_opens
+            .push(open.clone());
+        app.update();
+    }
+    let lead = recipient_messages(&mut app, "lead");
+    let wing = recipient_messages(&mut app, "wing");
+    assert_eq!((lead.len(), wing.len()), (2, 2));
+    assert_ne!(lead[0].thread_id, wing[0].thread_id);
+    assert_eq!(lead[0].thread_id, lead[1].thread_id);
+    assert_eq!(wing[0].thread_id, wing[1].thread_id);
+    let inbox = &app.world().resource::<CommsInboxRes>().0;
+    assert!(inbox
+        .messages_for_thread(&lead[0].thread_id)
+        .iter()
+        .all(|message| message.is_for_ship(Some("lead"))));
+    assert!(inbox
+        .messages_for_thread(&wing[0].thread_id)
+        .iter()
+        .all(|message| message.is_for_ship(Some("wing"))));
+}
+
+#[test]
+fn addressed_comms_empty_selection_does_not_enter_root_or_broadcast() {
+    let mut app = recipient_comms_app();
+    app.world_mut()
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_comms_opens
+        .push(OpenCommsRequest {
+            recipients: crate::recipients::RecipientSelection::from_fields(
+                Some(vec!["absent".into()]),
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+            ..request("hail", "control")
+        });
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("root_calls"),
+        0
+    );
+    assert!(recipient_messages(&mut app, "lead").is_empty());
+    assert!(recipient_messages(&mut app, "wing").is_empty());
+    assert_eq!(
+        app.world()
+            .resource::<crate::recipients::RecipientDiagnostics>()
+            .0
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn addressed_comms_resolves_changed_instance_membership_after_snapshot_restore() {
+    use crate::objective_instances::{
+        ObjectiveInstanceKey, ObjectiveInstanceSpec, RecipientSelector,
+    };
+    let mut original = recipient_comms_app();
+    let key = ObjectiveInstanceKey {
+        objective_id: "escort".into(),
+        instance_id: "pair".into(),
+    };
+    let fleet = crate::objective_instances::player_ship_memberships(original.world_mut());
+    original
+        .world_mut()
+        .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
+        .0
+        .activate(
+            ObjectiveInstanceSpec {
+                key: key.clone(),
+                recipients: vec![RecipientSelector::Faction("Alliance".into())],
+            },
+            &fleet,
+        )
+        .unwrap();
+    original
+        .world_mut()
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_comms_opens
+        .push(OpenCommsRequest {
+            recipients: crate::recipients::RecipientSelection::from_fields(
+                None,
+                None,
+                None,
+                Some(vec![key]),
+            )
+            .unwrap(),
+            ..request("hail", "control")
+        });
+    let snapshot = crate::snapshot::capture(original.world());
+    assert_eq!(
+        snapshot.entities.len(),
+        2,
+        "both receiving ships are captured"
+    );
+    let mut restored = recipient_comms_app();
+    let report = crate::snapshot::restore(restored.world_mut(), &snapshot);
+    assert!(report.is_complete(), "snapshot gaps: {:?}", report.gaps);
+    for app in [&mut original, &mut restored] {
+        let registry = app
+            .world()
+            .resource::<crate::entities::config_cache::FactionRegistryResource>();
+        let alliance = registry.uuid_by_name("Alliance").unwrap();
+        let pirate = registry.uuid_by_name("Pirate").unwrap();
+        let mut ships = app
+            .world_mut()
+            .query::<(&EntityUuid, &mut crate::entities::spawner::FactionComponent)>();
+        for (uuid, mut faction) in ships.iter_mut(app.world_mut()) {
+            faction.0 = if uuid.0 == "wing" { alliance } else { pirate };
+        }
+        crate::objective_instances::reconcile_memberships(app.world_mut());
+        app.update();
+        assert!(recipient_messages(app, "lead").is_empty());
+        assert_eq!(recipient_messages(app, "wing").len(), 1);
+    }
+    assert_eq!(
+        recipient_messages(&mut original, "wing"),
+        recipient_messages(&mut restored, "wing")
+    );
+    assert_eq!(
+        crate::sim_digest::world_digest(original.world()),
+        crate::sim_digest::world_digest(restored.world()),
+        "original stages {:?}; restored stages {:?}",
+        crate::sim_digest::digest_stages(original.world()),
+        crate::sim_digest::digest_stages(restored.world()),
+    );
 }
 
 const AXIOM_TREE: &str = r#"

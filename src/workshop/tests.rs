@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn save_validation_reports_literal_recipient_references_in_resolved_scripts() {
+    let path = "assets/worlds/recipients.toml";
+    for (selection, expected) in [
+        ("recipient_ship_slots: [\"missing\"]", Some("ship slot")),
+        ("recipient_factions: [\"missing\"]", Some("faction")),
+        ("recipient_objective_instances: [#{objective_id: \"escort\", instance_id: \"missing\"}]", Some("Objective instance")),
+        ("recipient_objective_instances: [#{objective_id: \"escort\", instance_id: \"pair\"}]", None),
+        ("recipient_ship_slots: []", None),
+    ] {
+        let script = format!(r#"on_world_loaded("run");
+            fn run(ctx) {{
+                ctx.effects.add_objective(#{{id: "escort", instance_id: "pair", text: "Escort", all_player_ships: true}});
+                ctx.effects.open_comms(#{{from: "control", node_fn: "hail", {selection}}});
+            }}
+            fn hail(ctx) {{ #{{message: "Orders", responses: []}} }}"#);
+        let sources = Sources(BTreeMap::from([
+            (path.into(), "script='recipients.rhai'\n[global]\ntitle='Recipients'\n".into()),
+            ("assets/worlds/recipients.rhai".into(), script),
+        ]));
+        let mut report = WorkshopValidation::default();
+        validate_world(path, &sources, &mut report);
+        let findings: Vec<_> = report.findings.iter().filter(|finding| finding.category == "invalid-recipient").collect();
+        match expected {
+            Some(fragment) => {
+                assert_eq!(findings.len(), 1, "{:?}", report.findings);
+                assert!(findings[0].message.contains(fragment));
+                assert_eq!(findings[0].file, "assets/worlds/recipients.rhai");
+                assert!(findings[0].line.is_some());
+            }
+            None => assert!(findings.is_empty(), "{:?}", report.findings),
+        }
+    }
+}
+
+#[test]
 fn project_and_pack_sound_catalogs_require_their_captured_decodable_bytes() {
     const SOUND: &str = "assets/sounds/custom/sonar ping.ogg";
     let catalog = include_str!("../../tests/fixtures/sound-cue-pack.toml");

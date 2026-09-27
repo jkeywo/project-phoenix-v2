@@ -62,6 +62,7 @@ impl ScriptResolver for NoSiblingScripts {
 
 /// A compiled, validated script content set for one world.
 pub struct CompiledScripts {
+    pub recipient_references: super::recipient_refs::RecipientScriptReferences,
     /// Retained ASTs keyed by content-relative (or virtual) path, sorted.
     pub asts: BTreeMap<String, AST>,
     /// Every named function defined across all units — the resolution set the
@@ -292,6 +293,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
     let content_hash = vellum_script::content_hash(&sorted);
 
     CompiledScripts {
+        recipient_references: super::recipient_refs::scan(&sorted),
         asts,
         defined_fns,
         function_lines,

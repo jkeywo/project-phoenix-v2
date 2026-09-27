@@ -168,6 +168,10 @@ pub struct TestTraceSource {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TestTraceKind {
+    RecipientDiagnostic {
+        action: String,
+        message: String,
+    },
     HostCall {
         function: String,
     },

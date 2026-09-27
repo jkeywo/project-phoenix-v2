@@ -3,7 +3,7 @@ title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
 sources: [src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
-updated: 2026-09-21
+updated: 2026-09-27
 ---
 
 # Objectives
@@ -70,6 +70,10 @@ the recorded recipients as semantic ship references and Ship links; cached names
 or UUID fallbacks keep those rows addressable by the activity feed's ship filter.
 
 ## Explicit multi-ship instances
+
+`src/recipients.rs` also reads effective current instance members for addressed
+script actions and Comms. This union does not change Objective assignment
+precedence or use a ship's frozen last-known view as current membership.
 
 `objective_instances::ObjectiveInstanceManager` is the additive multi-ship
 contract; legacy Objective ids keep the manager and scope above unchanged. An

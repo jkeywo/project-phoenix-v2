@@ -623,6 +623,8 @@ pub struct PreCompiledScripts(pub Option<crate::world::script::load::CompiledScr
 /// [`tick_script_callbacks`] drains the due entries each tick.
 #[derive(Resource)]
 pub struct WorldScriptRuntime {
+    /// Authored names remain valid before their instance is activated.
+    pub recipient_declarations: BTreeSet<crate::objective_instances::ObjectiveInstanceKey>,
     /// The runtime host that runs retained handler fns.
     pub host: RuntimeHost,
     /// Retained ASTs keyed by content-relative (or virtual) path.
@@ -693,6 +695,7 @@ impl WorldScriptRuntime {
             .map(|path| (path, BTreeSet::from([None])))
             .collect();
         Some(WorldScriptRuntime {
+            recipient_declarations: compiled.recipient_references.declarations,
             host: RuntimeHost::new(),
             asts: compiled.asts,
             ast_owners,
@@ -722,6 +725,7 @@ impl WorldScriptRuntime {
     /// `load_world_scripts`), not through this number.
     pub(crate) fn empty() -> Self {
         WorldScriptRuntime {
+            recipient_declarations: BTreeSet::new(),
             host: RuntimeHost::new(),
             asts: BTreeMap::new(),
             ast_owners: BTreeMap::new(),
@@ -777,6 +781,11 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         use crate::authoritative::{DeclareState, StateClass};
         app.declare_state::<ObjectiveManagerRes>(StateClass::Folded, "objective-runtime-state");
+        app.declare_state::<crate::recipients::RecipientDiagnostics>(
+            StateClass::Presentation,
+            "recipient-authoring-diagnostics",
+        )
+        .init_resource::<crate::recipients::RecipientDiagnostics>();
         app.declare_state::<ObjectiveInstanceManagerRes>(
             StateClass::Folded,
             "objective-instance-runtime-state",
@@ -1806,6 +1815,9 @@ pub(crate) fn merge_layer_scripts(
     runtime: &mut WorldContentRuntime,
     script_runtime: &mut WorldScriptRuntime,
 ) -> Vec<String> {
+    script_runtime
+        .recipient_declarations
+        .extend(compiled.recipient_references.declarations);
     for (path, lines) in &compiled.function_lines {
         script_runtime
             .function_lines
@@ -3534,6 +3546,61 @@ pub(crate) fn apply_dispatch_result(
 
     for cmd in action_cmds {
         match cmd {
+            ActionCmd::Addressed {
+                recipients,
+                action,
+                origin_layer,
+            } => {
+                let source_path = trace_source_path.map(str::to_string);
+                commands.queue(move |world: &mut World| {
+                    use bevy::ecs::system::RunSystemOnce;
+                    match crate::recipients::resolve_in_world(world, &recipients) {
+                        Ok(ships) if ships.is_empty() => {
+                            bevy::log::warn!("Addressed action selected no current player ships");
+                            crate::recipients::report(
+                                world,
+                                crate::recipients::RecipientDiagnostic {
+                                    tick: trace_tick,
+                                    source: source_path,
+                                    line: trace_source_line,
+                                    action: "addressed".into(),
+                                    message:
+                                        "No current player ships matched; action was not applied"
+                                            .into(),
+                                },
+                            );
+                        }
+                        Ok(ships) => {
+                            if let Err(error) = world.run_system_once_with(
+                                apply_addressed_action,
+                                (
+                                    ships,
+                                    *action,
+                                    source_path,
+                                    trace_source_line,
+                                    trace_tick,
+                                    origin_layer,
+                                ),
+                            ) {
+                                bevy::log::error!("Addressed action application failed: {error}");
+                            }
+                        }
+                        Err(error) => {
+                            bevy::log::warn!("Addressed action refused: {error}");
+                            crate::recipients::report(
+                                world,
+                                crate::recipients::RecipientDiagnostic {
+                                    tick: trace_tick,
+                                    source: source_path,
+                                    line: trace_source_line,
+                                    action: "addressed".into(),
+                                    message: error.to_string(),
+                                },
+                            );
+                        }
+                    }
+                });
+            }
             ActionCmd::Presentation { ship, cue } => {
                 commands.queue(move |world: &mut World| {
                     use bevy::ecs::system::RunSystemOnce;
@@ -5658,3 +5725,91 @@ fn remove_layer_triggers(runtime: &mut WorldContentRuntime, path: &str) -> usize
 #[cfg(test)]
 #[path = "server_tests.rs"]
 pub(crate) mod tests;
+
+/// Addressed delivery reuses the ordinary dispatcher and applier. Resolution
+/// happens in the enclosing exclusive command, so earlier instance mutations
+/// are visible, and UUID iteration order is shared by every simulation peer.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn apply_addressed_action(
+    In((ships, action, source_path, source_line, tick, origin_layer)): In<(
+        Vec<String>,
+        crate::world::config::TriggerAction,
+        Option<String>,
+        Option<usize>,
+        u64,
+        Option<String>,
+    )>,
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut objectives: ResMut<ObjectiveManagerRes>,
+    mut commands: Commands,
+    mut modifiers: ShipModifiersParams,
+    mut factions: FactionDispatchParams,
+    mut ai: Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<BehaviourSection>,
+    >,
+    entities: Query<(Entity, &EntityUuid)>,
+    mut layers: Option<ResMut<WorldLayerMap>>,
+    mut balance: Option<ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
+    mut queues: EffectQueues,
+) {
+    let uuid_to_entity = entities
+        .iter()
+        .map(|(entity, uuid)| (uuid.0.clone(), entity))
+        .collect();
+    let mut events = Vec::new();
+    for ship in ships {
+        let mut names = runtime.name_to_uuid.clone();
+        // Do not overwrite any authored name: it may also be a sound source or
+        // AI target carried by the action.
+        let mut alias = "addressed_recipient".to_string();
+        while names.contains_key(&alias) {
+            alias.push('_');
+        }
+        names.insert(alias.clone(), ship);
+        let Ok(action) = crate::recipients::retarget_action(&action, &alias) else {
+            return;
+        };
+        let layer_views = project_layer_views(layers.as_deref());
+        let result = dispatch_action(
+            &action,
+            &DispatchContext {
+                origin_layer: origin_layer.clone(),
+                entity_name: None,
+                name_to_uuid: &names,
+                base_flags: &runtime.flags,
+                layers: &layer_views,
+                base_anchors: &HashMap::new(),
+                factions: factions.registry.as_deref().map(|registry| &registry.0),
+                uuid_source: &|| unreachable!("addressed actions cannot spawn entities"),
+                template_loader: &crate::entities::loader::WasmTemplateLoader,
+            },
+        );
+        apply_dispatch_result(
+            result,
+            "addressed action",
+            &mut events,
+            &uuid_to_entity,
+            &mut runtime,
+            &mut objectives,
+            &mut commands,
+            &mut modifiers,
+            None,
+            layers.as_deref_mut(),
+            None,
+            None,
+            &mut factions,
+            &mut ai,
+            balance.as_deref_mut(),
+            tick,
+            source_path.as_deref(),
+            source_line,
+            &mut queues.out(),
+        );
+    }
+    runtime.pending_world_events.extend(events);
+}

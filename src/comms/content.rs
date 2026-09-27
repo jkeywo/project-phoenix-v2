@@ -207,6 +207,10 @@ pub struct ScriptedDialogue {
 /// reason (anonymous and short fn names are not unique across units).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenCommsRequest {
+    /// Deferred authored addressing. Resolved once when the root action runs;
+    /// each resulting dialogue then carries its immutable recipient_ship.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipients: Option<crate::recipients::RecipientSelection>,
     /// Bound sender of a GM hail; legacy authored opens resolve by name.
     #[serde(default)]
     pub sender_uuid: Option<String>,

@@ -111,6 +111,7 @@ pub mod engine;
 pub mod fixture;
 pub mod flags;
 pub mod load;
+pub mod recipient_refs;
 pub(crate) mod registry;
 pub mod schedule;
 pub mod triggers;

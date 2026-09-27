@@ -1624,6 +1624,10 @@ impl GmEventControls {
 /// An action to execute when a trigger fires.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TriggerAction {
+    Addressed {
+        recipients: crate::recipients::RecipientSelection,
+        action: Box<TriggerAction>,
+    },
     Presentation {
         ship: String,
         cue: crate::gm_presentation::PresentationCue,

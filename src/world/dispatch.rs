@@ -176,6 +176,11 @@ pub enum FlagMutation {
 /// `Uuid`s. Nothing here names a Bevy `Entity`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ActionCmd {
+    Addressed {
+        recipients: crate::recipients::RecipientSelection,
+        action: Box<TriggerAction>,
+        origin_layer: Option<String>,
+    },
     Presentation {
         ship: String,
         cue: crate::gm_presentation::PresentationCue,
@@ -624,6 +629,13 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
     let mut out = DispatchResult::default();
 
     match action {
+        TriggerAction::Addressed { recipients, action } => {
+            out.commands.push(ActionCmd::Addressed {
+                recipients: recipients.clone(),
+                action: action.clone(),
+                origin_layer: context.origin_layer.clone(),
+            });
+        }
         TriggerAction::Presentation { ship, cue } => {
             if let Some(uuid) = context.name_to_uuid.get(ship) {
                 let mut cue = cue.clone();

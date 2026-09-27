@@ -626,6 +626,7 @@ pub fn render_action(action: &TriggerAction) -> String {
             format!("remove_faction_enemy({faction}, {enemy})")
         }
         TriggerAction::ResetTrigger { id } => format!("reset_trigger({id})"),
+        TriggerAction::Addressed { .. } => "addressed action".to_string(),
     }
 }
 

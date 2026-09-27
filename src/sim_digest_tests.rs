@@ -979,6 +979,7 @@ use crate::world::workforce::WorkforceRecord;
 /// [`an_empty_scenario_folds_as_no_scenario_at_all`]).
 fn empty_script_runtime() -> WorldScriptRuntime {
     WorldScriptRuntime {
+        recipient_declarations: Default::default(),
         host: crate::world::script::engine::RuntimeHost::new(),
         asts: std::collections::BTreeMap::new(),
         ast_owners: std::collections::BTreeMap::new(),
@@ -1079,6 +1080,7 @@ fn open_request(root_fn: &str) -> OpenCommsRequest {
     OpenCommsRequest {
         sender_uuid: None,
         recipient_ship: None,
+        recipients: None,
         from: "control".into(),
         root_fn: root_fn.into(),
         display_name: None,

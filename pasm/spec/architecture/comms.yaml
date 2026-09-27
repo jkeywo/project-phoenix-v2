@@ -1,4 +1,24 @@
 entities:
+  - component: addressed-recipient-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Addressed Recipient Resolution
+      summary: "Issue #1533: script actions and Comms use one union of authored ship slots, live factions, all player ships and effective Objective-instance members. Resolve and deduplicate in stable UUID order when executing. Invalid names refuse the whole selection; valid empty sets perform no effects or dialogue-root calls and produce bounded source-located Workshop and GM diagnostics. Omitted Comms selectors retain legacy scope."
+      rationale:
+        - "Addressed actions retarget the ordinary typed dispatcher, retaining action gates and information boundaries. Comms evaluates one root, then uses private ordinary recipient-bound dialogue, projection and reply admission. Pending Comms selectors are captured and digested with the existing open queue; membership is resolved after restore when the request runs."
+        - "Workshop Save checks structural literal selectors in the resolved script set without executing expressions. Computed selectors are validated at execution. Recipient diagnostics are a bounded presentation resource, excluded from authoritative continuation."
+    architecture:
+      kind: admission-policy
+      authority: authoritative
+      reads: [objective-instance-state]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/recipients.rs, src/world/script/recipient_refs.rs, src/world/script/effects.rs, src/world/server.rs, src/comms/scripted.rs, src/workshop/mod.rs, gui/gm-recipient-diagnostics.js]
+      symbols: [RecipientSelection, RecipientCatalog, RecipientDiagnostics, addressed_action, apply_addressed_action]
+      tests: [cargo test --lib addressed, cargo test --lib recipients]
+
   - component: comms-dialogue-controller
     core:
       status: implemented

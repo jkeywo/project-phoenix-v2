@@ -38,6 +38,7 @@ use crate::world::server::WorldContentRuntime;
 
 #[derive(SystemParam)]
 struct GmWorldInspectorSources<'w> {
+    recipient_diagnostics: Option<Res<'w, crate::recipients::RecipientDiagnostics>>,
     runtime: Option<Res<'w, WorldContentRuntime>>,
     config: Option<Res<'w, crate::world::config::WorldConfig>>,
     objectives: Option<Res<'w, crate::world::server::ObjectiveManagerRes>>,
@@ -292,6 +293,8 @@ pub struct GmEntityProjection {
 /// state when every selectable ship has left the world.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct GmEntityProjectionPayload {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recipient_diagnostics: Vec<crate::recipients::RecipientDiagnostic>,
     /// Derived live world membership for the GM tree; not snapshot authority.
     #[serde(default)]
     pub world_membership: BTreeMap<String, String>,
@@ -1354,6 +1357,11 @@ fn publish_local_projection(
         )
         .collect();
     let next = GmEntityProjectionPayload {
+        recipient_diagnostics: world_sources
+            .recipient_diagnostics
+            .as_deref()
+            .map(|rows| rows.0.iter().cloned().collect())
+            .unwrap_or_default(),
         world_membership: all_names
             .iter()
             .map(|(uuid, _, _, layer)| {

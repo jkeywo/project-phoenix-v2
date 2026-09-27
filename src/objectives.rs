@@ -36,7 +36,7 @@ pub fn project_entity_targets(
 ) -> Vec<crate::core::messages::EntitySnapshot> {
     let targets: std::collections::HashSet<&str> = objectives
         .iter()
-        .filter(|objective| objective.status == ObjectiveStatus::Active)
+        .filter(|objective| objective.status == ObjectiveStatus::Active && !objective.unassigned)
         .flat_map(|objective| objective.targets.iter().map(String::as_str))
         .collect();
     entities
@@ -1020,6 +1020,7 @@ impl ObjectiveManager {
 
 fn record_to_snapshot(r: &ObjectiveRecord) -> ObjectiveSnapshot {
     ObjectiveSnapshot {
+        progress: None,
         unassigned: false,
         id: r.id.clone(),
         text: r.text.clone(),
@@ -1117,6 +1118,7 @@ mod tests {
             source: ObjectiveSource::Mission,
             relevance,
             snapshot: ObjectiveSnapshot {
+                progress: None,
                 unassigned: false,
                 id: id.into(),
                 text: String::new(),

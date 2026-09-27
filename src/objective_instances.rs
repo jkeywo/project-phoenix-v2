@@ -423,6 +423,7 @@ impl ObjectiveInstanceManager {
                 snapshot.id = display_key(&view.key);
                 snapshot.status = view.status.clone();
                 snapshot.unassigned = !view.assigned;
+                snapshot.progress = Some(view.progress);
                 Some(snapshot)
             })
             .collect()
@@ -453,6 +454,7 @@ impl ObjectiveInstanceManager {
                 row.id = display_key(&view.key);
                 row.snapshot.id = row.id.clone();
                 row.snapshot.status = view.status.clone();
+                row.snapshot.progress = Some(view.progress);
                 if let Some(directive) = self
                     .instances
                     .iter()
@@ -541,7 +543,10 @@ fn display_key(key: &ObjectiveInstanceKey) -> String {
     format!("{}::{}", key.objective_id, key.instance_id)
 }
 
-fn match_specificity(selectors: &[RecipientSelector], ship: &PlayerShipMembership) -> Option<u8> {
+pub(crate) fn match_specificity(
+    selectors: &[RecipientSelector],
+    ship: &PlayerShipMembership,
+) -> Option<u8> {
     selectors
         .iter()
         .filter_map(|selector| match selector {
@@ -627,6 +632,15 @@ pub fn reconcile_memberships(world: &mut World) {
                     .remove::<crate::entities::spawner::FactionComponent>();
             }
         }
+        let message = activation_refusal_message(&ActivationRefusal::Conflict(conflict.clone()));
+        ObjectiveCommandOrigin {
+            source: None,
+            line: None,
+            tick: world
+                .get_resource::<crate::sim_tick::SimTick>()
+                .map_or(0, |tick| tick.0),
+        }
+        .refused(world, message);
         bevy::log::warn!(
             "Objective instance reconciliation refused: objective '{}' is ambiguous for ship '{}' across {:?}",
             conflict.objective_id,
@@ -722,6 +736,7 @@ mod tests {
 
     fn snapshot(id: &str) -> ObjectiveSnapshot {
         ObjectiveSnapshot {
+            progress: None,
             unassigned: false,
             id: id.into(),
             text: format!("objective.{id}"),
@@ -888,6 +903,11 @@ mod tests {
             .id();
 
         world.run_system_once(reconcile_memberships).unwrap();
+        let diagnostics = world.resource::<crate::recipients::RecipientDiagnostics>();
+        assert_eq!(diagnostics.0.len(), 1);
+        for label in ["survive", "ship-a", "beta-one", "beta-two"] {
+            assert!(diagnostics.0[0].message.contains(label));
+        }
         assert_eq!(
             world
                 .get::<crate::entities::spawner::FactionComponent>(entity)
@@ -976,6 +996,33 @@ mod tests {
         assert_eq!(manager.view_for_ship("ship-a")[0].progress, 0.75);
         manager.set_progress(&key("beta"), 0.8);
         assert_eq!(manager.view_for_ship("ship-a")[0].progress, 0.75);
+        let mut restored: ObjectiveInstanceManager =
+            serde_json::from_str(&serde_json::to_string(&manager).unwrap()).unwrap();
+        for peer in [&mut manager, &mut restored] {
+            let frozen = peer.project_snapshots_for_ship("ship-a", vec![snapshot("survive")]);
+            assert_eq!(frozen[0].progress, Some(0.75));
+            assert!(frozen[0].unassigned);
+            peer.complete(&key("beta"), &outside).unwrap();
+            let frozen = peer.project_snapshots_for_ship("ship-a", vec![snapshot("survive")]);
+            assert_eq!(frozen[0].status, ObjectiveStatus::Active);
+            assert_eq!(frozen[0].progress, Some(0.75));
+            peer.reconcile(&beta).unwrap();
+            let joined = peer.project_snapshots_for_ship("ship-a", vec![snapshot("survive")]);
+            assert_eq!(joined[0].status, ObjectiveStatus::Completed);
+            assert_eq!(joined[0].progress, Some(0.8));
+            assert!(!joined[0].unassigned);
+            assert!(peer
+                .records()
+                .iter()
+                .find(|row| row.spec.key == key("beta"))
+                .unwrap()
+                .completion_members
+                .is_empty());
+        }
+        assert_eq!(
+            serde_json::to_value(manager).unwrap(),
+            serde_json::to_value(restored).unwrap()
+        );
     }
 
     #[test]
@@ -1091,5 +1138,26 @@ mod tests {
             TriggerAction::SetObjectiveInstanceProgress { key: parsed, progress }
                 if parsed == key("lead") && progress == 0.5
         ));
+    }
+    #[test]
+    fn unassigned_history_does_not_mark_live_objective_targets() {
+        let entity = crate::core::messages::EntitySnapshot {
+            uuid: "marker".into(),
+            objective_target: true,
+            ..Default::default()
+        };
+        let mut objective = snapshot("hold");
+        objective.targets = vec!["marker".into()];
+        assert!(
+            crate::objectives::project_entity_targets(
+                std::slice::from_ref(&entity),
+                &[objective.clone()]
+            )[0]
+            .objective_target
+        );
+        objective.unassigned = true;
+        assert!(
+            !crate::objectives::project_entity_targets(&[entity], &[objective])[0].objective_target
+        );
     }
 }

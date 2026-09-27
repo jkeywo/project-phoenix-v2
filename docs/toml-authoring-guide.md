@@ -2192,7 +2192,21 @@ uses `flt("1.5")` syntax because scenario Rhai has no bare floating literals.
 `recipient_factions` names authored faction names. `all_player_ships = true`
 also selects every player ship. The authoritative Objective instance resolver
 determines membership and rejects ambiguous equal-specificity assignments;
-the form does not attempt to reproduce that rule. **Save Script** checks the
+the form does not attempt to reproduce that rule. Explicit ship slots take
+precedence over factions, and factions over all player ships. **Save Script**
+rejects ties detectable from literal instance declarations across the composed
+script set, including absent slots and faction combinations not currently
+present. Computed selectors remain subject to atomic runtime refusal.
+
+Instance progress belongs to the instance, not its current ships. Leaving freezes
+the crew row, including its displayed progress, and marks it no longer assigned;
+joining another instance of the same Objective replaces that row. Joining a
+completed instance displays its final state without repeating credit or effects.
+Completion credit retains only the effective members at completion. A refused
+live faction change restores the accepted membership and appears in the GM
+recipient diagnostics and Workshop Test trace with the conflicting instance IDs.
+
+**Save Script** checks the
 candidate and reports source locations for definite findings. A callback that
 depends on a live fleet or a later faction change must also be exercised in a
 disposable **Test** run: run once per selected ship slot to inspect that ship's

@@ -126,7 +126,7 @@ export function entityRadius(e) {
 function activeObjectiveTargetNames(objectives) {
   const names = new Set();
   for (const obj of (objectives || [])) {
-    if (!obj || obj.status && obj.status !== 'Active') continue;
+    if (!obj || obj.unassigned || obj.status && obj.status !== 'Active') continue;
     for (const target of (obj.targets || [])) {
       if (target != null && String(target).trim() !== '') names.add(String(target));
     }

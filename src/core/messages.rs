@@ -5966,6 +5966,10 @@ pub struct ObjectiveSnapshot {
     /// recipient set. It remains visible but cannot be acted on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unassigned: bool,
+    /// Instance-owned progress, including the frozen last-known value after leaving.
+    /// Absent for legacy Objectives, whose wire representation is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f32>,
     /// Entity names this objective is associated with. Each named entity is
     /// marked on the nav radar with an objective ring. May reference real
     /// entities (stations, ships) or invisible `objective_marker` beacons

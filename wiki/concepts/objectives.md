@@ -2,7 +2,7 @@
 title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
-sources: [src/gm_objective.rs, src/objective_instances/control.rs, gui/gm-objective-panel.js, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/recipients.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
+sources: [src/world/script/recipient_refs.rs, src/workshop/mod.rs, gui/components/ph-objective-list.js, src/core/messages.rs, src/gm_objective.rs, src/objective_instances/control.rs, gui/gm-objective-panel.js, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/recipients.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
 updated: 2026-09-27
 ---
 
@@ -98,7 +98,9 @@ ambiguous restores the ship's previous faction before gameplay Input; the
 accepted fleet is captured with the instance state for restore.
 
 Crew history stores the last effective instance for each Objective definition.
-Leaving marks that view unassigned and freezes it; joining another instance
+Crew snapshots carry optional instance progress, which the shared Objective list
+renders as a localised value; legacy rows omit it. Leaving marks that view
+unassigned and freezes it; joining another instance
 replaces it. Completion records the effective members once. Later membership
 changes may expose the completed state but do not alter credit, reopen the
 instance, or produce another successful completion transition. The manager is
@@ -118,6 +120,10 @@ Workshop's Scenario scripts panel uses `editor/workshop-objective-snippet.js`
 to insert or update those Rhai fields in exact source. Save runs candidate
 validation and Test runs live membership; the form does not duplicate the
 authoritative resolver.
+The literal recipient scanner in `src/world/script/recipient_refs.rs` checks
+instance ties across the composed script set using the runtime specificity rule.
+Computed selectors defer to activation. Live faction refusals also enter the
+bounded recipient diagnostics and Workshop Test trace.
 The same panel inserts ship-scoped modifier actions through the addressed
 effect API, including the current members of a named Objective instance.
 

@@ -225,3 +225,22 @@ describe('PhObjectiveList', () => {
     expect(rows[0].classList.contains('boosted')).toBe(false);
   });
 });
+
+
+describe('Objective instance progress', () => {
+  it('renders current and frozen progress, then replaces the departed instance', () => {
+    const { el } = setup();
+    el.state = { objectives: [{ id: 'hold::one', text: 'Hold', progress: 0.25 }] };
+    expect(queryText(el, '.text')).toContain(t('component.objectives.progress', { progress: 0.25 }));
+    el.state = { objectives: [{ id: 'hold::one', text: 'Hold', progress: 0.25, unassigned: true }] };
+    expect(queryText(el, '.text')).toContain(t('component.objectives.progress', { progress: 0.25 }));
+    expect(queryText(el, '.text')).toContain(t('component.objectives.unassigned'));
+    el.state = { objectives: [{ id: 'hold::two', text: 'Hold', progress: 7, status: 'Completed' }] };
+    expect(el.shadowRoot.querySelectorAll('.row')).toHaveLength(1);
+    expect(queryText(el, '.text')).toContain(t('component.objectives.progress', { progress: 7 }));
+    expect(queryText(el, '.text')).not.toContain(t('component.objectives.unassigned'));
+    expect(el.shadowRoot.querySelector('.row').classList.contains('done')).toBe(true);
+    el.state = { objectives: [{ id: 'legacy', text: 'Legacy' }] };
+    expect(queryText(el, '.text')).toBe('Legacy');
+  });
+});

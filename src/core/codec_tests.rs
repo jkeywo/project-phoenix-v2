@@ -688,6 +688,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessageDiscriminants::ObjectiveSummary,
             ServerMessage::ObjectiveSummary {
                 objectives: vec![ObjectiveSnapshot {
+                    progress: None,
                     unassigned: false,
                     id: "obj-1".into(),
                     text: "Destroy the convoy".into(),
@@ -2050,6 +2051,7 @@ fn an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire() {
     let encoded = JsonCodec
         .encode_server(&ServerMessage::ObjectiveSummary {
             objectives: vec![ObjectiveSnapshot {
+                progress: None,
                 unassigned: false,
                 id: "obj-a3-window".into(),
                 text: "world.falling_skyway.objective.window.text".into(),
@@ -2104,6 +2106,7 @@ fn objective_text_params_ride_the_wire_in_sorted_key_order() {
     let encoded = JsonCodec
         .encode_server(&ServerMessage::ObjectiveSummary {
             objectives: vec![ObjectiveSnapshot {
+                progress: None,
                 unassigned: false,
                 id: "obj".into(),
                 text: "some.id".into(),
@@ -6597,4 +6600,21 @@ fn undo_of_a_removal_decodes_the_published_presence_pair_verbatim() {
             "{rejected}"
         );
     }
+}
+
+#[test]
+fn instance_progress_and_frozen_assignment_round_trip() {
+    let legacy = r#"{"id":"hold","text":"objective.hold","mandatory":true,"status":"Active","source":"Mission"}"#;
+    let mut snapshot: ObjectiveSnapshot = serde_json::from_str(legacy).unwrap();
+    assert_eq!(snapshot.progress, None);
+    assert!(serde_json::to_value(&snapshot)
+        .unwrap()
+        .get("progress")
+        .is_none());
+    snapshot.id = "hold::alliance".into();
+    snapshot.progress = Some(0.25);
+    snapshot.unassigned = true;
+    assert_server_roundtrip(ServerMessage::ObjectiveSummary {
+        objectives: vec![snapshot],
+    });
 }

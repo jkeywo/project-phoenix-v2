@@ -2,7 +2,7 @@
 //! are left to the runtime validator; this scanner never executes authored code.
 
 use super::validate::{lex_significant_raw, Tok, Token};
-use crate::objective_instances::ObjectiveInstanceKey;
+use crate::objective_instances::{ObjectiveInstanceKey, ObjectiveInstanceSpec};
 use crate::recipients::{RecipientCatalog, RecipientSelection};
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
 use rhai::{Dynamic, ImmutableString, Map};
@@ -15,6 +15,9 @@ pub struct RecipientScriptReferences {
     pub declarations: BTreeSet<ObjectiveInstanceKey>,
     pub selections: Vec<LocatedSelection>,
     pub malformed: Vec<(String, usize, String)>,
+    pub instances: Vec<(String, usize, ObjectiveInstanceSpec)>,
+    pub computed_objectives: BTreeSet<String>,
+    pub computed_objective_identity: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -131,9 +134,13 @@ pub fn scan(sources: &[vellum_script::ScriptSource]) -> RecipientScriptReference
                 || tokens[start - 1].0.kind != Tok::Dot
                 || !matches!(&tokens[start-2].0.kind, Tok::Ident(receiver) if receiver == "effects")
                 || !punctuation(&tokens[start + 1], '(')
-                || !punctuation(&tokens[start + 2], '#')
-                || !punctuation(&tokens[start + 3], '{')
             {
+                continue;
+            }
+            if !punctuation(&tokens[start + 2], '#') || !punctuation(&tokens[start + 3], '{') {
+                if method == "add_objective" {
+                    result.computed_objective_identity = true;
+                }
                 continue;
             }
             let mut depth = 1;
@@ -156,11 +163,18 @@ pub fn scan(sources: &[vellum_script::ScriptSource]) -> RecipientScriptReference
             let mut selected = Map::new();
             let mut objective_id = None;
             let mut instance_id = None;
+            let mut computed_recipients = false;
             for entry in entries(&tokens[start + 4..end]) {
                 let Some((name, value)) = field(entry) else {
                     continue;
                 };
                 let Some(value) = literal(value, &engine) else {
+                    if matches!(
+                        name,
+                        "recipient_ship_slots" | "recipient_factions" | "all_player_ships"
+                    ) {
+                        computed_recipients = true;
+                    }
                     continue;
                 };
                 match name {
@@ -180,19 +194,45 @@ pub fn scan(sources: &[vellum_script::ScriptSource]) -> RecipientScriptReference
                 }
             }
             if method == "add_objective" {
-                if let (Some(objective_id), Some(instance_id)) = (objective_id, instance_id) {
+                if computed_recipients || instance_id.is_none() {
+                    if let Some(id) = &objective_id {
+                        result.computed_objectives.insert(id.clone());
+                    }
+                }
+                if objective_id.is_none() {
+                    result.computed_objective_identity = true;
+                }
+                if let (Some(objective_id), Some(instance_id)) = (&objective_id, &instance_id) {
                     result.declarations.insert(ObjectiveInstanceKey {
-                        objective_id,
-                        instance_id,
+                        objective_id: objective_id.clone(),
+                        instance_id: instance_id.clone(),
                     });
                 }
             }
             match RecipientSelection::from_rhai_map(&selected) {
-                Ok(Some(selection)) => result.selections.push(LocatedSelection {
-                    path: source.path.clone(),
-                    line: tokens[start].0.line,
-                    selection,
-                }),
+                Ok(Some(selection)) => {
+                    if method == "add_objective" && !computed_recipients {
+                        if let (Some(objective_id), Some(instance_id)) = (objective_id, instance_id)
+                        {
+                            result.instances.push((
+                                source.path.clone(),
+                                tokens[start].0.line,
+                                ObjectiveInstanceSpec {
+                                    key: ObjectiveInstanceKey {
+                                        objective_id,
+                                        instance_id,
+                                    },
+                                    recipients: selection.selectors.clone(),
+                                },
+                            ));
+                        }
+                    }
+                    result.selections.push(LocatedSelection {
+                        path: source.path.clone(),
+                        line: tokens[start].0.line,
+                        selection,
+                    });
+                }
                 Err(message) => {
                     result
                         .malformed
@@ -239,7 +279,89 @@ impl RecipientScriptReferences {
                         },
                     }),
             )
+            .chain(self.assignment_findings(catalog))
             .collect()
+    }
+
+    /// Check literal declarations over the authored slot/faction vocabulary.
+    /// Higher-specificity matches shield lower ones, just as in the live resolver.
+    /// Computed selectors are deliberately left for activation-time validation.
+    fn assignment_findings(&self, catalog: &RecipientCatalog) -> Vec<WorldFinding> {
+        let mut findings = Vec::new();
+        let mut seen = BTreeSet::new();
+        let objectives: BTreeSet<_> = self
+            .instances
+            .iter()
+            .map(|(_, _, spec)| spec.key.objective_id.as_str())
+            .collect();
+        for objective in objectives {
+            let mut definitions = std::collections::BTreeMap::new();
+            let mut variable_keys = BTreeSet::new();
+            for (_, _, spec) in self
+                .instances
+                .iter()
+                .filter(|(_, _, spec)| spec.key.objective_id == objective)
+            {
+                if definitions
+                    .insert(&spec.key, &spec.recipients)
+                    .is_some_and(|previous| previous != &spec.recipients)
+                {
+                    variable_keys.insert(&spec.key);
+                }
+            }
+            let uncertain = self.computed_objective_identity
+                || self.computed_objectives.contains(objective)
+                || !variable_keys.is_empty();
+            for slot in &catalog.ship_slots {
+                // The empty faction also covers a player ship with no faction.
+                for faction in
+                    std::iter::once("").chain(catalog.factions.iter().map(String::as_str))
+                {
+                    let ship = crate::objective_instances::PlayerShipMembership {
+                        ship_id: slot.clone(),
+                        slot_id: slot.clone(),
+                        faction: faction.into(),
+                    };
+                    let mut candidates = std::collections::BTreeMap::new();
+                    for (path, line, spec) in &self.instances {
+                        if spec.key.objective_id != objective || variable_keys.contains(&spec.key) {
+                            continue;
+                        }
+                        if let Some(score) =
+                            crate::objective_instances::match_specificity(&spec.recipients, &ship)
+                        {
+                            candidates
+                                .entry(&spec.key.instance_id)
+                                .or_insert((score, path, line));
+                        }
+                    }
+                    let Some(best) = candidates.values().map(|(score, _, _)| *score).max() else {
+                        continue;
+                    };
+                    // An opaque declaration may shield faction/all matches. It
+                    // cannot outrank two literal explicit-slot assignments.
+                    if uncertain && best < 3 {
+                        continue;
+                    }
+                    candidates.retain(|_, (score, _, _)| *score == best);
+                    if candidates.len() < 2 {
+                        continue;
+                    }
+                    let ids: Vec<_> = candidates.keys().map(|id| (*id).clone()).collect();
+                    if !seen.insert((objective, ids.clone())) {
+                        continue;
+                    }
+                    let (_, path, line) = candidates.values().next().unwrap();
+                    findings.push(WorldFinding {
+                        severity: Severity::Error,
+                        category: "ambiguous-objective-instances",
+                        message: format!("Objective '{objective}' gives ship slot '{slot}' in faction '{faction}' equal-specificity assignments in instances {}. Change one recipient selector", ids.join(", ")),
+                        source: SourceLocation { file: (*path).clone(), line: Some(**line), reference: objective.into() },
+                    });
+                }
+            }
+        }
+        findings
     }
 }
 
@@ -323,5 +445,101 @@ mod tests {
         };
         assert_eq!(refs.selections.len(), 1);
         assert!(refs.validate(&catalog).is_empty());
+    }
+    #[test]
+    fn literal_instance_ties_fail_save_for_slots_factions_and_all_players() {
+        for selector in [
+            r#"recipient_ship_slots: ["lead"]"#,
+            r#"recipient_factions: ["Alliance"]"#,
+            "all_player_ships: true",
+        ] {
+            let refs = scan_body(&format!(
+                r#"
+                fn run(ctx) {{
+                    ctx.effects.add_objective(#{{ id: "hold", instance_id: "one", {selector} }});
+                    ctx.effects.add_objective(#{{ id: "hold", instance_id: "two", {selector} }});
+                }}"#
+            ));
+            let catalog = RecipientCatalog {
+                ship_slots: ["lead".into()].into(),
+                factions: ["Alliance".into()].into(),
+                ..Default::default()
+            };
+            let findings = refs.validate(&catalog);
+            assert_eq!(findings.len(), 1, "{selector}");
+            assert_eq!(findings[0].category, "ambiguous-objective-instances");
+            assert_eq!(findings[0].source.file, "mission.rhai");
+            assert_eq!(findings[0].source.line, Some(3));
+            for label in ["hold", "one", "two", "lead"] {
+                assert!(findings[0].message.contains(label));
+            }
+        }
+    }
+
+    #[test]
+    fn static_precedence_matches_runtime_and_computed_selectors_defer_to_runtime() {
+        let body = r#"
+            fn run(ctx) {
+                ctx.effects.add_objective(#{ id: "hold", instance_id: "one", recipient_factions: ["Alliance"] });
+                ctx.effects.add_objective(#{ id: "hold", instance_id: "two", recipient_factions: ["Alliance"] });
+                ctx.effects.add_objective(#{ id: "hold", instance_id: "lead", recipient_ship_slots: ["lead"] });
+            }"#;
+        let catalog = RecipientCatalog {
+            ship_slots: ["lead".into()].into(),
+            factions: ["Alliance".into()].into(),
+            ..Default::default()
+        };
+        assert!(
+            scan_body(body).validate(&catalog).is_empty(),
+            "explicit slot shields the lower faction tie"
+        );
+        let computed = body.replace(r#"["lead"]"#, "chosen_slots()");
+        assert!(
+            scan_body(&computed).validate(&catalog).is_empty(),
+            "computed higher selectors cannot cause a false static finding"
+        );
+        let mut more_slots = catalog.clone();
+        more_slots.ship_slots.insert("wing".into());
+        assert_eq!(
+            scan_body(body).validate(&more_slots).len(),
+            1,
+            "an unshielded slot exposes the faction tie"
+        );
+    }
+    #[test]
+    fn computed_declarations_cannot_hide_explicit_ties_or_invent_lower_ties() {
+        let catalog = RecipientCatalog {
+            ship_slots: ["lead".into()].into(),
+            factions: ["Alliance".into()].into(),
+            ..Default::default()
+        };
+        let explicit = r#"fn run(ctx) {
+            ctx.effects.add_objective(#{id: "hold", instance_id: "one", recipient_ship_slots: ["lead"]});
+            ctx.effects.add_objective(#{id: "hold", instance_id: "two", recipient_ship_slots: ["lead"]});
+            ctx.effects.add_objective(#{id: "hold", instance_id: "computed", recipient_ship_slots: choose_slots()});
+        }"#;
+        assert_eq!(scan_body(explicit).validate(&catalog).len(), 1);
+        let opaque_explicit = explicit.replace(
+            r#"#{id: "hold", instance_id: "computed", recipient_ship_slots: choose_slots()}"#,
+            "chosen_objective()",
+        );
+        assert_eq!(scan_body(&opaque_explicit).validate(&catalog).len(), 1);
+        let lower = r#"fn run(ctx) {
+            ctx.effects.add_objective(#{id: "hold", instance_id: "one", recipient_factions: ["Alliance"]});
+            ctx.effects.add_objective(#{id: "hold", instance_id: "two", recipient_factions: ["Alliance"]});
+            ctx.effects.add_objective(#{id: "hold", instance_id: choose_id(), recipient_ship_slots: ["lead"]});
+        }"#;
+        assert!(scan_body(lower).validate(&catalog).is_empty());
+        assert!(scan_body(&lower.replace(
+            r#"id: "hold", instance_id: choose_id()"#,
+            r#"id: choose_id(), instance_id: "lead""#
+        ))
+        .validate(&catalog)
+        .is_empty());
+        let opaque_lower = lower.replace(
+            r#"#{id: "hold", instance_id: choose_id(), recipient_ship_slots: ["lead"]}"#,
+            "chosen_objective()",
+        );
+        assert!(scan_body(&opaque_lower).validate(&catalog).is_empty());
     }
 }

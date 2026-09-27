@@ -912,6 +912,7 @@ fn insert_viewscreen_objective(app: &mut App, target_name: &str, score: f32) {
                 crate::core::messages::SystemAffinity::Captain,
             ],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                progress: None,
                 unassigned: false,
                 id: format!("obj-destroy-{target_name}"),
                 text: format!("Destroy {target_name}"),
@@ -947,6 +948,7 @@ fn insert_viewscreen_scan_objective(app: &mut App, target_name: &str, score: f32
             source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![crate::core::messages::SystemAffinity::Sensors],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                progress: None,
                 unassigned: false,
                 id: format!("obj-scan-{target_name}"),
                 text: "world.objective.scan".into(),
@@ -1191,6 +1193,7 @@ fn ai_sensors_skips_untargeted_destroy() {
                 crate::core::messages::SystemAffinity::Captain,
             ],
             snapshot: crate::core::messages::ObjectiveSnapshot {
+                progress: None,
                 unassigned: false,
                 id: "obj-destroy-any".into(),
                 text: "Engage hostiles".into(),

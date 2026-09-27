@@ -1234,6 +1234,7 @@ mod tests {
             source: ObjectiveSource::Mission,
             relevance: vec![SystemAffinity::Engineering],
             snapshot: ObjectiveSnapshot {
+                progress: None,
                 unassigned: false,
                 id: id.into(),
                 text: String::new(),

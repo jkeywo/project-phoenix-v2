@@ -4188,3 +4188,82 @@ fn control_system_hail_dispatches_same_as_client_message_hail() {
         "ControlSystem::Hail must reach handle_hail and be recorded"
     );
 }
+
+#[test]
+fn comms_instance_history_survives_departure_and_completed_join() {
+    use crate::objective_instances::{
+        ObjectiveInstanceKey, ObjectiveInstanceManager, ObjectiveInstanceSpec,
+        PlayerShipMembership, RecipientSelector,
+    };
+    use crate::world::server::ObjectiveInstanceManagerRes;
+    let mut app = test_app();
+    let entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(crate::entities::spawner::EntityUuid("ship".into()));
+    let mut definitions = crate::objectives::ObjectiveManager::new();
+    definitions.add("hold", "Hold", true, vec![]);
+    app.world_mut()
+        .insert_resource(ObjectiveManagerRes(definitions));
+    let key = ObjectiveInstanceKey {
+        objective_id: "hold".into(),
+        instance_id: "alliance".into(),
+    };
+    let fleet = [PlayerShipMembership {
+        ship_id: "ship".into(),
+        slot_id: "lead".into(),
+        faction: "Alliance".into(),
+    }];
+    let mut instances = ObjectiveInstanceManager::default();
+    instances
+        .activate(
+            ObjectiveInstanceSpec {
+                key: key.clone(),
+                recipients: vec![RecipientSelector::Faction("Alliance".into())],
+            },
+            &fleet,
+        )
+        .unwrap();
+    instances.set_progress(&key, 0.25);
+    app.world_mut()
+        .insert_resource(ObjectiveInstanceManagerRes(instances));
+    app.update();
+    let current = comms_bb(&mut app).objectives;
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].progress, Some(0.25));
+    {
+        let mut manager = app
+            .world_mut()
+            .resource_mut::<ObjectiveInstanceManagerRes>();
+        manager.0.reconcile(&[]).unwrap();
+        manager.0.set_progress(&key, 0.75);
+        manager.0.complete(&key, &[]).unwrap();
+    }
+    app.update();
+    let frozen = comms_bb(&mut app).objectives;
+    assert_eq!(frozen.len(), 1);
+    assert!(frozen[0].unassigned);
+    assert_eq!(frozen[0].progress, Some(0.25));
+    assert_eq!(
+        frozen[0].status,
+        crate::core::messages::ObjectiveStatus::Active
+    );
+    app.world_mut()
+        .resource_mut::<ObjectiveInstanceManagerRes>()
+        .0
+        .reconcile(&fleet)
+        .unwrap();
+    app.update();
+    let joined = comms_bb(&mut app).objectives;
+    assert_eq!(joined.len(), 1);
+    assert!(!joined[0].unassigned);
+    assert_eq!(joined[0].progress, Some(0.75));
+    assert_eq!(
+        joined[0].status,
+        crate::core::messages::ObjectiveStatus::Completed
+    );
+}

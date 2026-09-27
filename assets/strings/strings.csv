@@ -4669,3 +4669,5 @@ world.cruiser_elimination.victory,Winning team result,Victory — opposing team 
 world.cruiser_elimination.defeat,Losing team result,Defeat — both cruisers lost,Niederlage – beide Kreuzer verloren,Defeat — both cruisers lost,machine
 world.cruiser_elimination.draw,Simultaneous team elimination result,Draw — both teams eliminated together,Unentschieden — beide Teams gleichzeitig ausgeschaltet,Draw — both teams eliminated together,machine
 world.cruiser_elimination.finished,Competitive match ending reason,The cruiser engagement is complete.,Das Kreuzergefecht ist beendet.,The cruiser engagement is complete.,machine
+
+component.objectives.progress,Instance progress appended to crew Objective rows including frozen unassigned history,[Progress: {progress}],[Fortschritt: {progress}],[Progress: {progress}],machine

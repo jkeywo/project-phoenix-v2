@@ -783,19 +783,19 @@ fn publish_captain_blackboard(
                         captain_boost,
                         uuid_opt.map_or("", |u| u.0.as_str()),
                     );
-                    let scored = objective_instances
-                        .as_ref()
-                        .map_or(scored.clone(), |instances| {
-                            instances.0.project_scored_for_ship(
-                                uuid_opt.map_or("", |u| u.0.as_str()),
-                                scored,
-                            )
-                        });
-                    scored
+                    let snapshots: Vec<_> = scored
                         .into_iter()
                         .filter(crate::objectives::is_visible_objective)
                         .map(|o| o.snapshot)
-                        .collect()
+                        .collect();
+                    objective_instances
+                        .as_ref()
+                        .map_or(snapshots.clone(), |instances| {
+                            instances.0.project_snapshots_for_ship(
+                                uuid_opt.map_or("", |u| u.0.as_str()),
+                                snapshots,
+                            )
+                        })
                 })
                 .unwrap_or_default();
             boosted_objective_id = boost.boosted_for(scope).map(str::to_string);

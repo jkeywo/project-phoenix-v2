@@ -50,6 +50,7 @@ fn obj(
         source: ObjectiveSource::Doctrine,
         relevance,
         snapshot: ObjectiveSnapshot {
+            progress: None,
             unassigned: false,
             id: id.to_string(),
             text: String::new(),

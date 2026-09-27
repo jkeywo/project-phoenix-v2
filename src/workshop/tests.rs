@@ -928,3 +928,37 @@ fn ship_authoring_schema_is_the_runtime_registry_and_directive_vocabulary() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn save_validation_rejects_instance_ties_across_composed_worlds() {
+    let path = "assets/worlds/root.toml";
+    let script = |id: &str| {
+        format!(
+            r#"on_world_loaded("run"); fn run(ctx) {{ ctx.effects.add_objective(#{{id: "hold", instance_id: "{id}", text: "Hold", all_player_ships: true}}); }}"#
+        )
+    };
+    let sources = Sources(BTreeMap::from([
+        (
+            path.into(),
+            "script='root.rhai'\nextra_worlds=['assets/worlds/child.toml']\n[[available_ships]]\ntemplate_path='assets/entities/test.toml'\n[global]\ntitle='Root'\n".into(),
+        ),
+        ("assets/worlds/root.rhai".into(), script("root")),
+        (
+            "assets/worlds/child.toml".into(),
+            "script='child.rhai'\n[global]\ntitle='Child'\n".into(),
+        ),
+        ("assets/worlds/child.rhai".into(), script("child")),
+    ]));
+    let mut report = WorkshopValidation::default();
+    validate_world(path, &sources, &mut report);
+    let findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.category == "ambiguous-objective-instances")
+        .collect();
+    assert_eq!(findings.len(), 1, "{:?}", report.findings);
+    for label in ["hold", "root", "child"] {
+        assert!(findings[0].message.contains(label));
+    }
+    assert!(findings[0].line.is_some());
+}

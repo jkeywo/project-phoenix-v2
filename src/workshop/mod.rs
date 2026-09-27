@@ -337,18 +337,34 @@ fn validate_world(path: &str, sources: &Sources, report: &mut WorkshopValidation
             .collect(),
         ..Default::default()
     };
+    let mut recipient_references =
+        crate::world::script::recipient_refs::RecipientScriptReferences::default();
     for world in std::iter::once(&root).chain(children.iter().map(|(_, child)| child)) {
         if let Some(compiled) = &world.scripts {
+            recipient_references
+                .selections
+                .extend(compiled.recipient_references.selections.iter().cloned());
+            recipient_references
+                .malformed
+                .extend(compiled.recipient_references.malformed.iter().cloned());
+            recipient_references
+                .instances
+                .extend(compiled.recipient_references.instances.iter().cloned());
+            recipient_references.computed_objective_identity |=
+                compiled.recipient_references.computed_objective_identity;
+            recipient_references.computed_objectives.extend(
+                compiled
+                    .recipient_references
+                    .computed_objectives
+                    .iter()
+                    .cloned(),
+            );
             recipient_catalog
                 .objective_instances
                 .extend(compiled.recipient_references.declarations.iter().cloned());
         }
     }
-    for world in std::iter::once(&root).chain(children.iter().map(|(_, child)| child)) {
-        if let Some(compiled) = &world.scripts {
-            report.extend(compiled.recipient_references.validate(&recipient_catalog));
-        }
-    }
+    report.extend(recipient_references.validate(&recipient_catalog));
     // Keep the source records separate from the borrowed validation views.
     let root_text = WorldReader::read(sources, path).unwrap_or_default();
     let mut root_source = WorldSource::new(path, &root_text, &root.config);

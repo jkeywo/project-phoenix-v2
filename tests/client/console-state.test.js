@@ -4802,3 +4802,13 @@ describe('withVisitingSystems', () => {
     });
   });
 });
+
+
+describe('departed Objective history target projection', () => {
+  it('removes objective rings from frozen unassigned history', () => {
+    const entities = [{ uuid: 'region', name: 'Patrol Zone', x: 10, z: 0, tags: ['region'], shape: 'sphere', radius: 80, region_colour: [0.2, 0.4, 0.8], objective_target: true }];
+    const objective = { id: 'hold::alliance', status: 'Active', targets: ['Patrol Zone'] };
+    expect(buildRadarRegions(entities, [objective])[0].objective_target).toBe(true);
+    expect(buildRadarRegions(entities, [{ ...objective, unassigned: true }])[0].objective_target).toBe(false);
+  });
+});

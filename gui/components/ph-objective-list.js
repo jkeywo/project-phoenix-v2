@@ -88,7 +88,9 @@ export class PhObjectiveList extends PhElement {
     raw.forEach(o => {
       const key = o.id || o.text || '';
       const done = o.done != null ? o.done : (o.status === 'Completed');
-      const text = o.text || '';
+      const progress = Number.isFinite(o.progress) && o.progress >= 0
+        ? t('component.objectives.progress', { progress: o.progress }) : '';
+      const text = [o.text || '', progress].filter(Boolean).join(' — ');
       const boosted = key !== '' && boostedId === key;
       let el = this.#rowCache.get(key);
       if (!el) {

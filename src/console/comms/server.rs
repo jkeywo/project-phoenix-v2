@@ -183,15 +183,16 @@ pub(crate) fn publish_comms_blackboard(
                 .map(|o| {
                     let ship_id = uuid.map_or("", |id| id.0.as_str());
                     let scored = o.0.scored_pool_for(&conditions, ship_id);
-                    objective_instances
-                        .as_ref()
-                        .map_or(scored.clone(), |instances| {
-                            instances.0.project_scored_for_ship(ship_id, scored)
-                        })
+                    let snapshots: Vec<_> = scored
                         .into_iter()
                         .filter(crate::objectives::is_visible_objective)
                         .map(|s| s.snapshot)
-                        .collect()
+                        .collect();
+                    objective_instances
+                        .as_ref()
+                        .map_or(snapshots.clone(), |instances| {
+                            instances.0.project_snapshots_for_ship(ship_id, snapshots)
+                        })
                 })
                 .unwrap_or_default();
         }

@@ -353,7 +353,8 @@ explicit challenger refusal, then common digest ticks. Existing race, exact
 restore, connected-holder, transport-route and six-peer digest checks are
 unchanged. Focused fake-clock tests exercise independent deadlines and every
 phase timeout; they provide no new browser recovery acceptance. The retained
-d032 automatic-fallback cell remains inconclusive until the new runner is run.
+d032 automatic-fallback artifact remains inconclusive; the separately bounded
+b161 rerun below provides the later passing observation.
 
 
 ### Same-process candidate Pause on the solo f2ed run
@@ -401,6 +402,91 @@ Focused validation of the completed correction:
 - PASM validate, scan and traceability all exit 0 on the final contract; logs
   are `target/1534-same-handle-bootstrap-pasm-*-v3.log`.
 
-These targeted checks do not replace the corrected six-process active-workload
-runtime run. In particular, live GM actions during a pending transfer still
-need the resulting canonical history and digest agreement observed end to end.
+These targeted checks are complemented by the corrected six-process
+active-workload runtime observation below.
+
+
+### Corrected native GM redial PASS on b16122a0
+
+On 2026-09-27, the six-process native relay case passed its healthy admission
+and active-workload baseline, same-process GM reconnect, and post-Resume digest
+gates in 171.423 seconds. Product and runner both used clean source
+`b16122a02414ed67cd5d396d0bed889ae275cc82`.
+
+GM 2 retained PID 10360 and its process start time, capability, operator and
+slot while transport generation 0 closed and generation 1 opened. The agreed
+loss was tick 604; all six peers reported the same reconnect Commit at tick
+609. Explicit Resume was accepted and applied. All six subsequently agreed at
+tick 900 (`abc485a58080e5c1`) and tick 1200 (`7b7ff12876ec618e`), with no
+repeated command orders. The result records no failure and sets admission,
+workload and recovery verdicts to true.
+
+Retained evidence under the main checkout's `target/` (SHA-256):
+
+- `1534-native-gm-redial-relay-b16122a0-corrected/matrix.json`:
+  `016567084e7f38f05ffd42d5eb08568f0eb79b96fcfb1e87b96e1c371f4561eb`.
+- `native-build-receipt-b16122a0.json`:
+  `f56f4940768927552c47ce396b6452f14eff1c36d9ec618a91c134041c5ef731`.
+  It records clean source, the refreshed library and dependency attribution,
+  content/bundle/SDK hashes, and the successful native build. Its archived
+  `native-build-b16122a0-provenance/phoenix-host.exe` was independently hashed:
+  `7f5a4f2ed618663369ef4423c55358da41708faf3dd6c1ff52af7aedb305ffc2`.
+- `1534-native-gm-redial-relay-b16122a0-corrected-service/attribution.json`:
+  `4ddf01fffd131868f71163753a5916e1d6b9661d076d1168bc8deb34a58ecbd9`.
+  It pins the same source and receipt, records service exit 0 and confirmed
+  cleanup, and reports 37,923 reliable frames seen/written with no cancellation
+  or queue overflow. Delay and loss were both zero.
+
+This passes the bounded all-native GM socket-redial cell on loopback relay.
+It does not establish the other unrun native/mixed fault cells or impaired
+transport coverage. The earlier failed artifacts remain diagnostic evidence.
+
+
+### Browser replacement automatic fallback PASS on b16122a0
+
+The corrected phase-bounded browser run passed on 2026-09-27 from 21:45:14.376
+through 21:52:55.277 UTC. Its manifest and source-matched WASM receipt name
+`b16122a02414ed67cd5d396d0bed889ae275cc82` with an empty source patch;
+the manifest's 1,662 bundle hashes match the receipt exactly. The per-page
+evaluation timeout was 180 seconds.
+
+Ship 2, slot 2, was lost at agreed tick 440. Both contenders started their
+claim in the same recorded millisecond; only `replacement-1` received slot 2,
+and `replacement-2` was refused with `slot-taken`. All six resulting peers
+reported canonical restore boundary 2700, claim sequence 1, and InProgress.
+The outcome confirms exactly one claim and a restored roster. The loser's
+later challenge was also refused with `slot-taken`, preserving the holder.
+
+Every phase passed within its independently recorded deadline:
+
+| Phase | Observed seconds | Budget seconds |
+| --- | ---: | ---: |
+| Agreed loss and Backfill | 0.278 | 90 |
+| Concurrent admission | 85.782 | 120 |
+| Canonical restore | 17.298 | 90 |
+| Connected-holder challenge | 85.058 | 120 |
+| Final digest verification | 0.009 | 90 |
+
+The final check used checkpoints collected after challenge start at tick 2735,
+including while its fallback admission ladder was pending; 0.009 seconds is
+verification time, not the time needed to simulate new checkpoints. All six
+agreed at 3000 (`e741e0f4dfc3581f`), 3300 (`3cfc6414c3d1fcba`), and
+3600/3900/4200/4500. The result records no telemetry overflow and confirms the
+fallback route. The service suppressed 80 RTC offers; the winner sent four
+offers, opened relay, and retained no selected direct connection. Artificial
+relay delay/loss were zero, with no dropped snapshots or queue overflow.
+
+Retained evidence under the main checkout's `target/` (SHA-256):
+
+- `1534-browser-replacement-b16122a0-fallback/automatic-fallback/result.json`:
+  `2d59fe4fe566ac8f484d6cf8ffde185cb9dff1fbf4e53999320251e049f3ed00`.
+- `1534-browser-replacement-b16122a0-fallback/manifest.json`:
+  `74be1bd5bf12598a27d46fe3d0d787d052d2df8967bc6d7a89f47e42b8e1f85e`.
+- `browser-wasm-receipt-b16122a0.json`:
+  `cc247306f53280ca0f0b168d83c5a8e2b73465b0b7b1fbb1515df4e193cdf377`.
+
+This closes the observed browser automatic-fallback replacement gap while
+retaining the d032 shared-budget timeout as historical evidence. It is a
+single-machine, browser-only loopback run with real WASM simulation and Bevy
+rendering disabled. It establishes no native/mixed replacement, added relay
+impairment, physical-network, endurance or performance acceptance.

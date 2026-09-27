@@ -490,7 +490,8 @@ bootstrap; the readiness and connected-holder gates remain unchanged.
 tests after the correction (`target/1534-fresh-lobby-replacement-green.log`).
 Both ordinary and fresh-Lobby replacements commit the record and retain more
 than sixty shared post-restore digest checks. This is integration evidence;
-new source-matched browser/native replacement races still need runtime results.
+later source-matched browser race results are recorded in
+`1534-mixed-native-recovery.md`; native/mixed races remain untested.
 
 ## Outstanding
 
@@ -500,7 +501,7 @@ new source-matched browser/native replacement races still need runtime results.
 | Owner loss | Passed at `da812fb0` | Passed at `da812fb0`; prior evidence retained | Passed at `da812fb0` with attributed milestone recorder | Native healthy precondition failed at `9f2ba003`; no owner fault injected |
 | GM loss | Passed at `da812fb0` | Passed at `da812fb0` | Passed at `da812fb0` with attributed milestone recorder | Native relay passed at `9f2ba003`; earlier precondition failure retained |
 | Divergence restore and exact-once reducer effect | Passed at `da812fb0` | Passed at `da812fb0`; prior failures retained above | Passed at `9f2ba003` with attributed `c2246356` witness; earlier observer failures retained | Untested |
-| Two replacement contenders and connected-holder challenge | Race admission passed, restore failed at `9f2ba003` | Race admission passed, restore failed at `9f2ba003` | Untested | Untested |
+| Two replacement contenders and connected-holder challenge | Passed at `d032d604`; earlier restore failure retained | Passed at `d032d604`; earlier restore failure retained | Passed at `b16122a0` with separate phase deadlines; earlier shared-budget timeout retained | Untested |
 
 The participant-electorate fix passed seven focused Rust recovery tests and a
 WASM configuration check; these are not substitute runtime evidence. The `97a6bd01` live rerun remains failed for the reasons above. The owner-suffix proof limitation above remains
@@ -512,6 +513,7 @@ physical/mobile/internet recovery, impaired-network
 recovery or complete recovery-feedback observation is established here.
 
 The replacement race runtime failures and subsequent integration regression are
-retained above; the corrected race still needs a live result. Final
+retained above; corrected browser races now pass all three routes, with
+source attribution and bounds in `1534-mixed-native-recovery.md`. Final
 integration gates and the final source-matched matrix remain the integration
 task's responsibility. Issue #1534 must remain open while these gaps remain.

@@ -50,7 +50,11 @@ source-metadata refresh. A pack without a String Table can start a locale here.
 Workshop's Script editor, Test controls and diagnostics repaint from String IDs
 without remounting source inputs. Technical source paths, compiler details and
 unknown authored prose remain literal inside translated status frames. The
-strict string scan includes the mounted Script editor view.
+strict string scan includes the Workshop page and mounted Script editor view,
+and checks thrown String IDs in the Script and Objective snippet helpers.
+Runtime findings retain semantic severity through a locale repaint while file
+paths and compiler detail remain literal. Unknown provider errors receive a
+translated refusal frame without treating their message as a String ID.
 
 A text id may be joined on the wire by a sibling field named `<field>_params`
 (`ObjectiveSnapshot::text_params`, `CommsMessage::body_params`). `localiseTree`

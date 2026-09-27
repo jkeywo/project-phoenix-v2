@@ -59,11 +59,13 @@ describe('Workshop Authoring browser surface', () => {
       + '[Pack imported. Select a document to edit or validate the draft.]\n'
       + 'workshop.check_refused,Prüfung fehlgeschlagen. Entwurf erhalten.,'
       + '[Validation failed. Your draft is retained.]\n'
+      + 'workshop.files,Ausgewählte Quelldokumente,[Pack documents]\n'
       + 'workshop.exported,Geprüftes ZIP exportiert.,[Validated ZIP exported.]\n' }]);
     setLocale('de');
     mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
     await importBytes();
     expect(document.querySelector('.workshop-findings').textContent).toContain('Paket importiert');
+    expect(document.querySelector('label[for="workshop-files"]').textContent).toBe('Ausgewählte Quelldokumente');
     select(WORKSHOP_WORLD);
     edit('[global\n');
     await evaluated('check');
@@ -86,6 +88,7 @@ describe('Workshop Authoring browser surface', () => {
     setOverlayCatalogues([{ source: 'de-fixture', csv: 'id,de,de_source\n'
       + 'workshop.title,Werkstatt,[Phoenix Workshop]\n'
       + 'workshop.check_refused,Prüfung fehlgeschlagen. Entwurf erhalten.,[Validation failed. Your draft is retained.]\n'
+      + 'workshop.severity.error,Fehler,[Error]\n'
       + 'settings.language,Sprache,[Language]\n' }]);
     let editor;
     const preference = createLocalePreference({ doc: document, nav: { language: 'en' },
@@ -113,6 +116,7 @@ describe('Workshop Authoring browser surface', () => {
     expect(document.querySelector('#root h1').textContent).toBe('Werkstatt');
     expect(document.querySelector('.workshop-findings').textContent).toContain('Prüfung fehlgeschlagen');
     expect(document.querySelector('.workshop-findings').textContent).toContain('bad source');
+    expect(document.querySelector('.workshop-findings').textContent).toContain('Fehler: bad source');
     expect(source.value).toBe(editedValue);
     expect(document.activeElement).toBe(source);
     expect(source.selectionStart).toBe(4);

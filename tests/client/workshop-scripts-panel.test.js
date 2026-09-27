@@ -180,7 +180,8 @@ describe('Workshop Rhai panel', () => {
     setTable(new Map());
   });
 
-  it('keeps literal validation detail through a language repaint', async () => {
+  it('frames literal validation detail in German through a language repaint', async () => {
+    setTable(buildTable('id,context,en,de\nworkshop.scripts.operation_refused,error,Script operation failed,Schreibvorgang fehlgeschlagen\n', 'de'));
     const value = makeDraft();
     const panel = mountWorkshopScripts({ root: document.getElementById('root'), draft: () => value,
       runtime: { scriptHostFunctions: async () => [], scriptDiagnostics: async () => [],
@@ -192,8 +193,14 @@ describe('Workshop Rhai panel', () => {
     document.querySelector('.script-editor-save').click();
     await vi.waitFor(() => expect(document.getElementById('workshop-script-status').textContent)
       .toContain('literal compiler detail'));
+    expect(document.getElementById('workshop-script-status').textContent).toContain('Schreibvorgang fehlgeschlagen');
+    expect(document.getElementById('workshop-script-status').getAttribute('role')).toBe('alert');
+    expect(document.activeElement).toBe(document.getElementById('workshop-script-status'));
     panel.refreshLanguage();
     expect(document.getElementById('workshop-script-status').textContent).toContain('literal compiler detail');
+    expect(document.getElementById('workshop-script-status').textContent).toContain('Schreibvorgang fehlgeschlagen');
+    expect(value.read(WORLD)).toContain('fn start');
     panel.dispose();
+    setTable(new Map());
   });
 });

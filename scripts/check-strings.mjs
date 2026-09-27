@@ -132,6 +132,10 @@ const codeFiles = [
   // Workshop's Rhai editor is the only editor/ DOM view mounted directly in
   // the shipped authoring surface; its labels and diagnostics are player copy.
   path.join(root, 'editor', 'script-editor-view.js'),
+  // These helpers throw presentation String IDs consumed by the mounted
+  // Workshop script panel. They are not t() calls, so check them explicitly.
+  path.join(root, 'editor', 'workshop-scripts.js'),
+  path.join(root, 'editor', 'workshop-objective-snippet.js'),
   ...await walk(
     path.join(root, 'gui'),
     (f) => /\.(js|html)$/.test(f)
@@ -140,6 +144,7 @@ const codeFiles = [
   ),
   path.join(root, 'client.html'),
   path.join(root, 'server.html'),
+  path.join(root, 'workshop.html'),
 ];
 
 // `t('some.id')` / `t("some.id")` — the trailing [,)] excludes computed ids
@@ -151,6 +156,7 @@ const T_CALL = /\bt\(\s*(['"])([A-Za-z0-9_.-]+)\1\s*[,)]/g;
 // exempt from BOTH scans — gate green, console rendering ⟨typo.id⟩.
 const DATA_I18N = /data-i18n\s*=\s*(?:"([^"]+)"|'([^']+)')/g;
 const DATA_I18N_ATTR = /data-i18n-attr\s*=\s*(?:"([^"]+)"|'([^']+)')/g;
+const WORKSHOP_ERROR_ID = /new Error\(\s*(['"])(workshop\.[A-Za-z0-9_.-]+)\1\s*\)/g;
 
 for (const file of codeFiles) {
   let src;
@@ -158,6 +164,11 @@ for (const file of codeFiles) {
 
   for (const m of src.matchAll(T_CALL)) {
     if (!table.has(m[2])) errors.push(`${rel(file)}: t('${m[2]}') has no CSV row`);
+  }
+  if (['editor/workshop-scripts.js', 'editor/workshop-objective-snippet.js'].includes(rel(file))) {
+    for (const m of src.matchAll(WORKSHOP_ERROR_ID)) {
+      if (!table.has(m[2])) errors.push(`${rel(file)}: thrown Workshop String Id '${m[2]}' has no CSV row`);
+    }
   }
   for (const m of src.matchAll(DATA_I18N)) {
     const id = m[1] ?? m[2];

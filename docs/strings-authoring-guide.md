@@ -381,11 +381,14 @@ The gate reports the tag itself; write `${t('id')}` in the template.
 - **A `.textContent` right-hand side containing a `;`** — the capture stops at
   the first one, so a callback body or a semicolon inside the string itself
   hides the rest. Pinned in `tests/client/strings-literals.test.js`.
-- **Most of `editor/`.** Pure authoring logic is outside the scan; the mounted
-  `editor/script-editor-view.js` DOM surface is scanned along with Workshop's
-  `gui/` panels. Workshop also resolves authored labels as String IDs at
-  render time, while unknown mod prose, source paths and compiler details stay
-  literal inside translated diagnostic frames.
+- **Most of `editor/`.** Pure authoring logic is outside the DOM literal scan;
+  the mounted `editor/script-editor-view.js` and `workshop.html` are scanned
+  along with Workshop's `gui/` panels. The checker also verifies literal
+  `new Error('workshop.…')` String IDs in the script and Objective snippet
+  helpers. Workshop resolves authored labels as String IDs at render time,
+  while unknown mod prose, source paths and compiler details stay literal
+  inside translated diagnostic frames. Keep the outcome and severity in the
+  String Table; do not turn compiler detail into a fabricated translation key.
 - **Files listed in `UNLOCALISED_FILES`** in the checker — currently just
   `gui/lobby-client.html`, a redirect stub whose `<title>` shows for the length
   of one `location.replace`. Its expected finding is pinned in

@@ -57,9 +57,13 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
   let previousDraft = null, previousRevision = -1, previousWorld = null;
   const option = (value, label) => { const item = node('option', null, { value }); item.textContent = label; return item; };
   const show = (id, error = false, detail = '') => {
-    status.dataset.messageId = has(id) ? id : '';
-    status.dataset.detail = detail;
-    status.textContent = [has(id) ? t(id) : id, detail].filter(Boolean).join(' ');
+    // Runtime/compiler text is source detail, never a String Id. Keep a
+    // translated outcome around it so a refusal has meaning in every locale.
+    const messageId = has(id) ? id : 'workshop.scripts.operation_refused';
+    const literalDetail = has(id) ? detail : [id, detail].filter(Boolean).join(' ');
+    status.dataset.messageId = messageId;
+    status.dataset.detail = literalDetail;
+    status.textContent = [t(messageId), literalDetail].filter(Boolean).join(' ');
     status.setAttribute('role', error ? 'alert' : 'status'); if (error) status.focus();
   };
   create.addEventListener('click', async () => {

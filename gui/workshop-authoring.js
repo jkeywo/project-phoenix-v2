@@ -625,6 +625,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (!refused) layoutMount.reveal('findings', { focus: '.workshop-findings' });
     for (const record of records) {
       const row = el('p');
+      row.dataset.workshopSeverity = record.severity;
+      row.dataset.workshopMessage = record.message;
       const location = `${record.file}${record.line ? `:${record.line}` : ''}`;
       if (draft.paths().includes(record.file)) {
         const target = button(null, '', () => {
@@ -1077,6 +1079,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       if (selected) sourceLabel.textContent = translate('workshop.source_path', { path: selected });
       if (lastFinding && findings.firstChild?.nodeType === 3) {
         findings.firstChild.textContent = [translate(lastFinding.id), ...lastFinding.details].join('\n');
+      }
+      for (const row of findings.querySelectorAll('[data-workshop-severity]')) {
+        row.lastChild.textContent = ` — ${translate(`workshop.severity.${row.dataset.workshopSeverity}`)}: ${row.dataset.workshopMessage}`;
       }
       renderFeedbackRows();
       root.scrollTop = scrollTop;

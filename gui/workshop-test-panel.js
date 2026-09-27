@@ -1,11 +1,11 @@
 import { createWorkshopTest } from '../editor/workshop-test.js';
 import { validateTestBreakpoint } from '../editor/workshop-test-breakpoint.js';
-import { t } from './strings.js';
+import { applyToDom, t, wireText } from './strings.js';
 
 /** Shared offline controls over the native child/browser iframe capability. */
 export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: isBusy,
   changed = () => {}, leave = () => {}, openSource = () => {}, win = root.ownerDocument.defaultView }) {
-  if (!provider?.test) return { node: null, viewNode: null, traceNode: null, refresh() {}, held: () => false,
+  if (!provider?.test) return { node: null, viewNode: null, traceNode: null, refresh() {}, refreshLanguage() {}, held: () => false,
     testing: () => false, dispose() {} };
   const doc = root.ownerDocument;
   const panel = doc.createElement('section');
@@ -16,7 +16,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   tracePanel.className = 'workshop-test-trace';
   const make = (tag, id, textId) => {
     const node = doc.createElement(tag); node.id = `workshop-test-${id}`;
-    if (textId) node.textContent = t(textId);
+    if (textId) { node.dataset.i18n = textId; node.textContent = t(textId); }
     return node;
   };
   const command = (id, text, invoke) => {
@@ -32,17 +32,21 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   const breakpointEnabled = make('input', 'breakpoint-enabled'); breakpointEnabled.type = 'checkbox';
   const breakpointKind = make('select', 'breakpoint-kind');
   for (const [value, id] of [['flag', 'workshop.test_breakpoint_flag'], ['counter', 'workshop.test_breakpoint_counter']]) {
-    const option = doc.createElement('option'); option.value = value; option.textContent = t(id); breakpointKind.append(option);
+    const option = doc.createElement('option'); option.value = value; option.dataset.i18n = id;
+    option.textContent = t(id); breakpointKind.append(option);
   }
   const breakpointName = make('input', 'breakpoint-name'); breakpointName.maxLength = 128;
   const breakpointLayer = make('select', 'breakpoint-layer');
   const breakpointFlagValue = make('select', 'breakpoint-flag-value');
   for (const [value, id] of [['true', 'workshop.test_breakpoint_true'], ['false', 'workshop.test_breakpoint_false']]) {
-    const option = doc.createElement('option'); option.value = value; option.textContent = t(id); breakpointFlagValue.append(option);
+    const option = doc.createElement('option'); option.value = value; option.dataset.i18n = id;
+    option.textContent = t(id); breakpointFlagValue.append(option);
   }
   const breakpointComparison = make('select', 'breakpoint-comparison');
   for (const value of ['eq', 'ne', 'ge', 'gt', 'le', 'lt']) {
-    const option = doc.createElement('option'); option.value = value; option.textContent = value; breakpointComparison.append(option);
+    const option = doc.createElement('option'); option.value = value;
+    option.dataset.i18n = `workshop.test_breakpoint_comparison_${value}`;
+    option.textContent = t(option.dataset.i18n); breakpointComparison.append(option);
   }
   const breakpointValue = make('input', 'breakpoint-value'); breakpointValue.type = 'number'; breakpointValue.step = '1'; breakpointValue.value = '1';
   let choices = { worlds: [], ships: [], slots: {}, layers: {} }, choicesReady = false;
@@ -52,7 +56,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     const previousSlot = slot.value, previousHull = ship.value;
     slot.replaceChildren(...offered.map(row => {
       const option = doc.createElement('option'); option.value = row.id;
-      option.textContent = row.label ? t(row.label) : row.id; return option;
+      option.textContent = row.label ? wireText(row.label) : row.id; return option;
     }));
     if (retainStale && previousSlot && offered.length && !offered.some(row => row.id === previousSlot)) {
       const stale = doc.createElement('option'); stale.value = previousSlot;
@@ -143,14 +147,16 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     void session.control(control).catch(() => {});
   });
   panel.append(make('h2', 'heading', 'workshop.test_heading'), make('p', 'scope', 'workshop.test_scope'));
-  const label = (target, id) => { const node = doc.createElement('label'); node.htmlFor = target.id; node.textContent = t(id); panel.append(node, target); };
+  const label = (target, id) => { const node = doc.createElement('label'); node.htmlFor = target.id;
+    node.dataset.i18n = id; node.textContent = t(id); panel.append(node, target); };
   label(world, 'workshop.test_world'); label(slot, 'workshop.test_slot');
   label(ship, 'workshop.test_ship'); label(seed, 'workshop.test_seed');
   const breakpointFields = doc.createElement('fieldset'); breakpointFields.className = 'workshop-test-breakpoint';
-  const breakpointLegend = doc.createElement('legend'); breakpointLegend.textContent = t('workshop.test_breakpoint');
+  const breakpointLegend = doc.createElement('legend'); breakpointLegend.dataset.i18n = 'workshop.test_breakpoint';
+  breakpointLegend.textContent = t('workshop.test_breakpoint');
   breakpointFields.append(breakpointLegend);
   const breakpointField = (target, id) => { const node = doc.createElement('label'); node.htmlFor = target.id;
-    node.textContent = t(id); breakpointFields.append(node, target); };
+    node.dataset.i18n = id; node.textContent = t(id); breakpointFields.append(node, target); };
   breakpointField(breakpointEnabled, 'workshop.test_breakpoint_enabled');
   breakpointField(breakpointKind, 'workshop.test_breakpoint_kind');
   breakpointField(breakpointName, 'workshop.test_breakpoint_name');
@@ -167,7 +173,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     viewPanel.append(viewport); provider.test.mount(viewport, t('workshop.test_heading'));
   } else {
     const unavailable = doc.createElement('p');
-    unavailable.textContent = t('workshop.test_scope');
+    unavailable.dataset.i18n = 'workshop.test_scope'; unavailable.textContent = t('workshop.test_scope');
     viewPanel.append(unavailable);
   }
   root.append(viewPanel);
@@ -178,16 +184,19 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     ['all', 'workshop.test_trace_all'], ['host-call', 'workshop.test_trace_calls'],
     ['flag-mutation', 'workshop.test_trace_flags'], ['callback', 'workshop.test_trace_callbacks'],
   ]) {
-    const option = doc.createElement('option'); option.value = value; option.textContent = t(id); traceFilter.append(option);
+    const option = doc.createElement('option'); option.value = value; option.dataset.i18n = id;
+    option.textContent = t(id); traceFilter.append(option);
   }
   const traceLabel = doc.createElement('label'); traceLabel.htmlFor = traceFilter.id;
-  traceLabel.textContent = t('workshop.test_trace_filter');
+  traceLabel.dataset.i18n = 'workshop.test_trace_filter'; traceLabel.textContent = t('workshop.test_trace_filter');
   const traceStatus = make('p', 'trace-status'); traceStatus.setAttribute('role', 'status');
   const traceList = make('ol', 'trace-list');
+  traceList.dataset.i18nAttr = 'aria-label:workshop.test_trace';
   traceList.setAttribute('aria-label', t('workshop.test_trace'));
   tracePanel.append(traceHeading, traceScope, traceLabel, traceFilter, traceStatus, traceList);
   const breakpointHit = make('section', 'breakpoint-hit'); breakpointHit.setAttribute('aria-live', 'polite');
-  const breakpointHitHeading = doc.createElement('h3'); breakpointHitHeading.textContent = t('workshop.test_breakpoint_hit');
+  const breakpointHitHeading = doc.createElement('h3'); breakpointHitHeading.dataset.i18n = 'workshop.test_breakpoint_hit';
+  breakpointHitHeading.textContent = t('workshop.test_breakpoint_hit');
   const breakpointHitCondition = make('p', 'breakpoint-hit-condition');
   const breakpointHitSource = make('button', 'breakpoint-hit-source'); breakpointHitSource.type = 'button';
   const breakpointHitTrace = make('ol', 'breakpoint-hit-trace');
@@ -206,9 +215,9 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
       scope: record.layer ? t('workshop.test_trace_layer', { layer: record.layer }) : t('workshop.test_trace_root'),
     });
     if (record.kind === 'callback-scheduled') return t('workshop.test_trace_scheduled', {
-      function: record.function, tick: String(record.fire_tick),
+      function: record.function, tick: record.fire_tick,
     });
-    return t('workshop.test_trace_fired', { function: record.function, tick: String(record.scheduled_tick) });
+    return t('workshop.test_trace_fired', { function: record.function, tick: record.scheduled_tick });
   };
   function paintTrace(run) {
     const records = Array.isArray(run?.trace) ? run.trace : [];
@@ -221,7 +230,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     traceList.replaceChildren(...visible.map(record => {
       const row = doc.createElement('li'); row.dataset.kind = record.kind;
       const identity = doc.createElement('span'); identity.className = 'workshop-test-trace-identity';
-      identity.textContent = t('workshop.test_trace_identity', { tick: String(record.tick), order: String(record.order) });
+      identity.textContent = t('workshop.test_trace_identity', { tick: record.tick, order: record.order });
       const event = doc.createElement('span'); event.className = 'workshop-test-trace-event';
       event.textContent = traceEventText(record);
       const location = `${record.source?.path || ''}${record.source?.line ? `:${record.source.line}` : ''}`;
@@ -236,17 +245,18 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
       row.append(identity, doc.createTextNode(' '), event, doc.createTextNode(' '), source);
       return row;
     }));
-    traceStatus.textContent = t('workshop.test_trace_count', { shown: String(visible.length), total: String(records.length) });
+    traceStatus.textContent = t('workshop.test_trace_count', { shown: visible.length, total: records.length });
   }
   function paintBreakpoint(run) {
     const hit = run?.breakpoint_hit;
     breakpointHit.hidden = !hit;
     if (!hit) { breakpointHitTrace.replaceChildren(); return; }
     const condition = hit.breakpoint.condition;
-    const expected = condition.kind === 'flag' ? String(condition.value)
-      : `${condition.comparison} ${condition.value}`;
+    const expected = condition.kind === 'flag'
+      ? t(condition.value ? 'workshop.test_breakpoint_true' : 'workshop.test_breakpoint_false')
+      : `${t(`workshop.test_breakpoint_comparison_${condition.comparison}`)} ${condition.value}`;
     breakpointHitCondition.textContent = t('workshop.test_breakpoint_hit_detail', {
-      name: condition.name, expected, current: String(hit.current), tick: String(hit.tick),
+      name: condition.name, expected, current: String(hit.current), tick: hit.tick,
       scope: hit.breakpoint.layer || t('workshop.test_trace_root'),
     });
     const location = `${hit.source?.path || ''}${hit.source?.line ? `:${hit.source.line}` : ''}`;
@@ -257,7 +267,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     breakpointHitTrace.replaceChildren(...(hit.adjacent_trace || []).map(record => {
       const row = doc.createElement('li');
       row.textContent = `${t('workshop.test_trace_identity', {
-        tick: String(record.tick), order: String(record.order),
+        tick: record.tick, order: record.order,
       })} ${traceEventText(record)}`;
       return row;
     }));
@@ -270,7 +280,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   let offered = '';
   function paintViews(run) {
     const ships = Array.isArray(run?.ships) ? run.ships : [];
-    const signature = JSON.stringify(ships);
+    const signature = JSON.stringify([ships, t('workshop.test_view_gm'), t('workshop.test_view_launched')]);
     if (signature !== offered) {
       offered = signature;
       const options = [
@@ -297,7 +307,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     const running = !!state.run;
     panel.setAttribute('aria-busy', String(busy));
     start.disabled = busy || catalogPending || !draft || !validSelection();
-    start.textContent = t(running ? 'workshop.test_restart' : 'workshop.test_start');
+    start.dataset.i18n = running ? 'workshop.test_restart' : 'workshop.test_start';
+    start.textContent = t(start.dataset.i18n);
     world.disabled = slot.disabled = ship.disabled = seed.disabled = busy || testing;
     breakpointEnabled.disabled = breakpointKind.disabled = breakpointName.disabled = breakpointLayer.disabled = busy || testing;
     breakpointFlagValue.disabled = breakpointComparison.disabled = breakpointValue.disabled = busy || testing;
@@ -322,7 +333,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     speed.value = String(state.run?.multiplier || 1);
     const lines = [t(testing ? 'workshop.test_mode' : 'workshop.test_authoring_mode')];
     if (state.starting || state.run?.starting) lines.push(t('workshop.test_starting'));
-    else if (running) lines.push(t(state.run.paused ? 'workshop.test_held' : 'workshop.test_running', { tick: String(state.run.tick) }));
+    else if (running) lines.push(t(state.run.paused ? 'workshop.test_held' : 'workshop.test_running', { tick: state.run.tick }));
     if (state.stale) lines.push(t('workshop.test_stale'));
     if (choicesReady && !catalogPending && !validSelection()) lines.push(t('workshop.test_selection_invalid'));
     const error = localError || state.error;
@@ -377,6 +388,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   const timer = win.setInterval(() => { void session.poll().catch(() => {}); }, 500);
   refresh();
   return { node: panel, viewNode: viewPanel, traceNode: tracePanel, refresh, enter: () => session.test(),
+    refreshLanguage() { traceSignature = ''; offered = ''; paintSlotsAndShips({ retainStale: true });
+      paintBreakpointLayers(); render(); applyToDom(panel); applyToDom(tracePanel); applyToDom(viewPanel); },
     held: () => session.state().busy || session.state().mode === 'test', testing: () => session.state().mode === 'test',
     dispose() { disposed = true; win.clearInterval(timer); if (catalogTimer !== null) win.clearTimeout(catalogTimer);
       void session.dispose().catch(() => {}); panel.remove(); viewPanel.remove(); tracePanel.remove(); } };

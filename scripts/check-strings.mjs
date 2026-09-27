@@ -129,6 +129,9 @@ const table = buildTable(csvText);
 // calls would fail the id-existence check above with dozens of errors about
 // rows nobody should add. Nothing in there is ours to localise.
 const codeFiles = [
+  // Workshop's Rhai editor is the only editor/ DOM view mounted directly in
+  // the shipped authoring surface; its labels and diagnostics are player copy.
+  path.join(root, 'editor', 'script-editor-view.js'),
   ...await walk(
     path.join(root, 'gui'),
     (f) => /\.(js|html)$/.test(f)

@@ -1,6 +1,6 @@
 import { mountScriptEditor, renderScriptList } from '../editor/script-editor-view.js';
 import { applyWorkshopScript, workshopScriptUnits, workshopScriptWorlds } from '../editor/workshop-scripts.js';
-import { t } from './strings.js';
+import { has, t, wireText } from './strings.js';
 
 export function mountWorkshopScripts({ root, provider, runtime, draft, busy, setBusy, changed, attach = true }) {
   const doc = root.ownerDocument;
@@ -14,14 +14,17 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
   const list = node('div', null, { id: 'workshop-script-list', role: 'list', 'aria-label': t('workshop.scripts.units') });
   const editor = node('div', null, { id: 'workshop-script-editor' });
   const status = node('p', null, { id: 'workshop-script-status', role: 'status', tabindex: '-1' });
-  section.append(node('p', 'workshop.scripts.scope'), node('label', 'workshop.scripts.world', { for: world.id }),
+  const scope = node('p', 'workshop.scripts.scope');
+  const worldLabel = node('label', 'workshop.scripts.world', { for: world.id });
+  section.append(scope, worldLabel,
     world, list, status, editor);
   if (attach) root.append(section);
   let disposed = false, controller = null, hostFns = null, active = null;
   let previousDraft = null, previousRevision = -1, previousWorld = null;
   const option = (value, label) => { const item = node('option', null, { value }); item.textContent = label; return item; };
   const show = (id, error = false) => {
-    status.textContent = t(id); status.setAttribute('role', error ? 'alert' : 'status'); if (error) status.focus();
+    status.dataset.messageId = has(id) ? id : '';
+    status.textContent = wireText(id); status.setAttribute('role', error ? 'alert' : 'status'); if (error) status.focus();
   };
   async function open(unit) {
     if (!unit || busy()) return;
@@ -33,6 +36,7 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
     if (disposed || busy() || !currentUnit(unit)) return;
     controller?.destroy();
     controller = mountScriptEditor({ host: editor, source: unit.source,
+      t,
       title: `${unit.documentPath}${unit.kind === 'inline' ? ` — [script.${unit.key}]` : ''}`,
       hostFns, lineOffset: unit.lineOffset,
       getDiagnostics: async (source, lineOffset) => {
@@ -65,9 +69,12 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
   }
   function units() { return workshopScriptUnits(draft(), world.value); }
   function paintList() {
+    const focused = list.contains(doc.activeElement) ? doc.activeElement.closest('[data-script-id]')?.dataset.scriptId : null;
     const rows = units();
-    renderScriptList(list, rows, { selectedId: active?.id, onSelect: open });
+    renderScriptList(list, rows, { selectedId: active?.id, onSelect: open, t });
     for (const row of list.querySelectorAll('.script-list-row')) row.setAttribute('role', 'button');
+    if (focused) [...list.querySelectorAll('[data-script-id]')]
+      .find(row => row.dataset.scriptId === focused)?.focus();
   }
   function refresh({ hidden = false } = {}) {
     section.hidden = hidden;
@@ -86,5 +93,14 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
   }
   world.addEventListener('change', () => { previousWorld = world.value; active = null; controller?.destroy(); controller = null; paintList(); });
   refresh();
-  return { node: section, refresh, dispose() { disposed = true; controller?.destroy(); section.remove(); } };
+  return { node: section, refresh,
+    refreshLanguage() {
+      scope.textContent = t('workshop.scripts.scope');
+      worldLabel.textContent = t('workshop.scripts.world');
+      list.setAttribute('aria-label', t('workshop.scripts.units'));
+      if (status.dataset.messageId) status.textContent = t(status.dataset.messageId);
+      paintList();
+      controller?.refreshLanguage();
+    },
+    dispose() { disposed = true; controller?.destroy(); section.remove(); } };
 }

@@ -4,10 +4,52 @@ import { mountWorkshopTestPanel } from '../../gui/workshop-test-panel.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { t } from '../../gui/strings.js';
+import { readFileSync } from 'node:fs';
+import { getTable, setBaseCatalogue, setOverlayCatalogues, setLocale, setTable } from '../../gui/strings.js';
 import { WORKSHOP_MANIFEST, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 
 let panel;
 afterEach(() => { panel?.dispose(); document.body.replaceChildren(); });
+it('repaints a running Test trace in German with typed counts and literal ship names', async () => {
+  const previous = getTable();
+  setBaseCatalogue(readFileSync('assets/strings/strings.csv', 'utf8'));
+  setOverlayCatalogues([{ source: 'test-de-fixture', csv: 'id,de,de_source\n'
+    + 'workshop.test_heading,Probe,[Test]\n'
+    + 'workshop.test_trace_identity,Takt {tick} · Folge {order},[Tick {tick} · order {order}]\n'
+    + 'workshop.test_trace_count,{shown} von {total} Einträgen.,[Showing {shown} of {total} records.]\n'
+    + 'workshop.test_view_gm,Spielleitung,[Game Master]\n'
+    + 'workshop.test_view_launched,Gestartetes Schiff,[Launched ship]\n'
+    + 'workshop.test_breakpoint_comparison_ge,Mindestens,[At least]\n'
+    + 'workshop.test_running,Läuft bei Takt {tick}.,[Running at tick {tick}.]\n' }]);
+  setLocale('en');
+  const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: WORKSHOP_MANIFEST },
+    { path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT }]));
+  const run = { running: true, tick: 2345, paused: false, multiplier: 1,
+    view: { view: 'ship', entity: null }, ships: [{ entity: 'ship-2', name: 'Étoile' }],
+    trace: [{ tick: 1234, order: 2, kind: 'host-call', function: 'arrive', source: {} }] };
+  panel = mountWorkshopTestPanel({ root: document.body, draft: () => draft, busy: () => false,
+    provider: { test: { catalog: async () => ({ worlds: [WORKSHOP_WORLD], ships: ['assets/entities/hull.toml'] }),
+      capture: () => ({}), start: async () => run, status: async () => run, stop: async () => {} } } });
+  await vi.waitFor(() => expect(document.getElementById('workshop-test-start').disabled).toBe(false));
+  document.getElementById('workshop-test-start').click();
+  await vi.waitFor(() => expect(document.querySelector('.workshop-test-trace-identity')).not.toBeNull());
+  const traceFilter = document.getElementById('workshop-test-trace-filter');
+  traceFilter.value = 'host-call'; traceFilter.focus();
+  const comparison = document.getElementById('workshop-test-breakpoint-comparison');
+  comparison.value = 'ge';
+  setLocale('de'); panel.refreshLanguage();
+  expect(document.getElementById('workshop-test-heading').textContent).toBe('Probe');
+  expect(document.querySelector('.workshop-test-trace-identity').textContent).toBe('Takt 1.234 · Folge 2');
+  expect(document.getElementById('workshop-test-trace-status').textContent).toBe('1 von 1 Einträgen.');
+  expect(document.getElementById('workshop-test-status').textContent).toContain('Läuft bei Takt 2.345.');
+  expect([...document.getElementById('workshop-test-view').options].map(option => option.textContent))
+    .toContain('Étoile');
+  expect(traceFilter.value).toBe('host-call');
+  expect(comparison.value).toBe('ge');
+  expect(comparison.selectedOptions[0].textContent).toBe('Mindestens');
+  expect(document.activeElement).toBe(traceFilter);
+  panel.dispose(); panel = null; setOverlayCatalogues([]); setLocale('en'); setTable(previous);
+});
 it('chooses one controlled slot and only its permitted hull for a whole-scenario Test', async () => {
   const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: WORKSHOP_MANIFEST },
     { path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT }]));

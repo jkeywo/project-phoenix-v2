@@ -4,6 +4,8 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountScriptEditor, renderScriptList } from '../script-editor-view.js';
+import { readFileSync } from 'node:fs';
+import { getTable, setBaseCatalogue, setOverlayCatalogues, setLocale, setTable } from '../../gui/strings.js';
 
 const HOST_FNS = [
   { name: 'on_destroyed', receiver: '', category: 'trigger', signature: 'on_destroyed(entity, handler)', summary: 'Fire when destroyed.' },
@@ -171,6 +173,15 @@ describe('mountScriptEditor', () => {
     ctrl.destroy();
   });
 
+  it('reports a failed live compile as unavailable instead of clean', async () => {
+    const ctrl = mountScriptEditor({ host, diagnosticsDelayMs: 0,
+      getDiagnostics: async () => { throw new Error('compiler disconnected'); } });
+    await ctrl.runDiagnostics();
+    expect(host.querySelector('.script-diagnostics-unavailable')).toBeTruthy();
+    expect(host.querySelector('.script-diagnostics-ok')).toBeNull();
+    ctrl.destroy();
+  });
+
   it('fires onSave from the Save button', () => {
     const saved = [];
     const ctrl = mountScriptEditor({
@@ -180,5 +191,30 @@ describe('mountScriptEditor', () => {
     host.querySelector('.script-editor-save').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     expect(saved).toEqual(['fn a(ctx){}']);
     ctrl.destroy();
+  });
+
+  it('repaints German diagnostic chrome without changing source or caret', async () => {
+    const previous = getTable();
+    setBaseCatalogue(readFileSync('assets/strings/strings.csv', 'utf8'));
+    setOverlayCatalogues([{ source: 'script-de-fixture', csv: 'id,de,de_source\n'
+      + 'editor.script.title,Skript,[Script]\n'
+      + 'editor.script.save,Skript speichern,[Save Script]\n'
+      + 'editor.script.diagnostics.location,{severity} — {file}Zeile {line}{column},'
+      + '[{severity} — {file}Line {line}{column}]\n'
+      + 'editor.script.severity.error,FEHLER,[ERROR]\n'
+      + 'editor.script.diagnostics.ok,Keine Probleme,[No problems]\n' }]);
+    setLocale('en');
+    const ctrl = mountScriptEditor({ host, source: 'fn start() {}', diagnosticsDelayMs: 0,
+      getDiagnostics: () => [{ severity: 'error', line: 1234, column: 2, message: 'literal compiler detail' }] });
+    await ctrl.runDiagnostics();
+    ctrl.textarea.focus(); ctrl.textarea.setSelectionRange(3, 8);
+    setLocale('de'); ctrl.refreshLanguage();
+    expect(host.querySelector('.script-editor-save').textContent).toBe('Skript speichern');
+    expect(host.querySelector('.script-diagnostic-loc').textContent).toBe('FEHLER — Zeile 1.234:2');
+    expect(host.querySelector('.script-diagnostic-msg').textContent).toBe('literal compiler detail');
+    expect(ctrl.textarea.value).toBe('fn start() {}');
+    expect(document.activeElement).toBe(ctrl.textarea);
+    expect([ctrl.textarea.selectionStart, ctrl.textarea.selectionEnd]).toEqual([3, 8]);
+    ctrl.destroy(); setOverlayCatalogues([]); setLocale('en'); setTable(previous);
   });
 });

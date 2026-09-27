@@ -1066,6 +1066,8 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       const scrollTop = root.scrollTop;
       renderSettings();
       refresh();
+      scriptsPanel?.refreshLanguage();
+      testPanel?.refreshLanguage();
       applyToDom(root);
       for (const node of root.querySelectorAll('[data-workshop-static-id]')) {
         if (node.textContent !== node.dataset.workshopStaticText) continue;

@@ -5,7 +5,7 @@ import { mountWorkshopAuthoring } from '../../gui/workshop-authoring.js';
 import { readStoreZip, createStoreZip } from '../../editor/mod-pack-export.js';
 import { workshopPack, WORKSHOP_MANIFEST, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtures/workshop-pack.js';
 import { OPERATOR_PROFILE_KEY, createOperatorProfileSnapshot } from '../../gui/operator-profile.js';
-import { t, setBaseCatalogue, setLocale, setOverlayCatalogues } from '../../gui/strings.js';
+import { t, getTable, setTable, setBaseCatalogue, setLocale, setOverlayCatalogues } from '../../gui/strings.js';
 import { createLocalePreference, WORKSHOP_LOCALE_STORAGE_KEY } from '../../gui/locale-preference.js';
 import { mountSurfaceLanguage } from '../../gui/surface-language.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
@@ -49,6 +49,36 @@ afterEach(() => {
 });
 
 describe('Workshop Authoring browser surface', () => {
+  it('imports repairs a validation refusal and exports the corrected draft in German', async () => {
+    const previous = getTable();
+    mounted.dispose(); document.body.innerHTML = '<main id="root"></main>';
+    setBaseCatalogue(readFileSync('assets/strings/strings.csv', 'utf8'));
+    setOverlayCatalogues([{ source: 'authoring-de-fixture', csv: 'id,de,de_source\n'
+      + 'workshop.title,Werkstatt,[Phoenix Workshop]\n'
+      + 'workshop.imported,Paket importiert. Dokument wählen.,'
+      + '[Pack imported. Select a document to edit or validate the draft.]\n'
+      + 'workshop.check_refused,Prüfung fehlgeschlagen. Entwurf erhalten.,'
+      + '[Validation failed. Your draft is retained.]\n'
+      + 'workshop.exported,Geprüftes ZIP exportiert.,[Validated ZIP exported.]\n' }]);
+    setLocale('de');
+    mounted = mountWorkshopAuthoring({ root: document.getElementById('root'), download, runtime });
+    await importBytes();
+    expect(document.querySelector('.workshop-findings').textContent).toContain('Paket importiert');
+    select(WORKSHOP_WORLD);
+    edit('[global\n');
+    await evaluated('check');
+    expect(document.querySelector('.workshop-findings').textContent).toContain('Prüfung fehlgeschlagen');
+    expect(document.querySelector('[data-action-id="editor.mod.validate"]').dataset.state).toBe('Refused');
+    expect(byId('source').value).toBe('[global\n');
+    edit(`${WORKSHOP_WORLD_TEXT}# Gewählt\n`);
+    await evaluated('export');
+    expect(document.querySelector('.workshop-findings').textContent).toContain('Geprüftes ZIP exportiert');
+    const reopened = new WorkshopDocument(download.mock.calls[0][0]);
+    expect(reopened.read(WORKSHOP_WORLD)).toContain('# Gewählt');
+    expect(reopened.read(WORKSHOP_WORLD)).toContain(WORKSHOP_WORLD_TEXT.trim());
+    expect(reopened.read('scenarios.toml')).toBe(WORKSHOP_MANIFEST);
+    setOverlayCatalogues([]); setLocale('en'); setTable(previous);
+  });
   it('switches a live draft and validation refusal to German without losing editing context', async () => {
     mounted.dispose();
     document.body.innerHTML = '<main id="root"></main>';

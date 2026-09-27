@@ -58,4 +58,21 @@ describe('Workshop Rhai panel', () => {
       }
     }
   });
+
+  it('keeps a literal validation detail readable during a language repaint', async () => {
+    const value = makeDraft();
+    const panel = mountWorkshopScripts({ root: document.getElementById('root'), draft: () => value,
+      runtime: { scriptHostFunctions: async () => [], scriptDiagnostics: async () => [],
+        validate: async () => { throw new Error('literal compiler detail'); } },
+      busy: () => false, setBusy: vi.fn(), changed: vi.fn() });
+    document.querySelector('.script-list-row').click();
+    await vi.waitFor(() => expect(document.querySelector('.script-editor-input')).not.toBeNull());
+    document.querySelector('.script-editor-input').value = 'fn changed(ctx) {}';
+    document.querySelector('.script-editor-save').click();
+    await vi.waitFor(() => expect(document.getElementById('workshop-script-status').textContent)
+      .toContain('literal compiler detail'));
+    panel.refreshLanguage();
+    expect(document.getElementById('workshop-script-status').textContent).toContain('literal compiler detail');
+    panel.dispose();
+  });
 });

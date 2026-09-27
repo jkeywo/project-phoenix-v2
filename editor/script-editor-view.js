@@ -18,6 +18,7 @@ import {
   completionContext,
   matchCompletions,
 } from './script-editor.js';
+import { t as stringText } from '../gui/strings.js';
 
 function escapeHtml(s) {
   return String(s ?? '')
@@ -35,14 +36,14 @@ function escapeHtml(s) {
  * @param {string|null} [opts.selectedId]
  * @param {(unit: object) => void} [opts.onSelect]
  */
-export function renderScriptList(host, units, { selectedId = null, onSelect } = {}) {
+export function renderScriptList(host, units, { selectedId = null, onSelect, t = stringText } = {}) {
   if (!host) return;
   const document = host.ownerDocument;
   host.innerHTML = '';
   if (!units || units.length === 0) {
     const p = document.createElement('p');
     p.className = 'placeholder';
-    p.textContent = 'No scripts in this world';
+    p.textContent = t('editor.script.list_empty');
     host.appendChild(p);
     return;
   }
@@ -95,7 +96,7 @@ export function renderScriptList(host, units, { selectedId = null, onSelect } = 
 export function mountScriptEditor({
   host,
   source = '',
-  title = 'Script',
+  title = null,
   hostFns = [],
   getDiagnostics,
   isDiagnosticsAvailable,
@@ -103,6 +104,7 @@ export function mountScriptEditor({
   onChange,
   onSave,
   diagnosticsDelayMs = 250,
+  t = stringText,
 } = {}) {
   if (!host) throw new Error('mountScriptEditor: host is required');
   const document = host.ownerDocument;
@@ -118,11 +120,11 @@ export function mountScriptEditor({
   header.className = 'script-editor-header';
   const titleEl = document.createElement('span');
   titleEl.className = 'script-editor-title';
-  titleEl.textContent = title;
+  titleEl.textContent = title == null ? t('editor.script.title') : title;
   const saveBtn = document.createElement('button');
   saveBtn.type = 'button';
   saveBtn.className = 'script-editor-save';
-  saveBtn.textContent = 'Save Script';
+  saveBtn.textContent = t('editor.script.save');
   header.appendChild(titleEl);
   header.appendChild(saveBtn);
   root.appendChild(header);
@@ -141,7 +143,7 @@ export function mountScriptEditor({
   textarea.setAttribute('autocomplete', 'off');
   textarea.setAttribute('autocapitalize', 'off');
   textarea.value = source;
-  textarea.setAttribute('aria-label', title);
+  textarea.setAttribute('aria-label', title == null ? t('editor.script.title') : title);
   const popup = document.createElement('ul');
   popup.className = 'script-autocomplete hidden';
   popup.setAttribute('role', 'listbox');
@@ -163,6 +165,8 @@ export function mountScriptEditor({
   let activeIndex = -1;
   let diagTimer = null;
   let diagnosticsGeneration = 0;
+  let lastDiagnostics = [];
+  let diagnosticsAvailable = true;
 
   function refreshHighlight() {
     const tokens = tokenizeRhai(textarea.value, knownFns);
@@ -256,19 +260,18 @@ export function mountScriptEditor({
       // An empty result only means "clean" when the live check actually ran.
       // If the WASM seam is dead (see issue #995) getDiagnostics degrades to []
       // — say so plainly instead of claiming the script has no problems.
-      if (typeof isDiagnosticsAvailable === 'function' && !isDiagnosticsAvailable()) {
+      if (!diagnosticsAvailable || (typeof isDiagnosticsAvailable === 'function' && !isDiagnosticsAvailable())) {
         diagEl.classList.add('unavailable');
         const hint = document.createElement('span');
         hint.className = 'script-diagnostics-unavailable';
-        hint.textContent =
-          'Live checks unavailable — script validation is not wired in the editor yet (#995).';
+        hint.textContent = t('editor.script.diagnostics.unavailable');
         diagEl.appendChild(hint);
         return;
       }
       diagEl.classList.remove('unavailable');
       const ok = document.createElement('span');
       ok.className = 'script-diagnostics-ok';
-      ok.textContent = 'No problems';
+      ok.textContent = t('editor.script.diagnostics.ok');
       diagEl.appendChild(ok);
       return;
     }
@@ -279,9 +282,13 @@ export function mountScriptEditor({
       row.className = `script-diagnostic sev-${d.severity || 'error'}`;
       const loc = document.createElement('span');
       loc.className = 'script-diagnostic-loc';
-      const severity = String(d.severity || 'error').toUpperCase();
-      const file = d.file ? `${d.file}:` : '';
-      loc.textContent = `${severity} — ${file}Line ${d.line}${d.column ? ':' + d.column : ''}`;
+      const severity = d.severity || 'error';
+      const severityText = ['error', 'warning', 'info'].includes(severity)
+        ? t(`editor.script.severity.${severity}`) : String(severity).toUpperCase();
+      loc.textContent = t('editor.script.diagnostics.location', {
+        severity: severityText, file: d.file ? `${d.file}:` : '',
+        line: d.line, column: d.column ? `:${d.column}` : '',
+      });
       const msg = document.createElement('span');
       msg.className = 'script-diagnostic-msg';
       msg.textContent = d.message;
@@ -301,12 +308,15 @@ export function mountScriptEditor({
     let diags = [];
     try {
       diags = await getDiagnostics(requestedSource, lineOffset);
+      diagnosticsAvailable = true;
     } catch (err) {
       console.warn('[script-editor] diagnostics failed:', err?.message || err);
       diags = [];
+      diagnosticsAvailable = false;
     }
     if (requested !== diagnosticsGeneration || textarea.value !== requestedSource) return [];
-    renderDiagnostics(diags || []);
+    lastDiagnostics = diags || [];
+    renderDiagnostics(lastDiagnostics);
     return diags || [];
   }
 
@@ -382,6 +392,12 @@ export function mountScriptEditor({
     closeCompletions,
     refreshHighlight,
     runDiagnostics,
+    refreshLanguage() {
+      titleEl.textContent = title == null ? t('editor.script.title') : title;
+      textarea.setAttribute('aria-label', title == null ? t('editor.script.title') : title);
+      saveBtn.textContent = t('editor.script.save');
+      renderDiagnostics(lastDiagnostics);
+    },
     destroy() {
       if (diagTimer) clearTimeout(diagTimer);
       textarea.removeEventListener('input', onInput);

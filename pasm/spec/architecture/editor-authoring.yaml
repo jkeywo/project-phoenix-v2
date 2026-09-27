@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Workshop Authoring Shell
-      summary: The single browser/native Workshop shell owns exact-source authoring panels, per-file dirty state and one grouped undo/redo history. The retired editor.html URL is only a bookmark migration route.
+      summary: The single browser/native Workshop shell owns exact-source authoring panels, per-file dirty state and one grouped undo/redo history. Authoring, Test and validation chrome resolves String IDs and repaints the mounted panels on a private locale change while preserving source text, focus and the draft; compiler and file details remain literal inside translated frames. The retired editor.html URL is only a bookmark migration route.
     architecture:
       kind: authoring-interface
       authority: local
@@ -13,7 +13,7 @@ entities:
       depends_on: [editor-file-system-boundary, editor-model-marker-inspector, editor-runtime-reload-boundary]
     implementation:
       status: declared
-      paths: [workshop.html, gui/workshop-authoring.js, editor/workshop-document.js, editor/workshop-launch.js]
+      paths: [workshop.html, gui/workshop-authoring.js, gui/workshop-scripts-panel.js, gui/workshop-test-panel.js, editor/script-editor-view.js, editor/workshop-document.js, editor/workshop-launch.js]
       tests: [npm run test:editor]
 
   - state: editor-draft-state

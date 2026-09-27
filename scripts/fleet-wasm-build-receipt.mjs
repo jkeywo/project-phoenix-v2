@@ -41,7 +41,7 @@ export function createWasmBuildReceipt(source, bundleHashes, builtUtc = new Date
   if (!revisionPattern.test(source.sourceRevision)) throw new Error('Invalid source revision');
   const wasmSha256 = wasmFiles(bundleHashes);
   if (!Object.keys(wasmSha256).length) throw new Error('Built bundle has no WASM artifact');
-  if (!bundleHashes['client/index.html'] || !bundleHashes['server.html']) throw new Error('Built bundle lacks host or client page');
+  if (!bundleHashes['client/index.html'] || !bundleHashes['index.html']) throw new Error('Built bundle lacks host or client page');
   return { format: 'phoenix-browser-wasm-build-v1', sourceRevision: source.sourceRevision, sourcePatch: '',
     builtUtc, buildCommands: ['trunk build --release', 'node scripts/build-client.mjs'], wasmSha256, bundleHashes };
 }
@@ -59,7 +59,7 @@ export function verifyWasmBuildReceipt(receipt, source, bundleHashes) {
   if (!Object.keys(wasm).length || !receipt.wasmSha256 || typeof receipt.wasmSha256 !== 'object'
     || Object.keys(wasm).length !== Object.keys(receipt.wasmSha256).length
     || Object.entries(wasm).some(([name, hash]) => receipt.wasmSha256[name] !== hash)) throw new Error('Browser WASM receipt artifact mismatch');
-  if (!bundleHashes['client/index.html'] || !bundleHashes['server.html']) throw new Error('Browser WASM receipt lacks host or client page');
+  if (!bundleHashes['client/index.html'] || !bundleHashes['index.html']) throw new Error('Browser WASM receipt lacks host or client page');
   return true;
 }
 

@@ -5,7 +5,7 @@ import { mixedOptions } from '../../scripts/fleet-mixed-matrix.mjs';
 
 const hash = char => char.repeat(64);
 const source = { sourceRevision: 'a'.repeat(40), sourcePatch: '' };
-const bundle = { 'server.html': hash('b'), 'client/index.html': hash('c'), 'server_bg.wasm': hash('d') };
+const bundle = { 'index.html': hash('b'), 'client/index.html': hash('c'), 'server_bg.wasm': hash('d') };
 
 describe('source-matched browser WASM receipt', () => {
   it('binds a clean source revision to every bundle file and the WASM bytes', () => {
@@ -21,7 +21,7 @@ describe('source-matched browser WASM receipt', () => {
     expect(() => verifyWasmBuildReceipt(receipt, { ...source, sourceRevision: 'f'.repeat(40) }, bundle)).toThrow('revision mismatch');
     expect(() => verifyWasmBuildReceipt(receipt, { ...source, sourcePatch: ' M gui/server.js' }, bundle)).toThrow('clean source');
     expect(() => verifyWasmBuildReceipt({ ...receipt, wasmSha256: {} }, source, bundle)).toThrow('artifact mismatch');
-    expect(() => createWasmBuildReceipt(source, { 'client/index.html': hash('c'), 'server.html': hash('b') })).toThrow('no WASM');
+    expect(() => createWasmBuildReceipt(source, { 'client/index.html': hash('c'), 'index.html': hash('b') })).toThrow('no WASM');
   });
   it('keeps browser and native receipt options distinct in both runners', () => {
     expect(optionsFrom(['--out', 'evidence', '--wasm-build-receipt', 'wasm.json'])['wasm-build-receipt']).toMatch(/wasm\.json$/);

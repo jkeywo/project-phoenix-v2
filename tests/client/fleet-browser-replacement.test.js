@@ -1,6 +1,6 @@
 // Synthetic fixtures validate the gate only; no browser acceptance is claimed.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { observeReplacement, replacementHook, replacementOutcome } from '../../scripts/fleet-browser-replacement.mjs';
+import { observeReplacement, replacementHook, replacementOutcome, runReplacementPhase, REPLACEMENT_PHASE_SECONDS } from '../../scripts/fleet-browser-replacement.mjs';
 
 const label = slot => slot <= 4 ? `ship-${slot}` : `gm-${slot - 4}`;
 function peer(slot) {
@@ -40,7 +40,7 @@ function evidence(route = 'direct') {
     winnerTransport };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('bounded replacement evidence gate', () => {
   it.each(['direct', 'ws-relay', 'automatic-fallback'])('accepts complete %s fixture evidence', route => {
@@ -108,3 +108,72 @@ describe('replacement observer', () => {
   });
 });
 
+
+
+describe('replacement phase deadlines and provenance', () => {
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  it('gives admission, restore and challenge independent budgets and retains observed milestones', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000000);
+    const row = {};
+    const durations = { loss: 1000, admission: 86000, restore: 20000, challenge: 86000, digests: 20000 };
+    const task = (async () => {
+      for (const [name, seconds] of Object.entries(REPLACEMENT_PHASE_SECONDS)) {
+        await runReplacementPhase(row, name, seconds, async ({ bounded }) => {
+          await bounded(() => wait(durations[name]), 'actual observation');
+          return { observed: name };
+        });
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(213000); await task;
+    expect(row.phases.map(p => p.status)).toEqual(Array(5).fill('passed'));
+    expect(row.phases.map(p => p.elapsedMs)).toEqual(Object.values(durations));
+    expect(row.phases.at(-1).finishedMs - row.phases[0].startedMs).toBe(213000);
+    row.phases.forEach((p, index) => {
+      expect(p.deadlineMs - p.startedMs).toBe(REPLACEMENT_PHASE_SECONDS[p.name] * 1000);
+      expect(p.startedUtc).toBe(new Date(p.startedMs).toISOString());
+      expect(p.finishedUtc).toBe(new Date(p.finishedMs).toISOString());
+      expect(p.milestone).toEqual({ observed: p.name });
+      if (index) expect(p.startedMs).toBe(row.phases[index - 1].finishedMs);
+    });
+  });
+  it.each(Object.keys(REPLACEMENT_PHASE_SECONDS))('records a hung %s operation as timed out and does not enter the next phase', async name => {
+    vi.useFakeTimers(); vi.setSystemTime(10000);
+    const row = {}, later = vi.fn();
+    const task = (async () => {
+      await runReplacementPhase(row, name, 1, async ({ bounded }) => {
+        await bounded(() => new Promise(() => {}), 'blocked browser read');
+      });
+      await runReplacementPhase(row, 'later', 1, later);
+    })();
+    const rejected = expect(task).rejects.toThrow('deadline');
+    await vi.advanceTimersByTimeAsync(1000); await rejected;
+    expect(later).not.toHaveBeenCalled();
+    expect(row.phases).toHaveLength(1);
+    expect(row.phases[0]).toMatchObject({ name, status: 'timed-out', startedMs: 10000,
+      finishedMs: 11000, elapsedMs: 1000, budgetMs: 1000, lastOperation: 'blocked browser read' });
+    expect(row.phases[0].milestone).toBeUndefined();
+  });
+  it('does not renew the deadline when unsuccessful observations keep arriving', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const row = {}, observe = vi.fn(() => false);
+    const task = runReplacementPhase(row, 'restore', 1, ({ poll }) => poll('canonical agreement', observe));
+    const rejected = expect(task).rejects.toThrow('deadline');
+    await vi.advanceTimersByTimeAsync(1000); await rejected;
+    expect(row.phases[0].status).toBe('timed-out');
+    expect(observe).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(observe).toHaveBeenCalledTimes(4);
+    expect(row.phases[0].finishedMs).toBe(1000);
+  });
+  it('retains a concrete refusal instead of relabelling it a timeout', async () => {
+    const row = {};
+    await expect(runReplacementPhase(row, 'admission', 1, () => { throw new Error('Both replacements entered'); }))
+      .rejects.toThrow('Both replacements entered');
+    expect(row.phases[0]).toMatchObject({ status: 'failed', error: 'Error: Both replacements entered' });
+  });
+  it('bounds admission configuration independently from the recovery budget', () => {
+    for (const admissionSeconds of [0,181,Infinity,1.5]) {
+      expect(() => replacementHook({ admissionSeconds })).toThrow('admissionSeconds');
+    }
+  });
+});

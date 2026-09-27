@@ -109,8 +109,56 @@ export function replacementOutcome(evidence) {
     passed: baseline && disconnected && oneWinner && recoveryAgreed && oneClaim && advancing && protectedHolder && agreement && routeVerified && !overflow };
 }
 
-export function replacementHook({ faultSeconds = 90 } = {}) {
+export const REPLACEMENT_PHASE_SECONDS = Object.freeze({
+  loss: 90, admission: 120, restore: 90, challenge: 120, digests: 90,
+});
+
+// Each phase owns one deadline, including all of its polls and asynchronous
+// operations. Retain failed phases too, so admission time cannot masquerade as
+// time spent waiting for canonical restore.
+export async function runReplacementPhase(evidence, name, seconds, action) {
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 180) throw new Error('Invalid replacement phase seconds');
+  const startedMs = Date.now();
+  const phase = { name, budgetMs: seconds * 1000, startedMs,
+    startedUtc: new Date(startedMs).toISOString(), deadlineMs: startedMs + seconds * 1000, status: 'running' };
+  (evidence.phases ||= []).push(phase);
+  const timeout = label => {
+    phase.status = 'timed-out';
+    return new Error(`Replacement ${name} deadline during ${label}`);
+  };
+  const bounded = async (operation, label) => {
+    phase.lastOperation = label;
+    const remaining = phase.deadlineMs - Date.now();
+    if (remaining <= 0) throw timeout(label);
+    let timer;
+    try { return await Promise.race([Promise.resolve().then(operation), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(timeout(label)), remaining);
+    })]); } finally { clearTimeout(timer); }
+  };
+  const poll = async (label, operation) => {
+    while (true) {
+      if (await bounded(operation, label)) return;
+      await bounded(() => new Promise(resolve => setTimeout(resolve, 250)), label);
+    }
+  };
+  try {
+    // Bound the whole callback as well as its individual waits.
+    phase.milestone = await bounded(() => action({ bounded, poll }), name);
+    phase.status = 'passed';
+  } catch (error) {
+    if (phase.status !== 'timed-out') phase.status = 'failed';
+    phase.error = String(error);
+    throw error;
+  } finally {
+    phase.finishedMs = Date.now();
+    phase.finishedUtc = new Date(phase.finishedMs).toISOString();
+    phase.elapsedMs = phase.finishedMs - startedMs;
+  }
+}
+
+export function replacementHook({ faultSeconds = REPLACEMENT_PHASE_SECONDS.restore, admissionSeconds = REPLACEMENT_PHASE_SECONDS.admission } = {}) {
   if (!Number.isInteger(faultSeconds) || faultSeconds < 1 || faultSeconds > 180) throw new Error('Invalid replacement faultSeconds');
+  if (!Number.isInteger(admissionSeconds) || admissionSeconds < 1 || admissionSeconds > 180) throw new Error('Invalid replacement admissionSeconds');
   return async ({ result, ships, gms, newPage, base, query, code, step }) => {
     const peers = [...ships.map((page, index) => ({ page, label: `ship-${index + 1}` })),
       ...gms.map((page, index) => ({ page, label: `gm-${index + 1}` }))];
@@ -131,66 +179,77 @@ export function replacementHook({ faultSeconds = 90 } = {}) {
     const survivors = peers.filter(peer => peer !== victim);
     const evidence = result.recovery = { failure: 'replacement', route: result.route, before,
       victim: { label: victim.label, slot: victimState.mesh.slot }, startedUtc: new Date().toISOString(), samples: [] };
-    const deadline = Date.now() + faultSeconds * 1000;
-    const bounded = async (promise, label) => {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new Error(`Replacement deadline before ${label}`);
-      let timer;
-      try { return await Promise.race([promise, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Replacement deadline during ${label}`)), remaining);
-      })]); } finally { clearTimeout(timer); }
-    };
-    const poll = async (label, action) => {
-      do {
-        if (await bounded(action(), label)) return;
-        await bounded(new Promise(resolve => setTimeout(resolve, 250)), label);
-      } while (Date.now() < deadline);
-      throw new Error(`Replacement deadline during ${label}`);
-    };
-    await bounded(victim.page.close(), 'victim close');
-    step(`closed ${victim.label} before fixed-slot replacement race`);
-    await poll('agreed loss and Backfill', async () => {
-      evidence.disconnected = await Promise.all(survivors.map(read));
-      evidence.outcome = replacementOutcome(evidence);
-      return evidence.outcome.disconnected;
+    const budgets = { loss: faultSeconds, admission: admissionSeconds, restore: faultSeconds,
+      challenge: admissionSeconds, digests: faultSeconds };
+    evidence.phaseBudgetsSeconds = budgets;
+    const phase = (name, action) => runReplacementPhase(evidence, name, budgets[name], action);
+    await phase('loss', async ({ bounded, poll }) => {
+      await bounded(() => victim.page.close(), 'victim close');
+      step(`closed ${victim.label} before fixed-slot replacement race`);
+      await poll('agreed loss and Backfill', async () => {
+        evidence.disconnected = await Promise.all(survivors.map(read));
+        evidence.outcome = replacementOutcome(evidence);
+        return evidence.outcome.disconnected;
+      });
+      return { lossTick: evidence.disconnected[0].mesh.recovery.losses.find(row => row.slot === evidence.victim.slot).tick };
     });
-    const startAt = Date.now() + 750;
-    await bounded(Promise.all(candidates.map(peer => peer.page.evaluate(async ({ code, slot, startAt }) => {
-      await new Promise(resolve => setTimeout(resolve, Math.max(0, startAt - Date.now())));
-      window.__replacementEvidence.attempt = { startedMs: Date.now() };
-      window.__replacementEvidence.attempt.result = await window.__hostFleetJoin(code, `slot-${slot}`);
-    }, { code, slot: evidence.victim.slot, startAt }))), 'concurrent claims');
-    await poll('one admission and one explicit refusal', async () => {
-      evidence.race = await Promise.all(candidates.map(read));
-      const winners = evidence.race.filter(row => admitted(row, evidence.victim.slot));
-      if (winners.length > 1) throw new Error('Both replacements entered the same fixed slot');
-      return winners.length === 1 && evidence.race.filter(refused).length === 1;
+    await phase('admission', async ({ bounded, poll }) => {
+      const startAt = Date.now() + 750;
+      await bounded(() => Promise.all(candidates.map(peer => peer.page.evaluate(async ({ code, slot, startAt }) => {
+        await new Promise(resolve => setTimeout(resolve, Math.max(0, startAt - Date.now())));
+        window.__replacementEvidence.attempt = { startedMs: Date.now() };
+        window.__replacementEvidence.attempt.result = await window.__hostFleetJoin(code, `slot-${slot}`);
+      }, { code, slot: evidence.victim.slot, startAt }))), 'concurrent claims');
+      await poll('one admission and one explicit refusal', async () => {
+        evidence.race = await Promise.all(candidates.map(read));
+        const winners = evidence.race.filter(row => admitted(row, evidence.victim.slot));
+        if (winners.length > 1) throw new Error('Both replacements entered the same fixed slot');
+        return winners.length === 1 && evidence.race.filter(refused).length === 1;
+      });
+      const winner = evidence.race.find(row => admitted(row, evidence.victim.slot));
+      return { winner: winner.label, tick: winner.mesh.tick, phase: winner.phase };
     });
     const winner = candidates.find(peer => peer.label === evidence.race.find(row => admitted(row, evidence.victim.slot)).label);
     const loser = candidates.find(peer => peer !== winner);
     const restored = [...survivors, winner];
-    await poll('canonical replacement restore', async () => {
-      evidence.after = await Promise.all(restored.map(read));
-      evidence.outcome = replacementOutcome(evidence);
-      return evidence.outcome.recoveryAgreed && evidence.outcome.advancing;
+    await phase('restore', async ({ poll }) => {
+      await poll('canonical replacement restore', async () => {
+        evidence.after = await Promise.all(restored.map(read));
+        evidence.outcome = replacementOutcome(evidence);
+        return evidence.outcome.recoveryAgreed && evidence.outcome.advancing;
+      });
+      return { boundary: evidence.outcome.boundary, sequence: evidence.outcome.sequence,
+        peers: evidence.after.map(row => ({ label: row.label, tick: row.mesh.tick, phase: row.phase })) };
     });
     evidence.challengeTick = Math.max(...evidence.after.map(row => row.mesh.tick));
-    await bounded(loser.page.evaluate(async ({ code, slot }) => {
-      window.__replacementEvidence.challengeAttempt = { startedMs: Date.now() };
-      window.__replacementEvidence.challengeAttempt.result = await window.__hostFleetJoin(code, `slot-${slot}`);
-    }, { code, slot: evidence.victim.slot }), 'connected-slot challenge');
-    step('race winner restored; loser attempted to displace the connected holder');
-    await poll('protected holder and exact post-challenge digests', async () => {
-      evidence.challenger = await read(loser);
-      evidence.winnerTransport = await winner.page.evaluate(async () => {
-        const { rtc, relayReady, relayFrames, signalOffersSent } = await window.__matrixRead();
-        return { rtc, relayReady, relayFrames, signalOffersSent };
+    await phase('challenge', async ({ bounded, poll }) => {
+      await bounded(() => loser.page.evaluate(async ({ code, slot }) => {
+        window.__replacementEvidence.challengeAttempt = { startedMs: Date.now() };
+        window.__replacementEvidence.challengeAttempt.result = await window.__hostFleetJoin(code, `slot-${slot}`);
+      }, { code, slot: evidence.victim.slot }), 'connected-slot challenge');
+      step('race winner restored; loser attempted to displace the connected holder');
+      await poll('explicit refusal and protected holder', async () => {
+        evidence.challenger = await read(loser);
+        evidence.after = await Promise.all(restored.map(read));
+        evidence.outcome = replacementOutcome(evidence);
+        return evidence.outcome.protectedHolder;
       });
-      evidence.after = await Promise.all(restored.map(read));
-      evidence.outcome = replacementOutcome(evidence);
-      if (evidence.outcome.overflow) throw new Error('Replacement observer overflow');
-      if (evidence.samples.length < 720) evidence.samples.push({ at: Date.now(), outcome: evidence.outcome });
-      return evidence.outcome.passed;
+      return { challenger: loser.label, reason: evidence.challenger.fleet.reason, challengeTick: evidence.challengeTick };
+    });
+    await phase('digests', async ({ poll }) => {
+      await poll('protected holder and exact post-challenge digests', async () => {
+        evidence.challenger = await read(loser);
+        evidence.winnerTransport = await winner.page.evaluate(async () => {
+          const { rtc, relayReady, relayFrames, signalOffersSent } = await window.__matrixRead();
+          return { rtc, relayReady, relayFrames, signalOffersSent };
+        });
+        evidence.after = await Promise.all(restored.map(read));
+        evidence.outcome = replacementOutcome(evidence);
+        if (evidence.outcome.overflow) throw new Error('Replacement observer overflow');
+        if (evidence.samples.length < 720) evidence.samples.push({ at: Date.now(), outcome: evidence.outcome });
+        return evidence.outcome.passed;
+      });
+      return { ticks: evidence.outcome.commonDigests.map(row => row.tick) };
     });
     evidence.finishedUtc = new Date().toISOString();
     step('one fixed-slot winner, canonical restore, protected holder and two matching checkpoints');

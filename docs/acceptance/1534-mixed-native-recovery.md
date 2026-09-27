@@ -331,3 +331,26 @@ with separately bounded admission, restore and challenge phases, retaining
 phase timestamps and slot-claim observations. Keep the failed artifact and the
 cell open until canonical restore, holder protection and digest agreement are
 actually observed.
+
+### Bounded replacement phases for the next run
+
+The browser replacement runner now allocates separate deadlines to loss (90s),
+concurrent admission (120s), canonical restore (90s), the connected-holder
+challenge (120s), and final digest agreement (90s). The admission and challenge
+budgets each cover their own production direct retry ladder before fallback.
+The runner manifest records these budgets instead of implying one total 90s
+fault deadline. Replacement runs also default the per-page evaluation timeout
+to 180s, so that wrapper cannot truncate a 120s admission/challenge phase. An
+explicit caller-supplied --timeout remains effective and is retained in the
+matrix options; a smaller value can still end an evaluation early. No phase
+poll renews its deadline.
+
+Each phase retains its name, budget, start/deadline/finish times, elapsed time,
+last operation and passed/failed/timed-out status in the result, including on
+failure. Completed phases record their observed milestone: agreed loss tick,
+winner and initial tick/phase, recovery boundary/claim sequence and peer ticks,
+explicit challenger refusal, then common digest ticks. Existing race, exact
+restore, connected-holder, transport-route and six-peer digest checks are
+unchanged. Focused fake-clock tests exercise independent deadlines and every
+phase timeout; they provide no new browser recovery acceptance. The retained
+d032 automatic-fallback cell remains inconclusive until the new runner is run.

@@ -1,6 +1,7 @@
+import { optionsFrom } from '../../scripts/fleet-browser-matrix.mjs';
 import { createEffectWitness } from '../../scripts/fleet-effect-witness.mjs';
 import { describe, expect, it } from 'vitest';
-import { failureOutcome, divergenceOutcome, observeRecovery, directEffectOutcome, awaitDirectEffectBaseline, startDirectEffectWitness } from '../../scripts/fleet-browser-recovery.mjs';
+import { recoveryMatrixArgs, failureOutcome, divergenceOutcome, observeRecovery, directEffectOutcome, awaitDirectEffectBaseline, startDirectEffectWitness } from '../../scripts/fleet-browser-recovery.mjs';
 
 function evidence() {
   const before = Array.from({length:6}, (_,i)=>({label:`peer-${i+1}`,mesh:{slot:i+1,tick:100}}));
@@ -137,4 +138,21 @@ it('refuses to start without two actual baseline effects and rejects a changed i
   await expect(startDirectEffectWitness(proof,async()=>{},async()=>changed)).rejects.toThrow('Effect baseline changed');
   const absent=directEffectEvidence();
   await expect(startDirectEffectWitness(absent,async()=>{},async()=>absent.effectBefore)).rejects.toThrow('Initial continuous witness');
+});
+
+
+describe('replacement browser evaluation budget', () => {
+  it('defaults replacement evaluations to 180 seconds beyond the longest 120-second phase', () => {
+    const args = ['--out', 'target/options-only', '--routes', 'automatic-fallback'];
+    expect(optionsFrom(recoveryMatrixArgs(args, 'replacement')).timeout).toBe(180);
+    expect(args).not.toContain('--timeout');
+  });
+  it('retains an explicit evaluation bound in the matrix options', () => {
+    const args = ['--out', 'target/options-only', '--timeout', '150'];
+    expect(optionsFrom(recoveryMatrixArgs(args, 'replacement')).timeout).toBe(150);
+    expect(recoveryMatrixArgs(args, 'replacement')).toEqual(args);
+  });
+  it('keeps other recovery cases on the ordinary matrix default', () => {
+    expect(optionsFrom(recoveryMatrixArgs(['--out', 'target/options-only'], 'divergence')).timeout).toBe(90);
+  });
 });

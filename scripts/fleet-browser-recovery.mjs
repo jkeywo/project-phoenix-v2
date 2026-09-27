@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { main as browserMatrix } from './fleet-browser-matrix.mjs';
-import { replacementHook } from './fleet-browser-replacement.mjs';
+import { replacementHook, REPLACEMENT_PHASE_SECONDS } from './fleet-browser-replacement.mjs';
 import { createEffectWitness } from './fleet-effect-witness.mjs';
 
 export const FAILURES = ['ship', 'leader', 'gm'];
@@ -276,14 +276,22 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
   };
 }
 
+export function recoveryMatrixArgs(args, failure) {
+  // A pending fallback join is one page.evaluate call; its default 90s wrapper
+  // must not expire before the replacement admission/challenge phase does.
+  return failure === 'replacement' && !args.includes('--timeout')
+    ? [...args, '--timeout', '180'] : [...args];
+}
+
 export async function main(args = process.argv.slice(2)) {
   const index = args.indexOf('--failure');
   if (index < 0 || !args[index+1]) throw new Error('Choose --failure ship|leader|gm|divergence|replacement');
   const copy = [...args]; const [,failure] = copy.splice(index,2);
   const afterHealthy = failure === 'replacement' ? replacementHook()
     : failure === 'divergence' ? divergenceHook() : failureHook(failure);
-  return browserMatrix(copy, {kind:'phoenix-real-browser-recovery-v1', provenance:{failure,
-    faultSeconds:['divergence','replacement'].includes(failure)?90:60,
+  return browserMatrix(recoveryMatrixArgs(copy, failure), {kind:'phoenix-real-browser-recovery-v1', provenance:{failure,
+    faultSeconds:failure==='replacement'?null:failure==='divergence'?90:60,
+    phaseBudgetsSeconds:failure==='replacement'?REPLACEMENT_PHASE_SECONDS:null,
     runnerSha256:createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex'),
     effectWitnessHelperSha256:failure==='divergence'?createHash('sha256').update(readFileSync(new URL('./fleet-effect-witness.mjs',import.meta.url))).digest('hex'):null,
     replacementHelperSha256:failure==='replacement'?createHash('sha256').update(readFileSync(new URL('./fleet-browser-replacement.mjs',import.meta.url))).digest('hex'):null}, afterHealthy});

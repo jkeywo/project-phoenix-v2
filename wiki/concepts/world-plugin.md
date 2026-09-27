@@ -119,7 +119,7 @@ Triggers registered from a world's `[script]` block are matched against `WorldEv
 | `on_hailed` | `entity = "<name>"` | `WorldEvent::Hailed` for the named entity. |
 | `on_flag_set` / `on_flag_cleared` | `name = "<flag>"` | False→true / true→false transitions of a world flag (with `parent:` walks for sub-world layers). |
 | `on_world_loaded` | (none) | Once at world load (or sub-world load). |
-| `on_entered_region` / `on_exited_region` | `entity = "<region>"` | Player ship enters / exits the named region. |
+| `on_entered_region` / `on_exited_region` | `entity = "<region>"` | Any fleet player ship enters / exits the named region; every peer observes the crossing. NPC ships do not trigger the world callback. |
 
 `OnAllDestroyed` is the only condition with non-trivial runtime state (`seen_destroyed: HashSet<String>` on `TriggerState`). `condition_matches` is stateless and read-only; the stateful `OnAllDestroyed` path is fast-pathed in `trigger_fires_for_events` before delegating. The mutation of `seen_destroyed` happens **before** the `when` predicate is evaluated, so a trigger with `on_all_destroyed` + `when = "flag(armed)"` will accumulate destruction events while the flag is unset and fire on the first tick where both conditions hold.
 

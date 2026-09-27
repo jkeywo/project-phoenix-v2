@@ -1,0 +1,8 @@
+# A harmless authored proximity marker for the optional convoy recovery task.
+# The region trigger observes a player escort entering this sphere;
+# it deals no damage and changes no physics or sensors.
+tags = ["trigger_volume"]
+
+[shape]
+type = "sphere"
+radius = 90.0

@@ -1,4 +1,4 @@
-# T5 reference mission, issue #1548. The design digest was read before this
+# T5 reference mission, issues #1548 and #1551. The design digest was read before this
 # scenario was authored; its existing Falling Skyway model remains separate.
 # There is no deadline for the three transports. Their actual arrival or loss
 # closes the mission, so complete escort destruction cannot decide their fate.
@@ -13,7 +13,10 @@ entities:
         [ai] Four Alliance escort slots protect three civilian transports on a
         final route. The ship slots can choose destroyer or cruiser. The mission
         closes when every transport has reached safety or been destroyed, and
-        narrates the actual count without a victory threshold.
+        narrates the actual count without a victory threshold. The 2,300-unit
+        crossing at a hauler's 12-unit/s top speed and 0.18 route fraction
+        gives an unobstructed travel baseline near eighteen minutes; combat
+        may shorten or prolong actual play, with no twenty-minute fail timer.
     game_design:
       world_file: assets/worlds/alliance_convoy_escort.toml
 
@@ -57,8 +60,11 @@ entities:
       relation: >
         saved + lost = 3 at mission close; each of the three transports
         contributes exactly one fate, and escort destruction alone cannot close
-        the mission.
-      asserted_by: [alliance_convoy_fate_accounting]
+        the mission. The fleet count and present slots are frozen after
+        GameStart. One to four escorts schedule respectively one to four
+        raiders; three escorts receive a scoped recovery task and four also
+        receive a separate pursuit task. Disconnects do not rescale them.
+      asserted_by: [alliance_convoy_fate_accounting, alliance_convoy_launch_scale_and_optional_outcomes]
       anchors:
         - name: lane-escort-pace
           path: assets/worlds/alliance_convoy_escort.toml
@@ -68,4 +74,4 @@ entities:
           expect: "0.18"
     implementation:
       status: declared
-      paths: [tests/headless_runner.rs]
+      paths: [src/server_app/world_setup.rs, tests/headless_runner.rs]

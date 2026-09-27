@@ -428,7 +428,7 @@ pub(crate) fn spawn_game_start_entities(
     mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    mut runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
     id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
@@ -465,6 +465,7 @@ pub(crate) fn spawn_game_start_entities(
         .as_ref()
         .map_or_else(|| roster.len(), |slots| slots.0.len());
     let mut player_ships_spawned = 0usize;
+    let mut launched_slot_ids = Vec::new();
     let mut authored_ship_row_index = 0usize;
     let mut game_start_entity_uuids = Vec::new();
     let named_positions = crate::world::config::build_named_entity_positions(mc);
@@ -743,6 +744,9 @@ pub(crate) fn spawn_game_start_entities(
         // `remove_resource` calls is byte-for-byte the one that shipped inline,
         // which the archetype-order guard gates.
         if is_fleet_ship {
+            if let Some(slot) = authored_slot {
+                launched_slot_ids.push(slot.id.clone());
+            }
             let synthetic_host = fleet_ship
                 .map(|ship| ship.host)
                 .or_else(|| {
@@ -805,6 +809,23 @@ pub(crate) fn spawn_game_start_entities(
         .map(|saved| saved.0.clone())
         .unwrap_or(game_start_entity_uuids);
     commands.insert_resource(GameStartEntityUuids(persistent_game_start_uuids));
+    // Scenario scripts may scale their first encounter from the fleet that
+    // actually launched. Freeze the fact after all GameStart rows were applied;
+    // a later disconnect/backfill does not change the authored mission plan.
+    // Slotless legacy worlds retain their old flag store and digest.
+    if !mc.ship_slots.is_empty() {
+        if let Some(runtime) = runtime.as_mut() {
+            runtime.flags.set_flag_value(
+                "fleet.initial_player_ships",
+                i64::try_from(player_ships_spawned).expect("ship slot count fits i64"),
+            );
+            for slot_id in launched_slot_ids {
+                runtime
+                    .flags
+                    .set_flag_value(&format!("fleet.slot.{slot_id}.present"), 1);
+            }
+        }
+    }
     if resume_game_start_uuids.is_some() {
         commands.remove_resource::<ResumeGameStartEntityUuids>();
     }

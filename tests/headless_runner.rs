@@ -18418,6 +18418,67 @@ fn alliance_convoy_fate_accounting() {
         assert_eq!(flags.counter("convoy_saved"), saved as i64);
         assert_eq!(flags.counter("convoy_lost"), 3 - saved as i64);
     }
+
+    // Side outcomes are their own rows and objective verdicts, never hidden
+    // inside the transport count. Exercise both completed and missed tasks.
+    let mut completed = flags_with(&[
+        ("convoy_recovery_task_active", 1),
+        ("convoy_pursuit_task_active", 1),
+        ("convoy_saved", 3),
+    ]);
+    let recovery = script.call("escort_entered_recovery", &completed);
+    assert_eq!(window_report_rows(&recovery)[0].id, "recovery");
+    assert_eq!(
+        convoy_instance_verdicts(&recovery).0,
+        vec!["recover_survivors"]
+    );
+    window_apply_flags(&recovery, &mut completed);
+    let pursuit = script.call("first_raider_lost", &completed);
+    assert_eq!(window_report_rows(&pursuit)[0].id, "pursuit");
+    assert_eq!(convoy_instance_verdicts(&pursuit).0, vec!["pursue_raider"]);
+    window_apply_flags(&pursuit, &mut completed);
+    let final_account = script.call("resolve_convoy", &completed);
+    assert_eq!(window_report_rows(&final_account).len(), 1);
+    assert_eq!(window_report_rows(&final_account)[0].id, "convoy_fate");
+    assert!(convoy_instance_verdicts(&final_account).1.is_empty());
+
+    let missed = flags_with(&[
+        ("convoy_recovery_task_active", 1),
+        ("convoy_pursuit_task_active", 1),
+        ("convoy_saved", 1),
+        ("convoy_lost", 2),
+    ]);
+    let final_account = script.call("resolve_convoy", &missed);
+    let rows = window_report_rows(&final_account);
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["convoy_fate", "recovery", "pursuit"]
+    );
+    assert_eq!(
+        convoy_instance_verdicts(&final_account).1,
+        ["recover_survivors", "pursue_raider"]
+    );
+}
+
+fn convoy_instance_verdicts(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+) -> (Vec<String>, Vec<String>) {
+    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::script::effects::BufferedEffect;
+    let mut completed = Vec::new();
+    let mut failed = Vec::new();
+    for effect in &effects.commands {
+        match effect {
+            BufferedEffect::Cmd(ActionCmd::CompleteObjectiveInstance { key }) => {
+                completed.push(key.objective_id.clone())
+            }
+            BufferedEffect::Cmd(ActionCmd::FailObjectiveInstance { key }) => {
+                failed.push(key.objective_id.clone())
+            }
+            _ => {}
+        }
+    }
+    (completed, failed)
 }
 
 /// Shorten only the authored lane for an integration probe. The same three
@@ -18528,6 +18589,153 @@ fn alliance_convoy_seeded_arrivals_losses_and_last_escort_loss() {
             );
             std::fs::remove_file(path).unwrap();
         }
+    }
+}
+
+/// The launch roster, rather than the number of connected people later in
+/// play, determines the raider waves and side-task scope. A short route keeps
+/// this four-roster end-to-end probe fast while retaining the authored script.
+#[test]
+fn alliance_convoy_launch_scale_and_optional_outcomes() {
+    use project_phoenix::core::report::MissionReport;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let original = std::fs::read_to_string("assets/worlds/alliance_convoy_escort.toml").unwrap();
+    let slots = ["lead", "port", "starboard", "rear"];
+    for fleet_size in 1..=4 {
+        let world = original
+            .replace(
+                "safe_harbour = [0.0, 0.0, -2400.0]",
+                "safe_harbour = [0.0, 0.0, -300.0]",
+            )
+            .replace("speed = 0.18", "speed = 1.0")
+            .replace("after(180,", "after(2,")
+            .replace("after(360,", "after(3,")
+            .replace("after(540,", "after(4,");
+        let path = std::env::temp_dir().join(format!(
+            "phoenix_convoy_scale_{}_{}.toml",
+            std::process::id(),
+            fleet_size
+        ));
+        std::fs::write(&path, world).unwrap();
+        let dt = 1.0 / 60.0;
+        let args = HeadlessArgs {
+            world_path: path.to_string_lossy().to_string().into(),
+            ship_path: "assets/entities/alliance_destroyer.toml".into(),
+            dt,
+            max_ticks: ticks_for_sim_seconds(90.0, dt),
+            deterministic: true,
+            seed: Some(1551),
+            ..test_args()
+        };
+        let mut app = build_headless_app(&args).expect("convoy scale probe builds");
+        // Exercise arbitrary slot subsets: a one-ship fleet can be rear only,
+        // and the three-ship fleet omits port, the preferred recovery assignee.
+        let included = match fleet_size {
+            1 => &slots[3..4],
+            2 => &slots[2..4],
+            3 => &["lead", "starboard", "rear"][..],
+            _ => &slots[..],
+        };
+        app.insert_resource(project_phoenix::ship_slots::FrozenShipSlots(
+            included
+                .iter()
+                .map(|slot_id| project_phoenix::ship_slots::LaunchedSlot {
+                    slot_id: (*slot_id).into(),
+                    hull: "assets/entities/alliance_destroyer.toml".into(),
+                    claimant: None,
+                    source: project_phoenix::ship_slots::LaunchSource::Backfill,
+                })
+                .collect(),
+        ));
+        run(&mut app, ticks_for_sim_seconds(6.0, dt));
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        assert_eq!(
+            flags.counter("fleet.initial_player_ships"),
+            fleet_size as i64,
+            "fleet size {fleet_size}"
+        );
+        for slot in slots {
+            assert_eq!(
+                flags.counter(&format!("fleet.slot.{slot}.present")) > 0,
+                included.contains(&slot),
+                "slot {slot} in fleet size {fleet_size}"
+            );
+        }
+        assert_eq!(
+            flags.counter("convoy_recovery_task_active") > 0,
+            fleet_size >= 3
+        );
+        assert_eq!(
+            flags.counter("convoy_pursuit_task_active") > 0,
+            fleet_size == 4
+        );
+        assert_eq!(
+            objective_status_opt(&app, "recover_survivors").is_some(),
+            fleet_size >= 3
+        );
+        assert_eq!(
+            objective_status_opt(&app, "pursue_raider").is_some(),
+            fleet_size == 4
+        );
+        let instances = &app
+            .world()
+            .resource::<project_phoenix::world::server::ObjectiveInstanceManagerRes>()
+            .0;
+        let recovery = instances
+            .records()
+            .iter()
+            .find(|row| row.spec.key.instance_id == "ship_recovery");
+        assert_eq!(recovery.is_some(), fleet_size >= 3);
+        if let Some(recovery) = recovery {
+            let assignee = if fleet_size == 3 { "lead" } else { "port" };
+            assert_eq!(
+                recovery.spec.recipients,
+                [
+                    project_phoenix::objective_instances::RecipientSelector::ShipSlot(
+                        assignee.into()
+                    )
+                ]
+            );
+        }
+        let pursuit = instances
+            .records()
+            .iter()
+            .find(|row| row.spec.key.instance_id == "ship_pursuit");
+        assert_eq!(pursuit.is_some(), fleet_size == 4);
+        if let Some(pursuit) = pursuit {
+            assert_eq!(
+                pursuit.spec.recipients,
+                [
+                    project_phoenix::objective_instances::RecipientSelector::ShipSlot(
+                        "starboard".into()
+                    )
+                ]
+            );
+        }
+        let named = &app.world().resource::<WorldContentRuntime>().name_to_uuid;
+        for (minimum_fleet, raider) in [(2, "second"), (3, "third"), (4, "fourth")] {
+            assert_eq!(
+                named.contains_key(&format!("world.alliance_convoy.raider.{raider}")),
+                fleet_size >= minimum_fleet,
+                "raider {raider} in fleet size {fleet_size}"
+            );
+        }
+        run(&mut app, args.max_ticks);
+        assert_eq!(
+            app.world().resource::<State<GamePhase>>().get(),
+            &GamePhase::GameOver,
+            "fleet size {fleet_size} must finish from transport fates"
+        );
+        let rows = app.world().resource::<MissionReport>().rows();
+        assert_eq!(
+            rows.len(),
+            usize::from(fleet_size >= 3) + usize::from(fleet_size == 4) + 1
+        );
+        assert!(rows.iter().any(|row| row.id == "convoy_fate"));
+        assert_eq!(rows.iter().any(|row| row.id == "recovery"), fleet_size >= 3);
+        assert_eq!(rows.iter().any(|row| row.id == "pursuit"), fleet_size == 4);
+        std::fs::remove_file(path).unwrap();
     }
 }
 

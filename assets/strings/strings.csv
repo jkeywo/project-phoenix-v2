@@ -9,12 +9,28 @@ world.alliance_convoy.transport.aster,Convoy transport name,Aster
 world.alliance_convoy.transport.bell,Convoy transport name,Bell
 world.alliance_convoy.transport.cedar,Convoy transport name,Cedar
 world.alliance_convoy.raider.first,Convoy attacker name,Harrow Interceptor
+world.alliance_convoy.raider.second,Convoy attacker name,Harrow Ambush Leader
+world.alliance_convoy.raider.third,Convoy attacker name,Harrow Pursuer
+world.alliance_convoy.raider.fourth,Convoy attacker name,Harrow Outer Guard
+world.alliance_convoy.escort.lead,Convoy escort name,Alliance Convoy Command
+world.alliance_convoy.escort.port,Convoy escort name,Alliance Port Screen
+world.alliance_convoy.escort.starboard,Convoy escort name,Alliance Starboard Screen
+world.alliance_convoy.escort.rear,Convoy escort name,Alliance Rear Guard
+world.alliance_convoy.recovery_zone,Convoy recovery marker,Survivor Signal
 world.alliance_convoy.objective.escort,Shared convoy Objective,Escort the three transports to safety and record their fates.
+world.alliance_convoy.objective.recovery,Assigned escort Objective,Reach the survivor signal and bring its people aboard.
+world.alliance_convoy.objective.pursuit,Assigned escort Objective,Stop the Harrow interceptor before it can return to the convoy lane.
 world.alliance_convoy.report.heading,Convoy report heading,The convoy
 world.alliance_convoy.report.zero,Convoy report outcome,All three transports were lost before reaching safety.
 world.alliance_convoy.report.one,Convoy report outcome,One transport reached safety; two were lost.
 world.alliance_convoy.report.two,Convoy report outcome,Two transports reached safety; one was lost.
 world.alliance_convoy.report.three,Convoy report outcome,All three transports reached safety.
+world.alliance_convoy.report.recovery.heading,Recovery report heading,Survivor signal
+world.alliance_convoy.report.recovery.saved,Recovery report outcome,An escort recovered the stranded crew.
+world.alliance_convoy.report.recovery.missed,Recovery report outcome,The survivor signal went unanswered before the transports' fates were settled.
+world.alliance_convoy.report.pursuit.heading,Pursuit report heading,Harrow interceptor
+world.alliance_convoy.report.pursuit.stopped,Pursuit report outcome,The interceptor was stopped before it could make another pass.
+world.alliance_convoy.report.pursuit.escaped,Pursuit report outcome,The interceptor remained at large when the convoy mission ended.
 world.alliance_convoy.game_over,Convoy game over reason,The three transports' fates are settled.
 client.crew_spectator.title,Destroyed crew camera panel,Your ship has been destroyed
 client.crew_spectator.following,Current shared camera target label,Following:

@@ -1003,24 +1003,29 @@ impl Plugin for WorldPlugin {
 /// tick produces no further `RegionEntered` events.
 ///
 /// After PRD #597 PR 9, `update_region_membership` tracks region membership
-/// for every ship (player + NPCs). World-scenario triggers, however, remain
-/// player-driven: only crossings by the `LocalShip` are bridged into
-/// `pending_world_events`.
+/// for every ship (player + NPCs). World-scenario triggers remain
+/// player-driven, but every fleet player ship must be observed on every peer:
+/// a remote escort crossing the convoy recovery site is the same world event
+/// for all lockstep hosts. NPC crossings remain excluded.
 fn handle_region_entered_event(
     trigger: On<crate::regions::server::RegionEntered>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     runtime: Option<ResMut<WorldContentRuntime>>,
-    local_ship_q: Query<(), With<crate::server_app::LocalShip>>,
+    player_ship_q: Query<
+        (),
+        Or<(
+            With<crate::server_app::LocalShip>,
+            With<crate::lockstep::FleetSlotOf>,
+        )>,
+    >,
 ) {
     let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
         return;
     };
     let ev = trigger.event();
-    // World triggers fire only on player-ship boundary crossings; NPC ships
-    // (also tracked in RegionMembership after PRD #597 PR 9) are silently
-    // dropped here — they still receive region effects via the other
-    // observers/systems.
-    if local_ship_q.get(ev.subject).is_err() {
+    // Every peer simulates the frozen fleet. LocalShip alone would make a
+    // remote escort's authored region entry disappear from this peer's story.
+    if player_ship_q.get(ev.subject).is_err() {
         return;
     }
     let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {
@@ -1033,19 +1038,25 @@ fn handle_region_entered_event(
 
 /// Observer: mirror of `handle_region_entered_event` for region exits.
 /// Fires both on boundary-crossing exits and on implicit exits when the
-/// region entity is despawned while the ship is inside. Filters on
-/// `LocalShip` for the same reason: world-scenario triggers are player-driven.
+/// region entity is despawned while the ship is inside. Filters on the same
+/// fleet-player set as entry so all peers observe the same authored events.
 fn handle_region_exited_event(
     trigger: On<crate::regions::server::RegionExited>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     runtime: Option<ResMut<WorldContentRuntime>>,
-    local_ship_q: Query<(), With<crate::server_app::LocalShip>>,
+    player_ship_q: Query<
+        (),
+        Or<(
+            With<crate::server_app::LocalShip>,
+            With<crate::lockstep::FleetSlotOf>,
+        )>,
+    >,
 ) {
     let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
         return;
     };
     let ev = trigger.event();
-    if local_ship_q.get(ev.subject).is_err() {
+    if player_ship_q.get(ev.subject).is_err() {
         return;
     }
     let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {

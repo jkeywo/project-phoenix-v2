@@ -396,6 +396,15 @@ dead with the situation still live.
 
 A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedule.*`:
 
+In a world with authored `[[ship_slot]]` rows, GameStart publishes the fleet
+that actually launched as `ctx.flags["fleet.initial_player_ships"]` and one
+`ctx.flags["fleet.slot.<id>.present"]` per spawned slot. These are frozen launch
+facts. A disconnected host keeps its ship and receives ordinary Backfill; do
+not use live crew connections to resize a mission after launch. The convoy
+world uses these facts to schedule fewer raiders for smaller fleets and to
+assign optional Objectives only to slots present at launch. Its route has no
+deadline; all three transport arrival/loss callbacks decide its ending.
+
 | Call | Notes |
 |---|---|
 | `ctx.effects.add_objective(#{ id, text, mandatory?, targets?, source?, base_priority?, directive_kind?, … })` | Add to the objectives list, with its AI directive and utility scoring. |

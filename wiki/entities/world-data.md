@@ -2,7 +2,7 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, tests/cruiser_elimination.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/worlds/cruiser_elimination.toml, assets/scenarios.toml]
+sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server/renderer.rs, src/server_app/world_setup.rs, server.html, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, tests/cruiser_elimination.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/worlds/cruiser_elimination.toml, assets/entities/region_convoy_recovery.toml, assets/scenarios.toml]
 updated: 2026-09-27
 ---
 
@@ -55,6 +55,11 @@ uses four `[[ship_slot]]` rows, a terminating civilian `[[route]]`, and script
 callbacks that count each transport's arrival or loss once. Its report row
 describes the actual count when all three fates resolve; the route has no
 deadline that ends the mission while a transport is still travelling.
+`spawn_game_start_entities` publishes the frozen count and identities of the
+slots that actually spawned to world flags. The convoy script reads these to
+schedule later raiders and scope its separate recovery and pursuit Objectives.
+Its recovery marker is a trigger region; player-ship entry resolves that side
+task, while the convoy fate remains governed by the transport callbacks.
 
 `[[gm_palette]]` entries bind a template and closed authored variants for GM
 map placement; their templates join the ordinary preload/content set.

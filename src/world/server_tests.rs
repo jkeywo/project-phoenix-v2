@@ -9151,6 +9151,72 @@ fn ship_entering_region_fires_on_entered_region_trigger_exactly_once() {
 }
 
 #[test]
+fn nonlocal_fleet_ship_region_entry_matches_local_peer() {
+    use crate::command_admission::HostSlot;
+    use crate::lockstep::FleetSlotOf;
+
+    // The same port escort is remote to one peer and LocalShip to the other.
+    // Both simulations must enqueue the same authored region event when it
+    // crosses; otherwise a scoped convoy side task diverges in lockstep.
+    for port_is_local in [false, true] {
+        let mut app = region_trigger_test_app();
+        let uuid = "uuid-recovery-zone";
+        spawn_region_with_uuid(&mut app, 100.0, 0.0, 50.0, uuid);
+        let idx = install_region_trigger(
+            &mut app,
+            "recovery_zone",
+            uuid,
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "recovery_zone".into(),
+            },
+        );
+        let local = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+            q.single(app.world()).unwrap()
+        };
+        app.world_mut()
+            .entity_mut(local)
+            .insert(FleetSlotOf(HostSlot::SOLO));
+        let remote = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                FleetSlotOf(HostSlot(1)),
+                Transform::default(),
+                crate::ship::state::ShipPhysics::default(),
+                crate::ship_plugin::ShipConfigComponent::default(),
+                crate::ship_plugin::ShipSystemControlSources::default(),
+                crate::modifiers::ShipModifiers::new(),
+            ))
+            .id();
+        app.update(); // both player ships outside
+        assert!(!trigger_fired(&app, idx));
+        if port_is_local {
+            set_ship_pos(&mut app, 110.0, 0.0);
+        } else {
+            app.world_mut()
+                .entity_mut(remote)
+                .get_mut::<crate::ship::state::ShipPhysics>()
+                .unwrap()
+                .x = 110.0;
+        }
+        app.update(); // queue the crossing
+        app.update(); // drain and fire
+        assert!(
+            trigger_fired(&app, idx),
+            "port entry must fire when port_is_local={port_is_local}"
+        );
+        assert!(app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .pending_world_events
+            .is_empty());
+    }
+}
+
+#[test]
 fn ship_exiting_region_fires_on_exited_region_trigger() {
     let mut app = region_trigger_test_app();
     let uuid = "uuid-nebula";
@@ -9260,8 +9326,8 @@ fn overlapping_regions_fire_independent_enter_triggers() {
 fn npc_entering_region_does_not_fire_trigger() {
     // Region membership is tracked per-ship (PRD #597 PR 9), so an NPC ship
     // does now enter `RegionMembership.inside` when it crosses a region
-    // boundary. World-scenario triggers, however, remain player-driven:
-    // `handle_region_entered_event` filters on `LocalShip`, so an NPC
+    // boundary. World-scenario triggers, however, remain fleet-player-driven:
+    // `handle_region_entered_event` filters on `LocalShip`/`FleetSlotOf`, so an NPC
     // crossing does not fire an `OnEnteredRegion` trigger.
     //
     // This test uses a bare entity (no `Ship` marker) to keep the setup

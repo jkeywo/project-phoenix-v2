@@ -30,10 +30,15 @@ export function mixedOptions(argv) {
     else throw new Error('Unknown option '+key);
   }
   for(const key of ['out','binary','bundle'])if(!o[key])throw new Error('--'+key+' is required');
-  for(const [key,min,max] of [['seconds',1,60],['timeout',1,180],['deadline',30,295],['port',1024,65535],['rendezvousPort',1024,65535],['delayMs',0,2000],['lossPercent',0,99],['seed',0,4294967295]])if(!Number.isInteger(o[key])||o[key]<min||o[key]>max)throw new Error('Invalid '+key);
+  for(const [key,min,max] of [['seconds',1,60],['timeout',1,180],['deadline',30,900],['port',1024,65535],['rendezvousPort',1024,65535],['delayMs',0,2000],['lossPercent',0,99],['seed',0,4294967295]])if(!Number.isInteger(o[key])||o[key]<min||o[key]>max)throw new Error('Invalid '+key);
   if(o.port===o.rendezvousPort)throw new Error('Ports must differ');
   if(!o.routes.length||o.routes.some(r=>!ROUTES.includes(r))||new Set(o.routes).size!==o.routes.length)throw new Error('Invalid routes');
   return o;
+}
+// Opt-in extended runs retain a full minute for shutdown beyond the case bound.
+export function mixedNativeSeconds(deadline) {
+  if (!Number.isInteger(deadline) || deadline < 30 || deadline > 900) throw new Error('Invalid deadline');
+  return deadline > 295 ? deadline + 60 : 300;
 }
 // Keep browser startup, observation and the retained mode description together.
 export function mixedBrowserRuntime(options, route) {
@@ -151,7 +156,7 @@ async function runCase(browser,o,route,runNativeProbe,hooks={}){
       if(nativeById.has(id))throw new Error('Duplicate native probe '+id);
       result.nativeEvents[id]=[];
       const run=runNativeProbe({binary:o.binary,bundle:o.bundle,source:o.source,out:path.join(directory,id),rendezvous,origin:base,
-        seconds:300,role:id.startsWith('gm')?'gm':'ship','fleet-code':code,claim,workload:true,
+        seconds:mixedNativeSeconds(o.deadline),role:id.startsWith('gm')?'gm':'ship','fleet-code':code,claim,workload:true,
         deferGmReady:id==='gm-2',nextCommand:()=>id==='gm-2'?nativeCommands.shift():null,
         shouldStop:()=>stop||stoppedNative.has(id),onEvent:event=>{
           if(!stop&&!stoppedNative.has(id)){

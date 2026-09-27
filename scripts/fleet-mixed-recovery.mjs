@@ -94,7 +94,7 @@ export function mixedReplacementOutcome(evidence) {
     limits:['One native replacement after confirmed loss; simultaneous claim race and connected-holder challenge are separate browser cases']};
 }
 export function mixedFailureHook(failure,{faultSeconds=90}={}) {
-  if(!MIXED_FAILURES.includes(failure)||!integer(faultSeconds)||faultSeconds>180)throw new Error('Invalid mixed recovery scenario');
+  if(!MIXED_FAILURES.includes(failure)||!integer(faultSeconds)||faultSeconds>600)throw new Error('Invalid mixed recovery scenario');
   return async ({result,peers,step,stopNative,launchNative,wait,deadline,evaluate})=>{
     await Promise.all(peers.map(peer=>evaluate(peer.page,observeRecovery)));
     const readBrowser=async peer=>browserRecoveryPeer({label:peer.label,errors:peer.errors,...await evaluate(peer.page,()=>({mesh:window.__hostMeshStatus(),phase:window.__saveSlotsPhase,
@@ -111,7 +111,7 @@ export function mixedFailureHook(failure,{faultSeconds=90}={}) {
     const faultDeadline=Math.min(deadline,Date.now()+faultSeconds*1000);
     await wait(async()=>{
       evidence.after=await capture(browserSurvivors,nativeSurvivors);evidence.outcome=mixedRecoveryOutcome(evidence);
-      if(evidence.samples.length>=800)throw new Error('Mixed recovery sample overflow');
+      if(evidence.samples.length>=4000)throw new Error('Mixed recovery sample overflow');
       evidence.samples.push({at:new Date().toISOString(),outcome:evidence.outcome});
       if(Date.now()>faultDeadline)throw new Error('Mixed loss deadline: '+evidence.outcome.reasons.join('; '));
       return evidence.outcome.passed;
@@ -128,12 +128,26 @@ export function mixedFailureHook(failure,{faultSeconds=90}={}) {
     step('native replacement restored with two common mixed digest checkpoints');
   };
 }
+export function mixedRecoveryOptions(args) {
+  const copy=[...args];
+  const extract=(name,required=false)=>{
+    const indexes=copy.flatMap((value,index)=>value===name?[index]:[]);
+    if(indexes.length>1)throw new Error('Repeated '+name);
+    if(!indexes.length){if(required)throw new Error('Choose --failure ship|gm|leader|replacement');return null;}
+    const index=indexes[0],value=copy[index+1];
+    if(!value||value.startsWith('--'))throw new Error('Incomplete '+name);
+    copy.splice(index,2);return value;
+  };
+  const failure=extract('--failure',true);
+  if(!MIXED_FAILURES.includes(failure))throw new Error('Invalid mixed recovery scenario');
+  const faultSeconds=Number(extract('--fault-seconds')??90);
+  if(!integer(faultSeconds)||faultSeconds>600)throw new Error('--fault-seconds must be an integer from 1 to 600');
+  return {args:copy,failure,faultSeconds};
+}
 export async function main(args=process.argv.slice(2)) {
-  const copy=[...args],index=copy.indexOf('--failure');
-  if(index<0)throw new Error('Choose --failure ship|gm|leader|replacement');
-  const [,failure]=copy.splice(index,2);
+  const {args:copy,failure,faultSeconds}=mixedRecoveryOptions(args);
   for(const option of ['--build-receipt','--wasm-build-receipt'])if(!copy.includes(option))throw new Error(option+' is required for recovery evidence');
   if(!copy.includes('--render'))throw new Error('--render is required for recovery evidence');
-  return mixedMatrix(copy,{kind:'phoenix-real-mixed-recovery-v1',provenance:{failure,runnerSha256:createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex')},afterHealthy:mixedFailureHook(failure)});
+  return mixedMatrix(copy,{kind:'phoenix-real-mixed-recovery-v1',provenance:{failure,faultSeconds,runnerSha256:createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex')},afterHealthy:mixedFailureHook(failure,{faultSeconds})});
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().then(result=>process.exit(result.status==='passed'?0:1),error=>{console.error(error);process.exit(1);});

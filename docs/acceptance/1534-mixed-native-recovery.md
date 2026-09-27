@@ -22,10 +22,18 @@ same technical slot. The observer supplies the existing `join` API's claim
 argument; it does not change admission or write simulation state. Each process
 has a private identity-store directory. No reconnect credential is logged.
 
-The healthy matrix's deadline includes recovery. A fault has at most 90 seconds
-and cannot extend the overall 295-second cap; startup or automatic fallback can
-consume that budget and produce an explicit failure. Each native probe also has
-its own 300-second lifetime and bounded, confirmed process cleanup.
+The healthy matrix's deadline includes recovery. Defaults remain 290 seconds
+for the overall case and 90 seconds after the fault. Explicit `--deadline` may
+extend the overall window up to 900 seconds, and `--fault-seconds` may extend the
+post-fault window up to 600 seconds; the fault window is always capped by the
+remaining overall budget. The two healthy and two post-fault checkpoint gates
+are unchanged. For a slow rendered rig, add `--deadline 900 --fault-seconds 600`.
+Startup or automatic fallback can consume the budget and fail explicitly.
+Native probes keep the default 300-second lifetime for case deadlines up to
+295 seconds. An explicitly longer case gives each probe `deadline + 60` seconds,
+bounded by 960 seconds, plus bounded and confirmed process cleanup. A native
+probe invoked alone retains its 45-second default. Telemetry and observation
+buffers remain bounded; overflow fails the run.
 
 ## Required evidence
 
@@ -61,3 +69,15 @@ endurance, physical-network behavior or complete effect-count auditing.
 An old-owner suffix retained only by a non-successor has no transferable origin
 proof and intentionally remains held/refused. A failed owner-continuation cell
 must retain that evidence rather than weaken the provenance gate.
+
+## First rendered mixed measurement
+
+The clean source-matched `91f382e6` forced-relay native ship-loss invocation
+expired at the original 295-second limit before any fault was injected. All six
+peers agreed at tick 300 (`f84aec42538b44cd`); final browser ticks were 354/355/355.
+Station Applied feedback and GM actions were observed without runtime errors.
+All three native children confirmed exit and unchanged binary hash. Raw evidence
+is in ignored `target/1534-mixed-native-ship-relay-91f382e6/`; result JSON SHA256
+is `5e71f2c252637ea442025bf206d47234de09a9decea1d92d60a5646a6bc2d01b`.
+This establishes a measurement-window limitation, not a recovery pass. The
+extended window is opt-in and must produce its own evidence.

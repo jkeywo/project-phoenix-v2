@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import vm from 'node:vm';
-import { instrumentNativeFleetModule, nativeProbeOutcome, parseNativeProbeArgs } from '../../scripts/fleet-native-probe.mjs';
+import { EventEmitter } from 'node:events';
+import { instrumentNativeFleetModule, nativeProbeOutcome, parseNativeProbeArgs, terminateNativeProbe } from '../../scripts/fleet-native-probe.mjs';
 
 const args = ['--binary', 'host.exe', '--bundle', 'dist', '--source', '.', '--out', 'run', '--rendezvous', 'http://127.0.0.1:8788', '--origin', 'http://localhost:8080'];
 
 describe('bounded native runtime bootstrap probe', () => {
   it('requires concrete inputs and refuses missing, repeated and unbounded options', () => {
     expect(parseNativeProbeArgs(args).seconds).toBe(45);
-    for (const extra of [['--seconds', '0'], ['--seconds', '301'], ['--seconds', '1.5'], ['--seconds', 'NaN'], ['--seconds'], ['--extra', 'x'], ['--out', 'other']]) {
+    for (const extra of [['--seconds', '0'], ['--seconds', '961'], ['--seconds', '1.5'], ['--seconds', 'NaN'], ['--seconds'], ['--extra', 'x'], ['--out', 'other']]) {
       expect(() => parseNativeProbeArgs([...args, ...extra])).toThrow();
     }
     expect(() => parseNativeProbeArgs(args.slice(2))).toThrow('--binary');
@@ -63,5 +64,33 @@ describe('bounded native runtime bootstrap probe', () => {
   it('refuses ambiguous source rewriting', () => {
     expect(() => instrumentNativeFleetModule('export const changed = true;', 'http://localhost')).toThrow();
     expect(() => instrumentNativeFleetModule('export function createNativeFleetPeer() {}\nexport function createNativeFleetPeer() {}', 'http://localhost')).toThrow();
+  });
+});
+
+describe('bounded native child cleanup',()=>{
+  function child(terminate) {
+    const process=new EventEmitter();process.pid=12345;process.exitCode=null;process.signalCode=null;
+    process.finish=()=>{process.signalCode='SIGTERM';process.emit('exit');};
+    process.kill=()=>{if(terminate)process.finish();return true;};return process;
+  }
+  it('observes normal exit without invoking tree termination or leaking listeners',async()=>{
+    const process=child(true);let forced=false;
+    const result=await terminateNativeProbe(process,{graceMs:2,forceMs:2,forceTree:()=>{forced=true;}});
+    expect(result.cleanupExitObserved).toBe(true);expect(forced).toBe(false);expect(process.listenerCount('exit')).toBe(0);
+  });
+  it('forces only the spawned tree after grace and requires an observed exit',async()=>{
+    const process=child(false),pids=[];
+    const result=await terminateNativeProbe(process,{graceMs:1,forceMs:1,forceTree:pid=>{pids.push(pid);process.finish();return {status:0};}});
+    expect(pids).toEqual([12345]);expect(result).toEqual({forcedCleanup:{status:0},cleanupExitObserved:true});expect(process.listenerCount('exit')).toBe(0);
+  });
+  it('fails cleanup honestly when even forced termination does not produce exit',async()=>{
+    const process=child(false);
+    const result=await terminateNativeProbe(process,{graceMs:1,forceMs:1,forceTree:()=>({status:1})});
+    expect(result.cleanupExitObserved).toBe(false);expect(process.listenerCount('exit')).toBe(0);
+  });
+  it('allows an explicit 960-second lifetime while retaining the 45-second default',()=>{
+    expect(parseNativeProbeArgs(args).seconds).toBe(45);
+    expect(parseNativeProbeArgs([...args,'--seconds','960']).seconds).toBe(960);
+    expect(()=>parseNativeProbeArgs([...args,'--seconds','961'])).toThrow();
   });
 });

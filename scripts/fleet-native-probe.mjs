@@ -24,7 +24,7 @@ export function parseNativeProbeArgs(argv) {
     if (!values[name]) throw new Error(`--${name} is required`);
   }
   const seconds = Number(values.seconds ?? 45);
-  if (!Number.isSafeInteger(seconds) || seconds < 5 || seconds > 300) throw new Error('--seconds must be an integer from 5 to 300');
+  if (!Number.isSafeInteger(seconds) || seconds < 5 || seconds > 960) throw new Error('--seconds must be an integer from 5 to 960');
   for (const name of ['rendezvous', 'origin']) {
     const url = new URL(values[name]);
     if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) throw new Error(`Invalid --${name} URL`);
@@ -121,7 +121,37 @@ export function nativeProbeOutcome(events, processExit, expected = 'owner') {
       'Configured relay capability is not an observed link route; route callbacks are recorded separately'] };
 }
 
+// The observer owns only this spawned child. Waiting is bounded, and a forced
+// Windows cleanup targets its exact process tree rather than a process name.
+export async function terminateNativeProbe(child, { graceMs = 5000, forceMs = 1000,
+  forceTree = pid => {
+    const result = spawnSync('taskkill', ['/PID',String(pid),'/T','/F'], {windowsHide:true,timeout:5000,encoding:'utf8'});
+    return {status:result.status,error:result.error?.message};
+  } } = {}) {
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  if (exited()) return {cleanupExitObserved:true};
+  if (!Number.isInteger(child.pid) || child.pid <= 0) throw new Error('Native cleanup requires the spawned child PID');
+  const waitExit = ms => new Promise(resolve => {
+    if (exited()) { resolve(); return; }
+    const finish = () => { clearTimeout(timer); child.removeListener('exit',finish); resolve(); };
+    const timer = setTimeout(finish,ms);
+    child.once('exit',finish);
+  });
+  const result = {};
+  const normal = waitExit(graceMs);
+  try { child.kill(); } catch (error) { result.killError = error.message; }
+  await normal;
+  if (!exited()) {
+    try { result.forcedCleanup = forceTree(child.pid); }
+    catch (error) { result.forcedCleanup = {error:error.message}; }
+    await waitExit(forceMs);
+  }
+  result.cleanupExitObserved = exited();
+  return result;
+}
+
 export async function runNativeProbe(options) {
+  if (!Number.isSafeInteger(options.seconds) || options.seconds < 5 || options.seconds > 960) throw new Error('Native lifetime must be an integer from 5 to 960 seconds');
   if (process.platform !== 'win32') throw new Error('This probe requires Windows');
   const source = fs.realpathSync(options.source);
   const binary = fs.realpathSync(options.binary);
@@ -245,15 +275,8 @@ export async function runNativeProbe(options) {
   } catch (error) { evidence.failure = error.message; evidence.outcome = nativeProbeOutcome(events, child?.exitCode ?? -1, options['fleet-code'] ? 'member' : 'owner'); }
   finally {
     if (child && child.exitCode === null && child.signalCode === null && !spawnError) {
-      child.kill();
-      await new Promise(resolve => { const timer = setTimeout(resolve, 5000); child.once('exit', () => { clearTimeout(timer); resolve(); }); });
-      if (child.exitCode === null && child.signalCode === null) {
-        const forced = spawnSync('taskkill', ['/PID',String(child.pid),'/T','/F'], {windowsHide:true,timeout:5000,encoding:'utf8'});
-        evidence.forcedCleanup = {status:forced.status,error:forced.error?.message};
-        await new Promise(resolve => { const timer=setTimeout(resolve,1000); child.once('exit',()=>{clearTimeout(timer);resolve();}); });
-      }
+      Object.assign(evidence, await terminateNativeProbe(child));
       evidence.terminatedAtBound = true;
-      evidence.cleanupExitObserved = child.exitCode !== null || child.signalCode !== null;
       if (!evidence.cleanupExitObserved) evidence.failure ||= 'Native process cleanup did not confirm exit';
     }
     listener.closeAllConnections();

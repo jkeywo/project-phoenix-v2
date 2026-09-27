@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import vm from 'node:vm';
-import {mixedOptions,mixedBrowserRuntime,mixedOutcome,observeMixedDigests,verifyMixedImpairment} from '../../scripts/fleet-mixed-matrix.mjs';
+import {mixedOptions,mixedNativeSeconds,mixedBrowserRuntime,mixedOutcome,observeMixedDigests,verifyMixedImpairment} from '../../scripts/fleet-mixed-matrix.mjs';
 import {observeBrowser} from '../../scripts/fleet-browser-matrix.mjs';
 function fixture(route='direct'){
  const ids=['ship-1','ship-2','gm-1'];
@@ -21,7 +21,7 @@ describe('mixed runtime evidence gate',()=>{
  it('observes returned digest frames without draining or changing raw data',()=>{const context=vm.createContext({window:{}});vm.runInContext('('+observeMixedDigests.toString()+')()',context);let calls=0;const raw=JSON.stringify([{t:'digest',d:{tick:300,digest:'abc'}},{t:'tick',d:{tick:301}}]);context.window.wasm_take_mesh_frames=()=>{calls++;return raw;};expect(context.window.wasm_take_mesh_frames()).toBe(raw);expect(calls).toBe(1);expect(context.window.__mixedDigests).toHaveLength(1);});
  it('requires distinct adopted slots and exact roles',()=>{const f=fixture();f.events['gm-2'][0].value.local=4;expect(mixedOutcome(f.browser,f.events,f.options).reasons).toContain('Six distinct adopted simulation slots required');expect(mixedOutcome(f.browser,f.events,f.options).reasons).toContain('Exact four ship and two GM roles required');});
  it('refuses failed native telemetry even with sufficient captured workload',()=>{const f=fixture();f.events['gm-2'].push({kind:'observer-error',value:{status:431}});expect(mixedOutcome(f.browser,f.events,f.options).passed).toBe(false);});
- it('bounds run options and requires native inputs',()=>{expect(()=>mixedOptions(['--out','unused'])).toThrow('binary');expect(()=>mixedOptions(['--out','unused','--binary','bin','--bundle','dist','--deadline','300'])).toThrow('deadline');});
+ it('bounds run options and requires native inputs',()=>{expect(()=>mixedOptions(['--out','unused'])).toThrow('binary');expect(()=>mixedOptions(['--out','unused','--binary','bin','--bundle','dist','--deadline','901'])).toThrow('deadline');});
  it('refuses claimed impairment without actual native relay writes',()=>{expect(()=>verifyMixedImpairment({route:'direct',impairment:{profile:{delay_ms:0,loss_percent:0,seed:1530},counters:{relay_reliable_written:0}}},{delayMs:0,lossPercent:0,seed:1530})).toThrow('native relay traffic');});
 });
 
@@ -48,4 +48,14 @@ describe('mixed browser render mode', () => {
   expect(()=>mixedOptions([...required, '--seconds', '--render'])).toThrow('Incomplete option');
   expect(()=>mixedOptions([...required, '--render', 'false'])).toThrow('Incomplete option');
  });
+});
+
+it('extends native lifetime only for explicitly longer bounded mixed runs',()=>{
+  const required=['--out','unused','--binary','bin','--bundle','dist'];
+  expect(mixedOptions(required).deadline).toBe(290);
+  expect(mixedNativeSeconds(mixedOptions(required).deadline)).toBe(300);
+  expect(mixedNativeSeconds(295)).toBe(300);
+  expect(mixedNativeSeconds(mixedOptions([...required,'--deadline','900']).deadline)).toBe(960);
+  expect(()=>mixedNativeSeconds(901)).toThrow();
+  expect(()=>mixedOptions([...required,'--deadline','900.5'])).toThrow();
 });

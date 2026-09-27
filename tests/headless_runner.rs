@@ -18330,6 +18330,207 @@ fn one_report_row(
     rows[0].clone()
 }
 
+/// The four outcomes come from the authored script over the same fate ledger
+/// the arrival and destruction callbacks update. A clock or escort casualty
+/// alone cannot make `saved + lost` reach three.
+#[test]
+fn alliance_convoy_fate_accounting() {
+    use project_phoenix::core::report::ReportRowState;
+    let world_path = "assets/worlds/alliance_convoy_escort.toml";
+    let source = std::fs::read_to_string(world_path).expect("convoy world exists");
+    let doc: toml::Value = toml::from_str(&source).expect("convoy world parses");
+    let compiled = project_phoenix::world::script::load::load_world_scripts(
+        world_path,
+        &doc,
+        &project_phoenix::world::script::load::NoSiblingScripts,
+    );
+    assert!(
+        !project_phoenix::world::validate::has_error(&compiled.findings),
+        "convoy script compiles: {:?}",
+        compiled.findings
+    );
+    let path = compiled.asts.keys().next().expect("convoy script").clone();
+    let script = WindowScript {
+        host: project_phoenix::world::script::engine::RuntimeHost::new(),
+        compiled,
+        path,
+        docs: vec![doc],
+    };
+
+    for saved in 0..=3 {
+        let flags = flags_with(&[("convoy_saved", saved), ("convoy_lost", 3 - saved)]);
+        let effects = script.call("resolve_convoy", &flags);
+        let rows = window_report_rows(&effects);
+        assert_eq!(rows.len(), 1, "{saved} saved must write one account");
+        let row = &rows[0];
+        assert_eq!(row.id, "convoy_fate");
+        let ending = ["zero", "one", "two", "three"][saved as usize];
+        assert_eq!(
+            row.outcome_id,
+            format!("world.alliance_convoy.report.{ending}")
+        );
+        assert_eq!(
+            row.state,
+            if saved == 0 {
+                ReportRowState::Lost
+            } else if saved == 3 {
+                ReportRowState::Saved
+            } else {
+                ReportRowState::Partial
+            }
+        );
+        assert_eq!(window_objective_verdicts(&effects).0, vec!["escort_convoy"]);
+    }
+    for (saved, lost) in [(0, 0), (1, 1), (2, 0), (0, 2)] {
+        let effects = script.call(
+            "resolve_convoy",
+            &flags_with(&[("convoy_saved", saved), ("convoy_lost", lost)]),
+        );
+        assert!(
+            window_report_rows(&effects).is_empty(),
+            "unresolved fate ended early"
+        );
+        assert!(window_objective_verdicts(&effects).0.is_empty());
+    }
+
+    let transports = ["aster", "bell", "cedar"];
+    for saved in 0..=3 {
+        let mut flags = project_phoenix::world::flags::FlagStore::new();
+        for (index, transport) in transports.iter().enumerate() {
+            let handler = format!(
+                "{transport}_{}",
+                if index < saved { "arrived" } else { "lost" }
+            );
+            let effects = script.call(&handler, &flags);
+            window_apply_flags(&effects, &mut flags);
+            assert_eq!(
+                window_report_rows(&effects).len(),
+                usize::from(index == 2),
+                "transport {transport} wrote the final row at the wrong time"
+            );
+            let duplicate = script.call(&format!("{transport}_lost"), &flags);
+            assert!(
+                window_report_rows(&duplicate).is_empty(),
+                "one hull gained a second fate"
+            );
+            assert!(window_increments(&duplicate).is_empty());
+        }
+        assert_eq!(flags.counter("convoy_saved"), saved as i64);
+        assert_eq!(flags.counter("convoy_lost"), 3 - saved as i64);
+    }
+}
+
+/// Shorten only the authored lane for an integration probe. The same three
+/// transport callbacks and report logic run in the headless simulation, with
+/// real destruction events injected by its script on a fixed seed.
+#[test]
+fn alliance_convoy_seeded_arrivals_losses_and_last_escort_loss() {
+    use project_phoenix::core::report::MissionReport;
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::world::content::WorldEvent;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let original = std::fs::read_to_string("assets/worlds/alliance_convoy_escort.toml").unwrap();
+    for lost in 0..=3 {
+        for lose_escort in [false, true]
+            .into_iter()
+            .filter(|lose_escort| lost == 0 || !*lose_escort)
+        {
+            let mut world = original
+                .replace(
+                    "safe_harbour = [0.0, 0.0, -2400.0]",
+                    "safe_harbour = [0.0, 0.0, -300.0]",
+                )
+                .replace("speed = 0.18", "speed = 1.0");
+            if lost > 0 {
+                world = world.replacen(
+                    "on_world_loaded(\"on_load\");",
+                    "on_world_loaded(\"on_load\");\non_timer(1, \"forced_losses\");",
+                    1,
+                );
+                let names = ["aster", "bell", "cedar"];
+                let removals = names[..lost]
+                    .iter()
+                    .map(|name| format!("    ctx.effects.destroy_entity(\"world.alliance_convoy.transport.{name}\");"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let insertion = world
+                    .rfind("\"\"\"")
+                    .expect("inline Rhai closing delimiter");
+                world.insert_str(
+                    insertion,
+                    &format!("fn forced_losses(ctx) {{\n{removals}\n}}\n"),
+                );
+            }
+            let path = std::env::temp_dir().join(format!(
+                "phoenix_convoy_{}_{}_{}.toml",
+                std::process::id(),
+                lost,
+                u8::from(lose_escort)
+            ));
+            std::fs::write(&path, world).unwrap();
+            let dt = 1.0 / 60.0;
+            let args = HeadlessArgs {
+                world_path: path.to_string_lossy().to_string().into(),
+                ship_path: "assets/entities/alliance_destroyer.toml".into(),
+                dt,
+                max_ticks: ticks_for_sim_seconds(60.0, dt),
+                deterministic: true,
+                seed: Some(1548),
+                ..test_args()
+            };
+            let mut app = build_headless_app(&args).expect("convoy probe world builds");
+            // The direct headless launcher has no slot-picker claimant and
+            // correctly leaves all `unclaimed = "absent"` rows out. Supply the
+            // one launched escort this seeded journey is exercising.
+            app.insert_resource(project_phoenix::ship_slots::FrozenShipSlots(vec![
+                project_phoenix::ship_slots::LaunchedSlot {
+                    slot_id: "lead".into(),
+                    hull: "assets/entities/alliance_destroyer.toml".into(),
+                    claimant: None,
+                    source: project_phoenix::ship_slots::LaunchSource::Backfill,
+                },
+            ]));
+            if lose_escort {
+                run(&mut app, 60);
+                let (ship, uuid) = {
+                    let mut q = app
+                        .world_mut()
+                        .query_filtered::<(Entity, &EntityUuid), With<LocalShip>>();
+                    let (ship, uuid) = q.single(app.world()).expect("sole escort spawned");
+                    (ship, uuid.0.clone())
+                };
+                app.world_mut().entity_mut(ship).despawn();
+                app.world_mut()
+                    .resource_mut::<WorldContentRuntime>()
+                    .pending_world_events
+                    .push(WorldEvent::Destroyed { uuid });
+            }
+            run(&mut app, args.max_ticks);
+            let rows = app.world().resource::<MissionReport>().rows();
+            assert_eq!(
+                rows.len(),
+                1,
+                "lost={lost}, escort_lost={lose_escort}: {rows:?}"
+            );
+            let expected = ["three", "two", "one", "zero"][lost];
+            assert_eq!(
+                rows[0].outcome_id,
+                format!("world.alliance_convoy.report.{expected}")
+            );
+            assert_eq!(
+                objective_status(&app, "escort_convoy"),
+                project_phoenix::core::messages::ObjectiveStatus::Completed
+            );
+            assert_eq!(
+                app.world().resource::<State<GamePhase>>().get(),
+                &GamePhase::GameOver
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
 /// A flag store with one flag set — the common shape of these one-fact cases.
 fn flags_with(pairs: &[(&str, i64)]) -> project_phoenix::world::flags::FlagStore {
     let mut flags = project_phoenix::world::flags::FlagStore::new();

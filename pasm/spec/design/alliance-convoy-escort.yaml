@@ -1,0 +1,71 @@
+# T5 reference mission, issue #1548. The design digest was read before this
+# scenario was authored; its existing Falling Skyway model remains separate.
+# There is no deadline for the three transports. Their actual arrival or loss
+# closes the mission, so complete escort destruction cannot decide their fate.
+entities:
+  - scenario_model: alliance-convoy-escort
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Alliance Convoy Escort
+      summary: >
+        [ai] Four Alliance escort slots protect three civilian transports on a
+        final route. The ship slots can choose destroyer or cruiser. The mission
+        closes when every transport has reached safety or been destroyed, and
+        narrates the actual count without a victory threshold.
+    game_design:
+      world_file: assets/worlds/alliance_convoy_escort.toml
+
+  - gate: convoy-transport-fates-resolved
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: All Transport Fates Resolved
+      summary: >
+        [ai] Each transport independently reaches the safety marker or is lost.
+        The final authored outcome waits for all three fates, even if every
+        escort was destroyed earlier. No elapsed-time failure closes the route.
+    game_design:
+      self_resolving: true
+      on_success: [convoy-four-narrative-endings]
+
+  - consequence: convoy-four-narrative-endings
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Four Convoy Accounts
+      summary: >
+        [ai] Exactly one report row describes zero, one, two, or three
+        transports reaching safety. The shared escort Objective resolves with
+        that authored account. A numerical balance score is never player copy.
+    game_design:
+      handler: resolve_convoy
+
+  - design_invariant: convoy-fate-accounting
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Every Transport Has One Fate
+      summary: >
+        [ai] The outcome count is derived from three latched arrival/loss facts,
+        never a timer or the escort hull count.
+    game_design:
+      relation: >
+        saved + lost = 3 at mission close; each of the three transports
+        contributes exactly one fate, and escort destruction alone cannot close
+        the mission.
+      asserted_by: [alliance_convoy_fate_accounting]
+      anchors:
+        - name: lane-escort-pace
+          path: assets/worlds/alliance_convoy_escort.toml
+          table: route.leg
+          match: "anchor=safe_harbour"
+          key: speed
+          expect: "0.18"
+    implementation:
+      status: declared
+      paths: [tests/headless_runner.rs]

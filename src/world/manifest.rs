@@ -1118,7 +1118,7 @@ world = "assets/worlds/mod_skirmish.toml"
     // -- shipped manifest ----------------------------------------------------
 
     /// The real shipped manifest must parse, list exactly the selectable roots
-    /// (`combat_test`, and since issue #1034 `falling_skyway`), and validate
+    /// (`combat_test`, `falling_skyway`, and `alliance_convoy_escort`), and validate
     /// cleanly against the shipped world files — the pre-load catalog is
     /// authoritative, so a broken manifest must fail in CI rather than at host
     /// startup.
@@ -1127,7 +1127,10 @@ world = "assets/worlds/mod_skirmish.toml"
         let manifest_toml = include_str!("../../assets/scenarios.toml");
         let m = parse_manifest(manifest_toml).expect("scenarios.toml must parse");
         let ids: Vec<&str> = m.scenarios.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, ["combat_test", "falling_skyway"]);
+        assert_eq!(
+            ids,
+            ["combat_test", "falling_skyway", "alliance_convoy_escort"]
+        );
 
         let mut map = HashMap::new();
         map.insert(
@@ -1138,6 +1141,10 @@ world = "assets/worlds/mod_skirmish.toml"
             "assets/worlds/falling_skyway.toml".to_string(),
             include_str!("../../assets/worlds/falling_skyway.toml").to_string(),
         );
+        map.insert(
+            "assets/worlds/alliance_convoy_escort.toml".to_string(),
+            include_str!("../../assets/worlds/alliance_convoy_escort.toml").to_string(),
+        );
 
         let findings = validate_manifest(&m, manifest_toml, resolver(map.clone()));
         assert!(
@@ -1147,7 +1154,17 @@ world = "assets/worlds/mod_skirmish.toml"
 
         // The catalog exposes each scenario's own ships, drawn from its world.
         let catalog = build_catalog(&m, resolver(map));
-        assert_eq!(catalog.scenarios.len(), 2);
+        assert_eq!(catalog.scenarios.len(), 3);
+        let convoy = catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "alliance_convoy_escort")
+            .expect("convoy appears in the selectable catalogue");
+        assert_eq!(
+            convoy.ships.len(),
+            2,
+            "convoy exposes both permitted Alliance hulls"
+        );
         // Falling Skyway offers exactly the destroyer — the small-crew hull the
         // mission is authored for (issue #1034). Read from the WORLD's own
         // `[[available_ships]]`, not curated in the manifest.

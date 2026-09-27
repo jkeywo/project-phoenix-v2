@@ -75,7 +75,11 @@ async function main(args) {
   const output = path.resolve(args[1]);
   const before = sourceState(root);
   if (before.sourcePatch !== '') throw new Error('Browser WASM build requires a clean source checkout');
-  execFileSync('trunk', ['build', '--release'], { cwd: root, stdio: 'inherit' });
+  // Trunk's clap parser accepts true/false for NO_COLOR; automation commonly
+  // supplies 1, which otherwise makes the build fail before compilation.
+  execFileSync('trunk', ['build', '--release'], {
+    cwd: root, stdio: 'inherit', env: { ...process.env, NO_COLOR: 'true' },
+  });
   execFileSync(process.execPath, ['scripts/build-client.mjs'], { cwd: root, stdio: 'inherit' });
   const after = sourceState(root);
   if (after.sourceRevision !== before.sourceRevision || after.sourcePatch !== '') throw new Error('Source changed during browser WASM build');

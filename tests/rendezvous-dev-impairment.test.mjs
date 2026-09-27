@@ -116,6 +116,10 @@ describe('local rendezvous impairment', () => {
     assert.equal(final.relay_reliable_written, 2);
     assert.equal(final.relay_snapshot_written, 0);
     assert.equal(final.pending, 0);
+    assert.equal(final.observed_write_delay_ms.reliable.count, 2);
+    assert(final.observed_write_delay_ms.reliable.min >= 125);
+    assert(final.observed_write_delay_ms.reliable.max >= final.observed_write_delay_ms.reliable.min);
+    assert.equal(final.observed_write_delay_ms.snapshot.count, 0);
     host.ws.close(); client.ws.close();
   });
 

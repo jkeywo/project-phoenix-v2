@@ -52,7 +52,8 @@
 // while leaving code lookup, join and the WebSocket game relay intact. These
 // are application frames, not IP packets; "written" means handed to the local
 // socket, not acknowledged by a remote peer. The seed fixes loss decisions for
-// the same frame arrival order. No profile simulates mobile radio behavior.
+// the same frame arrival order. Direct WebRTC DataChannel traffic bypasses this
+// adapter and is unimpaired. No profile simulates mobile radio behavior.
 
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -101,12 +102,14 @@ for (let i = 0; i < argv.length; i += 1) {
 const registry = createRegistry({ data: DATA });
 /** @type {Map<string, {socket: import('node:net').Socket, pending: object[], timer: ReturnType<typeof setTimeout>|null, lastDue: number}>} */
 const sockets = new Map();
+const delayStats = () => ({ count: 0, min: null, max: null, total: 0 });
 const counters = {
   relay_reliable_seen: 0, relay_reliable_written: 0, relay_reliable_cancelled: 0,
   relay_snapshot_seen: 0, relay_snapshot_written: 0,
   relay_snapshot_dropped: 0, relay_snapshot_cancelled: 0,
   relay_frames_delayed: 0, signal_offers_dropped: 0,
   queue_overflow_closes: 0, pending: 0, peak_pending: 0,
+  observed_write_delay_ms: { reliable: delayStats(), snapshot: delayStats() },
 };
 // LCG with a fully specified 32-bit sequence, so a given seed and arrival
 // order produce the same snapshot-drop decisions across Node versions.
@@ -116,10 +119,18 @@ function drawLoss() {
   return randomState / 0x100000000 < profile.loss_percent / 100;
 }
 
-function writeFrame(entry, frame) {
+function writeFrame(entry, frame, enqueuedAt = null) {
   sendText(entry.socket, JSON.stringify(frame));
   if (frame.type === 'relay' && frame.class === 'reliable') counters.relay_reliable_written += 1;
   if (frame.type === 'relay' && frame.class === 'snapshot') counters.relay_snapshot_written += 1;
+  if (enqueuedAt !== null && frame.type === 'relay') {
+    const observed = performance.now() - enqueuedAt;
+    const stats = counters.observed_write_delay_ms[frame.class];
+    stats.count += 1;
+    stats.total += observed;
+    stats.min = stats.min === null ? observed : Math.min(stats.min, observed);
+    stats.max = stats.max === null ? observed : Math.max(stats.max, observed);
+  }
 }
 
 function pump(connId) {
@@ -128,9 +139,9 @@ function pump(connId) {
   entry.timer = null;
   const now = performance.now();
   while (entry.pending.length && entry.pending[0].due <= now) {
-    const { frame } = entry.pending.shift();
+    const { frame, enqueuedAt } = entry.pending.shift();
     counters.pending -= 1;
-    writeFrame(entry, frame);
+    writeFrame(entry, frame, enqueuedAt);
   }
   if (entry.pending.length) {
     entry.timer = setTimeout(() => pump(connId), Math.max(0, entry.pending[0].due - performance.now()));
@@ -139,13 +150,15 @@ function pump(connId) {
 
 function queueFrame(connId, entry, frame) {
   if (counters.pending >= MAX_PENDING_FRAMES) {
-    if (frame.class === 'snapshot') {
+    if (frame.type === 'relay' && frame.class === 'snapshot') {
       counters.relay_snapshot_dropped += 1;
     } else {
       // Closing is the honest result when the local adapter cannot retain a
       // reliable frame. It must never silently turn reliable into lossy.
       counters.queue_overflow_closes += 1;
-      if (frame.class === 'reliable') counters.relay_reliable_cancelled += 1;
+      if (frame.type === 'relay' && frame.class === 'reliable') {
+        counters.relay_reliable_cancelled += 1;
+      }
       endSocket(connId, 1013, 'impairment queue full');
     }
     return;
@@ -153,9 +166,10 @@ function queueFrame(connId, entry, frame) {
   // A control frame behind delayed game traffic must not overtake it on this
   // same socket. It takes no extra delay of its own.
   const isRelay = frame.type === 'relay';
-  const due = Math.max(performance.now() + (isRelay ? profile.delay_ms : 0), entry.lastDue);
+  const enqueuedAt = performance.now();
+  const due = Math.max(enqueuedAt + (isRelay ? profile.delay_ms : 0), entry.lastDue);
   entry.lastDue = due;
-  entry.pending.push({ frame, due });
+  entry.pending.push({ frame, due, enqueuedAt });
   counters.pending += 1;
   counters.peak_pending = Math.max(counters.peak_pending, counters.pending);
   if (isRelay) counters.relay_frames_delayed += 1;
@@ -221,16 +235,26 @@ function frameHeader(opcode, length) {
   return b;
 }
 
-function endSocket(connId, code = 1000, reason = '') {
+function removeConnection(connId) {
   const entry = sockets.get(connId);
-  if (!entry) return;
+  if (!entry) return null;
   sockets.delete(connId);
   if (entry.timer) clearTimeout(entry.timer);
   for (const { frame } of entry.pending) {
-    if (frame.class === 'snapshot') counters.relay_snapshot_cancelled += 1;
-    if (frame.class === 'reliable') counters.relay_reliable_cancelled += 1;
+    if (frame.type === 'relay' && frame.class === 'snapshot') {
+      counters.relay_snapshot_cancelled += 1;
+    }
+    if (frame.type === 'relay' && frame.class === 'reliable') {
+      counters.relay_reliable_cancelled += 1;
+    }
     counters.pending -= 1;
   }
+  return entry;
+}
+
+function endSocket(connId, code = 1000, reason = '') {
+  const entry = removeConnection(connId);
+  if (!entry) return;
   const body = Buffer.concat([
     Buffer.from([(code >> 8) & 0xff, code & 0xff]),
     Buffer.from(String(reason).slice(0, 120), 'utf8'),
@@ -301,7 +325,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({
       profile,
-      scope: 'local WebSocket relay frames; loss applies only to snapshot class',
+      scope: 'local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class',
       counters,
       max_pending_frames: MAX_PENDING_FRAMES,
     }));
@@ -345,8 +369,8 @@ server.on('upgrade', (req, socket, head) => {
     );
   });
   const gone = () => {
-    if (!sockets.has(connId)) return;
-    endSocket(connId);
+    if (!removeConnection(connId)) return;
+    dispatch(registry.disconnect(connId));
   };
   socket.on('close', gone);
   socket.on('error', gone);

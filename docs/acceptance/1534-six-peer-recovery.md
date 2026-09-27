@@ -362,22 +362,74 @@ switching source trees. They establish native in-process continuation after
 the correction; source-matched browser/native transport recovery is still
 required, and the outstanding matrix below remains authoritative.
 
+### Corrected source-matched browser recovery
+
+Product source `da812fb07149188928561daeea2de2389644ed1c` passed injected GM
+divergence on direct WebRTC and forced relay. Both cases restored at tick 1200,
+then agreed at 1500 and 1800, retained all four ship identities in fresh controls,
+and continuously witnessed the single actual 5 HP effect without duplicate
+orders. The direct observers each took 1,658 samples; relay observers each took
+1,233. Every observer ended without an error. This resolves the recurrent
+post-restore GM split in those two real runtime routes.
+
+The same product build passed GM loss on direct WebRTC, forced relay and
+automatic fallback. Every case retained five equivalent survivors and agreed
+at checkpoints 600/900 after one HostLoss, at ticks 376, 428 and 366 respectively.
+The lost participant was a GM, so ship Backfill is not applicable.
+
+The same build also passed owner loss on all three browser routes. Each case
+committed owner continuation, applied one agreed HostLoss with Backfill (ticks
+388 direct, 387 relay and 369 fallback), and retained five matching survivors
+at checkpoints 600/900. The fallback used the same separately attributed
+corrected runner as GM loss.
+
+The original fallback divergence attempt and first GM fallback attempt stopped
+before fault injection: the observer's 64 most recent DOM text changes had
+evicted retry history. These are retained precondition failures, not recovery
+passes or observed product recovery failures. The corrected GM fallback uses
+the reviewed durable retry milestone recorder from runner
+`45e9a1de59cf4792e13c125d439d27b432681b13`. Its recovery, replacement and effect
+helpers are byte-identical to the pinned main helpers. The integrator separately
+verified the original clean product source and all bundle hashes against its
+original WASM receipt; the run does not relabel that receipt as the runner commit.
+
+| Retained artifact | SHA-256 |
+| --- | --- |
+| `target/browser-wasm-receipt-da812fb0.json` | `9cbee6003afe510de3f914693305cc6e837c7a9cd39f783bed910c87115bdba9` |
+| Application WASM | `2c3e7c095606758a2a93cbd367812375763826b3537fdf9ef760caf32e3b545f` |
+| `target/1534-source-browser-divergence-other-da812fb0/direct/result.json` | `2ce565c410c4025bba1b977f82843f624aba977fddc99487fa45875c1c9844ca` |
+| `target/1534-source-browser-divergence-relay-da812fb0/ws-relay/result.json` | `74ef80528aef59d1bade65fb57be794a5d334a1001f6c3e7e256b4d1208c9a98` |
+| `target/1534-source-browser-gm-all-da812fb0-v2/direct/result.json` | `37eab902d7f73de379ce1aaa6a4ed17c3c17c6dc971603f7f6762a6208d48990` |
+| `target/1534-source-browser-gm-all-da812fb0-v2/ws-relay/result.json` | `3c9f27e94fe748ca49236f30b0613c21c514e069914784275b7a92c3dee75530` |
+| `target/1534-source-browser-gm-fallback-da812fb0-corrected/automatic-fallback/result.json` | `fa715d6c4a538fe5e51aa6a8b92949f0f2653fdc9bf0977f8256c634f081fcc1` |
+| `target/1534-source-browser-leader-direct-relay-da812fb0/direct/result.json` | `fe611779c6c701e7217eb8d745f1c9e2fe5c15fccab84eede7b0b7ed3ce25f0b` |
+| `target/1534-source-browser-leader-direct-relay-da812fb0/ws-relay/result.json` | `ddb085416ce6941bcfa558261daf8ac0783144ea45b9390be00e17bf4e458173` |
+| `target/1534-source-browser-leader-fallback-da812fb0-corrected/automatic-fallback/result.json` | `3fbfd1bd7861221fb0792f4434378cb474668ec7d0d1f63644e7adfb2b4920b2` |
+| `target/1534-browser-runner-provenance-da812fb0.json` | `a2b1cd5af1757c5932fb05e5b9ee1f3437e596606229c12471b27f89d52f6212` |
+
+Commands use `node scripts/fleet-browser-recovery.mjs --failure <case>`, fresh
+`--out`, pinned `--dist`, `--seconds 10 --timeout 180`, the named `--routes` and
+ports 18440/18441. Original main runs pass `--wasm-build-receipt`; the separately
+attributed corrected runner uses the integrator's external verification above.
+Browser rendering is disabled in these bounded simulation/transport cases.
+
 ## Outstanding
 
 | Case | Browser direct | Browser forced relay | Browser automatic fallback | Native/mixed |
 | --- | --- | --- | --- | --- |
-| Non-owner ship loss | Passed at `b4e17e72` | Passed at `b4e17e72` | Passed at `b4e17e72` | Healthy gate failed before injection; no recovery evidence |
-| Owner loss | Untested | Failed at `b4e17e72`; passed at `91f382e6` | Untested | Untested |
-| GM loss | Untested | Untested | Untested | Untested |
-| Divergence restore and exact-once reducer effect | Untested | Failed at `d2b6a8ed`, `fdaf31c2` and `97a6bd01`; latest run has recurrent GM-only divergence | Untested | Untested |
+| Non-owner ship loss | Passed at `b4e17e72` | Passed at `b4e17e72` | Passed at `b4e17e72` | Native relay passed at `da812fb0`; mixed healthy gate previously expired before injection |
+| Owner loss | Passed at `da812fb0` | Passed at `da812fb0`; prior evidence retained | Passed at `da812fb0` with attributed milestone recorder | Untested |
+| GM loss | Passed at `da812fb0` | Passed at `da812fb0` | Passed at `da812fb0` with attributed milestone recorder | Native precondition failed after spontaneous ship redial; rerun pending correction |
+| Divergence restore and exact-once reducer effect | Passed at `da812fb0` | Passed at `da812fb0`; prior failures retained above | Pre-fault observer history expired; recovery unrun | Untested |
 | Two replacement contenders and connected-holder challenge | Untested | Untested | Untested | Untested |
 
 The participant-electorate fix passed seven focused Rust recovery tests and a
 WASM configuration check; these are not substitute runtime evidence. The `97a6bd01` live rerun remains failed for the reasons above. The owner-suffix proof limitation above remains
 unresolved even if the ordinary owner-loss cells pass. Native hosts have no
 WebRTC; native-involving routes require relay, with browser legs exercising
-direct or automatic fallback where applicable. No native-only recovery case,
-rendered-browser recovery, physical/mobile/internet recovery, impaired-network
+direct or automatic fallback where applicable. The native-only ship-loss pass
+is detailed in `1534-mixed-native-recovery.md`; no rendered-browser recovery,
+physical/mobile/internet recovery, impaired-network
 recovery or complete recovery-feedback observation is established here.
 
 The replacement race has focused helper tests but no runtime result yet. Final

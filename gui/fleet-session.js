@@ -1403,9 +1403,11 @@ export function createFleetMember(opts) {
       joiner.sendFrame(encodeHostFrame(helloFrame({
         ship: announced.ship,
         name: announced.name,
-        // A replacement machine names the disconnected slot it is reclaiming
-        // (issue #1120); a plain join leaves this null.
-        claim,
+        // A replacement machine names its target explicitly. An admitted ship
+        // whose own transport redials must reclaim its existing slot too;
+        // a plain first join still requests a new slot. The owner's claim gate
+        // continues to refuse a slot already held by another live connection.
+        claim: claim || (reconnected && acceptedRole === HOST_ROLE_SHIP ? mine : null),
         role: acceptedRole,
         reconnectCredential: privateReconnectCredential,
       })));

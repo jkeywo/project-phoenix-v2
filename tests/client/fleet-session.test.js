@@ -44,6 +44,7 @@ import {
 } from '../../gui/rendezvous-transport.js';
 
 import { DATA, MAX_SLOTS, STAMP, settle, deferred, makeWorld, makePeerFactory, leadOn, memberOn, fleetOf, lastRoster } from './fleet-session-harness.js';
+import { transportLeversFromLocation } from '../../gui/transport-levers.js';
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -1422,6 +1423,38 @@ describe('closing and reopening admission', () => {
 });
 
 describe('mission start freezes the fleet', () => {
+  it.each(['direct','ws-relay'])('reclaims the same frozen ship slot after a %s same-handle redial', async route => {
+    vi.useFakeTimers();
+    let lead,ship,challenger;
+    try {
+      const world=makeWorld(),joinSockets=[],claims=[],losses=[];
+      const factories={peer:makePeerFactory(),socket:url=>{
+        const socket=world.socket(url);if(url.endsWith('/v1/join'))joinSockets.push(socket);return socket;
+      }};
+      lead=await leadOn(world,factories,{onSlotClaimed:slot=>claims.push(slot),onHostLost:slot=>losses.push(slot)});
+      const levers=transportLeversFromLocation('?transport='+route);
+      ship=await memberOn(world,factories,lead.code.suffix,{levers,ship:{template_path:'same-hull.toml'}});
+      expect(ship.member.slot).toBe('slot-2');
+      lead.fleet.freeze();await settle();
+      const adoptions=ship.simulationRosters.length;
+      if(route==='ws-relay')joinSockets[0].close();
+      else factories.peer.channels.find(channel=>channel.origin==='offer'&&channel.label===RELIABLE_CHANNEL).close();
+      await settle();expect(lastRoster(lead).slots[1].connected).toBe(false);
+      await vi.advanceTimersByTimeAsync(100);await settle();
+      expect(ship.refusals).toEqual([]);
+      expect(ship.member.slot).toBe('slot-2');
+      expect(lastRoster(lead).slots).toHaveLength(2);
+      expect(lastRoster(lead).slots[1]).toMatchObject({id:'slot-2',connected:true,ship:{template_path:'same-hull.toml'}});
+      expect(losses).toEqual([2]);expect(claims).toEqual([2]);
+      expect(ship.simulationRosters).toHaveLength(adoptions);
+      challenger=await memberOn(world,factories,lead.code.suffix,{levers,claim:'slot-2'});
+      expect(challenger.refusals.map(row=>row.reason)).toEqual(['slot-taken']);
+      expect(claims).toEqual([2]);
+    } finally {
+      challenger?.member.close();ship?.member.close();lead?.fleet.close();
+      vi.clearAllTimers();vi.useRealTimers();
+    }
+  });
   it('refuses a further host with a recovery reason, not a closure one', async () => {
     const { factories, world, lead } = await fleetOf();
     await memberOn(world, factories, lead.code.suffix);

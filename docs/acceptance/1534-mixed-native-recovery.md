@@ -144,3 +144,28 @@ observer connection reset after intentional termination; survivor verdict
 evidence stops collecting that victim at the confirmed fault request. No
 survivor runtime/observer failure occurred. This case proves native non-owner
 ship loss only; the other native and mixed fault cells remain separate work.
+
+## Native GM precondition failure and reconnect regression
+
+The next all-native relay run used the same `da812fb0` product receipt and
+runner `f6be20ad`. It failed before the requested GM fault while waiting for
+matching native digests after workload receipts. The artifact is
+`target/1534-native-gm-relay-da812fb0/matrix.json`, SHA-256
+`37e7db386ea1ccb5a19f0d78029bea252ae085a46ac37df26ad47ba78bdb8560`.
+This is an unsuccessful precondition, not a GM recovery result.
+
+Ship 2 had been admitted at 17:37:21.346 UTC on 2026-09-27 and remained a live
+native process. Its relay link closed at 17:37:48.423; a new attempt became
+ready at 17:37:48.767 and received `recovery-only` at 17:37:48.837. Five peers
+applied the unrequested ship HostLoss at tick 71. The original socket closure
+has no retained error reason and remains unexplained diagnostic evidence.
+
+The subsequent refusal exposed a reproducible product defect: the same member
+handle sent its original null slot claim after admission. Focused regressions
+close both a direct channel and a relay socket after freezing the fleet. They
+failed with `recovery-only` before the correction and pass when the redial
+claims its admitted slot. They also require the original hull, one loss/claim,
+no second simulation adoption, and refusal of a competing connected-slot claim.
+`npx vitest run tests/client/fleet-session.test.js tests/client/host-mesh.test.js tests/client/native-fleet-peer.test.js`
+passed 162 tests on the correction. Actual native GM recovery remains unproven
+until a new source-matched binary and bundle execute the case successfully.

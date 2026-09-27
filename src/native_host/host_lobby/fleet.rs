@@ -154,6 +154,17 @@ pub enum NativeFleetEvent {
         generation: u64,
         raw: String,
     },
+    BeginGmJoin {
+        id: u64,
+        join_kind: crate::gm_join::GmJoinKind,
+        approved_by: u32,
+        candidate_host: u32,
+        operator_id: String,
+    },
+    RefuseGmJoin {
+        id: u64,
+        reason: String,
+    },
     Identity(serde_json::Value),
     ForceResult(serde_json::Value),
     JoinStatus(String),
@@ -229,6 +240,25 @@ impl NativeFleetEvents {
                 generation: *generation,
                 raw: roster.clone(),
             }),
+            HostLobbyRecord::FleetBeginGmJoin {
+                id,
+                join_kind,
+                approved_by,
+                candidate_host,
+                operator_id,
+            } => Some(NativeFleetEvent::BeginGmJoin {
+                id: *id,
+                join_kind: *join_kind,
+                approved_by: *approved_by,
+                candidate_host: *candidate_host,
+                operator_id: operator_id.clone(),
+            }),
+            HostLobbyRecord::FleetRefuseGmJoin { id, reason } => {
+                Some(NativeFleetEvent::RefuseGmJoin {
+                    id: *id,
+                    reason: reason.clone(),
+                })
+            }
             HostLobbyRecord::FleetIdentity { identity } => {
                 Some(NativeFleetEvent::Identity(identity.clone()))
             }
@@ -253,6 +283,7 @@ impl NativeFleetEvents {
 #[derive(Serialize)]
 struct NativeFleetUpdate {
     recovery: serde_json::Value,
+    gm_join: Option<crate::gm_join::GmJoinProgress>,
     continuation_result: Option<NativeContinuationResult>,
     health: Option<crate::gm_health::GmHealthProjection>,
     ship: serde_json::Value,
@@ -416,6 +447,31 @@ fn apply_events(world: &mut World) {
                     generation,
                     roster,
                 });
+            }
+            NativeFleetEvent::BeginGmJoin {
+                id,
+                join_kind,
+                approved_by,
+                candidate_host,
+                operator_id,
+            } => {
+                begin_native_gm_join(
+                    world,
+                    id,
+                    join_kind,
+                    approved_by,
+                    candidate_host,
+                    operator_id,
+                );
+            }
+            NativeFleetEvent::RefuseGmJoin { id, reason } => {
+                if id > 0 && reason == "candidate-disconnected" {
+                    let _ = crate::gm_join::refuse_join(
+                        world,
+                        crate::gm_join::GmJoinId(id),
+                        crate::gm_join::GmJoinRefusal::CandidateDisconnected,
+                    );
+                }
             }
             NativeFleetEvent::Identity(identity) => {
                 let Some(code) = world
@@ -663,6 +719,69 @@ fn connect_join_wire(base: &str, origin: &str) -> Result<Box<dyn RelaySocket>, S
 #[cfg(not(feature = "host"))]
 fn connect_join_wire(_base: &str, _origin: &str) -> Result<Box<dyn RelaySocket>, String> {
     Err("this build has no native WebSocket adapter".into())
+}
+
+/// The same authoritative transaction the browser bridge invokes. The local
+/// page has authenticated the capability; Rust still checks owner, identity and
+/// departure before it can schedule a pause, and later proves the restore.
+fn begin_native_gm_join(
+    world: &mut World,
+    id: u64,
+    kind: crate::gm_join::GmJoinKind,
+    approved_by: u32,
+    candidate_host: u32,
+    operator_id: String,
+) {
+    use crate::gm_join::{GmJoinCandidate, GmJoinId, GmJoinKind, GmJoinRefusal, GmJoinRuntime};
+    if id == 0 {
+        return;
+    }
+    world.init_resource::<GmJoinRuntime>();
+    // A --world boot records SaveScenario. A world selected in the native
+    // lobby retains the accepted catalogue selection instead.
+    let scenario = world
+        .get_resource::<crate::save_slots_lifecycle::SaveScenario>()
+        .map(|scenario| scenario.0.as_str())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            let catalog =
+                world.get_resource::<crate::native_host::world_load::LobbyScenarioCatalog>()?;
+            let selection =
+                world.get_resource::<crate::native_host::world_load::LobbySelection>()?;
+            crate::lobby::scenario_arbiter::world_path_for(&catalog.0, &selection.0)
+        })
+        .map(str::to_owned);
+    let result = if approved_by == 0
+        || candidate_host == 0
+        || operator_id.is_empty()
+        || operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
+    {
+        Err(GmJoinRefusal::InvalidCandidate)
+    } else if let Some(scenario) = scenario {
+        let candidate = GmJoinCandidate {
+            host: crate::command_admission::HostSlot(candidate_host),
+            operator_id,
+        };
+        match kind {
+            GmJoinKind::FirstTime => crate::gm_join::begin_join(
+                world,
+                GmJoinId(id),
+                crate::command_admission::HostSlot(approved_by),
+                candidate,
+                scenario,
+            ),
+            GmJoinKind::Reconnect => {
+                crate::gm_join::begin_reconnect(world, GmJoinId(id), candidate, scenario)
+            }
+        }
+    } else {
+        Err(GmJoinRefusal::TransferFailed)
+    };
+    if let Err(reason) = result {
+        world
+            .resource_mut::<GmJoinRuntime>()
+            .refuse(GmJoinId(id), reason);
+    }
 }
 
 fn apply_pending_gm_bootstrap(world: &mut World) {
@@ -971,6 +1090,9 @@ fn publish_state(world: &mut World) {
                 .and_then(|log| log.last()),
             world.get_resource::<crate::lockstep::FleetRoster>(),
         ),
+        gm_join: world
+            .get_resource::<crate::gm_join::GmJoinRuntime>()
+            .map(|runtime| runtime.progress().clone()),
         continuation_result: continuation_result(world),
         health: world
             .get_resource::<crate::gm_health::GmHealthWatch>()
@@ -1044,6 +1166,80 @@ mod tests {
             self.0.lock().unwrap().1 = true;
         }
     }
+    #[test]
+    fn native_gm_reconnect_record_enters_the_authoritative_pause_transaction() {
+        use crate::command_admission::HostSlot;
+        use crate::gm_join::{GmJoinProgress, GmJoinRefusal, GmJoinRuntime};
+        use crate::lockstep::{FleetGm, FleetLockstep, FleetRoster, FleetShip};
+        for (operator, departed, expected) in [
+            (
+                "wrong-gm",
+                true,
+                Some(GmJoinRefusal::ReconnectIdentityMismatch),
+            ),
+            ("gm-2", false, Some(GmJoinRefusal::ReconnectStillConnected)),
+            ("gm-2", true, None),
+        ] {
+            let mut world = wire_world();
+            world.insert_resource(
+                FleetRoster::with_participants_and_gms(
+                    vec![FleetShip::new(HostSlot(1))],
+                    vec![HostSlot(1), HostSlot(2)],
+                    vec![FleetGm {
+                        host: HostSlot(2),
+                        operator_id: "gm-2".into(),
+                    }],
+                    HostSlot(1),
+                    HostSlot(1),
+                )
+                .unwrap(),
+            );
+            let mut session = FleetLockstep(crate::lockstep::LockstepSession::new(
+                HostSlot(1),
+                [HostSlot(1), HostSlot(2)],
+                2,
+            ));
+            if departed {
+                session.depart(HostSlot(2));
+            }
+            world.insert_resource(session);
+            world.init_resource::<crate::lockstep::MeshOutbox>();
+            world.init_resource::<GmJoinRuntime>();
+            world.insert_resource(crate::sim_tick::SimTick(10));
+            world.insert_resource(crate::save_slots_lifecycle::SaveScenario(
+                "assets/worlds/probe_fleet_six_peer.toml".into(),
+            ));
+            let raw =
+                serde_json::json!({"kind":"fleet_begin_gm_join","id":7,"join_kind":"reconnect",
+                "approved_by":1,"candidate_host":2,"operator_id":operator})
+                .to_string();
+            let record = HostLobbyRecord::decode(&raw)
+                .expect("native owner must accept typed GM reconnect requests");
+            assert!(world.resource_mut::<NativeFleetEvents>().record(&record));
+            apply_events(&mut world);
+            match expected {
+                Some(reason) => assert_eq!(
+                    world.resource::<GmJoinRuntime>().progress(),
+                    &GmJoinProgress::Refused {
+                        id: crate::gm_join::GmJoinId(7),
+                        reason
+                    }
+                ),
+                None => {
+                    assert!(matches!(
+                        world.resource::<GmJoinRuntime>().progress(),
+                        GmJoinProgress::AwaitingPause { .. }
+                    ));
+                    let frames = world.resource_mut::<crate::lockstep::MeshOutbox>().drain();
+                    assert!(
+                        matches!(frames.as_slice(), [crate::lockstep::MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::Pause(approval))]
+                        if approval.candidate.operator_id == "gm-2" && approval.kind == crate::gm_join::GmJoinKind::Reconnect)
+                    );
+                }
+            }
+        }
+    }
+
     fn wire_world() -> World {
         let mut world = World::new();
         world.init_resource::<NativeFleetEvents>();

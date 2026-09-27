@@ -1457,6 +1457,8 @@ pub(crate) fn drain_surface_records(
             | HostLobbyRecord::FleetGmBootstrap { .. }
             | HostLobbyRecord::FleetStartPolicy { .. }
             | HostLobbyRecord::FleetForceResult { .. }
+            | HostLobbyRecord::FleetBeginGmJoin { .. }
+            | HostLobbyRecord::FleetRefuseGmJoin { .. }
             | HostLobbyRecord::FleetGmJoinPending { .. }
             | HostLobbyRecord::FleetGmJoinStatus { .. }
             | HostLobbyRecord::FleetJoinStatus { .. } => continue,

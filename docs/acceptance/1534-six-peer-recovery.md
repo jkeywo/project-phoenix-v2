@@ -427,11 +427,40 @@ SHA-256 `969eadcc6e379a777056758a93931bd2969f9eb06ef020fc302147f19c62270a`.
 The harness now establishes the actual matching two-GM effect and journal
 baseline before installing either continuous witness. It checks that each
 initial witness contains exactly the established effect and journal order,
-then injects divergence. Later backdated history, missing continuity or a
-duplicate effect still fails. Native/mixed observers publish an initial
+then injects divergence. Later backdated target effects, missing continuity or a
+duplicate effect still fails; unrelated late combat rows may be inserted while
+the retained history suffix and sorted-ring eviction bounds remain valid.
+Native/mixed observers publish an initial
 baseline separately and must publish their first continuous projection before
 injection. This is a harness-only sequencing change; a corrected runtime run
 must establish its own result against the pinned product receipt.
+
+### Corrected fallback effect continuity
+
+The corrected v2 attempt on `9f2ba003` actually restored boundary 1200 and
+agreed across six peers at 1500/1800/2100/2400/2700. It still failed its effect
+verdict because ordinary hostile damage at ticks 527/1007 arrived after
+bootstrap connection rows at 5110/5109. The target GM effect and its journal
+entry remained present once. Preserve
+`target/1534-source-browser-divergence-fallback-9f2ba003-corrected-v2/automatic-fallback/result.json`
+as a failed observer result, not a recovery pass.
+
+The reviewed `c2246356` observer accepts unrelated late rows while preserving
+exact target counts, later target-effect backdating rejection, retained suffix
+continuity, full-capacity eviction and the bound that a removed row cannot be
+newer than the surviving oldest row. The final v4 run passed against the same
+independently verified `9f2ba003` product receipt: boundary 1200 restored, all
+six peers agreed at 1500/1800, zero duplicate command orders, stable ship
+identities, and one target effect continuously witnessed by both GMs in
+1,243/1,244 error-free samples. It suppressed 68 actual RTC offers before relay.
+Browser and service cleanup completed.
+
+Artifact:
+`target/1534-source-browser-divergence-fallback-9f2ba003-corrected-v4/automatic-fallback/result.json`,
+SHA-256 `3b1ba56b9750c469fb8776f1780c585038718901dc5ef5ed5ce08d8b59dd67af`.
+Runner/product attribution:
+`target/1534-browser-runner-provenance-9f2ba003-c2246356.json`.
+This separately attributed harness revision does not relabel the product receipt.
 
 ### Fresh-Lobby replacement restore failure
 
@@ -470,7 +499,7 @@ new source-matched browser/native replacement races still need runtime results.
 | Non-owner ship loss | Passed at `b4e17e72` | Passed at `b4e17e72` | Passed at `b4e17e72` | Native relay passed at `da812fb0`; mixed healthy gate previously expired before injection |
 | Owner loss | Passed at `da812fb0` | Passed at `da812fb0`; prior evidence retained | Passed at `da812fb0` with attributed milestone recorder | Native healthy precondition failed at `9f2ba003`; no owner fault injected |
 | GM loss | Passed at `da812fb0` | Passed at `da812fb0` | Passed at `da812fb0` with attributed milestone recorder | Native relay passed at `9f2ba003`; earlier precondition failure retained |
-| Divergence restore and exact-once reducer effect | Passed at `da812fb0` | Passed at `da812fb0`; prior failures retained above | Pre-fault observer history expired; recovery unrun | Untested |
+| Divergence restore and exact-once reducer effect | Passed at `da812fb0` | Passed at `da812fb0`; prior failures retained above | Passed at `9f2ba003` with attributed `c2246356` witness; earlier observer failures retained | Untested |
 | Two replacement contenders and connected-holder challenge | Race admission passed, restore failed at `9f2ba003` | Race admission passed, restore failed at `9f2ba003` | Untested | Untested |
 
 The participant-electorate fix passed seven focused Rust recovery tests and a

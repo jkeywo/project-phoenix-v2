@@ -221,6 +221,17 @@ pub enum HostLobbyRecord {
     FleetForceResult {
         result: serde_json::Value,
     },
+    FleetBeginGmJoin {
+        id: u64,
+        join_kind: crate::gm_join::GmJoinKind,
+        approved_by: u32,
+        candidate_host: u32,
+        operator_id: String,
+    },
+    FleetRefuseGmJoin {
+        id: u64,
+        reason: String,
+    },
     FleetGmJoinPending {
         request: serde_json::Value,
     },

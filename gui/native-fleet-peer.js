@@ -24,6 +24,7 @@ export function createNativeFleetPeer({
   let credentials = [];
   const publishedControl = new Map();
   let latestControl = null;
+  let completedGmJoinId = null;
   const pendingWire = [];
   let wireFailed = false;
 
@@ -110,6 +111,22 @@ export function createNativeFleetPeer({
     return credential;
   };
   const emit = (record) => send(record);
+  // These callbacks also travel with a member if it becomes the owner.
+  // Acceptance here only queues the request; Rust owns pause/restore/commit.
+  const beginGmJoin = request => {
+    const {id, approvedBy, candidateHost, operatorId, kind = 'first-time'} = request || {};
+    if (![id, approvedBy, candidateHost].every(value => Number.isSafeInteger(value) && value > 0)
+        || !['first-time', 'reconnect'].includes(kind)
+        || typeof operatorId !== 'string' || !operatorId) return false;
+    emit({kind:'fleet_begin_gm_join',id,join_kind:kind,approved_by:approvedBy,
+      candidate_host:candidateHost,operator_id:operatorId});
+    return true;
+  };
+  const refuseGmJoin = (id, reason) => {
+    if (!Number.isSafeInteger(id) || id <= 0 || reason !== 'candidate-disconnected') return false;
+    emit({kind:'fleet_refuse_gm_join',id,reason});
+    return true;
+  };
   const authenticateFrame = (raw, slot) => {
     try {
       const frame = JSON.parse(raw);
@@ -172,6 +189,8 @@ export function createNativeFleetPeer({
           ? { ok: true }
           : { ok: false, code: 'version-mismatch' },
         authenticateFrame,
+        onBeginGmJoin: beginGmJoin,
+        onRefuseGmJoin: refuseGmJoin,
         onContinuation: continuation,
         onContinuationFrame: continuationFrame,
         onCode: (code) => emit({ kind: 'fleet_code', code: code.full, suffix: code.suffix }),
@@ -220,6 +239,8 @@ export function createNativeFleetPeer({
         onStartGrant: grant => emit({ kind: 'fleet_start_grant', grant }),
         checkStamp: stamp => sameStamp(stamp) ? { ok: true } : { ok: false, code: 'version-mismatch' },
         authenticateFrame,
+        onBeginGmJoin: beginGmJoin,
+        onRefuseGmJoin: refuseGmJoin,
         onContinuation: continuation,
         onContinuationFrame: continuationFrame,
         onHostLost: slot => emit({ kind: 'fleet_host_lost', slot }),
@@ -295,6 +316,13 @@ export function createNativeFleetPeer({
           resolve(result.status);
         }
       }
+      const progress = state.gm_join;
+      const id = progress?.commit?.id || progress?.id;
+      if (handle.isOwner && Number.isSafeInteger(id) && id > 0 && completedGmJoinId !== id
+          && ['committed', 'refused'].includes(progress?.status)
+          && handle.completeGmJoin?.(id, progress.status, progress.reason || null)) {
+        completedGmJoinId = id;
+      }
       for (const frame of state.frames || []) handle.broadcast(frame);
       if (state.force_start) handle.forceStart?.();
       return true;
@@ -305,6 +333,7 @@ export function createNativeFleetPeer({
       handle = null;
       publishedControl.clear();
       latestControl = null;
+      completedGmJoinId = null;
       configured = false;
       pendingWire.length = 0;
       for (const socket of [...sockets.values()]) socket.close();

@@ -2,6 +2,38 @@ import { describe, expect, it, vi } from 'vitest';
 import { createNativeFleetPeer } from '../../gui/native-fleet-peer.js';
 
 describe('native technical fleet peer', () => {
+  it.each([true, false])('bridges GM reconnect and waits for authoritative completion (owner=%s)', owner => {
+    const sent = [];
+    let options;
+    const handle = {isOwner:owner, update:vi.fn(), setCrewReadiness:vi.fn(),
+      setGmReady:vi.fn(), setStartValidation:vi.fn(), broadcast:vi.fn(),
+      completeGmJoin:vi.fn(() => true), close:vi.fn()};
+    const create = value => {options=value; return handle;};
+    const peer = createNativeFleetPeer({send:record => sent.push(record),createOwner:create,createMember:create});
+    peer.configure({base:'https://fleet.test',owner,credentials:['one']});
+    if (!owner) peer.join('CODE', {});
+    // A member retains these callbacks when createFleetMember promotes it.
+    handle.isOwner = true;
+    const request = {id:7,kind:'reconnect',approvedBy:1,candidateHost:2,operatorId:'gm-2'};
+    expect(options.onBeginGmJoin(request)).toBe(true);
+    expect(sent).toContainEqual({kind:'fleet_begin_gm_join',id:7,join_kind:'reconnect',
+      approved_by:1,candidate_host:2,operator_id:'gm-2'});
+    expect(handle.completeGmJoin).not.toHaveBeenCalled();
+    peer.update({gm_join:{status:'awaiting-pause',approval:{id:7}}});
+    peer.update({gm_join:{status:'transferring',approval:{id:7}}});
+    expect(handle.completeGmJoin).not.toHaveBeenCalled();
+    peer.update({gm_join:{status:'committed',commit:{id:7}}});
+    peer.update({gm_join:{status:'committed',commit:{id:7}}});
+    expect(handle.completeGmJoin).toHaveBeenCalledExactlyOnceWith(7,'committed',null);
+    expect(options.onRefuseGmJoin(8,'candidate-disconnected')).toBe(true);
+    expect(sent).toContainEqual({kind:'fleet_refuse_gm_join',id:8,reason:'candidate-disconnected'});
+    peer.update({gm_join:{status:'refused',id:8,reason:'candidate-disconnected'}});
+    expect(handle.completeGmJoin).toHaveBeenLastCalledWith(8,'refused','candidate-disconnected');
+    handle.isOwner=false;
+    peer.update({gm_join:{status:'committed',commit:{id:9}}});
+    expect(handle.completeGmJoin).toHaveBeenCalledTimes(2);
+  });
+
   it('health-only ticks cannot flood control frames while changed state and every edge still publish', () => {
     let options;
     const handle = {update:vi.fn(),setCrewReadiness:vi.fn(),setGmReady:vi.fn(),setStartValidation:vi.fn(),broadcast:vi.fn(),forceStart:vi.fn(),close:vi.fn()};

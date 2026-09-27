@@ -214,3 +214,32 @@ transaction injected. Retained artifact:
 `target/1534-native-leader-relay-9f2ba003/matrix.json`, SHA-256
 `911b2318f939131725aefd9bb31c1db7d5c58046ab449e02ec05805be41b7713`.
 This is a failed precondition and leaves native leader recovery unproven.
+
+
+The refusal was traced to the native owner adapter omitting `onBeginGmJoin`
+and `onRefuseGmJoin`, while `createFleetOwner` defaults the begin callback to
+`false`. Its update adapter also lacked terminal `GmJoinRuntime` progress, so
+starting Rust recovery alone could not finish public admission. The original
+transport closure remains unexplained.
+
+The native adapter now carries typed begin/refuse records to the shared Rust
+transaction and returns its authoritative terminal progress to
+`completeGmJoin`. Both owner and member options carry these callbacks, including
+members later promoted to ownership. Rust retains the existing owner,
+slot/operator identity and departed-slot gates. Candidate bootstrap and snapshot
+transfer reuse the shared recovery path; an accepted transport never suffices
+as proof of restore. The native leader case still requires a source-matched
+runtime rerun after the correction.
+
+
+The JavaScript owner/promoted-member regression first failed because the begin
+callback did not exist, then passed with the existing fleet session tests
+(90/90). The native bridge transfer regression first failed decoding the absent
+record, then passed with the existing direct reconnect case (2/2):
+`cargo test --features headless --test lockstep_snapshot_transfer gm_reconnect`.
+These tests use real simulation restore, canonical command/GM history, digest
+agreement and explicit Resume. They do not substitute for native process/relay
+runtime evidence. Retained logs are
+`target/1534-native-gm-bridge-red-v2.log` and
+`target/1534-native-gm-bridge-green.log`; the first `red.log` instead records a
+corrected test setup error before product ingress was reached.

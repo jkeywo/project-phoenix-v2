@@ -660,6 +660,15 @@ fn first_time_gm_join_commits_three_apps_only_after_digest_then_typed_resume() {
 /// the survivor's typed transaction is the only canonical source.
 #[test]
 fn departed_gm_reconnect_restores_owner_history_and_digest_before_rejoin_and_resume() {
+    gm_reconnect_restores_owner_history(false);
+}
+
+#[test]
+fn native_bridge_gm_reconnect_restores_history_before_authoritative_commit() {
+    gm_reconnect_restores_owner_history(true);
+}
+
+fn gm_reconnect_restores_owner_history(native_bridge: bool) {
     use project_phoenix::ai::cadence::{AiBaseInterval, AiSnapshotReady, AiTickReady};
     use project_phoenix::gm_action::{
         GmAction, GmActionId, GmActionJournal, GmActionRequest, GmActionSubmission,
@@ -766,16 +775,43 @@ fn departed_gm_reconnect_restores_owner_history_and_digest_before_rejoin_and_res
     drain_mesh(&mut owner);
     drain_mesh(&mut returning);
 
-    let approval = begin_reconnect(
-        owner.world_mut(),
-        GmJoinId(1294),
-        GmJoinCandidate {
-            host: HostSlot(2),
-            operator_id: "gm-1".into(),
-        },
-        DUEL,
-    )
-    .unwrap();
+    let approval = if native_bridge {
+        use project_phoenix::native_host::host_lobby::{
+            fleet::{NativeFleetEvents, NativeFleetPlugin},
+            HostLobbyRecord,
+        };
+        // The headless builder already finishes plugins; install the native
+        // bridge systems directly into this existing real simulation.
+        bevy::prelude::Plugin::build(&NativeFleetPlugin, &mut owner);
+        let record = HostLobbyRecord::decode(r#"{"kind":"fleet_begin_gm_join","id":1294,"join_kind":"reconnect","approved_by":1,"candidate_host":2,"operator_id":"gm-1"}"#)
+            .expect("native reconnect record must decode");
+        assert!(owner
+            .world_mut()
+            .resource_mut::<NativeFleetEvents>()
+            .record(&record));
+        owner.world_mut().run_schedule(bevy::prelude::PreUpdate);
+        match owner
+            .world()
+            .resource::<project_phoenix::gm_join::GmJoinRuntime>()
+            .progress()
+        {
+            project_phoenix::gm_join::GmJoinProgress::AwaitingPause { approval } => {
+                approval.clone()
+            }
+            progress => panic!("native request did not enter canonical reconnect: {progress:?}"),
+        }
+    } else {
+        begin_reconnect(
+            owner.world_mut(),
+            GmJoinId(1294),
+            GmJoinCandidate {
+                host: HostSlot(2),
+                operator_id: "gm-1".into(),
+            },
+            DUEL,
+        )
+        .unwrap()
+    };
     assert_eq!(approval.kind, GmJoinKind::Reconnect);
     assert_eq!(approval.owner, HostSlot(1));
     assert_eq!(approval.approved_by, HostSlot(1));

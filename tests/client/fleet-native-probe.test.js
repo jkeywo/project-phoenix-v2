@@ -28,11 +28,13 @@ describe('bounded native runtime bootstrap probe', () => {
     const peer = context.createNativeFleetPeer({send: value => calls.push(value), onDiag: value => calls.push(value)});
     const config = {owner:false,stamp:'content',credentials:['SECRET']};
     expect(peer.configure(config)).toBe(config);
-    const state = {crew:{connected:3,ready:3},frames:['PRIVATE']};
+    const state = {crew:{connected:3,ready:3},recovery:{losses:[{slot:2,tick:300}]},continuation_result:{status:{status:'held'}},frames:[JSON.stringify({t:'tick',d:{from:1,commands:[{origin:1,seq:2,tick:301,ship:'stable-ship',payload:{type:'SetThrust',secret:'PRIVATE'}}]}})]};
     expect(peer.update(state)).toBe(state);
     expect(calls).toHaveLength(4);
     expect(messages.find(row => row.kind === 'onDiag').value.transport).toBe('ws-relay');
     expect(JSON.stringify(messages)).not.toMatch(/SECRET|PRIVATE/);
+    expect(messages.find(row=>row.kind==='recovery-command').value).toMatchObject({origin:1,seq:2,ship:'stable-ship',type:'SetThrust'});
+    expect(messages.find(row=>row.kind==='state').value).toMatchObject({recovery:{losses:[{slot:2,tick:300}]},continuation:{status:'held'}});
   });
 
   it('never promotes configured capability, owner registration or early process exit into a matrix pass', () => {
@@ -43,6 +45,19 @@ describe('bounded native runtime bootstrap probe', () => {
     expect(nativeProbeOutcome([{kind:'engine'}, {kind:'configuration'}, {kind:'fleet_join_status',value:{status:'admitted'}}], null, 'member').bootstrapObserved).toBe(true);
     expect(nativeProbeOutcome(events.slice(1), null).bootstrapObserved).toBe(false);
     expect(nativeProbeOutcome([{kind:'engine'},{kind:'configuration'},{kind:'fleet_join_status',value:{status:'pending'}}], null).bootstrapObserved).toBe(false);
+  });
+
+  it('supplies a replacement claim through the existing join API without logging reconnect capabilities', () => {
+    const events=[],calls=[];
+    const source=`export function createNativeFleetPeer() { return {configure(){},update(){},join(...args){return args;}}; }`;
+    const context={window:{addEventListener(){}},navigator:{userAgent:'test'},Set,JSON,
+      fetch:url=>{events.push(JSON.parse(new URL(url).searchParams.get('event')));return Promise.resolve({ok:true});}};
+    vm.createContext(context);
+    vm.runInContext(instrumentNativeFleetModule(source,'http://localhost/token',{claim:'slot-3'}).replace('export function createNativeFleetPeer','function createNativeFleetPeer'),context);
+    const peer=context.createNativeFleetPeer({send:record=>calls.push(record)});
+    const result=peer.join('code',{}, {reconnectCredential:'SECRET'},'ship');
+    expect(result[2]).toEqual({reconnectCredential:'SECRET',claim:'slot-3'});
+    expect(JSON.stringify(events)).not.toContain('SECRET');
   });
 
   it('refuses ambiguous source rewriting', () => {

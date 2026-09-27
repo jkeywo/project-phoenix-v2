@@ -37,7 +37,7 @@ export function parseNativeProbeArgs(argv) {
 
 // Wrap only the exported adapter's callbacks. The shipped transport, admission,
 // bridge queues, simulation and renderer remain the code under observation.
-export function instrumentNativeFleetModule(source, endpoint, { gmJoinCode = null } = {}) {
+export function instrumentNativeFleetModule(source, endpoint, { gmJoinCode = null, claim = null } = {}) {
   const declaration = 'export function createNativeFleetPeer(';
   if (source.split(declaration).length !== 2) throw new Error('Native fleet factory declaration changed');
   return source.replace(declaration, 'function observedNativeFleetPeer(') + `
@@ -78,15 +78,24 @@ export function createNativeFleetPeer(options = {}) {
   peer.update = raw => {
     const state = typeof raw === 'string' ? JSON.parse(raw) : raw;
     for (const rawFrame of state.frames || []) {
-      try { const frame = JSON.parse(rawFrame); if (frame.t === 'digest') report('digest',frame.d); } catch (_) {}
+      try {
+        const frame = JSON.parse(rawFrame);
+        if (frame.t === 'digest') report('digest',frame.d);
+        if (frame.t === 'tick') for (const command of frame.d.commands || []) report('recovery-command', {
+          from:frame.d.from, origin:command.origin, seq:command.seq, tick:command.tick,
+          ship:command.ship, target:command.target, type:command.payload?.type
+        });
+        if (['host-loss','slot-claim','recovery-ready'].includes(frame.t)) report('recovery-frame',frame);
+      } catch (_) { report('observer-error',{reason:'invalid-outgoing-frame'}); }
     }
-    const evidence = {crew:state.crew, ship_ready:state.ship_ready, gm_ready:state.gm_ready, validation:state.validation, roster_result:state.roster_result};
+    const evidence = {crew:state.crew, ship_ready:state.ship_ready, gm_ready:state.gm_ready, validation:state.validation, roster_result:state.roster_result, recovery:state.recovery, continuation:state.continuation_result?.status};
     const key = JSON.stringify(evidence);
     if (key !== last) { last = key; report('state', evidence); }
     return update.call(peer, raw);
   };
   const join = peer.join;
-  peer.join = (...args) => { const result = join.apply(peer, args); report('join-call', {role:args[3], accepted:result}); return result; };
+  const replacementClaim = ${JSON.stringify(claim)};
+  peer.join = (...args) => { if (replacementClaim) args[2] = {...args[2],claim:replacementClaim}; const result = join.apply(peer, args); report('join-call', {role:args[3], accepted:result === true}); return result; };
   const gmJoinCode = ${JSON.stringify(gmJoinCode)};
   if (gmJoinCode) setTimeout(() => {
     window.phoenixHostLobbyOut.send(JSON.stringify({kind:'join_peer',code:gmJoinCode}));
@@ -197,7 +206,7 @@ export async function runNativeProbe(options) {
       else if (entry.isDirectory()) fs.symlinkSync(input, target, 'junction');
       else if (entry.name === 'index.html') fs.copyFileSync(input, target);
     }
-    const instrumented = instrumentNativeFleetModule(fleetSource, endpoint, {gmJoinCode: options.role === 'gm' ? options['fleet-code'] : null});
+    const instrumented = instrumentNativeFleetModule(fleetSource, endpoint, {gmJoinCode: options.role === 'gm' ? options['fleet-code'] : null, claim: options.claim || null});
     fs.writeFileSync(path.join(scratchBundle, 'gui/native-fleet-peer.js'), instrumented);
     if (options.workload) {
       const gmPath = path.join(scratchBundle, 'gui/native-gm-workspace.js');

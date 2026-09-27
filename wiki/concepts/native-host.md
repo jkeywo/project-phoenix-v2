@@ -2670,3 +2670,7 @@ native GM Ready until all peers are admitted. The delayed native smoke result
 in `docs/acceptance/1530-native-impaired-result.json` records actual reliable
 relay delay; its zero snapshot count means configured snapshot loss was not
 exercised in that cell.
+
+## Mixed recovery measurement
+
+`scripts/fleet-mixed-recovery.mjs` extends the healthy mixed workload with bounded native ship/GM loss, browser owner loss across mixed survivors, and a fresh native fixed-slot replacement. The native probe records applied recovery diagnostics and continuation status with actual digest checkpoints and compact command orders. `docs/acceptance/1534-mixed-native-recovery.md` defines the evidence gates and limits; fixture tests alone do not establish runtime acceptance.

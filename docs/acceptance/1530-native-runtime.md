@@ -183,3 +183,30 @@ operator until admission connects it. The driver stops requesting Ready when
 its own authoritative GM metadata reports Ready. Ordinary native-only runs keep
 the default automatic Ready behavior. This option changes only the private
 workload driver, not production GM readiness or admission.
+
+
+## Measured delayed native run — 2026-09-27
+
+The corrected observer passed the actual six-peer workload in **138.310 seconds**
+from source `f54b12ad`, using the same recorded executable and bundle. The
+[portable delayed-run result](1530-native-impaired-result.json) includes the raw
+artifact hashes and the service receipt. Each of twelve Stations recorded
+**72–73 Applied receipts**. The two separate GM peers recorded **37/37 and 36/36
+requested/Applied actions**, with compact telemetry retaining their full observed
+sequences. All six accepted slots agreed after those actions at tick 300
+(`40d34053c7dc9d94`) and 600 (`0e9b1904b76aac51`). No runtime or observer fault
+occurred before teardown; every native process and the local service exited.
+
+The local rendezvous profile was 20 ms delay, 10% snapshot loss, seed 1530.
+Actual service counters reported **19,037 reliable frames seen, delayed and
+written**, with measured write delay **20.045–57.953 ms**, zero cancelled frames,
+zero queue-overflow closes and zero pending frames at completion. There were
+**zero snapshot frames and zero snapshot drops**. Native fleet lockstep traffic
+in this cell is reliable; the configured snapshot-loss setting was therefore
+not exercised. These are application-frame delay measurements, not IP packet
+loss or an internet-network qualification.
+
+Private raw evidence is `.phoenix/native-six-workload-impaired-1530/` and
+`.phoenix/native-impaired-service-1530/receipt.json`. The latter records service
+source revision/hash, command, initial/final counters and cleanup. The ordinary
+Force Start and combined ship-owner GM caveats from the clean run also apply.

@@ -1,0 +1,355 @@
+{
+  "issue": 1530,
+  "measuredUtc": "2026-09-27T10:39:35.374Z",
+  "sourceRevision": "f54b12ad70fb1b537ffc08c5dd9d47cdb516ca31",
+  "sourceWasDirty": false,
+  "artifactRoot": ".phoenix/native-six-workload-impaired-1530",
+  "matrixSha256": "c4ce9975ef31d80a66cb34c2747b02037433ba23f36bbc5790b3c78cb3aee9ec",
+  "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+  "buildReceipt": {
+    "path": ".phoenix/native-build-isolated-stamp-1530.json",
+    "sha256": "8fd5338200f343874a8b85c9ecd73e52cdb9aa8513b74ef654f8eb20e558a6b4"
+  },
+  "bundleReceipt": {
+    "path": ".phoenix/native-bundle-welcome-1530.json",
+    "sha256": "533a125d75d2629ff77c22eeef36535147db8e214e14a7dad141441c03ad4eea"
+  },
+  "harnessHashes": {
+    "fleet-native-probe.mjs": "4f94b9c5f90ddd5494a6762f824368103887650f8825a7a4cf00bfffe5ecff42",
+    "fleet-native-matrix.mjs": "20d77001a5845e38e2fba8e880991d7885a23c333819491a44469d663541ec19",
+    "fleet-native-workload.mjs": "f3b53c80be8909eeef85ed0a7cf443eb764028034c28ed4e5d48a22fc7e7a2f4"
+  },
+  "bundle": {
+    "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+    "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+    "instrumentedModuleSha256": "2592bac29f9e73613140638909feb57b8ef5c70f2d26d56db81f1e25cde3c0fe",
+    "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+  },
+  "elapsedMs": 138310,
+  "passed": true,
+  "forceRequested": true,
+  "digestAfter": "2026-09-27T10:38:23.284Z",
+  "peers": [
+    {
+      "id": "ship-1",
+      "role": "ship",
+      "local": 1,
+      "acceptedGeneration": 1,
+      "manifestSha256": "03076580212924ae6538b6ce666bf12a9886c18e976875de4436df499fa82d01",
+      "eventsSha256": "500283ad789df1da7e81a121f700249e0b4dc184fc694150a473641a8cf01040",
+      "sourcePatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "ship-2",
+      "role": "ship",
+      "local": 4,
+      "acceptedGeneration": 1,
+      "manifestSha256": "c927e76796e43345bd29c48ff3915089982cb0cb7d7f1cdbf1abcd42b3129f9e",
+      "eventsSha256": "e40a35ef24c6f22edfc0166275c47e198ad6d0137e0c2e33b305727896a5d561",
+      "sourcePatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "ship-3",
+      "role": "ship",
+      "local": 3,
+      "acceptedGeneration": 1,
+      "manifestSha256": "96fb0438aed16ef9d9471707d797c0f68961a84d77b436f558561081e59848f9",
+      "eventsSha256": "670480d092cf415f8b5bff9bcc2d1b3065520a0965b7239718733edc98040ed1",
+      "sourcePatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "ship-4",
+      "role": "ship",
+      "local": 2,
+      "acceptedGeneration": 1,
+      "manifestSha256": "3b83c278bb8e50cb3d34770ea5c3f582602759c7a989a24a3baed880d458d03a",
+      "eventsSha256": "726865dcbf8110eafa9697e1cb3c364c34ec71a70f4e9a0ad38942fcb33add3b",
+      "sourcePatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "gm-1",
+      "role": "gm",
+      "local": 5,
+      "acceptedGeneration": 1,
+      "manifestSha256": "2a93a2151e2df69b7862afa6e946e3f94cb3814f6ae02b2dbdcf2f0ba80bf9e7",
+      "eventsSha256": "c07e73cbbfd7c7f628f7c3ed7c4d67d8d29592cfa28d030e41feb04b57a67829",
+      "sourcePatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "gm-2",
+      "role": "gm",
+      "local": 6,
+      "acceptedGeneration": 1,
+      "manifestSha256": "e46c7f703611ef6b843184b9f06bf23774da359384b7cd0db1f875c31512dd17",
+      "eventsSha256": "2a240511baf00402a2312a744d1435a0117cd353b07bf50f4d143540b43d5bd8",
+      "sourcePatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    }
+  ],
+  "stations": [
+    {
+      "peer": "ship-1",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 72
+    },
+    {
+      "peer": "ship-1",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 72
+    },
+    {
+      "peer": "ship-1",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 72
+    },
+    {
+      "peer": "ship-2",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 73
+    },
+    {
+      "peer": "ship-2",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 73
+    },
+    {
+      "peer": "ship-2",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 73
+    },
+    {
+      "peer": "ship-3",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 73
+    },
+    {
+      "peer": "ship-3",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 73
+    },
+    {
+      "peer": "ship-3",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 73
+    },
+    {
+      "peer": "ship-4",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 72
+    },
+    {
+      "peer": "ship-4",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 72
+    },
+    {
+      "peer": "ship-4",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 73,
+      "applied": 72
+    }
+  ],
+  "gms": [
+    {
+      "peer": "gm-1",
+      "operator": "gm-2",
+      "requests": 37,
+      "applied": 37
+    },
+    {
+      "peer": "gm-2",
+      "operator": "gm-3",
+      "requests": 36,
+      "applied": 36
+    }
+  ],
+  "commonDigests": [
+    {
+      "tick": 300,
+      "byPeer": {
+        "ship-1": "40d34053c7dc9d94",
+        "ship-2": "40d34053c7dc9d94",
+        "ship-3": "40d34053c7dc9d94",
+        "ship-4": "40d34053c7dc9d94",
+        "gm-1": "40d34053c7dc9d94",
+        "gm-2": "40d34053c7dc9d94"
+      },
+      "agreed": true
+    },
+    {
+      "tick": 600,
+      "byPeer": {
+        "ship-1": "0e9b1904b76aac51",
+        "ship-2": "0e9b1904b76aac51",
+        "ship-3": "0e9b1904b76aac51",
+        "ship-4": "0e9b1904b76aac51",
+        "gm-1": "0e9b1904b76aac51",
+        "gm-2": "0e9b1904b76aac51"
+      },
+      "agreed": true
+    }
+  ],
+  "impairment": {
+    "receipt": {
+      "path": ".phoenix/native-impaired-service-1530/receipt.json",
+      "sha256": "f37dcf24394d7c3aa7021a02905c60dfa2f8a1eae97066caba3c0f1a1ced23fa"
+    },
+    "serviceSourceRevision": "9a1a78c166271388d6952b910bbdaf5ae12ab5d2",
+    "serviceSha256": "687fce016c2b5a22ebffc9db4a009e039341245b9741568058bc250fdabe70c0",
+    "initial": {
+      "profile": {
+        "delay_ms": 20,
+        "loss_percent": 10,
+        "seed": 1530,
+        "block_rtc_offers": false
+      },
+      "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+      "counters": {
+        "relay_reliable_seen": 0,
+        "relay_reliable_written": 0,
+        "relay_reliable_cancelled": 0,
+        "relay_snapshot_seen": 0,
+        "relay_snapshot_written": 0,
+        "relay_snapshot_dropped": 0,
+        "relay_snapshot_cancelled": 0,
+        "relay_frames_delayed": 0,
+        "signal_offers_dropped": 0,
+        "queue_overflow_closes": 0,
+        "pending": 0,
+        "peak_pending": 0,
+        "observed_write_delay_ms": {
+          "reliable": {
+            "count": 0,
+            "min": null,
+            "max": null,
+            "total": 0
+          },
+          "snapshot": {
+            "count": 0,
+            "min": null,
+            "max": null,
+            "total": 0
+          }
+        }
+      },
+      "max_pending_frames": 4096
+    },
+    "final": {
+      "profile": {
+        "delay_ms": 20,
+        "loss_percent": 10,
+        "seed": 1530,
+        "block_rtc_offers": false
+      },
+      "scope": "local WebSocket relay frames only; direct DataChannel traffic bypasses this adapter; loss applies only to snapshot class",
+      "counters": {
+        "relay_reliable_seen": 19037,
+        "relay_reliable_written": 19037,
+        "relay_reliable_cancelled": 0,
+        "relay_snapshot_seen": 0,
+        "relay_snapshot_written": 0,
+        "relay_snapshot_dropped": 0,
+        "relay_snapshot_cancelled": 0,
+        "relay_frames_delayed": 19037,
+        "signal_offers_dropped": 0,
+        "queue_overflow_closes": 0,
+        "pending": 0,
+        "peak_pending": 49,
+        "observed_write_delay_ms": {
+          "reliable": {
+            "count": 19037,
+            "min": 20.04529999999795,
+            "max": 57.952799999999115,
+            "total": 479575.5682000022
+          },
+          "snapshot": {
+            "count": 0,
+            "min": null,
+            "max": null,
+            "total": 0
+          }
+        }
+      },
+      "max_pending_frames": 4096
+    },
+    "cleanupExitObserved": true
+  },
+  "limits": [
+    "Loopback relay only; no ordinary internet or mobile-network evidence",
+    "Bounded smoke run; no performance or endurance acceptance",
+    "Binary source-build provenance must be verified against the recorded external build command",
+    "Configured snapshot loss was not exercised: zero snapshot frames and zero dropped snapshots; this run measures delayed reliable relay delivery.",
+    "Two stationless GM peers plus the ship-owner combined GM role; Force Start was used.",
+    "Same previously recorded native executable and private bundle; source changes since build are observer, tests, and documentation only."
+  ]
+}

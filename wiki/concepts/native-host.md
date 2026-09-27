@@ -2644,3 +2644,10 @@ owner retains its combined GM role, so the run uses a separate GM's ordinary
 Force Start; it does not establish automatic all-ready launch or internet,
 impairment or endurance acceptance. Post-Welcome control replay is snapshot-only:
 it cannot repeat mesh frames, Force Start edges or roster-result generations.
+
+The native observer fails explicitly on oversized, queued or rejected telemetry
+and records each attributed GM action once. Coordinated mixed runs can defer
+native GM Ready until all peers are admitted. The delayed native smoke result
+in `docs/acceptance/1530-native-impaired-result.json` records actual reliable
+relay delay; its zero snapshot count means configured snapshot loss was not
+exercised in that cell.

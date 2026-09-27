@@ -135,8 +135,10 @@
  * `14` adds the combined `ship-gm` capability (issue #1495). An older peer
  * would collapse that native technical peer to one capability or count it as
  * two simulations, so mixed revisions must refuse before forming a fleet.
+ * `15` adds authenticated per-origin stream continuation and owner takeover.
+ * Older peers cannot reconcile the retained tail or acknowledge the pause.
  */
-export const HOST_MESH_PROTOCOL = 14;
+export const HOST_MESH_PROTOCOL = 15;
 
 import { canonicalStationRatings } from './fleet-crew.js';
 export { canonicalStationRatings } from './fleet-crew.js';
@@ -572,6 +574,47 @@ export function openFleet({
     fleet.nextGmSeq += 1;
   }
   return fleet;
+}
+
+/** Rebuild only transport bookkeeping after a verified frozen-owner takeover.
+ * No simulation topology adoption or ship creation belongs to this operation.
+ */
+export function continueFrozenFleet(roster, local, departed, options = {}) {
+  if (!roster?.frozen || !roster.participants?.includes(local)
+      || !roster.participants.includes(departed) || local === departed) {
+    throw new Error('invalid-frozen-continuation');
+  }
+  const fleet = openFleet({ ...options, maxSlots: roster.max_slots });
+  fleet.owner = local;
+  fleet.frozen = true;
+  fleet.admission = ADMISSION_CLOSED;
+  fleet.nextSeq = Math.max(...roster.participants.map(hostSlotOrdinal)) + 1;
+  // A continuation cannot create another start grant.
+  fleet.startGrant = { id: 'continued', mode: 'continuation', operator_id: null };
+  fleet.slots = roster.slots.map(slot => ({ ...slot, peer: null, owner: slot.id === local,
+    connected: slot.id !== departed && slot.connected !== false, startValidation: true }));
+  fleet.gms = (roster.gm_bindings || []).map(binding => {
+    const gm = roster.gms.find(row => row.id === binding.operator_id);
+    return { ...gm, meshSlot: binding.host, peer: null, credential: null,
+      connected: binding.host !== departed, startValidation: true,
+      credential: binding.host === local ? reconnectClaim(options.localReconnectCredential) : null };
+  });
+  fleet.nextGmSeq = fleet.gms.length + 1;
+  return fleet;
+}
+
+/** The service proof, not a Hello field, authorizes preserving a live slot. */
+export function bindFleetContinuation(fleet, peer, ordinal, credential) {
+  const id = `slot-${ordinal}`;
+  const ship = fleet.slots.find(slot => slot.id === id);
+  const gm = fleet.gms.find(row => row.meshSlot === id);
+  if (!fleet.frozen || id === fleet.owner || (!ship && !gm)
+      || (ship && (!ship.connected || ship.peer)) || (gm && (!gm.connected || gm.peer))) return null;
+  return { ...fleet,
+    slots: fleet.slots.map(slot => slot.id === id ? { ...slot, peer } : slot),
+    gms: fleet.gms.map(row => row.meshSlot === id
+      ? { ...row, peer, credential: reconnectClaim(credential) } : row),
+  };
 }
 
 /** The slot a rendezvous peer id holds, or null. */
@@ -1503,10 +1546,12 @@ export const welcomeFrame = (slotIdent, roster, {
   role = HOST_ROLE_SHIP,
   operatorId = null,
   reconnectCredential = null,
+  streamFrontier = null,
 } = {}) => {
   const nextRole = hostRole(role);
   if (roleHasGm(nextRole)) {
     return hostFrame(HOST_FRAME_WELCOME, {
+      ...(streamFrontier ? { stream_frontier: streamFrontier } : {}),
       slot: slotIdent,
       roster,
       role: nextRole,
@@ -1514,7 +1559,7 @@ export const welcomeFrame = (slotIdent, roster, {
       reconnect_credential: reconnectCredential,
     });
   }
-  return hostFrame(HOST_FRAME_WELCOME, { slot: slotIdent, roster });
+  return hostFrame(HOST_FRAME_WELCOME, { slot: slotIdent, roster, ...(streamFrontier ? { stream_frontier: streamFrontier } : {}) });
 };
 
 /**

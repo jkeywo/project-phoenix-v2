@@ -10,6 +10,7 @@ entities:
         whether the next fixed tick may run at all, and names the peer holding it up when it
         may not.
       rationale:
+        - "[ai] #1534 owner continuation is a bounded single-failure transaction in host-mesh revision 15. Frozen peers number each authenticated origin stream and retain only the tail not acknowledged by every live participant. Service-authorized same-slot reconnect carries no new simulation adoption. Every survivor first confirms a Rust hold; the successor reconciles all survivor frontiers, replays only unseen rows through a dedicated epoch-and-origin checked ingress, and commits only after every authenticated survivor acknowledges the same owner watermark. Old-owner grants are ingested under old authority before changing the coordinator; commit queues one agreed HostLoss at that watermark plus one. Missing/conflicting history, replay refusal, overflow, unsupported structural recovery, or membership changes outside the initially delegated roster retain an explicit failure instead of resetting a ship or guessing a frontier. No partition or concurrent-failure guarantee follows from this path."
         - "[ai] #1553 verifies bounded named cross-feature journeys through versioned evidence: competing authored slot picks to launch/report; scoped GM Objective results; disconnect health and existing snapshot recovery; destroyed-crew camera retargeting; and private profile/input/locale presentation. Dedicated GM precedence, atomicity, completed-joining and frozen-history cases stay separate from scenario stories. In-process protocol and jsdom checks never claim real device, layout, owner-handover or human acceptance. The kit routes newly discovered defects to originating features rather than enlarging the acceptance scope."
         - "[ai] #1543's ignored local measurement mode observes six sequential headless Apps, twelve synthetic Station clients and two GM identities on one process clock. Cycle cost and wave-to-observed-application samples retain source/content hashes, exact dirty instrumentation patch and digest checks. The independent relay probe records real loopback WebSocket echoes without a simulation. Neither establishes browser/native workload, impaired-network, recovery or one-hour acceptance. Numeric proposals require explicit user ratification before acceptance and never become timing gates on unrelated CI machines."
         - "[ai] #1535 projects fleet transport degradation and the existing semantic public health projection into a stable polite live region on browser and native host surfaces. Four ships and two GMs are the tested support threshold; larger rosters are admitted with a localized warning. The independent 32-peer transport allocation bound remains. Health presentation changes neither CommandDelay nor eviction decisions, and transport credentials and addresses remain outside the rendered projection."
@@ -28,7 +29,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lockstep/session.rs, src/lockstep/mod.rs, src/server/bridge.rs, gui/fleet-session.js]
+      paths: [src/lockstep/session.rs, src/lockstep/mod.rs, src/lockstep/continuation.rs, src/lockstep/continuation_systems.rs, src/server/bridge.rs, gui/fleet-session.js, gui/fleet-continuation.js, gui/fleet-owner-continuation.js, gui/fleet-continuation-wire.js]
       symbols:
         - LockstepSession
         - FleetLockstep
@@ -37,7 +38,7 @@ entities:
         - join_fleet
         - wasm_join_fleet
         - wasm_mesh_status
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/smoke/fleet-lockstep.spec.js]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/client/fleet-owner-handoff.test.js, tests/client/fleet-owner-continuation.test.js, tests/client/fleet-continuation.test.js, tests/client/fleet-continuation-wire.test.js, tests/smoke/fleet-lockstep.spec.js]
 
   - state: fleet-lockstep-state
     core:

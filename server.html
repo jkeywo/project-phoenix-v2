@@ -6070,6 +6070,8 @@
         onBeginGmJoin: beginFleetGmJoin,
         onRefuseGmJoin: refuseFleetGmJoin,
         onSimulationFrame: receiveMeshFrame,
+        onContinuation: continueFleetOwner,
+        onContinuationFrame: receiveFleetContinuationFrame,
         // A member host dropped mid-mission (issue #1119). Tell the simulation
         // the slot; it agrees the disconnect tick from that host's own watermark
         // and flips its ship to Backfill there, then mints a host-loss frame the
@@ -6204,6 +6206,8 @@
         onGmJoinStatus: receiveFleetGmJoinStatus,
         onGmJoinPending: ({ request }) => receiveFleetGmJoinRequest(request),
         onSimulationFrame: receiveMeshFrame,
+        onContinuation: continueFleetOwner,
+        onContinuationFrame: receiveFleetContinuationFrame,
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
         // tearing the link down would evict a member for touching its loadout.
@@ -6393,6 +6397,36 @@
      * frame whose declared origin disagrees with it. `authSlot` is `0` (never a
      * real slot) when the page could not resolve one, which the sim trusts.
      */
+    function continueFleetOwner(request) {
+      if (typeof window.wasm_fleet_continuation !== 'function'
+          || typeof window.wasm_fleet_continuation_status !== 'function') {
+        return Promise.resolve({ status: 'refused', reason: 'continuation-unavailable' });
+      }
+      let queued;
+      try { queued = JSON.parse(window.wasm_fleet_continuation(JSON.stringify(request))); }
+      catch (_) { return Promise.resolve({ status: 'refused', reason: 'continuation-unreadable' }); }
+      if (queued.status === 'refused') return Promise.resolve(queued);
+      const expected = { begin: 'held', replayed: 'replayed', commit: 'committed' }[request.op];
+      const started = performance.now();
+      return new Promise(resolve => {
+        const poll = () => {
+          let state;
+          try { state = JSON.parse(window.wasm_fleet_continuation_status()); } catch (_) {}
+          if (state?.generation === queued.generation && (state.status === expected || state.status === 'refused')) {
+            resolve(state);
+          } else if (performance.now() - started > 15000) {
+            resolve({ status: 'refused', reason: 'continuation-timeout' });
+          } else setTimeout(poll, 16);
+        };
+        poll();
+      });
+    }
+
+    function receiveFleetContinuationFrame(raw, source, epoch) {
+      return typeof window.wasm_fleet_continuation_frame === 'function'
+        && window.wasm_fleet_continuation_frame(BigInt(epoch), source, raw);
+    }
+
     function receiveMeshFrame(raw, authSlot) {
       if (window.wasm_receive_mesh_frame) window.wasm_receive_mesh_frame(authSlot || 0, raw);
     }
@@ -8465,6 +8499,9 @@ function finishInit() {
   window.wasm_take_mesh_frames = wasmBindings.wasm_take_mesh_frames;
   window.wasm_join_fleet = wasmBindings.wasm_join_fleet;
   window.wasm_fleet_join_status = wasmBindings.wasm_fleet_join_status;
+  window.wasm_fleet_continuation = wasmBindings.wasm_fleet_continuation;
+  window.wasm_fleet_continuation_status = wasmBindings.wasm_fleet_continuation_status;
+  window.wasm_fleet_continuation_frame = wasmBindings.wasm_fleet_continuation_frame;
   window.wasm_leave_fleet = wasmBindings.wasm_leave_fleet;
   window.wasm_set_gm_roster = wasmBindings.wasm_set_gm_roster;
   // First typed GM action tracer (#1292). The page supplies the admitted

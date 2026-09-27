@@ -2120,3 +2120,33 @@ describe('terminal direct peer failure (#1534)', () => {
     expect(closed).toHaveBeenCalledTimes(1);
   });
 });
+
+it('binds a verified continuation proof to only one adapter across peer replacement', () => {
+  let socket;
+  const announced=[];
+  const host=createRendezvousHost({base:'https://rendezvous.test', namespace:NAMESPACE_SERVER,
+    transports:['ws-relay'], checkStamp:()=>({ok:true}), onConnection:conn=>announced.push(conn),
+    factories:{socket:()=>socket={readyState:1,bufferedAmount:0,send(){},close(){}},peer:()=>{throw new Error('relay only');}}});
+  const frame=value=>socket.onmessage({data:JSON.stringify({v:1,...value})});
+  const attach=continuation=>{
+    frame({type:'peer-joined',peer:'reused',...(continuation?{continuation}:{})});
+    frame({type:'relay-peer',peer:'reused',...(continuation?{continuation}:{})});
+    frame({type:'relay',from:'reused',class:'reliable',payload:JSON.stringify({type:'JoinHandshake',data:{stamp:'test'}})});
+  };
+  attach({epoch:1,slot:2});
+  expect(announced[0].continuation).toEqual({epoch:1,slot:2});
+  frame({type:'relay-peer-left',peer:'reused'});
+  attach(null);
+  expect(announced[1].continuation).toBeNull();
+  // A late close of the old adapter must not delete the new peer entry.
+  announced[0].emit('close');
+  const delivered=[];announced[1].on('data',raw=>delivered.push(raw));
+  frame({type:'relay',from:'reused',class:'reliable',payload:'fresh'});
+  expect(delivered).toEqual(['fresh']);
+  frame({type:'relay-peer-left',peer:'reused'});
+  frame({type:'peer-joined',peer:'reused',continuation:{epoch:2,slot:3}});
+  frame({type:'peer-left',peer:'reused'});
+  attach(null);
+  expect(announced[2].continuation).toBeNull();
+  host.close();
+});

@@ -103,6 +103,7 @@ import './strings-boot.js';
 import { localiseTree, rememberRawDeliveredMessage, setOverlayCatalogues } from './strings.js';
 import {
   NAMESPACE_CLIENT,
+  NAMESPACE_SERVER,
   parseJoinCode,
   reasonStringId,
   getJoinCodeData,
@@ -511,6 +512,8 @@ export function createRendezvousHost(opts) {
     onError = () => {},
     onPeerIce = () => {},
     onPeerShedding = () => {},
+    onFleetControl = () => false,
+    takeover = null,
     onLog = () => {},
     reregister = true,
     transports = ['webrtc', 'ws-relay'],
@@ -532,6 +535,7 @@ export function createRendezvousHost(opts) {
   });
 
   const peers = new Map(); // rendezvous peer id → per-joiner state
+  const verifiedContinuations = new Map();
   let socket = null;
   let code = null;
   let closed = false;
@@ -618,6 +622,10 @@ export function createRendezvousHost(opts) {
       onLog,
     });
     entry.adapter = adapter;
+    adapter.continuation = verifiedContinuations.get(id) || null;
+    // The proof belongs to this adapter after binding. The pending lookup may
+    // never lend it to a later connection that reuses the rendezvous peer id.
+    verifiedContinuations.delete(id);
     // The reliable channel's own close is the one true end of this peer:
     // reap the entry and its RTCPeerConnection right there, so a joiner
     // whose SIGNALLING died first (peer-left arrived, entry deliberately
@@ -626,7 +634,8 @@ export function createRendezvousHost(opts) {
     // guarded, so a later sweep emitting again is harmless.
     adapter.on('close', () => {
       try { entry.pc.close(); } catch { /* already gone */ }
-      peers.delete(id);
+      if (peers.get(id) === entry) peers.delete(id);
+      if (verifiedContinuations.get(id) === adapter.continuation) verifiedContinuations.delete(id);
     });
     pairSnapshot(entry);
     channel.onmessage = (ev) => {
@@ -864,6 +873,7 @@ export function createRendezvousHost(opts) {
    * for entries that never reached that point.
    */
   function dropUnadmittedPeers() {
+    verifiedContinuations.clear();
     for (const [id, entry] of [...peers]) {
       if (isLiveAdmittedLink(entry)) continue;
       if (entry.adapter) entry.adapter.emit('close');
@@ -889,7 +899,7 @@ export function createRendezvousHost(opts) {
           // harmless to send on every reconnect after that: a registry that
           // cannot honour it (grace expired, wrong secret, or simply does not
           // recognise the field) falls through to an ordinary fresh mint.
-          ...(resumeToken ? { resume: resumeToken } : {}),
+          ...(resumeToken ? { resume: resumeToken } : takeover ? { takeover } : {}),
         }));
         break;
       case 'hosted':
@@ -904,13 +914,20 @@ export function createRendezvousHost(opts) {
         if (msg.code.secret) resumeToken = { suffix: msg.code.suffix, secret: msg.code.secret };
         onLog(`[rendezvous] issued ${code.namespace} code ${code.suffix}`);
         onCode(code);
+        if (namespace === NAMESPACE_SERVER && msg.fleet) onFleetControl({ type: 'fleet-capability', ...msg.fleet });
+        break;
+      case 'fleet-capability':
+      case 'fleet-successors-set':
+        if (namespace === NAMESPACE_SERVER) onFleetControl(msg);
         break;
       case 'peer-joined':
+        if (namespace === NAMESPACE_SERVER && msg.continuation && !peers.get(msg.peer)?.adapter) verifiedContinuations.set(msg.peer, { ...msg.continuation });
         // A relay-only native host has no RTCPeerConnection implementation.
         // `relay-peer` creates the same registry entry and channel pair.
         if (transports.includes('webrtc')) peerState(msg.peer);
         break;
       case 'peer-left': {
+        verifiedContinuations.delete(msg.peer);
         // registry.js's leave() sends this when THAT peer's own rendezvous
         // WebSocket dies — a Durable Object eviction, a worker redeploy, a
         // phone radio dropping the WS on a lock screen. It says nothing about
@@ -941,6 +958,7 @@ export function createRendezvousHost(opts) {
         break;
       // ── The WebSocket game relay (issue #1113) ────────────────────────────
       case 'relay-peer':
+        if (namespace === NAMESPACE_SERVER && msg.continuation && !peers.get(msg.peer)?.adapter) verifiedContinuations.set(msg.peer, { ...msg.continuation });
         relayPeerState(msg.peer, msg.limits);
         break;
       case 'relay': {
@@ -949,6 +967,7 @@ export function createRendezvousHost(opts) {
         break;
       }
       case 'relay-peer-left': {
+        verifiedContinuations.delete(msg.peer);
         // Unlike `peer-left`, this one really is the end of the link: a relayed
         // peer has no DataChannel to outlive its socket. Tear it down here so
         // the page runs its ordinary disconnect lifecycle.
@@ -1096,6 +1115,9 @@ export function createRendezvousHost(opts) {
       return true;
     },
     /** Open or close new-joiner admission without dropping the code. */
+    setFleetSuccessors(successors) {
+      if (namespace === NAMESPACE_SERVER && socket && socket.readyState === 1) socket.send(frame('fleet-successors', successors));
+    },
     setAdmission(state) {
       if (socket && socket.readyState === 1) socket.send(frame('host-admission', { state }));
     },
@@ -1117,6 +1139,7 @@ export function createRendezvousHost(opts) {
         try { entry.pc.close(); } catch { /* already closed */ }
       }
       peers.clear();
+      verifiedContinuations.clear();
       if (socket) socket.close();
     },
   };
@@ -1178,6 +1201,8 @@ export function createRendezvousJoiner(opts) {
      * still-live channel.
      */
     onAccepted = null,
+    onFleetControl = () => false,
+    continuation: initialContinuation = null,
     /** False for a peer whose frames are not ServerMessages. */
     localise = true,
   } = opts;
@@ -1218,6 +1243,9 @@ export function createRendezvousJoiner(opts) {
   let channel = null;
   let snapshot = null;
   let closed = false;
+  let continuation = initialContinuation;
+  let continuationHold = false;
+  let ownerLost = null;
   /** True once the host has ACCEPTED this build at least once. */
   let established = false;
   let generation = 0;
@@ -1288,6 +1316,13 @@ export function createRendezvousJoiner(opts) {
    */
   function fail(gen, reason, detail) {
     if (closed || gen !== generation || gen === failedGeneration) return;
+    if (continuation && ownerLost && established && reason === 'unreachable') {
+      continuationHold = true;
+      clearTimers();
+      onStatus('disconnected');
+      onFleetControl({ ...ownerLost, mediaFailed: true });
+      return;
+    }
     failedGeneration = gen;
     teardown();
     // The direct ladder is spent and there is one rung left: let the service
@@ -1486,6 +1521,10 @@ export function createRendezvousJoiner(opts) {
       if (gen !== generation || pc !== mine) return;
       onLog(`[ICE] state — ${pc.iceConnectionState}`);
       onDiag({ event: 'ice-state', state: pc.iceConnectionState });
+      if (pc.iceConnectionState === 'failed') fail(gen, 'unreachable');
+    };
+    pc.onconnectionstatechange = () => {
+      if (gen === generation && pc === mine && pc.connectionState === 'failed') fail(gen, 'unreachable');
     };
 
     // Both channels are created here, on the offerer, so the answering host
@@ -1540,7 +1579,7 @@ export function createRendezvousJoiner(opts) {
         // can never answer `wrong-type`. The check above already refuses the
         // disagreeing case locally; this is the same fact stated to the one
         // party that indexes on it.
-        socket.send(frame('join', { code: parsed.full, namespace }));
+        socket.send(frame('join', { code: parsed.full, namespace, ...(continuation ? { continuation } : {}) }));
         break;
       case 'joined':
         // The host has said what it can answer on. A host with no WebRTC — the
@@ -1577,7 +1616,31 @@ export function createRendezvousJoiner(opts) {
       case 'relay':
         if (relay) relay.deliver(msg);
         break;
+      case 'fleet-capability':
+        if (namespace === NAMESPACE_SERVER) {
+          continuation = { epoch: msg.epoch, slot: msg.slot, capability: msg.capability };
+          onFleetControl(msg);
+        }
+        break;
+      case 'fleet-owner-lost':
+        if (namespace === NAMESPACE_SERVER && continuation) {
+          ownerLost = msg;
+          if (socketIsTheLink()) {
+            continuationHold = true;
+            clearTimers();
+            onStatus('disconnected');
+            onFleetControl({ ...msg, mediaFailed: true });
+          }
+        }
+        break;
+      case 'fleet-takeover-grant':
+      case 'fleet-takeover-wait':
+      case 'fleet-state':
+      case 'fleet-owner-changed':
+        if (namespace === NAMESPACE_SERVER && continuation) onFleetControl(msg);
+        break;
       case 'relay-closed':
+        if (continuationHold) break;
         // The service has stopped carrying this link. Unlike a `closed` frame
         // against a DataChannel, this really is the end of the game path.
         onLog(`[rendezvous] relay closed (${msg.reason || 'unknown'})`);
@@ -1696,6 +1759,21 @@ export function createRendezvousJoiner(opts) {
   attempt();
 
   return {
+    get continuation() { return continuation ? { ...continuation } : null; },
+    requestTakeover() {
+      if (!continuation || !continuationHold || socket?.readyState !== 1) return false;
+      socket.send(frame('fleet-takeover', { epoch: continuation.epoch, capability: continuation.capability }));
+      return true;
+    },
+    reconnectContinuation(epoch) {
+      if (!continuation || !Number.isSafeInteger(epoch) || epoch <= continuation.epoch) return false;
+      continuation = { ...continuation, epoch };
+      continuationHold = false;
+      ownerLost = null;
+      clearTimers();
+      attempt();
+      return true;
+    },
     get suffix() { return parsed.suffix; },
     get full() { return parsed.full; },
     get connected() { return linked(); },

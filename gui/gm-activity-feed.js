@@ -428,9 +428,9 @@ export function createGmActivityFeed({
     switch (entry.category) {
       case 'damage':
         return t('server.gm.activity.damage_detail', {
-          amount: String(detail.amount),
-          shield: String(detail.shield_absorbed),
-          hull: String(detail.hull_damage),
+          amount: detail.amount,
+          shield: detail.shield_absorbed,
+          hull: detail.hull_damage,
           weapon: detail.weapon,
           kind: t(`server.gm.activity.victim_kind.${detail.victim_kind}`),
         });
@@ -470,7 +470,7 @@ export function createGmActivityFeed({
             `server.gm.activity.action.apply_direct_${detail.action.heal ? 'heal' : 'damage'}`,
             {
               entity: detail.action.entity,
-              amount: hullPoints(detail.action.applied_milli_hp),
+              amount: Number(hullPoints(detail.action.applied_milli_hp)),
             },
           );
           if (detail.action.scope) {
@@ -484,7 +484,7 @@ export function createGmActivityFeed({
           }
           if (detail.action.discarded_milli_hp > 0) {
             action += t('server.gm.activity.action.direct_effect_discarded', {
-              amount: hullPoints(detail.action.discarded_milli_hp),
+              amount: Number(hullPoints(detail.action.discarded_milli_hp)),
             });
           }
         } else if (detail.action.type === 'set_system_disabled') {
@@ -564,7 +564,7 @@ export function createGmActivityFeed({
     metadata.className = 'gm-activity-metadata';
     const tick = doc.createElement('span');
     tick.className = 'gm-activity-tick';
-    tick.textContent = t('server.gm.activity.tick', { tick: String(entry.tick) });
+    tick.textContent = t('server.gm.activity.tick', { tick: entry.tick });
     const category = doc.createElement('span');
     category.className = 'gm-activity-category';
     category.textContent = t(`server.gm.activity.category.${entry.category}`);

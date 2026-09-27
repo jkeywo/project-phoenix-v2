@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createGmEntityTree } from '../../gui/gm-entity-tree.js';
+import { setBaseCatalogue, setOverlayCatalogues, setLocale, t } from '../../gui/strings.js';
 
 describe('keyed GM entity tree', () => {
   let root, tree, onSelect;
@@ -16,10 +20,10 @@ describe('keyed GM entity tree', () => {
   it('includes empty worlds, stations, player slots and unassigned entities', () => {
     tree.update({ ...state(), entities: [...entities, { entity_id: 'runtime', name: 'Runtime' }] });
     expect(button('Empty layer')).toBeTruthy();
-    expect(button('Helm · Backfill')).toBeTruthy();
+    expect(button('Helm · station.rating.backfill.name')).toBeTruthy();
     expect(button('server.gm.tree.unassigned')).toBeTruthy();
     button('Empty player slot').click(); expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'slot' }));
-    button('Helm · Backfill').click(); expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'station' }));
+    button('Helm · station.rating.backfill.name').click(); expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'station' }));
   });
   it('retains row identity and selection through updates and faction moves', () => {
     tree.update(state()); tree.selectEntity('one');
@@ -45,11 +49,11 @@ describe('keyed GM entity tree', () => {
   it('reveals matching ancestors during search without losing manual expansion', () => {
     tree.update(state());
     const search = root.querySelector('input'); search.value = 'Helm'; search.dispatchEvent(new Event('input'));
-    expect(button('Helm · Backfill').closest('[hidden]')).toBeNull();
+    expect(button('Helm · station.rating.backfill.name').closest('[hidden]')).toBeNull();
     expect(button('Empty layer').closest('[hidden]')).not.toBeNull();
     search.value = ''; search.dispatchEvent(new Event('input'));
     expect(button('Empty layer').closest('[hidden]')).toBeNull();
-    expect(button('Helm · Backfill').closest('[hidden]')).not.toBeNull();
+    expect(button('Helm · station.rating.backfill.name').closest('[hidden]')).not.toBeNull();
   });
   it('supports keyboard navigation and removes despawned rows', () => {
     tree.update(state());
@@ -57,5 +61,37 @@ describe('keyed GM entity tree', () => {
     row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     expect(document.activeElement).not.toBe(row);
     tree.update({ ...state(), entities: [] }); expect(button('Resolute')).toBeUndefined();
+  });
+
+  it('repaints authored ship and station ids without changing selection or literal names', () => {
+    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+    setBaseCatalogue(fs.readFileSync(path.join(repo, 'assets/strings/strings.csv'), 'utf8'));
+    setOverlayCatalogues([{ source: 'gm-tree-de', csv: 'id,de,de_source\n'
+      + 'entity.alliance_cruiser.display_name,AEV Phönix,[AEV Phoenix]\n'
+      + 'station.helm.name,Ruder,Helm\n'
+      + 'station.rating.backfill.name,KI-Besatzung,BACKFILL (AI)\n'
+      + 'server.gm.tree.search,Einheiten und Stationen suchen,Search entities and stations\n'
+      + 'server.gm.tree.title,Einheitenbaum,Entity Tree\n' }]);
+    setLocale('en');
+    tree = createGmEntityTree({ root, doc: document, t, onSelect });
+    const raw = { entities: [{ entity_id: 'one', name: 'entity.alliance_cruiser.display_name',
+      faction: { entity_id: 'f1', name: 'Captain’s own faction' } }],
+    worlds: { root: { label: 'world.falling_skyway.global.title' } }, membership: { one: 'root' },
+    stations: [{ ship_id: 'one', stations: [{ station_id: 'helm', name: 'station.helm.name', rating: 'Backfill' }] }],
+    slots: [] };
+    tree.update(raw);
+    tree.selectEntity('one');
+    expect(button('[AEV Phoenix]')).toBeTruthy();
+    setLocale('de');
+    tree.update(raw);
+    expect(button('AEV Phönix').closest('[role=treeitem]').getAttribute('aria-selected')).toBe('true');
+    expect(button('Ruder · KI-Besatzung')).toBeTruthy();
+    expect(root.querySelector('input').placeholder).toBe('Einheiten und Stationen suchen');
+    expect(root.querySelector('[role="tree"]').getAttribute('aria-label')).toBe('Einheitenbaum');
+    expect(button('Captain’s own faction')).toBeTruthy();
+    expect(raw.entities[0].name).toBe('entity.alliance_cruiser.display_name');
+    expect(raw.stations[0].stations[0].station_id).toBe('helm');
+    setOverlayCatalogues([]);
+    setLocale('en');
   });
 });

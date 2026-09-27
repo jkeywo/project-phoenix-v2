@@ -592,6 +592,31 @@ describe('GM activity feed presentation and selection links', () => {
     setOverlayCatalogues([]);
   });
 
+  it('formats retained damage numbers at the GM locale while keeping ship attribution', () => {
+    setBaseCatalogue(read('assets/strings/strings.csv'));
+    setOverlayCatalogues([{ source: 'gm-damage-de', csv: 'id,de,de_source\n'
+      + 'server.gm.activity.tick,Takt {tick},[Tick {tick}]\n'
+      + 'server.gm.activity.damage_detail,{amount} Schaden: {shield} Schild / {hull} Hülle · {weapon} · {kind},'
+      + '[{amount} damage: {shield} shield / {hull} hull · {weapon} · {kind}]\n' }]);
+    setLocale('en');
+    harness = mount({ translate: t });
+    const row = damage({ tick: 2345 });
+    row.detail.data.amount = 1234;
+    row.detail.data.shield_absorbed = 1000;
+    row.detail.data.hull_damage = 234;
+    expect(harness.feed.update(payload([row], 16))).toBe(true);
+    const before = harness.feed.state();
+    setLocale('de');
+    harness.feed.refreshLanguage();
+    const shown = document.querySelector('.gm-activity-entry');
+    expect(shown.querySelector('.gm-activity-tick').textContent).toBe('Takt 2.345');
+    expect(shown.querySelector('.gm-activity-detail').textContent).toContain('1.234 Schaden: 1.000 Schild');
+    expect(shown.dataset.tick).toBe('2345');
+    expect(harness.feed.state()).toEqual(before);
+    setOverlayCatalogues([]);
+    setLocale('en');
+  });
+
   it('renders every category and exact operator outcome', () => {
     const rows = [...allCategories(), gmAction('no-op'), gmAction('refused')];
     expect(harness.feed.update(payload(rows, 16))).toBe(true);

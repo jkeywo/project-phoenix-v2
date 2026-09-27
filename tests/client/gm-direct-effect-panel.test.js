@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   createGmDirectEffectPanel,
   entityIsDamageable,
@@ -18,7 +21,7 @@ import {
   gmEffectScopeTotals,
   parseGmEffectScope,
 } from '../../gui/gm-effect-scope.js';
-import { t } from '../../gui/strings.js';
+import { t, setBaseCatalogue, setOverlayCatalogues, setLocale } from '../../gui/strings.js';
 import { createGmConfirmationProfile, createGmConfirmationController } from '../../gui/gm-confirmation.js';
 
 function mount({
@@ -425,6 +428,34 @@ describe('GM direct effect panel', () => {
       correlation: 'gm-effect-1',
       reason: t('server.gm.effect.reason_unspecified'),
     }));
+  });
+
+  it('repaints a completed intervention in German with typed values and the draft intact', () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+    setBaseCatalogue(fs.readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8'));
+    setOverlayCatalogues([{ source: 'gm-de-fixture', csv: 'id,de,de_source\n'
+      + 'server.gm.effect.result_applied,{name} fügte {entity} {amount} Hülle bei Tick {tick} zu. ({correlation}),'
+      + '[{name} applied {amount} hull to {entity} at tick {tick}. Applied ({correlation}).]\n' }]);
+    setLocale('en');
+    const { panel, submitDirectEffect } = mount();
+    panel.select(entity({ status: { hull_current_milli_hp: 2_000_000, hull_max_milli_hp: 2_000_000 } }));
+    typeAmount(1234.5);
+    amountInput().focus();
+    damageButton().click();
+    expect(submitDirectEffect).toHaveBeenCalledOnce();
+    panel.update({ results: [result({ tick: 2345, effect: {
+      ...result().effect, applied_milli_hp: 1_234_500,
+    } })] });
+    expect(logRows()[0].textContent).toContain('1,234.5');
+    setLocale('de');
+    panel.refreshLanguage();
+    expect(logRows()[0].textContent).toContain('fügte npc-1 1.234,5 Hülle bei Tick 2.345 zu');
+    expect(logRows()[0].dataset.tick).toBe('2345');
+    expect(amountInput().value).toBe('1234.5');
+    expect(document.activeElement).toBe(amountInput());
+    panel.destroy();
+    setOverlayCatalogues([]);
+    setLocale('en');
   });
 
   it('names the destroyed target and the discarded remainder on the result row', () => {
@@ -915,4 +946,3 @@ describe('GM direct effect panel', () => {
     });
   });
 });
-

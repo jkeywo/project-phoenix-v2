@@ -250,35 +250,35 @@ export function createGmJournalPanel({
     status.setAttribute('aria-atomic', 'true');
   }
   if (list) list.setAttribute('role', 'list');
-  if (empty) empty.textContent = t('server.gm.journal.empty');
-  // Panel-level answer to "what can I undo?", so a GM does not have to open
-  // entries one by one to discover that nothing in this build is reversible.
-  // Derived from the shared table, never asserted here.
-  if (inverseSupport) {
-    const supported = gmInverseSupportedKinds();
-    inverseSupport.textContent = supported.length === 0
-      ? t('server.gm.journal.inverse_support_none')
-      : t('server.gm.journal.inverse_support_some', {
-        kinds: supported
-          .map((kind) => (GM_JOURNAL_ACTION_KIND_LABELS[kind]
-            ? t(GM_JOURNAL_ACTION_KIND_LABELS[kind])
-            : kind))
-          .join(', '),
-      });
-  }
-  if (clearButton) clearButton.textContent = t('server.gm.journal.filter.clear');
-  if (undoButton) undoButton.textContent = t('server.gm.journal.undo');
   if (undoFeedback) {
     undoFeedback.setAttribute('role', 'status');
     undoFeedback.setAttribute('aria-live', 'polite');
   }
-  if (outcomeFilter) {
-    for (const option of outcomeFilter.options) {
+
+  function paintStaticLabels() {
+    if (empty) empty.textContent = t('server.gm.journal.empty');
+    // The support line reflects the current catalogue, never a cached answer.
+    if (inverseSupport) {
+      const supported = gmInverseSupportedKinds();
+      inverseSupport.textContent = supported.length === 0
+        ? t('server.gm.journal.inverse_support_none')
+        : t('server.gm.journal.inverse_support_some', {
+          kinds: supported
+            .map((kind) => (GM_JOURNAL_ACTION_KIND_LABELS[kind]
+              ? t(GM_JOURNAL_ACTION_KIND_LABELS[kind])
+              : kind))
+            .join(', '),
+        });
+    }
+    if (clearButton) clearButton.textContent = t('server.gm.journal.filter.clear');
+    if (undoButton) undoButton.textContent = t('server.gm.journal.undo');
+    if (outcomeFilter) for (const option of outcomeFilter.options) {
       option.textContent = t(option.value === 'all'
         ? 'server.gm.journal.filter.outcome_all'
         : OUTCOME_LABELS[option.value] || 'server.gm.journal.filter.outcome_all');
     }
   }
+  paintStaticLabels();
 
   const operatorName = (id) => {
     let name = id;
@@ -295,10 +295,10 @@ export function createGmJournalPanel({
     })
     : kindLabel(entry));
   const orderText = (entry) => (entry.sequence === undefined
-    ? t('server.gm.journal.order_unsequenced', { tick: String(entry.tick) })
+    ? t('server.gm.journal.order_unsequenced', { tick: entry.tick })
     : t('server.gm.journal.order', {
-      tick: String(entry.tick),
-      sequence: String(entry.sequence),
+      tick: entry.tick,
+      sequence: entry.sequence,
     }));
   const outcomeText = (entry) => t(OUTCOME_LABELS[entry.outcome]);
   const reasonText = (entry) => (entry.reason
@@ -426,7 +426,7 @@ export function createGmJournalPanel({
       affected: entry.affected,
       exposure: entry.spawn_exposure,
       technical: entry.outcome === 'applied'
-        ? t('server.gm.inverse.technical_applied', { tick: String(entry.tick) })
+        ? t('server.gm.inverse.technical_applied', { tick: entry.tick })
         : t(entry.outcome === 'no-op'
           ? 'server.gm.inverse.technical_no_op'
           : 'server.gm.inverse.technical_refused'),
@@ -562,9 +562,9 @@ export function createGmJournalPanel({
     if (empty) empty.hidden = filtered.length !== 0;
     if (status) {
       status.textContent = t('server.gm.journal.status', {
-        shown: String(filtered.length),
-        total: String(state.total),
-        capacity: String(state.capacity),
+        shown: filtered.length,
+        total: state.total,
+        capacity: state.capacity,
       });
     }
     // Selection is validated against the whole journal, not the filtered view:
@@ -617,6 +617,12 @@ export function createGmJournalPanel({
 
   return {
     update,
+    refreshLanguage() {
+      paintStaticLabels();
+      rebuildOperatorFilter();
+      undoFeedbackState(undoFeedback?.dataset.state || '');
+      render({ rebuildOperators: false });
+    },
     select,
     clearFilters,
     reset,

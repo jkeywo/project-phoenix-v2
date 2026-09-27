@@ -82,7 +82,15 @@ The browser Game Master and standalone Workshop each have their own private
 language choice, initially from that browser's language. Their selectors use
 the same composed catalogue as the Console but separate local storage keys, so
 choosing German in Workshop cannot change a crew member's or GM's choice.
-The GM repaints retained action results and activity from semantic ids. Workshop
+The GM repaints retained action results, intervention history, the journal and
+entity tree from semantic ids. Author world, entity, Station and System names
+as String Ids when they are catalogue copy; an unknown name remains literal,
+including a Game Master's own input. Keep ticks, amounts and counts as numbers
+until the `t()` display call so the GM's locale formats them. A language switch
+repaints the retained projection; it does not submit an intervention again or
+change its result, target, ordering, focus or draft. The final report uses the
+same String Id and typed-parameter rules, while literal narrative lines and
+private ship fields retain their existing meaning and visibility. Workshop
 repaints its mounted editor, preserving the draft and selected source. Its
 `window.phWorkshopLanguage.preview(locale)` and `.restore()` are a temporary
 presentation seam for translation previews; only `.select(locale)` saves a

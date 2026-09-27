@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gameOverView, reportRows } from '../../gui/game-over-view.js';
 import { LobbyState } from '../../gui/lobby-state.js';
-import { localiseTree, setTable, getTable, wireText } from '../../gui/strings.js';
+import { localiseTree, setTable, getTable, wireText, setBaseCatalogue, setOverlayCatalogues, setLocale, t } from '../../gui/strings.js';
 
 describe('gameOverView — visibility', () => {
   it('is visible only in the GameOver phase', () => {
@@ -193,6 +193,36 @@ const trafficPartial = {
 };
 
 describe('gameOverView — a report-bearing ending', () => {
+  it('renders a German narrative report after a live switch while leaving literal author text and scope private', () => {
+    const original = getTable();
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+    setBaseCatalogue(readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8'));
+    setOverlayCatalogues([{ source: 'report-de-fixture', csv: 'id,de,de_source\n'
+      + 'client.game_over_reported,EINSATZBERICHT,[MISSION REPORT]\n'
+      + 'world.falling_skyway.report.lyra.heading,Lyra Ascending,[Lyra Ascending]\n'
+      + 'world.falling_skyway.report.lyra.saved,Vor dem Strahlungsband gerettet.,[Pulled clear of the lane before the band closed.]\n' }]);
+    const raw = { phase: 'GameOver', outcome: 'defeat', reason: 'The author wrote this exact line.',
+      report: [
+        { ...lyraSaved, ships: ['private-instance'] },
+        { id: 'literal', heading: 'The author named this ship.',
+          outcome: 'world.falling_skyway.report.traffic.thinned', state: 'partial' },
+      ] };
+    setLocale('en');
+    const english = gameOverView({ ...raw, report: localiseTree(raw.report) });
+    expect(english.rows[0].outcomeId).toBe(t('world.falling_skyway.report.lyra.saved'));
+    setLocale('de');
+    const german = gameOverView({ ...raw, report: localiseTree(raw.report) });
+    expect(t(german.headlineId)).toBe('EINSATZBERICHT');
+    expect(german.outcome).toBe('reported');
+    expect(german.rows.map(row => row.id)).toEqual(['lyra', 'literal']);
+    expect(german.rows[0].outcomeId).toBe('Vor dem Strahlungsband gerettet.');
+    expect(german.rows[1].headingId).toBe('The author named this ship.');
+    expect(german.bodyText).toBe('The author wrote this exact line.');
+    expect(german.rows[0]).not.toHaveProperty('ships');
+    setOverlayCatalogues([]);
+    setLocale('en');
+    setTable(original);
+  });
   it('is classified reported and headlined as a report, not a verdict', () => {
     const vm = gameOverView({ phase: 'GameOver', report: [lyraSaved] });
     expect(vm.outcome).toBe('reported');

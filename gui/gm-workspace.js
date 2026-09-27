@@ -792,9 +792,13 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
         gmMissionPanel.refreshLanguage();
         gmObjectivePanel.refreshLanguage();
         gmCommsPanel.refreshLanguage();
+        gmDirectEffect.refreshLanguage();
+        gmJournalPanel.refreshLanguage();
         gmSessionControls.refreshAdmission();
         sessionWidget.render();
         shell.refresh();
+        const projection = gmProjection.state();
+        shell.refreshSelection(projection.entities.find(entity => entity.entity_id === projection.selectedId) || null);
       });
       if (activeId && active !== doc.activeElement) doc.getElementById(activeId)?.focus?.({ preventScroll: true });
     },

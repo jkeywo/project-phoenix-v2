@@ -88,6 +88,9 @@ export function hullPoints(milliHp) {
   return String(Math.round(milliHp) / MILLI_HP_PER_HP);
 }
 
+/** Keep the existing hullPoints helper stable; pass numbers to String Table interpolation. */
+function displayHullPoints(milliHp) { return Number(hullPoints(milliHp)); }
+
 /** Milli-HP from a typed hull-point amount, or null when it is not a request. */
 export function milliHpFromInput(value) {
   const points = typeof value === 'string' ? Number(value.trim()) : Number(value);
@@ -391,8 +394,8 @@ export function createGmDirectEffectPanel({
     let text = t(`server.gm.effect.result_${suffix}`, {
       name: operatorName(result.operator_id),
       entity: result.target || '',
-      amount: hullPoints(result.effect ? result.effect.applied_milli_hp : 0),
-      tick: String(result.tick),
+      amount: displayHullPoints(result.effect ? result.effect.applied_milli_hp : 0),
+      tick: result.tick,
       correlation: result.correlation,
       reason: refusalText(result.reason),
     });
@@ -409,7 +412,7 @@ export function createGmDirectEffectPanel({
     }
     if (result.effect && result.effect.discarded_milli_hp > 0) {
       text += t('server.gm.effect.result_discarded', {
-        amount: hullPoints(result.effect.discarded_milli_hp),
+        amount: displayHullPoints(result.effect.discarded_milli_hp),
       });
     }
     row.textContent = text;
@@ -509,7 +512,7 @@ export function createGmDirectEffectPanel({
     if (discarded > 0) {
       warning.dataset.discarded = String(discarded);
       const overflow = t('server.gm.effect.overflow_warning', {
-        amount: hullPoints(discarded),
+        amount: displayHullPoints(discarded),
       });
       text = text ? `${text} ${overflow}` : overflow;
     } else {
@@ -606,13 +609,13 @@ export function createGmDirectEffectPanel({
       } else if (chosen) {
         hullLine.textContent = t('server.gm.effect.scope_hull', {
           scope: scopeText(chosen),
-          current: hullPoints(totals.current),
-          max: hullPoints(totals.max),
+          current: displayHullPoints(totals.current),
+          max: displayHullPoints(totals.max),
         });
       } else {
         hullLine.textContent = t('server.gm.effect.hull', {
-          current: hullPoints(totals.current),
-          max: hullPoints(totals.max),
+          current: displayHullPoints(totals.current),
+          max: displayHullPoints(totals.max),
         });
       }
     }
@@ -679,15 +682,15 @@ export function createGmDirectEffectPanel({
       category,
       description: t('settings.gm.confirmation.effect', {
         effect: t(`server.gm.effect.${kind}`), name: displayText(target.name),
-        amount: hullPoints(amount), scope: scopeText(chosen),
+        amount: displayHullPoints(amount), scope: scopeText(chosen),
       }),
       preview: () => {
         const live = getEntity ? getEntity(target.entity_id)
           : selected?.entity_id === target.entity_id ? selected : null;
         const prediction = previewDirectEffect(live, kind, amount, chosen);
         return prediction ? t('settings.gm.confirmation.effect_preview', {
-          amount: hullPoints(prediction.applied_milli_hp),
-          discarded: hullPoints(prediction.discarded_milli_hp),
+          amount: displayHullPoints(prediction.applied_milli_hp),
+          discarded: displayHullPoints(prediction.discarded_milli_hp),
           result: t(prediction.destroyed ? 'settings.gm.confirmation.destroys'
             : 'settings.gm.confirmation.survives'),
         }) : t('settings.gm.confirmation.preview_unavailable');
@@ -770,11 +773,11 @@ export function createGmDirectEffectPanel({
           ? t(`server.gm.effect.${verb}_scoped_accessibility`, {
               name: selected ? displayText(selected.name) : '',
               scope: scopeText(chosen),
-              amount: hullPoints(amount || 0),
+              amount: displayHullPoints(amount || 0),
             })
           : t(`server.gm.effect.${verb}_accessibility`, {
               name: selected ? displayText(selected.name) : '',
-              amount: hullPoints(amount || 0),
+              amount: displayHullPoints(amount || 0),
             }),
       );
     }
@@ -896,6 +899,11 @@ export function createGmDirectEffectPanel({
     select,
     update,
     reset,
+    refreshLanguage() {
+      renderTarget();
+      renderLog();
+      paintFeedback(feedbackStatus?.dataset.state || null, feedbackStatus?.dataset.entity || null);
+    },
     refreshAdmission,
     preview: (kind) => previewDirectEffect(selected, kind, requestedMilliHp(), scope()),
     /** Absolute scope push, for the same reason `select` is one. */

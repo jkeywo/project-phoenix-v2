@@ -14,7 +14,7 @@ import {
   gmJournalEntryKey,
   parseGmJournalProjection,
 } from '../../gui/gm-journal-panel.js';
-import { buildTable, setTable, t } from '../../gui/strings.js';
+import { buildTable, setTable, t, setBaseCatalogue, setOverlayCatalogues, setLocale } from '../../gui/strings.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -96,7 +96,7 @@ it('renders the real applied, no-op and refused facts with public attribution an
   // Outcome is words on the row, not colour alone.
   expect(rows().map((row) => row.dataset.outcome)).toEqual(['applied', 'no-op', 'refused']);
   expect(document.getElementById('gm-journal-status').textContent)
-    .toBe(t('server.gm.journal.status', { shown: '3', total: '3', capacity: '4096' }));
+    .toBe(t('server.gm.journal.status', { shown: 3, total: 3, capacity: 4096 }));
   expect(document.getElementById('gm-journal-empty').hidden).toBe(true);
 });
 
@@ -115,7 +115,47 @@ it('states up front which families this build can undo', () => {
 it('reports the honest total when the durable journal is longer than the published window', () => {
   panel.update(payload(HISTORY, { total: 900 }));
   expect(document.getElementById('gm-journal-status').textContent)
-    .toBe(t('server.gm.journal.status', { shown: '3', total: '900', capacity: '4096' }));
+    .toBe(t('server.gm.journal.status', { shown: 3, total: 900, capacity: 4096 }));
+});
+
+it('repaints retained history in German with typed tick and capacity without changing focus', () => {
+  setBaseCatalogue(read('assets/strings/strings.csv'));
+  setOverlayCatalogues([{ source: 'journal-de-fixture', csv: 'id,de,de_source\n'
+    + 'server.gm.journal.order,Takt {tick} / Nr. {sequence},[Tick {tick} / #{sequence}]\n'
+    + 'server.gm.journal.status,{shown} von {total} Aktionen. Limit {capacity}.,'
+    + '[Showing {shown} of {total} recorded actions. The run\'s journal holds up to {capacity}.]\n'
+    + 'server.gm.journal.filter.operator_all,Alle Spielleiter,[All operators]\n'
+    + 'server.gm.journal.filter.outcome_all,Alle Ergebnisse,[All outcomes]\n'
+    + 'server.gm.journal.filter.clear,Filter löschen,[Clear filters]\n'
+    + 'server.gm.journal.undo,Aktion rückgängig machen,[Undo this action]\n'
+    + 'server.gm.journal.outcome.applied,Ausgeführt,[Applied]\n'
+    + 'server.gm.journal.inverse_support_some,Rückgängig möglich: {kinds}.,'
+    + '[Undo is available for: {kinds}. Select an entry for its consequences.]\n' }]);
+  setLocale('en');
+  panel.update(payload([entry({ tick: 1234, sequence: 2 }),
+    entry({ operator_id: 'gm-sam', correlation: 'second', sequence: 3 })]));
+  const operators = document.getElementById('gm-journal-operator-filter');
+  const outcomes = document.getElementById('gm-journal-outcome-filter');
+  operators.value = 'gm-alex';
+  outcomes.value = 'applied';
+  outcomes.dispatchEvent(new Event('change'));
+  rows()[0].focus();
+  setLocale('de');
+  panel.refreshLanguage();
+  expect(rowText(0)[0]).toBe('Takt 1.234 / Nr. 2');
+  expect(document.getElementById('gm-journal-status').textContent).toBe('1 von 2 Aktionen. Limit 4.096.');
+  expect(operators.options[0].textContent).toBe('Alle Spielleiter');
+  expect(outcomes.options[0].textContent).toBe('Alle Ergebnisse');
+  expect([...outcomes.options].find(option => option.value === 'applied').textContent).toBe('Ausgeführt');
+  expect(document.getElementById('gm-journal-clear-filters').textContent).toBe('Filter löschen');
+  expect(document.getElementById('gm-journal-undo').textContent).toBe('Aktion rückgängig machen');
+  expect(document.getElementById('gm-journal-inverse-support').textContent).toContain('Rückgängig möglich:');
+  expect(operators.value).toBe('gm-alex');
+  expect(outcomes.value).toBe('applied');
+  expect(document.activeElement).toBe(rows()[0]);
+  expect(panel.state().entries[0].tick).toBe(1234);
+  setOverlayCatalogues([]);
+  setLocale('en');
 });
 
 it('shows the refusal reason and the technical/witnessed split on the selected entry', () => {

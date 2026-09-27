@@ -16,7 +16,7 @@ afterEach(() => {
   document.head.querySelectorAll('link').forEach(link => link.remove());
   document.body.replaceChildren();
 });
-function mount(extra = {}, translate = id => id) {
+function mount(extra = {}, translate = id => id, has = () => false) {
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   document.body.innerHTML = parsed.body.innerHTML;
   document.documentElement.classList.add('phoenix-gm-page');
@@ -24,7 +24,7 @@ function mount(extra = {}, translate = id => id) {
   const win = { document, Event, MutationObserver: class extends MutationObserver {
     constructor(fn) { super(fn); observers.push(this); }
   }, __phoenixGmPage: true, ...extra };
-  const shell = mountGmWorkspaceShell({doc:document,win,t:translate,has:()=>false,selectEntity});
+  const shell = mountGmWorkspaceShell({doc:document,win,t:translate,has,selectEntity});
   mountedShells.push(shell);
   return {shell,selectEntity,win};
 }
@@ -510,7 +510,55 @@ it('selects entities through the shared selection seam and stations in observati
   shell.refresh({ entities: [entity] }, { ships: [{ ship_id: 'ship', stations: [{ station_id: 'helm', name: 'Helm', rating: 'Backfill' }] }] });
   const button = text => [...get('gm-roster-ships').querySelectorAll('button')].find(node => node.textContent === text);
   button('Resolute').click(); expect(selectEntity).toHaveBeenCalledWith('ship');
-  button('Helm · Backfill').click(); expect(station).toHaveBeenCalledWith('ship', 'helm');
+  button('Helm · station.rating.backfill.name').click(); expect(station).toHaveBeenCalledWith('ship', 'helm');
+});
+it('repaints retained GM connection status after a language change', () => {
+  let german = false;
+  const translate = id => german && id === 'server.gm.shell.ready' ? 'Bereit' : id;
+  const { shell } = mount({}, translate);
+  shell.metadata({ gms: [{ id: 'gm-1', name: 'Ari', ready: true }], ship_slots: [] });
+  const operators = get('gm-roster-operators');
+  expect(operators.textContent).toContain('server.gm.shell.ready');
+  german = true;
+  shell.refresh();
+  expect(operators.textContent).toContain('Ari · Bereit');
+  expect(operators.textContent).not.toContain('server.gm.shell.ready');
+});
+it('repaints the same selected entity and a visible group summary without changing selection', () => {
+  let german = false;
+  const translate = id => german ? ({ 'entity.ship': 'Schiff', 'system.engine': 'Antrieb',
+    'server.gm.tree.unassigned': 'Ohne Welt', 'server.gm.tree.group_summary': 'Gruppe' })[id] || id : id;
+  const { shell, selectEntity } = mount({}, translate,
+    id => ['entity.ship', 'system.engine'].includes(id));
+  const entity = { entity_id: 'ship', name: 'entity.ship', kind: 'player_ship', faction: null,
+    status: { systems: [{ name: 'system.engine', current_milli_hp: 1000, max_milli_hp: 2000 }] } };
+  shell.refresh({ entities: [entity] });
+  shell.selection(entity);
+  const chip = get('gm-selection-chip');
+  expect(chip.textContent).toBe('entity.ship');
+  german = true;
+  shell.refresh();
+  shell.refreshSelection(entity);
+  expect(chip.textContent).toBe('Schiff');
+  expect(get('gm-system-pills').textContent).toContain('Antrieb · 50%');
+  expect(selectEntity).not.toHaveBeenCalled();
+
+  german = false;
+  shell.refresh();
+  const world = [...get('gm-roster-ships').querySelectorAll('button')]
+    .find(button => button.textContent === 'server.gm.tree.unassigned');
+  world.click();
+  const summary = get('gm-tree-inspection');
+  expect(summary.hidden).toBe(false);
+  const title = summary.querySelector('h3');
+  german = true;
+  shell.refresh();
+  shell.refreshSelection(entity);
+  expect(summary.hidden).toBe(false);
+  expect(summary.querySelector('h3')).toBe(title);
+  expect(title.textContent).toBe('Ohne Welt');
+  expect(summary.querySelector('p').textContent).toBe('Gruppe');
+  expect(selectEntity).not.toHaveBeenCalled();
 });
 it('lets an empty player-slot tree node fill with AI before Start', () => {
   const submitted = vi.fn(() => true);

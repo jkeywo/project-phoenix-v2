@@ -697,6 +697,13 @@ fn main() {
             }
         }
     }
+    if sim.fleet_code.is_some() && host_lobby.is_none() {
+        eprintln!(
+            "phoenix-host: --fleet-code requires the embedded fleet bridge: build with \
+             --features ultralight and provide a built host bundle with --client-dir"
+        );
+        std::process::exit(1);
+    }
     cfg.host_lobby = host_lobby.clone();
     // The mod-pack shelf (issue #1366). Scanned HERE rather than inside the app
     // builder, so an operator who named a folder that is not there is told at the
@@ -736,7 +743,7 @@ fn main() {
         }
     };
     if host_lobby.is_some() {
-        let explicit_owner = sim.rendezvous.is_some();
+        let explicit_owner = sim.rendezvous.is_some() && sim.fleet_code.is_none();
         let base = sim
             .rendezvous
             .as_deref()
@@ -751,6 +758,10 @@ fn main() {
                     .get_resource::<project_phoenix::lobby::SelectedShipResource>()
                     .map(|ship| ship.0.clone())
                     .unwrap_or_default();
+                let ship_name =
+                    project_phoenix::entities::config_cache::get_cached_entity_config(&ship_path)
+                        .and_then(|config| config.name)
+                        .unwrap_or_default();
                 let fleet_config = native_host::host_lobby::fleet::NativeFleetConfig {
                     base: base.to_string(),
                     origin: origin.to_string(),
@@ -762,12 +773,22 @@ fn main() {
                     max_name_length: table.limits.max_slot_name_length,
                     max_ship_path_length: table.limits.max_slot_ship_path_length,
                     ship_path,
-                    ship_name: String::new(),
+                    ship_name,
                     gm_name: "GM".to_string(),
                     operator_id: project_phoenix::gm_action::NATIVE_GM_OPERATOR_ID.to_string(),
                     credentials: native_host::host_lobby::fleet::mint_reconnect_credentials(),
                 };
                 app.insert_resource(fleet_config);
+                if let Some(code) = &sim.fleet_code {
+                    let mut role = app
+                        .world_mut()
+                        .resource_mut::<native_host::session_role::NativeSessionRoleState>();
+                    role.request(native_host::session_role::NativeSessionRole::ShipHost);
+                    role.pending_code = Some(code.clone());
+                    app.world_mut()
+                        .resource_mut::<native_host::host_lobby::fleet::NativeFleetEvents>()
+                        .request_join(code.clone());
+                }
                 if explicit_owner {
                     match native_host::relay_socket::WsRelaySocket::connect(base, origin) {
                         Ok(socket) => {

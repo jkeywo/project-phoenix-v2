@@ -288,6 +288,8 @@ export function createFleetOwner(opts) {
     onError = () => {},
     onLog = () => {},
     authenticateFrame = defaultAuthenticateFrame,
+    levers,
+    onDiag = () => {},
     transports,
     factories,
   } = opts;
@@ -552,6 +554,7 @@ export function createFleetOwner(opts) {
       fleet = result.fleet;
       links.set(conn.peer, conn);
       connSlots.set(conn.peer, hostSlotOrdinal(result.slot.id));
+      reportLink(conn.peer, { event: 'open' });
       conn.send(encodeHostFrame(welcomeFrame(result.slot.id, rosterOf(fleet), {
         role: result.role,
         operatorId: result.operatorId,
@@ -586,6 +589,7 @@ export function createFleetOwner(opts) {
       fleet = verdict.fleet;
       pendingLinks.set(conn.peer, conn);
       connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));
+      reportLink(conn.peer, { event: 'open' });
       const provisional = provisionalGmJoinRoster(fleet);
       conn.send(encodeHostFrame(gmJoinPendingFrame(verdict.request, provisional)));
       if (verdict.request.kind === GM_JOIN_RECONNECT) {
@@ -614,6 +618,7 @@ export function createFleetOwner(opts) {
     fleet = verdict.fleet;
     links.set(conn.peer, conn);
     connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));
+    reportLink(conn.peer, { event: 'open' });
     conn.send(encodeHostFrame(welcomeFrame(verdict.meshSlot, rosterOf(fleet), {
       role: verdict.role,
       operatorId: verdict.operatorId,
@@ -693,12 +698,25 @@ export function createFleetOwner(opts) {
   // Declared before the transport because its own callbacks reach back for it;
   // they only ever run off a socket event, but a `const` in a temporal dead
   // zone is a footgun aimed at whoever next makes one of those synchronous.
+  function reportLink(peer, event) {
+    const ship = slotForPeer(fleet, peer);
+    const gm = gmForPeer(fleet, peer);
+    onDiag({ ...event, link: peer, identity: ship?.id || gm?.id || null,
+      name: ship?.name || ship?.ship?.name || gm?.name || '' });
+  }
   let host = null;
   host = createRendezvousHost({
     base,
     namespace: NAMESPACE_SERVER,
     transports,
     iceServers,
+    levers,
+    onPeerIce: (peer, state) => reportLink(peer, state === 'ws-relay'
+      ? { event: 'transport', transport: 'ws-relay' }
+      : state === 'connected' || state === 'completed'
+        ? { event: 'transport', transport: 'webrtc' }
+      : { event: state === 'closed' || state === 'failed' ? 'closed' : 'ice-state', state }),
+    onPeerShedding: (peer, dropped) => reportLink(peer, { event: 'relay-degraded', dropped }),
     factories,
     checkStamp,
     onCode: (issued) => {
@@ -1125,6 +1143,8 @@ export function createFleetMember(opts) {
     onRefusedSlot = () => {},
     onStatus = () => {},
     onLog = () => {},
+    levers,
+    onDiag = () => {},
     factories,
   } = opts;
 
@@ -1426,9 +1446,14 @@ export function createFleetMember(opts) {
         onError(code, detail);
       }
     },
-    onStatus,
+    onStatus: status => {
+      if (status === 'disconnected' || status === 'error') onDiag({ event: 'closed' });
+      onStatus(status);
+    },
     onError,
     onLog,
+    levers,
+    onDiag,
   });
 
   return {

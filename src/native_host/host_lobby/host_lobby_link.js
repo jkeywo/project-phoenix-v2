@@ -194,16 +194,22 @@ function send(record) {
 }
 
 const nativeFleetPeer = createNativeFleetPeer({ send, log: msg => console.log(msg) });
+let pendingNativeFleetJoin = null;
+let latestNativeFleetState = null;
+function joinNativeFleetWhenReady() {
+  if (!pendingNativeFleetJoin || !landingJoinData) return;
+  const request = pendingNativeFleetJoin;
+  pendingNativeFleetJoin = null;
+  return nativeFleetPeer.join(request.code, landingJoinData, request.reconnect || null, request.role || 'gm');
+}
 window.__phoenixHostFleetConfigure = json => nativeFleetPeer.configure(json);
 window.__phoenixHostFleetUpdate = json => {
   let state;
   try { state = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return false; }
+  latestNativeFleetState = state;
   if (state?.join_request) {
-    nativeFleetPeer.join(
-      state.join_request.code,
-      landingJoinData,
-      state.join_request.reconnect || null,
-    );
+    pendingNativeFleetJoin = state.join_request;
+    joinNativeFleetWhenReady();
   }
   return nativeFleetPeer.update(state);
 };
@@ -323,7 +329,10 @@ let landingJoinPending = false;
 
 fetch('assets/join/join-codes.json')
   .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-  .then(data => { landingJoinData = data; })
+  .then(data => {
+    landingJoinData = data;
+    if (joinNativeFleetWhenReady() && latestNativeFleetState) nativeFleetPeer.update(latestNativeFleetState);
+  })
   .catch(error => console.warn('[host-lobby] join-code format unavailable', error));
 
 function landingProvides() {

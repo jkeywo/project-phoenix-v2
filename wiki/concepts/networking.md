@@ -3,7 +3,7 @@ title: Networking
 type: concept
 tags: [networking, webrtc, rendezvous, join-code, session-token, gm, star-topology, datachannel, snapshot, fleet, host-mesh, lockstep, ws-relay, diagnostics]
 sources: [gui/fleet-crew.js, src/lockstep/crew.rs, src/lobby/session.rs, src/session_connections.rs, src/session_connections/browser.rs, server.html, client.html, gui/rendezvous-transport.js, gui/rendezvous-relay.js, gui/rendezvous-protocol.js, gui/transport-levers.js, gui/connection-diagnostics.js, gui/join-code.js, gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/gm_join.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/transfer.rs, src/lockstep/snapshot_relay.rs, src/lockstep/mod.rs, src/core/codec.rs, gui/connection-manager.js, gui/host-peer-routing.js, worker-rendezvous/src/registry.js, worker-rendezvous/src/relay.js, worker-rendezvous/src/index.js, gui/session-token.js, src/core/rendezvous.rs, src/native_host/relay_transport.rs, src/native_host/relay_socket.rs, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/world_setup.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/delivery/mod.rs, AGENTS.md]
-updated: 2026-09-13
+updated: 2026-09-27
 ---
 
 # Networking
@@ -316,6 +316,14 @@ It also carries `window.__wasmReady` (set once the host page has both opened its
 `tests/smoke/transport-fixture.js` is the single seam every transport assumption lives behind — `fixtures.js` and the ~40 specs importing `readHostPeerId`/`createTestClient` know nothing about it. See `tests/smoke/transport-shim.spec.js` (the stand-in itself), `rendezvous-join.spec.js` (typed join, QR link, distinct refusals), `multi-client-crew.spec.js` (four phones on one code) and `snapshot-channel.spec.js` (the delivery-class split and its per-token fallback), plus [Testing Strategy](./testing-strategy.md).
 
 ## Related
+
+`tests/client/fleet-matrix-harness.js` supplies reusable six-peer protocol cases
+for direct, forced WebSocket relay and automatic RTC exhaustion. These use
+socket/RTC stand-ins. Native `--fleet-code` joins a selected ship through
+`gui/native-fleet-peer.js` and the retained lobby bridge; the GM landing route
+continues to join as GM. Runtime evidence and its limits are tracked in
+`docs/acceptance/1530-six-peer-matrix.md`.
+
 
 - [Architecture](./architecture.md) · [Message Flow](./message-flow.md)
 - [Player](../entities/player.md) · [Session](../entities/session.md)

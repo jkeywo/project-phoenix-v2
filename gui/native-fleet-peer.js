@@ -1,5 +1,5 @@
 import { createFleetMember, createFleetOwner } from './fleet-session.js';
-import { HOST_ROLE_GM, HOST_ROLE_SHIP_GM } from './host-mesh.js';
+import { HOST_ROLE_GM, HOST_ROLE_SHIP, HOST_ROLE_SHIP_GM } from './host-mesh.js';
 
 /**
  * Native host-mesh control plane. The embedded surface owns the network link;
@@ -8,6 +8,7 @@ import { HOST_ROLE_GM, HOST_ROLE_SHIP_GM } from './host-mesh.js';
  */
 export function createNativeFleetPeer({
   send, log = console.log, createOwner = createFleetOwner, createMember = createFleetMember,
+  onRoster = () => {}, onDiag = () => {},
 } = {}) {
   let handle = null;
   let configured = false;
@@ -15,10 +16,21 @@ export function createNativeFleetPeer({
   let nextRosterGeneration = 1;
   const pendingRosters = new Map();
   let config = null;
+  const pendingWire = [];
+  let wireReady = false;
+  let wireFailed = false;
 
   const bridgeSocket = () => {
+    wireReady = false;
+    let messageHandler = null;
+    const drainWire = () => {
+      if (!wireReady || typeof messageHandler !== 'function') return;
+      while (pendingWire.length && value.readyState === 1) {
+        messageHandler({ data: pendingWire.shift() });
+      }
+    };
     const value = {
-      readyState: 1,
+      readyState: wireFailed ? 3 : 1,
       bufferedAmount: 0,
       send(frame) { send({ kind: 'fleet_wire_send', frame }); },
       close() {
@@ -27,12 +39,18 @@ export function createNativeFleetPeer({
         value.onclose?.();
       },
       onopen: null,
-      onmessage: null,
+      get onmessage() { return messageHandler; },
+      set onmessage(handler) { messageHandler = handler; drainWire(); },
       onerror: null,
       onclose: null,
     };
     socket = value;
-    queueMicrotask(() => value.readyState === 1 && value.onopen?.());
+    queueMicrotask(() => {
+      if (value.readyState !== 1) return;
+      value.onopen?.();
+      wireReady = true;
+      drainWire();
+    });
     return value;
   };
 
@@ -86,13 +104,15 @@ export function createNativeFleetPeer({
           if (!credential) throw new Error('native fleet GM credential pool is exhausted');
           return credential;
         },
-        name: config.gm_name || 'GM',
+        name: config.ship_name || config.gm_name || 'GM',
         ship: { template_path: config.ship_path || null, name: config.ship_name || '' },
         checkStamp: (stamp) => sameStamp(stamp, config.stamp)
           ? { ok: true }
           : { ok: false, code: 'version-mismatch' },
         authenticateFrame,
         onCode: (code) => emit({ kind: 'fleet_code', code: code.full, suffix: code.suffix }),
+        onRoster,
+        onDiag,
         onSimulationRoster: (roster) => {
           const generation = nextRosterGeneration++;
           emit({ kind: 'fleet_roster', generation, roster: JSON.stringify(roster) });
@@ -110,8 +130,9 @@ export function createNativeFleetPeer({
       return true;
     },
 
-    join(code, data, reconnect = null) {
+    join(code, data, reconnect = null, role = HOST_ROLE_GM) {
       if (!configured || !config || handle) return false;
+      if (role !== HOST_ROLE_GM && role !== HOST_ROLE_SHIP) return false;
       handle = createMember({
         base: config.base,
         code,
@@ -123,10 +144,15 @@ export function createNativeFleetPeer({
           socket: bridgeSocket,
           peer: () => { throw new Error('native fleet is relay-only'); },
         },
-        role: HOST_ROLE_GM,
-        name: config.gm_name || 'GM',
+        role,
+        onRoster,
+        onDiag,
+        ship: role === HOST_ROLE_SHIP
+          ? { template_path: config.ship_path || null, name: config.ship_name || '' } : undefined,
+        name: role === HOST_ROLE_SHIP ? config.ship_name || '' : config.gm_name || 'GM',
         reconnectCredential: reconnect && reconnect.reconnectCredential,
         claim: reconnect && reconnect.claim,
+        onWelcome: () => emit({ kind: 'fleet_join_status', status: 'admitted' }),
         // createFleetMember can announce identity synchronously while its
         // factory call is still assigning `handle`. Defer one microtask so the
         // persisted reconnect claim contains the admitted mesh slot as well as
@@ -184,10 +210,24 @@ export function createNativeFleetPeer({
       if (handle) handle.close();
       handle = null;
       configured = false;
+      pendingWire.length = 0;
+      wireReady = false;
+      wireFailed = false;
+      socket = null;
     },
 
     receive(frame) {
-      if (socket?.readyState === 1) socket.onmessage?.({ data: frame });
+      if (wireFailed) return;
+      if (wireReady && socket?.readyState === 1 && typeof socket.onmessage === 'function') {
+        socket.onmessage({ data: frame });
+      } else if (pendingWire.length < 64) {
+        pendingWire.push(frame);
+      } else {
+        wireFailed = true;
+        pendingWire.length = 0;
+        socket?.close();
+        emit({ kind: 'fleet_fault', reason: 'pending-frame-overflow', detail: '' });
+      }
     },
 
     get role() { return handle?.role || HOST_ROLE_SHIP_GM; },

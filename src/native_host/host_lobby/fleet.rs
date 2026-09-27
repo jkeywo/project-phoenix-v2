@@ -68,6 +68,7 @@ struct NativeRosterResult {
 #[derive(Clone, Serialize)]
 struct NativeFleetJoinRequest {
     code: String,
+    role: &'static str,
     reconnect: Option<crate::native_host::fleet_identity::NativeFleetIdentity>,
 }
 
@@ -201,7 +202,7 @@ fn apply_events(world: &mut World) {
                 let Some(config) = world.get_resource::<NativeFleetConfig>().cloned() else {
                     continue;
                 };
-                let reconnect = world
+                let mut reconnect = world
                     .resource::<crate::native_host::fleet_identity::NativeFleetIdentityStore>()
                     .load(&code)
                     .unwrap_or_else(|error| {
@@ -210,8 +211,26 @@ fn apply_events(world: &mut World) {
                         );
                         None
                     });
+                let role = if world
+                    .resource::<crate::native_host::session_role::NativeSessionRoleState>()
+                    .role()
+                    == crate::native_host::session_role::NativeSessionRole::ShipHost
+                {
+                    "ship"
+                } else {
+                    "gm"
+                };
+                if role == "ship" {
+                    // A native GM capability stored for this code cannot claim
+                    // a ship slot or change this explicitly selected role.
+                    reconnect = None;
+                }
                 world.resource_mut::<NativeFleetPublication>().join_request =
-                    Some(NativeFleetJoinRequest { code, reconnect });
+                    Some(NativeFleetJoinRequest {
+                        code,
+                        role,
+                        reconnect,
+                    });
                 if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
                     wire.0.close();
                 }
@@ -523,7 +542,8 @@ fn publish_state(world: &mut World) {
         .unwrap_or_default();
     let validation = world.contains_resource::<crate::world::config::WorldConfig>();
     let update = NativeFleetUpdate {
-        ship: serde_json::json!({ "template_path": ship_path }),
+        ship: serde_json::json!({ "template_path": ship_path,
+            "name": world.resource::<NativeFleetConfig>().ship_name }),
         ship_ready: validation,
         crew,
         station_ratings,

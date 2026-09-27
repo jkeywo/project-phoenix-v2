@@ -2,6 +2,55 @@ import { describe, expect, it, vi } from 'vitest';
 import { createNativeFleetPeer } from '../../gui/native-fleet-peer.js';
 
 describe('native technical fleet peer', () => {
+  it('retains reliable frames until the bridge socket handlers are registered', async () => {
+    const received = [];
+    let options;
+    const peer = createNativeFleetPeer({ send: vi.fn(), createOwner: candidate => {
+      options = candidate;
+      return { close() {} };
+    } });
+    peer.receive('before-socket');
+    peer.configure({ base: 'https://fleet.test', credentials: ['one'] });
+    const socket = options.factories.socket();
+    peer.receive('before-handlers');
+    socket.onmessage = event => received.push(event.data);
+    await Promise.resolve();
+    peer.receive('after-open');
+    expect(received).toEqual(['before-socket', 'before-handlers', 'after-open']);
+  });
+
+  it('refuses an overflowing startup wire explicitly instead of losing reliable frames', () => {
+    const send = vi.fn();
+    const peer = createNativeFleetPeer({ send });
+    for (let i = 0; i < 65; i += 1) peer.receive(`frame-${i}`);
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      kind: 'fleet_fault', reason: 'pending-frame-overflow', detail: '',
+    });
+  });
+  it('admits a selected native ship through the ordinary fleet member path', () => {
+    const sent = [];
+    let options;
+    const handle = {
+      role: 'ship', update: vi.fn(), setCrewReadiness: vi.fn(),
+      setGmReady: vi.fn(), setStartValidation: vi.fn(), broadcast: vi.fn(),
+    };
+    const peer = createNativeFleetPeer({
+      send: record => sent.push(record),
+      createMember: candidate => { options = candidate; return handle; },
+    });
+    peer.configure({ base: 'https://fleet.test', owner: false,
+      ship_path: 'assets/entities/alliance_cruiser.toml', credentials: ['configuration'] });
+    expect(peer.join('SERVER-CODE', {}, null, 'ship')).toBe(true);
+    expect(options.role).toBe('ship');
+    expect(options.ship.template_path).toBe('assets/entities/alliance_cruiser.toml');
+    expect(options.transports).toEqual(['ws-relay']);
+    options.onWelcome();
+    expect(sent).toContainEqual({ kind: 'fleet_join_status', status: 'admitted' });
+    peer.update({ ship: options.ship, ship_ready: true,
+      crew: { connected: 3, ready: 3 }, station_ratings: [['helm', 'Std']] });
+    expect(handle.setCrewReadiness).toHaveBeenCalledWith(
+      { connected: 3, ready: 3 }, [['helm', 'Std']]);
+  });
   it('opens one relay-only owner carrying ship and GM capabilities', async () => {
     const sent = [];
     let options;
@@ -58,6 +107,7 @@ describe('native technical fleet peer', () => {
     socket.onmessage = received;
     socket.send('{"type":"host-open"}');
     peer.receive('{"type":"ready"}');
+    await Promise.resolve();
     expect(sent).toContainEqual({ kind: 'fleet_wire_send', frame: '{"type":"host-open"}' });
     expect(received).toHaveBeenCalledWith({ data: '{"type":"ready"}' });
   });

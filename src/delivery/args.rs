@@ -150,6 +150,8 @@ pub struct SimArgs {
     /// keeps the pre-#1113 behaviour: a host nobody can connect to, which is
     /// exactly what `--solo` is for.
     pub rendezvous: Option<String>,
+    /// Join an existing fleet as this process's selected player ship.
+    pub fleet_code: Option<String>,
     /// The `Origin` header the rendezvous socket claims.
     ///
     /// Required with `--rendezvous`, and deliberately not defaulted: the
@@ -323,6 +325,9 @@ CREW (issue #1113)
                           discovering it. These explicit flags override the
                           built-in rendezvous used by the lobby's GM-only Join
                           as Peer route; New Game remains LAN-direct by default.
+    --fleet-code <CODE>   Join this ship to an existing fleet. Requires --world,
+                          --client-dir, --rendezvous and --origin; refuses
+                          --solo. The native fleet link uses WebSocket relay.
     --origin <URL>        The Origin header that socket claims. REQUIRED with
                           --rendezvous and deliberately not defaulted: the
                           service refuses an upgrade whose Origin is not on its
@@ -375,6 +380,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut skip_bundle_check = false;
     let mut world: Option<String> = None;
     let mut rendezvous: Option<String> = None;
+    let mut fleet_code: Option<String> = None;
     let mut origin: Option<String> = None;
     let mut ship: Option<String> = None;
     let mut seed: Option<u64> = None;
@@ -475,6 +481,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                 mod_pack_dir_given = true;
             }
             "--rendezvous" => rendezvous = Some(value_for(&arg, &mut it)?),
+            "--fleet-code" => fleet_code = Some(value_for(&arg, &mut it)?),
             "--origin" => origin = Some(value_for(&arg, &mut it)?),
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -496,6 +503,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             || setup
             || profile.is_some()
             || rendezvous.is_some()
+            || fleet_code.is_some()
             || origin.is_some()
             || ship.is_some()
             || seed.is_some()
@@ -601,6 +609,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             ("--frame-stats", frame_stats),
             ("--mod-pack-dir", mod_pack_dir.is_some()),
             ("--rendezvous", rendezvous.is_some()),
+            ("--fleet-code", fleet_code.is_some()),
             ("--origin", origin.is_some()),
         ] {
             if given {
@@ -633,6 +642,11 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
              not on its deployed allowlist, and a native host has no page origin to send"
                 .to_string(),
         );
+    }
+    if fleet_code.is_some()
+        && (world.is_none() || rendezvous.is_none() || client_dir.is_none() || solo)
+    {
+        return Err("--fleet-code needs --world, --rendezvous, --origin and --client-dir, and refuses --solo".into());
     }
     if origin.is_some() && rendezvous.is_none() {
         return Err("--origin only means anything with --rendezvous".to_string());
@@ -708,6 +722,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             panes,
             frame_stats,
             rendezvous,
+            fleet_code,
             origin,
         })
     } else {
@@ -1148,6 +1163,52 @@ mod tests {
         assert!(err.contains("--origin"), "{err}");
         let err = parse(&["--world", "w.toml", "--origin", "https://x.test"]).unwrap_err();
         assert!(err.contains("--rendezvous"), "{err}");
+    }
+
+    #[test]
+    fn joining_a_native_ship_requires_a_loaded_world_and_live_bridge() {
+        let args = run(&[
+            "--world",
+            "w.toml",
+            "--client-dir",
+            "dist",
+            "--rendezvous",
+            "https://x.test",
+            "--origin",
+            "https://host.test",
+            "--fleet-code",
+            "ABCDWXYZ",
+        ]);
+        assert_eq!(args.sim.unwrap().fleet_code.as_deref(), Some("ABCDWXYZ"));
+        for args in [
+            vec!["--world", "w.toml", "--fleet-code", "ABCDWXYZ"],
+            vec![
+                "--lobby",
+                "--client-dir",
+                "dist",
+                "--rendezvous",
+                "https://x.test",
+                "--origin",
+                "https://host.test",
+                "--fleet-code",
+                "ABCDWXYZ",
+            ],
+            vec![
+                "--world",
+                "w.toml",
+                "--solo",
+                "--client-dir",
+                "dist",
+                "--rendezvous",
+                "https://x.test",
+                "--origin",
+                "https://host.test",
+                "--fleet-code",
+                "ABCDWXYZ",
+            ],
+        ] {
+            assert!(parse(&args).unwrap_err().contains("--fleet-code"));
+        }
     }
 
     #[test]

@@ -1,0 +1,457 @@
+{
+  "kind": "loopback-protocol-only",
+  "timestamp": "2026-09-27T00:13:00.177Z",
+  "runtime": "v24.13.0",
+  "revision": "ea9acfb316c80a52ccbf586d07c3a5ecdfa853e4",
+  "dirty": true,
+  "tracked_source_patch": "diff --git a/assets/join/join-codes.json b/assets/join/join-codes.json\nindex a3e7af20..07776db4 100644\n--- a/assets/join/join-codes.json\n+++ b/assets/join/join-codes.json\n@@ -30,7 +30,7 @@\n     \"record_ttl_seconds\": 43200,\n     \"max_lookups_per_connection\": 60,\n     \"max_peers_per_record\": 32,\n-    \"max_fleet_hosts\": 4,\n+    \"max_fleet_hosts\": 32,\n     \"max_slot_name_length\": 48,\n     \"max_slot_ship_path_length\": 160,\n     \"max_code_length\": 160,\ndiff --git a/gui/fleet-session.js b/gui/fleet-session.js\nindex 1a166d2e..6101b5ed 100644\n--- a/gui/fleet-session.js\n+++ b/gui/fleet-session.js\n@@ -288,6 +288,8 @@ export function createFleetOwner(opts) {\n     onError = () => {},\n     onLog = () => {},\n     authenticateFrame = defaultAuthenticateFrame,\n+    levers,\n+    onDiag = () => {},\n     transports,\n     factories,\n   } = opts;\n@@ -552,6 +554,7 @@ export function createFleetOwner(opts) {\n       fleet = result.fleet;\n       links.set(conn.peer, conn);\n       connSlots.set(conn.peer, hostSlotOrdinal(result.slot.id));\n+      reportLink(conn.peer, { event: 'open' });\n       conn.send(encodeHostFrame(welcomeFrame(result.slot.id, rosterOf(fleet), {\n         role: result.role,\n         operatorId: result.operatorId,\n@@ -586,6 +589,7 @@ export function createFleetOwner(opts) {\n       fleet = verdict.fleet;\n       pendingLinks.set(conn.peer, conn);\n       connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));\n+      reportLink(conn.peer, { event: 'open' });\n       const provisional = provisionalGmJoinRoster(fleet);\n       conn.send(encodeHostFrame(gmJoinPendingFrame(verdict.request, provisional)));\n       if (verdict.request.kind === GM_JOIN_RECONNECT) {\n@@ -614,6 +618,7 @@ export function createFleetOwner(opts) {\n     fleet = verdict.fleet;\n     links.set(conn.peer, conn);\n     connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));\n+    reportLink(conn.peer, { event: 'open' });\n     conn.send(encodeHostFrame(welcomeFrame(verdict.meshSlot, rosterOf(fleet), {\n       role: verdict.role,\n       operatorId: verdict.operatorId,\n@@ -693,12 +698,25 @@ export function createFleetOwner(opts) {\n   // Declared before the transport because its own callbacks reach back for it;\n   // they only ever run off a socket event, but a `const` in a temporal dead\n   // zone is a footgun aimed at whoever next makes one of those synchronous.\n+  function reportLink(peer, event) {\n+    const ship = slotForPeer(fleet, peer);\n+    const gm = gmForPeer(fleet, peer);\n+    onDiag({ ...event, link: peer, identity: ship?.id || gm?.id || null,\n+      name: ship?.name || ship?.ship?.name || gm?.name || '' });\n+  }\n   let host = null;\n   host = createRendezvousHost({\n     base,\n     namespace: NAMESPACE_SERVER,\n     transports,\n     iceServers,\n+    levers,\n+    onPeerIce: (peer, state) => reportLink(peer, state === 'ws-relay'\n+      ? { event: 'transport', transport: 'ws-relay' }\n+      : state === 'connected' || state === 'completed'\n+        ? { event: 'transport', transport: 'webrtc' }\n+      : { event: state === 'closed' || state === 'failed' ? 'closed' : 'ice-state', state }),\n+    onPeerShedding: (peer, dropped) => reportLink(peer, { event: 'relay-degraded', dropped }),\n     factories,\n     checkStamp,\n     onCode: (issued) => {\n@@ -1125,6 +1143,8 @@ export function createFleetMember(opts) {\n     onRefusedSlot = () => {},\n     onStatus = () => {},\n     onLog = () => {},\n+    levers,\n+    onDiag = () => {},\n     factories,\n   } = opts;\n \n@@ -1424,11 +1444,18 @@ export function createFleetMember(opts) {\n         }\n         onLog(`[fleet] the fleet refused this host: ${code}`);\n         onError(code, detail);\n+        closed = true;\n+        joiner?.close();\n       }\n     },\n-    onStatus,\n+    onStatus: status => {\n+      if (status === 'disconnected' || status === 'error') onDiag({ event: 'closed' });\n+      onStatus(status);\n+    },\n     onError,\n     onLog,\n+    levers,\n+    onDiag,\n   });\n \n   return {\ndiff --git a/gui/rendezvous-transport.js b/gui/rendezvous-transport.js\nindex ff31f8e9..22018287 100644\n--- a/gui/rendezvous-transport.js\n+++ b/gui/rendezvous-transport.js\n@@ -509,6 +509,8 @@ export function createRendezvousHost(opts) {\n     transports = ['webrtc', 'ws-relay'],\n     levers = defaultTransportLevers(),\n     factories = defaultFactories(),\n+    resume: initialResume = null,\n+    onResumeToken = () => {},\n   } = opts;\n \n   /**\n@@ -539,7 +541,7 @@ export function createRendezvousHost(opts) {\n    * is what the wire presents on the way back in, and the two have to\n    * survive independently for reclaim to work at all.\n    */\n-  let resumeToken = null;\n+  let resumeToken = initialResume;\n   /**\n    * When the CURRENT run of service loss began (issue #1115) — set on the first\n    * `lostService` of a loss streak, held across its failed retries, cleared the\n@@ -879,7 +881,11 @@ export function createRendezvousHost(opts) {\n         // Only a registration/reclaim response carries `secret` — an\n         // admission-state ACK reuses the same `hosted` type without one, and\n         // must not clobber the held token with `undefined`.\n-        if (msg.code.secret) resumeToken = { suffix: msg.code.suffix, secret: msg.code.secret };\n+        if (msg.code.secret) {\n+          resumeToken = { suffix: msg.code.suffix, secret: msg.code.secret,\n+            ...(initialResume?.required ? { required: true } : {}) };\n+          onResumeToken({ ...resumeToken });\n+        }\n         onLog(`[rendezvous] issued ${code.namespace} code ${code.suffix}`);\n         onCode(code);\n         break;\ndiff --git a/worker-rendezvous/src/registry.js b/worker-rendezvous/src/registry.js\nindex 7c105da1..1478003e 100644\n--- a/worker-rendezvous/src/registry.js\n+++ b/worker-rendezvous/src/registry.js\n@@ -424,6 +424,7 @@ export function createRegistry({\n           held.host = connId;\n           held.graceUntil = null;\n           held.lastSeen = now();\n+          held.transports = sanitiseTransports(frame.transports);\n           conn.key = held.key;\n           return [\n             out(connId, {\n@@ -433,9 +434,14 @@ export function createRegistry({\n             }),\n           ];\n         }\n+        if (resume.required) return [fail(connId, 'host-open', 'unreachable')];\n         records.delete(held.key);\n       }\n     }\n+    // A successor may only reclaim the existing, no-longer-live registration.\n+    // Never create a second fleet when its checkpoint is stale or the original\n+    // host is still alive; this is the atomic fence for owner continuation.\n+    if (resume?.required) return [fail(connId, 'host-open', 'unreachable')];\n \n     const minted = mintSuffix(\n       data,\n",
+  "hashes": {
+    "gui/fleet-session.js": "15ed174b0bb10436d5736ff257cab48ff50ad1b84f04950fe2b9ea365f0694e1",
+    "gui/rendezvous-transport.js": "80f1dd6e662268d424f39a3d36fad6c6e79bb86007840c99f692fee69673fe00",
+    "worker-rendezvous/src/registry.js": "bd4876a3cd9ce206bec23acbce4228ebd5eee30abf1b716bb076103ebaef0ede",
+    "assets/join/join-codes.json": "7313ef4bfdc6ad8e0dda713ae2cb0c8b66edb61b32d69080a12ff8efdf9e5dda",
+    "scripts/rendezvous-dev-server.mjs": "f2bbceeaef90316639a0011f176d74022c33ae97aba746a1d02b21a17557a25a",
+    "scripts/fleet-relay-probe.mjs": "df064dabd02389a72b947689390e31c348b89d6ee0be786ff2ce094b1a96d6bb"
+  },
+  "composition": {
+    "ship_protocol_peers": 4,
+    "gm_protocol_peers": 2,
+    "simulations": 0,
+    "station_client_documents": 0
+  },
+  "profile": {
+    "address": "loopback",
+    "added_delay_ms": 0,
+    "added_loss_percent": 0
+  },
+  "routes": [
+    {
+      "slot": 2,
+      "transport": "ws-relay"
+    },
+    {
+      "slot": 3,
+      "transport": "ws-relay"
+    },
+    {
+      "slot": 4,
+      "transport": "ws-relay"
+    },
+    {
+      "slot": 5,
+      "transport": "ws-relay"
+    },
+    {
+      "slot": 6,
+      "transport": "ws-relay"
+    }
+  ],
+  "count": 100,
+  "p50_ms": 0.7128000000000156,
+  "p95_ms": 1.1100000000000136,
+  "p99_ms": 1.3327999999999633,
+  "max_ms": 1.348100000000045,
+  "samples": [
+    {
+      "slot": 2,
+      "round_trip_ms": 0.9427000000000021
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.7737999999999943
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.9037000000000148
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.856899999999996
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 1.2010999999999967
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.5692000000000235
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 1.2223999999999933
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.6475999999999544
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.7888000000000375
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.7402000000000157
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.5236999999999625
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.6247999999999934
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 1.3327999999999633
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 1.0243000000000393
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.8559000000000196
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.6347999999999843
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.8503999999999223
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 1.1081000000000358
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.7663000000000011
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.6559999999999491
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.7807999999999993
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.7889999999999873
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 1.0574000000000296
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 1.1100000000000136
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 1.348100000000045
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.7060000000000173
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.8887999999999465
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.7856999999999061
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.7250000000000227
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.6073999999999842
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.6988000000000056
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.7087999999999965
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.8656999999999471
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.9051999999999225
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.8468000000000302
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.7837999999999283
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 1.053700000000049
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.9063000000001011
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.7481000000000222
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.8868999999999687
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.929300000000012
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.8212000000000899
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.8064999999999145
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.9151000000000522
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.8029999999999973
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.5219999999999345
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.9022000000001071
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.7158000000001721
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.7664000000002034
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.7554000000000087
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.5602999999998701
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.6341000000002168
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.5472999999999502
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.6049000000000433
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.6972000000000662
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.5715000000000146
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 1.3268000000000484
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.5910000000001219
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.7000000000000455
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.7109000000000378
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.8352999999999611
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.6221999999997934
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.7054000000000542
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.6819000000000415
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.7129999999999654
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.6476000000000113
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.6084999999998217
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.6409000000001015
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.9015000000001692
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.6064000000001215
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.5544999999999618
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.5179000000000542
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.6742999999999029
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.6182000000001153
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.6694999999999709
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.7799999999999727
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.546100000000024
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.5779999999999745
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.789299999999912
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.6761999999998807
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.5267999999998665
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.5898000000001957
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 1.0554999999999382
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.4699000000000524
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.8777999999999793
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.45489999999995234
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.5100999999999658
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.41039999999998145
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.6795999999999367
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.5614000000000487
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 0.4415000000001328
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.662900000000036
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.563799999999901
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.5797000000000025
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.7128000000000156
+    },
+    {
+      "slot": 2,
+      "round_trip_ms": 1.031099999999924
+    },
+    {
+      "slot": 3,
+      "round_trip_ms": 0.48669999999992797
+    },
+    {
+      "slot": 4,
+      "round_trip_ms": 0.6769999999999072
+    },
+    {
+      "slot": 5,
+      "round_trip_ms": 0.7418999999999869
+    },
+    {
+      "slot": 6,
+      "round_trip_ms": 0.7244000000000597
+    }
+  ],
+  "limitations": "Synthetic frames; no authoritative command application, stalls, recovery, rendering or real-network acceptance."
+}

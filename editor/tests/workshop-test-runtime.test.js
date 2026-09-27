@@ -29,6 +29,26 @@ function fixture() {
 }
 
 describe('captured browser Test boot', () => {
+  it('preloads the controlled hull and every Backfill default, but omits absent slots', async () => {
+    const { runtime, load } = fixture();
+    const captured = snapshot();
+    const lead = 'assets/entities/lead.toml';
+    const absent = 'assets/entities/absent.toml';
+    captured.selection.slot = 'wing';
+    captured.files[world] = `[global]\n[[ship_slot]]\nid='lead'\ndefault_ship='${lead}'\n`
+      + `[[ship_slot.ships]]\ntemplate_path='${lead}'\n`
+      + `[[ship_slot]]\nid='wing'\ndefault_ship='${ship}'\n`
+      + `[[ship_slot.ships]]\ntemplate_path='${ship}'\n`
+      + `[[ship_slot]]\nid='reserve'\ndefault_ship='${absent}'\nunclaimed='absent'\n`
+      + `[[ship_slot.ships]]\ntemplate_path='${absent}'\n`;
+    captured.files[lead] = '# lead';
+    const run = await launchWorkshopTest(captured, { load });
+    expect(runtime.wasm_load_world).toHaveBeenCalledWith(world, captured.files[world], [ship, lead]);
+    expect(runtime.wasm_workshop_test_preload_ship).toHaveBeenCalledTimes(2);
+    expect(runtime.wasm_workshop_test_preload_ship).toHaveBeenCalledWith(lead, '# lead');
+    expect(runtime.wasm_workshop_test_preload_ship).not.toHaveBeenCalledWith(absent, expect.anything());
+    run.dispose();
+  });
   it('loads the selected hull/include/optional rig and Rhai through normal callbacks using only captured text', async () => {
     const { runtime, load } = fixture();
     const captured = snapshot();

@@ -9,10 +9,21 @@ use std::collections::BTreeMap;
 pub struct TestCatalog {
     pub worlds: Vec<String>,
     pub ships: Vec<String>,
+    /// Authored choices for the selected world's controlled ship slot.
+    pub slots: BTreeMap<String, Vec<TestSlotOffer>>,
     /// Exact authored child layers loaded with each selectable root. The root
     /// itself is represented by the breakpoint's absent `layer`, never by a
     /// `WorldLayerMap` key.
     pub layers: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestSlotOffer {
+    pub id: String,
+    pub label: Option<String>,
+    pub ships: Vec<String>,
+    pub default_ship: String,
+    pub unclaimed: crate::world::config::UnclaimedSlotPolicy,
 }
 
 pub fn catalog(files: BTreeMap<String, String>) -> TestCatalog {
@@ -27,8 +38,37 @@ pub fn catalog(files: BTreeMap<String, String>) -> TestCatalog {
         .iter()
         .map(|world| (world.clone(), breakpoint_layers(&source, world)))
         .collect();
+    let slots = worlds
+        .iter()
+        .map(|world| {
+            let offered = source
+                .0
+                .get(world)
+                .and_then(|text| crate::world::config::parse_world(text).ok())
+                .map(|config| {
+                    config
+                        .ship_slots
+                        .into_iter()
+                        .map(|slot| TestSlotOffer {
+                            id: slot.id,
+                            label: slot.label,
+                            ships: slot
+                                .ships
+                                .into_iter()
+                                .map(|ship| ship.template_path)
+                                .collect(),
+                            default_ship: slot.default_ship,
+                            unclaimed: slot.unclaimed,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            (world.clone(), offered)
+        })
+        .collect();
     TestCatalog {
         worlds,
+        slots,
         ships: source
             .0
             .keys()
@@ -85,6 +125,43 @@ pub fn validate_selection(
             &source.0,
             &selection.world,
         ));
+        if let Some(config) = source
+            .0
+            .get(&selection.world)
+            .and_then(|text| crate::world::config::parse_world(text).ok())
+        {
+            if config.ship_slots.is_empty() {
+                if selection.slot.is_some() {
+                    report.error(
+                        "runtime-slot-invalid",
+                        &selection.world,
+                        "Legacy world has no authored ship slot to select".into(),
+                    );
+                }
+            } else if let Some(slot) = config
+                .ship_slots
+                .iter()
+                .find(|slot| selection.slot.as_deref() == Some(slot.id.as_str()))
+            {
+                if !slot
+                    .ships
+                    .iter()
+                    .any(|ship| ship.template_path == selection.ship)
+                {
+                    report.error(
+                        "runtime-slot-hull-invalid",
+                        &selection.world,
+                        format!("Selected hull is not offered by ship slot {:?}", slot.id),
+                    );
+                }
+            } else {
+                report.error(
+                    "runtime-slot-invalid",
+                    &selection.world,
+                    "Select an authored ship slot".into(),
+                );
+            }
+        }
     }
     if !exact_path(&selection.ship, "assets/entities/")
         || !source
@@ -115,6 +192,54 @@ mod tests {
 [[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
 [[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
 
+    #[test]
+    fn authored_test_slot_offers_and_selection_use_the_runtime_hull_allowlist() {
+        const OTHER: &str = "assets/entities/other.toml";
+        let world = format!(
+            "[global]\ntitle = 'Slots'\n\
+[[ship_slot]]\nid = 'lead'\ndefault_ship = '{HULL}'\nunclaimed = 'backfill'\n\
+[[ship_slot.ships]]\ntemplate_path = '{HULL}'\n\
+[[ship_slot]]\nid = 'wing'\ndefault_ship = '{OTHER}'\nunclaimed = 'absent'\n\
+[[ship_slot.ships]]\ntemplate_path = '{OTHER}'\n\
+[[entity]]\nid = 'lead-row'\ntemplate_path = '{HULL}'\nspawn_on = 'game_start'\n\
+[[entity]]\nid = 'wing-row'\ntemplate_path = '{OTHER}'\nspawn_on = 'game_start'\n"
+        );
+        let files = BTreeMap::from([
+            (ROOT.into(), world),
+            (HULL.into(), format!("tags=['ship']\n{HULL_SOURCE}")),
+            (OTHER.into(), format!("tags=['ship']\n{HULL_SOURCE}")),
+        ]);
+        let offers = catalog(files.clone());
+        assert_eq!(offers.slots[ROOT].len(), 2);
+        assert_eq!(offers.slots[ROOT][1].id, "wing");
+        assert_eq!(offers.slots[ROOT][1].ships, [OTHER]);
+
+        let selected = TestSelection {
+            world: ROOT.into(),
+            slot: Some("wing".into()),
+            ship: OTHER.into(),
+            seed: 7,
+        };
+        let accepted = validate_selection(files.clone(), &selected);
+        assert!(accepted.accepted, "{:?}", accepted.findings);
+        let wrong_hull = TestSelection {
+            ship: HULL.into(),
+            ..selected.clone()
+        };
+        assert!(validate_selection(files.clone(), &wrong_hull)
+            .findings
+            .iter()
+            .any(|finding| finding.category == "runtime-slot-hull-invalid"));
+        let no_slot = TestSelection {
+            slot: None,
+            ..selected
+        };
+        assert!(validate_selection(files, &no_slot)
+            .findings
+            .iter()
+            .any(|finding| finding.category == "runtime-slot-invalid"));
+    }
+
     /// A Test runs the exact unsaved composition (issue #1475): a child the
     /// draft declares and carries is accepted although nothing beneath the
     /// draft knows it, and the same root is refused once the child is gone.
@@ -135,6 +260,7 @@ mod tests {
         ]);
         let selection = TestSelection {
             world: ROOT.into(),
+            slot: None,
             ship: HULL.into(),
             seed: 7,
         };
@@ -192,6 +318,7 @@ mod tests {
         ]);
         let selection = TestSelection {
             world: ROOT.into(),
+            slot: None,
             ship: HULL.into(),
             seed: 7,
         };
@@ -230,6 +357,7 @@ mod tests {
             files,
             &TestSelection {
                 world: "assets/worlds/elsewhere.toml".into(),
+                slot: None,
                 ship: HULL.into(),
                 seed: 7,
             },

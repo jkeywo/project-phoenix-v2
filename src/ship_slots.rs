@@ -175,6 +175,29 @@ impl ShipSlotReservations {
 }
 
 impl FrozenShipSlots {
+    /// A disposable Workshop Test controls exactly one authored slot. Every
+    /// other present slot uses the same Backfill/absent freeze as a live launch.
+    pub fn for_workshop_test(
+        slots: &[ShipSlotConfig],
+        controlled_slot: &str,
+        hull: &str,
+    ) -> Result<Self, String> {
+        let mut reservations = ShipSlotReservations::default();
+        if reservations.claim(slots, controlled_slot, "workshop-test") != ClaimOutcome::Claimed {
+            return Err(format!("Unknown Test ship slot {controlled_slot:?}"));
+        }
+        if reservations.confirm_hull(slots, controlled_slot, "workshop-test", hull)
+            != HullOutcome::Confirmed
+        {
+            return Err(format!(
+                "Hull {hull:?} is not offered by Test ship slot {controlled_slot:?}"
+            ));
+        }
+        reservations
+            .freeze(slots)
+            .ok_or_else(|| "Test slot confirmation failed".into())
+    }
+
     /// Add one still-empty authored slot using its default hull. This is the
     /// pre-launch GM operation; sorting back into authored order preserves the
     /// same spawn/mint order an authored `unclaimed = "backfill"` row has.
@@ -404,6 +427,46 @@ mod tests {
             serde_json::from_str::<FrozenShipSlots>(&json).unwrap(),
             frozen
         );
+    }
+
+    #[test]
+    fn workshop_test_controls_one_slot_and_backfills_or_omits_the_others() {
+        let mut authored = slots();
+        authored.push(ShipSlotConfig {
+            id: "wing".into(),
+            label: None,
+            ships: vec![AvailableShipEntry {
+                template_path: "destroyer".into(),
+                label: None,
+            }],
+            default_ship: "destroyer".into(),
+            unclaimed: UnclaimedSlotPolicy::Absent,
+        });
+        authored.push(ShipSlotConfig {
+            id: "reserve".into(),
+            label: None,
+            ships: vec![AvailableShipEntry {
+                template_path: "frigate".into(),
+                label: None,
+            }],
+            default_ship: "frigate".into(),
+            unclaimed: UnclaimedSlotPolicy::Backfill,
+        });
+        let frozen = FrozenShipSlots::for_workshop_test(&authored, "wing", "destroyer").unwrap();
+        assert_eq!(
+            frozen
+                .0
+                .iter()
+                .map(|row| (row.slot_id.as_str(), row.source))
+                .collect::<Vec<_>>(),
+            [
+                ("lead", LaunchSource::Backfill),
+                ("wing", LaunchSource::Claimed),
+                ("reserve", LaunchSource::Backfill)
+            ]
+        );
+        assert_eq!(frozen.0[1].hull, "destroyer");
+        assert!(FrozenShipSlots::for_workshop_test(&authored, "wing", "cruiser").is_err());
     }
 
     #[test]

@@ -134,6 +134,16 @@ An unclaimed `backfill` slot launches its default hull under ordinary AI;
 is evaluated only at initial launch: losing a host after start does not remove
 its frozen ship or revisit `absent`, and uses the normal recovery contract.
 
+Workshop's mission ship slot editor changes a selected world's allowed hulls,
+default hull and unclaimed policy through the same validation as Save and Export.
+The edit is one undoable source change; saving or exporting and reopening keeps
+the authored slot values. A disposable Test chooses one controlled slot and a
+hull offered by it. Every other `backfill` slot launches its default ship under
+AI, while each `absent` slot stays out of the run. The Test observer selector
+can inspect every present ship without changing the controlled slot. Start a
+new Test to control a different slot. Legacy `[[available_ships]]` worlds still
+use their original single-ship selection and are not converted by this editor.
+
 Anchors are reusable positions for routes, objectives, AI directives, spawns, and script calls. A scenario should name spatial intentions rather than repeat coordinates. `extra_worlds` may compose additive world layers; unload policy determines whether pending delayed actions cancel or resolve when a layer leaves.
 
 The simulation, AI, and snapshot cadences must divide into whole-number relationships. Player-visible values should use string identifiers where the interface expects them. A scenario catalogue controls what the host offers; being authored under `assets/worlds/` does not automatically mean public-demo availability.

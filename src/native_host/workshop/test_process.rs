@@ -382,6 +382,18 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
     config.surface = crate::boot::NativeRenderSurface::Window;
     let mut app =
         crate::native_host::build_native_host_app(&config, &preload).map_err(|e| e.to_string())?;
+    if let Some(slot_id) = launch.selection.slot.as_deref() {
+        let slots = &app
+            .world()
+            .resource::<crate::world::config::WorldConfig>()
+            .ship_slots;
+        let frozen = crate::ship_slots::FrozenShipSlots::for_workshop_test(
+            slots,
+            slot_id,
+            &launch.selection.ship,
+        )?;
+        app.insert_resource(frozen);
+    }
     let world = app.world_mut();
     for mut window in world.query::<&mut Window>().iter_mut(world) {
         window.title = "Project Phoenix — Test".into();
@@ -498,6 +510,7 @@ mod tests {
             ]),
             selection: TestSelection {
                 world: "assets/worlds/test.toml".into(),
+                slot: None,
                 ship: "assets/entities/test.toml".into(),
                 seed: 1,
             },

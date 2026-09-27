@@ -554,9 +554,26 @@ pub(crate) fn spawn_game_start_entities(
         } else {
             player_ships_spawned < launch_ship_count && is_authored_ship_row
         };
-        let fleet_ship = is_fleet_ship
-            .then(|| roster.ship(player_ships_spawned))
-            .flatten();
+        // A frozen authored claim names the ship whose original crew owns this
+        // view. The default solo roster has no authored slot, so assigning it
+        // positionally would make an earlier Backfill slot local as well as the
+        // claimed slot (notably in a disposable Workshop Test controlling wing).
+        // A real fleet roster carries authored ids and matches those instead.
+        let has_frozen_claim = frozen_ship_slots
+            .as_ref()
+            .is_some_and(|slots| slots.0.iter().any(|slot| slot.claimant.is_some()));
+        let fleet_ship = if is_fleet_ship && authored_slot.is_some() && has_frozen_claim {
+            frozen_slot.and_then(|slot| {
+                roster
+                    .ships()
+                    .iter()
+                    .find(|ship| ship.authored_slot_id.as_deref() == Some(slot.slot_id.as_str()))
+            })
+        } else if is_fleet_ship {
+            roster.ship(player_ships_spawned)
+        } else {
+            None
+        };
         // Which hull this slot flies: the roster's choice for a fleet member,
         // and this host's own lobby selection for a lone host (`ship_path` is
         // `None` there, which is what keeps the solo spawn byte-identical).

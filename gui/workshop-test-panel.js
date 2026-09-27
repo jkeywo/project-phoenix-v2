@@ -26,6 +26,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   };
   const status = make('p', 'status'); status.setAttribute('role', 'status');
   const world = make('select', 'world');
+  const slot = make('select', 'slot');
   const ship = make('select', 'ship');
   const seed = make('input', 'seed'); seed.type = 'number'; seed.min = '0'; seed.max = String(Number.MAX_SAFE_INTEGER); seed.step = '1'; seed.value = '1';
   const breakpointEnabled = make('input', 'breakpoint-enabled'); breakpointEnabled.type = 'checkbox';
@@ -44,7 +45,34 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     const option = doc.createElement('option'); option.value = value; option.textContent = value; breakpointComparison.append(option);
   }
   const breakpointValue = make('input', 'breakpoint-value'); breakpointValue.type = 'number'; breakpointValue.step = '1'; breakpointValue.value = '1';
-  let choices = { worlds: [], ships: [], layers: {} }, choicesReady = false;
+  let choices = { worlds: [], ships: [], slots: {}, layers: {} }, choicesReady = false;
+  const offeredSlots = () => choices.slots?.[world.value] || [];
+  function paintSlotsAndShips({ retainStale = false } = {}) {
+    const offered = offeredSlots();
+    const previousSlot = slot.value, previousHull = ship.value;
+    slot.replaceChildren(...offered.map(row => {
+      const option = doc.createElement('option'); option.value = row.id;
+      option.textContent = row.label ? t(row.label) : row.id; return option;
+    }));
+    if (retainStale && previousSlot && offered.length && !offered.some(row => row.id === previousSlot)) {
+      const stale = doc.createElement('option'); stale.value = previousSlot;
+      stale.textContent = previousSlot; stale.disabled = true; slot.append(stale);
+    }
+    slot.value = (offered.some(row => row.id === previousSlot) || retainStale && offered.length && previousSlot)
+      ? previousSlot : (offered[0]?.id || '');
+    const slotRow = offered.find(row => row.id === slot.value);
+    const hulls = slotRow ? slotRow.ships : offered.length ? [] : choices.ships;
+    ship.replaceChildren(...hulls.map(path => {
+      const option = doc.createElement('option'); option.value = path; option.textContent = path; return option;
+    }));
+    if (retainStale && previousHull && !hulls.includes(previousHull)) {
+      const stale = doc.createElement('option'); stale.value = previousHull;
+      stale.textContent = previousHull; stale.disabled = true; ship.append(stale);
+    }
+    ship.value = hulls.includes(previousHull) || retainStale && previousHull
+      ? previousHull : (slotRow?.default_ship || hulls[0] || '');
+    slot.hidden = slot.previousElementSibling.hidden = offered.length === 0;
+  }
   const breakpoint = () => validateTestBreakpoint(!breakpointEnabled.checked ? null : {
     layer: breakpointLayer.value || null,
     condition: breakpointKind.value === 'flag'
@@ -53,13 +81,16 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
           value: Number(breakpointValue.value) },
   }, choices.layers?.[world.value] || []);
   const validSelection = () => choicesReady && choices.worlds.includes(world.value)
-    && choices.ships.includes(ship.value) && seed.value.trim() !== ''
+    && (offeredSlots().length === 0 ? choices.ships.includes(ship.value)
+      : offeredSlots().some(row => row.id === slot.value && row.ships.includes(ship.value)))
+    && seed.value.trim() !== ''
     && Number.isSafeInteger(Number(seed.value)) && Number(seed.value) >= 0
     && (() => { try { breakpoint(); return true; } catch (_) { return false; } })();
   const selection = () => {
     const number = Number(seed.value);
     if (!validSelection()) throw new Error(t('workshop.test_selection_invalid'));
-    return { world: world.value, ship: ship.value, seed: number, breakpoint: breakpoint() };
+    return { world: world.value, ...(offeredSlots().length ? { slot: slot.value } : {}),
+      ship: ship.value, seed: number, breakpoint: breakpoint() };
   };
   let session;
   let previousDraft, previousRevision;
@@ -80,10 +111,11 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     }));
     breakpointLayer.value = layers.includes(current) ? current : '';
   };
-  for (const candidate of [world, ship, seed, breakpointEnabled, breakpointKind, breakpointName,
+  for (const candidate of [world, slot, ship, seed, breakpointEnabled, breakpointKind, breakpointName,
     breakpointLayer, breakpointFlagValue, breakpointComparison, breakpointValue]) {
     candidate.addEventListener(candidate === breakpointName || candidate === breakpointValue ? 'input' : 'change',
-      () => { localError = null; if (candidate === world) paintBreakpointLayers(); render(); });
+      () => { localError = null; if (candidate === world || candidate === slot) paintSlotsAndShips();
+        if (candidate === world) paintBreakpointLayers(); render(); });
   }
   const authoring = command('authoring', 'workshop.test_authoring', async () => {
     await session.authoring(); leave();
@@ -112,7 +144,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   });
   panel.append(make('h2', 'heading', 'workshop.test_heading'), make('p', 'scope', 'workshop.test_scope'));
   const label = (target, id) => { const node = doc.createElement('label'); node.htmlFor = target.id; node.textContent = t(id); panel.append(node, target); };
-  label(world, 'workshop.test_world'); label(ship, 'workshop.test_ship'); label(seed, 'workshop.test_seed');
+  label(world, 'workshop.test_world'); label(slot, 'workshop.test_slot');
+  label(ship, 'workshop.test_ship'); label(seed, 'workshop.test_seed');
   const breakpointFields = doc.createElement('fieldset'); breakpointFields.className = 'workshop-test-breakpoint';
   const breakpointLegend = doc.createElement('legend'); breakpointLegend.textContent = t('workshop.test_breakpoint');
   breakpointFields.append(breakpointLegend);
@@ -262,7 +295,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     panel.setAttribute('aria-busy', String(busy));
     start.disabled = busy || catalogPending || !draft || !validSelection();
     start.textContent = t(running ? 'workshop.test_restart' : 'workshop.test_start');
-    world.disabled = ship.disabled = seed.disabled = busy || testing;
+    world.disabled = slot.disabled = ship.disabled = seed.disabled = busy || testing;
     breakpointEnabled.disabled = breakpointKind.disabled = breakpointName.disabled = breakpointLayer.disabled = busy || testing;
     breakpointFlagValue.disabled = breakpointComparison.disabled = breakpointValue.disabled = busy || testing;
     const counter = breakpointKind.value === 'counter';
@@ -300,13 +333,13 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   function refresh() {
     const draft = getDraft();
     if (draft !== previousDraft || draft?.sourceRevision !== previousRevision) {
-      if (draft !== previousDraft) { world.replaceChildren(); ship.replaceChildren(); choicesReady = false; }
+      if (draft !== previousDraft) { world.replaceChildren(); slot.replaceChildren(); ship.replaceChildren(); choicesReady = false; }
       previousDraft = draft; previousRevision = draft?.sourceRevision;
       session.changed();
       const generation = ++catalogGeneration;
       if (catalogTimer !== null) win.clearTimeout(catalogTimer);
       catalogPending = !!draft;
-      if (!draft) { world.replaceChildren(); ship.replaceChildren(); }
+      if (!draft) { world.replaceChildren(); slot.replaceChildren(); ship.replaceChildren(); }
       else catalogTimer = win.setTimeout(async () => {
         const files = Object.fromEntries(draft.paths().filter(path => !draft.isBinary(path) && /\.(toml|rhai)$/.test(path))
           .map(path => [path, draft.read(path)]));
@@ -314,7 +347,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
           const catalog = await provider.test.catalog(files);
           if (disposed || generation !== catalogGeneration) return;
           choices = catalog; choicesReady = true;
-          for (const [select, paths] of [[world, catalog.worlds], [ship, catalog.ships]]) {
+          for (const [select, paths] of [[world, catalog.worlds]]) {
             const current = select.value;
             select.replaceChildren(...paths.map(path => {
               const option = doc.createElement('option'); option.value = path; option.textContent = path; return option;
@@ -325,6 +358,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
             }
             if (current) select.value = current;
           }
+          paintSlotsAndShips({ retainStale: true });
           paintBreakpointLayers();
           localError = null;
         } catch (error) {

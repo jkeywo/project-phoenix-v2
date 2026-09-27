@@ -159,7 +159,7 @@ entities:
         - "[ai] The GM markup is INJECTED at build time from server.html rather than written again, so the Test mounts the real console. A Workshop-only substitute would be a second surface to keep correct and would stop being evidence about the real one the moment it drifted; the native GM already does the same thing at runtime."
         - "[ai] Every window.__host* GM write is bound to a refusal rather than left undefined. An undefined global crashes a panel on first press and leaves 'can this mutate the run?' answerable only by reading every panel; one list answers it, and a Test that somehow acquired a route fails a test rather than quietly working."
         - "[ai] The surface follows the RUNTIME's reported view, never the request that asked for it, so a refused switch cannot leave the page claiming a view the run is not drawing. The runtime refuses a ship the run does not have."
-        - "[ai] A Test today runs ONE player ship, because the disposable boot keeps the default solo roster; multi-ship Test authoring is #1153 on the T5 track. The selector reads whatever player ships the run actually has rather than assuming one, so it needs no change when that lands."
+        - "[ai] For an authored multi-ship world, Test selects one controlled ship slot and one of its allowed hulls. The ordinary reservation freeze launches every other Backfill slot and omits Absent slots. The existing observer selector reads every present player ship in the disposable run, while selection of another controlled slot requires a new Test. Legacy available_ships worlds retain the one-ship selection and source bytes."
         - "[ai] The omniscient view is mounted ISOLATED. The ordinary GM workspace fetches the private-feedback manifest, the cue catalogue and every sample they name the moment it mounts — project assets outside the capture, which the Test isolation smoke spec caught in CI. An isolated mount gives feedback audio a silent output with no manifest and mounts no audition; every projection panel is unchanged, so the view stays the real console rather than a trimmed copy."
     architecture:
       kind: presentation-adapter
@@ -177,6 +177,8 @@ entities:
         - gui/workshop-test-boot.js
         - gui/workshop-test-panel.js
         - editor/workshop-test-runtime.js
+        - editor/workshop-slot-authoring.js
+        - gui/workshop-slot-authoring-panel.js
         - editor/workshop-test-child.js
         - scripts/gm-console-markup.mjs
         - scripts/build-workshop.mjs
@@ -186,6 +188,7 @@ entities:
         - cargo test --features headless --test gm_presentation_neutrality
         - npx vitest run tests/client/workshop-test-view.test.js
         - npx vitest run editor/tests/workshop-test-child.test.js tests/client/workshop-test-panel.test.js
+        - npx vitest run editor/tests/workshop-slot-authoring.test.js tests/client/workshop-slot-authoring-panel.test.js
 
   - component: workshop-test-script-trace
     core:

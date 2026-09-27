@@ -1082,6 +1082,7 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
     .unwrap();
     let selection = test_snapshot::TestSelection {
         world: "assets/worlds/test.toml".into(),
+        slot: None,
         ship: "assets/entities/test.toml".into(),
         seed: 42,
     };

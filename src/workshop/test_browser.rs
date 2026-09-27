@@ -15,6 +15,7 @@ use wasm_bindgen::prelude::*;
 pub(crate) struct BrowserTest {
     pub launch: Launch,
     pub assets: Arc<BTreeMap<String, Arc<[u8]>>>,
+    pub frozen_slots: Option<crate::ship_slots::FrozenShipSlots>,
 }
 
 impl BrowserTest {
@@ -52,13 +53,30 @@ impl BrowserTest {
                 )
                 .contains(path)
             });
-        let report = super::test_source::validate_selection(text, &launch.selection);
+        let report = super::test_source::validate_selection(text.clone(), &launch.selection);
         if !report.accepted {
             return Err(fail(
                 &crate::core::codec::encode_workshop_validation(&report)
                     .map_err(|e| fail(&e.to_string()))?,
             ));
         }
+        let frozen_slots = text
+            .get(&launch.selection.world)
+            .and_then(|source| crate::world::config::parse_world(source).ok())
+            .filter(|config| !config.ship_slots.is_empty())
+            .map(|config| {
+                crate::ship_slots::FrozenShipSlots::for_workshop_test(
+                    &config.ship_slots,
+                    launch
+                        .selection
+                        .slot
+                        .as_deref()
+                        .expect("validated Test slot"),
+                    &launch.selection.ship,
+                )
+            })
+            .transpose()
+            .map_err(|message| fail(&message))?;
         crate::entities::config_cache::replace_faction_registry(factions);
         if let Some(breakpoint) = launch.breakpoint.as_ref() {
             breakpoint.validate().map_err(|message| fail(message))?;
@@ -69,6 +87,7 @@ impl BrowserTest {
         Ok(Self {
             launch,
             assets: Arc::new(assets),
+            frozen_slots,
         })
     }
 }
@@ -103,13 +122,20 @@ struct BrowserTestRun {
     acknowledged: u64,
 }
 
-pub(crate) fn install(app: &mut App, launch: Launch) {
+pub(crate) fn install(
+    app: &mut App,
+    launch: Launch,
+    frozen_slots: Option<crate::ship_slots::FrozenShipSlots>,
+) {
     use crate::authoritative::{DeclareState, StateClass};
     crate::sim_rng::install(
         app.world_mut(),
         crate::sim_rng::SimRng::new(launch.selection.seed, crate::sim_rng::SeedSource::Cli),
     );
     EDGE.with(|edge| edge.borrow_mut().status = Some(TestStatus::starting(&launch)));
+    if let Some(frozen) = frozen_slots {
+        app.insert_resource(frozen);
+    }
     app.declare_state::<BrowserTestRun>(StateClass::Timer, "gm-milestone-integrated-workshop")
         .insert_resource(super::test_breakpoint::TestBreakpointState::configured(
             launch.breakpoint.clone(),

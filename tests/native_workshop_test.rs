@@ -83,6 +83,56 @@ fn fresh_test_restarts_reproduce_fixed_ticks_on_backfill_without_live_layout_or_
     }
 }
 
+#[test]
+fn disposable_native_test_controls_one_authored_slot_and_runs_other_present_slots() {
+    use project_phoenix::lockstep::FleetSlotOf;
+    use project_phoenix::ship_slots::{AuthoredShipSlotId, FrozenShipSlots, LaunchSource};
+    const WORLD: &str = "tests/fixtures/worlds/multi_ship_slots_direct_launch.toml";
+    const HULL: &str = "assets/entities/alliance_cruiser.toml";
+    let preload = preload_content_templates(".").expect("shipped content preloads");
+    let mut config = NativeHostConfig::new(WORLD);
+    config.ship_path = Some(HULL.into());
+    config.solo = true;
+    config.deterministic = true;
+    config.remember_layout = false;
+    config.surface = NativeRenderSurface::Contract;
+    let mut app = build_native_host_app(&config, &preload).expect("ordinary native host builds");
+    let frozen = FrozenShipSlots::for_workshop_test(
+        &app.world()
+            .resource::<project_phoenix::world::config::WorldConfig>()
+            .ship_slots,
+        "wing",
+        HULL,
+    )
+    .expect("controlled slot is offered");
+    assert_eq!(frozen.0.len(), 2);
+    assert_eq!(frozen.0[0].source, LaunchSource::Backfill);
+    assert_eq!(frozen.0[1].source, LaunchSource::Claimed);
+    app.insert_resource(frozen);
+    app.add_plugins(TestClockPlugin);
+    app.finish();
+    app.cleanup();
+    request(&mut app, TestControl::Pause {});
+    for _ in 0..4 {
+        request(&mut app, TestControl::Step {});
+    }
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress
+    );
+    let mut ships = app.world_mut().query::<(
+        &AuthoredShipSlotId,
+        &FleetSlotOf,
+        Has<project_phoenix::server_app::LocalShip>,
+    )>();
+    let mut roster: Vec<_> = ships
+        .iter(app.world())
+        .map(|(slot, _, local)| (slot.0.clone(), local))
+        .collect();
+    roster.sort();
+    assert_eq!(roster, [("lead".into(), false), ("wing".into(), true)]);
+}
+
 /// The SDK composition test proves the embedded Authoring page. This separate
 /// display smoke exercises the actual host executable, staged project and
 /// inherited-pipe clock path through its ordinary native renderer.
@@ -142,6 +192,7 @@ fn actual_test_host_starts_unsaved_source_steps_and_retires_its_stage() {
             files,
             TestSelection {
                 world: world.into(),
+                slot: None,
                 ship: "assets/entities/alliance_cruiser.toml".into(),
                 seed: 41,
             },

@@ -1,5 +1,7 @@
 /** One fresh iframe boots the ordinary browser simulation from explicit bytes.
  * Content callbacks never fetch a missing path or consult mutable Live state. */
+import { parse } from 'smol-toml';
+
 export async function launchWorkshopTest(snapshot, {
   load = async () => {
     const module = await import(/* @vite-ignore */ new URL('../phoenix.js', import.meta.url).href);
@@ -63,8 +65,14 @@ export async function launchWorkshopTest(snapshot, {
   for (const [path, source] of Object.entries(files)) {
     if (typeof source === 'string' && /\.(toml|rhai)$/.test(path)) runtime.wasm_push_world_toml(path, source);
   }
-  runtime.wasm_load_world(selection.world, read(selection.world), [selection.ship]);
-  runtime.wasm_workshop_test_preload_ship(selection.ship, read(selection.ship));
+  const worldSource = read(selection.world);
+  const slots = parse(worldSource).ship_slot || [];
+  const launchHulls = new Set([selection.ship]);
+  for (const slot of slots) {
+    if (slot.id !== selection.slot && slot.unclaimed !== 'absent') launchHulls.add(slot.default_ship);
+  }
+  runtime.wasm_load_world(selection.world, worldSource, [...launchHulls]);
+  for (const hull of launchHulls) runtime.wasm_workshop_test_preload_ship(hull, read(hull));
   while (tasks.size) await Promise.all([...tasks]);
   signal?.throwIfAborted();
   if (failure) throw failure;

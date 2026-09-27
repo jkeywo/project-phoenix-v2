@@ -4189,6 +4189,36 @@ workshop.test_heading,Offline disposable simulation controls,[Test]
 workshop.test_scope,Offline Test source isolation and authority,[Test validates the unsaved draft and starts a fresh simulation. Every Station uses Backfill. Editing requires a restart to apply changes.]
 workshop.test_world,Test world path selector,[World]
 workshop.test_ship,Test player hull path selector,[Player hull]
+workshop.test_slot,Controlled ship slot selector in a disposable multi-ship Test,[Controlled ship slot]
+workshop.slot.title,Workshop ship slot authoring heading,[Mission ship slots]
+workshop.slot.scope,Workshop ship slot authoring scope,Choose the ships each slot can fly and how an unclaimed slot launches.
+workshop.slot.world,Workshop world source selector,[World]
+workshop.slot.slot,Workshop authored slot selector,[Ship slot]
+workshop.slot.new,Workshop empty slot selector,New slot
+workshop.slot.id,Workshop ship slot identifier,[Slot ID]
+workshop.slot.label,Workshop ship slot display label,[Label]
+workshop.slot.ships,Workshop slot allowed ships multi-select,[Allowed ships]
+workshop.slot.default,Workshop slot default hull selector,[Default ship]
+workshop.slot.unclaimed,Workshop unclaimed slot policy selector,[If unclaimed]
+workshop.slot.backfill,Workshop unclaimed slot Backfill choice,Backfill
+workshop.slot.absent,Workshop unclaimed slot absent choice,Absent
+workshop.slot.add,Workshop add ship slot action,Add slot
+workshop.slot.update,Workshop update ship slot action,Apply slot
+workshop.slot.remove,Workshop remove ship slot action,Remove slot
+workshop.slot.checking,Workshop ship slot validation pending,Checking ship slot…
+workshop.slot.applied,Workshop ship slot operation accepted,Ship slot applied.
+workshop.slot.refused,Workshop ship slot operation refused,Ship slot change refused.
+workshop.slot.error_world,Workshop ship slot missing world source,World source is unavailable.
+workshop.slot.error_source,Workshop ship slot source range invalid,This slot source cannot be edited safely.
+workshop.slot.error_select,Workshop ship slot selection required,Select an authored slot.
+workshop.slot.error_duplicate,Workshop ship slot duplicate identifier,Slot ID already exists.
+workshop.slot.error_id,Workshop ship slot invalid identifier,Enter a unique slot ID.
+workshop.slot.error_ships,Workshop ship slot invalid allowed ships,Choose distinct authored hulls.
+workshop.slot.error_default,Workshop ship slot invalid default,Choose a default from this slot's allowed hulls.
+workshop.slot.error_policy,Workshop ship slot invalid unclaimed policy,Choose an unclaimed policy.
+workshop.slot.error_operation,Workshop ship slot invalid operation,Unknown slot operation.
+workshop.slot.error_runtime,Workshop ship slot runtime validation refused,Runtime validation refused this slot change.
+workshop.slot.error_stale,Workshop ship slot source changed before apply,World source changed while checking. Try again.
 workshop.test_seed,Deterministic Test seed input,[Seed]
 workshop.test_speed,Test time multiplier selector,[Speed]
 workshop.test_start,Start fresh validated draft Test,[Start Test]

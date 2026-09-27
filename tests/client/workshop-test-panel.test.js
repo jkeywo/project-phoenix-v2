@@ -8,6 +8,28 @@ import { WORKSHOP_MANIFEST, WORKSHOP_WORLD, WORKSHOP_WORLD_TEXT } from '../fixtu
 
 let panel;
 afterEach(() => { panel?.dispose(); document.body.replaceChildren(); });
+it('chooses one controlled slot and only its permitted hull for a whole-scenario Test', async () => {
+  const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: WORKSHOP_MANIFEST },
+    { path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT }]));
+  const lead = 'assets/entities/lead.toml', wing = 'assets/entities/wing.toml';
+  const start = vi.fn(async () => ({ running: true, tick: 0 }));
+  panel = mountWorkshopTestPanel({ root: document.body, draft: () => draft, busy: () => false,
+    provider: { test: { catalog: async () => ({ worlds: [WORKSHOP_WORLD], ships: [lead, wing],
+      slots: { [WORKSHOP_WORLD]: [
+        { id: 'lead', ships: [lead], default_ship: lead },
+        { id: 'wing', ships: [wing], default_ship: wing },
+      ] } }), capture: () => ({}), start, status: async () => ({ running: true }), stop: async () => {} } } });
+  await vi.waitFor(() => expect(document.getElementById('workshop-test-start').disabled).toBe(false));
+  const slot = document.getElementById('workshop-test-slot');
+  const ship = document.getElementById('workshop-test-ship');
+  expect(slot.hidden).toBe(false);
+  expect([...ship.options].map(row => row.value)).toEqual([lead]);
+  slot.value = 'wing'; slot.dispatchEvent(new Event('change'));
+  expect([...ship.options].map(row => row.value)).toEqual([wing]);
+  document.getElementById('workshop-test-start').click();
+  await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+  expect(start.mock.calls[0][1]).toMatchObject({ world: WORKSHOP_WORLD, slot: 'wing', ship: wing });
+});
 it('derives a browser pack catalog from exact text instead of native byte-array encoding', async () => {
   const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: WORKSHOP_MANIFEST },
     { path: WORKSHOP_WORLD, text: WORKSHOP_WORLD_TEXT }]));

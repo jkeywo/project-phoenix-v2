@@ -16,6 +16,7 @@ import { mountWorkshopComposition } from './workshop-composition-panel.js';
 import { mountWorkshopEntity } from './workshop-entity-panel.js';
 import { mountWorkshopPresets } from './workshop-presets-panel.js';
 import { mountWorkshopShipAuthoring } from './workshop-ship-authoring-panel.js';
+import { mountWorkshopSlotAuthoring } from './workshop-slot-authoring-panel.js';
 import { mountWorkshopScripts } from './workshop-scripts-panel.js';
 import { mountWorkshopSpatial } from './workshop-spatial-panel.js';
 import { inlineBlockBaseLine } from '../editor/script-editor.js';
@@ -188,6 +189,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let entityPanel = null;
   let presetsPanel = null;
   let shipAuthoringPanel = null;
+  let slotAuthoringPanel = null;
   let scriptsPanel = null;
   let spatialPanel = null;
   let layoutMount = null;
@@ -262,6 +264,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  slotAuthoringPanel = mountWorkshopSlotAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
+    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
+    setBusy(value) { pendingValidation = value; refresh(); },
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   scriptsPanel = mountWorkshopScripts({ root, attach: false, provider, runtime, draft: () => draft,
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
@@ -274,7 +280,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     dependencies: () => catalogueDependencies, t: translate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
-  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node);
+  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node, slotAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
@@ -440,6 +446,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     entityPanel?.refresh({ hidden: testing });
     presetsPanel?.refresh({ hidden: testing });
     shipAuthoringPanel?.refresh({ hidden: testing });
+    slotAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
     spatialPanel?.refresh({ hidden: testing });
     localisationPanel?.refresh();
@@ -1053,6 +1060,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     entityPanel?.dispose();
     presetsPanel?.dispose();
     shipAuthoringPanel?.dispose();
+    slotAuthoringPanel?.dispose();
     scriptsPanel?.dispose();
     spatialPanel?.dispose();
     layoutMount.dispose();

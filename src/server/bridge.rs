@@ -1204,7 +1204,7 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
     }
 
     if let Some(test) = test {
-        crate::workshop::test_browser::install(&mut app, test.launch);
+        crate::workshop::test_browser::install(&mut app, test.launch, test.frozen_slots);
     }
 
     crate::perf::browser::boot_end();

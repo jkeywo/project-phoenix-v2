@@ -2,8 +2,8 @@
 title: Workshop Authoring
 type: entity
 tags: [workshop, editor, tooling, scenario, entity, models, mod]
-sources: [workshop.html, editor.html, viewer.html, editor/workshop-launch.js, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, editor/workshop-provider.js, editor/workshop-source-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-composition.js, editor/workshop-entity-composition.js, editor/workshop-ship-authoring.js, editor/workshop-presets.js, editor/workshop-spatial.js, editor/workshop-scripts.js, editor/workshop-models.js, editor/workshop-model-structure.js, editor/workshop-test.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/workshop-boot.js, gui/workshop-redirect.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-test-panel.js, scripts/build-workshop.mjs, scripts/dev-workshop.mjs, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/archive.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/preview.rs, src/delivery/args.rs, src/viewer/preview.rs, pasm/spec/architecture/workshop-model-authoring.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
-updated: 2026-09-20
+sources: [workshop.html, editor.html, viewer.html, editor/workshop-launch.js, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, editor/workshop-provider.js, editor/workshop-source-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-composition.js, editor/workshop-entity-composition.js, editor/workshop-ship-authoring.js, editor/workshop-slot-authoring.js, editor/workshop-presets.js, editor/workshop-spatial.js, editor/workshop-scripts.js, editor/workshop-models.js, editor/workshop-model-structure.js, editor/workshop-test.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/workshop-boot.js, gui/workshop-redirect.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-slot-authoring-panel.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-test-panel.js, scripts/build-workshop.mjs, scripts/dev-workshop.mjs, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/test_source.rs, src/ship_slots.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/preview.rs, src/delivery/args.rs, src/viewer/preview.rs, pasm/spec/architecture/workshop-model-authoring.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
+updated: 2026-09-27
 ---
 
 # Workshop Authoring
@@ -194,6 +194,15 @@ validator before one undo entry is written. Test captures that same unsaved
 selected hull; its participant-free start leaves every authored Station on
 Backfill and therefore exercises the authored consoles and AI policies rather
 than a separate Workshop mock.
+
+The mission ship slot panel in `gui/workshop-slot-authoring-panel.js` edits the
+selected world source through `editor/workshop-slot-authoring.js`. It validates a
+candidate with the ordinary Workshop runtime before recording one undo entry.
+The Test catalogue in `src/workshop/test_source.rs` exposes each authored
+slot's hull choices; `src/ship_slots.rs` freezes one Test-controlled slot and
+the other slots' Backfill or Absent decisions. Browser and native Test adapters
+install that frozen roster before simulation startup. Legacy worlds keep their
+single-hull Test path.
 
 The Composition panel also authors the runtime's existing presentation-only GM
 role-preset schema. Native form controls create, edit, order and remove presets,

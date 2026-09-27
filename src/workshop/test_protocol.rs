@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct TestSelection {
     pub world: String,
+    /// Authored ship slot controlled by this disposable run. Legacy worlds
+    /// keep the historical implicit single ship when this is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
     pub ship: String,
     pub seed: u64,
 }

@@ -111,3 +111,36 @@ is in ignored `target/1534-mixed-native-ship-relay-91f382e6/`; result JSON SHA25
 is `5e71f2c252637ea442025bf206d47234de09a9decea1d92d60a5646a6bc2d01b`.
 This establishes a measurement-window limitation, not a recovery pass. The
 extended window is opt-in and must produce its own evidence.
+
+## Current source native ship loss
+
+The all-native relay ship-loss case passed on product source
+`da812fb07149188928561daeea2de2389644ed1c`, using clean runner
+`39e89c895b26ead247074a23aafe8c5f53c18de7`. The source-matched
+`cargo build --features ultralight --bin phoenix-host` completed in 3m 02s.
+The retained receipt records the refreshed library timestamp, current main
+dependency paths, copied executable, SDK libraries, content and bundle hashes.
+
+The first process ran from 17:27:32 to 17:30:11 UTC on 2026-09-27. The whole
+case took 160.397 seconds within its 900-second limit. All six peers completed
+the twelve-Station/two-GM workload and agreed at ticks 300/600 before the fault.
+Native ship 3 occupied technical slot 4 in this run; its process exit was
+confirmed. All five survivors applied exactly one HostLoss at tick 603 and
+reported that ship uncrewed/Backfill. They agreed at ticks 900
+(`7d7d4e0afd287b74`) and 1200 (`bcc297b3707eee76`), retaining their slots and
+unique outgoing command orders. All six process manifests confirm cleanup and
+unchanged executable hashes; the rendezvous service also confirmed exit.
+
+| Retained artifact | SHA-256 |
+| --- | --- |
+| `target/native-build-receipt-da812fb0.json` | `f93d8bdc8db2f40729ae83422cf7e04730f82643d90916ad90688ed8ceebda96` |
+| Native executable | `c1ebfa3e6b3a8128e4ee357cbdcdb2c541d980cbe446b9593ed63db02c8ff9a6` |
+| `target/1534-native-ship-relay-da812fb0/matrix.json` | `5bbe5fa52c8393d77c08ae0a03666200dc0011ac7152ca8d34ae4e6605b06536` |
+| `target/1534-native-ship-relay-da812fb0-service/attribution.json` | `a9b3b4190fe073c640f06571766cae287cbc0c2d7bb709fe5c87053ef12f5c7a` |
+
+The service observed 31,302 reliable relay frames, no configured impairment and
+no queue overflow. The terminated victim's raw teardown stream includes an HTTP
+observer connection reset after intentional termination; survivor verdict
+evidence stops collecting that victim at the confirmed fault request. No
+survivor runtime/observer failure occurred. This case proves native non-owner
+ship loss only; the other native and mixed fault cells remain separate work.

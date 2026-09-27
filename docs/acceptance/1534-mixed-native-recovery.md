@@ -169,3 +169,35 @@ no second simulation adoption, and refusal of a competing connected-slot claim.
 `npx vitest run tests/client/fleet-session.test.js tests/client/host-mesh.test.js tests/client/native-fleet-peer.test.js`
 passed 162 tests on the correction. Actual native GM recovery remains unproven
 until a new source-matched binary and bundle execute the case successfully.
+
+## Rebuilt source native GM loss
+
+After the redial correction, the all-native relay GM-loss case passed on clean
+product `9f2ba0036e39100c34ab76ada2eab215d89d3592` with clean runner
+`cb69607e88c190206ac6f8426d063e81d939d0f1`. The matching native build finished
+at 18:07:44 UTC on 2026-09-27 after 27.12 seconds; its receipt retains the
+refreshed main library dependency records, archived executable and SDK hashes.
+The case took 160.760 seconds within the 900-second limit. Its command was
+`target/run-native-1534-current.ps1 -Failure gm -ExpectedRevision 9f2ba0036e39100c34ab76ada2eab215d89d3592`,
+which invokes the documented all-native runner with workload enabled and keeps
+its relay service log and counters.
+
+All six participants completed the twelve-Station/two-GM healthy workload and
+agreed at ticks 300/600. The runner then terminated native GM 2 in slot 6.
+All five survivors applied one HostLoss at tick 603 and agreed at ticks 900
+(`c6f9a0be9ced1ac1`) and 1200 (`b411b8fe6a84cd1f`), with unchanged survivor
+slots and no repeated outgoing orders. Ship Backfill is not applicable to GM
+loss. All six process manifests confirm cleanup, unchanged binary hashes and
+no process failure; the service also confirmed cleanup. Raw HTTP observer
+connection resets occur during process teardown, after the collected verdict.
+The service saw 31,113 reliable relay frames, no snapshots, no impairment and
+no queue overflow. This run proves native GM loss; it does not establish the
+cause of the earlier spontaneous socket closure or directly inject a redial.
+
+| Retained artifact | SHA-256 |
+| --- | --- |
+| `target/browser-wasm-receipt-9f2ba003.json` | `eeb9437fcb25690ed95489e462b527ff612638d73cc20a216a289da1c8557d13` |
+| `target/native-build-receipt-9f2ba003.json` | `75a801b14dd0962a675fdcdf7ff4cf263c9fa6f809b92ab051877305382e0242` |
+| Native executable | `9c2928b6658cd894e06af4c6f0963b2f34fb9ba40f98911a842ab5a54dfa3887` |
+| `target/1534-native-gm-relay-9f2ba003/matrix.json` | `edbfa930adc67299a571b75a10443d1839ccc7f255c4c8e2ad73da863cea9d88` |
+| `target/1534-native-gm-relay-9f2ba003-service/attribution.json` | `590acdea3bdd2ed4ed00636c69d18c841ea7ce297367f860c5e73c59ba4737df` |

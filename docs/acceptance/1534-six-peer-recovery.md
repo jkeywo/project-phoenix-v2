@@ -419,7 +419,7 @@ Browser rendering is disabled in these bounded simulation/transport cases.
 | --- | --- | --- | --- | --- |
 | Non-owner ship loss | Passed at `b4e17e72` | Passed at `b4e17e72` | Passed at `b4e17e72` | Native relay passed at `da812fb0`; mixed healthy gate previously expired before injection |
 | Owner loss | Passed at `da812fb0` | Passed at `da812fb0`; prior evidence retained | Passed at `da812fb0` with attributed milestone recorder | Untested |
-| GM loss | Passed at `da812fb0` | Passed at `da812fb0` | Passed at `da812fb0` with attributed milestone recorder | Native precondition failed after spontaneous ship redial; rerun pending correction |
+| GM loss | Passed at `da812fb0` | Passed at `da812fb0` | Passed at `da812fb0` with attributed milestone recorder | Native relay passed at `9f2ba003`; earlier precondition failure retained |
 | Divergence restore and exact-once reducer effect | Passed at `da812fb0` | Passed at `da812fb0`; prior failures retained above | Pre-fault observer history expired; recovery unrun | Untested |
 | Two replacement contenders and connected-holder challenge | Untested | Untested | Untested | Untested |
 

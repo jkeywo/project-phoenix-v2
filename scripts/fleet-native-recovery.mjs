@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseNativeProbeArgs } from './fleet-native-probe.mjs';
 import { runNativeAdmissionMatrix } from './fleet-native-matrix.mjs';
 import { mixedFailureHook } from './fleet-mixed-recovery.mjs';
+import { nativeGmRedialHook } from './fleet-native-redial.mjs';
 import { sourceState } from './fleet-wasm-build-receipt.mjs';
 import { fileHash } from './profile-provenance.mjs';
 
@@ -19,7 +20,7 @@ export function nativeRecoveryOptions(args) {
     copy.splice(index,2);return value;
   };
   const failure=take('--failure'),receipt=take('--build-receipt');
-  if(!['ship','gm','leader','replacement','divergence'].includes(failure))throw new Error('Invalid native recovery scenario');
+  if(!['ship','gm','leader','replacement','divergence','gm-redial'].includes(failure))throw new Error('Invalid native recovery scenario');
   const options=parseNativeProbeArgs(copy);
   if(!options.workload)throw new Error('Native recovery requires --workload true');
   return {failure,receipt,options};
@@ -30,7 +31,7 @@ export async function main(args=process.argv.slice(2)) {
   if(source.sourcePatch||receipt.dirtyDiff?.length||receipt.sourceRevision!==source.sourceRevision
     ||receipt.binarySha256!==fileHash(options.binary)||receipt.libraryMtimeRefreshedWithoutByteChange!==true)
     throw new Error('Native build receipt does not match clean source and binary');
-  const result=await runNativeAdmissionMatrix(options,{afterHealthy:mixedFailureHook(failure,{
+  const result=await runNativeAdmissionMatrix(options,{afterHealthy:failure==='gm-redial'?nativeGmRedialHook():mixedFailureHook(failure,{
     faultSeconds:600,nativeLabels:['ship-1','ship-2','ship-3','ship-4','gm-1','gm-2'],
   })});
   result.buildReceipt={path:path.resolve(file),sha256:fileHash(file),sourceRevision:source.sourceRevision};

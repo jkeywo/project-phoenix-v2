@@ -71,6 +71,7 @@ export async function runNativeAdmissionMatrix(options, hooks = {}) {
   if (fs.existsSync(output)) throw new Error('Matrix output already exists');
   fs.mkdirSync(output, {recursive:true});
   const events = new Map(), commands = new Map(), fleetCommands = new Map(), promises = [], runsById = new Map(), stopped = new Set();
+  const processes = new Map();
   const result = {nativeEvents:{},steps:[]};
   const step = name => { result.steps.push({name,utc:new Date().toISOString()}); process.stderr.write(name+'\n'); };
   let fleetCode, failure, stop = false, stage = 'owner';
@@ -81,6 +82,7 @@ export async function runNativeAdmissionMatrix(options, hooks = {}) {
     events.set(id,[]); commands.set(id,[]); fleetCommands.set(id,[]);
     result.nativeEvents[id] = events.get(id);
     const promise = runNativeProbe({...options,...extra,role,'fleet-code':code,out:path.join(output,id),shouldStop:() => stop || stopped.has(id),
+      onProcess:read => processes.set(id,read),
       nextCommand:() => commands.get(id).shift(),
       nextFleetCommand:hooks.afterHealthy ? () => fleetCommands.get(id).shift() : undefined,
       onEvent:event => { if (stop || stopped.has(id)) return; events.get(id).push(event); if (['fleet_fault','page-error','page-rejection','configure-error','station-error','gm-control-error','observer-overflow','observer-error'].includes(event.kind)
@@ -140,6 +142,7 @@ export async function runNativeAdmissionMatrix(options, hooks = {}) {
             return {id,cleanupExitObserved:true,finishedAt:run.finishedAt,binarySha256:run.binary.sha256};
           },
           launchNative:(id,extra) => launch(id,id.startsWith('gm')?'gm':'ship',fleetCode,extra),
+          nativeProcess:id => processes.get(id)?.(),
           commandNative:(id,command) => fleetCommands.get(id).push(command),
           commandGm:(id,command) => commands.get(id).push(command),
           evaluate:() => { throw new Error('Native hook cannot evaluate a browser page'); },

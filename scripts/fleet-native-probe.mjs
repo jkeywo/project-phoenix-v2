@@ -49,13 +49,32 @@ export function createNativeFleetPeer(options = {}) {
   window.addEventListener('unhandledrejection', event => report('page-rejection', {message:String(event.reason)}));
   let lastHealth = 0;
   let armedDivergence = false, injected = false;
+  let recoverySocket=null, memberCreations=0, wireGeneration=null, lastIdentity=null, redialIdentity=null;
+  const observedMember = memberOptions => {
+    memberCreations++;
+    const socket = memberOptions.factories.socket;
+    return (options.createMember || createFleetMember)({...memberOptions,factories:{...memberOptions.factories,
+      socket:(...args)=>{ recoverySocket=socket(...args); return recoverySocket; }}});
+  };
   const wrap = name => value => {
     if (name !== 'onHealth' || Date.now() - lastHealth > 1000) { report(name,value); if (name === 'onHealth') lastHealth = Date.now(); }
     return options[name]?.(value);
   };
   const peer = observedNativeFleetPeer({...options,
     onRoster:wrap('onRoster'), onDiag:wrap('onDiag'), onHealth:wrap('onHealth'),
+    createMember:observedMember,
     send(record) {
+      if (['fleet_wire_send','fleet_wire_open'].includes(record.kind)) wireGeneration=record.generation ?? 0;
+      if (['fleet_wire_open','fleet_wire_close'].includes(record.kind))
+        report(record.kind,{generation:record.generation,role:record.role});
+      if(record.kind==='fleet_identity') {
+        const identity=record.identity;
+        if(redialIdentity) report('redial-identity',{
+          sameCredential:!!identity.reconnectCredential && identity.reconnectCredential===redialIdentity.reconnectCredential,
+          sameOperator:identity.operatorId===redialIdentity.operatorId,
+          sameSlot:identity.claim===redialIdentity.claim});
+        lastIdentity=identity;
+      }
       if (armedDivergence && !injected && record.kind === 'fleet_frame') {
         const frame = typeof record.frame === 'string' ? JSON.parse(record.frame) : record.frame;
         const command = frame.t === 'tick' && frame.d.commands?.find(row => row.payload?.type === 'SetBoost');
@@ -79,6 +98,15 @@ export function createNativeFleetPeer(options = {}) {
       return options.send(record);
     },
   });
+  const receive = peer.receive;
+  peer.receive = raw => {
+    try {
+      const event=JSON.parse(raw)?.native_wire;
+      if(event && ['open','close','fault'].includes(event.event))
+        report('fleet-wire-event',{generation:event.generation,event:event.event});
+    } catch (_) {}
+    return receive.call(peer,raw);
+  };
   const configure = peer.configure;
   peer.configure = raw => {
     const config = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -100,7 +128,7 @@ export function createNativeFleetPeer(options = {}) {
         if (['host-loss','slot-claim','recovery-ready'].includes(frame.t)) report('recovery-frame',frame);
       } catch (_) { report('observer-error',{reason:'invalid-outgoing-frame'}); }
     }
-    const evidence = {crew:state.crew, ship_ready:state.ship_ready, gm_ready:state.gm_ready, validation:state.validation, roster_result:state.roster_result, recovery:state.recovery, continuation:state.continuation_result?.status};
+    const evidence = {crew:state.crew, ship_ready:state.ship_ready, gm_ready:state.gm_ready, validation:state.validation, roster_result:state.roster_result, recovery:state.recovery, gm_join:state.gm_join, continuation:state.continuation_result?.status};
     const key = JSON.stringify(evidence);
     if (key !== last) { last = key; report('state', evidence); }
     return update.call(peer, raw);
@@ -130,6 +158,14 @@ export function createNativeFleetPeer(options = {}) {
         setTimeout(()=>executeJoin(args,command.attempt),Math.max(0,command.startAt-Date.now()));
       }
       if(command?.kind==='diverge') {armedDivergence=true; report('divergence-armed',{});}
+      if(command?.kind==='gm-redial') {
+        if(redialIdentity || peer.role!=='gm' || !lastIdentity?.reconnectCredential
+          || recoverySocket?.readyState!==1 || !Number.isSafeInteger(wireGeneration))
+          throw new Error('Native GM socket redial precondition missing');
+        redialIdentity={...lastIdentity};
+        report('redial-requested',{generation:wireGeneration,memberCreations});
+        recoverySocket.close();
+      }
     } catch(error){report('observer-error',{reason:error.message});}
     finally {controlBusy=false;}
   },100);` : ''}
@@ -308,6 +344,8 @@ export async function runNativeProbe(options) {
       env: { ...process.env, BEVY_ASSET_ROOT: privateContent, PHOENIX_FLEET_IDENTITY_DIR:evidence.identityStoreRoot, APPDATA: path.join(output, 'appdata'), LOCALAPPDATA: path.join(output, 'localappdata'), RUST_LOG: 'warn,bevy_render::renderer=info' },
       stdio: ['ignore', stdout, stderr] });
     child.once('error', error => { spawnError = error; });
+    evidence.processId=child.pid;
+    options.onProcess?.(()=>({pid:child.pid,startedAt:evidence.startedAt,alive:child.exitCode===null&&child.signalCode===null&&!spawnError}));
     const deadline = Date.now() + options.seconds * 1000;
     while (Date.now() < deadline && child.exitCode === null && child.signalCode === null && !spawnError && !eventOverflow && !options.shouldStop?.()) await new Promise(resolve => setTimeout(resolve, 100));
     if (spawnError) throw spawnError;

@@ -61,6 +61,34 @@ describe('bounded native runtime bootstrap probe', () => {
     expect(JSON.stringify(events)).not.toContain('SECRET');
   });
 
+  it('closes the existing native GM socket once and proves identity without exposing the capability',async()=>{
+    const reports=[],controls=[],sent=[];let poll,closed=0,members=0;
+    const source=`export function createNativeFleetPeer(options) {
+      globalThis.emitIdentity=()=>options.send({kind:'fleet_identity',identity:{operatorId:'gm-2',claim:'slot-6',reconnectCredential:'SECRET'}});
+      options.createMember({factories:{socket:()=>({readyState:1,close(){globalThis.closeSocket();options.send({kind:'fleet_wire_close',generation:0});this.readyState=3;}})}});
+      options.send({kind:'fleet_wire_send',generation:0,frame:'PRIVATE'});
+      globalThis.emitIdentity();
+      return {role:'gm',configure(){},update(){},receive(){},join(){throw new Error('must retain the existing member');}};
+    }`;
+    const context=vm.createContext({closeSocket:()=>closed++,window:{addEventListener(){}},navigator:{userAgent:'test'},
+      setInterval:fn=>poll=fn,
+      fetch:url=>{if(url.endsWith('/fleet-control'))return Promise.resolve({ok:true,json:async()=>controls.shift()||null});
+        reports.push(JSON.parse(new URL(url).searchParams.get('event')));return Promise.resolve({ok:true});}});
+    vm.runInContext(instrumentNativeFleetModule(source,'http://localhost/token',{recoveryControl:true})
+      .replace('export function createNativeFleetPeer','function createNativeFleetPeer'),context);
+    const peer=context.createNativeFleetPeer({send:record=>sent.push(record),createMember:options=>{members++;options.factories.socket();}});
+    controls.push({kind:'gm-redial'});await poll();
+    expect(closed).toBe(1);expect(members).toBe(1);
+    expect(reports.find(row=>row.kind==='redial-requested').value).toEqual({generation:0,memberCreations:1});
+    expect(sent).toContainEqual({kind:'fleet_wire_close',generation:0});
+    peer.receive(JSON.stringify({native_wire:{event:'open',generation:1}}));context.emitIdentity();
+    expect(reports.find(row=>row.kind==='fleet-wire-event').value).toEqual({event:'open',generation:1});
+    expect(reports.find(row=>row.kind==='redial-identity').value).toEqual({sameCredential:true,sameOperator:true,sameSlot:true});
+    controls.push({kind:'gm-redial'});await poll();
+    expect(closed).toBe(1);expect(reports.some(row=>row.kind==='observer-error')).toBe(true);
+    expect(JSON.stringify(reports)).not.toMatch(/SECRET|PRIVATE/);
+  });
+
   it('refuses ambiguous source rewriting', () => {
     expect(() => instrumentNativeFleetModule('export const changed = true;', 'http://localhost')).toThrow();
     expect(() => instrumentNativeFleetModule('export function createNativeFleetPeer() {}\nexport function createNativeFleetPeer() {}', 'http://localhost')).toThrow();

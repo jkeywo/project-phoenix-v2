@@ -243,3 +243,25 @@ runtime evidence. Retained logs are
 `target/1534-native-gm-bridge-red-v2.log` and
 `target/1534-native-gm-bridge-green.log`; the first `red.log` instead records a
 corrected test setup error before product ingress was reached.
+
+
+## Deterministic same-process native GM redial probe
+
+`fleet-native-recovery.mjs --failure gm-redial` extends the existing native
+runner with a bounded redial after the six-peer healthy workload. The private
+instrumented bundle retains the existing member's real bridge socket and calls
+its ordinary `close()` once. It creates no new member and never rewrites
+simulation state. Rust closes the old transport; ordinary production redial
+must open a newer native wire generation.
+
+The verdict requires the same live child PID/start time before and after, one
+member creation, the new Rust-observed wire generation, and unchanged private
+capability/operator/slot comparisons (only booleans are retained). It then
+requires six identical authoritative reconnect commits, five agreed survivor
+HostLosses, an explicit applied GM Resume, stable original ship identities in
+fresh controls, no duplicate outgoing orders or observer errors, and two exact
+matching post-commit digest checkpoints. Use the existing native invocation,
+matching `--build-receipt`, `--seconds 900 --workload true` and a fresh output
+directory, changing only `--failure gm-redial`. Its recovery wait is bounded at
+600 seconds. This probe is implemented and unit-tested; no live redial result
+is claimed until the source-matched runtime run completes.

@@ -134,6 +134,7 @@ export function mountNativeGmWorkspace(options) {
       if (command?.kind === 'ready') readyAllowed = true;
       tryReady();
       if (command?.kind === 'force-start') { bridge.forceStart(); report('gm-force-start-requested',{}); }
+      if (command?.kind === 'resume') report('gm-resume-requested',{correlation:command.correlation,accepted:window.__hostSetSessionPaused(false,command.correlation)});
       if (command?.kind === 'effect-track') effectRequest=command.request;
       if (command?.kind === 'effect-observe') {
         effectRequest=command.request;

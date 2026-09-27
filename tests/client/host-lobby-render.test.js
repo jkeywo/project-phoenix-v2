@@ -23,7 +23,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { t } from '../../gui/strings.js';
+import { getLocale, t } from '../../gui/strings.js';
 import { hostLobbyViewModel } from '../../gui/host-lobby-view.js';
 import {
   renderHostLobby,
@@ -396,7 +396,7 @@ describe('the bridge monitor row', () => {
     const buttons = rowButtons();
     expect(buttons.length).toBe(2);
     expect(buttons[0].textContent).toContain('BRAVIA');
-    expect(buttons[0].textContent).toContain('3840');
+    expect(buttons[0].textContent).toContain(new Intl.NumberFormat(getLocale()).format(3840));
     expect(buttons[0].textContent).toContain(t('server.monitor_row.viewscreen'));
     expect(buttons[1].textContent).toContain('BenQ EX');
     expect(buttons[1].textContent).not.toContain(t('server.monitor_row.viewscreen'));

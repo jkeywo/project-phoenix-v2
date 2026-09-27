@@ -12,7 +12,7 @@ describe('Strike reserve controls', () => {
     for (const element of [gunnery, power]) {
       element.state = { charge: 0, capacity: 90, enabled: false, depleted: true };
       expect(element.shadowRoot.getElementById('status').textContent).toBe(t('dynasty.boost.depleted'));
-      expect(element.shadowRoot.getElementById('charge').getAttribute('aria-valuenow')).toBe('0');
+      expect(element.shadowRoot.getElementById('charge').shadowRoot.querySelector('.bar-wrap').getAttribute('aria-valuenow')).toBe('0');
     }
     expect(power.shadowRoot.getElementById('toggle').hidden).toBe(true);
     window.activateSemanticAction = vi.fn();

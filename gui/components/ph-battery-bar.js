@@ -92,14 +92,19 @@ export class PhBatteryBar extends PhElement {
     const label = root.getElementById('bar-label');
     const thresholdMarker = root.getElementById('threshold-marker');
     const chargingIndicator = root.getElementById('charging-indicator');
+    const gauge = root.querySelector('.bar-wrap');
     const reserve = this.hasAttribute('reserve');
     thresholdMarker.hidden = reserve;
     if (reserve) {
-      this.setAttribute('role', 'progressbar');
-      this.setAttribute('aria-valuemin', '0');
-      this.setAttribute('aria-valuemax', '100');
-      this.setAttribute('aria-valuenow', String(Math.round(levelPct)));
-      this.setAttribute('aria-label', t('dynasty.reserve.title'));
+      gauge.setAttribute('role', 'progressbar');
+      gauge.setAttribute('aria-valuemin', '0');
+      gauge.setAttribute('aria-valuemax', '100');
+      gauge.setAttribute('aria-valuenow', String(Math.round(levelPct)));
+      gauge.setAttribute('aria-label', t('dynasty.reserve.title'));
+    } else {
+      for (const name of ['role', 'aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-label']) {
+        gauge.removeAttribute(name);
+      }
     }
 
     // Vertical gauges fill from the bottom; the threshold marker travels up

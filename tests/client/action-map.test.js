@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 56 expected action keys', () => {
+  it('contains exactly the 57 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -57,6 +57,7 @@ describe('ACTION_MAP', () => {
       'set_sensors_target',
       'set_shield_focus',
       'set_station_stance',
+      'set_strike_boost',
       'set_target',
       'set_torpedo_volley_target',
       'set_view',

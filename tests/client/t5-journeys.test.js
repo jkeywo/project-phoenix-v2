@@ -64,7 +64,7 @@ it('J2: scoped GM confirmation survives locale change and ends in a score-free r
     state: 'partial', score: 1 }] });
   expect(report.outcome).toBe('reported');
   expect(report.rows[0]).not.toHaveProperty('score');
-  expect(t(report.rows[0].outcomeId)).toContain('One transport');
+  expect(t(report.rows[0].outcomeId)).toContain('Ein Transport');
 });
 
 it('J3: a GM disconnect/reconnect preserves identity while health reports recovery honestly', async () => {

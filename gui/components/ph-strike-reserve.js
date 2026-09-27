@@ -10,7 +10,7 @@ export class PhStrikeReserve extends PhElement {
       :host { display:block; color:var(--ink); }
       h3 { font-size:var(--text-sm); margin:0 0 .5rem; }
       button { min-height:var(--control-hit-min); min-width:var(--control-hit-min); width:100%; margin:.5rem 0; padding:.5rem; color:var(--ink); background:var(--surface-panel); border:2px solid var(--edge); }
-      button[aria-pressed="true"] { border-color:var(--loaded); }
+      button[aria-pressed="true"] { min-height:var(--control-hit-min); min-width:var(--control-hit-min); border-color:var(--loaded); }
       button:focus-visible { outline:3px solid var(--cyan); outline-offset:2px; }
       p { font-size:var(--text-sm); line-height:1.4; }
     </style>

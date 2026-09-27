@@ -54,11 +54,18 @@ describe('PhBatteryBar', () => {
     el.state = { level_pct: 0, charging: false, emergency_threshold_pct: 20 };
     expect(el.shadowRoot.getElementById('bar-fill').className).toBe('fill');
     expect(el.shadowRoot.getElementById('threshold-marker').hidden).toBe(true);
-    expect(el.getAttribute('aria-label')).toBe(t('dynasty.reserve.title'));
-    expect(el.getAttribute('aria-valuenow')).toBe('0');
+    const gauge = el.shadowRoot.querySelector('.bar-wrap');
+    expect(el.hasAttribute('role')).toBe(false);
+    expect(el.hasAttribute('tabindex')).toBe(false);
+    expect(gauge.getAttribute('role')).toBe('progressbar');
+    expect(gauge.getAttribute('aria-label')).toBe(t('dynasty.reserve.title'));
+    expect(gauge.getAttribute('aria-valuenow')).toBe('0');
     el.state = { level_pct: 25, charging: true };
     expect(el.shadowRoot.getElementById('charging-indicator').style.display).toBe('flex');
-    expect(el.getAttribute('aria-valuenow')).toBe('25');
+    expect(gauge.getAttribute('aria-valuenow')).toBe('25');
+    el.removeAttribute('reserve');
+    expect(gauge.hasAttribute('role')).toBe(false);
+    expect(gauge.hasAttribute('aria-valuenow')).toBe(false);
   });
 
   it('renders amber fill when near threshold (within 10pp)', () => {

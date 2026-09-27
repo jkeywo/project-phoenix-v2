@@ -22,7 +22,10 @@ afterEach(() => { setOverlayCatalogues([]); setLocale('en'); });
 describe('operator setup to launch language', () => {
   it('renders German setup and selection while an untranslated ship stage falls back to English', () => {
     setBaseCatalogue(core);
-    setOverlayCatalogues([{ source: 'fixture-de', csv: german }]);
+    setOverlayCatalogues([
+      { source: 'fixture-de', csv: german },
+      { source: 'fixture-untranslated', csv: 'id,en\nserver.select_ship,[Choose a ship to launch]\n' },
+    ]);
     setLocale('de');
     const parsed = new DOMParser().parseFromString(markup, 'text/html');
     const doc = document.implementation.createHTMLDocument('');
@@ -45,7 +48,7 @@ describe('operator setup to launch language', () => {
     expect(selected).toEqual(['combat_test']);
     expect(scenarioCatalogView(catalogue, { scenario_id: 'combat_test' }, false).labelId)
       .toBe('server.select_ship');
-    expect(t('server.select_ship')).toBe('[Select a ship]');
+    expect(t('server.select_ship')).toBe('[Choose a ship to launch]');
 
     applyToDom(doc);
     expect(doc.getElementById('ai-launch-btn').textContent).toBe('KI-Schiff starten');

@@ -1662,11 +1662,17 @@ pub fn apply_mesh_inbox(
     for (frame, origin) in sim_frames {
         match frame {
             MeshFrame::Tick(tick) => {
-                if tick.from == session.local() || session.has_departed(tick.from) {
+                let departed = session.has_departed(tick.from);
+                let expected_owner = roster.as_deref().map_or(lead, FleetRoster::owner);
+                if tick.from == session.local() || (departed && tick.from != expected_owner) {
                     continue;
                 }
+                // A close observation can precede the current owner's final
+                // authenticated start decision. Preserve that immutable boundary
+                // through the normal validation below, even after departure.
+                // Once ownership transfers, the former owner's entire frame is
+                // fenced above so it cannot alter the successor's start tracker.
                 if let Some(grant) = tick.start_grant.as_ref() {
-                    let expected_owner = roster.as_deref().map_or(lead, FleetRoster::owner);
                     let now = sim_tick.as_deref().map_or(0, |tick| tick.0);
                     let reason =
                         if tick.from != expected_owner {
@@ -1724,6 +1730,11 @@ pub fn apply_mesh_inbox(
                     } else if let Some(pending) = pending_starts.as_deref_mut() {
                         pending.adopt_canonical(grant.clone());
                     }
+                }
+                if departed {
+                    // The start decision does not revive command authority or
+                    // put the departed host back in the watermark wait-set.
+                    continue;
                 }
                 // `tick.from` is now authenticated to the delivering connection at
                 // ingress above (issue #1120 closed the #1118 `TODO`): a frame

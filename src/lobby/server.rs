@@ -3369,6 +3369,73 @@ mod tests {
     }
 
     #[test]
+    fn departed_owner_start_boundary_never_revives_commands_or_survives_owner_transfer() {
+        use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
+        use crate::core::messages::{SystemControlPayload, SystemId};
+        use crate::lockstep::{FleetLockstep, FleetRoster, MeshFrame, MeshInbox, MeshOrigin};
+
+        // The live case proves this same command passes ownership/admission;
+        // departure alone must fence it while preserving the start decision.
+        for (departed, transferred) in [(false, false), (true, false), (true, true)] {
+            let mut app = test_app();
+            enable_managed_lobby(&mut app, true);
+            install_two_participant_fleet(&mut app, 2, 1, 2);
+            let ship = "00000000-0000-8000-8000-000000000001";
+            app.world_mut().spawn((
+                crate::lockstep::FleetSlotOf(HostSlot(1)),
+                crate::entities::spawner::EntityUuid(ship.into()),
+            ));
+            if departed {
+                app.world_mut()
+                    .resource_mut::<FleetLockstep>()
+                    .depart(HostSlot(1));
+            }
+            if transferred {
+                assert!(app
+                    .world_mut()
+                    .resource_mut::<FleetRoster>()
+                    .transfer_owner(HostSlot(1), HostSlot(2)));
+            }
+            let mut grant = automatic_grant(1);
+            grant.apply_tick = 3;
+            app.world_mut().resource_mut::<MeshInbox>().push_from(
+                MeshFrame::Tick(crate::lockstep::TickFrame {
+                    from: HostSlot(1),
+                    tick: 0,
+                    ready_through: 2,
+                    commands: vec![crate::lockstep::MeshCommand {
+                        tick: 10,
+                        order: CommandOrder::new(HostSlot(1), 1),
+                        ship: ShipKey(ship.into()),
+                        target: SystemId("helm_thrust".into()),
+                        payload: SystemControlPayload::SetThrust { value: 0.5 },
+                    }],
+                    start_grant: Some(grant.clone()),
+                }),
+                MeshOrigin::Peer(HostSlot(1)),
+            );
+            tick(&mut app);
+            let tracker = app.world().resource::<StartGrantTracker>();
+            assert_eq!(tracker.canonical.as_ref(), (!transferred).then_some(&grant));
+            assert!(
+                !tracker.is_failed_closed(),
+                "a former owner cannot poison the successor"
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<crate::command_admission::log::PendingCommands>()
+                    .len(),
+                usize::from(!departed)
+            );
+            if departed {
+                let fleet = app.world().resource::<FleetLockstep>();
+                assert!(fleet.has_departed(HostSlot(1)));
+                assert_eq!(fleet.watermark_of(HostSlot(1)), None);
+            }
+        }
+    }
+
+    #[test]
     fn managed_lobby_never_arms_the_legacy_local_countdown() {
         let mut app = test_app();
         enable_managed_lobby(&mut app, true);

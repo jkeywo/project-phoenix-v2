@@ -345,8 +345,8 @@ pub struct ScenarioCatalogEntry {
     pub label: Option<String>,
     /// The world's `[global] description`, when present.
     pub description: Option<String>,
-    /// The ships this scenario offers — the referenced world's
-    /// `[[available_ships]]` list, and *only* those (issue #754 AC4).
+    /// The ships this scenario offers — `[[available_ships]]` for a legacy
+    /// world, or the deduplicated hull options of its explicit ship slots.
     pub ships: Vec<CatalogShip>,
     /// Authored mission slots after legacy one-slot compatibility synthesis.
     pub slots: Vec<ShipSlotConfig>,
@@ -1118,7 +1118,8 @@ world = "assets/worlds/mod_skirmish.toml"
     // -- shipped manifest ----------------------------------------------------
 
     /// The real shipped manifest must parse, list exactly the selectable roots
-    /// (`combat_test`, `falling_skyway`, and `alliance_convoy_escort`), and validate
+    /// (`combat_test`, `falling_skyway`, `alliance_convoy_escort`, and
+    /// `cruiser_elimination`), and validate
     /// cleanly against the shipped world files — the pre-load catalog is
     /// authoritative, so a broken manifest must fail in CI rather than at host
     /// startup.
@@ -1129,7 +1130,12 @@ world = "assets/worlds/mod_skirmish.toml"
         let ids: Vec<&str> = m.scenarios.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["combat_test", "falling_skyway", "alliance_convoy_escort"]
+            [
+                "combat_test",
+                "falling_skyway",
+                "alliance_convoy_escort",
+                "cruiser_elimination",
+            ]
         );
 
         let mut map = HashMap::new();
@@ -1145,6 +1151,10 @@ world = "assets/worlds/mod_skirmish.toml"
             "assets/worlds/alliance_convoy_escort.toml".to_string(),
             include_str!("../../assets/worlds/alliance_convoy_escort.toml").to_string(),
         );
+        map.insert(
+            "assets/worlds/cruiser_elimination.toml".to_string(),
+            include_str!("../../assets/worlds/cruiser_elimination.toml").to_string(),
+        );
 
         let findings = validate_manifest(&m, manifest_toml, resolver(map.clone()));
         assert!(
@@ -1154,7 +1164,29 @@ world = "assets/worlds/mod_skirmish.toml"
 
         // The catalog exposes each scenario's own ships, drawn from its world.
         let catalog = build_catalog(&m, resolver(map));
-        assert_eq!(catalog.scenarios.len(), 3);
+        assert_eq!(catalog.scenarios.len(), 4);
+        let elimination = catalog
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id == "cruiser_elimination")
+            .expect("the competitive reference world is selectable");
+        assert_eq!(
+            elimination
+                .ships
+                .iter()
+                .map(|ship| ship.template_path.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "assets/entities/alliance_cruiser.toml",
+                "assets/entities/dynasty_player_cruiser.toml",
+            ]
+        );
+        assert_eq!(elimination.slots.len(), 4);
+        assert!(elimination.slots.iter().all(|slot| {
+            slot.unclaimed == crate::world::config::UnclaimedSlotPolicy::Backfill
+                && slot.ships.len() == 1
+                && slot.default_ship == slot.ships[0].template_path
+        }));
         let convoy = catalog
             .scenarios
             .iter()

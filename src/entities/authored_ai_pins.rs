@@ -378,10 +378,15 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // depart from the impulse baseline, not three.
     ("alliance_cruiser", "engines"),
     ("alliance_cruiser", "steering"),
-    // The crewed Dynasty cruiser composes the same class doctrine unchanged;
-    // this is inherited behaviour, not a new tactical departure.
+    // The crewed Dynasty cruiser has its own charge, approach, attack and
+    // recovery travel machine (issue #1539), on both movement axes.
     ("dynasty_player_cruiser", "engines"),
     ("dynasty_player_cruiser", "steering"),
+    // Its fourth power channel charges the strike reserve while boost is off,
+    // then yields that allocation during a paid strike or at full reserve.
+    // Ordinary helm and weapons bids remain, but this is deliberately not the
+    // fleet battery policy and is measured by the #1550 seeded duel matrix.
+    ("dynasty_player_cruiser", "power"),
     // …and NOT the three tubes the ring exists to point, which is worth a note
     // because they were listed here for one release (issue #929).
     //
@@ -3671,10 +3676,9 @@ fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
          with. This is a DEPENDENCY, not a deadlock — but it is only discharged by \
          guns that are actually heavy enough, which is a balance claim no authored \
          text can settle. A hull added here owes a seeded sweep in its own file \
-         showing the gate opening in practice; the Dynasty hull inherits the \
-         Alliance cruiser's identical weapons and movement doctrine, whose 28 \
-         `probe_duel` seeds launch on all of them and carry the matching \
-         arc-collapse trace"
+         showing the gate opening in practice; the Dynasty hull has its own \
+         #1539 Backfill strike-cycle test and #1550 200-duel balance evidence, \
+         alongside the Alliance cruiser's 28 `probe_duel` seed trace"
     );
     assert!(
         weak_entry_permissive_launcher.is_empty(),

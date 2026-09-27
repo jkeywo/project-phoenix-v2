@@ -1358,7 +1358,7 @@ mod tests {
         // number of rows.
         assert_eq!(
             counts,
-            [55, 71, 639, 51, 56],
+            [55, 71, 659, 51, 56],
             "update the reviewed inventory ratchet"
         );
         let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
@@ -1377,7 +1377,7 @@ mod tests {
             }
         }
         assert_eq!(
-            fingerprint, 17_948_140_228_494_028_562,
+            fingerprint, 11_182_696_995_030_163_064,
             "update the reviewed inventory fingerprint"
         );
     }

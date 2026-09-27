@@ -962,7 +962,21 @@ fn shipped_content_has_no_composition_findings() {
             && reference.source == "inline-script"
             && reference.origin.as_deref() == Some("draft")
     }));
-    assert_eq!(catalog.catalogue.len(), 2);
+    let mut ids = catalog
+        .catalogue
+        .iter()
+        .map(|scenario| scenario.id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        [
+            "alliance_convoy_escort",
+            "combat_test",
+            "cruiser_elimination",
+            "falling_skyway",
+        ]
+    );
 }
 
 #[test]

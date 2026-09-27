@@ -18,6 +18,42 @@ use std::collections::BTreeSet;
 const DYNASTY: &str = "assets/entities/dynasty_player_cruiser.toml";
 const ALLIANCE: &str = "assets/entities/alliance_cruiser.toml";
 
+// This is a sustained-cycle fixture, not a balance duel: an ordinary lethal
+// fight can remove Dynasty's only hostile before it spends one reserve. Give
+// every hull the same one-time durability increase, including the scripted
+// spawn, while preserving system order, health fractions and damage tiers.
+// Reserve capacity, charging, weapon emissions and authored AI stay ordinary.
+fn durable_combat_hulls(
+    mut hulls: Query<
+        &mut project_phoenix::entities::spawner::EntitySystemHull,
+        Added<project_phoenix::entities::spawner::EntitySystemHull>,
+    >,
+) {
+    for mut hull in &mut hulls {
+        let entries: Vec<_> = hull
+            .0
+            .iter()
+            .map(|(id, entry)| (id.clone(), entry.clone()))
+            .collect();
+        hull.0 = project_phoenix::ship::damage::SystemHull::from_config_with_display_names(
+            entries
+                .iter()
+                .map(|(id, entry)| {
+                    (
+                        id.clone(),
+                        entry.display_name.clone(),
+                        entry.max * 1000.0,
+                        entry.tier_config,
+                    )
+                })
+                .collect(),
+        );
+        for (id, entry) in entries {
+            hull.0.set_hp(&id, entry.current * 1000.0);
+        }
+    }
+}
+
 fn host(local: HostSlot, crewed: bool) -> App {
     let mut app = build_headless_app(&HeadlessArgs {
         world_path: "assets/worlds/probe_fleet_duel.toml".into(),
@@ -33,6 +69,10 @@ fn host(local: HostSlot, crewed: bool) -> App {
         ..Default::default()
     })
     .unwrap();
+    app.add_systems(
+        FixedUpdate,
+        durable_combat_hulls.before(project_phoenix::sim_sets::SimSet::Membership),
+    );
     let stations = ["command", "sensors", "damage-control"];
     if crewed && local == HostSlot(1) {
         let mut sessions = app.world_mut().resource_mut::<Sessions>();
@@ -189,6 +229,23 @@ fn authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers() {
             max_charge >= 60.0,
             "crewed={crewed}, charge={max_charge}, phases={phases:?}"
         );
+        if !depleted || enables < 2 {
+            let world = hosts[0].world_mut();
+            let mut ships = world.query::<(
+                &project_phoenix::entities::spawner::EntityUuid,
+                &project_phoenix::entities::spawner::EntitySystemHull,
+                Option<&ShipPowerSystem>,
+            )>();
+            for (uuid, hull, power) in ships.iter(world) {
+                eprintln!(
+                    "ship {} hull={}/{} reserve={:?}",
+                    uuid.0,
+                    hull.0.total_current(),
+                    hull.0.total_max(),
+                    power.map(|power| (power.0.battery_charge, power.0.strike_boost()))
+                );
+            }
+        }
         assert!(
             depleted && enables >= 2,
             "crewed={crewed}, enables={enables}, depleted={depleted}, phases={phases:?}"

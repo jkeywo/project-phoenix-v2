@@ -2159,6 +2159,20 @@ pub fn decode_workshop_recovery(
     serde_json::from_slice(bytes).map_err(|error| error.to_string())
 }
 
+pub fn decode_fleet_continuation(
+    value: &str,
+) -> Result<crate::lockstep::continuation::ContinuationRequest, String> {
+    if value.len() > 4096 {
+        return Err("continuation-request-too-large".into());
+    }
+    serde_json::from_str(value).map_err(|error| error.to_string())
+}
+pub fn encode_fleet_continuation_status(
+    value: &crate::lockstep::continuation::ContinuationStatus,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
@@ -2960,18 +2974,4 @@ mod mesh_frame_tests {
             );
         }
     }
-}
-
-pub fn decode_fleet_continuation(
-    value: &str,
-) -> Result<crate::lockstep::continuation::ContinuationRequest, String> {
-    if value.len() > 4096 {
-        return Err("continuation-request-too-large".into());
-    }
-    serde_json::from_str(value).map_err(|error| error.to_string())
-}
-pub fn encode_fleet_continuation_status(
-    value: &crate::lockstep::continuation::ContinuationStatus,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
 }

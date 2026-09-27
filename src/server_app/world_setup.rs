@@ -658,7 +658,8 @@ pub(crate) fn spawn_game_start_entities(
             pos
         };
 
-        // Override with player_spawn rotation when spawning the player ship (issue #623).
+        // Each crew slot keeps its authored heading. The first slot's legacy
+        // player_spawn override still wins when present (issue #623).
         let player_spawn_rot: Option<bevy::math::Quat> =
             if is_fleet_ship && player_ships_spawned == 0 {
                 mc.player_spawn.as_ref().and_then(|s| s.rotation).map(|r| {
@@ -667,7 +668,14 @@ pub(crate) fn spawn_game_start_entities(
                 })
             } else {
                 None
-            };
+            }
+            .or_else(|| {
+                entity_inst
+                    .transform
+                    .as_ref()
+                    .filter(|_| is_fleet_ship)
+                    .map(|transform| transform.quat())
+            });
 
         let spawned = crate::entities::spawner::spawn_entity(
             &mut commands,

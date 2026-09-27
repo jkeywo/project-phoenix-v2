@@ -1,0 +1,114 @@
+# Competitive reference scenario (#1549). Slot order is also GameStart ship order.
+# Every unclaimed berth launches on Backfill; hulls and factions are fixed.
+[global]
+title = "world.cruiser_elimination.title"
+description = "world.cruiser_elimination.description"
+seed = 1549
+command_delay_ticks = 2
+
+[[ship_slot]]
+id = "alliance_one"
+label = "world.cruiser_elimination.alliance_one"
+default_ship = "assets/entities/alliance_cruiser.toml"
+ships = [{ template_path = "assets/entities/alliance_cruiser.toml" }]
+unclaimed = "backfill"
+[[ship_slot]]
+id = "alliance_two"
+label = "world.cruiser_elimination.alliance_two"
+default_ship = "assets/entities/alliance_cruiser.toml"
+ships = [{ template_path = "assets/entities/alliance_cruiser.toml" }]
+unclaimed = "backfill"
+[[ship_slot]]
+id = "dynasty_one"
+label = "world.cruiser_elimination.dynasty_one"
+default_ship = "assets/entities/dynasty_player_cruiser.toml"
+ships = [{ template_path = "assets/entities/dynasty_player_cruiser.toml" }]
+unclaimed = "backfill"
+[[ship_slot]]
+id = "dynasty_two"
+label = "world.cruiser_elimination.dynasty_two"
+default_ship = "assets/entities/dynasty_player_cruiser.toml"
+ships = [{ template_path = "assets/entities/dynasty_player_cruiser.toml" }]
+unclaimed = "backfill"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.cruiser_elimination.alliance_one"
+display_name = "world.cruiser_elimination.alliance_one"
+transform = { position = [-24, 0, 40], rotation = [0, 0, 0] }
+spawn_on = "game_start"
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.cruiser_elimination.alliance_two"
+display_name = "world.cruiser_elimination.alliance_two"
+transform = { position = [24, 0, 40], rotation = [0, 0, 0] }
+spawn_on = "game_start"
+[[entity]]
+template_path = "assets/entities/dynasty_player_cruiser.toml"
+name = "world.cruiser_elimination.dynasty_one"
+display_name = "world.cruiser_elimination.dynasty_one"
+transform = { position = [-24, 0, -40], rotation = [0, 3.141592653589793, 0] }
+spawn_on = "game_start"
+[[entity]]
+template_path = "assets/entities/dynasty_player_cruiser.toml"
+name = "world.cruiser_elimination.dynasty_two"
+display_name = "world.cruiser_elimination.dynasty_two"
+transform = { position = [24, 0, -40], rotation = [0, 3.141592653589793, 0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_world_loaded("brief_teams");
+on_destroyed("world.cruiser_elimination.alliance_one", "alliance_loss");
+on_destroyed("world.cruiser_elimination.alliance_two", "alliance_loss");
+on_destroyed("world.cruiser_elimination.dynasty_one", "dynasty_loss");
+on_destroyed("world.cruiser_elimination.dynasty_two", "dynasty_loss");
+// Death handlers in one pipeline pass all commit before these flag events
+// enter the next pass. The resolver therefore sees both teams' same-tick losses.
+on_flag_set("alliance_eliminated", "resolve_match");
+on_flag_set("dynasty_eliminated", "resolve_match");
+
+fn brief_teams(ctx) {
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_objective(#{ id: "eliminate_dynasty", instance_id: "alliance",
+        text: "world.cruiser_elimination.alliance_objective", mandatory: true,
+        recipient_ship_slots: ["alliance_one", "alliance_two"] });
+    ctx.effects.add_objective(#{ id: "eliminate_alliance", instance_id: "dynasty",
+        text: "world.cruiser_elimination.dynasty_objective", mandatory: true,
+        recipient_ship_slots: ["dynasty_one", "dynasty_two"] });
+}
+fn alliance_loss(ctx) {
+    ctx.flags.increment("alliance_losses", 1);
+    if ctx.flags.alliance_losses >= 2 { ctx.flags.alliance_eliminated = 1; }
+}
+fn dynasty_loss(ctx) {
+    ctx.flags.increment("dynasty_losses", 1);
+    if ctx.flags.dynasty_losses >= 2 { ctx.flags.dynasty_eliminated = 1; }
+}
+fn resolve_match(ctx) {
+    if ctx.flags.match_resolved > 0 { return; }
+    if ctx.flags.alliance_eliminated == 0 && ctx.flags.dynasty_eliminated == 0 { return; }
+    ctx.flags.match_resolved = 1;
+    if ctx.flags.alliance_eliminated > 0 && ctx.flags.dynasty_eliminated > 0 {
+        ctx.flags.match_draw = 1;
+        ctx.effects.fail_objective("eliminate_dynasty", "alliance");
+        ctx.effects.fail_objective("eliminate_alliance", "dynasty");
+        ctx.effects.report_row(#{ id: "alliance", heading: "world.cruiser_elimination.alliance", outcome: "world.cruiser_elimination.draw", state: "neutral" });
+        ctx.effects.report_row(#{ id: "dynasty", heading: "world.cruiser_elimination.dynasty", outcome: "world.cruiser_elimination.draw", state: "neutral" });
+    } else if ctx.flags.dynasty_eliminated > 0 {
+        ctx.flags.alliance_victory = 1;
+        ctx.effects.complete_objective("eliminate_dynasty", "alliance");
+        ctx.effects.fail_objective("eliminate_alliance", "dynasty");
+        ctx.effects.report_row(#{ id: "alliance", heading: "world.cruiser_elimination.alliance", outcome: "world.cruiser_elimination.victory", state: "saved" });
+        ctx.effects.report_row(#{ id: "dynasty", heading: "world.cruiser_elimination.dynasty", outcome: "world.cruiser_elimination.defeat", state: "lost" });
+    } else {
+        ctx.flags.dynasty_victory = 1;
+        ctx.effects.complete_objective("eliminate_alliance", "dynasty");
+        ctx.effects.fail_objective("eliminate_dynasty", "alliance");
+        ctx.effects.report_row(#{ id: "alliance", heading: "world.cruiser_elimination.alliance", outcome: "world.cruiser_elimination.defeat", state: "lost" });
+        ctx.effects.report_row(#{ id: "dynasty", heading: "world.cruiser_elimination.dynasty", outcome: "world.cruiser_elimination.victory", state: "saved" });
+    }
+    ctx.effects.game_over("world.cruiser_elimination.finished");
+}
+"""

@@ -1,0 +1,26 @@
+entities:
+  - scenario_model: cruiser-elimination
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Alliance–Dynasty Cruiser Elimination
+      summary: "A standalone competitive reference fight fields two fixed Alliance cruisers and two fixed Dynasty player cruisers. Unclaimed slots launch with full Backfill. The world starts hostility and team-scoped objectives without a GM. An individual loss leaves the crew in the ordinary cinematic spectator lifecycle while surviving teammates continue."
+    game_design:
+      world_file: assets/worlds/cruiser_elimination.toml
+      must_not_be: [dependent on four human hosts, a retune of the Harrow NPC cruiser, a match ended by one cruiser loss]
+    implementation:
+      status: declared
+      paths: [assets/worlds/cruiser_elimination.toml, assets/scenarios.toml, tests/cruiser_elimination.rs]
+      tests: [cargo test --features headless --test cruiser_elimination]
+  - decision: cruiser-elimination-team-results
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Resolve the Entire Team and the Entire Tick
+      summary: "Each named cruiser loss increments its team's counter once. Team-eliminated flag events are resolved in the next trigger-chaining pass, after all losses in the same pass commit. Both eliminated teams produce a draw; otherwise the surviving team wins. One resolved latch prevents duplicate endings. Two ordinary localisable report rows name each team's result, so no host-relative Victory banner is incorrectly shown to both crews."
+      rationale:
+        - "The result is a shared authored fact, independent of LocalShip. Report rows and explicit result flags are used by both human acceptance and the subsequent balance runner."
+        - "Starting separation and lateral spacing are authored reference conditions, not a claim of ratified balance. The 200-duel evaluation and 2v2 follow-up tune only the distinct playable Dynasty variant."
+    implementation:
+      status: declared
+      paths: [assets/worlds/cruiser_elimination.toml, gui/game-over-view.js, tests/cruiser_elimination.rs]

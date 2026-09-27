@@ -43,3 +43,7 @@ world = "assets/worlds/falling_skyway.toml"
 [[scenario]]
 id = "alliance_convoy_escort"
 world = "assets/worlds/alliance_convoy_escort.toml"
+
+[[scenario]]
+id = "cruiser_elimination"
+world = "assets/worlds/cruiser_elimination.toml"

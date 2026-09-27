@@ -2,7 +2,7 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/scenarios.toml]
+sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, tests/cruiser_elimination.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/worlds/cruiser_elimination.toml, assets/scenarios.toml]
 updated: 2026-09-27
 ---
 
@@ -12,6 +12,13 @@ The TOML-defined layout for a root world or a supporting world layer: anchors,
 entity instances, objectives, global ambient light, and the `[script]` block
 carrying its scenario logic. The root loads at startup; supporting worlds can be composed at startup
 or loaded during play.
+
+`assets/worlds/cruiser_elimination.toml` is the competitive four-cruiser reference:
+fixed `ship_slot` hull choices retain two ships per team through unclaimed-slot
+Backfill, named destruction events resolve the team result, and ordinary report
+rows show both teams' outcomes. Its design is in
+`pasm/spec/design/cruiser-elimination.yaml`; runtime proofs are in
+`tests/cruiser_elimination.rs`.
 
 ## Source schema (`src/world/config.rs`)
 

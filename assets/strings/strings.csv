@@ -4629,3 +4629,17 @@ server.gm.objective.activate_all,Explicit bulk Objective action,Activate all ins
 server.gm.objective.complete_all,Explicit bulk Objective action,Complete all instances
 server.gm.objective.fail_all,Explicit bulk Objective action,Fail all instances
 server.gm.objective.instance_count,Explicit bulk Objective membership count,{count} instances
+world.cruiser_elimination.title,Competitive scenario selection title,Cruiser Elimination
+world.cruiser_elimination.description,Competitive scenario selection description,"Two Alliance cruisers against two Dynasty strike cruisers. Choose a fixed berth; unclaimed ships use Backfill. Eliminate both opposing cruisers to win. Destroyed crews spectate the remaining fight."
+world.cruiser_elimination.alliance_one,Fixed Alliance ship berth,Alliance One
+world.cruiser_elimination.alliance_two,Fixed Alliance ship berth,Alliance Two
+world.cruiser_elimination.dynasty_one,Fixed Dynasty ship berth,Dynasty One
+world.cruiser_elimination.dynasty_two,Fixed Dynasty ship berth,Dynasty Two
+world.cruiser_elimination.alliance_objective,Alliance team objective,Eliminate both Dynasty cruisers.
+world.cruiser_elimination.dynasty_objective,Dynasty team objective,Eliminate both Alliance cruisers.
+world.cruiser_elimination.alliance,Team report heading,Alliance
+world.cruiser_elimination.dynasty,Team report heading,Dynasty
+world.cruiser_elimination.victory,Winning team result,Victory — opposing team eliminated
+world.cruiser_elimination.defeat,Losing team result,Defeat — both cruisers lost
+world.cruiser_elimination.draw,Simultaneous team elimination result,Draw — both teams eliminated together
+world.cruiser_elimination.finished,Competitive match ending reason,The cruiser engagement is complete.

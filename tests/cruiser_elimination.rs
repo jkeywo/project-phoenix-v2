@@ -6,21 +6,35 @@ use phoenix::core::messages::{GamePhase, StationId};
 use phoenix::entities::spawner::{EntitySystemHull, EntityUuid};
 use phoenix::headless::{build_headless_app, run, HeadlessArgs};
 use phoenix::server_app::LocalShip;
-use phoenix::ship_slots::AuthoredShipSlotId;
+use phoenix::ship_slots::{AuthoredShipSlotId, FrozenShipSlots};
 use phoenix::world::server::WorldContentRuntime;
 use project_phoenix as phoenix;
 
-fn boot(seed: u64, human: bool) -> App {
+fn boot(seed: u64, claimed_slot: Option<&str>) -> App {
+    let selected_ship = if claimed_slot.is_some_and(|slot| slot.starts_with("dynasty")) {
+        "assets/entities/dynasty_player_cruiser.toml"
+    } else {
+        "assets/entities/alliance_cruiser.toml"
+    };
     let mut app = build_headless_app(&HeadlessArgs {
         world_path: "assets/worlds/cruiser_elimination.toml".into(),
-        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        ship_path: selected_ship.into(),
         seed: Some(seed),
         max_ticks: 100_000,
         deterministic: true,
         ..Default::default()
     })
     .unwrap();
-    if human {
+    if let Some(slot) = claimed_slot {
+        let frozen = FrozenShipSlots::for_workshop_test(
+            &app.world()
+                .resource::<phoenix::world::config::WorldConfig>()
+                .ship_slots,
+            slot,
+            selected_ship,
+        )
+        .expect("the claimed berth offers its selected cruiser");
+        app.insert_resource(frozen);
         let mut sessions = app.world_mut().resource_mut::<phoenix::lobby::Sessions>();
         sessions
             .0
@@ -72,15 +86,17 @@ fn boot(seed: u64, human: bool) -> App {
             physics.yaw
         );
     }
-    if human {
-        let (config, sources) = app
+    if let Some(slot) = claimed_slot {
+        let (local_slot, config, sources) = app
             .world_mut()
             .query_filtered::<(
+                &AuthoredShipSlotId,
                 &phoenix::ship_plugin::ShipConfigComponent,
                 &phoenix::ship_plugin::ShipSystemControlSources,
             ), With<LocalShip>>()
             .single(app.world())
             .unwrap();
+        assert_eq!(local_slot.0, slot);
         assert!(
             config
                 .0
@@ -180,7 +196,7 @@ fn result(app: &App, expected: &str) {
 
 #[test]
 fn competitive_world_results_and_destroyed_crew_keep_their_identity() {
-    let mut app = boot(1549, true);
+    let mut app = boot(1549, Some("alliance_one"));
     let original = app
         .world_mut()
         .query_filtered::<Entity, With<LocalShip>>()
@@ -197,14 +213,35 @@ fn competitive_world_results_and_destroyed_crew_keep_their_identity() {
             .active
     );
     assert!(app.world().get::<LocalShip>(original).is_some());
+    assert_eq!(
+        app.world()
+            .get::<phoenix::ship::state::ShipViewMode>(original)
+            .unwrap()
+            .view_mode,
+        phoenix::core::messages::ViewMode::Cinematic
+    );
+    let follow = app
+        .world()
+        .resource::<phoenix::crew_spectator::CrewSpectator>()
+        .target
+        .clone()
+        .expect("destroyed crew follows a surviving cruiser");
+    let surviving: Vec<_> = app
+        .world_mut()
+        .query::<(&EntityUuid, &EntitySystemHull)>()
+        .iter(app.world())
+        .filter(|(_, hull)| !hull.0.is_destroyed())
+        .map(|(uuid, _)| uuid.0.clone())
+        .collect();
+    assert!(surviving.contains(&follow));
     destroy(&mut app, &["alliance_two"]);
     result(&app, "dynasty_victory");
 
-    let mut app = boot(1550, false);
+    let mut app = boot(1550, None);
     destroy(&mut app, &["dynasty_one", "dynasty_two"]);
     result(&app, "alliance_victory");
 
-    let mut app = boot(1551, false);
+    let mut app = boot(1551, None);
     destroy(
         &mut app,
         &["alliance_one", "dynasty_one", "alliance_two", "dynasty_two"],
@@ -217,15 +254,19 @@ fn competitive_world_results_and_destroyed_crew_keep_their_identity() {
 
 #[test]
 fn competitive_world_finishes_without_a_gm_with_full_and_mixed_backfill() {
-    for human in [false, true] {
-        let mut app = boot(1549, human);
+    for (seed, claimed_slot) in [
+        (1549, None),
+        (1552, Some("alliance_one")),
+        (1553, Some("dynasty_one")),
+    ] {
+        let mut app = boot(seed, claimed_slot);
         run(&mut app, 18_000);
         let runtime = app.world().resource::<WorldContentRuntime>();
         let outcome = ["alliance_victory", "dynasty_victory", "match_draw"]
             .into_iter()
             .find(|name| runtime.flags.counter(name) == 1);
         if outcome.is_none() {
-            let path = std::env::temp_dir().join(format!("cruiser-elimination-human-{human}.json"));
+            let path = std::env::temp_dir().join(format!("cruiser-elimination-seed-{seed}.json"));
             std::fs::write(
                 &path,
                 serde_json::to_vec_pretty(&phoenix::snapshot::capture(app.world())).unwrap(),

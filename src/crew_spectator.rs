@@ -29,6 +29,10 @@ impl Plugin for CrewSpectatorPlugin {
             Update,
             update_crew_spectator
                 .in_set(CrewSpectatorPresentation)
+                // GM view expiry first clears its own force. A destroyed crew
+                // then installs the cinematic force for this frame; without
+                // this order the GM sync can clear it back to Camera.
+                .after(crate::gm_presentation::sync_views)
                 .run_if(resource_exists::<Sessions>),
         );
     }

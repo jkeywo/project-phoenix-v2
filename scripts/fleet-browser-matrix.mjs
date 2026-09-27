@@ -218,7 +218,7 @@ async function waitService(base, child) {
   }
   throw new Error('Rendezvous did not become ready');
 }
-async function runCase(browser, options, route) {
+async function runCase(browser, options, route, hooks = {}) {
   const directory = path.join(options.out, route); await mkdir(directory);
   const result = { route, profile: { delayMs: options.delayMs, lossPercent: options.lossPercent, seed: options.seed, boundary: route === 'direct' ? 'actual RTCDataChannel.send' : 'loopback rendezvous outgoing relay frames', unit: 'application frames; not IP packets' }, startedUtc: new Date().toISOString(), status: 'running', peers: [], clients: [], steps: [] };
   const contexts = [], pages = [];
@@ -326,6 +326,16 @@ async function runCase(browser, options, route) {
     result.gmActions = ['gm-1 pause observed by both GMs', 'gm-2 resume observed by both GMs'];
     await Promise.all([...ships, ...gms].map((page, index) => page.waitForFunction(tick => window.__hostMeshStatus().tick > tick + 30 && window.__hostMeshStatus().samples > 0 && window.__hostMeshStatus().peers_heard.length === 5, initial[index].tick)));
     step('active command interval and GM actions completed');
+    if (hooks.afterHealthy) {
+      const healthy = { ...result, peers: [], clients: [] };
+      for (const row of pages) {
+        const snapshot = { label: row.label, errors: [...row.errors], state: await row.page.evaluate(() => window.__matrixRead()) };
+        (row.label.match(/^ship-\d$|^gm-/) ? healthy.peers : healthy.clients).push(snapshot);
+      }
+      verifyEvidence(healthy);
+      result.healthy = healthy;
+      await hooks.afterHealthy({ result, ships, gms, clients, newPage, base, query, code, step, options });
+    }
     result.status = 'passed';
   } catch (error) { result.status = 'failed'; result.error = String(error.stack || error); }
   finally {
@@ -339,7 +349,12 @@ async function runCase(browser, options, route) {
     }
     try { result.impairment = await (await fetch(`${rendezvous}/__impairment`, { signal: AbortSignal.timeout(5000) })).json(); } catch { result.impairment = null; }
     if (result.status === 'passed') {
-      try { verifyEvidence(result); verifyImpairment(result, options); }
+      try {
+        if (!hooks.afterHealthy) verifyEvidence(result);
+        else for (const endpoint of [...result.peers,...result.clients]) {
+          if (endpoint.errors?.length) throw new Error(`${endpoint.label}: browser exception observed during recovery`);
+        }
+        verifyImpairment(result.healthy ? { ...result.healthy, impairment: result.impairment } : result, options); }
       catch (error) {
         result.status = 'failed'; result.error = String(error);
         try { await pages[0]?.page.screenshot({ path: path.join(directory, 'evidence-gate-failure.png'), timeout: 5000 }); } catch { /* page closed */ }
@@ -354,14 +369,14 @@ async function runCase(browser, options, route) {
   return result;
 }
 
-export async function main(args = process.argv.slice(2)) {
+export async function main(args = process.argv.slice(2), hooks = {}) {
   const options = optionsFrom(args);
   await mkdir(path.dirname(options.out), { recursive: true }); await mkdir(options.out);
   await stat(path.join(options.dist, 'client/index.html')).catch(() => { throw new Error('Missing built client/index.html; run node scripts/build-client.mjs after Trunk'); });
   const require = createRequire(path.join(options.dependencies, 'package.json'));
   const { chromium } = require('@playwright/test');
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
-  const manifest = { status: 'running', kind: 'phoenix-real-browser-matrix-v1', options, revision: git(['rev-parse', 'HEAD']),
+  const manifest = { status: 'running', kind: hooks.kind || 'phoenix-real-browser-matrix-v1', extension: hooks.provenance || null, options, revision: git(['rev-parse', 'HEAD']),
     sourcePatch: git(['diff', 'HEAD']), bundleHashes: await bundleHashes(options.dist),
     runnerSha256: sha(await readFile(fileURLToPath(import.meta.url))), channelImpairmentSha256: sha(await readFile(path.join(root, 'scripts/fleet-channel-impairment.mjs'))), node: process.version, os: { platform: platform(), release: release(), cpus: cpus()[0]?.model, ramBytes: totalmem() },
     composition: { shipSimulations: 4, gmSimulations: 2, stationDocuments: 12 },
@@ -378,7 +393,7 @@ export async function main(args = process.argv.slice(2)) {
       ...(options.render ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])] });
     browser = await chromium.connect(browserServer.wsEndpoint(), { timeout: 30000 });
     manifest.browser = browser.version(); await save();
-    for (const route of options.routes) { const result = await runCase(browser, options, route); manifest.results.push({ route, status: result.status, error: result.error }); await save(); }
+    for (const route of options.routes) { const result = await runCase(browser, options, route, hooks); manifest.results.push({ route, status: result.status, error: result.error }); await save(); }
     manifest.status = manifest.results.every(result => result.status === 'passed') ? 'passed' : 'failed';
     if (manifest.status === 'failed') process.exitCode = 1;
   } catch (error) { manifest.status = 'failed'; manifest.error = String(error); throw error; }

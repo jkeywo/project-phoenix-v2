@@ -144,7 +144,7 @@ pub fn os_defaults_script(prefs: &OsAccessibilityPrefs) -> String {
 /// `navigator.language`; this seed takes precedence when the host environment
 /// declares a language and otherwise leaves that browser value in charge.
 pub fn query_os_locale() -> Option<String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "host"))]
     if let Ok(languages) = windows::System::UserProfile::GlobalizationPreferences::Languages() {
         if let Ok(language) = languages.GetAt(0) {
             if let Some(locale) = normalise_os_locale(&language.to_string()) {

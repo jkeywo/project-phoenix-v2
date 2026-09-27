@@ -111,6 +111,7 @@ pub(crate) struct CollisionBodies<'w, 's> {
 /// system destructures it back to its original locals at entry.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CollisionSinks<'w, 's> {
+    pub mission: crate::crew_spectator::CrewMissionPolicy<'w>,
     pub outbox: ResMut<'w, SimOutbox>,
     pub next_state: ResMut<'w, NextState<GamePhase>>,
     pub game_over_reason: ResMut<'w, GameOverReason>,
@@ -144,6 +145,7 @@ pub(crate) fn handle_collisions(
         body_query,
     } = bodies;
     let CollisionSinks {
+        mission,
         mut outbox,
         mut next_state,
         mut game_over_reason,
@@ -471,7 +473,21 @@ pub(crate) fn handle_collisions(
                     },
                 ));
             }
-            if ship_destroyed {
+            if ship_destroyed && mission.continues_after_ship_loss() {
+                if hull_applied > 0.0 {
+                    if let Some(uuid) = ship_uuid {
+                        destroyed_events.write(crate::ai::server::AiEntityDestroyed {
+                            entity_uuid: uuid.0.clone(),
+                        });
+                        if let Some(ref mut msgs) = balance_events {
+                            msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
+                                victim: uuid.0.clone(),
+                                killer: None,
+                            });
+                        }
+                    }
+                }
+            } else if ship_destroyed {
                 if is_local {
                     outbox.push_reliable((Target::All, ServerMessage::ShipDestroyed));
                 }

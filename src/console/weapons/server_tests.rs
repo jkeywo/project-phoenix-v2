@@ -4600,6 +4600,120 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
     );
 }
 
+#[test]
+fn crew_spectator_blaster_kill_retains_remote_and_local_crew_once_without_ending_mission() {
+    use crate::command_admission::HostSlot;
+    use crate::entities::spawner::EntityUuid;
+    use crate::lockstep::{FleetRoster, FleetShip, FleetSlotOf};
+    for (local, multi) in [(false, true), (true, true), (true, false)] {
+        let mut app = test_app();
+        if multi {
+            app.insert_resource(FleetRoster::new(
+                vec![FleetShip::new(HostSlot(0)), FleetShip::new(HostSlot(1))],
+                HostSlot(0),
+            ));
+        }
+        let mut bank = crate::weapons::blaster::BlasterSystem::new(
+            crate::weapons::blaster::BlasterBankConfig {
+                id: "fore".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 360.0,
+                volley_count: 1,
+                volley_interval_secs: 0.1,
+                cooldown_secs: 3.0,
+                charge_time_secs: 0.0,
+                projectile_speed: 40.0,
+                collision_radius: 5.0,
+                visual_scale: 1.0,
+                damage: 50,
+                shield_pierce: 0.0,
+                recoil_impulse: 0.0,
+                screenshake_magnitude: 0.0,
+                marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
+                range: 35.0,
+            },
+        );
+        // Two lethal bolts in one tick must publish just one destruction fact.
+        for id in ["first", "second"] {
+            bank.in_flight
+                .push(crate::weapons::blaster::BlasterProjectile {
+                    id: id.into(),
+                    x: 100.0,
+                    z: -20.0,
+                    heading: 0.0,
+                    speed: 40.0,
+                    lifespan_remaining: 5.0,
+                    collision_radius: 5.0,
+                    damage: 50,
+                    shield_pierce: 0.0,
+                    source_uuid: "shooter".into(),
+                });
+        }
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            EntityUuid("shooter".into()),
+            BlasterSystemResource(vec![bank]),
+            Transform::default(),
+        ));
+        let victim = app
+            .world_mut()
+            .spawn((
+                EntityUuid("crew-victim".into()),
+                EntitySystemHull(SystemHull::from_config(&[(SystemId("hull".into()), 30.0)])),
+                Transform::from_xyz(100.0, 0.0, -20.0),
+            ))
+            .id();
+        if multi {
+            app.world_mut()
+                .entity_mut(victim)
+                .insert(FleetSlotOf(HostSlot(1)));
+        }
+        if local {
+            app.world_mut()
+                .entity_mut(victim)
+                .insert(crate::server_app::LocalShip);
+        }
+        let mut destroyed = app
+            .world()
+            .resource::<Messages<crate::ai::server::AiEntityDestroyed>>()
+            .get_cursor();
+        app.update();
+        assert!(app
+            .world()
+            .get::<EntitySystemHull>(victim)
+            .unwrap()
+            .0
+            .is_destroyed());
+        assert_eq!(
+            destroyed
+                .read(
+                    app.world()
+                        .resource::<Messages<crate::ai::server::AiEntityDestroyed>>()
+                )
+                .filter(|ev| ev.entity_uuid == "crew-victim")
+                .count(),
+            usize::from(multi)
+        );
+        let ended = app
+            .world()
+            .resource::<SimOutbox>()
+            .iter()
+            .any(|(_, msg)| matches!(msg, ServerMessage::ShipDestroyed))
+            || app
+                .world()
+                .resource::<Outbox>()
+                .0
+                .iter()
+                .any(|ev| matches!(ev.msg, ServerMessage::ShipDestroyed));
+        assert_eq!(
+            ended, !multi,
+            "legacy LocalShip without FleetSlotOf retains its ending"
+        );
+    }
+}
+
 /// The blaster's twin of `phaser_beam_from_an_unidentified_shooter_...`.
 ///
 /// `BlasterProjectile::source_uuid` is a plain `String` and carries `""` for a

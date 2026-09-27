@@ -868,6 +868,7 @@ pub(crate) fn tick_blaster_system(
 /// locals at entry.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct BlasterHitSinks<'w> {
+    pub mission: crate::crew_spectator::CrewMissionPolicy<'w>,
     pub outbox: ResMut<'w, SimOutbox>,
     pub next_state: Option<ResMut<'w, NextState<GamePhase>>>,
     pub game_over_reason: Option<ResMut<'w, GameOverReason>>,
@@ -892,6 +893,7 @@ pub(crate) fn handle_blaster_hits(
         Option<&mut crate::ship::shields::ShipShields>,
         Option<&mut crate::entities::spawner::EntityShipArcHull>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
     )>,
     // `Entity` + `EntityUuid` ride along so the shooter walk below can be
     // sorted into a stable order (issue #1052) rather than taken in archetype
@@ -924,6 +926,7 @@ pub(crate) fn handle_blaster_hits(
         entities: entity_q,
     } = geometry;
     let BlasterHitSinks {
+        mission,
         mut outbox,
         mut next_state,
         mut game_over_reason,
@@ -1031,8 +1034,16 @@ pub(crate) fn handle_blaster_hits(
         ));
 
         // Apply shields-first damage to the matching entity.
-        for (entity, ast_uuid, ent_uuid, mut hull_comp, mut shield_comp, mut arc_hull, is_local) in
-            hit_target_q.iter_mut()
+        for (
+            entity,
+            ast_uuid,
+            ent_uuid,
+            mut hull_comp,
+            mut shield_comp,
+            mut arc_hull,
+            is_local,
+            is_fleet,
+        ) in hit_target_q.iter_mut()
         {
             let uuid_matches = ast_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str())
                 || ent_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str());
@@ -1106,15 +1117,29 @@ pub(crate) fn handle_blaster_hits(
                     });
                 hull_applied_total = hull_applied;
                 ship_destroyed = destroyed;
-                if is_local {
-                    outbox.push_reliable((
-                        Target::All,
-                        ServerMessage::DamageTaken {
-                            hull: hull_applied,
-                            shield: shield_amount,
-                        },
-                    ));
-                    if destroyed {
+                if is_local || is_fleet {
+                    if is_local {
+                        outbox.push_reliable((
+                            Target::All,
+                            ServerMessage::DamageTaken {
+                                hull: hull_applied,
+                                shield: shield_amount,
+                            },
+                        ));
+                    }
+                    if destroyed && mission.continues_after_ship_loss() {
+                        if hull_applied > 0.0 {
+                            destroyed_events.write(crate::ai::server::AiEntityDestroyed {
+                                entity_uuid: det.target_uuid.clone(),
+                            });
+                            if let Some(ref mut msgs) = balance_events {
+                                msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
+                                    victim: det.target_uuid.clone(),
+                                    killer: det.source_uuid.clone(),
+                                });
+                            }
+                        }
+                    } else if destroyed {
                         outbox.push_reliable((Target::All, ServerMessage::ShipDestroyed));
                         if let Some(ref mut ns) = next_state {
                             ns.set(GamePhase::GameOver);

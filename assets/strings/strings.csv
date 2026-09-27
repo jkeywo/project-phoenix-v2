@@ -1,4 +1,9 @@
 id,context,en
+client.crew_spectator.title,Destroyed crew camera panel,Your ship has been destroyed
+client.crew_spectator.following,Current shared camera target label,Following:
+client.crew_spectator.empty,No remaining ship camera target,No remaining ships to follow.
+client.crew_spectator.help,Destroyed crew spectator explanation,Your crew can choose a ship for the shared Viewscreen. Station controls are unavailable.
+client.crew_spectator.choose,Camera target button group label,Choose a ship to follow
 server.gm.tree.group_summary,GM group summary,{id} · {count} entities
 server.gm.station.controlling,GM live station status,Live · Controlling station
 server.gm.station.observing,GM live station status,Live · Observation only — take over to enable commands

@@ -2,8 +2,8 @@
 title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
-sources: [src/core/messages.rs, src/ship/viewscreen.rs, src/ship/state.rs, src/console/captain/server.rs, src/server/renderer.rs, src/server/radar.rs, src/server/viewscreen_border.rs, gui/console-state.js]
-updated: 2026-08-27
+sources: [src/core/messages.rs, src/ship/viewscreen.rs, src/ship/state.rs, src/console/captain/server.rs, src/server/renderer.rs, src/server/radar.rs, src/server/viewscreen_border.rs, gui/console-state.js, src/crew_spectator.rs, gui/crew-spectator-view.js]
+updated: 2026-09-27
 ---
 
 # View Modes
@@ -14,6 +14,17 @@ published in `SimSnapshot`, so reconnecting clients and every mounted console
 derive their controls from the same state.
 
 ## Modes
+
+In a multi-ship mission, a destroyed crew's Viewscreen enters cinematic
+spectating. `src/crew_spectator.rs` retains the original `LocalShip` and Station
+assignments; only its host-local camera target changes. Original crew members
+(including those reconnecting after destruction) can select any surviving ship.
+The latest valid choice wins, target loss selects another survivor, and an empty
+candidate list shows a neutral status. The shared browser/native Console panel
+publishes names and the current camera target, never the followed ship's private
+Station data or Objectives. Dead-hull command admission disables human and
+Backfill gameplay controls. Authored multi-ship scenarios decide mission endings
+from ordinary destruction facts; single-ship missions keep their existing defeat.
 
 - `Camera(CameraView)` selects a named `camera_*` marker from the ship's model
   rig. `camera_fore` is the default. The renderer resolves the marker's world

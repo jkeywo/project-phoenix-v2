@@ -488,7 +488,7 @@ pub fn admit_system_commands(
     mut reader: MessageReader<InboundMessage>,
     mut ship_query: Query<(
         Entity,
-        &crate::ship_plugin::ShipSystemControlSources,
+        &mut crate::ship_plugin::ShipSystemControlSources,
         &mut crate::core::messages::AdmittedCommands,
         &crate::ship_plugin::ShipConfigComponent,
         Has<LocalShip>,
@@ -497,6 +497,7 @@ pub fn admit_system_commands(
         // authors no `human_seeking` system and on any ship before
         // `resolve_human_seeking_hosts` has run once.
         Option<&crate::ship_plugin::HumanSeekingHosts>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
     )>,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
@@ -520,7 +521,11 @@ pub fn admit_system_commands(
     let mut local_ship: Option<Entity> = None;
     let mut by_ship_key: std::collections::HashMap<String, Entity> =
         std::collections::HashMap::new();
-    for (entity, _, mut admitted, _, is_local, uuid, _) in ship_query.iter_mut() {
+    for (entity, mut sources, mut admitted, _, is_local, uuid, _, hull) in ship_query.iter_mut() {
+        // Restore hull-derived availability before any command can enter.
+        sources
+            .0
+            .set_destroyed(hull.is_some_and(|h| h.0.is_destroyed()));
         admitted.0.clear();
         if is_local {
             local_ship = Some(entity);
@@ -560,7 +565,7 @@ pub fn admit_system_commands(
         };
         // Read-only: the accepted command is queued for its apply tick rather
         // than pushed here, so this borrow never needs to be mutable.
-        let Ok((ship_entity, control_sources, _, ship_config, _, ship_uuid, seeking_hosts)) =
+        let Ok((ship_entity, control_sources, _, ship_config, _, ship_uuid, seeking_hosts, _)) =
             ship_query.get(route)
         else {
             if let Some(correlation) = correlation.as_ref() {
@@ -675,7 +680,7 @@ pub fn admit_system_commands(
         // tick's world, and the `Entity` captured at acceptance is only the
         // fallback for a ship that never had a uuid to be named by.
         let route = by_ship_key.get(&due.ship.0).copied().unwrap_or(due.route);
-        let Ok((_, _, mut admitted, _, _, _, _)) = ship_query.get_mut(route) else {
+        let Ok((_, _, mut admitted, _, _, _, _, hull)) = ship_query.get_mut(route) else {
             if let (Some(correlation), Some(token)) = (
                 due.command.feedback_correlation.as_ref(),
                 due.command.response_token.as_deref(),
@@ -697,6 +702,20 @@ pub fn admit_system_commands(
             );
             continue;
         };
+        if hull.is_some_and(|h| h.0.is_destroyed()) {
+            if let (Some(correlation), Some(token)) = (
+                due.command.feedback_correlation.as_ref(),
+                due.command.response_token.as_deref(),
+            ) {
+                write_action_feedback(
+                    &mut outbound,
+                    token,
+                    correlation,
+                    ActionFeedbackOutcome::Refused,
+                );
+            }
+            continue;
+        }
         admitted.0.push(due.command);
     }
 }
@@ -1186,6 +1205,45 @@ station = "repair"
              refusal is a hard error"
         );
         assert!(app.world().resource::<log::PendingCommands>().is_empty());
+    }
+
+    #[test]
+    fn crew_spectator_dead_hull_refuses_controls_while_live_crew_still_controls_own_ship() {
+        let (mut dead, wreck) = admission_app(ControlSource::Human);
+        let (mut live, ship) = admission_app(ControlSource::Human);
+        let id = SystemId("repair".into());
+        let mut hull = crate::ship::damage::SystemHull::from_config(&[(id.clone(), 10.0)]);
+        hull.set_hp(&id, 0.0);
+        dead.world_mut()
+            .entity_mut(wreck)
+            .insert(crate::entities::spawner::EntitySystemHull(hull));
+        send(&mut dead, HOLDER, dispatch(0));
+        send(&mut live, HOLDER, dispatch(0));
+        dead.update();
+        live.update();
+        assert!(admitted(&mut dead, wreck).is_empty());
+        assert!(command_log(&dead).is_empty());
+        assert_eq!(admitted(&mut live, ship), vec![dispatch(0)]);
+        let policy = dead
+            .world()
+            .get::<ShipSystemControlSources>(wreck)
+            .unwrap()
+            .0
+            .policy_for(&id);
+        assert!(!policy.accept_human_input && !policy.operate_ai && !policy.coordinate);
+        // A repaired availability flag or a reconnect cannot override the hull.
+        dead.world_mut()
+            .get_mut::<ShipSystemControlSources>(wreck)
+            .unwrap()
+            .0
+            .set_offline(id, false);
+        dead.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .reconnect(HOLDER);
+        send(&mut dead, HOLDER, dispatch(0));
+        dead.update();
+        assert!(admitted(&mut dead, wreck).is_empty());
     }
 
     #[test]

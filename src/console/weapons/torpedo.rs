@@ -1488,6 +1488,7 @@ pub(crate) fn tick_torpedo_lifecycle(
         let mut asteroid_destroyed = false;
         let mut non_local_ship_destroyed = false;
         let mut local_ship_destroyed = false;
+        let mut crew_death_edge = false;
         let mut hit_x = 0.0_f32;
         let mut hit_z = 0.0_f32;
         let mut destroyed_ship_radius = DEFAULT_SHIP_EXPLOSION_RADIUS;
@@ -1516,6 +1517,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 continue;
             }
             let is_asteroid = asteroid_uuid.is_some();
+            let was_alive = !hull_comp.0.is_destroyed();
 
             // ── The struck arc decides which payload the round delivers ──────
             //
@@ -1748,6 +1750,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                     asteroid_destroyed = true;
                 } else if target_is_fleet_ship {
                     local_ship_destroyed = true;
+                    crew_death_edge = was_alive;
                 } else {
                     non_local_ship_destroyed = true;
                     destroyed_ship_radius = collider_opt
@@ -1770,7 +1773,19 @@ pub(crate) fn tick_torpedo_lifecycle(
             }
         }
 
-        if local_ship_destroyed {
+        if local_ship_destroyed && death_latch.mission.continues_after_ship_loss() {
+            if crew_death_edge {
+                destroyed_events.write(crate::ai::server::AiEntityDestroyed {
+                    entity_uuid: target_uuid.clone(),
+                });
+                if let Some(ref mut msgs) = balance_events {
+                    msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
+                        victim: target_uuid.clone(),
+                        killer: det.source_uuid.clone(),
+                    });
+                }
+            }
+        } else if local_ship_destroyed {
             // A torpedo can now deliver the killing blow to the player: AI
             // crews only started firing them once the doctrine gate stopped
             // demanding every shield arc be down at once. Until then this

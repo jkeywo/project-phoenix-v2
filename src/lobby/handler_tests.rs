@@ -80,6 +80,7 @@ fn dispatch(
         // not through a pure result-producing handler — so like the other
         // runtime variants it is a no-op on this dispatch path.
         ClientMessage::ControlSystem { .. }
+        | ClientMessage::SelectCrewSpectatorTarget { .. }
         | ClientMessage::ControlSystemCorrelated { .. }
         | ClientMessage::SendCoordination { .. }
         | ClientMessage::SelectScenario { .. }

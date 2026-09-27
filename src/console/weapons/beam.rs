@@ -1840,6 +1840,7 @@ pub(crate) fn tick_beams_prepare(
 /// `world` / `outbox` / … locals at entry, leaving the body untouched.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct BeamApplySinks<'w> {
+    pub mission: crate::crew_spectator::CrewMissionPolicy<'w>,
     pub world: ResMut<'w, WorldResource>,
     pub outbox: Option<ResMut<'w, SimOutbox>>,
     pub next_state: Option<ResMut<'w, NextState<GamePhase>>>,
@@ -1910,6 +1911,7 @@ pub(crate) fn tick_beams_apply_damage(
     // (issue #1185). Bundling the parameters does not alter their types, their
     // `Option` fallbacks, or the system's access set.
     let BeamApplySinks {
+        mission,
         mut world,
         mut outbox,
         mut next_state,
@@ -2174,7 +2176,20 @@ pub(crate) fn tick_beams_apply_damage(
                             ));
                         }
                     }
-                    if destroyed {
+                    if destroyed && mission.continues_after_ship_loss() {
+                        if hull_applied > 0.0 {
+                            destroyed_events.write(crate::ai::server::AiEntityDestroyed {
+                                entity_uuid: state.effective_target_uuid.clone(),
+                            });
+                            if let Some(ref mut msgs) = balance_events {
+                                msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
+                                    victim: state.effective_target_uuid.clone(),
+                                    killer: Some(state.shooter_uuid.clone())
+                                        .filter(|u| !u.is_empty()),
+                                });
+                            }
+                        }
+                    } else if destroyed {
                         if target_is_local {
                             if let Some(ref mut ob) = outbox {
                                 ob.push_reliable((Target::All, ServerMessage::ShipDestroyed));

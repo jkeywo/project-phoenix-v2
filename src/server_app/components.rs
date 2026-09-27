@@ -484,6 +484,7 @@ pub struct WorldAndTracked<'w> {
 /// validation.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct PlayerDeathLatch<'w> {
+    pub(crate) mission: crate::crew_spectator::CrewMissionPolicy<'w>,
     pub next_state: Option<ResMut<'w, NextState<crate::core::messages::GamePhase>>>,
     pub reason: Option<ResMut<'w, GameOverReason>>,
 }

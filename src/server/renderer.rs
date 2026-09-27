@@ -137,6 +137,7 @@ impl Plugin for RendererPlugin {
                     // `Update`, so this frame's camera work reads the latest
                     // stepped `Transform`s without an explicit edge.
                     hull_camera
+                        .after(crate::crew_spectator::CrewSpectatorPresentation)
                         // First-person positions the view from the local ship's
                         // root transform, so it must read the INTERPOLATED pose
                         // (the first-person half of the thrust-burst fix) — order
@@ -144,6 +145,7 @@ impl Plugin for RendererPlugin {
                         .after(apply_local_ship_render_interpolation)
                         .run_if(in_state(GamePhase::InProgress)),
                     cinematic_camera
+                        .after(crate::crew_spectator::CrewSpectatorPresentation)
                         .after(apply_local_ship_render_interpolation)
                         // Read the INTERPOLATED enemy transform when tracking a
                         // target, not the fixed-tick one — otherwise the camera
@@ -740,6 +742,13 @@ fn hull_camera(
 /// Cinematic camera: positions the view above and behind the ship, tracks
 /// nearby entities with hysteresis (enemy > friendly > closest).
 fn cinematic_camera(
+    spectator: Option<Res<crate::crew_spectator::CrewSpectator>>,
+    spectator_ships: Query<(
+        &EntityUuid,
+        &ShipPhysics,
+        Option<&RenderInterp>,
+        Option<&CinematicCameraSection>,
+    )>,
     view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     physics_q: Query<(&ShipPhysics, Option<&RenderInterp>), With<crate::server_app::LocalShip>>,
     cinematic_q: Query<&CinematicCameraSection, With<crate::server_app::LocalShip>>,
@@ -760,6 +769,14 @@ fn cinematic_camera(
     let Ok(cam_cfg) = cinematic_q.single() else {
         return;
     };
+    let selected = spectator
+        .as_ref()
+        .filter(|state| state.active)
+        .and_then(|state| state.target.as_ref())
+        .and_then(|uuid| spectator_ships.iter().find(|(id, ..)| id.0 == *uuid));
+    let (physics, interp, cam_cfg) = selected
+        .map(|(_, physics, interp, config)| (physics, interp, config.unwrap_or(cam_cfg)))
+        .unwrap_or((physics, interp, cam_cfg));
     let cfg = &cam_cfg.0;
 
     // Only run when cinematic mode is selected.
@@ -805,7 +822,9 @@ fn cinematic_camera(
     let frame_bias = Vec3::Y * cfg.look_target_y_offset;
 
     // ── Collect entity snapshot for all non-local entities ──────────
-    let local_uuid_str = local_q.single().ok().map(|u| u.0.clone());
+    let local_uuid_str = selected
+        .map(|(uuid, ..)| uuid.0.clone())
+        .or_else(|| local_q.single().ok().map(|u| u.0.clone()));
     let local_faction: Option<uuid::Uuid> = local_uuid_str.as_ref().and_then(|lu| {
         all_entities
             .iter()
@@ -1419,6 +1438,68 @@ mod tests {
     use super::*;
     use crate::server_app::LocalShip;
     use crate::ship::state::ShipViewMode;
+
+    #[test]
+    fn crew_spectator_camera_follows_selected_ship_without_moving_local_identity() {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<Time<Fixed>>();
+        app.init_resource::<CinematicCameraState>();
+        app.init_resource::<crate::crew_spectator::CrewSpectator>();
+        app.add_systems(Update, cinematic_camera);
+        let mut mode = ShipViewMode::default();
+        mode.force_view_mode(Some(ViewMode::Cinematic));
+        let config = toml::from_str::<crate::entities::config::CinematicCameraConfig>(
+            "position = [0.0, 8.0, 15.0]",
+        )
+        .unwrap();
+        let own = app
+            .world_mut()
+            .spawn((
+                LocalShip,
+                EntityUuid("own".into()),
+                mode,
+                ShipPhysics::default(),
+                CinematicCameraSection(config),
+                Transform::default(),
+            ))
+            .id();
+        let target = app
+            .world_mut()
+            .spawn((
+                EntityUuid("other".into()),
+                ShipPhysics {
+                    x: 100.0,
+                    ..default()
+                },
+            ))
+            .id();
+        let camera = app
+            .world_mut()
+            .spawn((GameCamera, Transform::default()))
+            .id();
+        {
+            let mut spectator = app
+                .world_mut()
+                .resource_mut::<crate::crew_spectator::CrewSpectator>();
+            spectator.active = true;
+            spectator.target = Some("other".into());
+        }
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::new(100.0, 8.0, 15.0)
+        );
+        assert!(app.world().get::<LocalShip>(own).is_some());
+        assert!(app.world().get::<LocalShip>(target).is_none());
+        app.world_mut()
+            .resource_mut::<crate::crew_spectator::CrewSpectator>()
+            .target = None;
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::new(0.0, 8.0, 15.0)
+        );
+    }
 
     #[test]
     fn render_interp_blends_between_committed_ship_poses() {

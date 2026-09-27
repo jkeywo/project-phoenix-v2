@@ -21,6 +21,22 @@ A scenario provides a bounded situation for one or more selectable player ships.
 
 The world TOML defines stable data: global timing, anchors, placed entities, selectable ships, player spawn, routes, workforces, deadlines, rendering, audio, and script sources. Rhai defines event choreography: trigger registration, dialogue, objectives, spawning, deadlines, state changes, consequences, and game-over calls. Persistent simulation systems continue to own movement, combat, damage, tractor coupling, docking, umbilical flow, repair dispatch, condition, capacity, sensing, and faction behaviour.
 
+## Crew loss in multi-ship missions
+
+Worlds with multiple authored ship slots, or sessions with multiple fleet ships,
+continue after an individual crew ship is destroyed. Each lethal damage path
+emits the ordinary entity-destroyed fact once and retains the crew hull for
+identity and reporting. Author the mission's terminal outcome explicitly from
+those destruction facts; crew loss does not automatically declare global defeat.
+Single-ship missions retain their existing ship-destruction ending.
+
+The lost crew's shared Viewscreen enters cinematic spectating. Any original crew
+member can select a remaining ship, including an opponent, from their Console;
+the latest accepted choice wins. Loss of that target selects another survivor,
+or shows that no ships remain. This does not transfer Station authority or expose
+the target's private Console data or Objectives. Reconnecting original crew keep
+their camera control, while ordinary gameplay controls remain unavailable.
+
 ## Scenario scales
 
 | Form | Appropriate use | Example |

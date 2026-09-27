@@ -261,6 +261,7 @@ pub fn add_simulation_plugins(app: &mut App) {
 
 /// [`add_simulation_plugins`] with explicit control over the optional slices.
 pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
+    app.add_plugins(crate::crew_spectator::CrewSpectatorPlugin);
     crate::sim_sets::configure_fixed_order(app);
     // The logical simulation tick (issue #895). The whole `SimSet` chain lives
     // in `FixedUpdate`, so the simulation advances zero or more whole steps per
@@ -348,6 +349,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::debug_overlay::DamageLog>(
                 StateClass::Timer,
                 "digest-exclusion-classes",
+            )
+            .declare_state::<crate::crew_spectator::CrewSpectator>(
+                StateClass::Presentation,
+                "crew-spectator-camera-state",
             )
             // Cache of the presentation-only debug flags (issue #940):
             // `report_debug_state` compares against it to skip re-announcing.

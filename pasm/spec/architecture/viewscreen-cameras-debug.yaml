@@ -1,4 +1,40 @@
 entities:
+  - component: destroyed-crew-spectator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Destroyed Crew Spectator
+      summary: A lost crew in a multi-ship mission keeps its original ship identity and follows a surviving ship through the shared cinematic camera. Original connected crew members choose targets with latest accepted choice winning; target loss selects another remaining ship or a neutral empty state.
+      rationale:
+        - "Issue #1527: crew destruction emits one ordinary destruction fact and retains the fleet hull. The scenario controls mission completion; a single crew loss does not send ShipDestroyed or force GameOver. Solo missions retain their existing ending."
+        - "Camera selection is host-local presentation. It never moves LocalShip, changes Station tenure, mirrors target private data or grants gameplay authority. Admission derives wreck availability from the owning hull; both human and Backfill controls remain closed."
+        - "Original crew membership includes disconnected crew records at destruction, so reconnect restores camera selection eligibility. Explicit observers and later joins retain their ordinary surfaces and receive no destroyed-crew camera projection. Native and browser hosts use the same plugin, renderer and Console module."
+    architecture:
+      kind: presentation-controller
+      authority: local
+      owns: [crew-spectator-camera-state]
+      reads: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/crew_spectator.rs, src/server/renderer.rs, src/command_admission/mod.rs, gui/crew-spectator-view.js, gui/sim-state.js, client.html]
+      tests: [cargo test --lib --features headless crew_spectator, npx vitest run tests/client/crew-spectator.test.js]
+
+  - state: crew-spectator-camera-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Crew Spectator Camera State
+      summary: Original crew eligibility and the shared camera target, plus reliable per-recipient projection caches. Contains no target Station or Objective data and is excluded from authoritative digests.
+    architecture:
+      classification: local-view
+      owner: destroyed-crew-spectator
+      writers: [destroyed-crew-spectator]
+    implementation:
+      status: declared
+      paths: [src/crew_spectator.rs, src/core/messages.rs]
+      symbols: [CrewSpectator, CrewSpectatorPayload]
+
   - component: viewscreen-arbiter
     core:
       status: implemented

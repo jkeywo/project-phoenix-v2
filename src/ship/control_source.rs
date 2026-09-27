@@ -42,6 +42,9 @@ pub fn control_tick_policy(source: ControlSource) -> ControlTickPolicy {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ControlSourceResolver {
+    /// Derived from the owning hull. No Station, GM availability switch or
+    /// reconnect may grant gameplay control over a wreck.
+    destroyed: bool,
     sources: HashMap<SystemId, ControlSource>,
     /// Systems that are offline due to damage (Disabled/Destroyed tier).
     ///
@@ -57,6 +60,9 @@ pub struct ControlSourceResolver {
 }
 
 impl ControlSourceResolver {
+    pub fn set_destroyed(&mut self, destroyed: bool) {
+        self.destroyed = destroyed;
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -84,7 +90,7 @@ impl ControlSourceResolver {
 
     /// True when damage or an explicit GM latch prevents operation.
     pub fn is_offline(&self, system_id: &SystemId) -> bool {
-        self.offline_systems.contains(system_id) || self.is_gm_disabled(system_id)
+        self.destroyed || self.offline_systems.contains(system_id) || self.is_gm_disabled(system_id)
     }
 
     pub fn is_gm_disabled(&self, system_id: &SystemId) -> bool {

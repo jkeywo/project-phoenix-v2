@@ -2722,6 +2722,10 @@ pub enum SystemControlPayload {
 #[strum_discriminants(name(ClientMessageDiscriminants), derive(Hash, strum::EnumIter))]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
+    /// Camera-only choice from an original member of a destroyed crew.
+    SelectCrewSpectatorTarget {
+        uuid: String,
+    },
     Identify {
         token: String,
         name: String,
@@ -3368,11 +3372,27 @@ pub struct GameOverReportRow {
 /// fieldless companion enum that automatically stays in sync with the
 /// variant list below — used by the codec's table-driven round-trip harness
 /// (issue #610) to enforce that every variant has a sample row.
+/// Public camera choices only: no target Station or Objective projection.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CrewSpectatorPayload {
+    pub active: bool,
+    pub can_select: bool,
+    pub target: Option<String>,
+    pub ships: Vec<CrewSpectatorShip>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CrewSpectatorShip {
+    pub uuid: String,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, strum::EnumDiscriminants)]
 #[strum_discriminants(name(ServerMessageDiscriminants), derive(Hash, strum::EnumIter))]
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
+    CrewSpectatorState(CrewSpectatorPayload),
     Welcome {
         state: GameState,
         ship_stations: ShipStations,

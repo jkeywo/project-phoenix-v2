@@ -138,6 +138,12 @@ fn a_published_infrastructure_block_round_trips() {
 fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
     vec![
         (
+            ClientMessageDiscriminants::SelectCrewSpectatorTarget,
+            ClientMessage::SelectCrewSpectatorTarget {
+                uuid: "remaining-ship".into(),
+            },
+        ),
+        (
             ClientMessageDiscriminants::Identify,
             ClientMessage::Identify {
                 token: "t".into(),
@@ -293,6 +299,18 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
 
 fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
     vec![
+        (
+            ServerMessageDiscriminants::CrewSpectatorState,
+            ServerMessage::CrewSpectatorState(CrewSpectatorPayload {
+                active: true,
+                can_select: true,
+                target: Some("remaining-ship".into()),
+                ships: vec![CrewSpectatorShip {
+                    uuid: "remaining-ship".into(),
+                    name: "Ship".into(),
+                }],
+            }),
+        ),
         (
             ServerMessageDiscriminants::Welcome,
             ServerMessage::Welcome {

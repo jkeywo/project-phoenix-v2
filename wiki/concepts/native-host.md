@@ -356,30 +356,24 @@ bytes, so an in-process pane can skip the codec while still entering through
 The one authorisation decision the seam makes is the **reserved-token refusal**
 (`lobby::handler::is_reserved_token`): `__local_console__` and `ai:`-prefixed
 tokens are dropped at ingress, because the browser refuses them at its own
-PeerJS ingress too and `__local_console__` skips the station-tenure branch of
+Phoenix transport ingress too and `__local_console__` skips the station-tenure branch of
 `is_command_authorized` entirely.
 
-**Not yet connected.** The transport itself is issue #1112 — PeerJS is browser
-JavaScript and cannot run in a native process, which is why #1121 is filed as
-blocked by it. Everything downstream of the seam (admission, projection,
-protocol) is the same code a phone goes through, and
-`tests/native_host_sim.rs` drives a participant through it end to end with the
-loopback transport.
+The native host accepts phones on its own delivery port through the Phoenix
+join endpoint (#1353). With `--client-dir` it serves the client bundle and a
+direct LAN join code; `--rendezvous` adds the optional cloud leg. Admission,
+projection and protocol downstream of the transport are shared with browser
+hosting. `tests/native_host_sim.rs` exercises an in-process participant and
+`tests/native_direct_join.rs` exercises the bound socket.
 
-The operator-visible consequence: with no transport and no panes, **`--solo` is
-the only mode that reaches a running mission.** Without it the host waits in the
-lobby, and every route out of it needs a session — collective `SetReady`
-auto-start, or the host page's force-start (`drain_force_start_input`,
-wasm-only). The mode is not refused, because it becomes correct the day #1112
-lands; `build_native_host_app` warns loudly at boot instead (`LogCat::Lobby`),
-and `--help` and AGENTS.md carry the same caveat. A host with `--pane` does have
-participants, so it does not take that arm.
+A bundle-less host with no transport participants still needs `--solo` to
+launch directly. A `--client-dir` lobby offers the viewscreen's AI-launch
+control, while phones can join by its direct code. The native force-start path
+uses the same bridge action as the browser host.
 
-Two transports on one host compose with `PairedTransport` — poll both, dispatch
-to both, neither told about the other's traffic. That is how #1112's network
-transport arrives beside the panes: an `insert_resource`, not a re-plumb. Since
-issue #1353 there are three possible legs (panes, direct LAN accept, the cloud
-relay), and `phoenix-host` folds whichever it has into one
+Multiple transports compose with `PairedTransport` — poll and dispatch each
+leg without exposing one leg's traffic to another. The possible legs are
+panes, direct LAN accept and the cloud relay; `phoenix-host` folds them into one
 `Box<dyn NativeTransport>` rather than spelling out eight combinations.
 
 ## The host is its own rendezvous (issue #1353)
@@ -622,7 +616,7 @@ way, because they close different holes:
    pane's own — `handle_identify` uses the body token, so this is the only gate
    that stops a pane impersonating *another participant's ordinary token*;
 3. the #1121 seam refuses reserved tokens at ingress, as `server.html` does at
-   its PeerJS ingress.
+   its Phoenix transport ingress.
 
 Outbound, `session_connections::ConnectionRegistry` selects one current
 physical owner per recipient. `Audience::Holding*` has already resolved

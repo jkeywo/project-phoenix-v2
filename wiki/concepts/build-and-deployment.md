@@ -213,12 +213,10 @@ evolved this binary instead of adding a second one.
   --client-dir dist --solo
 ```
 
-Browser crew clients cannot join a native host until the Phoenix transport
-(issue #1112) replaces PeerJS, so a host with none of `--solo`, `--pane` or a
-lobby surface waits in a lobby nothing can enter — and says so loudly at boot
-rather than refusing, because the mode becomes correct the day #1112 lands.
-Since issue #1328 a `--client-dir` host has a third route to a running mission:
-the AI-launch control on the viewscreen's own lobby surface. `--manifest` also
+With `--client-dir`, phones join a native host on its own LAN port (#1353),
+and the viewscreen lobby can launch with AI backfill (#1328). A bundle-less
+host with no `--solo` or `--pane` has no participant route to launch and says
+so at boot. `--manifest` also
 narrows the **default hull** this process flies, not only the catalogue it
 publishes.
 

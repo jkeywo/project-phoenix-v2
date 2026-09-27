@@ -21,10 +21,10 @@ system in `src/ship/sensors.rs`:
   (`src/ship/sensors.rs:20`; also reachable via the
   `crate::sensors_plugin::SensorRadarSelection` alias). Every ship — player and
   NPC — carries its own.
-- `handle_sensors_messages` (`src/ship/sensors.rs:168`) consumes admitted
+- `handle_sensors_messages` (`src/ship/sensors.rs:171`) consumes admitted
   `SetScienceTarget` / `ClearScienceTarget` command payloads and writes the
   ship's own `SensorRadarSelection`.
-- `operate_sensors_ai` (`src/ship/sensors.rs:1099`) is the AI decide-and-emit
+- `operate_sensors_ai` (`src/ship/sensors.rs:1167`) is the AI decide-and-emit
   system (issue #828): rather than writing `SensorRadarSelection` directly, it
   emits an admitted `SetScienceTarget` / `ClearScienceTarget` through the same
   command-admission seam the human path uses, so AI and human converge on one

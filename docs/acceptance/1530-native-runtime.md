@@ -123,7 +123,7 @@ validated with `delivery::check_host_stamp`, then the embedded owner compares
 that canonical field exactly. Two empty identities cannot match; missing or
 JSON-form stamps fail rather than weakening the browser/native boundary.
 
-## Measured native run — 2026-09-27
+## Measured native run â€“ 2026-09-27
 
 The actual Windows/Ultralight six-process workload passed in **107.192 seconds**.
 The portable [result and artifact hashes](1530-native-runtime-result.json) record
@@ -185,13 +185,13 @@ the default automatic Ready behavior. This option changes only the private
 workload driver, not production GM readiness or admission.
 
 
-## Measured delayed native run — 2026-09-27
+## Measured delayed native run â€“ 2026-09-27
 
 The corrected observer passed the actual six-peer workload in **138.310 seconds**
 from source `f54b12ad`, using the same recorded executable and bundle. The
 [portable delayed-run result](1530-native-impaired-result.json) includes the raw
 artifact hashes and the service receipt. Each of twelve Stations recorded
-**72–73 Applied receipts**. The two separate GM peers recorded **37/37 and 36/36
+**72â€“73 Applied receipts**. The two separate GM peers recorded **37/37 and 36/36
 requested/Applied actions**, with compact telemetry retaining their full observed
 sequences. All six accepted slots agreed after those actions at tick 300
 (`40d34053c7dc9d94`) and 600 (`0e9b1904b76aac51`). No runtime or observer fault
@@ -199,7 +199,7 @@ occurred before teardown; every native process and the local service exited.
 
 The local rendezvous profile was 20 ms delay, 10% snapshot loss, seed 1530.
 Actual service counters reported **19,037 reliable frames seen, delayed and
-written**, with measured write delay **20.045–57.953 ms**, zero cancelled frames,
+written**, with measured write delay **20.045â€“57.953 ms**, zero cancelled frames,
 zero queue-overflow closes and zero pending frames at completion. There were
 **zero snapshot frames and zero snapshot drops**. Native fleet lockstep traffic
 in this cell is reliable; the configured snapshot-loss setting was therefore

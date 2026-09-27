@@ -69,6 +69,22 @@ fn selected(pair: &Candidate) -> bool {
     pair.producer == PRODUCER && CONSUMERS.contains(&pair.consumer.as_str())
 }
 
+// The frozen inventory predates strike-reserve accounting. These three
+// unselected pairs also share reactor state: allocation and torpedo cold gates
+// read it, and actual weapon emission debits it. They retain graph/order
+// coverage, not a foreign-only behavioral claim. Pin the exact extension rather
+// than tolerating new access.
+fn shares_strike_reserve(pair: &Candidate) -> bool {
+    (pair.producer == "project_phoenix::console_ai::server::ai_power_allocation"
+        && matches!(
+            pair.consumer.as_str(),
+            "project_phoenix::console::weapons::beam::handle_fire_phaser"
+                | "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+        ))
+        || (pair.producer == "project_phoenix::console_ai::server::ai_torpedo_auto_fire"
+            && pair.consumer == "project_phoenix::console::weapons::beam::handle_fire_phaser")
+}
+
 fn key(graph: &ScheduleGraph, name: &str) -> SystemKey {
     let matches: Vec<_> = graph
         .systems
@@ -208,18 +224,31 @@ impl ScheduleBuildPass for Observe {
         let pairs = candidates();
         let mut coverage = Vec::new();
         let mut ordered = Vec::new();
+        let mut reserve_pairs = 0;
         for pair in &pairs {
             let a = key(graph, &pair.producer);
             let b = key(graph, &pair.consumer);
             let raw =
                 conflict(world, graph, a, b).expect("actual executor incompatibility remains");
+            let mut expected_access = vec![std::any::type_name::<
+                project_phoenix::core::messages::AdmittedCommands,
+            >()
+            .to_owned()];
+            if shares_strike_reserve(pair) {
+                assert!(
+                    !selected(pair),
+                    "the behavioral tranche remains foreign-only"
+                );
+                reserve_pairs += 1;
+                expected_access.push(
+                    std::any::type_name::<project_phoenix::ship::power::ShipPowerSystem>()
+                        .to_owned(),
+                );
+            }
+            expected_access.sort();
             assert_eq!(
-                raw.access,
-                [
-                    std::any::type_name::<project_phoenix::core::messages::AdmittedCommands>()
-                        .to_owned()
-                ],
-                "a new access invalidates the exact family premise: {pair:?}"
+                raw.access, expected_access,
+                "exact audited access: {pair:?}"
             );
             let expected = crate::declared_order::before(&pair.producer, &pair.consumer);
             let (forward, reverse) = (reaches(a, b), reaches(b, a));
@@ -234,6 +263,10 @@ impl ScheduleBuildPass for Observe {
                 ordered.push(json!({"pair":pair,"raw":raw,"producer_before":forward,"consumer_before":reverse}));
             }
         }
+        assert_eq!(
+            reserve_pairs, 3,
+            "all strike-reserve extensions stay covered"
+        );
         assert_eq!(coverage.len(), 5);
         assert_eq!(
             ordered.len(),

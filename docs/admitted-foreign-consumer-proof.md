@@ -31,6 +31,27 @@ incidental probe/barrier paths remain diagnostic output. Physical external
 conflict vectors and multiplicities remain compared even when declared order
 removes those rows from the reported ambiguity census.
 
+### Strike-reserve access extension (#1532)
+
+The frozen 275-pair inventory remains intact. Three pairs outside the five-pair
+behavioral tranche now also conflict on `ShipPowerSystem`:
+`ai_power_allocation` with `handle_fire_phaser` and with `handle_fire_torpedo`,
+and `ai_torpedo_auto_fire` with `handle_fire_phaser`.
+Allocation and torpedo cold-group gates read the reactor; weapon emission debits its strike
+reserve. These are mixed-access pairs with graph/order coverage; the fixture
+does not claim foreign-only behavioral evidence for them. The graph proof pins
+exactly `AdmittedCommands` plus `ShipPowerSystem` for these three named pairs and
+sole `AdmittedCommands` for the other 272. Missing or additional access still
+fails. All declared directions, raw vectors, registration perturbations and
+the five original behavioral families remain checked without new ordering edges
+or ambiguity allowances.
+
+On 2026-09-27, source `a7eb78d56ca6882b65fe3a2f0dbb856f24146f1f` plus this
+graph-proof correction passed
+`cargo test --features headless --test admitted_foreign_consumers five_foreign_consumers_preserve_effects_under_declared_order_registration_changes -- --exact`:
+one parent, all nine fresh children and all fifteen boundary cases per child.
+This is focused evidence; it does not claim the full integration gate passed.
+
 ## Historical proof and receipts
 
 This prepared test covers five producer/consumer pairs from the exact 275-pair

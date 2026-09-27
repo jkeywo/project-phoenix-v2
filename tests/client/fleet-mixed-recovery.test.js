@@ -59,7 +59,7 @@ it('requires native restored state, exact agreement, original ship controls and 
  }
 });
 
-it('waits when native observer activation precedes its first evidence projection',async()=>{
+it('waits for native baseline projections before starting continuous observers',async()=>{
  const result={nativeEvents:Object.fromEntries(labels.map((id,index)=>[id,[
   {kind:'simulation-roster',value:{generation:1,local:index+1}},
   {kind:'state',value:{roster_result:{generation:1,accepted:true}}},
@@ -67,7 +67,7 @@ it('waits when native observer activation precedes its first evidence projection
  ]]))};
  const hook=mixedDivergenceHook({nativeLabels:labels});
  await expect(hook({result,peers:[],step(){},deadline:Date.now()+10000,
-  commandGm(id,command){if(command.kind==='effect-observe')result.nativeEvents[id].push({kind:'effect-observer-started',value:{}});},
+  commandGm(id,command){expect(command.kind).not.toBe('effect-observe');},
   async wait(predicate,label){const ready=await predicate();if(label==='one actual GM damage baseline'){expect(ready).toBe(false);throw new Error('baseline remains pending');}expect(ready).toBe(true);},
  })).rejects.toThrow('baseline remains pending');
 });

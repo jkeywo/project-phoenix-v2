@@ -413,6 +413,26 @@ ports 18440/18441. Original main runs pass `--wasm-build-receipt`; the separatel
 attributed corrected runner uses the integrator's external verification above.
 Browser rendering is disabled in these bounded simulation/transport cases.
 
+### Fallback observer baseline sequencing
+
+The first `9f2ba003` automatic-fallback divergence attempt ran from 18:11:35 to
+18:16:20 UTC on 2026-09-27 and failed before injection. Both continuous
+observers rejected `backdated-history` at sample 4. The retained ring had a
+bootstrap connection row at tick 5099; the requested GM damage and action rows
+then arrived at game tick 396. This records an observer precondition failure,
+not a duplicate effect or failed divergence recovery. Artifact:
+`target/1534-source-browser-divergence-fallback-9f2ba003/automatic-fallback/result.json`,
+SHA-256 `969eadcc6e379a777056758a93931bd2969f9eb06ef020fc302147f19c62270a`.
+
+The harness now establishes the actual matching two-GM effect and journal
+baseline before installing either continuous witness. It checks that each
+initial witness contains exactly the established effect and journal order,
+then injects divergence. Later backdated history, missing continuity or a
+duplicate effect still fails. Native/mixed observers publish an initial
+baseline separately and must publish their first continuous projection before
+injection. This is a harness-only sequencing change; a corrected runtime run
+must establish its own result against the pinned product receipt.
+
 ## Outstanding
 
 | Case | Browser direct | Browser forced relay | Browser automatic fallback | Native/mixed |

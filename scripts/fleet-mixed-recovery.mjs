@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { main as mixedMatrix } from './fleet-mixed-matrix.mjs';
-import { observeRecovery, captureDirectEffect, directEffectOutcome } from './fleet-browser-recovery.mjs';
+import { observeRecovery, captureDirectEffect, directEffectOutcome, startDirectEffectWitness } from './fleet-browser-recovery.mjs';
 import { createEffectWitness } from './fleet-effect-witness.mjs';
 
 const nativeIds = ['ship-3','ship-4','gm-2'];
@@ -196,11 +196,9 @@ export function mixedDivergenceHook({faultSeconds=600,nativeLabels=nativeIds}={}
     await thrust(.4);
     let before;
     await wait(async()=>{before=await capture();return before.filter(peer=>peer.label.startsWith('ship-')).every(peer=>peer.commands?.length);},'ship identities before divergence');
-    const evidence=result.recovery={failure:'divergence',victim:'gm-2',before,effectWitnessRequired:true,effectSamples:[],samples:[]};
+    const evidence=result.recovery={failure:'divergence',victim:'gm-2',before,effectSamples:[],samples:[]};
     evidence.effectRequest={entity:before.find(peer=>peer.label==='ship-1').commands[0].ship,correlation:'1534-native-divergence-effect-once',amount_milli_hp:5000};
-    for(const id of nativeGms)commandGm(id,{kind:'effect-observe',request:evidence.effectRequest});
-    for(const peer of browserGms)await evaluate(peer.page,createEffectWitness,{...evidence.effectRequest,observe:true,maxDurationMs:600000,maxSamples:14000,maxBytes:32*1024*1024});
-    await wait(()=>nativeGms.every(id=>result.nativeEvents[id].some(row=>row.kind==='effect-observer-started')),'native effect observers active');
+    for(const id of nativeGms)commandGm(id,{kind:'effect-track',request:evidence.effectRequest});
     commandGm(nativeGms[0],{kind:'effect-apply',request:evidence.effectRequest});
     const effects=async()=>{
       const rows=[...await Promise.all(browserGms.map(async peer=>({label:peer.label,...await evaluate(peer.page,captureDirectEffect,evidence.effectRequest)}))),
@@ -212,6 +210,14 @@ export function mixedDivergenceHook({faultSeconds=600,nativeLabels=nativeIds}={}
     const faultDeadline=Math.min(deadline,Date.now()+faultSeconds*1000);
     const bounded=async fn=>{if(Date.now()>faultDeadline)throw new Error('Native divergence deadline: '+(evidence.outcome?.reasons?.join('; ')||'effect baseline'));return fn();};
     await wait(()=>bounded(async()=>{evidence.effectBefore=await effects();evidence.effectAfter=evidence.effectBefore;return directEffectOutcome(evidence);}), 'one actual GM damage baseline');
+    await startDirectEffectWitness(evidence,async()=>{
+      for(const id of nativeGms)commandGm(id,{kind:'effect-observe',request:evidence.effectRequest});
+      for(const peer of browserGms)await evaluate(peer.page,createEffectWitness,{...evidence.effectRequest,observe:true,maxDurationMs:600000,maxSamples:14000,maxBytes:32*1024*1024});
+      await wait(()=>bounded(()=>nativeGms.every(id=>
+        result.nativeEvents[id].some(row=>row.kind==='effect-observer-started')
+        && last(result.nativeEvents[id],'effect-witness')?.continuous?.samples>0)),
+      'native effect observers active with first projection');
+    },effects);
     commandNative(evidence.victim,{kind:'diverge'});step('armed one incoming authenticated native GM command change');
     let checkedIdentity=false;
     await wait(()=>bounded(async()=>{

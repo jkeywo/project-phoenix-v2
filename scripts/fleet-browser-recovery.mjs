@@ -148,6 +148,23 @@ export async function awaitDirectEffectBaseline(evidence, readEffects, {
   } while(now()<=deadline);
   return false;
 }
+// Install only after the requested reducer fact and journal order are present
+// on both GMs. Bootstrap connection activity may have a later tick than that
+// first fact; the continuous contract starts with the established baseline.
+export async function startDirectEffectWitness(evidence, start, readEffects) {
+  if (!directEffectOutcome({...evidence,effectWitnessRequired:false}))
+    throw new Error('Missing actual effect baseline before continuous observation');
+  evidence.effectBaseline=structuredClone(evidence.effectBefore);
+  await start();
+  const observed=await readEffects();
+  if (!directEffectOutcome({...evidence,effectAfter:observed,effectWitnessRequired:false}))
+    throw new Error('Effect baseline changed before continuous observation');
+  evidence.effectBefore=observed;evidence.effectAfter=observed;evidence.effectSamples=[];
+  evidence.effectWitnessRequired=true;
+  if (!directEffectOutcome(evidence))
+    throw new Error('Initial continuous witness does not contain the established effect');
+}
+
 export function divergenceOutcome(evidence) {
   const peers = evidence.after || [];
   const victim = peers.find(peer => peer.label === evidence.victim);
@@ -204,8 +221,6 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
     evidence.effectRequest={entity:evidence.identityBefore[0].ship,correlation:'1534-divergence-effect-once',amount_milli_hp:5000};
     const readEffects=()=>Promise.all(gms.map(async(page,index)=>({label:`gm-${index+1}`,
       ...await page.evaluate(captureDirectEffect,evidence.effectRequest)})));
-    evidence.effectWitnessRequired=true;
-    await Promise.all(gms.map(page=>page.evaluate(createEffectWitness,{...evidence.effectRequest,observe:true})));
     try {
       const submitted=await gms[0].evaluate(request=>window.__hostApplyDirectEffect({
         ...request,effect:'damage',scope:'entity',scope_id:null}),evidence.effectRequest);
@@ -215,6 +230,8 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
         evidence.effectRequest.correlation)));
       if(!await awaitDirectEffectBaseline(evidence,readEffects))
         throw new Error('Missing one actual GM damage event with retained earlier history within 10s');
+      await startDirectEffectWitness(evidence,()=>Promise.all(gms.map(page=>
+        page.evaluate(createEffectWitness,{...evidence.effectRequest,observe:true}))),readEffects);
       await gms[0].evaluate(() => {
         const receive = window.wasm_receive_mesh_frame;
         window.wasm_receive_mesh_frame = (source, raw) => {
@@ -252,7 +269,7 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
       throw new Error('Divergence did not restore with stable ship identities, one continuously witnessed reducer effect, unique command orders and two matching checkpoints');
     } finally {
       evidence.effectObserverLogs=await Promise.all(gms.map(async(page,index)=>({label:`gm-${index+1}`,
-        ...await page.evaluate(()=>window.__recoveryEffectWitness.stop())})));
+        ...await page.evaluate(()=>window.__recoveryEffectWitness?.stop() || {notStarted:true})})));
       const invalid=evidence.effectObserverLogs.find(row=>row.error);
       if(invalid)throw new Error(`Continuous effect witness failed on ${invalid.label}: ${invalid.error}`);
     }

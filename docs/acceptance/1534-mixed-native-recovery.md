@@ -57,8 +57,9 @@ buffers remain bounded; overflow fails the run.
   the old ship entity ID in a new post-restore command, and two fresh matching
   six-peer checkpoints.
 - Divergence changes exactly one incoming authenticated `SetBoost` command on
-  native GM 2. Both GMs continuously witness one earlier 5 HP direct damage
-  effect with the shared bounded-ring reducer. Recovery requires the agreed
+  native GM 2. Both GMs first establish one actual 5 HP direct damage event and its journal
+  order, then start the shared bounded-ring witness before injection. Each
+  initial witness must contain exactly that established effect. Recovery requires the agreed
   snapshot boundary, two matching later checkpoints, original ship controls,
   no repeated outgoing orders and unchanged effect/journal evidence. A sampling
   gap or witness overflow fails the case.

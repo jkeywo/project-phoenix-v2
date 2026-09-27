@@ -1,5 +1,6 @@
+import { createEffectWitness } from '../../scripts/fleet-effect-witness.mjs';
 import { describe, expect, it } from 'vitest';
-import { failureOutcome, divergenceOutcome, observeRecovery, directEffectOutcome, awaitDirectEffectBaseline } from '../../scripts/fleet-browser-recovery.mjs';
+import { failureOutcome, divergenceOutcome, observeRecovery, directEffectOutcome, awaitDirectEffectBaseline, startDirectEffectWitness } from '../../scripts/fleet-browser-recovery.mjs';
 
 function evidence() {
   const before = Array.from({length:6}, (_,i)=>({label:`peer-${i+1}`,mesh:{slot:i+1,tick:100}}));
@@ -109,4 +110,31 @@ it('requires a real canonical sequence before calling the reducer effect shared'
   const proof=directEffectEvidence();
   for(const row of [...proof.effectBefore,...proof.effectAfter])delete row.journal[0].sequence;
   expect(directEffectOutcome(proof)).toBe(false);
+});
+
+
+it('starts continuous observation from an established effect despite later bootstrap activity',async()=>{
+  const proof=directEffectEvidence(),order=[],witnesses=[];
+  const activity=proof.effectBefore.map(row=>({capacity:256,entries:[{tick:2},...row.events,{tick:5099,category:'connection'}]}));
+  await startDirectEffectWitness(proof,async()=>{
+    order.push('start');
+    for(const state of activity){const witness=createEffectWitness(proof.effectRequest);witness.sample(state,0);witnesses.push(witness);}
+  },async()=>{order.push('read');return proof.effectBefore.map((row,index)=>({...row,continuous:witnesses[index].read()}));});
+  expect(order).toEqual(['start','read']);expect(directEffectOutcome(proof)).toBe(true);
+  expect(proof.effectBaseline.every(row=>!row.continuous)).toBe(true);
+  const later={...activity[0],entries:[...activity[0].entries.slice(0,-1),{tick:401,category:'connection'},activity[0].entries.at(-1)]};
+  witnesses[0].sample(later,50);
+  proof.effectAfter[0].continuous=witnesses[0].read();
+  expect(proof.effectAfter[0].continuous.error).toBe('backdated-history');
+  expect(directEffectOutcome(proof)).toBe(false);
+});
+it('refuses to start without two actual baseline effects and rejects a changed initial witness',async()=>{
+  const missing=directEffectEvidence();missing.effectBefore[1].events=[];
+  let started=false;
+  await expect(startDirectEffectWitness(missing,async()=>{started=true;},async()=>[])).rejects.toThrow('Missing actual effect baseline');
+  expect(started).toBe(false);
+  const proof=directEffectEvidence(),changed=structuredClone(proof.effectBefore);changed[0].events.push(changed[0].events[0]);
+  await expect(startDirectEffectWitness(proof,async()=>{},async()=>changed)).rejects.toThrow('Effect baseline changed');
+  const absent=directEffectEvidence();
+  await expect(startDirectEffectWitness(absent,async()=>{},async()=>absent.effectBefore)).rejects.toThrow('Initial continuous witness');
 });

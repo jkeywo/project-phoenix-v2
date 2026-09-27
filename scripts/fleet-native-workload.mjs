@@ -134,6 +134,7 @@ export function mountNativeGmWorkspace(options) {
       if (command?.kind === 'ready') readyAllowed = true;
       tryReady();
       if (command?.kind === 'force-start') { bridge.forceStart(); report('gm-force-start-requested',{}); }
+      if (command?.kind === 'effect-track') effectRequest=command.request;
       if (command?.kind === 'effect-observe') {
         effectRequest=command.request;
         createEffectWitness({...effectRequest,observe:true,maxDurationMs:600000,maxSamples:14000,maxBytes:32*1024*1024});

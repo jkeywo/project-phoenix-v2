@@ -356,6 +356,37 @@ workshop.scripts.stale,Workshop Rhai stale refusal,[The script changed before th
 workshop.scripts.validation_refused,Workshop Rhai candidate refusal,[Runtime validation refused the script change.]
 workshop.scripts.invalid_inline,Workshop Rhai invalid inline source refusal,[The inline script string could not be edited without changing its surrounding source.]
 workshop.scripts.literal_delimiter,Workshop Rhai literal delimiter refusal,[This script contains the surrounding literal delimiter. Use a sibling Rhai file or change the TOML string form.]
+workshop.scripts.create,Workshop new script action,[Create script in this world]
+workshop.scripts.created,Workshop new script success,[Script created in the draft. Add callbacks and save your changes.]
+workshop.scripts.already_present,Workshop new script refusal,[This world already has a script. Open its source to edit it.]
+workshop.objective.title,Workshop Objective instance template,[Objective instance]
+workshop.objective.scope,Workshop Objective instance template guidance,[Insert an editable Objective and optional addressed completion in the open script. Save Script checks the candidate before changing the draft; Test runs Objective assignment and shows each ship's progress.]
+workshop.objective.id,Workshop Objective id label,[Objective ID]
+workshop.objective.instance,Workshop Objective instance id label,[Instance ID]
+workshop.objective.text,Workshop Objective String ID label,[Text String ID]
+workshop.objective.slots,Workshop Objective slot recipient label,"[Ship slot IDs, separated by commas]"
+workshop.objective.factions,Workshop Objective faction recipient label,"[Faction IDs, separated by commas]"
+workshop.objective.all,Workshop Objective all ship recipient label,[All player ships]
+workshop.objective.delay,Workshop Objective optional delayed completion label,[Complete this instance after seconds (optional)]
+workshop.objective.insert,Workshop Objective insert button,[Insert into script]
+workshop.objective.inserted,Workshop Objective inserted status,"[Template inserted. Review the script, then save it to run validation.]"
+workshop.objective.error_open,Workshop Objective no script refusal,[Open a script unit before inserting an Objective.]
+workshop.objective.error_fields,Workshop Objective fields refusal,[Enter valid Objective and Instance IDs and a text String ID.]
+workshop.objective.error_recipient,Workshop Objective recipient refusal,"[Choose ship slots, factions or all player ships.]"
+workshop.objective.error_selector,Workshop Objective selector refusal,"[Recipient values must be nonempty and unique; choose authored ship slot IDs and faction names.]"
+workshop.objective.error_delay,Workshop Objective delay refusal,[Completion delay must be a positive whole number of seconds.]
+workshop.objective.action_title,Workshop ship-addressed action form,[Ship-addressed action]
+workshop.objective.action_scope,Workshop ship-addressed action guidance,"[Use the Objective recipient fields above; optionally include current members of this Objective instance. An empty selection delivers nothing. Insert a modifier action into the open script, then Save Script to validate it.]"
+workshop.objective.action_kind,Workshop ship-addressed action kind,[Modifier action]
+workshop.objective.action_apply,Workshop apply modifier choice,[Apply modifier]
+workshop.objective.action_remove,Workshop remove modifier choice,[Remove modifier]
+workshop.objective.action_slot,Workshop modifier slot label,[Modifier slot]
+workshop.objective.action_tag,Workshop modifier tag label,[Modifier tag]
+workshop.objective.action_bonus,Workshop modifier bonus label,[Bonus for apply]
+workshop.objective.action_members,Workshop instance-member selector label,[Include current members of the Objective instance above]
+workshop.objective.action_insert,Workshop addressed action insert button,[Insert addressed action]
+workshop.objective.error_action,Workshop addressed action fields refusal,"[Choose a modifier action, slot and tag; instance members also need both Objective IDs.]"
+workshop.objective.error_bonus,Workshop addressed modifier bonus refusal,[Enter a nonzero finite bonus for an applied modifier.]
 workshop.composition.scope,Workshop composition authority and validation scope,[Edits are exact-source transactions. The complete candidate must pass the ordinary runtime validation before this draft changes.]
 workshop.composition.origin_draft,Editable world member origin,[Editable draft source]
 workshop.composition.origin_dependency,Immutable dependency world origin with {origin} naming its pack,[Read-only dependency from {origin}]

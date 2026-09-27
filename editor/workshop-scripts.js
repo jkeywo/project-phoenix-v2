@@ -7,7 +7,28 @@ export function workshopScriptWorlds(draft) {
     .flatMap(path => {
       try { return [{ path, source: draft.read(path), parsed: parse(draft.read(path)) }]; }
       catch { return []; }
-    }).filter(world => extractScriptUnits(world.parsed, world.path).length);
+    });
+}
+
+/** Start a script in a scriptless world through the same validated draft path. */
+export async function createWorkshopScript({ draft, provider, runtime, worldPath, current }) {
+  const before = draft?.read(worldPath);
+  if (typeof before !== 'string' || !current()) throw new Error('workshop.scripts.stale');
+  const parsed = parse(before);
+  if (parsed.script !== undefined) throw new Error('workshop.scripts.already_present');
+  const after = before + (before.endsWith('\n') ? '\n' : '\n\n')
+    + "[script]\nsetup = '''\n// Add scenario callbacks here.\n'''\n";
+  const revision = draft.sourceRevision;
+  const candidate = provider?.restoreDocument
+    ? provider.restoreDocument(draft.snapshot()) : WorkshopDocument.restore(draft.snapshot());
+  candidate.apply([{ path: worldPath, before, after }]);
+  const report = await runtime.validate(provider?.save ? null : candidate.archive(), candidate);
+  if (!report?.accepted) { const error = new Error('workshop.scripts.validation_refused'); error.report = report; throw error; }
+  if (!current() || draft.sourceRevision !== revision || draft.read(worldPath) !== before) {
+    throw new Error('workshop.scripts.stale');
+  }
+  draft.apply([{ path: worldPath, before, after }]);
+  return report;
 }
 
 export function workshopScriptUnits(draft, worldPath) {

@@ -3652,6 +3652,55 @@ fn addressed_script_uses_just_activated_instance_members_and_shared_modifier_dis
 }
 
 #[test]
+fn objective_instance_conflict_and_dangling_reference_report_script_source() {
+    let (mut app, _, _, _) = recipient_action_app(
+        r#"
+        on_world_loaded("run");
+        fn run(ctx) {
+            ctx.effects.add_objective(#{ id: "escort", instance_id: "one", text: "objective.escort",
+                recipient_ship_slots: ["lead"] });
+            ctx.effects.add_objective(#{ id: "escort", instance_id: "two", text: "objective.escort",
+                recipient_ship_slots: ["lead"] });
+            ctx.effects.complete_objective("escort", "missing");
+        }
+    "#,
+    );
+    app.init_resource::<crate::workshop::test_trace::TestTrace>();
+    app.update();
+
+    let manager = &app.world().resource::<ObjectiveInstanceManagerRes>().0;
+    assert_eq!(
+        manager.records().len(),
+        1,
+        "conflicting activation must be atomic"
+    );
+    assert_eq!(manager.records()[0].spec.key.instance_id, "one");
+    let diagnostics = &app
+        .world()
+        .resource::<crate::recipients::RecipientDiagnostics>()
+        .0;
+    assert_eq!(diagnostics.len(), 2);
+    assert!(diagnostics[0].message.contains("equal-specificity"));
+    assert!(diagnostics[0].message.contains("lead"));
+    assert!(diagnostics[1].message.contains("escort:missing"));
+    assert!(diagnostics
+        .iter()
+        .all(|row| row.source.is_some() && row.line.is_some()));
+    assert_eq!(
+        app.world()
+            .resource::<crate::workshop::test_trace::TestTrace>()
+            .records()
+            .iter()
+            .filter(|row| matches!(
+                row.kind,
+                crate::workshop::test_protocol::TestTraceKind::RecipientDiagnostic { .. }
+            ))
+            .count(),
+        2,
+    );
+}
+
+#[test]
 fn addressed_actions_exclude_retained_zero_hull_crew_without_erasing_identity() {
     let (mut app, _, lead, wing) = recipient_action_app(
         r#"

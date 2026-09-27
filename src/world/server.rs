@@ -3640,8 +3640,13 @@ pub(crate) fn apply_dispatch_result(
             | ActionCmd::CompleteObjectiveInstance { .. }
             | ActionCmd::FailObjectiveInstance { .. }
             | ActionCmd::SetObjectiveInstanceProgress { .. }) => {
+                let origin = crate::objective_instances::ObjectiveCommandOrigin {
+                    source: trace_source_path.map(str::to_owned),
+                    line: trace_source_line,
+                    tick: trace_tick,
+                };
                 commands.queue(move |world: &mut World| {
-                    crate::objective_instances::apply_command(world, cmd);
+                    crate::objective_instances::apply_command(world, cmd, &origin);
                 });
             }
 

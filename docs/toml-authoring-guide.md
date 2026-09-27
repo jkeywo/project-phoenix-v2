@@ -2160,6 +2160,39 @@ next = "Engineering"
 
 ---
 
+## Workshop Objective instances
+
+Open a world script in Workshop's **Scenario scripts** panel, or use **Create
+script in this world** when the world has none. The **Objective
+instance** form inserts an editable Rhai callback with an `id`, `instance_id`,
+text String ID and one or more recipient selectors. Reusing the same two IDs
+updates the inserted block. Authors can edit its Rhai directly for conditions,
+progress and other lifecycle actions; the optional whole-second delay inserts
+an instance-addressed completion through the ordinary schedule API.
+
+The adjacent **Ship-addressed action** form uses those same recipient fields
+to insert `ctx.effects.addressed(#{ ... })` for applying or removing a modifier.
+It can additionally select the current members of the Objective instance named
+above. Its selectors are combined at action time; leaving all of them empty is
+an explicit no-delivery action. Save checks names and references through the
+runtime validator. Authors can edit the inserted Rhai for other addressed
+action types and choose when the callback runs. The generated modifier bonus
+uses `flt("1.5")` syntax because scenario Rhai has no bare floating literals.
+
+`recipient_ship_slots` names authored `[[ship_slot]]` IDs, while
+`recipient_factions` names authored faction names. `all_player_ships = true`
+also selects every player ship. The authoritative Objective instance resolver
+determines membership and rejects ambiguous equal-specificity assignments;
+the form does not attempt to reproduce that rule. **Save Script** checks the
+candidate and reports source locations for definite findings. A callback that
+depends on a live fleet or a later faction change must also be exercised in a
+disposable **Test** run: run once per selected ship slot to inspect that ship's
+Objective progress and action result. A refused activation or dangling instance
+mutation appears in Test's source-located trace and the GM diagnostics with the
+Objective ID, instance IDs and conflicting ship or slot where relevant. Export
+and reopen retain the exact Rhai
+source, including the instance and recipient fields.
+
 ## Maintenance
 
 When you change any of the parser modules referenced above, update the

@@ -2,7 +2,7 @@
 title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
-sources: [src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
+sources: [src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/recipients.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
 updated: 2026-09-27
 ---
 
@@ -104,6 +104,12 @@ recipient set is rejected rather than interpreted as everyone.
 `add_objective(#{ ... })` accepts those same selector keys, while the two-argument
 `complete_objective(id, instance_id)` and `fail_objective(id, instance_id)`
 overloads preserve the one-argument legacy calls exactly.
+Workshop's Scenario scripts panel uses `editor/workshop-objective-snippet.js`
+to insert or update those Rhai fields in exact source. Save runs candidate
+validation and Test runs live membership; the form does not duplicate the
+authoritative resolver.
+The same panel inserts ship-scoped modifier actions through the addressed
+effect API, including the current members of a named Objective instance.
 
 Spawned player ships carry `AuthoredShipSlotId` separately from their numeric
 transport `HostSlot`. The instance manager reconciles deterministic

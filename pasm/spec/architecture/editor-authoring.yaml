@@ -63,6 +63,22 @@ entities:
       paths: [editor/workshop-runtime.js, src/workshop/mod.rs, editor/validation.js]
       tests: [cargo test, npm run test:editor]
 
+  - component: editor-objective-instance-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Workshop Objective Instance Authoring
+      summary: The existing Rhai script panel inserts or updates editable named Objective instance callbacks with slot, faction or all-player recipients and optional instance-addressed completion. Its addressed-action form inserts a ship-scoped modifier using those recipients and optional live Objective-instance members. Candidate save uses the runtime validator and exact-source undo history; disposable Test executes live membership rules for one selected ship slot per run.
+    architecture:
+      kind: authoring-interface
+      authority: local
+      reads: [editor-draft-state]
+      depends_on: [editor-validation-service, objective-instance-contract]
+    implementation:
+      status: declared
+      paths: [gui/workshop-scripts-panel.js, editor/workshop-objective-snippet.js, editor/workshop-scripts.js, gui/workshop-test-panel.js]
+      tests: [npx vitest run editor/tests/workshop-objective-snippet.test.js tests/client/workshop-scripts-panel.test.js]
+
   - component: editor-save-admission
     core:
       status: implemented

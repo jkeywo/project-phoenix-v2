@@ -79,6 +79,40 @@ pub enum ActivationRefusal {
     Conflict(AssignmentConflict),
 }
 
+#[derive(Clone, Debug)]
+pub struct ObjectiveCommandOrigin {
+    pub source: Option<String>,
+    pub line: Option<usize>,
+    pub tick: u64,
+}
+
+impl ObjectiveCommandOrigin {
+    fn refused(&self, world: &mut World, message: String) {
+        crate::recipients::report(
+            world,
+            crate::recipients::RecipientDiagnostic {
+                tick: self.tick,
+                source: self.source.clone(),
+                line: self.line,
+                action: "objective-instance".into(),
+                message,
+            },
+        );
+    }
+}
+
+fn activation_refusal_message(reason: &ActivationRefusal) -> String {
+    match reason {
+        ActivationRefusal::EmptyRecipients => "Choose at least one Objective recipient".into(),
+        ActivationRefusal::UnknownShipSlot(slot) => format!("Unknown Objective ship slot '{slot}'"),
+        ActivationRefusal::UnknownFaction(faction) => format!("Unknown Objective faction '{faction}'"),
+        ActivationRefusal::StaticShipSlotConflict { objective_id, slot_id, instance_ids } =>
+            format!("Objective '{objective_id}' gives ship slot '{slot_id}' equal-specificity assignments in instances {}. Change one recipient selector", instance_ids.join(", ")),
+        ActivationRefusal::Conflict(conflict) =>
+            format!("Objective '{}' gives ship '{}' equal-specificity assignments in instances {}. Change one recipient selector", conflict.objective_id, conflict.ship_id, conflict.instance_ids.join(", ")),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObjectiveInstanceTransition {
     pub key: ObjectiveInstanceKey,
@@ -603,7 +637,11 @@ pub fn reconcile_memberships(world: &mut World) {
 /// Apply the instance-only objective commands queued by the shared world
 /// dispatcher. Legacy commands never enter this function and therefore retain
 /// their existing reducer byte-for-byte.
-pub fn apply_command(world: &mut World, command: crate::world::dispatch::ActionCmd) {
+pub fn apply_command(
+    world: &mut World,
+    command: crate::world::dispatch::ActionCmd,
+    origin: &ObjectiveCommandOrigin,
+) {
     use crate::world::dispatch::ActionCmd;
 
     let fleet = player_ship_memberships(world);
@@ -643,14 +681,15 @@ pub fn apply_command(world: &mut World, command: crate::world::dispatch::ActionC
             let objective_id = spec.key.objective_id.clone();
             let instance_key = spec.key.clone();
             let instance_directive = directive.clone();
-            let activated = match world
+            let activation = world
                 .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
                 .0
-                .activate_validated(spec, &fleet, &known_slots, &known_factions)
-            {
+                .activate_validated(spec, &fleet, &known_slots, &known_factions);
+            let activated = match activation {
                 Ok(changed) => changed,
                 Err(reason) => {
                     bevy::log::warn!("Objective instance activation refused: {reason:?}");
+                    origin.refused(world, activation_refusal_message(&reason));
                     return;
                 }
             };
@@ -690,42 +729,86 @@ pub fn apply_command(world: &mut World, command: crate::world::dispatch::ActionC
             }
         }
         ActionCmd::CompleteObjectiveInstance { key } => {
-            match world
+            let known = world
+                .resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+                .0
+                .records()
+                .iter()
+                .any(|row| row.spec.key == key);
+            let completion = world
                 .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
                 .0
-                .complete(&key, &fleet)
-            {
+                .complete(&key, &fleet);
+            match completion {
                 Ok(true) => transition = Some((key.objective_id, ObjectiveStatus::Completed)),
-                Ok(false) => {}
-                Err(conflict) => bevy::log::warn!(
-                    "Objective instance completion refused: objective '{}' is ambiguous for ship '{}' across {:?}",
-                    conflict.objective_id,
-                    conflict.ship_id,
-                    conflict.instance_ids
+                Ok(false) if !known => origin.refused(
+                    world,
+                    format!(
+                        "Unknown Objective instance '{}:{}'; check the authored id and instance_id",
+                        key.objective_id, key.instance_id
+                    ),
                 ),
+                Ok(false) => {}
+                Err(conflict) => {
+                    bevy::log::warn!(
+                        "Objective instance completion refused: objective '{}' is ambiguous for ship '{}' across {:?}",
+                        conflict.objective_id,
+                        conflict.ship_id,
+                        conflict.instance_ids
+                    );
+                    origin.refused(
+                        world,
+                        activation_refusal_message(&ActivationRefusal::Conflict(conflict)),
+                    );
+                }
             }
         }
         ActionCmd::FailObjectiveInstance { key } => {
-            match world
+            let known = world
+                .resource::<crate::world::server::ObjectiveInstanceManagerRes>()
+                .0
+                .records()
+                .iter()
+                .any(|row| row.spec.key == key);
+            let failure = world
                 .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
                 .0
-                .fail(&key, &fleet)
-            {
+                .fail(&key, &fleet);
+            match failure {
                 Ok(true) => transition = Some((key.objective_id, ObjectiveStatus::Failed)),
-                Ok(false) => {}
-                Err(conflict) => bevy::log::warn!(
-                    "Objective instance failure refused: objective '{}' is ambiguous for ship '{}' across {:?}",
-                    conflict.objective_id,
-                    conflict.ship_id,
-                    conflict.instance_ids
+                Ok(false) if !known => origin.refused(
+                    world,
+                    format!(
+                        "Unknown Objective instance '{}:{}'; check the authored id and instance_id",
+                        key.objective_id, key.instance_id
+                    ),
                 ),
+                Ok(false) => {}
+                Err(conflict) => {
+                    bevy::log::warn!(
+                        "Objective instance failure refused: objective '{}' is ambiguous for ship '{}' across {:?}",
+                        conflict.objective_id,
+                        conflict.ship_id,
+                        conflict.instance_ids
+                    );
+                    origin.refused(
+                        world,
+                        activation_refusal_message(&ActivationRefusal::Conflict(conflict)),
+                    );
+                }
             }
         }
         ActionCmd::SetObjectiveInstanceProgress { key, progress } => {
-            world
+            let changed = world
                 .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
                 .0
                 .set_progress(&key, progress);
+            if !changed {
+                origin.refused(world, format!(
+                    "Objective instance '{}:{}' was not active; check the authored ids and progress",
+                    key.objective_id, key.instance_id
+                ));
+            }
         }
         _ => return,
     }

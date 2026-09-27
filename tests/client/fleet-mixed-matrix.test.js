@@ -35,7 +35,7 @@ describe('mixed browser render mode', () => {
  it.each([false, true])('sets the webdriver flag used for browser boot selection when render=%s', render => {
   const options = mixedOptions([...required, ...(render ? ['--render'] : []), '--delay-ms', '20', '--loss-percent', '10']);
   const runtime = mixedBrowserRuntime(options, 'direct');
-  const context = vm.createContext({ navigator: {webdriver:true}, window: {addEventListener(){}, WebSocket:class {}, RTCPeerConnection:class {}}, observer:runtime.observer });
+  const context = vm.createContext({ navigator: {webdriver:true}, document: {addEventListener(){}}, window: {addEventListener(){}, WebSocket:class {}, RTCPeerConnection:class {}}, observer:runtime.observer });
   vm.runInContext('('+observeBrowser.toString()+')(observer,()=>{})', context);
   expect(context.navigator.webdriver).toBe(!render);
   expect(runtime.launch.args.includes('--use-angle=swiftshader')).toBe(render);

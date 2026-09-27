@@ -8,7 +8,7 @@ import { HOST_ROLE_GM, HOST_ROLE_SHIP, HOST_ROLE_SHIP_GM } from './host-mesh.js'
  */
 export function createNativeFleetPeer({
   send, log = console.log, createOwner = createFleetOwner, createMember = createFleetMember,
-  onRoster = () => {}, onDiag = () => {},
+  onRoster = () => {}, onDiag = () => {}, onHealth = () => {},
 } = {}) {
   let handle = null;
   let configured = false;
@@ -189,6 +189,7 @@ export function createNativeFleetPeer({
       if (!handle) return false;
       let state;
       try { state = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) { return false; }
+      if (state.health) onHealth(state.health);
       handle.update({ ship: state.ship, ready: !!state.ship_ready });
       handle.setCrewReadiness(state.crew || {}, state.station_ratings || []);
       handle.setGmReady(!!state.gm_ready);

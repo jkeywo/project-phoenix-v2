@@ -167,6 +167,7 @@ impl NativeFleetEvents {
 
 #[derive(Serialize)]
 struct NativeFleetUpdate {
+    health: Option<crate::gm_health::GmHealthProjection>,
     ship: serde_json::Value,
     ship_ready: bool,
     crew: crate::lobby::start_policy::ReadinessTally,
@@ -190,7 +191,10 @@ impl Plugin for NativeFleetPlugin {
             .add_systems(PreUpdate, poll_wire.before(super::drain_surface_records))
             .add_systems(PreUpdate, apply_events.after(super::drain_surface_records))
             .add_systems(Update, apply_pending_gm_bootstrap)
-            .add_systems(PostUpdate, publish_state);
+            .add_systems(
+                PostUpdate,
+                publish_state.after(crate::gm_health::publish_health_projection),
+            );
     }
 }
 
@@ -542,6 +546,10 @@ fn publish_state(world: &mut World) {
         .unwrap_or_default();
     let validation = world.contains_resource::<crate::world::config::WorldConfig>();
     let update = NativeFleetUpdate {
+        health: world
+            .get_resource::<crate::gm_health::GmHealthWatch>()
+            .and_then(|watch| watch.last())
+            .cloned(),
         ship: serde_json::json!({ "template_path": ship_path,
             "name": world.resource::<NativeFleetConfig>().ship_name }),
         ship_ready: validation,

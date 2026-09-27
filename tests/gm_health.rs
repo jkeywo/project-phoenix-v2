@@ -48,7 +48,7 @@ fn seeded(local: HostSlot, slots: &[HostSlot]) -> App {
         slots.iter().copied(),
         DELAY,
     )));
-    // The projections only run on a peer that is actually presenting a GM desk.
+    // This fixture also presents the attention queue, which requires a GM desk.
     app.insert_resource(phoenix::gm_projection::BrowserGameMaster);
     app.add_plugins((GmHealthPlugin, GmAttentionPlugin));
     app.finish();
@@ -59,6 +59,16 @@ fn seeded(local: HostSlot, slots: &[HostSlot]) -> App {
 
 fn solo() -> App {
     seeded(HostSlot(1), &[HostSlot(1)])
+}
+
+#[test]
+fn ordinary_fleet_ship_publishes_health_without_a_gm_desk() {
+    let mut app = solo();
+    app.world_mut()
+        .remove_resource::<phoenix::gm_projection::BrowserGameMaster>();
+    app.world_mut().insert_resource(GmHealthWatch::default());
+    app.update();
+    assert!(app.world().resource::<GmHealthWatch>().last().is_some());
 }
 
 fn advance(app: &mut App, ticks: usize) {

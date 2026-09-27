@@ -67,6 +67,7 @@ import {
   viewscreenPresentationRecordFields,
 } from './gui/viewscreen-presentation.js';
 import { createNativeFleetPeer } from './gui/native-fleet-peer.js';
+import { createFleetHealth } from './gui/fleet-health.js';
 
 // The static `data-i18n` markup — "CREW", "CONNECTED", the awaiting-selection
 // badge, the join panel's caption, this surface's QR toggle, the picker's
@@ -193,7 +194,11 @@ function send(record) {
   }
 }
 
-const nativeFleetPeer = createNativeFleetPeer({ send, log: msg => console.log(msg) });
+const nativeFleetHealth = createFleetHealth({ doc: document,
+  root: () => document.body, t });
+const nativeFleetPeer = createNativeFleetPeer({ send, log: msg => console.log(msg),
+  onRoster: nativeFleetHealth.roster, onDiag: nativeFleetHealth.diagnostic,
+  onHealth: nativeFleetHealth.health });
 let pendingNativeFleetJoin = null;
 let latestNativeFleetState = null;
 function joinNativeFleetWhenReady() {

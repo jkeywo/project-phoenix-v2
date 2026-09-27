@@ -124,7 +124,7 @@ pub struct RawLimits {
 }
 
 fn default_max_fleet_hosts() -> usize {
-    4
+    32
 }
 fn default_max_slot_name_length() -> usize {
     48

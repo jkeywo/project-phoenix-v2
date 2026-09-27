@@ -1001,8 +1001,8 @@ pub fn publish_health_projection(
     }
 }
 
-/// Registers the health projection on a GM-presenting peer, exactly as
-/// [`crate::gm_attention::GmAttentionPlugin`] registers the attention queue.
+/// Registers public health on GM-presenting peers and ordinary fleet ships.
+/// Ship hosts use the same semantic projection for their fleet status region.
 pub struct GmHealthPlugin;
 
 impl Plugin for GmHealthPlugin {
@@ -1017,7 +1017,10 @@ impl Plugin for GmHealthPlugin {
                 publish_health_projection
                     .after(crate::audio_lifecycle::AudioLifecyclePublished)
                     .before(crate::gm_attention::publish_attention_projection)
-                    .run_if(crate::gm_projection::gm_presentation_active),
+                    .run_if(
+                        crate::gm_projection::gm_presentation_active
+                            .or(resource_exists::<FleetLockstep>),
+                    ),
             );
     }
 }

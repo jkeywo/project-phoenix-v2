@@ -324,6 +324,12 @@ socket/RTC stand-ins. Native `--fleet-code` joins a selected ship through
 continues to join as GM. Runtime evidence and its limits are tracked in
 `docs/acceptance/1530-six-peer-matrix.md`.
 
+`gui/fleet-health.js` renders transport retry, relay, disconnect and shedding
+facts alongside the public `GmHealthProjection` on browser and native fleet
+surfaces. Its stable polite live region preserves focus across updates. The
+four-ship/two-GM support threshold produces a warning; it does not refuse larger
+fleets. The separate transport allocation bound is 32 peers. Public health is
+published for ordinary fleet ships as well as GM-presenting peers.
 
 - [Architecture](./architecture.md) · [Message Flow](./message-flow.md)
 - [Player](../entities/player.md) · [Session](../entities/session.md)

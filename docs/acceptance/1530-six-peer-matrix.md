@@ -61,3 +61,15 @@ shorter-run durations/limits remain governed by #1543 and #1090.
 At this checkpoint, no real-runtime matrix cell is passed. Native ship admission
 and bounded protocol coverage are prerequisites; the full runtime/workload
 matrix remains outstanding for #1530.
+
+## Operator feedback controls
+
+`tests/client/fleet-health.test.js` drives retry/fallback and disconnect
+diagnostics from the same protocol fixture into the shared browser/native
+renderer, preserves keyboard focus, and admits a fifth ship and third GM with
+the support warning. Its slow/restoring-peer projection case tests rendering;
+the actual delayed-runtime projection and native surface observations remain
+part of the unrun runtime matrix above. The native retained surface is available
+through F9 during play; browser fleet warnings remain outside the hidden lobby.
+
+Actual-runtime #1535 feedback acceptance remains unverified.

@@ -3338,6 +3338,7 @@
   <script type="module" src="gui/host-mesh.js"></script>
   <script type="module" src="gui/fleet-selection-gate.js"></script>
   <script type="module" src="gui/fleet-session.js"></script>
+  <script type="module" src="gui/fleet-health.js"></script>
 
   <!-- Which transport rung(s) this host may use, and what the #conn-diag
        readout says about the ones its crew ended up on (issue #1113). Both
@@ -4152,6 +4153,15 @@
 
     /** The fleet handle from gui/fleet-session.js, or null when there is none. */
     let fleetHandle = null;
+    let fleetHealthPanel = null;
+    function getFleetHealth() {
+      if (!fleetHealthPanel && window.fleetHealth) {
+        fleetHealthPanel = window.fleetHealth.createFleetHealth({
+          doc: document, root: () => document.body, t,
+        });
+      }
+      return fleetHealthPanel;
+    }
     /** The most recent roster body — the owner's own, or the lead's sync. */
     let fleetRoster = null;
     /** The code on screen: this host's own code, or the one it typed. */
@@ -5759,6 +5769,7 @@
 
     /** Paint the fleet panel from the pure view model. */
     function paintFleetPanel() {
+      getFleetHealth()?.roster(fleetRoster);
       const panel = document.getElementById('fleet-panel');
       // Boot race, the same one __updateLobby guards: this can run before the
       // module islands have evaluated, and the next paint re-renders.
@@ -5888,6 +5899,7 @@
       }
       setFleetManagedLobby(false);
       fleetHandle = null;
+      getFleetHealth()?.reset();
       fleetRoster = null;
       fleetSuffix = null;
       fleetFault = reason;
@@ -6009,6 +6021,8 @@
       return !!adoptFleet(window.fleetSession.createFleetOwner({
         base: rendezvousBase,
         iceServers: fleetIceServers,
+        levers: window.transportLevers?.transportLeversFromLocation(location.search),
+        onDiag: event => getFleetHealth()?.diagnostic(event),
         maxSlots: data.limits.max_fleet_hosts,
         maxNameLength: data.limits.max_slot_name_length,
         maxShipPathLength: data.limits.max_slot_ship_path_length,
@@ -6129,6 +6143,8 @@
         claim,
         stamp: hostStampField(),
         iceServers: fleetIceServers,
+        levers: window.transportLevers?.transportLeversFromLocation(location.search),
+        onDiag: event => getFleetHealth()?.diagnostic(event),
         role: fleetRole,
         name: fleetRoleHasGm() ? t('settings.fleet.role_gm') : '',
         reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null,
@@ -6374,6 +6390,7 @@
      * each frame carries its own tick, so nothing is lost by batching.
      */
     function pumpMeshFrames() {
+      if (fleetHandle) getFleetHealth()?.health(window.__hostGmHealthState?.()?.projection);
       flushFleetLobbyInputs();
       flushFleetStartGrants();
       if (pollFleetSimulationRoster()) {

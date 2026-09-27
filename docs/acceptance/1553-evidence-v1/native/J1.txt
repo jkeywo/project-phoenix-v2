@@ -1,0 +1,24 @@
+   Compiling project-phoenix v0.1.0 (C:\Users\jkeyw\.codex\worktrees\recipient-actions\project-phoenix-v2)
+warning: methods `take_authored` and `take_computer` are never used
+   --> src\native_host\audio\mod.rs:104:8
+    |
+103 | impl Control {
+    | ------------ methods in this implementation
+104 |     fn take_authored(
+    |        ^^^^^^^^^^^^^
+...
+126 |     fn take_computer(&mut self, now: Instant) -> Option<String> {
+    |        ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `project-phoenix` (lib) generated 1 warning
+    Finished `test` profile [optimized + debuginfo] target(s) in 47.15s
+     Running tests\t5_journeys.rs (C:\Coding\project-phoenix-v2\target\debug\deps\t5_journeys-ce1ddb9406645175.exe)
+
+running 1 test
+2026-09-27T03:50:11.912872Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+test competing_slot_picks_freeze_into_actual_launch_and_convoy_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.08s
+

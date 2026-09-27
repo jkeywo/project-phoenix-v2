@@ -1,0 +1,18 @@
+   Compiling project-phoenix v0.1.0 (C:\Users\jkeyw\.codex\worktrees\recipient-actions\project-phoenix-v2)
+warning: unused import: `super::*`
+  --> src\gm_npc\inspector.rs:93:9
+   |
+93 |     use super::*;
+   |         ^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `project-phoenix` (lib test) generated 1 warning (run `cargo fix --lib -p project-phoenix --tests` to apply 1 suggestion)
+    Finished `test` profile [optimized + debuginfo] target(s) in 5m 42s
+     Running unittests src\lib.rs (C:\Coding\project-phoenix-v2\target\debug\deps\project_phoenix-1c0e3283330ceae6.exe)
+
+running 1 test
+test command_admission::tests::crew_spectator_dead_hull_refuses_controls_while_live_crew_still_controls_own_ship ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8017 filtered out; finished in 0.02s
+

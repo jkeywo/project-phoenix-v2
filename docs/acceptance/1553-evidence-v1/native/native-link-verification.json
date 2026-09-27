@@ -1,0 +1,12 @@
+{
+  "checkedUtc": "2026-09-27T03:52:00.4902710Z",
+  "sourceRoot": "C:\\Users\\jkeyw\\.codex\\worktrees\\recipient-actions\\project-phoenix-v2",
+  "libraryDependencyRecordSha256": "5bc806f76099aec5b15418fd13e22855db1289d65dbf4d5fa110ebf606c30933",
+  "libraryDependencyRecordMtimeUtc": "2026-09-27T03:49:26.9187978Z",
+  "dependencyIncludesObjectiveReducer": true,
+  "linkedPdbIncludesSourceRoot": true,
+  "linkedPdbIncludesObjectiveReducer": true,
+  "executableSha256": "eca89f684275b51344ee5fc81d49dda054f50b42352e60b5ee8724b6324307ca",
+  "executableMtimeUtc": "2026-09-27T03:50:07.9465877Z",
+  "verification": "Runner refreshed src/lib.rs mtime before first Cargo; compile log names this worktree; dependency record and linked PDB were checked before releasing shared target."
+}

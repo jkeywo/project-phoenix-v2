@@ -1,0 +1,30 @@
+warning: methods `take_authored` and `take_computer` are never used
+   --> src\native_host\audio\mod.rs:104:8
+    |
+103 | impl Control {
+    | ------------ methods in this implementation
+104 |     fn take_authored(
+    |        ^^^^^^^^^^^^^
+...
+126 |     fn take_computer(&mut self, now: Instant) -> Option<String> {
+    |        ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `project-phoenix` (lib) generated 1 warning
+   Compiling project-phoenix v0.1.0 (C:\Users\jkeyw\.codex\worktrees\recipient-actions\project-phoenix-v2)
+    Finished `test` profile [optimized + debuginfo] target(s) in 6.53s
+     Running tests\gm_objective.rs (C:\Coding\project-phoenix-v2\target\debug\deps\gm_objective-7b73673433f8295d.exe)
+
+running 6 tests
+test closed_ingress_and_authored_palette_reject_untrusted_vocabulary ... ok
+test apply_tick_checks_lost_recipients_unknown_ids_and_ingress_authority ... ok
+test authored_scope_lifecycle_and_same_tick_conflicts_are_atomic_without_local_ship ... ok
+test gm_instances_follow_live_factions_freeze_history_and_keep_completed_credit ... ok
+test gm_instance_bulk_is_atomic_ordered_and_attributed_with_repeat_noop ... ok
+2026-09-27T03:50:22.449221Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+2026-09-27T03:50:22.711119Z ERROR bevy_log: Could not set global logger and tracing subscriber as they are already set. Consider disabling LogPlugin.
+test seeded_canonical_objectives_replay_and_restore_terminal_records ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+

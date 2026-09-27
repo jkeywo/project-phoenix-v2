@@ -1,0 +1,47 @@
+{
+  "format": "phoenix-t5-journeys-v1",
+  "startedUtc": "2026-09-27T03:55:24.496Z",
+  "lane": "js",
+  "revision": "84b51c74e4b143156cee942c6aaba1f27139eb64",
+  "dirty": true,
+  "trackedPatch": "",
+  "hashes": {
+    "Cargo.toml": "7059099938ad82a5284fe295634b9c6049048c8c0ef5c3495ff5eef1874e89db",
+    "Cargo.lock": "7d332e751cd55c7a2540d344b8c509d15fb7349fc1e99591ae79dab6a0761a93",
+    "scripts/t5-journeys.mjs": "e63811b315181a40943764edb9d0fa936123e628d7924fe0132e93a96b99ae73",
+    "tests/t5_journeys.rs": "de03c88e82ca7c602a23cb4cb4b17dfbfd0f8d8f9f2b116f4bdf74cd902b20f4",
+    "tests/client/t5-journeys.test.js": "6a83a9d4dc628646308a6f9c3fd6cfb1dfcd47e13d66392047c2648194553a77",
+    "tests/gm_objective.rs": "ab50e931cea465a6883e151cd374e234dafcbe4247c65eb9783c9c19391e86e3",
+    "tests/lockstep_recovery.rs": "531fad99638263e7ce3c204d796f0c8e5962323e6dc14c98ae0e25a2189b3712",
+    "tests/cruiser_elimination.rs": "0dbe01c5d75f19527db127670ba371ccc297fd12830010af1d89e5809bbb09c6",
+    "src/command_admission/mod.rs": "63ed762850ff40d4a5d1bfabd2e0cc9c361da2f0dd5581a384b5f775d813d1bc",
+    "assets/worlds/alliance_convoy_escort.toml": "7d0e370519efc643a1a33af16aa131d270cc363171b1f32796bff0d49a802924",
+    "assets/worlds/cruiser_elimination.toml": "6912245f19b6b4bcf10d8003aa31d22d67c302b5855828c8340e841e057400a7",
+    "assets/entities/alliance_cruiser.toml": "968b8812b2c3da042650dbcd47bc483d147d369099e39a673b9220fc4ed4d043",
+    "assets/entities/alliance_destroyer.toml": "8bb02a3a2d10b6f4a7feeb3795671b42dfa6e3c4830bbeac2a944a749886c379",
+    "assets/entities/dynasty_player_cruiser.toml": "e99df834f9af9b072011c8d78f9385c99c5ed2366fd90a38858281a5e4f1ae4e",
+    "assets/strings/strings.csv": "e3df99328613035329010a264ca27b6c1caa28dd7d54c6ad4bcd7c74e02e600d"
+  },
+  "node": "v24.13.0",
+  "cargoTargetDir": "target",
+  "limitations": "In-process protocol and jsdom presentation; headless authority uses synthetic inputs. No actual device, network handover, pixel layout, audio or human acceptance claim.",
+  "results": [
+    {
+      "id": "J2-J5-client",
+      "executable": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\jkeyw\\.codex\\worktrees\\recipient-actions\\project-phoenix-v2\\node_modules\\vitest\\vitest.mjs",
+        "run",
+        "tests/client/t5-journeys.test.js",
+        "--reporter=json",
+        "--outputFile=C:\\Users\\jkeyw\\AppData\\Local\\Temp\\phoenix-1553-js-v2\\J2-J5-client.json"
+      ],
+      "startedUtc": "2026-09-27T03:55:24.627Z",
+      "status": "passed",
+      "passed": 4,
+      "finishedUtc": "2026-09-27T03:55:28.375Z"
+    }
+  ],
+  "status": "passed",
+  "finishedUtc": "2026-09-27T03:55:28.377Z"
+}

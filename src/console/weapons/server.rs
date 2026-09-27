@@ -1470,6 +1470,8 @@ struct TargetSelectionScans<'w, 's> {
             &'static crate::entities::spawner::EntityUuid,
             &'static Transform,
             Option<&'static FactionComponent>,
+            Option<&'static crate::entities::spawner::EntitySystemHull>,
+            Has<crate::lockstep::FleetSlotOf>,
         ),
         Or<(
             With<crate::server_app::Ship>,
@@ -1698,6 +1700,13 @@ fn ai_target_selection(
         hostiles: hostile_scan_q,
         debris: debris_q,
     } = scans;
+    // Retained crew hulls keep their UUID, faction and Ship marker for private
+    // projections and spectating. They cease being automatic combat targets.
+    let crew_wrecks: std::collections::BTreeSet<&str> = hostile_scan_q
+        .iter()
+        .filter(|(_, _, _, hull, fleet)| *fleet && hull.is_some_and(|hull| hull.0.is_destroyed()))
+        .map(|(uuid, ..)| uuid.0.as_str())
+        .collect();
 
     let registry_default = crate::ai::faction::FactionRegistry::default();
     let registry: &crate::ai::faction::FactionRegistry = faction_registry
@@ -1915,7 +1924,7 @@ fn ai_target_selection(
         // factionless / non-ship candidates are neutral (never auto-hostile).
         let self_faction_uuid = self_faction.map(|f| f.0);
         let is_hostile = |uuid: &str| -> bool {
-            let target_faction = hostile_scan_q.iter().find_map(|(u, _, faction)| {
+            let target_faction = hostile_scan_q.iter().find_map(|(u, _, faction, ..)| {
                 (u.0 == uuid).then_some(faction.map(|f| f.0)).flatten()
             });
             crate::ai::faction::is_enemy(self_faction_uuid, target_faction, registry)
@@ -1930,7 +1939,7 @@ fn ai_target_selection(
                 // civilians (issue #1348) — whatever source proposed it. The
                 // human fire path (`SetTarget`/`FirePhaser`) does not run through
                 // here, so a human operator is untouched by this exclusion.
-                if civilian_carrying.contains(uuid) {
+                if civilian_carrying.contains(uuid) || crew_wrecks.contains(uuid) {
                     return None;
                 }
                 let (tx, ty, tz) = target_xyz(uuid)?;
@@ -1982,8 +1991,8 @@ fn ai_target_selection(
                 let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
                 let entities: Vec<crate::ai::AiWorldEntity> = hostile_scan_q
                     .iter()
-                    .filter(|(u, _, _)| u.0 != self_uuid_str)
-                    .filter_map(|(u, t, faction)| {
+                    .filter(|(u, ..)| u.0 != self_uuid_str && !crew_wrecks.contains(u.0.as_str()))
+                    .filter_map(|(u, t, faction, ..)| {
                         // Only canonically-UUID'd entities can take part: an
                         // unparseable id would collapse to the nil UUID and let
                         // two entities alias each other in the scan.
@@ -2004,7 +2013,7 @@ fn ai_target_selection(
                     ..crate::ai::WorldView::default()
                 };
                 let found = crate::ai::find_nearest_hostile(&world_view, registry)?;
-                hostile_scan_q.iter().find_map(|(u, _, _)| {
+                hostile_scan_q.iter().find_map(|(u, ..)| {
                     (uuid::Uuid::parse_str(&u.0).ok() == Some(found)).then(|| u.0.clone())
                 })
             };

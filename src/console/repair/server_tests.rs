@@ -96,6 +96,64 @@ fn test_app() -> App {
     app
 }
 
+#[test]
+fn retained_crew_wrecks_cannot_be_revived_by_queued_repair_teams() {
+    use crate::entities::spawner::EntitySystemHull;
+    use crate::modifiers::repair_teams::RepairTeams;
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_secs(1));
+    app.insert_resource(time)
+        .add_systems(Update, tick_repair_teams);
+    let mut entities = Vec::new();
+    for kind in 0..4 {
+        let id = SystemId("core".into());
+        let mut hull = SystemHull::from_config(&[(id.clone(), 10.0)]);
+        hull.set_hp(&id, if kind == 3 { 1.0 } else { 0.0 });
+        let mut teams = RepairTeams::new(1);
+        teams.dispatch(0, id, "Core".into());
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                crate::modifiers::ShipModifiers::new(),
+                EntitySystemHull(hull),
+                ShipRepairTeams(teams),
+            ))
+            .id();
+        if kind == 1 {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(crate::server_app::LocalShip);
+        }
+        if kind >= 2 {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(crate::lockstep::FleetSlotOf(
+                    crate::command_admission::HostSlot(kind),
+                ));
+        }
+        entities.push(entity);
+    }
+    for _ in 0..20 {
+        app.update();
+    }
+    let hp = |index: usize| {
+        app.world()
+            .get::<EntitySystemHull>(entities[index])
+            .unwrap()
+            .0
+            .total_current()
+    };
+    assert!(
+        hp(0) > 0.0,
+        "authored NPC derelict repair remains available"
+    );
+    assert_eq!(hp(1), 0.0, "legacy local crew remains destroyed");
+    assert_eq!(hp(2), 0.0, "fleet crew remains destroyed");
+    assert!(hp(3) > 1.0, "a damaged surviving crew ship still repairs");
+}
+
 /// Read the LocalShip's own `ShipRepairTeams` component (issue #830 — no
 /// global Resource). Returns an owned clone for assertion convenience.
 fn local_teams(app: &mut App) -> ShipRepairTeams {

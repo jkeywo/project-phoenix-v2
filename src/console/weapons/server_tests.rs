@@ -7631,6 +7631,42 @@ fn tactical_ai_acquires_the_nearest_of_several_hostiles() {
     );
 }
 
+#[test]
+fn tactical_ai_releases_retained_crew_wreck_and_engages_surviving_opponent() {
+    let mut app = test_app();
+    set_tactical_radar_range(&mut app, 100.0);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    let wreck_uuid = uuid::Uuid::from_u128(1527001).to_string();
+    let live_uuid = uuid::Uuid::from_u128(1527002).to_string();
+    let wreck = spawn_hostile_hull(&mut app, &wreck_uuid, 0.0, -20.0);
+    spawn_hostile_hull(&mut app, &live_uuid, 0.0, -50.0);
+    app.world_mut()
+        .entity_mut(wreck)
+        .insert(crate::lockstep::FleetSlotOf(
+            crate::command_admission::HostSlot(2),
+        ));
+    app.world_mut()
+        .get_mut::<crate::entities::spawner::EntitySystemHull>(wreck)
+        .unwrap()
+        .0
+        .set_hp(&SystemId("captain".into()), 0.0);
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_weapons_target(&mut app, Some(wreck_uuid.clone()));
+    set_local_last_attacker(&mut app, Some(wreck_uuid.clone()));
+    tick(&mut app);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(live_uuid.as_str())
+    );
+    assert!(
+        app.world()
+            .get::<crate::entities::spawner::EntityUuid>(wreck)
+            .is_some(),
+        "retargeting must not remove the crew's identity"
+    );
+}
+
 /// The radar gate binds the new tier exactly as it binds the others: a
 /// ship must not lock what it cannot detect.
 #[test]

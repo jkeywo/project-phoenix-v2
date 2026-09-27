@@ -25,6 +25,9 @@ publishes names and the current camera target, never the followed ship's private
 Station data or Objectives. Dead-hull command admission disables human and
 Backfill gameplay controls. Authored multi-ship scenarios decide mission endings
 from ordinary destruction facts; single-ship missions keep their existing defeat.
+Ordinary repair ticks leave retained crew wrecks at zero hull, and Tactical's
+automatic target selector drops their persistent UUIDs in favour of surviving
+combatants (`src/console/repair/server.rs`, `src/console/weapons/server.rs`).
 
 - `Camera(CameraView)` selects a named `camera_*` marker from the ship's model
   rig. `camera_fore` is the default. The renderer resolves the marker's world

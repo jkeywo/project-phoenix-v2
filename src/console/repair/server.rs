@@ -400,6 +400,8 @@ pub fn tick_repair_teams(
             &mut crate::entities::spawner::EntitySystemHull,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            Has<crate::lockstep::FleetSlotOf>,
+            Has<crate::server_app::LocalShip>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -411,7 +413,13 @@ pub fn tick_repair_teams(
 ) {
     let dt = time.delta_secs();
 
-    for (teams_comp, modifiers, mut hull, ship_uuid, config) in ship_q.iter_mut() {
+    for (teams_comp, modifiers, mut hull, ship_uuid, config, fleet, local) in ship_q.iter_mut() {
+        // Crew wrecks remain for identity and cinematic spectating. A queued
+        // repair must not revive them on the next tick and reopen admission.
+        // NPC repair/recovery, including authored derelicts, keeps its policy.
+        if (fleet || local) && hull.0.is_destroyed() {
+            continue;
+        }
         let Some(mut teams) = teams_comp else {
             continue;
         };

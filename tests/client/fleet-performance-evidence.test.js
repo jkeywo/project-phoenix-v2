@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FORMAT, summarize } from '../../scripts/fleet-performance-evidence.mjs';
 import { installBrowserPerformanceObserver, installHostPerformanceObserver } from '../../scripts/fleet-performance-observer.mjs';
-import { captureOptions } from '../../scripts/fleet-performance-capture.mjs';
+import { captureOptions, verifyObservedRecoveryRows } from '../../scripts/fleet-performance-capture.mjs';
 
 const provenance = { revision: 'a'.repeat(40), content: 'probe@1', runtime: { browser: 'test' },
   artifactHashes: { bundle: 'b'.repeat(64) }, profile: { route: 'direct' } };
@@ -139,5 +139,16 @@ describe('T5 performance evidence', () => {
     });
     expect(() => captureOptions(['--wasm-build-receipt', 'receipt.json', '--fault-seconds', '181']))
       .toThrow('Invalid');
+  });
+
+  it('refuses a recovery capture without each observed milestone and host ticks', () => {
+    const rows = [event('tick', 0, { tick: 1 }), event('tick', 16, { tick: 2 }),
+      ...['fault', 'loss_detected', 'progress_resumed', 'digest_verified'].map(kind =>
+        event(kind, 30, { correlation: 'loss', ...(kind === 'digest_verified' ? { agreed: true, tick: 3 } : {}) }))];
+    expect(verifyObservedRecoveryRows('ship-1', rows, 'loss')).toBe(true);
+    expect(() => verifyObservedRecoveryRows('ship-1', rows.filter(row => row.kind !== 'loss_detected'), 'loss'))
+      .toThrow('loss_detected');
+    expect(() => verifyObservedRecoveryRows('ship-1', rows.filter(row => row.kind !== 'tick'), 'loss'))
+      .toThrow('tick interval');
   });
 });

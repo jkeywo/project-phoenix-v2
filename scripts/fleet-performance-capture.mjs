@@ -29,6 +29,17 @@ export function captureOptions(args) {
   return { matrix, ...own };
 }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+export function verifyObservedRecoveryRows(peer, rows, faultId) {
+  for (const kind of ['fault', 'loss_detected', 'progress_resumed', 'digest_verified']) {
+    if (rows.filter(row => row.kind === kind && row.correlation === faultId).length !== 1) {
+      throw new Error(`${peer}: missing or repeated observed ${kind}`);
+    }
+  }
+  if (rows.filter(row => row.kind === 'tick').length < 2) {
+    throw new Error(`${peer}: no measured host tick interval`);
+  }
+  return true;
+}
 export async function captureHook({ result, ships, gms, clients, step, options }, measureSeconds, faultSeconds) {
   const route = result.route;
   const peers = [...ships.map((page, index) => ({ page, label: `ship-${index + 1}` })),
@@ -84,6 +95,7 @@ export async function captureHook({ result, ships, gms, clients, step, options }
       window.__fleetHostPerformance.stop();
       return window.__fleetHostPerformance.read();
     });
+    verifyObservedRecoveryRows(peer.label, rows, faultId);
     events.push(...rows);
   }
   const measured = { format: FORMAT, expectedTickMs: 1000 / 60, events,

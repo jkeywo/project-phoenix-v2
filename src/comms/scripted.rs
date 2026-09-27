@@ -52,7 +52,6 @@ use crate::world::server::{
 /// and `balance_events` is the ledger the shared apply path writes.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct ScriptedCommsAux<'w> {
-    recipient_catalog: Option<Res<'w, crate::recipients::RecipientCatalog>>,
     objective_instances: Option<Res<'w, crate::world::server::ObjectiveInstanceManagerRes>>,
     id_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Entity as usize }>,
     message_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Message as usize }>,
@@ -232,11 +231,7 @@ pub(crate) fn open_scripted_comms_threads(
                 );
                 continue;
             }
-            let mut catalog = aux
-                .recipient_catalog
-                .as_deref()
-                .cloned()
-                .unwrap_or_default();
+            let mut catalog = crate::recipients::RecipientCatalog::default();
             catalog
                 .objective_instances
                 .extend(sr.recipient_declarations.iter().cloned());

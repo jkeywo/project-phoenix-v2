@@ -99,7 +99,9 @@ pub fn retarget_action(
 
 /// Authored names are separate from the live fleet: an absent slot or an
 /// inactive but declared instance is valid and may resolve to no ships.
-#[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
+/// Built for each resolution from content and Objective records; this is not
+/// independently stored simulation state or an injectable authority override.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecipientCatalog {
     pub ship_slots: BTreeSet<String>,
     pub factions: BTreeSet<String>,
@@ -125,10 +127,7 @@ pub(crate) fn resolve_in_world(
         .map(|(uuid, _)| uuid.0.clone())
         .collect();
     fleet.retain(|ship| !destroyed.contains(&ship.ship_id));
-    let mut catalog = world
-        .get_resource::<RecipientCatalog>()
-        .cloned()
-        .unwrap_or_default();
+    let mut catalog = RecipientCatalog::default();
     if let Some(script) = world.get_resource::<crate::world::server::WorldScriptRuntime>() {
         catalog
             .objective_instances

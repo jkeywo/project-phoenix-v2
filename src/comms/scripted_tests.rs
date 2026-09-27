@@ -92,9 +92,16 @@ fn recipient_comms_app() -> App {
         factions,
     ));
     app.init_resource::<crate::world::server::ObjectiveInstanceManagerRes>();
-    app.insert_resource(crate::recipients::RecipientCatalog {
-        ship_slots: ["lead", "wing", "absent"].map(String::from).into(),
-        factions: ["Alliance", "Pirate"].map(String::from).into(),
+    app.insert_resource(crate::world::config::WorldConfig {
+        ship_slots: ["lead", "wing", "absent"]
+            .map(|id| crate::world::config::ShipSlotConfig {
+                id: id.into(),
+                label: None,
+                ships: vec![],
+                default_ship: "assets/entities/alliance_cruiser.toml".into(),
+                unclaimed: crate::world::config::UnclaimedSlotPolicy::Absent,
+            })
+            .into(),
         ..Default::default()
     });
     app.add_systems(

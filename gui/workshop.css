@@ -173,6 +173,11 @@ button:not(:disabled) { cursor: pointer; }
 details { margin-top: 1.5rem; }
 .workshop-localisation { display: grid; align-content: start; gap: .5rem; }
 .workshop-localisation > select { width: 100%; }
+.workshop-localisation > input, .workshop-localisation-editor textarea,
+.workshop-localisation-editor input { width: 100%; box-sizing: border-box; }
+.workshop-localisation-editor { display: grid; gap: .45rem; border: 1px solid #8195a8; padding: .7rem; }
+.workshop-localisation-editor[hidden] { display: none; }
+.workshop-localisation-editor p { margin: .1rem 0; overflow-wrap: anywhere; }
 .workshop-localisation-entry { border: 1px solid #8195a8; padding: .65rem; margin-block: .5rem; overflow-wrap: anywhere; }
 .workshop-localisation-entry h3 { font-family: ui-monospace, monospace; margin-block-start: 0; }
 .workshop-localisation-entry[data-status="stale"],

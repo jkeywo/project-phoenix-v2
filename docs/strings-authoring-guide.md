@@ -39,13 +39,21 @@ translator explicitly refreshes the value and its source metadata.
 its translation and effective-English sources, provenance, status, conflicts,
 and the ordinary-precedence winner for an authoring diagnostic surface.
 
-Workshop's **Localisation** panel is that surface. It reports catalogue-wide
-missing/invalid/stale/conflict counts and, for every String Id authored by the
-open pack, the effective English source, translation source, winning source,
-provenance and relevant findings. Stale text remains in the document. **Refresh
-source metadata** is an explicit, undoable acknowledgement that the retained
-translation was checked against the displayed effective English; the ordinary
-Save/Export path then carries the updated `<locale>_source` cell.
+Workshop's **Localisation** panel is that surface. Search by String Id or
+context, choose a key (including a `.one`/`.other` plural variant), then edit
+its translation and provenance. An imported pack without a String Table can
+start a locale such as `de` there. The panel previews the effective English
+and the composed locale value and reports catalogue-wide missing, invalid,
+stale and conflict counts. It shows the effective English source, translation
+source, winning source, provenance and relevant findings for the chosen key.
+The Save translation control checks placeholders against the same composed
+runtime catalogue before writing an undoable CSV edit; an invalid edit stays in
+the field with focus so it can be corrected. A changed translation records the
+current effective English in `<locale>_source`. Merely opening or saving an
+unchanged stale entry does not certify it. **Refresh source metadata** is the
+explicit, undoable acknowledgement for retained stale text. Both operations
+use the ordinary Save/Export path, and reopening the ZIP retains every locale
+and metadata column.
 
 `scripts/extract-strings.mjs` preserves every existing header and cell,
 including locale/freshness/provenance columns, and appends new English rows at

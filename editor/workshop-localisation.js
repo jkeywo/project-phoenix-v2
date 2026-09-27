@@ -39,6 +39,61 @@ export function workshopCatalogueReport(dependencies, draft, locale) {
   return { ...report, authored: ids.map((id) => explainCatalogueEntry(report, id)) };
 }
 
+/** Context follows the same source order as the composed catalogue. */
+export function workshopStringContexts(dependencies, draft) {
+  const contexts = new Map();
+  for (const source of workshopCatalogueSources(dependencies, draft)) {
+    let rows;
+    try { rows = parseCsv(source.text); } catch { continue; }
+    const id = rows[0]?.indexOf('id') ?? -1;
+    const context = rows[0]?.indexOf('context') ?? -1;
+    if (id < 0 || context < 0) continue;
+    for (const row of rows.slice(1)) {
+      if (row[id] && row[context]) contexts.set(row[id], row[context]);
+    }
+  }
+  return contexts;
+}
+
+/** One translation edit in the ordinary undoable CSV member, preserving other columns. */
+export function editTranslationValue(csv, id, locale, translation, english, context = '', provenance = '') {
+  if (!/^[a-z]{2,3}(?:-[A-Z]{2})?$/.test(locale) || locale === 'en' || !id || !english) {
+    throw new Error('Invalid translation target');
+  }
+  const rows = csv ? parseCsv(csv) : [['id', 'context']];
+  if (!rows.length) rows.push(['id', 'context']);
+  const header = rows[0];
+  const idCol = header.indexOf('id');
+  if (idCol < 0) throw new Error('String Table has no id column');
+  if (rows.slice(1).some(row => row.length !== header.length)) {
+    throw new Error('String Table has malformed rows');
+  }
+  const ensureColumn = (name) => {
+    const existing = header.indexOf(name);
+    if (existing >= 0) return existing;
+    const added = header.length;
+    header.push(name);
+    for (const row of rows.slice(1)) row.push('');
+    return added;
+  };
+  const contextCol = ensureColumn('context');
+  const valueCol = ensureColumn(locale);
+  const sourceCol = ensureColumn(`${locale}_source`);
+  const provenanceCol = ensureColumn(`${locale}_provenance`);
+  let row = rows.slice(1).find(candidate => candidate[idCol] === id);
+  if (!row) {
+    row = Array(header.length).fill('');
+    row[idCol] = id;
+    row[contextCol] = context;
+    rows.push(row);
+  }
+  const changedValue = row[valueCol] !== translation;
+  row[valueCol] = translation;
+  row[provenanceCol] = provenance;
+  if (changedValue) row[sourceCol] = translation.trim() ? english : '';
+  return serializeCsv(rows, csv?.includes('\r\n') ? '\r\n' : '\n');
+}
+
 /** Explicitly accept current effective English as the source of an existing translation. */
 export function refreshTranslationSource(csv, id, locale, effectiveEnglish) {
   if (!locale || locale === 'en') return csv;

@@ -2,7 +2,7 @@
 title: Localisation
 type: concept
 tags: [localisation, strings, client, display-text]
-sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-entity-tree.js, gui/gm-direct-effect-panel.js, gui/gm-activity-feed.js, gui/gm-journal-panel.js, gui/game-over-view.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, src/server/bridge.rs, server.html, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md, docs/acceptance/1538-localised-host-journey.md]
+sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-entity-tree.js, gui/gm-direct-effect-panel.js, gui/gm-activity-feed.js, gui/gm-journal-panel.js, gui/game-over-view.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, src/server/bridge.rs, server.html, scripts/check-strings.mjs, scripts/extract-strings.mjs, docs/strings-authoring-guide.md, docs/acceptance/1538-localised-host-journey.md]
 updated: 2026-09-27
 ---
 
@@ -40,9 +40,12 @@ the selected entity or a literal operator name. The end report resolves its
 semantic narrative at presentation time while preserving literal lines and
 ship boundaries. Workshop repaints its mounted editor without
 replacing the draft and exposes a temporary preview choice for translation
-tooling. Workshop consumes the retained report in its Localisation panel and
-offers the only freshness mutation: an explicit source-metadata refresh that
-enters the ordinary undo/save/export document flow.
+tooling. Workshop consumes the retained report in its Localisation panel,
+searches effective String Ids and context, and edits translation values and
+provenance in the ordinary undo/save/export document flow. The editor checks
+placeholder names through the composed runtime report; changing a value records
+its effective English source, while an unchanged stale value needs an explicit
+source-metadata refresh. A pack without a String Table can start a locale here.
 
 A text id may be joined on the wire by a sibling field named `<field>_params`
 (`ObjectiveSnapshot::text_params`, `CommsMessage::body_params`). `localiseTree`

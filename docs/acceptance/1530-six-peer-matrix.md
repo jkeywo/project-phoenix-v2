@@ -21,8 +21,16 @@ they do not run twelve client documents or the simulations.
 
 ## Real browser runner
 
-Build the host with Trunk and then run `node scripts/build-client.mjs` so
-`dist/client/index.html` exists. Install `tests/smoke` Playwright dependencies
+For a source-matched browser build, start from a clean checkout and run
+`node scripts/fleet-wasm-build-receipt.mjs build target/browser-wasm-receipt.json`.
+It runs `trunk build --release` and `node scripts/build-client.mjs`, then records
+the source commit, every `dist` file hash and the WASM artifact hash. The
+receipt path must be outside tracked source or in an ignored output directory.
+Pass `--wasm-build-receipt target/browser-wasm-receipt.json` to either browser
+matrix command below. A supplied receipt must match the current clean source
+and every byte of the served `dist` bundle before the browser starts. Without
+it, the manifest still records artifact hashes but makes no source-matched
+WASM build claim. Install `tests/smoke` Playwright dependencies
 and Chromium. The runner loads Playwright directly, with no smoke transport
 fixture. Use a fresh output directory for each invocation:
 

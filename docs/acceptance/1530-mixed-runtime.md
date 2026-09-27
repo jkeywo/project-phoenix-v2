@@ -10,7 +10,12 @@ matrix runner. That mode remains unvalidated by the retained evidence below.
 
 ## Run
 
-Build a host browser bundle with Trunk, then `node scripts/build-client.mjs`.
+Build a source-matched browser bundle with
+`node scripts/fleet-wasm-build-receipt.mjs build target/browser-wasm-receipt.json`
+from a clean checkout. This runs release Trunk and the pure JS client build.
+Add `--wasm-build-receipt target/browser-wasm-receipt.json` to the mixed runner
+to verify the current browser bundle and clean source revision before launch.
+The separate `--build-receipt` continues to check the native executable.
 Build `phoenix-host` with `--features ultralight` using the native runtime fixes
 and preserve its source/build receipt. The native bundle needs a matching
 `client/index.html` and current `gui/native-fleet-peer.js`. Install the usual

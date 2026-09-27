@@ -9,6 +9,7 @@ import { cpus, totalmem, platform, release } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { impairDataChannel } from './fleet-channel-impairment.mjs';
+import { readVerifiedWasmReceipt } from './fleet-wasm-build-receipt.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ROUTES = ['direct', 'ws-relay', 'automatic-fallback'];
@@ -20,7 +21,7 @@ export function optionsFrom(args) {
     if (key === '--render') { options.render = true; continue; }
     const value = args[++i];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
-    if (['--out', '--dist', '--dependencies', '--service-script'].includes(key)) options[key.slice(2)] = path.resolve(value);
+    if (['--out', '--dist', '--dependencies', '--service-script', '--wasm-build-receipt'].includes(key)) options[key.slice(2)] = path.resolve(value);
     else if (key === '--routes') options.routes = value.split(',');
     else if (['--seconds', '--timeout', '--port', '--rendezvous-port', '--delay-ms', '--loss-percent', '--seed'].includes(key)) {
       const name = ({ '--rendezvous-port': 'rendezvousPort', '--delay-ms': 'delayMs', '--loss-percent': 'lossPercent' })[key] || key.slice(2);
@@ -367,6 +368,7 @@ export async function main(args = process.argv.slice(2)) {
     limitations: ['Single-machine loopback; no mobile/internet evidence', 'No native peers',
       options.render ? 'Software-rendered browser viewscreens' : 'Real WASM simulation; webdriver disables Bevy rendering',
       'Short bounded check, not endurance or performance acceptance'], results: [] };
+  if (options['wasm-build-receipt']) manifest.wasmBuildReceipt = await readVerifiedWasmReceipt(options['wasm-build-receipt'], root, manifest.bundleHashes);
   const save = () => writeFile(path.join(options.out, 'manifest.json'), JSON.stringify(manifest, null, 2));
   await save();
   let server, browser, browserServer;

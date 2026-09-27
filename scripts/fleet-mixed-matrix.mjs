@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { observeBrowser, bundleHashes, ROUTES } from './fleet-browser-matrix.mjs';
 import { impairDataChannel } from './fleet-channel-impairment.mjs';
+import { readVerifiedWasmReceipt } from './fleet-wasm-build-receipt.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nativeIds = ['ship-3', 'ship-4', 'gm-2'];
 const browserIds = ['ship-1', 'ship-2', 'gm-1'];
@@ -17,7 +18,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const sha = data => createHash('sha256').update(data).digest('hex');
 export function mixedOptions(argv) {
   const o = {dist:path.join(root,'dist'), dependencies:path.join(root,'tests/smoke'), source:root, seconds:10, timeout:120, deadline:290, port:18450, rendezvousPort:18451, delayMs:0, lossPercent:0, seed:1530, render:false, routes:[...ROUTES]};
-  const paths = ['out','dist','dependencies','binary','bundle','source','native-adapter','service-script','build-receipt'];
+  const paths = ['out','dist','dependencies','binary','bundle','source','native-adapter','service-script','build-receipt','wasm-build-receipt'];
   const numbers = {seconds:'seconds',timeout:'timeout',deadline:'deadline',port:'port','rendezvous-port':'rendezvousPort','delay-ms':'delayMs','loss-percent':'lossPercent',seed:'seed'};
   for (let i=0;i<argv.length;i++) {
     if (argv[i] === '--render') { o.render = true; continue; }
@@ -181,6 +182,7 @@ export async function main(argv=process.argv.slice(2)){
   const {runNativeProbe}=await import(adapter);const require=createRequire(path.join(o.dependencies,'package.json'));const {chromium}=require('@playwright/test');
   const manifest={kind:'real mixed browser/native fleet matrix',status:'running',options:o,sourceRevision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),sourcePatch:execFileSync('git',['diff','HEAD'],{cwd:root,encoding:'utf8'}),runnerSha256:sha(await fs.readFile(fileURLToPath(import.meta.url))),browserHarnessSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-browser-matrix.mjs'))),channelImpairmentSha256:sha(await fs.readFile(path.join(root,'scripts/fleet-channel-impairment.mjs'))),nativeAdapterSha256:sha(await fs.readFile(fileURLToPath(adapter))),binarySha256:sha(await fs.readFile(o.binary)),browserBundleHashes:await bundleHashes(o.dist),nativeBundleHashes:await bundleHashes(o.bundle),limits:['Single-machine loopback',mixedBrowserRuntime(o).limitation,'Six embedded native Station documents plus six browser Station documents','Application-frame impairment; not IP packet loss','Bounded acceptance subset; no mobile/endurance/performance/recovery acceptance'],results:[]};
   if(o['build-receipt']){const raw=await fs.readFile(o['build-receipt']);const receipt=JSON.parse(raw);manifest.nativeBuildReceipt={path:o['build-receipt'],sha256:sha(raw),receipt,binaryMatchesRecordedReceipt:receipt.binarySha256===manifest.binarySha256};if(!manifest.nativeBuildReceipt.binaryMatchesRecordedReceipt)throw new Error('Native binary does not match build receipt');}
+  if(o['wasm-build-receipt'])manifest.wasmBuildReceipt=await readVerifiedWasmReceipt(o['wasm-build-receipt'],o.source,manifest.browserBundleHashes);
   const save=()=>fs.writeFile(path.join(o.out,'manifest.json'),JSON.stringify(manifest,null,2));await save();let server,browser,browserServer;
   try{server=await serve(o.dist,o.port);browserServer=await chromium.launchServer(mixedBrowserRuntime(o).launch);browser=await chromium.connect(browserServer.wsEndpoint(),{timeout:30000});manifest.browser=browser.version();await save();for(const route of o.routes){const r=await runCase(browser,o,route,runNativeProbe);manifest.results.push({route,status:r.status,error:r.error});await save();if(r.status!=='passed')break;}manifest.status=manifest.results.every(r=>r.status==='passed')?'passed':'failed';}
   catch(e){manifest.status='failed';manifest.error=String(e.stack||e);}

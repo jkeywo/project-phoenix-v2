@@ -457,14 +457,14 @@ reserve_empty = 0.0
 [[power.ai_policy.rule]]
 priority = 20
 channel = "strike-reserve"
-when = "fact(battery_pct) >= param(reserve_empty) and fact(battery_pct) < param(reserve_full)"
+when = "fact(strike_boost_enabled) < 1 and fact(battery_pct) >= param(reserve_empty) and fact(battery_pct) < param(reserve_full)"
 verb = "set_power_group_allocation"
 level = 3
 
 [[power.ai_policy.rule]]
 priority = 21
 channel = "strike-reserve"
-when = "fact(battery_pct) >= param(reserve_full)"
+when = "fact(strike_boost_enabled) > 0 or fact(battery_pct) >= param(reserve_full)"
 verb = "set_power_group_allocation"
 level = 0
 
@@ -528,3 +528,173 @@ damage_multiplier = 1.5
 [power.strike_reserve.weapons.torpedo-tube-aft]
 cost = 8
 damage_multiplier = 1.5
+
+# Four ordinary Backfill phases share the live reserve switch with Gunnery.
+# Policy arrays replace the inherited broadside machine; actuator verbs remain shared.
+
+[helm_console.engines_ai]
+initial_state = "charge"
+rule = []
+
+[helm_console.engines_ai.param]
+attack_range = 32.0
+attack_release_range = 48.0
+approach_speed = 0.8
+escape_speed = 0.8
+
+[[helm_console.engines_ai.state]]
+id = "charge"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "approach"
+  when = "fact(strike_boost_enabled) > 0 and fact(posture) >= param(press_posture) and fact(target_valid) > 0"
+
+[[helm_console.engines_ai.state]]
+id = "approach"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "recovery"
+  when = "fact(strike_boost_enabled) < 1 or fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "attack"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(attack_range)"
+
+[[helm_console.engines_ai.state]]
+id = "attack"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "recovery"
+  when = "fact(strike_boost_enabled) < 1 or fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "approach"
+  when = "fact(target_valid) < 1 or fact(range_to_target) > param(attack_release_range)"
+
+[[helm_console.engines_ai.state]]
+id = "recovery"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "approach"
+  when = "fact(strike_boost_enabled) > 0 and fact(posture) >= param(press_posture) and fact(target_valid) > 0"
+
+[helm_console.steering_ai]
+initial_state = "charge"
+rule = []
+
+[helm_console.steering_ai.param]
+attack_range = 32.0
+attack_release_range = 48.0
+safe_range_margin = 25.0
+orbit_speed = 0.7
+torpedo_bearing_speed = 0.0
+
+[[helm_console.steering_ai.state]]
+id = "charge"
+yields_to_arc_requests = false
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 10
+  channel = "yaw"
+  when = "fact(target_valid) > 0"
+  verb = "hold_recovery_orbit"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "approach"
+  when = "fact(strike_boost_enabled) > 0 and fact(posture) >= param(press_posture) and fact(target_valid) > 0"
+
+[[helm_console.steering_ai.state]]
+id = "approach"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "recovery"
+  when = "fact(strike_boost_enabled) < 1 or fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "attack"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(attack_range)"
+
+[[helm_console.steering_ai.state]]
+id = "attack"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_torpedo_bearing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "recovery"
+  when = "fact(strike_boost_enabled) < 1 or fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "approach"
+  when = "fact(target_valid) < 1 or fact(range_to_target) > param(attack_release_range)"
+
+[[helm_console.steering_ai.state]]
+id = "recovery"
+yields_to_arc_requests = false
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 10
+  channel = "yaw"
+  when = "fact(target_valid) > 0"
+  verb = "hold_recovery_orbit"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "approach"
+  when = "fact(strike_boost_enabled) > 0 and fact(posture) >= param(press_posture) and fact(target_valid) > 0"

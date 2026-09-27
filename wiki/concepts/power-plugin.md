@@ -46,3 +46,5 @@ The authored `strike_reserve` policy in the Dynasty player hull stores explicitl
 # Strike boost
 
 `modifiers/strike_reserve.rs` owns pure attack-time accounting. The admitted toggle adapter is `console/weapons/strike.rs`; firing adapters spend after their no-fire gates. Paid beam and torpedo damage bonuses travel with active attacks through `snapshot.rs`, while blaster bolts retain their boosted damage in the existing projectile state. Gunnery and Power expose the same reserve readout; `gui/components/ph-strike-reserve.js` supplies the shared status and Gunnery toggle.
+
+Dynasty's authored Backfill coordinates charging with that same switch: Power charges while boost is off, then yields the charging allocation during a strike. Gunnery re-enables at its authored threshold. The Engines and Steering state machines use `strike_boost_enabled` in their transition guards to move through charge, approach, attack and recovery; these states remain visible in ordinary AI policy inspection. `seed_strike_reserve_facts` supplies own-ship charge and switch observations to Power evaluation and Helm transitions. The full two-peer outcome test is `tests/dynasty_backfill.rs`.

@@ -145,7 +145,24 @@ pub fn seed_power_facts(
         if has_destroy_objective { 1.0 } else { 0.0 },
     );
     facts.set_fact(fid::OFFLINE_SYSTEM_COUNT, offline_system_count as f64);
+    seed_strike_reserve_facts(&mut facts, power);
     facts
+}
+
+/// Shared, read-only readings for Power allocation and Helm transitions. These
+/// are the same charge and toggle that the human consoles receive; no AI reserve.
+pub(crate) fn seed_strike_reserve_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    power: &PowerSystem,
+) {
+    use crate::entities::ai_flag_hosts as fid;
+    if let Some(boost) = power.strike_boost() {
+        facts.set_fact(fid::STRIKE_RESERVE_CHARGE, power.battery_charge as f64);
+        facts.set_fact(
+            fid::STRIKE_BOOST_ENABLED,
+            if boost.enabled { 1.0 } else { 0.0 },
+        );
+    }
 }
 
 /// Debounce state for power brownout coordination advisories (issue #678).

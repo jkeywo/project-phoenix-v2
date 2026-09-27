@@ -524,6 +524,8 @@ pub const HOSTILE_CONTACT: FactId = FactId(crate::entities::config::CAPTAIN_HOST
 pub const HOSTILE_RANGE: FactId = FactId(crate::entities::config::CAPTAIN_HOSTILE_RANGE_FACT);
 // Power reactor
 pub const BATTERY_PCT: FactId = FactId(crate::entities::config::POWER_BATTERY_PCT_FACT);
+pub const STRIKE_RESERVE_CHARGE: FactId = FactId("strike_reserve_charge");
+pub const STRIKE_BOOST_ENABLED: FactId = FactId("strike_boost_enabled");
 pub const THRUST: FactId = FactId(crate::entities::config::POWER_THRUST_FACT);
 pub const RED_ALERT: FactId = FactId(crate::entities::config::POWER_RED_ALERT_FACT);
 pub const POWER_GROUP: FactId = FactId("power_");
@@ -650,6 +652,8 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     HOSTILE_CONTACT,
     HOSTILE_RANGE,
     BATTERY_PCT,
+    STRIKE_RESERVE_CHARGE,
+    STRIKE_BOOST_ENABLED,
     THRUST,
     RED_ALERT,
     POWER_GROUP,
@@ -784,6 +788,20 @@ const CAPTAIN_FACTS: &[FactDescriptor] = &[
 ];
 
 const POWER_FACTS: &[FactDescriptor] = &[
+    ship(
+        STRIKE_RESERVE_CHARGE,
+        "power",
+        "current authored strike reserve charge",
+        "false — no strike reserve",
+        "ship::power::seed_strike_reserve_facts",
+    ),
+    ship(
+        STRIKE_BOOST_ENABLED,
+        "power",
+        "1.0 while ordinary strike boost is enabled",
+        "false — no strike reserve",
+        "ship::power::seed_strike_reserve_facts",
+    ),
     ship(
         BATTERY_PCT,
         "power",
@@ -1221,6 +1239,20 @@ const TORPEDO_MAGAZINE_FACTS: &[FactDescriptor] = &[
 /// `ship::helm_ai::facts`); this registry closes only the typo hole — a helm
 /// `fact(...)` naming something no helm seeder produces.
 const HELM_FACTS: &[FactDescriptor] = &[
+    ship(
+        STRIKE_RESERVE_CHARGE,
+        "helm",
+        "own strike reserve charge for doctrine transitions",
+        "false — no strike reserve",
+        "ship::power::seed_strike_reserve_facts",
+    ),
+    ship(
+        STRIKE_BOOST_ENABLED,
+        "helm",
+        "own strike boost switch for doctrine transitions",
+        "false — no strike reserve",
+        "ship::power::seed_strike_reserve_facts",
+    ),
     ship(
         HAZARD_URGENCY,
         "helm",

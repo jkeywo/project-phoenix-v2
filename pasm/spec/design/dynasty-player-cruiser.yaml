@@ -40,3 +40,17 @@ entities:
       status: declared
       paths: [src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/snapshot.rs, gui/components/ph-strike-reserve.js]
       tests: [cargo test --lib strike_, npx vitest run tests/client/strike-reserve.test.js]
+  - decision: dynasty-backfill-strike-cycle
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Dynasty Backfill Strike Cycle
+      summary: "Dynasty's authored Engines and Steering machines coordinate charge, approach, attack and recovery using the ordinary ship-wide strike switch. Power charges while boost is off and yields those pips while boost is on. Gunnery explicitly re-enables at the authored reserve threshold. Helm closes only with a live target and combat posture, holds a firing bearing inside the attack range, and returns to a recovery orbit after depletion or disengagement."
+      rationale:
+        - "The charge and boost facts are own-ship observations, visible through existing policy inspection. Helm transition guards read them; actuator rules and downstream movement, allocation and weapon contracts remain shared with human operators. Existing non-reserve hulls receive no reserve facts or doctrine replacement."
+        - "The same authored policies run when all Stations are Backfill and when Command, Sensors and Damage Control are occupied by humans. Different fleet hosts must agree through depletion and a subsequent re-enable."
+        - "Attack ranges, movement speeds and reserve thresholds are authored tuning proposals; parity acceptance belongs to the separate seeded Dynasty balance evaluation."
+    implementation:
+      status: declared
+      paths: [assets/entities/dynasty_player_cruiser.toml, src/entities/ai_flag_hosts.rs, src/ship/power.rs, src/ship/helm_ai/mod.rs, tests/dynasty_backfill.rs]
+      tests: [cargo test --features headless --test dynasty_backfill]

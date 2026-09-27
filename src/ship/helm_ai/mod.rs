@@ -506,6 +506,7 @@ pub(crate) fn ai_policy_state_tick(
             Option<&crate::console::weapons::PhaserCombatConfigResource>,
             // The SHIP field of the orbit-direction composite key.
             Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::ship::power::ShipPowerSystem>,
             HelmPolicyRuntime,
         ),
         With<crate::ai::server::AiHighFidelity>,
@@ -565,6 +566,7 @@ pub(crate) fn ai_policy_state_tick(
         blasters,
         phaser_cfg,
         entity_uuid,
+        power,
         mut runtime,
     ) in ships.iter_mut()
     {
@@ -602,6 +604,9 @@ pub(crate) fn ai_policy_state_tick(
             physics.y,
             frame_red_alert(frame.ships.get(&entity)),
         );
+        if let Some(power) = power {
+            crate::ship::power::seed_strike_reserve_facts(&mut facts, &power.0);
+        }
         // The identity of the target the geometry above was seeded from. The
         // running range minimum is scoped to it, so a mid-state target switch
         // restarts the fold rather than inheriting a stranger's minimum.

@@ -100,7 +100,13 @@ struct Host {
 
 impl Host {
     fn new(slot: HostSlot) -> Self {
-        let mut app = build_headless_app(&args()).expect("six-peer probe app should build");
+        Self::with_seed(slot, SEED)
+    }
+
+    fn with_seed(slot: HostSlot, seed: u64) -> Self {
+        let mut configuration = args();
+        configuration.seed = Some(seed);
+        let mut app = build_headless_app(&configuration).expect("six-peer probe app should build");
         let mut tokens = BTreeMap::new();
         if SHIP_SLOTS.contains(&slot) {
             let mut sessions = app.world_mut().resource_mut::<Sessions>();
@@ -434,6 +440,358 @@ fn run_workload(hosts: &mut [Host], ticks: u64, wall_clock: bool) -> usize {
         }
     }
     npc_commands
+}
+
+/// Reproduce the non-fault input sequence surrounding the browser divergence
+/// probe. No peer is corrupted here: damage and fresh Helm input must preserve
+/// all six worlds before the recovery mechanism has anything to do.
+#[test]
+fn direct_damage_and_fresh_helm_controls_preserve_all_six_folds() {
+    direct_damage_helm_sequence(false);
+}
+
+/// Every replica must deplete every ship's boost, including the stationless
+/// GM replicas. Compare the battery before it changes speed, then the full fold
+/// through depletion and recharge so presentation locality cannot hide the bug.
+#[test]
+fn sustained_boost_depletes_identically_on_all_six_replicas() {
+    let mut hosts = build_fleet();
+    let mut saw_active = false;
+    let mut saw_depleted = false;
+    let mut saw_recharged = false;
+    for round in 0..500 {
+        if round == 20 {
+            for host in hosts.iter_mut().take(4) {
+                host.command(
+                    "helm",
+                    "helm-thrust",
+                    SystemControlPayload::SetThrust { value: 1.0 },
+                );
+                host.command(
+                    "helm",
+                    "helm-boost",
+                    SystemControlPayload::SetBoost { active: true },
+                );
+            }
+        }
+        step(&mut hosts);
+        let states: Vec<_> = hosts
+            .iter_mut()
+            .map(|host| {
+                let mut query = host
+                    .app
+                    .world_mut()
+                    .query::<(&FleetSlotOf, &project_phoenix::server_app::ShipBoost)>();
+                query
+                    .iter(host.app.world())
+                    .map(|(slot, boost)| (slot.0, (boost.0.is_active(), boost.0.battery.to_bits())))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .collect();
+        if round < 10 && states[0].is_empty() {
+            continue;
+        }
+        assert_eq!(states[0].len(), 4);
+        for (index, state) in states.iter().enumerate() {
+            assert_eq!(
+                state,
+                &states[0],
+                "boost replica {} at round {round}",
+                index + 1
+            );
+        }
+        saw_active |= states[0].values().all(|(active, _)| *active);
+        saw_depleted |= saw_active
+            && states[0]
+                .values()
+                .all(|(active, battery)| !active && f32::from_bits(*battery) < 0.01);
+        saw_recharged |= saw_depleted
+            && states[0]
+                .values()
+                .all(|(active, battery)| !active && f32::from_bits(*battery) > 0.1);
+        assert_equivalent(&mut hosts);
+    }
+    assert!(
+        saw_recharged,
+        "exhausted boost must recharge on all replicas"
+    );
+    assert!(saw_active, "admitted boost must actually engage every ship");
+    assert!(saw_depleted, "the run must cross battery exhaustion");
+}
+
+#[test]
+fn injected_gm_command_does_not_diverge_the_other_five_hosts() {
+    direct_damage_helm_sequence(true);
+}
+
+fn direct_damage_helm_sequence(inject: bool) {
+    let mut hosts: Vec<_> = ALL_SLOTS
+        .into_iter()
+        .map(|slot| Host::with_seed(slot, 1519))
+        .collect();
+    for host in &mut hosts {
+        host.app.insert_resource(MeshAgreement::new(300));
+    }
+    let mut injected = false;
+    let mut identity_controls_sent = false;
+    let mut original_ships = BTreeMap::new();
+    for tick in 0..if inject { 1600 } else { 700 } {
+        if tick < 300 && tick % 120 == 30 {
+            crew_wave(&mut hosts, tick / 120);
+        }
+        if tick == 360 {
+            for host in hosts.iter_mut().take(4) {
+                host.command(
+                    "helm",
+                    "helm-thrust",
+                    SystemControlPayload::SetThrust { value: 0.4 },
+                );
+            }
+        }
+        // Two harmless canonical actions precede damage so its event RNG uses
+        // the same grant sequence (3) as the browser's Pause/Resume prefix.
+        if [100, 200, 399].contains(&tick) {
+            let owner = &mut hosts[0];
+            let action = if tick == 399 {
+                let mut ships = owner.app.world_mut().query::<(&FleetSlotOf, &EntityUuid)>();
+                let target = ships
+                    .iter(owner.app.world())
+                    .find(|(slot, _)| slot.0 == OWNER)
+                    .expect("owner ship exists")
+                    .1
+                     .0
+                    .clone();
+                GmAction::ApplyDirectEffect {
+                    target,
+                    scope: project_phoenix::gm_effect::GmDirectEffectScope::Entity,
+                    effect: project_phoenix::gm_effect::GmDirectEffectKind::Damage,
+                    amount_milli_hp: 5000,
+                }
+            } else {
+                GmAction::SetSessionPaused { active: false }
+            };
+            let now = owner.tick();
+            let ready = owner
+                .app
+                .world()
+                .resource::<FleetLockstep>()
+                .ready_through(now);
+            let proposal = GmActionProposal {
+                from: GM_SLOTS[0],
+                operator_id: "gm-1".into(),
+                correlation: GmActionId::new(format!("recovery-baseline-{tick}")).unwrap(),
+                action,
+            };
+            let grant = sequence_owner_proposal(
+                &mut owner.app.world_mut().resource_mut::<GmActionJournal>(),
+                &proposal,
+                OWNER,
+                now,
+                ready,
+                false,
+                false,
+                false,
+            )
+            .expect("canonical GM request");
+            if tick == 399 {
+                assert_eq!(grant.order.sequence, 3);
+            }
+            owner
+                .app
+                .world_mut()
+                .resource_mut::<MeshOutbox>()
+                .push(MeshFrame::GmAction(GmActionFrame::Granted(grant)));
+        }
+        if tick == 403 {
+            hosts[0].command(
+                "helm",
+                "helm-thrust",
+                SystemControlPayload::SetThrust { value: 0.8 },
+            );
+        }
+        if inject {
+            let outgoing: Vec<_> = hosts.iter_mut().map(Host::drain).collect();
+            for (receiver, host) in hosts.iter_mut().enumerate() {
+                for (sender, frames) in outgoing.iter().enumerate() {
+                    if receiver == sender {
+                        continue;
+                    }
+                    let mut frames = frames.clone();
+                    if host.slot == GM_SLOTS[0] && sender == 0 && !injected {
+                        for frame in &mut frames {
+                            if let MeshFrame::Tick(frame) = frame {
+                                for command in &mut frame.commands {
+                                    if let SystemControlPayload::SetThrust { value } =
+                                        &mut command.payload
+                                    {
+                                        if *value == 0.8 && !injected {
+                                            *value = -0.7;
+                                            injected = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    host.deliver(&frames);
+                }
+            }
+            for host in &mut hosts {
+                run(&mut host.app, 1);
+            }
+        } else {
+            step(&mut hosts);
+        }
+        if inject
+            && !identity_controls_sent
+            && hosts[4]
+                .app
+                .world()
+                .resource::<project_phoenix::lockstep::recovery::RecoveryLog>()
+                .entries()
+                .iter()
+                .any(|record| {
+                    matches!(
+                        record.result,
+                        project_phoenix::lockstep::recovery::RecoveryResult::Recovered { .. }
+                    )
+                })
+        {
+            identity_controls_sent = true;
+            for host in hosts.iter_mut().take(4) {
+                host.command(
+                    "helm",
+                    "helm-thrust",
+                    SystemControlPayload::SetThrust { value: 0.5 },
+                );
+            }
+        }
+        if original_ships.is_empty() {
+            let mut query = hosts[0]
+                .app
+                .world_mut()
+                .query::<(&FleetSlotOf, &EntityUuid)>();
+            original_ships = query
+                .iter(hosts[0].app.world())
+                .map(|(slot, uuid)| (slot.0, uuid.0.clone()))
+                .collect();
+            if tick >= 10 {
+                assert_eq!(original_ships.len(), 4);
+            }
+        }
+        if tick == 450 {
+            // Snapshot restore replaces the recovering peer's pre-boundary
+            // command window, so verify this admission before restoration.
+            for host in &hosts {
+                let commands = host
+                    .app
+                    .world()
+                    .resource::<project_phoenix::command_admission::CommandLog>()
+                    .entries();
+                for (slot, ship) in &original_ships {
+                    assert!(commands.iter().any(|command| command.ship.0 == *ship && command.order.origin == *slot && command.tick > 360
+                        && matches!(command.payload, SystemControlPayload::SetThrust { value } if value == 0.4)));
+                }
+            }
+        }
+        let expected = hosts[0].digest();
+        if hosts
+            .iter()
+            .any(|host| (!inject || host.slot != GM_SLOTS[0]) && host.digest() != expected)
+        {
+            let directory = PathBuf::from("target/t5-artifacts/1534-direct-damage");
+            std::fs::create_dir_all(&directory).unwrap();
+            for host in &hosts {
+                let snapshot = project_phoenix::lockstep::capture_run(host.app.world(), WORLD);
+                std::fs::write(
+                    directory.join(format!("slot-{}.json", host.slot.0)),
+                    serde_json::to_vec_pretty(&snapshot).unwrap(),
+                )
+                .unwrap();
+            }
+        }
+        if inject {
+            assert!(
+                hosts
+                    .iter()
+                    .filter(|host| host.slot != GM_SLOTS[0])
+                    .all(|host| host.digest() == expected),
+                "uninjected peers diverged at round {tick}; six snapshots retained"
+            );
+        } else {
+            assert_equivalent(&mut hosts);
+        }
+    }
+    for host in &hosts {
+        let results: Vec<_> = host
+            .app
+            .world()
+            .resource::<GmActionJournal>()
+            .applied_results()
+            .iter()
+            .filter(|entry| entry.correlation == GmActionId::new("recovery-baseline-399").unwrap())
+            .collect();
+        assert_eq!(results.len(), 1, "one damage result on {:?}", host.slot);
+        assert_eq!(
+            results[0].outcome,
+            project_phoenix::gm_action::GmActionOutcome::Applied
+        );
+        assert_eq!(results[0].target.as_ref(), original_ships.get(&OWNER));
+        let effect = results[0]
+            .effect
+            .expect("damage applier must report the actual amount");
+        assert_eq!(effect.applied_milli_hp, 5000);
+        assert_eq!(effect.discarded_milli_hp, 0);
+        let commands = host
+            .app
+            .world()
+            .resource::<project_phoenix::command_admission::CommandLog>()
+            .entries();
+        for (slot, ship) in &original_ships {
+            let (value, after) = if inject { (0.5, 1200) } else { (0.4, 360) };
+            assert!(commands.iter().any(|command| command.ship.0 == *ship && command.order.origin == *slot && command.tick > after
+                && matches!(command.payload, SystemControlPayload::SetThrust { value: actual } if actual == value)),
+                "{:?} applied thrust {value} to original ship {ship} after {after}", host.slot);
+        }
+        if host.slot != GM_SLOTS[0] || !inject {
+            assert!(commands.iter().any(|command| command.ship.0 == original_ships[&OWNER]
+                && command.tick > 403 && matches!(command.payload, SystemControlPayload::SetThrust { value } if value == 0.8)));
+        }
+    }
+    if inject {
+        assert!(injected);
+        assert!(identity_controls_sent);
+        let restored = hosts.iter().find(|host| host.slot == GM_SLOTS[0]).unwrap();
+        assert!(restored
+            .app
+            .world()
+            .resource::<project_phoenix::lockstep::recovery::RecoveryLog>()
+            .entries()
+            .iter()
+            .any(|record| matches!(
+                record.result,
+                project_phoenix::lockstep::recovery::RecoveryResult::Recovered { .. }
+            ) && record.boundary_tick < 1500));
+        let checkpoint = hosts[0]
+            .app
+            .world()
+            .resource::<MeshAgreement>()
+            .local
+            .digest_at(1500)
+            .expect("leader reached the first post-restore checkpoint");
+        for host in &hosts {
+            assert_eq!(
+                host.app
+                    .world()
+                    .resource::<MeshAgreement>()
+                    .local
+                    .digest_at(1500),
+                Some(checkpoint),
+                "post-restore checkpoint on {:?}",
+                host.slot
+            );
+        }
+    }
 }
 
 #[test]

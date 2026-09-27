@@ -2,8 +2,8 @@
 title: Helm Runtime
 type: concept
 tags: [helm, ai, impulse, boost, steering]
-sources: [src/ship/continuation.rs, src/ship/physics_systems.rs, src/ship/impulse_boost_systems.rs, src/server_app/components.rs, src/snapshot.rs, tests/snapshot_resume.rs, src/ship/helm_admission.rs, src/ship/helm.rs, src/ai/core.rs, src/ai/server.rs, src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
-updated: 2026-09-09
+sources: [src/ship/continuation.rs, src/ship/physics_systems.rs, src/ship/impulse_boost_systems.rs, src/server_app/components.rs, src/snapshot.rs, tests/snapshot_resume.rs, tests/lockstep_six_peer.rs, src/ship/helm_admission.rs, src/ship/helm.rs, src/ai/core.rs, src/ai/server.rs, src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
+updated: 2026-09-27
 ---
 
 # Helm Runtime
@@ -37,3 +37,11 @@ Idle intent before admitted Helm commands, preserving their override order.
 runs. This lets a real damage cancel or admitted start apply on a newly
 restored/LOD-added command component while an untouched default stays inert.
 The consumer and snapshot restore clear the transient marker.
+
+Boost depletion in `src/ship/impulse_boost_systems.rs::tick_boost` advances every
+ship's `ShipBoost` using its admitted `ThrustInput` and `SteeringInput`; active
+impulse drains as full-forward thrust. The local HUD cache and crew sessions do
+not enter that calculation. `tests/lockstep_six_peer.rs` compares all four ship
+batteries across four ship hosts and two GM replicas through exhaustion and
+recharge, as well as the resulting physics fold. A LocalShip-only drain let
+remote replicas keep accelerating after the owning ship exhausted its battery.

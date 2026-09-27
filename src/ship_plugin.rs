@@ -273,7 +273,7 @@ impl Plugin for ShipPlugin {
                     tick_impulse
                         .in_set(crate::sim_sets::FixedStep::TickImpulse)
                         .in_set(crate::sim_sets::SimSet::Physics),
-                    // `tick_boost` reads the `LastHelmInput` pair for drain
+                    // `tick_boost` reads the per-entity actuator inputs for drain
                     // scaling — `.after(process_helm_inputs)` is the torn-pair
                     // edge (see above); the boost-transition ordering edge is
                     // declared as `.before(tick_boost)` on `apply_helm_commands`.
@@ -490,7 +490,7 @@ impl Plugin for ShipPlugin {
         //   mirrors applied payloads for the LocalShip), so the torn-pair
         //   contract is the single `.after(process_helm_inputs)` edge each
         //   pair reader (`publish_joystick_to_engines`,
-        //   `operate_helm_engine_ai`, `tick_boost`) declares in the tuple
+        //   `operate_helm_engine_ai`) declares in the tuple
         //   above; `helm_ai_last_input_pair_is_not_torn` pins the result.
         //   (`ai_power_allocation` reads `.thrust` alone, so it cannot see a
         //   torn pair and needs no edge.)

@@ -83,7 +83,7 @@ fn target_is_owner(
 ///
 /// `LastHelmInput` is mirrored for the LocalShip only, exactly as the old
 /// AI-side mirrors did: the viewscreen HUD (`recompute_hud_state`) and
-/// `tick_boost`/`publish_joystick_to_engines` read it for the player ship,
+/// `publish_joystick_to_engines` read it for the player ship,
 /// while NPC `LastHelmInput` deliberately stays at its spawn default so
 /// `ai_power_allocation`'s movement rule observes exactly what it observed
 /// before this migration.

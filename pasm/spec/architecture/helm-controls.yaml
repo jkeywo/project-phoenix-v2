@@ -380,7 +380,7 @@ entities:
       summary: Host-owned boost battery and active-state resource for short high-power helm bursts.
       rationale:
         - Boost is feature-gated by TOML config and does nothing when the ship omits boost configuration.
-        - Drain is based on current helm intent, and impulse-active movement drains as full-forward thrust.
+        - Drain is based on each ship's admitted ThrustInput and SteeringInput, and impulse-active movement drains as full-forward thrust. Every replica advances every ship's battery; LocalShip, local Sessions and the presentation LastHelmInput cache must not affect depletion.
     architecture:
       classification: authoritative
       owner: host-helm-control-router

@@ -1,14 +1,11 @@
 use bevy::prelude::*;
 
-use crate::lobby::Sessions;
-use crate::server_app::{LocalShip, Ship};
+use crate::server_app::Ship;
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship::components::{
-    BoostConfigResource, ImpulseConfigResource, LastHelmInput, ShipConfigComponent,
-    ShipSystemControlSources,
+    BoostConfigResource, ImpulseConfigResource, ShipConfigComponent, ShipSystemControlSources,
 };
-use crate::ship::helm::ImpulseCommand;
-use crate::ship::helm_ai::helm_axes_operate_ai;
+use crate::ship::helm::{ImpulseCommand, SteeringInput, ThrustInput};
 
 /// Hull-damage impulse auto-cancel (issue #695, reshaped by #824): writes an
 /// `Idle` `ImpulseCommand` intent when a ship's hull took damage this
@@ -101,50 +98,42 @@ fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
     thrust.clamp(-1.0, 1.0).abs() + steering.clamp(-1.0, 1.0).abs()
 }
 
+/// Boost depletion is authoritative for every ship replica. Local crew sessions
+/// and the HUD's LastHelmInput cache differ by host and cannot drive this fold.
+/// The admitted per-entity actuator latches are the same inputs physics consumes.
 pub(crate) fn tick_boost(
     time: Res<Time>,
-    mut boost_entity_q: Query<(Option<&BoostConfigResource>, &mut ShipBoost), With<LocalShip>>,
-    last_input_q: Query<&LastHelmInput, With<LocalShip>>,
-    sessions: Res<Sessions>,
-    impulse_q: Query<&ShipImpulse, With<LocalShip>>,
-    ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<LocalShip>>,
+    mut ships: Query<
+        (
+            Option<&BoostConfigResource>,
+            &mut ShipBoost,
+            Option<&ThrustInput>,
+            Option<&SteeringInput>,
+            Option<&ShipImpulse>,
+        ),
+        With<Ship>,
+    >,
 ) {
-    let Some((_ship_config, control_sources)) = ship_components.iter().next() else {
-        return;
-    };
-    let Some((entity_cfg, mut entity_boost)) = boost_entity_q.iter_mut().next() else {
-        return;
-    };
-    let config = entity_cfg.cloned().unwrap_or_default();
-    if !config.enabled {
-        return;
+    for (entity_cfg, mut boost, thrust, steering, impulse) in &mut ships {
+        let config = entity_cfg.cloned().unwrap_or_default();
+        if !config.enabled {
+            continue;
+        }
+        let drain_factor = if impulse.is_some_and(|state| state.0.is_active()) {
+            normalized_boost_drain_factor(1.0, 0.0)
+        } else {
+            normalized_boost_drain_factor(
+                thrust.map_or(0.0, |input| input.0),
+                steering.map_or(0.0, |input| input.0),
+            )
+        };
+        boost.0.tick_with_drain_factor(
+            time.delta_secs(),
+            config.active_duration,
+            config.recharge_duration,
+            drain_factor,
+        );
     }
-    let last_input = last_input_q.single().copied().unwrap_or_default();
-    let has_helm = sessions
-        .0
-        .holder_for_station(&crate::core::messages::StationId(
-            crate::ship::system_registry::HELM_STATION_ID.into(),
-        ))
-        .is_some()
-        || helm_axes_operate_ai(control_sources);
-    let impulse_active = impulse_q
-        .iter()
-        .next()
-        .map(|i| i.0.is_active())
-        .unwrap_or(false);
-    let drain_factor = if !has_helm {
-        0.0
-    } else if impulse_active {
-        normalized_boost_drain_factor(1.0, 0.0)
-    } else {
-        normalized_boost_drain_factor(last_input.thrust, last_input.steering)
-    };
-    entity_boost.0.tick_with_drain_factor(
-        time.delta_secs(),
-        config.active_duration,
-        config.recharge_duration,
-        drain_factor,
-    );
 }
 
 #[cfg(test)]
@@ -160,6 +149,7 @@ mod tests {
     use crate::regions::effects::{BlocksImpulseEffect, RegionEffectsConfig};
     use crate::regions::server::RegionPlugin;
     use crate::regions::shape::RegionShape;
+    use crate::server_app::LocalShip;
     use crate::ship::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::ship::test_support::*;
 
@@ -820,13 +810,22 @@ mod tests {
         start_game_with_helm_and_science(&mut app);
 
         toggle_boost(&mut app);
-        {
-            set_last_helm_input(
+        for (target, payload) in [
+            (
+                "helm-thrust",
+                SystemControlPayload::SetThrust { value: 1.0 },
+            ),
+            (
+                "helm-steering",
+                SystemControlPayload::SetSteering { value: 1.0 },
+            ),
+        ] {
+            push(
                 &mut app,
-                LastHelmInput {
-                    thrust: 1.0,
-                    steering: 1.0,
-                    lateral: 0.0,
+                "helm",
+                ClientMessage::ControlSystem {
+                    target: crate::core::messages::SystemId(target.into()),
+                    payload,
                 },
             );
         }
@@ -837,6 +836,27 @@ mod tests {
         assert!(
             (battery - 0.9).abs() < 0.001,
             "full thrust + full steering should drain twice the base rate; got {battery}"
+        );
+    }
+
+    #[test]
+    fn active_impulse_drains_boost_without_helm_axis_demand() {
+        let mut app = test_app();
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+        let mut impulse = get_ship_impulse(&mut app);
+        impulse.phase = ImpulsePhase::Active;
+        set_ship_impulse(&mut app, impulse);
+        toggle_boost(&mut app);
+        tick(&mut app);
+        assert!(get_ship_impulse(&mut app).is_active());
+        let battery = boost_battery(&mut app);
+        assert!(
+            (battery - 0.95).abs() < 0.001,
+            "active impulse drains at full thrust: {battery}"
         );
     }
 

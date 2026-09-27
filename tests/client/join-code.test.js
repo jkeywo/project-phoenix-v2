@@ -448,6 +448,33 @@ describe('reason reporting', () => {
     ).toEqual([]);
   });
 
+  it('keeps frozen-fleet continuity refusals distinct from a bad join code', () => {
+    const table = buildTable(readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8'));
+    const clientReasons = [
+      'host-present', 'forbidden-continuation', 'forbidden-takeover',
+      'stale-fleet-epoch', 'slot-connected',
+    ];
+    const hostReasons = [
+      'host-present', 'takeover-pending', 'forbidden-resume',
+      'not-hosting-fleet', 'invalid-member', 'already-configured',
+      'forbidden-takeover', 'stale-fleet-epoch',
+    ];
+    for (const reason of clientReasons) {
+      expect(reasonStringId(reason), reason).toMatch(/^client\.join\.error_/);
+      expect(reasonStringId(reason), reason).not.toBe(reasonStringId('unknown'));
+      expect(table.get(reasonStringId(reason)), reason).toBeTruthy();
+    }
+    for (const reason of hostReasons) {
+      expect(reasonStringId(reason, SURFACE_SERVER), reason).toMatch(/^server\.fleet\.error_/);
+      expect(reasonStringId(reason, SURFACE_SERVER), reason)
+        .not.toBe(reasonStringId('unknown', SURFACE_SERVER));
+      expect(table.get(reasonStringId(reason, SURFACE_SERVER)), reason).toBeTruthy();
+    }
+    expect(reasonStringId('stale-fleet-epoch')).not.toBe(reasonStringId('forbidden-continuation'));
+    expect(reasonStringId('host-present', SURFACE_SERVER))
+      .not.toBe(reasonStringId('takeover-pending', SURFACE_SERVER));
+  });
+
   it('has an authored strings.csv row for every reason it can display', () => {
     const table = buildTable(readFileSync(path.join(root, 'assets/strings/strings.csv'), 'utf8'));
     for (const reason of knownReasons()) {

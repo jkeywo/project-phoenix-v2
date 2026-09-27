@@ -4628,6 +4628,21 @@
      * This seam composes neither, so a GM can neither name a template the
      * simulation did not publish nor submit screen pixels.
      */
+    window.__hostObjectiveInstanceAction = function(request) {
+      const gm = localGm();
+      if (!gm || !request || request.operator_id !== gm.id
+          || typeof request.objective !== 'string' || !request.objective
+          || !['activate', 'complete', 'fail'].includes(request.verb)
+          || !(request.scope === 'all' || request.scope && typeof request.scope.instance === 'string'
+            && request.scope.instance && Object.keys(request.scope).length === 1)
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({ action: 'objective_instance_action',
+          operator_id: gm.id, correlation: request.correlation, objective: request.objective,
+          verb: request.verb, scope: request.scope })) !== false;
+      } catch (_) { return false; }
+    };
     window.__hostObjectiveAction = function(request) {
       const gm = localGm();
       if (!gm || !request || request.operator_id !== gm.id

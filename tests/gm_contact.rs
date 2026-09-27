@@ -313,6 +313,7 @@ fn refusal_and_reconstructed_frontier_keep_both_identities_and_mode() {
         target: Some("target".into()),
         observer: Some("observer".into()),
         objective_verb: None,
+        objective_instance_scope: None,
         objective_recipients: None,
         comms_recipients: None,
         npc_doctrine: None,

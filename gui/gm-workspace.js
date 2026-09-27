@@ -332,7 +332,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       const ship = win.__hostGmStationState?.().projection?.ships?.find((row) => row.ship_id === id);
       return ship?.name ? (has(ship.name) ? t(ship.name) : ship.name) : id;
     },
-    submit: (request) => win.__hostObjectiveAction?.(request) ?? false,
+    submit: (request) => (request.scope ? win.__hostObjectiveInstanceAction?.(request) : win.__hostObjectiveAction?.(request)) ?? false,
   });
   win.__hostGmObjectiveState = gmObjectivePanel.state;
   win.__hostGmMissionRefresh = () => { gmMissionPanel.refreshAdmission(); gmObjectivePanel.refreshAdmission(); };

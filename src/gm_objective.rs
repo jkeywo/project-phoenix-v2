@@ -13,6 +13,25 @@ pub enum ObjectiveVerb {
     Fail,
 }
 
+/// Explicit control scope. `All` is never inferred from an empty recipient list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ObjectiveInstanceScope {
+    Instance(String),
+    All,
+}
+
+impl ObjectiveInstanceScope {
+    pub fn valid(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Instance(id) => {
+                !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+            }
+        }
+    }
+}
+
 pub(crate) const MAX_OBJECTIVE_RECIPIENTS: usize = 32;
 
 fn valid_request_vocabulary(id: &str, recipients: &[String]) -> bool {
@@ -44,12 +63,24 @@ pub struct ObjectivePaletteEntry {
     pub origin_layer: Option<String>,
 }
 
+impl ObjectivePaletteEntry {
+    pub fn instance_id(&self) -> Option<&str> {
+        match &self.action {
+            crate::world::config::TriggerAction::AddObjectiveInstance { spec, .. } => {
+                Some(&spec.key.instance_id)
+            }
+            _ => None,
+        }
+    }
+}
+
 pub fn parse_palette(
     raw: &[RawObjectivePaletteEntry],
 ) -> Result<Vec<ObjectivePaletteEntry>, String> {
     let mut ids = std::collections::BTreeSet::new();
     raw.iter().map(|row| {
-        if row.id.is_empty() || row.label.is_empty() || !ids.insert(&row.id) {
+        let instance_id = row.fields.get("instance_id").and_then(toml::Value::as_str);
+        if row.id.is_empty() || row.label.is_empty() || !ids.insert((&row.id, instance_id)) {
             return Err(format!("invalid or duplicate gm_objective_palette id '{}'", row.id));
         }
         let mut fields = row.fields.clone();
@@ -58,8 +89,14 @@ pub fn parse_palette(
         fields.insert("id".into(), toml::Value::String(row.id.clone()));
         let raw_action: crate::world::config::RawActionEntry = toml::Value::Table(fields).try_into().map_err(|e| format!("Objective palette: {e}"))?;
         let action = crate::world::config::parse_action_entry(&raw_action)?;
-        if !matches!(&action, crate::world::config::TriggerAction::AddObjective { text, .. } if !text.is_empty()) {
+        if !matches!(&action, crate::world::config::TriggerAction::AddObjective { text, .. }
+            | crate::world::config::TriggerAction::AddObjectiveInstance { text, .. } if !text.is_empty()) {
             return Err("Objective palette requires authored text".into());
+        }
+        if let Some(id) = instance_id {
+            if !ObjectiveInstanceScope::Instance(id.to_owned()).valid() || !row.recipients.is_empty() {
+                return Err("Objective instance palette uses bounded instance_id and authored recipient selectors, not legacy recipients".into());
+            }
         }
         let mut recipients = row.recipients.clone();
         recipients.sort(); recipients.dedup();
@@ -162,7 +199,9 @@ pub fn validate(
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct ObjectiveControl<'w, 's> {
+    pub commands: Commands<'w, 's>,
     pub manager: Option<ResMut<'w, crate::world::server::ObjectiveManagerRes>>,
+    pub instances: Option<ResMut<'w, crate::world::server::ObjectiveInstanceManagerRes>>,
     pub balance: Option<ResMut<'w, Messages<crate::core::balance::BalanceEvent>>>,
     pub layers: Option<ResMut<'w, crate::world::server::WorldLayerMap>>,
     pub removal_targets: crate::gm_despawn::RemovalQuery<'w, 's>,
@@ -172,6 +211,164 @@ pub struct ObjectiveControl<'w, 's> {
         &'static crate::entities::spawner::EntityUuid,
         With<crate::lockstep::FleetSlotOf>,
     >,
+    pub fleet_members: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::ship_slots::AuthoredShipSlotId,
+            Option<&'static crate::entities::spawner::FactionComponent>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+}
+
+pub struct InstanceControlResult {
+    pub outcome: GmActionOutcome,
+    pub reason: Option<GmActionRefusalReason>,
+    pub diagnostic: Option<String>,
+    pub effects: Vec<crate::objective_instances::control::InstanceApply>,
+}
+
+/// Resolve all keys before mutation and commit only a fully accepted preview.
+pub fn apply_instance_control(
+    runtime: &crate::world::server::WorldContentRuntime,
+    manager: &mut crate::objectives::ObjectiveManager,
+    instances: &mut crate::objective_instances::ObjectiveInstanceManager,
+    id: &str,
+    scope: &ObjectiveInstanceScope,
+    verb: ObjectiveVerb,
+    fleet: &[crate::objective_instances::PlayerShipMembership],
+    known_slots: &std::collections::BTreeSet<String>,
+    known_factions: &std::collections::BTreeSet<String>,
+) -> InstanceControlResult {
+    use crate::objective_instances::{control::apply_instance_command, ObjectiveInstanceKey};
+    use crate::world::config::TriggerAction;
+    let refused = |reason, diagnostic| InstanceControlResult {
+        outcome: GmActionOutcome::Refused,
+        reason: Some(reason),
+        diagnostic,
+        effects: Vec::new(),
+    };
+    let keys: std::collections::BTreeSet<_> = match scope {
+        ObjectiveInstanceScope::Instance(instance_id) => [ObjectiveInstanceKey {
+            objective_id: id.to_owned(),
+            instance_id: instance_id.clone(),
+        }]
+        .into_iter()
+        .collect(),
+        ObjectiveInstanceScope::All if verb == ObjectiveVerb::Activate => runtime
+            .gm_objective_palette
+            .iter()
+            .filter(|entry| entry.id == id)
+            .filter_map(|entry| {
+                entry.instance_id().map(|instance| ObjectiveInstanceKey {
+                    objective_id: id.to_owned(),
+                    instance_id: instance.to_owned(),
+                })
+            })
+            .collect(),
+        ObjectiveInstanceScope::All => instances
+            .records()
+            .iter()
+            .filter(|row| row.spec.key.objective_id == id)
+            .map(|row| row.spec.key.clone())
+            .collect(),
+    };
+    if keys.is_empty() {
+        return refused(GmActionRefusalReason::UnknownObjective, None);
+    }
+    let mut next_instances = instances.clone();
+    let mut next_manager = manager.clone();
+    let mut effects = Vec::new();
+    for key in keys {
+        let command = match verb {
+            ObjectiveVerb::Activate => {
+                let Some(entry) = runtime.gm_objective_palette.iter().find(|entry| {
+                    entry.id == id && entry.instance_id() == Some(key.instance_id.as_str())
+                }) else {
+                    return refused(GmActionRefusalReason::UnknownObjective, None);
+                };
+                let TriggerAction::AddObjectiveInstance {
+                    spec,
+                    text,
+                    text_params,
+                    mandatory,
+                    targets,
+                    directive,
+                    utility,
+                    source,
+                    command_stance,
+                } = &entry.action
+                else {
+                    unreachable!()
+                };
+                ActionCmd::AddObjectiveInstance {
+                    spec: spec.clone(),
+                    text: text.clone(),
+                    text_params: text_params.clone(),
+                    mandatory: *mandatory,
+                    targets: targets.clone(),
+                    directive: directive.clone(),
+                    utility: utility.clone(),
+                    source: source.clone(),
+                    command_stance: command_stance.clone(),
+                    origin_layer: entry.origin_layer.clone(),
+                }
+            }
+            ObjectiveVerb::Complete | ObjectiveVerb::Fail => {
+                let Some(record) = next_instances
+                    .records()
+                    .iter()
+                    .find(|row| row.spec.key == key)
+                else {
+                    return refused(GmActionRefusalReason::UnknownObjective, None);
+                };
+                let target_status = if verb == ObjectiveVerb::Complete {
+                    ObjectiveStatus::Completed
+                } else {
+                    ObjectiveStatus::Failed
+                };
+                if record.status != ObjectiveStatus::Active && record.status != target_status {
+                    return refused(GmActionRefusalReason::ObjectiveNotActive, None);
+                }
+                if verb == ObjectiveVerb::Complete {
+                    ActionCmd::CompleteObjectiveInstance { key }
+                } else {
+                    ActionCmd::FailObjectiveInstance { key }
+                }
+            }
+        };
+        match apply_instance_command(
+            command,
+            &mut next_instances,
+            &mut next_manager,
+            fleet,
+            known_slots,
+            known_factions,
+        ) {
+            Ok(effect) => effects.push(effect),
+            Err(reason) => {
+                return refused(
+                    GmActionRefusalReason::ObjectiveScopeMismatch,
+                    Some(reason.message()),
+                )
+            }
+        }
+    }
+    let changed = effects.iter().any(|effect| effect.changed);
+    *instances = next_instances;
+    *manager = next_manager;
+    InstanceControlResult {
+        outcome: if changed {
+            GmActionOutcome::Applied
+        } else {
+            GmActionOutcome::NoOp
+        },
+        reason: None,
+        diagnostic: None,
+        effects,
+    }
 }
 
 pub fn resolve_recipients(
@@ -205,7 +402,7 @@ pub fn apply_control(
     let entry = runtime
         .gm_objective_palette
         .iter()
-        .find(|entry| entry.id == id);
+        .find(|entry| entry.id == id && entry.instance_id().is_none());
     let scope = if verb == ObjectiveVerb::Activate {
         let Some(entry) = entry else {
             return (
@@ -285,6 +482,8 @@ pub fn apply_control(
 pub struct ObjectiveRow {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
     pub label: String,
     pub text: String,
@@ -319,6 +518,7 @@ pub fn rows(
                         .unwrap_or_default()
                         .to_vec();
                     ObjectiveRow {
+                        objective_id: None,
                         instance_id: None,
                         progress: None,
                         completion_members: Vec::new(),
@@ -346,6 +546,7 @@ pub fn rows(
             };
             let recipients = instances.current_members(&record.spec.key);
             objectives.push(ObjectiveRow {
+                objective_id: Some(record.spec.key.objective_id.clone()),
                 id: format!(
                     "{}::{}",
                     record.spec.key.objective_id, record.spec.key.instance_id
@@ -354,7 +555,9 @@ pub fn rows(
                 label: snapshot.text.clone(),
                 text: snapshot.text,
                 text_params: snapshot.text_params,
-                available: false,
+                available: valid_request_vocabulary(&record.spec.key.objective_id, &[])
+                    && ObjectiveInstanceScope::Instance(record.spec.key.instance_id.clone())
+                        .valid(),
                 recipients,
                 status: Some(record.status.clone()),
                 progress: Some(record.progress),
@@ -369,6 +572,37 @@ pub fn rows(
                 .gm_objective_palette
                 .iter()
                 .map(|entry| {
+                    if let crate::world::config::TriggerAction::AddObjectiveInstance {
+                        spec,
+                        text,
+                        text_params,
+                        ..
+                    } = &entry.action
+                    {
+                        let record = instances.and_then(|manager| {
+                            manager
+                                .records()
+                                .iter()
+                                .find(|record| record.spec.key == spec.key)
+                        });
+                        return ObjectiveRow {
+                            id: format!("{}::{}", entry.id, spec.key.instance_id),
+                            objective_id: Some(entry.id.clone()),
+                            instance_id: Some(spec.key.instance_id.clone()),
+                            label: entry.label.clone(),
+                            text: text.clone(),
+                            text_params: text_params.clone(),
+                            recipients: instances
+                                .map(|manager| manager.current_members(&spec.key))
+                                .unwrap_or_default(),
+                            status: record.map(|record| record.status.clone()),
+                            progress: record.map(|record| record.progress),
+                            completion_members: record
+                                .map(|record| record.completion_members.clone())
+                                .unwrap_or_default(),
+                            available: true,
+                        };
+                    }
                     let resolved = resolve_recipients(entry, runtime, live);
                     let crate::world::config::TriggerAction::AddObjective {
                         text, text_params, ..
@@ -377,6 +611,7 @@ pub fn rows(
                         unreachable!()
                     };
                     ObjectiveRow {
+                        objective_id: None,
                         id: entry.id.clone(),
                         instance_id: None,
                         label: entry.label.clone(),

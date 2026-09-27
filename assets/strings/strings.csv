@@ -4604,3 +4604,11 @@ dynasty.console.damage_control.label,Dynasty role and attack-cycle onboarding,[D
 gm.recipients.diagnostics,GM recipient selection authoring feedback,[Recipient diagnostics]
 gm.recipients.diagnostic_at,GM recipient diagnostic source action and tick,[Tick {tick}: {action}]
 workshop.test_trace_recipient,Workshop recipient selection execution diagnostic,[{action}: {message}]
+server.gm.objective.all_instances,Explicit bulk Objective control scope,All instances
+server.gm.objective.instance,Named Objective control scope,Instance {instance}
+server.gm.objective.no_members,Empty Objective instance membership,No ships
+server.gm.objective.instance_progress,Instance progress and fixed completion recipients,Progress {progress}; credited at completion: {ships}
+server.gm.objective.activate_all,Explicit bulk Objective action,Activate all instances
+server.gm.objective.complete_all,Explicit bulk Objective action,Complete all instances
+server.gm.objective.fail_all,Explicit bulk Objective action,Fail all instances
+server.gm.objective.instance_count,Explicit bulk Objective membership count,{count} instances

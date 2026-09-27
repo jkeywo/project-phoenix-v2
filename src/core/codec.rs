@@ -1276,6 +1276,12 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                             .map(|v| serde_json::from_value(v.clone()))
                             .transpose()
                             .ok()?,
+                        objective_instance_scope: body
+                            .get("objective_instance_scope")
+                            .filter(|v| !v.is_null())
+                            .map(|v| serde_json::from_value(v.clone()))
+                            .transpose()
+                            .ok()?,
                         objective_recipients: body
                             .get("objective_recipients")
                             .filter(|v| !v.is_null())
@@ -1653,6 +1659,15 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
         // stays exact rather than accepting two shapes. There is deliberately
         // no template/asset field to smuggle anything through: the palette id
         // IS the vocabulary.
+        "objective_instance_action" if object.len() == 6 => {
+            let action = crate::gm_action::GmAction::ObjectiveInstanceAction {
+                objective: bounded_gm_target_id(object.get("objective")?.as_str()?)?,
+                scope: serde_json::from_value(object.get("scope")?.clone()).ok()?,
+                verb: serde_json::from_value(object.get("verb")?.clone()).ok()?,
+            };
+            action.validate().ok()?;
+            action
+        }
         "objective_action" if object.len() == 6 => {
             let action = crate::gm_action::GmAction::ObjectiveAction {
                 objective: bounded_gm_target_id(object.get("objective")?.as_str()?)?,
@@ -2393,6 +2408,7 @@ mod mesh_frame_tests {
                 lever: None,
                 effect_scope: None,
                 objective_verb: None,
+                objective_instance_scope: None,
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
@@ -2416,6 +2432,7 @@ mod mesh_frame_tests {
                 lever: None,
                 effect_scope: None,
                 objective_verb: None,
+                objective_instance_scope: None,
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
@@ -2440,6 +2457,7 @@ mod mesh_frame_tests {
                 lever: Some(crate::gm_event::GmEventLever::SkipNext),
                 effect_scope: None,
                 objective_verb: None,
+                objective_instance_scope: None,
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
@@ -2803,6 +2821,7 @@ mod mesh_frame_tests {
                 lever: None,
                 effect_scope: None,
                 objective_verb: None,
+                objective_instance_scope: None,
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,

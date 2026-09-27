@@ -4,6 +4,8 @@
 //! the additive multi-ship contract. Recipients are ship slots, not subject
 //! targets, and every mutation addresses `(objective_id, instance_id)`.
 
+pub mod control;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::messages::ObjectiveStatus;
@@ -642,8 +644,6 @@ pub fn apply_command(
     command: crate::world::dispatch::ActionCmd,
     origin: &ObjectiveCommandOrigin,
 ) {
-    use crate::world::dispatch::ActionCmd;
-
     let fleet = player_ship_memberships(world);
     let known_slots: BTreeSet<_> = world
         .get_resource::<crate::world::config::WorldConfig>()
@@ -664,175 +664,52 @@ pub fn apply_command(
                 .collect()
         })
         .unwrap_or_default();
-    let mut transition: Option<(String, ObjectiveStatus)> = None;
-    match command {
-        ActionCmd::AddObjectiveInstance {
-            spec,
-            text,
-            text_params,
-            mandatory,
-            targets,
-            directive,
-            utility,
-            source,
-            command_stance,
-            origin_layer,
-        } => {
-            let objective_id = spec.key.objective_id.clone();
-            let instance_key = spec.key.clone();
-            let instance_directive = directive.clone();
-            let activation = world
-                .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
-                .0
-                .activate_validated(spec, &fleet, &known_slots, &known_factions);
-            let activated = match activation {
-                Ok(changed) => changed,
-                Err(reason) => {
-                    bevy::log::warn!("Objective instance activation refused: {reason:?}");
-                    origin.refused(world, activation_refusal_message(&reason));
-                    return;
-                }
-            };
-            if activated {
+    let applied = world.resource_scope(
+        |world, mut instances: Mut<crate::world::server::ObjectiveInstanceManagerRes>| {
+            let mut objectives = world.resource_mut::<crate::world::server::ObjectiveManagerRes>();
+            control::apply_instance_command(
+                command,
+                &mut instances.0,
+                &mut objectives.0,
+                &fleet,
+                &known_slots,
+                &known_factions,
+            )
+        },
+    );
+    match applied {
+        Err(reason) => {
+            bevy::log::warn!("Objective instance mutation refused: {}", reason.message());
+            origin.refused(world, reason.message());
+        }
+        Ok(applied) => {
+            let targets = applied
+                .transition
+                .as_ref()
+                .and_then(|(id, _)| {
+                    world
+                        .resource::<crate::world::server::ObjectiveManagerRes>()
+                        .0
+                        .targets(id)
+                })
+                .unwrap_or_default()
+                .to_vec();
+            control::publish_instance_apply(
+                &applied,
+                &targets,
+                None,
                 world
-                    .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
-                    .0
-                    .set_directive(&instance_key, instance_directive);
-            }
-            let inserted = world
-                .resource_mut::<crate::world::server::ObjectiveManagerRes>()
-                .0
-                .add_full_with_params(
-                    objective_id.clone(),
-                    text,
-                    text_params,
-                    mandatory,
-                    targets,
-                    directive,
-                    utility,
-                    source,
-                    command_stance,
-                );
-            if inserted {
-                if let Some(path) = origin_layer {
-                    if let Some(mut layers) =
-                        world.get_resource_mut::<crate::world::server::WorldLayerMap>()
-                    {
-                        if let Some(layer) = layers.0.get_mut(&path) {
-                            layer.owned_objective_ids.push(objective_id.clone());
-                        }
-                    }
-                }
-            }
-            if activated {
-                transition = Some((objective_id, ObjectiveStatus::Active));
-            }
-        }
-        ActionCmd::CompleteObjectiveInstance { key } => {
-            let known = world
-                .resource::<crate::world::server::ObjectiveInstanceManagerRes>()
-                .0
-                .records()
-                .iter()
-                .any(|row| row.spec.key == key);
-            let completion = world
-                .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
-                .0
-                .complete(&key, &fleet);
-            match completion {
-                Ok(true) => transition = Some((key.objective_id, ObjectiveStatus::Completed)),
-                Ok(false) if !known => origin.refused(
-                    world,
-                    format!(
-                        "Unknown Objective instance '{}:{}'; check the authored id and instance_id",
-                        key.objective_id, key.instance_id
-                    ),
-                ),
-                Ok(false) => {}
-                Err(conflict) => {
-                    bevy::log::warn!(
-                        "Objective instance completion refused: objective '{}' is ambiguous for ship '{}' across {:?}",
-                        conflict.objective_id,
-                        conflict.ship_id,
-                        conflict.instance_ids
-                    );
-                    origin.refused(
-                        world,
-                        activation_refusal_message(&ActivationRefusal::Conflict(conflict)),
-                    );
-                }
-            }
-        }
-        ActionCmd::FailObjectiveInstance { key } => {
-            let known = world
-                .resource::<crate::world::server::ObjectiveInstanceManagerRes>()
-                .0
-                .records()
-                .iter()
-                .any(|row| row.spec.key == key);
-            let failure = world
-                .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
-                .0
-                .fail(&key, &fleet);
-            match failure {
-                Ok(true) => transition = Some((key.objective_id, ObjectiveStatus::Failed)),
-                Ok(false) if !known => origin.refused(
-                    world,
-                    format!(
-                        "Unknown Objective instance '{}:{}'; check the authored id and instance_id",
-                        key.objective_id, key.instance_id
-                    ),
-                ),
-                Ok(false) => {}
-                Err(conflict) => {
-                    bevy::log::warn!(
-                        "Objective instance failure refused: objective '{}' is ambiguous for ship '{}' across {:?}",
-                        conflict.objective_id,
-                        conflict.ship_id,
-                        conflict.instance_ids
-                    );
-                    origin.refused(
-                        world,
-                        activation_refusal_message(&ActivationRefusal::Conflict(conflict)),
-                    );
-                }
-            }
-        }
-        ActionCmd::SetObjectiveInstanceProgress { key, progress } => {
-            let changed = world
-                .resource_mut::<crate::world::server::ObjectiveInstanceManagerRes>()
-                .0
-                .set_progress(&key, progress);
-            if !changed {
-                origin.refused(world, format!(
-                    "Objective instance '{}:{}' was not active; check the authored ids and progress",
-                    key.objective_id, key.instance_id
-                ));
-            }
-        }
-        _ => return,
-    }
-
-    if let Some((objective_id, status)) = transition {
-        let targets = world
-            .resource::<crate::world::server::ObjectiveManagerRes>()
-            .0
-            .targets(&objective_id)
-            .unwrap_or_default()
-            .to_vec();
-        if let Some(mut messages) = world
-            .get_resource_mut::<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>()
-        {
-            if status == ObjectiveStatus::Completed {
-                messages.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
-                    objective_id: objective_id.clone(),
-                });
-            }
-            messages.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
-                objective_id,
-                status,
-                targets,
-            });
+                    .get_resource_mut::<crate::world::server::WorldLayerMap>()
+                    .as_deref_mut(),
+            );
+            control::publish_instance_apply(
+                &applied,
+                &targets,
+                world
+                    .get_resource_mut::<Messages<crate::core::balance::BalanceEvent>>()
+                    .as_deref_mut(),
+                None,
+            );
         }
     }
 }

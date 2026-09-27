@@ -256,6 +256,7 @@ pub fn validate_station_action(
         | GmAction::SetNpcDoctrine { .. }
         | GmAction::SetNpcDoctrineChecked { .. }
         | GmAction::ObjectiveAction { .. }
+        | GmAction::ObjectiveInstanceAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetContactClassification { .. }
         | GmAction::Presentation { .. }
@@ -315,6 +316,7 @@ pub fn validate_station_action(
         | GmAction::SetNpcDoctrine { .. }
         | GmAction::SetNpcDoctrineChecked { .. }
         | GmAction::ObjectiveAction { .. }
+        | GmAction::ObjectiveInstanceAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetContactClassification { .. }
         | GmAction::Presentation { .. }
@@ -1276,6 +1278,7 @@ station = "tactical"
                     verb: None,
                     effect_scope: None,
                     objective_verb: None,
+                    objective_instance_scope: None,
                     objective_recipients: None,
                     comms_recipients: None,
                     observer: None,

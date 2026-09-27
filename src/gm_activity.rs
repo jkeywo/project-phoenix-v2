@@ -160,6 +160,8 @@ pub enum GmActivityAction {
         objective: String,
         verb: crate::gm_objective::ObjectiveVerb,
         recipients: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instance_scope: Option<crate::gm_objective::ObjectiveInstanceScope>,
     },
     SetNpcDoctrine {
         target: String,
@@ -1483,6 +1485,7 @@ fn terminal_action_entries(
                                 objective: fact.target.clone()?,
                                 verb: fact.objective_verb?,
                                 recipients: fact.objective_recipients.clone()?,
+                                instance_scope: fact.objective_instance_scope.clone(),
                             }
                         }
                         (

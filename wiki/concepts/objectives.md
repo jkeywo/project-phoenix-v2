@@ -2,7 +2,7 @@
 title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
-sources: [src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/recipients.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
+sources: [src/gm_objective.rs, src/objective_instances/control.rs, gui/gm-objective-panel.js, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/recipients.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
 updated: 2026-09-27
 ---
 
@@ -30,6 +30,16 @@ World triggers, comms responses and authored GM palette activation create missio
    projections.
 
 ## GM activation and recipient scope
+
+Named instances have separate GM rows with current membership, progress and
+fixed completion members. The palette accepts `instance_id` and the ordinary
+recipient selectors; it cannot mix those with legacy `recipients`. The canonical
+`ObjectiveInstanceAction` carries an explicit instance or All scope. The shared
+pure reducer in `objective_instances/control.rs` supports atomic bulk previews
+before the ordinary agreed-tick GM executor commits state and balance facts.
+Results retain typed scope and operator attribution. Conflicts use the existing
+recipient diagnostics projection; crew snapshots remain selected-ship-only.
+
 
 The mission panel activates only `[[gm_objective_palette]]` entries. Each row
 reuses normal Objective parsing, including directive, utility, targets and text

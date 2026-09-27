@@ -92,6 +92,15 @@ describe('native GM workspace over the shared GM presenters', () => {
     app.view.dispose(); expect(window.__hostSetContactClassification(request)).toBe(false);
   });
 
+  it('sends explicit Objective instance scope through ordinary native GM authority', () => {
+    const app = mount();
+    const request = { objective: 'escort', scope: 'all', verb: 'complete', correlation: 'instances-1' };
+    expect(window.__hostObjectiveInstanceAction(request)).toBe(true);
+    expect(app.bridge.submitAction).toHaveBeenCalledExactlyOnceWith({ ...request,
+      action: 'objective_instance_action', operator_id: 'native-gm' });
+    app.view.dispose();
+  });
+
   it('keeps presentation interest off the authoritative action lane', () => {
     const inspectorInterest = vi.fn(() => true), consoleInterest = vi.fn(() => true);
     const app = mount({inspectorInterest, consoleInterest});

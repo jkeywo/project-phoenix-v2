@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Explicitly Shared Objective Instances
-      summary: "Issues #1523 and #1528: named instances of one Objective carry independent progress and lifecycle. TOML and Rhai address the same typed instance commands. Recipient selectors resolve live authored ship-slot, faction or all-player membership with explicit-slot > faction > all specificity; duplicate explicit-slot matches reject before a ship joins, and other equal matches refuse atomically. A refused live faction edit restores the ship's last accepted faction in the Membership phase before gameplay Input. Completion captures members once, while later joins inherit terminal state without replaying effects or credit."
+      summary: "Issues #1523 and #1528: named instances of one Objective carry independent progress and lifecycle. TOML and Rhai address the same typed instance commands. Recipient selectors resolve live authored ship-slot, faction or all-player membership with explicit-slot > faction > all specificity; duplicate explicit-slot matches reject before a ship joins, and other equal matches refuse atomically. A refused live faction edit restores the ship's last accepted faction in the Membership phase before gameplay Input. Completion captures members once, while later joins inherit terminal state without replaying effects or credit. Issue #1542 adds equal-GM named-instance and explicit all-instance controls over the same pure reducer; bulk mutations preview in sorted key order and commit atomically, with typed scope retained in canonical grants and attributed results."
     architecture:
       kind: authoritative-state-machine
       authority: authoritative
@@ -12,9 +12,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/objective_instances.rs, src/ship_slots.rs, src/server_app/world_setup.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/script/schedule.rs, src/narrative.rs, src/snapshot.rs, src/sim_digest.rs]
-      symbols: [ObjectiveInstanceManager, ObjectiveInstanceKey, RecipientSelector, ShipObjectiveInstanceView, AuthoredShipSlotId]
-      tests: [cargo test]
+      paths: [src/objective_instances.rs, src/objective_instances/control.rs, src/gm_objective.rs, src/gm_action.rs, gui/gm-objective-panel.js, src/ship_slots.rs, src/server_app/world_setup.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/script/schedule.rs, src/narrative.rs, src/snapshot.rs, src/sim_digest.rs]
+      symbols: [ObjectiveInstanceManager, ObjectiveInstanceKey, RecipientSelector, ShipObjectiveInstanceView, AuthoredShipSlotId, ObjectiveInstanceScope, apply_instance_command, apply_instance_control]
+      tests: [cargo test --features headless --test gm_objective, npx vitest run tests/client/gm-objective-panel.test.js]
 
   - state: objective-instance-state
     core:

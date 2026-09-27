@@ -307,6 +307,12 @@ pub enum GmAction {
     BackfillShipSlot {
         slot: String,
     },
+    /// Named instance or explicit all-instance control; append-only wire index.
+    ObjectiveInstanceAction {
+        objective: String,
+        scope: crate::gm_objective::ObjectiveInstanceScope,
+        verb: crate::gm_objective::ObjectiveVerb,
+    },
 }
 
 /// The exact affected field one GM action changed, with its before and after
@@ -638,6 +644,7 @@ impl GmAction {
             | Self::SetNpcDoctrine { .. }
             | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
+            | Self::ObjectiveInstanceAction { .. }
             | Self::SetSystemDisabled { .. }
             | Self::TransmitComms { .. }
             | Self::SetEventPaused { .. }
@@ -680,7 +687,7 @@ impl GmAction {
             // minted by the reducer a boundary later.
             Self::SpawnPaletteEntity { palette, .. } => Some(palette.as_str()),
             Self::BackfillShipSlot { slot } => Some(slot.as_str()),
-            Self::ObjectiveAction { objective, .. } => Some(objective),
+            Self::ObjectiveAction { objective, .. } | Self::ObjectiveInstanceAction { objective, .. } => Some(objective),
             Self::TransmitComms { transmission } => Some(&transmission.sender),
             Self::SetContactInformation { change, .. } => Some(change.target()),
             // The faction whose own enemies list moves. The enemy half is on
@@ -837,6 +844,9 @@ impl GmAction {
             {
                 Ok(())
             }
+            Self::ObjectiveInstanceAction {
+                objective, scope, ..
+            } if bounded(objective) && scope.valid() => Ok(()),
             Self::BackfillShipSlot { slot } if bounded(slot) => Ok(()),
             Self::SetStationPuppet { ship, station, .. }
                 if bounded(&ship.0) && bounded(&station.0) =>
@@ -880,7 +890,9 @@ impl GmAction {
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
             Self::BackfillShipSlot { .. } => GmActionKind::ShipSlotBackfill,
             Self::DespawnEntity { .. } => GmActionKind::WorldDespawn,
-            Self::ObjectiveAction { .. } => GmActionKind::ObjectiveControl,
+            Self::ObjectiveAction { .. } | Self::ObjectiveInstanceAction { .. } => {
+                GmActionKind::ObjectiveControl
+            }
             Self::SetContactInformation { .. } => GmActionKind::ContactInformation,
             Self::SetContactClassification { palette, .. } => {
                 if palette.is_some() {
@@ -924,6 +936,7 @@ impl GmAction {
             | Self::SetNpcDoctrine { .. }
             | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
+            | Self::ObjectiveInstanceAction { .. }
             | Self::TransmitComms { .. }
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
@@ -936,7 +949,9 @@ impl GmAction {
     /// The requested narrowing, independent of whether resolution can succeed.
     pub fn objective_verb(&self) -> Option<crate::gm_objective::ObjectiveVerb> {
         match self {
-            Self::ObjectiveAction { verb, .. } => Some(*verb),
+            Self::ObjectiveAction { verb, .. } | Self::ObjectiveInstanceAction { verb, .. } => {
+                Some(*verb)
+            }
             _ => None,
         }
     }
@@ -971,9 +986,17 @@ impl GmAction {
             _ => None,
         }
     }
+    pub fn objective_instance_scope(&self) -> Option<crate::gm_objective::ObjectiveInstanceScope> {
+        match self {
+            Self::ObjectiveInstanceAction { scope, .. } => Some(scope.clone()),
+            _ => None,
+        }
+    }
+
     pub fn objective_recipients(&self) -> Option<Vec<String>> {
         match self {
             Self::ObjectiveAction { recipients, .. } => Some(recipients.clone()),
+            Self::ObjectiveInstanceAction { .. } => Some(Vec::new()),
             _ => None,
         }
     }
@@ -1019,6 +1042,7 @@ impl GmAction {
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. } | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
+            | Self::ObjectiveInstanceAction { .. }
             | Self::TransmitComms { .. }
             | Self::SetFactionHostility { .. }
             | Self::UndoGmAction { .. }
@@ -1057,6 +1081,7 @@ impl GmAction {
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
+            | Self::ObjectiveInstanceAction { .. }
             | Self::SetNpcDoctrine { .. }
             | Self::SetNpcDoctrineChecked { .. }
             | Self::SetFactionHostility { .. }
@@ -1092,6 +1117,7 @@ impl GmAction {
             | Self::DespawnEntity { .. }
             | Self::SetNpcDoctrine { .. } | Self::SetNpcDoctrineChecked { .. }
             | Self::ObjectiveAction { .. }
+            | Self::ObjectiveInstanceAction { .. }
             | Self::TransmitComms { .. }
             // An undo is always a request to make something happen; WHAT it
             // makes true is `expected.before`, on the action itself.
@@ -1233,6 +1259,8 @@ pub struct GmActionRefusal {
     pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_recipients: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_instance_scope: Option<crate::gm_objective::ObjectiveInstanceScope>,
     /// Captured Comms audience, including refusals with no admitted grant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comms_recipients: Option<Vec<String>>,
@@ -1258,6 +1286,7 @@ impl GmActionRefusal {
         .with_lever(self.lever)
         .with_effect(None, self.effect_scope.clone())
         .with_objective(self.objective_verb, self.objective_recipients.clone())
+        .with_objective_instance_scope(self.objective_instance_scope.clone())
         .with_comms_recipients(self.comms_recipients.clone())
         .with_npc_doctrine(self.npc_doctrine.clone())
     }
@@ -1422,6 +1451,20 @@ pub fn validate_fleet_frame(
             }
             if is_objective != refusal.objective_verb.is_some()
                 || is_objective != refusal.objective_recipients.is_some()
+            {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
+            if refusal
+                .objective_instance_scope
+                .as_ref()
+                .is_some_and(|scope| {
+                    !is_objective
+                        || !scope.valid()
+                        || refusal
+                            .objective_recipients
+                            .as_ref()
+                            .is_some_and(|rows| !rows.is_empty())
+                })
             {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
@@ -1697,6 +1740,8 @@ pub struct LoggedGmAction {
     pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_recipients: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_instance_scope: Option<crate::gm_objective::ObjectiveInstanceScope>,
     /// Immutable Comms audience on the result itself: local refusals have no
     /// grant, and bounded activity/history must not depend on a live journal
     /// or current Fleet membership. Absent for every other action family so
@@ -1756,6 +1801,7 @@ impl LoggedGmAction {
             lever: None,
             effect_scope: None,
             objective_verb: None,
+            objective_instance_scope: None,
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
@@ -1785,6 +1831,13 @@ impl LoggedGmAction {
     ) -> Self {
         self.objective_verb = verb;
         self.objective_recipients = recipients;
+        self
+    }
+    pub fn with_objective_instance_scope(
+        mut self,
+        scope: Option<crate::gm_objective::ObjectiveInstanceScope>,
+    ) -> Self {
+        self.objective_instance_scope = scope;
         self
     }
     pub fn with_observer(mut self, observer: Option<String>) -> Self {
@@ -1857,6 +1910,7 @@ impl LoggedGmAction {
             request.action.objective_verb(),
             request.action.objective_recipients(),
         )
+        .with_objective_instance_scope(request.action.objective_instance_scope())
         .with_comms_recipients(request.action.comms_recipients())
         .with_npc_doctrine(request.action.npc_doctrine())
         // An inverse refused at ingress must still say WHICH action it meant to
@@ -2285,6 +2339,7 @@ impl GmActionJournal {
             || result.order != Some(grant.order)
             || result.objective_verb != grant.action.objective_verb()
             || result.objective_recipients != grant.action.objective_recipients()
+            || result.objective_instance_scope != grant.action.objective_instance_scope()
             || result.comms_recipients != grant.action.comms_recipients()
             || result.npc_doctrine != grant.action.npc_doctrine()
             || result.undo_of != grant.action.undo_reference()
@@ -2475,6 +2530,7 @@ impl GmActionJournal {
                         | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. }
+                        | GmAction::ObjectiveInstanceAction { .. }
                         | GmAction::SetNpcDoctrine { .. } | GmAction::SetNpcDoctrineChecked { .. }
                         // A faction relation and an inverse have no latch to
                         // fold forward here either: both are recorded by the
@@ -2565,6 +2621,7 @@ impl GmActionJournal {
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
+                | GmAction::ObjectiveInstanceAction { .. }
                 | GmAction::SetNpcDoctrine { .. }
                 | GmAction::SetNpcDoctrineChecked { .. }
                 | GmAction::SetFactionHostility { .. }
@@ -2594,6 +2651,7 @@ impl GmActionJournal {
                 lever: grant.action.event_lever(),
                 effect_scope: grant.action.effect_scope(),
                 objective_verb: grant.action.objective_verb(),
+                objective_instance_scope: grant.action.objective_instance_scope(),
                 objective_recipients: grant.action.objective_recipients(),
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
@@ -2693,6 +2751,7 @@ impl GmActionJournal {
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
+                | GmAction::ObjectiveInstanceAction { .. }
                 | GmAction::SetNpcDoctrine { .. }
                 | GmAction::SetNpcDoctrineChecked { .. }
                 | GmAction::SetFactionHostility { .. }
@@ -2723,6 +2782,7 @@ impl GmActionJournal {
                 lever: grant.action.event_lever(),
                 effect_scope: grant.action.effect_scope(),
                 objective_verb: grant.action.objective_verb(),
+                objective_instance_scope: grant.action.objective_instance_scope(),
                 objective_recipients: grant.action.objective_recipients(),
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
@@ -3627,6 +3687,94 @@ pub fn apply_due_actions(
                     result
                 }
             },
+            GmAction::ObjectiveInstanceAction {
+                objective,
+                scope,
+                verb,
+            } => {
+                let registry = factions.registry.as_deref();
+                let mut fleet: Vec<_> = objective_control
+                    .fleet_members
+                    .iter()
+                    .map(
+                        |(uuid, slot, faction)| crate::objective_instances::PlayerShipMembership {
+                            ship_id: uuid.0.clone(),
+                            slot_id: slot.0.clone(),
+                            faction: faction
+                                .and_then(|faction| {
+                                    registry.and_then(|registry| registry.get(&faction.0))
+                                })
+                                .map(|faction| faction.name.clone())
+                                .unwrap_or_default(),
+                        },
+                    )
+                    .collect();
+                fleet.sort_by(|a, b| a.ship_id.cmp(&b.ship_id));
+                let known_slots = world_config
+                    .as_deref()
+                    .map(|config| {
+                        config
+                            .effective_ship_slots()
+                            .into_iter()
+                            .map(|slot| slot.id)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let known_factions = registry
+                    .map(|registry| {
+                        registry
+                            .iter()
+                            .map(|faction| faction.name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                match (
+                    content.as_deref(),
+                    objective_control.manager.as_deref_mut(),
+                    objective_control.instances.as_deref_mut(),
+                ) {
+                    (Some(runtime), Some(manager), Some(instances)) => {
+                        let result = crate::gm_objective::apply_instance_control(
+                            runtime,
+                            &mut manager.0,
+                            &mut instances.0,
+                            objective,
+                            scope,
+                            *verb,
+                            &fleet,
+                            &known_slots,
+                            &known_factions,
+                        );
+                        for effect in &result.effects {
+                            crate::objective_instances::control::publish_instance_apply(
+                                effect,
+                                effect
+                                    .transition
+                                    .as_ref()
+                                    .and_then(|(id, _)| manager.0.targets(id))
+                                    .unwrap_or_default(),
+                                objective_control.balance.as_deref_mut(),
+                                objective_control.layers.as_deref_mut(),
+                            );
+                        }
+                        if let Some(message) = result.diagnostic {
+                            crate::recipients::queue_report(
+                                &mut objective_control.commands,
+                                now,
+                                "GM Console",
+                                None,
+                                "objective-instance",
+                                message,
+                            );
+                        }
+                        (result.outcome, result.reason)
+                    }
+                    _ => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownObjective),
+                    ),
+                }
+            }
             GmAction::ObjectiveAction {
                 objective,
                 verb,
@@ -3638,6 +3786,18 @@ pub fn apply_due_actions(
                     .map(|uuid| uuid.0.clone())
                     .collect();
                 match (content.as_deref(), objective_control.manager.as_deref_mut()) {
+                    _ if objective_control
+                        .instances
+                        .as_deref()
+                        .is_some_and(|instances| {
+                            instances.0.has_definition_instances(objective)
+                        }) =>
+                    {
+                        (
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::ObjectiveScopeMismatch),
+                        )
+                    }
                     (Some(runtime), Some(manager)) => crate::gm_objective::apply_control(
                         runtime,
                         &mut manager.0,
@@ -4061,6 +4221,7 @@ pub fn apply_due_actions(
                             lever: grant.action.event_lever(),
                             effect_scope: None,
                             objective_verb: None,
+                            objective_instance_scope: None,
                             objective_recipients: None,
                             comms_recipients: None,
                             observer: None,
@@ -4327,6 +4488,7 @@ pub fn apply_due_actions(
                         lever: grant.action.event_lever(),
                         effect_scope: None,
                         objective_verb: None,
+                        objective_instance_scope: None,
                         objective_recipients: None,
                         comms_recipients: None,
                         observer: None,
@@ -4414,6 +4576,7 @@ pub fn apply_due_actions(
                             lever: grant.action.event_lever(),
                             effect_scope: None,
                             objective_verb: None,
+                            objective_instance_scope: None,
                             objective_recipients: None,
                             comms_recipients: None,
                             observer: None,
@@ -4511,6 +4674,7 @@ pub fn apply_due_actions(
                 lever: grant.action.event_lever(),
                 effect_scope: requested_scope,
                 objective_verb: grant.action.objective_verb(),
+                objective_instance_scope: grant.action.objective_instance_scope(),
                 objective_recipients: grant.action.objective_recipients(),
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
@@ -4613,6 +4777,7 @@ pub(crate) fn refusal_for(
         lever: proposal.action.event_lever(),
         effect_scope: proposal.action.effect_scope(),
         objective_verb: proposal.action.objective_verb(),
+        objective_instance_scope: proposal.action.objective_instance_scope(),
         objective_recipients: proposal.action.objective_recipients(),
         comms_recipients: proposal.action.comms_recipients(),
         observer: proposal.action.observer_id(),
@@ -6829,6 +6994,7 @@ station = "helm"
             correlation: GmActionId::new("auth-refusal").unwrap(),
             effect_scope: None,
             objective_verb: None,
+            objective_instance_scope: None,
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
@@ -6985,6 +7151,7 @@ station = "helm"
             lever: None,
             effect_scope: None,
             objective_verb: None,
+            objective_instance_scope: None,
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
@@ -7007,6 +7174,7 @@ station = "helm"
             lever: None,
             effect_scope: None,
             objective_verb: None,
+            objective_instance_scope: None,
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
@@ -7037,6 +7205,7 @@ station = "helm"
             lever: None,
             effect_scope: None,
             objective_verb: None,
+            objective_instance_scope: None,
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
@@ -7078,6 +7247,7 @@ station = "helm"
                 verb: None,
                 effect_scope: None,
                 objective_verb: None,
+                objective_instance_scope: None,
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
@@ -8653,6 +8823,7 @@ kind = "{id}"
             correlation: GmActionId::new("effect-refusal").unwrap(),
             effect_scope: None,
             objective_verb: None,
+            objective_instance_scope: None,
             objective_recipients: None,
             comms_recipients: None,
             observer: None,

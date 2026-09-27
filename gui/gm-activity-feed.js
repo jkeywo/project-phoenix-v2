@@ -1,3 +1,4 @@
+import { validInstanceScope } from './gm-objective-panel.js';
 import { wireText } from './strings.js';
 // The milli-HP unit is spelled once, in the module that owns the directed
 // world-effect vocabulary (issue #1310); a second conversion here is exactly
@@ -125,8 +126,9 @@ function normaliseAction(value) {
   if (value.type === 'objective_action' && typeof value.objective === 'string' && value.objective
       && ['activate', 'complete', 'fail'].includes(value.verb) && Array.isArray(value.recipients)
       && value.recipients.every((id) => typeof id === 'string' && id)
-      && new Set(value.recipients).size === value.recipients.length) {
-    return { type: value.type, objective: value.objective, verb: value.verb, recipients: [...value.recipients] };
+      && new Set(value.recipients).size === value.recipients.length
+      && (value.instance_scope == null || validInstanceScope(value.instance_scope))) {
+    return { type: value.type, objective: value.objective, verb: value.verb, recipients: [...value.recipients], ...(value.instance_scope == null ? {} : { instance_scope: value.instance_scope }) };
   }
   if (value.type === 'spawn_palette_entity'
       && typeof value.palette === 'string' && value.palette.length > 0) {
@@ -504,7 +506,7 @@ export function createGmActivityFeed({
         } else if (detail.action.type === 'objective_action') {
           action = t(`server.gm.activity.action.objective_${detail.action.verb}`, {
             objective: detail.action.objective,
-            ships: detail.action.recipients.length ? detail.action.recipients.join(', ')
+            ships: detail.action.instance_scope ? (detail.action.instance_scope === 'all' ? t('server.gm.objective.all_instances') : t('server.gm.objective.instance', { instance: detail.action.instance_scope.instance })) : detail.action.recipients.length ? detail.action.recipients.join(', ')
               : t('server.gm.objective.all_ships'),
           });
         } else if (detail.action.type === 'set_npc_doctrine') {

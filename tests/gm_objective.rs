@@ -333,3 +333,292 @@ fn seeded_canonical_objectives_replay_and_restore_terminal_records() {
         .drain_transitions()
         .is_empty());
 }
+
+fn instance_app() -> App {
+    let source = r#"
+[global]
+seed = 1542
+[[ship_slot]]
+id = "lead"
+default_ship = "cruiser"
+ships = [{ template_path = "cruiser" }]
+[[ship_slot]]
+id = "wing"
+default_ship = "cruiser"
+ships = [{ template_path = "cruiser" }]
+[[gm_objective_palette]]
+id = "escort"
+instance_id = "all"
+label = "objective.escort"
+text = "objective.escort"
+all_player_ships = true
+[[gm_objective_palette]]
+id = "escort"
+instance_id = "faction"
+label = "objective.escort"
+text = "objective.escort"
+recipient_factions = ["alpha"]
+[[gm_objective_palette]]
+id = "escort"
+instance_id = "lead"
+label = "objective.escort"
+text = "objective.escort"
+recipient_ship_slots = ["lead"]
+[[gm_objective_palette]]
+id = "watch"
+instance_id = "alpha"
+label = "objective.watch"
+text = "objective.watch"
+recipient_factions = ["alpha"]
+[[gm_objective_palette]]
+id = "ambiguous"
+instance_id = "one"
+label = "objective.watch"
+text = "objective.watch"
+recipient_factions = ["alpha"]
+[[gm_objective_palette]]
+id = "ambiguous"
+instance_id = "two"
+label = "objective.watch"
+text = "objective.watch"
+recipient_factions = ["alpha"]
+"#;
+    let config = phoenix::world::config::parse_world(source).unwrap();
+    let mut app = bare();
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .gm_objective_palette = config.gm_objective_palette.clone();
+    app.insert_resource(config)
+        .init_resource::<phoenix::world::server::ObjectiveInstanceManagerRes>();
+    let mut registry = phoenix::ai::faction::FactionRegistry::new();
+    for (n, name) in [(1, "alpha"), (2, "beta")] {
+        registry.insert(phoenix::ai::faction::FactionConfig {
+            uuid: uuid::Uuid::from_u128(n),
+            name: name.into(),
+            display_name: None,
+            enemies: vec![],
+            compliance: None,
+        });
+    }
+    app.insert_resource(phoenix::entities::config_cache::FactionRegistryResource(
+        registry,
+    ));
+    let entities: Vec<_> = app
+        .world_mut()
+        .query::<(Entity, &phoenix::entities::spawner::EntityUuid)>()
+        .iter(app.world())
+        .map(|(entity, id)| (entity, id.0.clone()))
+        .collect();
+    for (entity, id) in entities {
+        app.world_mut().entity_mut(entity).insert((
+            phoenix::server_app::Ship,
+            phoenix::ship_slots::AuthoredShipSlotId(
+                if id == "ship-a" { "lead" } else { "wing" }.into(),
+            ),
+            phoenix::entities::spawner::FactionComponent(uuid::Uuid::from_u128(1)),
+        ));
+    }
+    app
+}
+
+fn instance_grant(
+    sequence: u64,
+    id: &str,
+    scope: phoenix::gm_objective::ObjectiveInstanceScope,
+    verb: ObjectiveVerb,
+) -> GmActionGrant {
+    let mut value = grant(sequence, 42, id, verb, vec![]);
+    value.operator_id = if sequence % 2 == 0 {
+        "gm-two"
+    } else {
+        "gm-one"
+    }
+    .into();
+    value.action = GmAction::ObjectiveInstanceAction {
+        objective: id.into(),
+        scope,
+        verb,
+    };
+    value
+}
+
+#[test]
+fn gm_instance_bulk_is_atomic_ordered_and_attributed_with_repeat_noop() {
+    use phoenix::gm_objective::ObjectiveInstanceScope as Scope;
+    use phoenix::world::server::ObjectiveInstanceManagerRes;
+    let mut app = instance_app();
+    let mut replay = instance_app();
+    let actions = [
+        instance_grant(1, "escort", Scope::All, ObjectiveVerb::Activate),
+        instance_grant(
+            2,
+            "escort",
+            Scope::Instance("lead".into()),
+            ObjectiveVerb::Complete,
+        ),
+        instance_grant(3, "escort", Scope::All, ObjectiveVerb::Fail),
+        instance_grant(4, "escort", Scope::All, ObjectiveVerb::Complete),
+        instance_grant(5, "escort", Scope::All, ObjectiveVerb::Complete),
+        instance_grant(6, "ambiguous", Scope::All, ObjectiveVerb::Activate),
+    ];
+    for action in actions {
+        let encoded = serde_json::to_string(&action).unwrap();
+        apply(&mut app, action);
+        apply(&mut replay, serde_json::from_str(&encoded).unwrap());
+        assert_eq!(
+            app.world().resource::<ObjectiveInstanceManagerRes>().0,
+            replay.world().resource::<ObjectiveInstanceManagerRes>().0
+        );
+        assert_eq!(
+            app.world().resource::<GmActionLog>().entries(),
+            replay.world().resource::<GmActionLog>().entries()
+        );
+    }
+    let instances = &app.world().resource::<ObjectiveInstanceManagerRes>().0;
+    assert_eq!(
+        instances.records().len(),
+        3,
+        "conflicting bulk activation leaves no first instance behind"
+    );
+    assert!(instances
+        .records()
+        .iter()
+        .all(|row| row.status == ObjectiveStatus::Completed));
+    let results = app.world().resource::<GmActionLog>().entries();
+    assert_eq!(
+        results.iter().map(|row| row.outcome).collect::<Vec<_>>(),
+        [
+            GmActionOutcome::Applied,
+            GmActionOutcome::Applied,
+            GmActionOutcome::Refused,
+            GmActionOutcome::Applied,
+            GmActionOutcome::NoOp,
+            GmActionOutcome::Refused
+        ]
+    );
+    assert_eq!(results[1].operator_id, "gm-two");
+    assert_eq!(
+        results[1].objective_instance_scope,
+        Some(Scope::Instance("lead".into()))
+    );
+    assert_eq!(results[3].objective_instance_scope, Some(Scope::All));
+    assert!(app
+        .world()
+        .resource::<phoenix::recipients::RecipientDiagnostics>()
+        .0
+        .back()
+        .unwrap()
+        .message
+        .contains("equal-specificity"));
+    let credits = app
+        .world_mut()
+        .resource_mut::<Messages<phoenix::core::balance::BalanceEvent>>()
+        .drain()
+        .filter(|event| {
+            matches!(
+                event,
+                phoenix::core::balance::BalanceEvent::ObjectiveCompleted { .. }
+            )
+        })
+        .count();
+    assert_eq!(
+        credits, 3,
+        "one completion per instance, never replayed on no-op"
+    );
+}
+
+#[test]
+fn gm_instances_follow_live_factions_freeze_history_and_keep_completed_credit() {
+    use phoenix::gm_objective::ObjectiveInstanceScope as Scope;
+    use phoenix::objective_instances::ObjectiveInstanceKey;
+    use phoenix::world::server::ObjectiveInstanceManagerRes;
+    let mut app = instance_app();
+    apply(
+        &mut app,
+        instance_grant(1, "escort", Scope::All, ObjectiveVerb::Activate),
+    );
+    apply(
+        &mut app,
+        instance_grant(2, "watch", Scope::All, ObjectiveVerb::Activate),
+    );
+    let key = ObjectiveInstanceKey {
+        objective_id: "watch".into(),
+        instance_id: "alpha".into(),
+    };
+    app.world_mut()
+        .resource_mut::<ObjectiveInstanceManagerRes>()
+        .0
+        .set_progress(&key, 0.4);
+    let wing = app
+        .world_mut()
+        .query::<(Entity, &phoenix::entities::spawner::EntityUuid)>()
+        .iter(app.world())
+        .find(|(_, id)| id.0 == "ship-b")
+        .unwrap()
+        .0;
+    app.world_mut()
+        .entity_mut(wing)
+        .insert(phoenix::entities::spawner::FactionComponent(
+            uuid::Uuid::from_u128(2),
+        ));
+    phoenix::objective_instances::reconcile_memberships(app.world_mut());
+    let instances = &app.world().resource::<ObjectiveInstanceManagerRes>().0;
+    let lead = instances
+        .view_for_ship("ship-a")
+        .into_iter()
+        .find(|view| view.key.objective_id == "escort")
+        .unwrap();
+    let wing_view = instances
+        .view_for_ship("ship-b")
+        .into_iter()
+        .find(|view| view.key.objective_id == "escort")
+        .unwrap();
+    assert_eq!(
+        lead.key.instance_id, "lead",
+        "explicit slot beats faction and all"
+    );
+    assert_eq!(
+        wing_view.key.instance_id, "all",
+        "live faction change falls through to all"
+    );
+    let frozen = instances
+        .view_for_ship("ship-b")
+        .into_iter()
+        .find(|view| view.key.objective_id == "watch")
+        .unwrap();
+    assert!(!frozen.assigned);
+    assert_eq!(frozen.progress, 0.4);
+    apply(
+        &mut app,
+        instance_grant(3, "watch", Scope::All, ObjectiveVerb::Complete),
+    );
+    app.world_mut()
+        .entity_mut(wing)
+        .insert(phoenix::entities::spawner::FactionComponent(
+            uuid::Uuid::from_u128(1),
+        ));
+    phoenix::objective_instances::reconcile_memberships(app.world_mut());
+    let instances = &app.world().resource::<ObjectiveInstanceManagerRes>().0;
+    let joined = instances
+        .view_for_ship("ship-b")
+        .into_iter()
+        .find(|view| view.key.objective_id == "watch")
+        .unwrap();
+    assert!(joined.assigned);
+    assert_eq!(joined.status, ObjectiveStatus::Completed);
+    assert_eq!(
+        instances
+            .records()
+            .iter()
+            .find(|row| row.spec.key == key)
+            .unwrap()
+            .completion_members,
+        ["ship-a"]
+    );
+    let definitions = &app.world().resource::<ObjectiveManagerRes>().0;
+    let crew = instances.project_snapshots_for_ship("ship-b", definitions.sorted_snapshots());
+    assert!(
+        crew.iter().all(|row| !row.id.contains("lead")),
+        "crew projection never contains another instance's identity"
+    );
+}

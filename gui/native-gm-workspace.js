@@ -13,6 +13,7 @@ const ACTIONS = Object.freeze({
   __hostSetGmEventPaused: 'set_event_paused',
   __hostArmGmEventSkip: 'arm_gm_event_skip',
   __hostObjectiveAction: 'objective_action',
+  __hostObjectiveInstanceAction: 'objective_instance_action',
   __hostTransmitComms: 'transmit_comms',
   __hostSpawnPaletteEntity: 'spawn_palette_entity',
   __hostApplyDirectEffect: 'apply_direct_effect',

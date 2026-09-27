@@ -4999,7 +4999,7 @@ fn apply_loaded_layer(
         runtime
             .gm_objective_palette
             .iter()
-            .any(|live| live.id == entry.id)
+            .any(|live| live.id == entry.id && live.instance_id() == entry.instance_id())
     }) {
         bevy::log::error!("layer {path} has a duplicate GM Objective palette id");
         return;

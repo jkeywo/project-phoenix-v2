@@ -694,6 +694,7 @@ mod tests {
             lever: None,
             effect_scope: None,
             objective_verb: None,
+            objective_instance_scope: None,
             objective_recipients: None,
             comms_recipients: None,
             observer: None,

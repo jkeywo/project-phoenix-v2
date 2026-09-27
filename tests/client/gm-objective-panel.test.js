@@ -27,6 +27,63 @@ function mount(options = {}) {
   return { panel, submit, schedule, cancelSchedule, setOperator: (value) => { operator = value; panel.refreshAdmission(); } };
 }
 
+const instance = (changes = {}) => authored({ id: 'escort::pair', objective_id: 'escort',
+  instance_id: 'pair', progress: 0.5, completion_members: [], status: 'Active', ...changes });
+
+it('keeps explicit instance and all-instance requests separate and attributes matching results', () => {
+  const { panel, submit } = mount();
+  const state = payload({ objective_palette: [], objectives: [instance()] });
+  expect(panel.update(state)).toBe(true);
+  const rows = document.querySelectorAll('.gm-objective-row');
+  expect(rows).toHaveLength(2);
+  expect(rows[0].textContent).toContain('Instance pair');
+  expect(rows[1].textContent).toContain('Complete all instances');
+  rows[0].querySelector('[data-verb="complete"]').click();
+  panel.confirm();
+  expect(submit).toHaveBeenLastCalledWith({ operator_id: 'gm-a', correlation: 'objective-1',
+    objective: 'escort', verb: 'complete', scope: { instance: 'pair' } });
+  panel.update({ ...state, objective_results: [result({ target: 'escort', objective_verb: 'complete',
+    objective_recipients: [], objective_instance_scope: 'all' })] });
+  expect(panel.state().pending).not.toBeNull();
+  panel.update({ ...state, objective_results: [result({ target: 'escort', objective_verb: 'complete',
+    objective_recipients: [], objective_instance_scope: { instance: 'pair' } })] });
+  expect(panel.state().pending).toBeNull();
+  document.querySelector('[data-objective="all-instances:escort"] [data-verb="complete"]').click();
+  panel.confirm();
+  expect(submit.mock.calls.at(-1)[0].scope).toBe('all');
+});
+
+it('shows fixed completion credit and never treats empty instance membership as all ships', () => {
+  const { panel } = mount();
+  panel.update(payload({ objective_palette: [], objectives: [instance({ recipients: [],
+    completion_members: ['ship-a'], status: 'Completed', progress: 1 })] }));
+  expect(document.getElementById('gm-objective-list').textContent).toContain('credited at completion: Courier');
+  panel.select({ kind: 'player_ship', entity_id: 'ship-b', name: 'Wing' });
+  expect(document.querySelectorAll('.gm-objective-row')).toHaveLength(0);
+});
+
+it('preserves focused instance controls and refuses malformed instance identities', () => {
+  const { panel } = mount();
+  const state = payload({ objective_palette: [], objectives: [instance()] });
+  panel.update(state);
+  button('complete').focus();
+  panel.update(state);
+  expect(document.activeElement.dataset.verb).toBe('complete');
+  expect(document.activeElement.dataset.objective).toBe('escort::pair');
+  expect(parseGmObjectivePayload(payload({ objectives: [instance({ objective_id: null })] }))).toBeNull();
+});
+
+it('names each instance distinctly for assistive technology', () => {
+  const { panel } = mount();
+  panel.update(payload({ objective_palette: [], objectives: [instance(),
+    instance({ id: 'escort::wing', instance_id: 'wing' })] }));
+  const names = [...document.querySelectorAll('[data-verb="complete"]')].map(button => button.getAttribute('aria-label'));
+  expect(names[0]).toContain('Instance pair');
+  expect(names[1]).toContain('Instance wing');
+  expect(names[2]).toContain('All instances');
+  expect(new Set(names).size).toBe(3);
+});
+
 it('uses the shared Objective policy and retains captured scope for ordinary stale admission', () => {
   const profile = createGmConfirmationProfile();
   const confirmation = createGmConfirmationController({ doc: document,

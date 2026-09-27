@@ -117,3 +117,33 @@ it('never promotes on media failure while the service still reports the owner pr
     expect(retried.sent.some(frame=>frame.type==='fleet-state')).toBe(true);
   } finally {two?.member.close();lead?.fleet.close();vi.useRealTimers();}
 });
+
+it('retains owner-changed while a survivor awaits its local Rust Begin acknowledgement',async()=>{
+  const world=makeWorld(),sockets=[],errors=[],stages=[];
+  let releaseBegin;
+  const factories={socket:url=>{const socket=world.socket(url),send=socket.send.bind(socket);socket.sent=[];socket.send=raw=>{socket.sent.push(JSON.parse(raw));send(raw);};sockets.push(socket);return socket;},peer:makePeerFactory()};
+  const options={transports:['ws-relay'],levers:transportLeversFromLocation('?transport=ws-relay'),
+    onContinuation:async request=>{stages.push([2,request.op]);return {status:{begin:'held',replayed:'replayed',commit:'committed'}[request.op],loss_tick:101};},
+    onContinuationFrame:()=>true,onError:(reason,detail)=>errors.push({reason,detail})};
+  const lead=await leadOn(world,factories,options);
+  const two=await memberOn(world,factories,lead.code.full,options);
+  const three=await memberOn(world,factories,lead.code.full,{...options,onContinuation:async request=>{
+    stages.push([3,request.op]);
+    if(request.op==='begin')await new Promise(resolve=>{releaseBegin=resolve;});
+    return {status:{begin:'held',replayed:'replayed',commit:'committed'}[request.op],loss_tick:101};
+  }});
+  try {
+    lead.fleet.freeze();await settle();
+    sockets[0].onclose=null;sockets[0].close();
+    for(let i=0;i<5;i++)await settle();
+    expect(two.member.isOwner).toBe(true);
+    expect(releaseBegin).toBeTypeOf('function');
+    expect(stages).not.toContainEqual([3,'commit']);
+    releaseBegin();for(let i=0;i<10;i++)await settle();
+    expect(errors).toEqual([]);
+    expect(sockets[2].sent.filter(frame=>frame.type==='fleet-takeover')).toHaveLength(0);
+    expect(stages.filter(([,op])=>op==='commit')).toEqual([[3,'commit'],[2,'commit']]);
+    two.member.broadcast(tick(2,110));await settle();
+    expect(three.simulationFrames.at(-1)).toMatchObject({raw:tick(2,110),authSlot:2});
+  } finally {two.member.close();three.member.close();}
+});

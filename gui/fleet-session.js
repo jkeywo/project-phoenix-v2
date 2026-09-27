@@ -1235,6 +1235,7 @@ export function createFleetMember(opts) {
   let continuation = null;
   let promoted = null;
   let continuationReconnect = false;
+  let announcedOwnerEpoch = 0;
   let streamBaseline = null;
   let roster = null;
   let acceptedRole = role === HOST_ROLE_GM || role === HOST_ROLE_SHIP_GM
@@ -1412,7 +1413,8 @@ export function createFleetMember(opts) {
     onFleetControl: async event => {
       if (!continuation) return;
       if (event.type === 'fleet-owner-lost' && event.mediaFailed) {
-        if (await continuation.begin(event.epoch + 1)) joiner.requestTakeover();
+        const nextEpoch = event.epoch + 1;
+        if (await continuation.begin(nextEpoch) && announcedOwnerEpoch < nextEpoch) joiner.requestTakeover();
       } else if (event.type === 'fleet-takeover-grant') {
         if (continuation.phase !== 'held' || event.slot !== hostSlotOrdinal(mine)
             || event.epoch !== continuation.epoch) return;
@@ -1428,15 +1430,15 @@ export function createFleetMember(opts) {
           onSimulationRoster: () => true,
           onRoster: value => { roster = value; onRoster(value); },
         });
-      } else if (event.type === 'fleet-owner-changed' && event.epoch > continuation.epoch) {
-        if (await continuation.begin(event.epoch)) {
-          continuationReconnect = true;
-          joiner.reconnectContinuation(event.epoch);
+      } else if (event.type === 'fleet-owner-changed' && event.epoch >= continuation.epoch) {
+        // Service takeover can complete while this peer still awaits its Rust
+        // hold acknowledgement. Remember that authority before awaiting, so a
+        // delayed owner-lost handler cannot request takeover in the old epoch.
+        announcedOwnerEpoch = Math.max(announcedOwnerEpoch, event.epoch);
+        if (event.slot !== hostSlotOrdinal(mine) && await continuation.begin(event.epoch)
+            && continuation.phase === 'held' && continuation.epoch === event.epoch) {
+          continuationReconnect = joiner.reconnectContinuation(event.epoch) || continuationReconnect;
         }
-      } else if (event.type === 'fleet-owner-changed' && event.epoch === continuation.epoch
-          && continuation.phase === 'held' && event.slot !== hostSlotOrdinal(mine)) {
-        continuationReconnect = true;
-        joiner.reconnectContinuation(event.epoch);
       }
     },
     onData: (frame) => {

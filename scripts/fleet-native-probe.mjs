@@ -8,7 +8,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { fileHash, treeHash } from './profile-provenance.mjs';
-import { paneWorkloadScript, instrumentNativeGmModule } from './fleet-native-workload.mjs';
+import { paneWorkloadScript, instrumentNativeGmModule, nativeObserverReporterScript } from './fleet-native-workload.mjs';
 
 export function parseNativeProbeArgs(argv) {
   const allowed = new Set(['binary', 'bundle', 'source', 'out', 'rendezvous', 'origin', 'fleet-code', 'seconds', 'role', 'workload']);
@@ -43,18 +43,7 @@ export function instrumentNativeFleetModule(source, endpoint, { gmJoinCode = nul
   return source.replace(declaration, 'function observedNativeFleetPeer(') + `
 export function createNativeFleetPeer(options = {}) {
   const endpoint = ${JSON.stringify(endpoint)};
-  const pendingImages = new Set();
-  let overflow = false;
-  const report = (kind, value) => {
-    if (pendingImages.size >= 256) {
-      if (!overflow) { overflow = true; fetch(endpoint + '?event=' + encodeURIComponent(JSON.stringify({kind:'observer-overflow',value:{reason:'pending-telemetry'}}))).catch(() => {}); }
-      return;
-    }
-    try {
-      const request = fetch(endpoint + '?event=' + encodeURIComponent(JSON.stringify({kind,value})));
-      pendingImages.add(request); request.catch(() => {}).finally(() => pendingImages.delete(request));
-    } catch (_) {}
-  };
+  ${nativeObserverReporterScript(endpoint)}
   report('engine', {userAgent:navigator.userAgent,queueMicrotask:typeof queueMicrotask});
   window.addEventListener('error', event => report('page-error', {message:event.message,stack:event.error?.stack}));
   window.addEventListener('unhandledrejection', event => report('page-rejection', {message:String(event.reason)}));
@@ -149,19 +138,21 @@ export async function runNativeProbe(options) {
   const events = [];
   let eventOverflow = false;
   const eventPath = `/${randomUUID()}`;
-  const listener = http.createServer((req, res) => {
+  const observerFault = reason => {
+    if (eventOverflow) return;
+    eventOverflow = true;
+    const event = {at:new Date().toISOString(),kind:'observer-overflow',value:{reason}};
+    events.push(event); options.onEvent?.(event);
+    fs.appendFileSync(path.join(output,'events.ndjson'),JSON.stringify(event) + '\n');
+  };
+  const listener = http.createServer({maxHeaderSize:131072}, (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (req.method === 'GET' && url.pathname === eventPath + '/control') {
       res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}).end(JSON.stringify(options.nextCommand?.() || null)); return;
     }
     if (req.method !== 'GET' || url.pathname !== eventPath) { res.writeHead(404).end(); return; }
     if ((req.url?.length || 0) > 65536 || events.length >= 20000) {
-      if (!eventOverflow) {
-        eventOverflow = true;
-        const event = {at:new Date().toISOString(),kind:'observer-overflow',value:{reason:'event-bound'}};
-        events.push(event); options.onEvent?.(event);
-        fs.appendFileSync(path.join(output,'events.ndjson'),JSON.stringify(event) + '\n');
-      }
+      observerFault('event-bound');
       res.writeHead(413).end(); return;
     }
     try {
@@ -173,6 +164,10 @@ export async function runNativeProbe(options) {
       options.onEvent?.(observed);
       res.writeHead(204, { 'Access-Control-Allow-Origin': '*' }).end();
     } catch { res.writeHead(400).end(); }
+  });
+  listener.on('clientError', (error, socket) => {
+    observerFault('http-parser-' + error.code);
+    socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
   });
   const evidence = { kind: 'native-runtime-bootstrap-only', sourceRevision: revision, dirtySource: !!dirty.trim(),
     binary: { path: binary, sha256: fileHash(binary), sourceBuildVerified: false },
@@ -206,7 +201,7 @@ export async function runNativeProbe(options) {
     fs.writeFileSync(path.join(scratchBundle, 'gui/native-fleet-peer.js'), instrumented);
     if (options.workload) {
       const gmPath = path.join(scratchBundle, 'gui/native-gm-workspace.js');
-      fs.writeFileSync(gmPath, instrumentNativeGmModule(fs.readFileSync(gmPath,'utf8'), endpoint));
+      fs.writeFileSync(gmPath, instrumentNativeGmModule(fs.readFileSync(gmPath,'utf8'), endpoint, {deferReady:options.deferGmReady === true}));
       const client = path.join(scratchBundle,'client');
       fs.unlinkSync(client);
       fs.mkdirSync(client);

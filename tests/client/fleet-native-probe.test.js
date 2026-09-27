@@ -22,7 +22,7 @@ describe('bounded native runtime bootstrap probe', () => {
           options.send({kind:'fleet_join_status',status:'admitted'}); return raw; } };
     }`;
     const context = { window: {addEventListener() {}}, navigator: { userAgent: 'Real engine test double' }, Set, JSON,
-      fetch: value => { messages.push(JSON.parse(new URL(value).searchParams.get('event'))); return Promise.resolve(); } };
+      fetch: value => { messages.push(JSON.parse(new URL(value).searchParams.get('event'))); return Promise.resolve({ok:true}); } };
     vm.createContext(context);
     vm.runInContext(instrumentNativeFleetModule(source, 'http://127.0.0.1/token').replace('export function createNativeFleetPeer', 'function createNativeFleetPeer'), context);
     const peer = context.createNativeFleetPeer({send: value => calls.push(value), onDiag: value => calls.push(value)});

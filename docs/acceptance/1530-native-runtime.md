@@ -161,3 +161,25 @@ identity store), and `native-six-workload-isolated-stamp-1530` (ship-ready snaps
 sent before admission). The last was deliberately stopped after that launch
 blocker was identified; its `operator-stop.json` records the reason and exact
 owned process. None of those failures is counted as workload acceptance.
+
+
+### Observer bounds and coordinated Ready
+
+The initial clean pass above has the required minimum GM receipts and matching
+digests; it is not a complete GM action-history recording. Growing GM snapshots
+could reach Node's default HTTP header cap before the observer's own bound.
+The corrected observer sends each attributed GM action once and compact session
+readbacks (pause/results/factions plus journal count), rejects telemetry URLs
+over 60,000 characters before sending, and reports failed/non-success HTTP
+responses as terminal observer faults. The listener's 128 KiB parser limit sits
+above its explicit 64 KiB request limit; parser errors also fail the run.
+Pending telemetry is capped at 256 requests, observed GM action keys at 4,096,
+and peer events at 20,000. Overflow cannot turn into a workload pass.
+
+`runNativeProbe({deferGmReady:true,...})` permits a mixed coordinator to withhold
+native GM Ready while browser peers finish their connection attempts. A queued
+`{kind:'ready'}` control grants that permission, which survives a missing local
+operator until admission connects it. The driver stops requesting Ready when
+its own authoritative GM metadata reports Ready. Ordinary native-only runs keep
+the default automatic Ready behavior. This option changes only the private
+workload driver, not production GM readiness or admission.

@@ -433,15 +433,45 @@ baseline separately and must publish their first continuous projection before
 injection. This is a harness-only sequencing change; a corrected runtime run
 must establish its own result against the pinned product receipt.
 
+### Fresh-Lobby replacement restore failure
+
+On product `9f2ba003`, both real browser replacement races admitted exactly one
+contender and refused the other with `slot-taken`. Direct lost slot 3 at tick
+425 and emitted one owner claim at tick 451; relay lost slot 4 at tick 406 and
+claimed at tick 426. Both six-peer groups stopped at tick 901. The admitted
+replacement remained in Lobby without a completed restore while the five
+survivors held in progress. The 90-second canonical restore deadline expired;
+neither route reached the later connected-holder challenge.
+
+| Retained result | SHA-256 |
+| --- | --- |
+| `target/1534-source-browser-replacement-direct-relay-9f2ba003/direct/result.json` | `7ae5eb0243a2fd8d60e11952bec4254e8414519996c05dde0935ff97b92244e9` |
+| `target/1534-source-browser-replacement-direct-relay-9f2ba003/ws-relay/result.json` | `63331a14e9c7606c059d873ee1e2c7bca28a0f6aef8ebfa041f93e61256f0e12` |
+
+The regression in `tests/lockstep_slot_recovery.rs` now replaces the lost host
+with a real native Contract app still in Lobby, rather than an automatically
+started headless app. Before correction it stalled without any committed
+restore, reproducing the runtime failure (`target/1534-fresh-lobby-replacement-red.log`).
+The trusted slot-recovery arm now enables the existing gated canonical
+GameStart bootstrap: only the elected leader's accepted record can stage the
+saved identities and request `InProgress`. An already-booted reconnect skips
+bootstrap; the readiness and connected-holder gates remain unchanged.
+
+`cargo test --features headless --test lockstep_slot_recovery` passed all six
+tests after the correction (`target/1534-fresh-lobby-replacement-green.log`).
+Both ordinary and fresh-Lobby replacements commit the record and retain more
+than sixty shared post-restore digest checks. This is integration evidence;
+new source-matched browser/native replacement races still need runtime results.
+
 ## Outstanding
 
 | Case | Browser direct | Browser forced relay | Browser automatic fallback | Native/mixed |
 | --- | --- | --- | --- | --- |
 | Non-owner ship loss | Passed at `b4e17e72` | Passed at `b4e17e72` | Passed at `b4e17e72` | Native relay passed at `da812fb0`; mixed healthy gate previously expired before injection |
-| Owner loss | Passed at `da812fb0` | Passed at `da812fb0`; prior evidence retained | Passed at `da812fb0` with attributed milestone recorder | Untested |
+| Owner loss | Passed at `da812fb0` | Passed at `da812fb0`; prior evidence retained | Passed at `da812fb0` with attributed milestone recorder | Native healthy precondition failed at `9f2ba003`; no owner fault injected |
 | GM loss | Passed at `da812fb0` | Passed at `da812fb0` | Passed at `da812fb0` with attributed milestone recorder | Native relay passed at `9f2ba003`; earlier precondition failure retained |
 | Divergence restore and exact-once reducer effect | Passed at `da812fb0` | Passed at `da812fb0`; prior failures retained above | Pre-fault observer history expired; recovery unrun | Untested |
-| Two replacement contenders and connected-holder challenge | Untested | Untested | Untested | Untested |
+| Two replacement contenders and connected-holder challenge | Race admission passed, restore failed at `9f2ba003` | Race admission passed, restore failed at `9f2ba003` | Untested | Untested |
 
 The participant-electorate fix passed seven focused Rust recovery tests and a
 WASM configuration check; these are not substitute runtime evidence. The `97a6bd01` live rerun remains failed for the reasons above. The owner-suffix proof limitation above remains
@@ -452,6 +482,7 @@ is detailed in `1534-mixed-native-recovery.md`; no rendered-browser recovery,
 physical/mobile/internet recovery, impaired-network
 recovery or complete recovery-feedback observation is established here.
 
-The replacement race has focused helper tests but no runtime result yet. Final
+The replacement race runtime failures and subsequent integration regression are
+retained above; the corrected race still needs a live result. Final
 integration gates and the final source-matched matrix remain the integration
 task's responsibility. Issue #1534 must remain open while these gaps remain.

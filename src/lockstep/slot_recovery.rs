@@ -360,7 +360,9 @@ fn open_slot_recovery(world: &mut World, local: HostSlot, interval: u64, delay: 
             // Arm to accept the canonical record from the elected leader, and only
             // that leader (#1118's arm). Clear any stale outcome so this host acts
             // on THIS recovery's restore.
-            world.resource_mut::<MeshRestoreArm>().arm(leader);
+            world
+                .resource_mut::<MeshRestoreArm>()
+                .arm_slot_recovery(leader);
             if let Some(mut rx) = world.get_resource_mut::<MeshSnapshotReceiver>() {
                 rx.clear_outcome();
             }

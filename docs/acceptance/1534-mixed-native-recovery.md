@@ -202,3 +202,15 @@ cause of the earlier spontaneous socket closure or directly inject a redial.
 | Native executable | `9c2928b6658cd894e06af4c6f0963b2f34fb9ba40f98911a842ab5a54dfa3887` |
 | `target/1534-native-gm-relay-9f2ba003/matrix.json` | `edbfa930adc67299a571b75a10443d1839ccc7f255c4c8e2ad73da863cea9d88` |
 | `target/1534-native-gm-relay-9f2ba003-service/attribution.json` | `590acdea3bdd2ed4ed00636c69d18c841ea7ce297367f860c5e73c59ba4737df` |
+
+## Native leader precondition failure
+
+The next `9f2ba003` native relay run, using clean harness `4c24b4f4`, failed
+before its requested leader fault. GM 1 had been admitted at 18:26:33.530 UTC
+on 2026-09-27; its link closed at 18:27:00.904, redial became ready at
+18:27:01.271, and `gm-join-refused` followed at 18:27:01.410. The case ended
+at the healthy matching-digest gate after 66.892 seconds, with no recovery
+transaction injected. Retained artifact:
+`target/1534-native-leader-relay-9f2ba003/matrix.json`, SHA-256
+`911b2318f939131725aefd9bb31c1db7d5c58046ab449e02ec05805be41b7713`.
+This is a failed precondition and leaves native leader recovery unproven.

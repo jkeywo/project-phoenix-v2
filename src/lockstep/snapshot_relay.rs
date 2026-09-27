@@ -248,16 +248,16 @@ impl MeshSnapshotReceiver {
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub struct MeshRestoreArm {
     armed_from: Option<HostSlot>,
-    /// A joining GM is a fresh private world, not an already-booted recovery
-    /// target. Its accepted canonical record must stage the saved GameStart
-    /// identities before that world enters `InProgress`; otherwise the normal
-    /// GameStart mint creates different UUIDs and a by-UUID restore can never
-    /// become ready. Ordinary divergence and slot recovery never use this mode.
+    /// A joining GM or fresh fixed-slot replacement must stage canonical
+    /// GameStart identities before entering `InProgress`; otherwise the normal
+    /// mint creates different UUIDs and a by-UUID restore never becomes ready.
+    /// Already-booted worlds skip this bootstrap; ordinary divergence does not
+    /// enable it.
     bootstrap_join_candidate: bool,
     /// The bounded join bootstrap exhausted its owner-granted wait boundary,
     /// so snapshot restore may build captured authored rows which the fresh
     /// world still has not produced. Ordinary divergence/slot recovery keeps
-    /// the stricter fully-bootstrapped gate.
+    /// the stricter readiness gate after GameStart.
     allow_rebuild: bool,
 }
 
@@ -275,6 +275,13 @@ impl MeshRestoreArm {
         self.armed_from = Some(leader);
         self.bootstrap_join_candidate = true;
         self.allow_rebuild = false;
+    }
+
+    /// Arm an authenticated fixed-slot recovery. A replacement still in Lobby
+    /// bootstraps only after the elected leader's record passes its gates; an
+    /// already-running same-handle reconnect keeps its existing GameStart.
+    pub(crate) fn arm_slot_recovery(&mut self, leader: HostSlot) {
+        self.arm_join_candidate(leader);
     }
 
     /// At the terminal owner-granted bootstrap boundary, permit the existing
@@ -512,13 +519,13 @@ fn gate_and_restore_against_with_readiness(
         );
     };
 
-    // A fresh GM candidate cannot mint its GameStart identities before
+    // A fresh joining participant cannot mint its GameStart identities before
     // seeing the canonical record: those UUIDs are part of the by-UUID restore
     // contract. `import_artifact` above has already version- and
     // semantic-gated `boot_identity`, so it is safe to stage only that private
-    // boot metadata now. The candidate remains technically paused, outside the
-    // public roster and lockstep wait-set, and this record stays staged for the
-    // ordinary restore retry after `OnEnter(InProgress)` finishes.
+    // boot metadata now. The owning join or slot-recovery transaction keeps
+    // the candidate held, and this record stays staged for the ordinary restore
+    // retry after `OnEnter(InProgress)` finishes.
     //
     // This intentionally precedes the rollback checkpoint. Staging boot UUIDs
     // and requesting the candidate-private GameStart transition is bootstrap,
@@ -533,18 +540,18 @@ fn gate_and_restore_against_with_readiness(
             .map(|phase| phase.get().clone())
         else {
             return MeshRestoreOutcome::RefusedGate(
-                "the joining GM candidate has no GamePhase bootstrap state".to_string(),
+                "the joining participant has no GamePhase bootstrap state".to_string(),
             );
         };
         if phase == crate::core::messages::GamePhase::InProgress {
             return MeshRestoreOutcome::RefusedGate(
-                "the joining GM candidate entered GameStart before canonical identities were staged"
+                "the joining participant entered GameStart before canonical identities were staged"
                     .to_string(),
             );
         }
         if !world.contains_resource::<NextState<crate::core::messages::GamePhase>>() {
             return MeshRestoreOutcome::RefusedGate(
-                "the joining GM candidate cannot request its GameStart bootstrap".to_string(),
+                "the joining participant cannot request its GameStart bootstrap".to_string(),
             );
         }
         let boot = snap

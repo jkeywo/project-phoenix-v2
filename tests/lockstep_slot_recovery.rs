@@ -91,7 +91,30 @@ struct Host {
 
 impl Host {
     fn new(slot: HostSlot, slots: &[HostSlot], uncrewed: &[HostSlot]) -> Self {
-        let mut app = build_headless_app(&args()).expect("app should build");
+        let app = build_headless_app(&args()).expect("app should build");
+        Self::from_app(app, slot, slots, uncrewed)
+    }
+
+    /// A fresh native/browser-equivalent lobby without headless auto-start.
+    fn new_lobby(slot: HostSlot, slots: &[HostSlot], uncrewed: &[HostSlot]) -> Self {
+        use project_phoenix::native_host::{
+            build_native_host_app, preload_content_templates, NativeHostConfig,
+        };
+        let mut config = NativeHostConfig::new(WORLD);
+        config.ship_path = Some(SHIP.into());
+        config.seed = Some(SEED);
+        config.deterministic = true;
+        config.surface = project_phoenix::boot::NativeRenderSurface::Contract;
+        config.solo = false;
+        let preload = preload_content_templates(".").expect("content should preload");
+        let mut app = build_native_host_app(&config, &preload).expect("lobby app should build");
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f64(args().dt),
+        ));
+        Self::from_app(app, slot, slots, uncrewed)
+    }
+
+    fn from_app(mut app: App, slot: HostSlot, slots: &[HostSlot], uncrewed: &[HostSlot]) -> Self {
         let token = format!("crew-{}", slot.slot_id());
         {
             let mut sessions = app.world_mut().resource_mut::<Sessions>();
@@ -254,6 +277,15 @@ fn thrust(value: f32) -> SystemControlPayload {
 /// slot, and the whole fleet finishes folding bit-identically on every shared tick.
 #[test]
 fn a_replacement_recovers_a_disconnected_slot_and_the_fleet_reconverges() {
+    replacement_recovers_and_reconverges(false);
+}
+
+#[test]
+fn a_fresh_lobby_replacement_bootstraps_from_the_canonical_record_and_reconverges() {
+    replacement_recovers_and_reconverges(true);
+}
+
+fn replacement_recovers_and_reconverges(fresh_lobby: bool) {
     let all = [SLOT_ONE, SLOT_TWO, SLOT_THREE];
     let mut hosts = vec![
         Host::new(SLOT_ONE, &all, &[]),
@@ -302,7 +334,21 @@ fn a_replacement_recovers_a_disconnected_slot_and_the_fleet_reconverges() {
 
     // A FRESH MACHINE boots as slot 3, with the slot uncrewed — the same picture the
     // survivors hold — and takes the vanished host's place in the ferry.
-    hosts[2] = Host::new(SLOT_THREE, &all, &[SLOT_THREE]);
+    hosts[2] = if fresh_lobby {
+        let candidate = Host::new_lobby(SLOT_THREE, &all, &[SLOT_THREE]);
+        assert_eq!(
+            candidate
+                .app
+                .world()
+                .resource::<State<project_phoenix::core::messages::GamePhase>>()
+                .get(),
+            &project_phoenix::core::messages::GamePhase::Lobby,
+            "the replacement must require a real GameStart bootstrap"
+        );
+        candidate
+    } else {
+        Host::new(SLOT_THREE, &all, &[SLOT_THREE])
+    };
     assert_eq!(
         hosts[2].tick(),
         FLEET_ACTIVATION_TICK,

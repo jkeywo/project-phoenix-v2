@@ -3656,6 +3656,119 @@ fn spawn_patrolling_npc(
         .id()
 }
 
+#[test]
+fn low_lod_route_obeys_authored_cruise_and_slows_after_demotion() {
+    let mut app = build_lod_test_app();
+    let mut world = crate::world::config::WorldConfig::default();
+    world
+        .anchors
+        .insert("harbour".into(), [500.0, 0.0, -2000.0]);
+    app.insert_resource(world);
+    spawn_player(&mut app, 0.0, 0.0);
+
+    let npc = spawn_patrolling_npc(
+        &mut app,
+        500.0,
+        -500.0,
+        "convoy-hauler",
+        "civilian-route",
+        &["harbour"],
+        false,
+    );
+    let mut behaviour = BehaviourConfig::default();
+    behaviour
+        .doctrine
+        .push(crate::entities::config::DoctrineObjective {
+            id: "civilian-route".into(),
+            target_speed: 0.18,
+            use_impulse: Some(false),
+            ..Default::default()
+        });
+    app.world_mut()
+        .entity_mut(npc)
+        .insert((BehaviourSection(behaviour), test_helm_section(12.0, 0.35)));
+    app.world_mut()
+        .get_mut::<ShipPhysics>(npc)
+        .unwrap()
+        .forward_speed = 120.0;
+
+    for _ in 0..20 {
+        tick_with_dt(&mut app, 1.0);
+    }
+    let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+    assert!(
+        (physics.forward_speed - 2.16).abs() < 0.01,
+        "authored 18% of 12 u/s: {}",
+        physics.forward_speed
+    );
+    assert!(
+        physics.z > -2000.0,
+        "a demoted hauler must not finish the whole route in 20 seconds: {}",
+        physics.z
+    );
+
+    // A ship starting without stored impulse velocity reaches the same
+    // authored cruise rather than the legacy 40% fallback.
+    {
+        let mut physics = app.world_mut().get_mut::<ShipPhysics>(npc).unwrap();
+        physics.z = -500.0;
+        physics.forward_speed = 0.0;
+    }
+    for _ in 0..20 {
+        tick_with_dt(&mut app, 1.0);
+    }
+    let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+    assert!(
+        (physics.forward_speed - 2.16).abs() < 0.01,
+        "authored cruise from rest: {}",
+        physics.forward_speed
+    );
+}
+
+#[test]
+fn low_lod_impulse_route_keeps_existing_velocity_on_demotion() {
+    let mut app = build_lod_test_app();
+    let mut world = crate::world::config::WorldConfig::default();
+    world
+        .anchors
+        .insert("harbour".into(), [500.0, 0.0, -2000.0]);
+    app.insert_resource(world);
+    spawn_player(&mut app, 0.0, 0.0);
+
+    let npc = spawn_patrolling_npc(
+        &mut app,
+        500.0,
+        -500.0,
+        "impulse-hauler",
+        "civilian-route",
+        &["harbour"],
+        false,
+    );
+    let mut behaviour = BehaviourConfig::default();
+    behaviour
+        .doctrine
+        .push(crate::entities::config::DoctrineObjective {
+            id: "civilian-route".into(),
+            target_speed: 0.18,
+            use_impulse: Some(true),
+            ..Default::default()
+        });
+    app.world_mut()
+        .entity_mut(npc)
+        .insert((BehaviourSection(behaviour), test_helm_section(12.0, 0.35)));
+    app.world_mut()
+        .get_mut::<ShipPhysics>(npc)
+        .unwrap()
+        .forward_speed = 120.0;
+
+    tick_with_dt(&mut app, 0.1);
+    let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+    assert_eq!(
+        physics.forward_speed, 120.0,
+        "existing impulse-route demotion must not brake to the ordinary cruise fraction"
+    );
+}
+
 /// Every cursor on `entity` as `(objective_id, waypoint_index)`.
 fn cursor_state(app: &App, entity: Entity) -> Vec<(String, usize)> {
     app.world()

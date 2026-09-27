@@ -2,7 +2,7 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server/renderer.rs, src/server_app/world_setup.rs, server.html, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, tests/cruiser_elimination.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/worlds/cruiser_elimination.toml, assets/entities/region_convoy_recovery.toml, assets/scenarios.toml]
+sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server/renderer.rs, src/server_app/world_setup.rs, src/civilian/server.rs, src/ai/server.rs, server.html, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, tests/cruiser_elimination.rs, tests/headless_runner.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/worlds/cruiser_elimination.toml, assets/entities/region_convoy_recovery.toml, assets/scenarios.toml]
 updated: 2026-09-27
 ---
 
@@ -55,6 +55,11 @@ uses four `[[ship_slot]]` rows, a terminating civilian `[[route]]`, and script
 callbacks that count each transport's arrival or loss once. Its report row
 describes the actual count when all three fates resolve; the route has no
 deadline that ends the mission while a transport is still travelling.
+The convoy's haulers opt out of civilian impulse travel and fly the authored
+route fraction in both high- and low-detail simulation. Other civilian routes
+retain their existing impulse default. Low-detail ships with a matching
+authored route directive that explicitly declines impulse now slow toward that
+directive's speed after demotion.
 `spawn_game_start_entities` publishes the frozen count and identities of the
 slots that actually spawned to world flags. The convoy script reads these to
 schedule later raiders and scope its separate recovery and pursuit Objectives.

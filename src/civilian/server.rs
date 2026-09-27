@@ -466,7 +466,7 @@ fn directive_for(
         target_speed: speed,
         // A civilian under way runs its drive: this is ambient traffic crossing
         // a system, not a warship holding a firing position.
-        use_impulse: Some(true),
+        use_impulse: Some(config.use_impulse.unwrap_or(true)),
         ..DoctrineObjective::default()
     };
     match travel {
@@ -586,6 +586,21 @@ mod tests {
             entry.target_speed, 0.4,
             "the current leg's authored speed is the directive's speed"
         );
+        assert_eq!(entry.use_impulse, Some(true));
+        let cruise = directive_for(
+            &CivilianTravel::Route {
+                id: "depot_run".into(),
+            },
+            &CivilianConfig {
+                use_impulse: Some(false),
+                ..Default::default()
+            },
+            Some(&route()),
+            0.18,
+        )
+        .expect("a convoy route has a directive");
+        assert_eq!(cruise.use_impulse, Some(false));
+        assert_eq!(cruise.target_speed, 0.18);
     }
 
     #[test]

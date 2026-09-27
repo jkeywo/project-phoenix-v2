@@ -1680,8 +1680,8 @@ fn simulate_low_lod_ships(
         .map(|wc| wc.anchors.clone())
         .unwrap_or_default();
 
-    // Default speed fraction when the low-LOD path has a valid route but the
-    // helm config is absent (unusual — all shipped hulls carry one).
+    // Default speed fraction when the low-LOD path has a valid route but no
+    // matching authored doctrine speed is available.
     const LOW_LOD_SPEED_FRACTION: f32 = 0.4;
     // Simple ramp rate so forward_speed doesn't snap from 0 to max in one tick.
     const LOW_LOD_ACCEL_PER_SEC: f32 = 10.0;
@@ -1803,8 +1803,27 @@ fn simulate_low_lod_ships(
                 // far from the player (and never had `integrate_ship_physics`
                 // running for it) actually moves. Without this a low-LOD ship
                 // stays stuck at forward_speed = 0 forever.
-                let target_speed = max_speed * LOW_LOD_SPEED_FRACTION;
-                if physics.forward_speed < target_speed {
+                let authored_speed = behaviour
+                    .doctrine
+                    .iter()
+                    // Impulse-capable routes have their own velocity contract;
+                    // only an explicit cruise directive opts into this ramp.
+                    .find(|directive| {
+                        directive.id == obj_id && directive.use_impulse == Some(false)
+                    })
+                    .map(|directive| directive.target_speed.clamp(0.0, 1.0));
+                let target_speed = max_speed * authored_speed.unwrap_or(LOW_LOD_SPEED_FRACTION);
+                if authored_speed.is_some() {
+                    // A demoted route ship may enter with impulse velocity.
+                    // Decelerate to its current leg's authored cruise instead
+                    // of carrying that velocity across the whole route.
+                    physics.forward_speed = crate::ai::lod::decay_speed_toward(
+                        physics.forward_speed,
+                        target_speed,
+                        LOW_LOD_ACCEL_PER_SEC,
+                        dt,
+                    );
+                } else if physics.forward_speed < target_speed {
                     physics.forward_speed =
                         (physics.forward_speed + LOW_LOD_ACCEL_PER_SEC * dt).min(target_speed);
                 }

@@ -15,8 +15,11 @@ entities:
         closes when every transport has reached safety or been destroyed, and
         narrates the actual count without a victory threshold. The 2,300-unit
         crossing at a hauler's 12-unit/s top speed and 0.18 route fraction
-        gives an unobstructed travel baseline near eighteen minutes; combat
-        may shorten or prolong actual play, with no twenty-minute fail timer.
+        gives an unobstructed travel baseline near eighteen minutes. The
+        convoy explicitly opts out of civilian impulse travel; low-detail
+        route movement follows that authored fraction. A full-length seeded
+        no-combat probe measured 1,065.4 seconds. Combat can shorten actual
+        play, with no twenty-minute fail timer.
     game_design:
       world_file: assets/worlds/alliance_convoy_escort.toml
 

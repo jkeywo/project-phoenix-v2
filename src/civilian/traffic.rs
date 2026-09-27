@@ -505,6 +505,10 @@ pub struct CivilianConfig {
     /// a hull that authors both flies the route it was assigned.
     #[serde(default = "default_route_priority")]
     pub route_priority: f32,
+    /// Override impulse travel for this civilian. Unset preserves the
+    /// existing traffic default; a slow escort route can opt out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_impulse: Option<bool>,
     /// Per-hull compliance. Absent falls back to the faction's, then to the
     /// cooperative default.
     #[serde(default, skip_serializing_if = "Option::is_none")]

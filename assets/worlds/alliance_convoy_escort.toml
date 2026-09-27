@@ -94,17 +94,17 @@ transform = { position = [0.0, 0.0, 120.0] }
 name = "world.alliance_convoy.transport.aster"
 template_path = "assets/entities/ship_civilian_hauler.toml"
 transform = { position = [-45.0, 0.0, -100.0] }
-overrides = { civilian = { route = "convoy_lane" } }
+overrides = { civilian = { route = "convoy_lane", use_impulse = false } }
 [[entity]]
 name = "world.alliance_convoy.transport.bell"
 template_path = "assets/entities/ship_civilian_hauler.toml"
 transform = { position = [0.0, 0.0, -80.0] }
-overrides = { civilian = { route = "convoy_lane" } }
+overrides = { civilian = { route = "convoy_lane", use_impulse = false } }
 [[entity]]
 name = "world.alliance_convoy.transport.cedar"
 template_path = "assets/entities/ship_civilian_hauler.toml"
 transform = { position = [45.0, 0.0, -100.0] }
-overrides = { civilian = { route = "convoy_lane" } }
+overrides = { civilian = { route = "convoy_lane", use_impulse = false } }
 
 # The baseline interception. #1551 scales later waves from the actual crew
 # count; this ship ensures the route already demands an escort at its midpoint.

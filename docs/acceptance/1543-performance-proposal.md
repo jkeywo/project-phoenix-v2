@@ -194,3 +194,46 @@ content set or network profile is not a comparable baseline.
 Current measurement ledger: **no supported-workload latency, stall, recovery or
 one-hour runtime measurements captured**. Owner transport handover (#1534) and
 the actual runtime matrix remain outstanding. User ratification remains pending.
+
+## Prepared trace reducer (no new runtime measurements)
+
+`scripts/fleet-performance-observer.mjs` is an opt-in browser page observer for
+the existing real matrix clients. After `observeBrowser` has installed its
+`__matrixEvidence` array, install `installBrowserPerformanceObserver` with a
+unique document clock ID and peer label. Call `window.__fleetPerformance.input`
+with the command's existing correlation immediately before dispatch. The
+observer timestamps that input and the real `ActionFeedback` `Applied` receipt
+with that document's `performance.now()` clock. The receipt duration includes
+the return delivery and is therefore a conservative **upper bound** on input to
+authoritative application. A refusal is not an applied sample. Read the events
+before closing the page. This hook does not alter or inject transport frames.
+
+`scripts/fleet-performance-evidence.mjs` reduces event traces from browser,
+native, or mixed runners. A producer must supply `format`,
+`expectedTickMs`, `provenance` (revision, composed content identity, runtime,
+artifact hashes and network profile) and events carrying `peer`, a unique
+monotonic `clock`, `ms`, `kind` and a correlation where applicable. For example,
+the native probe can emit a real `authoritative_applied` event with its applied
+tick, and a host tick observer can emit every successive `tick`. Fault runs can
+mark `fault`, `loss_detected`, `restore_commit`, `progress_resumed` and an
+agreed `digest_verified` at their actual observation boundaries. Record those
+events on one observer clock for each interval being reported. Keep the
+per-peer hardware, browser/native versions, shaping counters, raw source and
+bundle hashes in the same retained provenance as the matrix artifact. The
+reducer checks the revision shape and SHA-256 hash values; it cannot establish
+that supplied provenance matches a binary without the runner's separate
+artifact verification.
+
+The reducer subtracts timestamps only for the same clock and peer. It reports
+input-to-application as unavailable when the input document and authoritative
+host use different clocks, while retaining the independently measured receipt
+bound. Tick gaps require a contiguous tick sequence; planned GM pause overlap
+is removed from unplanned excess. Stall duration, excess and fraction are
+reported per clock and peer; the fleet-facing fraction is the **worst peer's**
+fraction, never a sum diluted by healthy peers. Recovery summaries retain detection,
+progress and digest verification as separate intervals and list restore commits
+without subtracting another peer's timestamp. Missing events remain visible
+as incomplete pairs. Run it with
+`node scripts/fleet-performance-evidence.mjs trace.json summary.json` after
+capturing a real workload trace. These tools have unit coverage, but no
+browser/native/mixed supported-workload trace has yet been captured with them.

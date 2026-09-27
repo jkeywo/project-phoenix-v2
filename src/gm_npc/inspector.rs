@@ -90,7 +90,6 @@ impl Default for NpcInspector {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     const REQUEST: &str = include_str!("../../tests/fixtures/npc-live-request.json");
 
     #[test]

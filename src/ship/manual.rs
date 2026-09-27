@@ -17,10 +17,9 @@
 //! wire-boundary localiser (`localiseTree`) leaves the whole structure
 //! untouched and the panel resolves the labels itself.
 //!
-//! The single exception is [`StationManualWire::overview`]: literal authored
-//! prose read from `[[station]] manual_overview` in the ship TOML. This is the
-//! same authored-content precedent as comms response text and `display_name` —
-//! data read from TOML, NOT emitted English in Rust and NOT a string id.
+//! [`StationManualWire::overview`] carries an authored String Id or legacy
+//! literal prose from `[[station]] manual_overview`. Rust preserves that value;
+//! the client resolves known ids with `wireText` while retaining mod prose.
 
 use crate::core::messages::{StationId, SystemId};
 use crate::ship::config::{ShipConfig, SystemInstanceConfig};
@@ -97,9 +96,8 @@ pub struct StationRatingAutomation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StationManualWire {
     pub station_id: StationId,
-    /// Authored overview prose from `[[station]] manual_overview` (TOML data;
-    /// the single authored-English exception — see module docs). `None` when
-    /// the station authored no overview.
+    /// Authored String Id or legacy prose from `[[station]] manual_overview`.
+    /// Resolved by the client; `None` when the station authored no overview.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overview: Option<String>,
     /// Generated sections, one per owned system that has a registered provider.

@@ -1,0 +1,15 @@
+entities:
+  - decision: dynasty-console-onboarding
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Dynasty Console Role and Attack-Cycle Guidance
+      summary: "All six Dynasty Stations retain shared controls and semantic actions. Reopenable role guidance explains the responsibility split and prepare/approach/strike/recover cycle. Authored tutorials follow the ordinary reserve projections for charging, boost and depletion; tutorial progress stays private to the operator and never gates simulation or Backfill."
+      rationale:
+        - "Issue #1540 completes role guidance over #1532's admitted ship-wide boost. Every player-facing guide and tutorial value is a String Id for English/German production. Manual role overviews reuse the same role IDs through the shared wire-text renderer."
+        - "[ai] Use the existing first-visit and state-trigger tutorial vocabulary, with a persistent details element for reopening the cycle. State lessons take priority when charging, boost or depletion is visible; no lesson sends a combat command or requires six human operators."
+        - "[ai] Keep keyboard/gamepad bindings and operator-profile behaviour in the shared semantic actions. Guidance points to current settings rather than hard-coding shortcut labels that rebinding would invalidate."
+    implementation:
+      status: declared
+      paths: [assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/, gui/themes/dynasty-cruiser.css, tests/client/dynasty-onboarding.test.js]
+      tests: [npx vitest run tests/client/dynasty-onboarding.test.js]

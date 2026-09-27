@@ -50,10 +50,10 @@ pub struct StationConfig {
     pub console: Option<String>,
     /// Authored overview prose for this station's ship manual tab (issue #772).
     ///
-    /// This is LITERAL authored English read from `[[station]] manual_overview`
-    /// in the ship TOML — the same authored-content precedent as comms response
-    /// text and `display_name`, NOT a `strings.csv` id and NOT emitted English
-    /// in Rust. `#[serde(default)]` so hulls that omit it (and the
+    /// Authored `[[station]] manual_overview` accepts a `strings.csv` id or
+    /// legacy literal prose. Rust carries it unchanged; the client resolves
+    /// known ids with `wireText` and preserves mod-authored prose (#1540).
+    /// `#[serde(default)]` so hulls that omit it (and the
     /// `rejects_missing_required_*` tests) keep parsing. See
     /// `crate::ship::manual` for how it is combined with generated sections.
     #[serde(default, skip_serializing_if = "Option::is_none")]

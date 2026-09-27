@@ -2173,3 +2173,24 @@ matching section in this document. The authoritative sources are:
 | Complexity presets | `src/console_ai/complexity.rs` |
 | Behaviour states / transitions | `src/ai/core.rs` |
 | Stations block | `src/lobby/stations_config.rs` |
+
+## Dynasty role and attack-cycle tutorials
+
+`assets/entities/dynasty_player_cruiser.toml` composes the six shared console
+families and authors `[[station.tutorial]]` steps using the ordinary evaluator.
+Use String Ids for titles, text and the role overview. Keep control anchors
+present in the authored Station document; the persistent `role-guidance` details
+section provides a way to reopen guidance after a tutorial is dismissed.
+
+State triggers read the actual Station payload: Gunnery uses
+`strike_reserve.charge`, `strike_reserve.enabled` and `strike_reserve.depleted`;
+Power uses `strike_reserve.charging` and `strike_reserve.depleted`.
+The ready-to-boost lesson retires after the ordinary `set_strike_boost` action.
+Depletion lessons follow authoritative state and do not assume the reserve is
+empty: an attack may cost more than the remaining charge. Tutorial dismissal
+never toggles boost, allocates energy, claims another role or waits for six
+humans. Backfill operates through the ordinary admitted controls.
+
+Keep device guidance independent of default shortcuts: the shared semantic
+actions and imported operator profile determine the current keyboard/gamepad
+bindings. Localised role text must not promise a fixed binding after remapping.

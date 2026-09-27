@@ -56,7 +56,7 @@ description = "entity.dynasty_player_cruiser.station.command.description"
 rank = "Cmdr."
 short_code = "CMD"
 console = "gui/dynasty-cruiser/command.html"
-manual_overview = "Set the ship's intent, direct the viewscreen and red alert state, and handle communications. Command coordinates the attack; it does not bypass the Gunnery or Helm systems that carry it out."
+manual_overview = "dynasty.onboarding.command.role"
 [[station.rating]]
 name = "Std"
 automated_systems = ["security"]
@@ -66,6 +66,27 @@ title = "entity.dynasty_player_cruiser.station.command.tutorial.title"
 text = "entity.dynasty_player_cruiser.station.command.tutorial.text"
 trigger = { kind = "first_visit" }
 
+[[station.tutorial]]
+id = "command-cycle"
+title = "dynasty.onboarding.cycle.title"
+text = "dynasty.onboarding.cycle.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "command-backfill"
+title = "dynasty.onboarding.backfill.title"
+text = "dynasty.onboarding.backfill.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "command-inputs"
+title = "dynasty.onboarding.inputs.title"
+text = "dynasty.onboarding.inputs.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
 [[station]]
 id = "helm"
 name = "Helm"
@@ -73,7 +94,7 @@ description = "entity.dynasty_player_cruiser.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/dynasty-cruiser/helm.html"
-manual_overview = "Plan the approach on Navigation, then fly it with the ship's ordinary thrust, steering, impulse and boost controls."
+manual_overview = "dynasty.onboarding.helm.role"
 [[station.rating]]
 name = "Std"
 automated_systems = ["dock"]
@@ -83,6 +104,27 @@ title = "entity.dynasty_player_cruiser.station.helm.tutorial.title"
 text = "entity.dynasty_player_cruiser.station.helm.tutorial.text"
 trigger = { kind = "first_visit" }
 
+[[station.tutorial]]
+id = "helm-cycle"
+title = "dynasty.onboarding.cycle.title"
+text = "dynasty.onboarding.cycle.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "helm-backfill"
+title = "dynasty.onboarding.backfill.title"
+text = "dynasty.onboarding.backfill.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "helm-inputs"
+title = "dynasty.onboarding.inputs.title"
+text = "dynasty.onboarding.inputs.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
 [[station]]
 id = "gunnery"
 name = "Gunnery"
@@ -90,7 +132,7 @@ description = "entity.dynasty_player_cruiser.station.gunnery.description"
 rank = "Ltn."
 short_code = "GUN"
 console = "gui/dynasty-cruiser/gunnery.html"
-manual_overview = "Lock contacts and operate every weapon through the ordinary Tactical admission path."
+manual_overview = "dynasty.onboarding.gunnery.role"
 [[station.rating]]
 name = "Std"
 automated_systems = []
@@ -100,6 +142,51 @@ title = "entity.dynasty_player_cruiser.station.gunnery.tutorial.title"
 text = "entity.dynasty_player_cruiser.station.gunnery.tutorial.text"
 trigger = { kind = "first_visit" }
 
+[[station.tutorial]]
+id = "gunnery-cycle"
+title = "dynasty.onboarding.cycle.title"
+text = "dynasty.onboarding.cycle.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "gunnery-backfill"
+title = "dynasty.onboarding.backfill.title"
+text = "dynasty.onboarding.backfill.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "gunnery-inputs"
+title = "dynasty.onboarding.inputs.title"
+text = "dynasty.onboarding.inputs.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "gunnery-ready"
+title = "dynasty.onboarding.ready.title"
+text = "dynasty.onboarding.ready.text"
+anchor = "strike-reserve"
+priority = 10
+trigger = { kind = "state", path = "strike_reserve.charge", op = "gt", value = 0, control = "set_strike_boost" }
+
+[[station.tutorial]]
+id = "gunnery-enabled"
+title = "dynasty.onboarding.enabled.title"
+text = "dynasty.onboarding.enabled.text"
+anchor = "strike-reserve"
+priority = 10
+trigger = { kind = "state", path = "strike_reserve.enabled", op = "truthy" }
+
+[[station.tutorial]]
+id = "gunnery-depleted"
+title = "dynasty.onboarding.depleted.title"
+text = "dynasty.onboarding.depleted.text"
+anchor = "strike-reserve"
+priority = 20
+trigger = { kind = "state", path = "strike_reserve.depleted", op = "truthy" }
+
 [[station]]
 id = "sensors"
 name = "Sensors"
@@ -107,7 +194,7 @@ description = "entity.dynasty_player_cruiser.station.sensors.description"
 rank = "Ltn."
 short_code = "SNS"
 console = "gui/dynasty-cruiser/sensors.html"
-manual_overview = "Detect and scan contacts, then pass useful target information to the rest of the bridge."
+manual_overview = "dynasty.onboarding.sensors.role"
 [[station.rating]]
 name = "Std"
 automated_systems = []
@@ -117,6 +204,27 @@ title = "entity.dynasty_player_cruiser.station.sensors.tutorial.title"
 text = "entity.dynasty_player_cruiser.station.sensors.tutorial.text"
 trigger = { kind = "first_visit" }
 
+[[station.tutorial]]
+id = "sensors-cycle"
+title = "dynasty.onboarding.cycle.title"
+text = "dynasty.onboarding.cycle.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "sensors-backfill"
+title = "dynasty.onboarding.backfill.title"
+text = "dynasty.onboarding.backfill.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "sensors-inputs"
+title = "dynasty.onboarding.inputs.title"
+text = "dynasty.onboarding.inputs.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
 [[station]]
 id = "power"
 name = "Power"
@@ -124,7 +232,7 @@ description = "entity.dynasty_player_cruiser.station.power.description"
 rank = "Ltn."
 short_code = "PWR"
 console = "gui/dynasty-cruiser/power.html"
-manual_overview = "Allocate reactor and battery output between the ship's ordinary power groups."
+manual_overview = "dynasty.onboarding.power.role"
 [[station.rating]]
 name = "Std"
 automated_systems = []
@@ -134,6 +242,43 @@ title = "entity.dynasty_player_cruiser.station.power.tutorial.title"
 text = "entity.dynasty_player_cruiser.station.power.tutorial.text"
 trigger = { kind = "first_visit" }
 
+[[station.tutorial]]
+id = "power-cycle"
+title = "dynasty.onboarding.cycle.title"
+text = "dynasty.onboarding.cycle.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "power-backfill"
+title = "dynasty.onboarding.backfill.title"
+text = "dynasty.onboarding.backfill.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "power-inputs"
+title = "dynasty.onboarding.inputs.title"
+text = "dynasty.onboarding.inputs.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "power-charging"
+title = "dynasty.onboarding.charging.title"
+text = "dynasty.onboarding.charging.text"
+anchor = "strike-reserve"
+priority = 10
+trigger = { kind = "state", path = "strike_reserve.charging", op = "truthy" }
+
+[[station.tutorial]]
+id = "power-depleted"
+title = "dynasty.onboarding.depleted.title"
+text = "dynasty.onboarding.depleted.text"
+anchor = "strike-reserve"
+priority = 20
+trigger = { kind = "state", path = "strike_reserve.depleted", op = "truthy" }
+
 [[station]]
 id = "damage-control"
 name = "Damage Control"
@@ -141,7 +286,7 @@ description = "entity.dynasty_player_cruiser.station.damage_control.description"
 rank = "Ltn."
 short_code = "DCO"
 console = "gui/dynasty-cruiser/damage-control.html"
-manual_overview = "Focus the shield grid and dispatch repair teams. Coupling equipment is kept here with the ship's other recovery work."
+manual_overview = "dynasty.onboarding.damage_control.role"
 [[station.rating]]
 name = "Std"
 automated_systems = ["tractor", "umbilical"]
@@ -149,6 +294,27 @@ automated_systems = ["tractor", "umbilical"]
 id = "damage-control-welcome"
 title = "entity.dynasty_player_cruiser.station.damage_control.tutorial.title"
 text = "entity.dynasty_player_cruiser.station.damage_control.tutorial.text"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "damage-control-cycle"
+title = "dynasty.onboarding.cycle.title"
+text = "dynasty.onboarding.cycle.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "damage-control-backfill"
+title = "dynasty.onboarding.backfill.title"
+text = "dynasty.onboarding.backfill.text"
+anchor = "role-guidance"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "damage-control-inputs"
+title = "dynasty.onboarding.inputs.title"
+text = "dynasty.onboarding.inputs.text"
+anchor = "role-guidance"
 trigger = { kind = "first_visit" }
 
 # Command: Captain and Comms responsibilities, plus the existing security and

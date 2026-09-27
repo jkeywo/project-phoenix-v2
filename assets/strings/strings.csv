@@ -4448,22 +4448,22 @@ entity.dynasty_player_cruiser.name,Dynasty player cruiser entity name,[Dynasty C
 entity.dynasty_player_cruiser.display_name,Dynasty player cruiser proper name,[DCS Vengeance]
 entity.dynasty_player_cruiser.station.command.description,Dynasty cruiser Command station description,[Captain and communications]
 entity.dynasty_player_cruiser.station.command.tutorial.title,Dynasty cruiser Command onboarding title,[Command]
-entity.dynasty_player_cruiser.station.command.tutorial.text,Dynasty cruiser Command onboarding text,[Set bridge intent and handle communications here. Gunnery and Helm execute your plan through their own controls.]
+entity.dynasty_player_cruiser.station.command.tutorial.text,Dynasty cruiser Command onboarding text,"[Set the attack intent and coordinate the bridge. You own the viewscreen, red alert and communications; Helm flies and Gunnery fires.]"
 entity.dynasty_player_cruiser.station.helm.description,Dynasty cruiser Helm station description,[Movement and navigation]
 entity.dynasty_player_cruiser.station.helm.tutorial.title,Dynasty cruiser Helm onboarding title,[Helm]
-entity.dynasty_player_cruiser.station.helm.tutorial.text,Dynasty cruiser Helm onboarding text,[Plot the approach and fly it. Use Navigation to place a waypoint and the helm controls to reach it.]
+entity.dynasty_player_cruiser.station.helm.tutorial.text,Dynasty cruiser Helm onboarding text,"[Plot the approach on Navigation and fly it with thrust, steering, impulse and boost. Keep an escape route ready while Power balances propulsion against reserve charging.]"
 entity.dynasty_player_cruiser.station.gunnery.description,Dynasty cruiser Gunnery station description,[Targeting and weapons]
 entity.dynasty_player_cruiser.station.gunnery.tutorial.title,Dynasty cruiser Gunnery onboarding title,[Gunnery]
-entity.dynasty_player_cruiser.station.gunnery.tutorial.text,Dynasty cruiser Gunnery onboarding text,[Lock a contact before bringing phasers or torpedoes to bear.]
+entity.dynasty_player_cruiser.station.gunnery.tutorial.text,Dynasty cruiser Gunnery onboarding text,[Select targets and operate ordinary weapons. Enable the ship-wide strike boost when ready to spend reserve charge. Every weapon spends its authored cost only when it fires.]
 entity.dynasty_player_cruiser.station.sensors.description,Dynasty cruiser Sensors station description,[Detection and scanning]
 entity.dynasty_player_cruiser.station.sensors.tutorial.title,Dynasty cruiser Sensors onboarding title,[Sensors]
-entity.dynasty_player_cruiser.station.sensors.tutorial.text,Dynasty cruiser Sensors onboarding text,[Select contacts on the sensor scope and scan them for the bridge.]
+entity.dynasty_player_cruiser.station.sensors.tutorial.text,Dynasty cruiser Sensors onboarding text,"[Detect and scan contacts. Give Command and Gunnery useful target information before the approach, and watch for threats during withdrawal.]"
 entity.dynasty_player_cruiser.station.power.description,Dynasty cruiser Power station description,[Energy allocation]
 entity.dynasty_player_cruiser.station.power.tutorial.title,Dynasty cruiser Power onboarding title,[Power]
-entity.dynasty_player_cruiser.station.power.tutorial.text,Dynasty cruiser Power onboarding text,[Balance reactor output and battery charge across the ship's power groups.]
+entity.dynasty_player_cruiser.station.power.tutorial.text,Dynasty cruiser Power onboarding text,"[Allocate generation to the strike reserve. Charging competes with propulsion, weapons and shields; it does not collect unused power automatically. Stored charge remains until Gunnery spends it.]"
 entity.dynasty_player_cruiser.station.damage_control.description,Dynasty cruiser Damage Control station description,[Shields and repair]
 entity.dynasty_player_cruiser.station.damage_control.tutorial.title,Dynasty cruiser Damage Control onboarding title,[Damage Control]
-entity.dynasty_player_cruiser.station.damage_control.tutorial.text,Dynasty cruiser Damage Control onboarding text,[Focus shields against the threat and dispatch repair teams to damaged systems.]
+entity.dynasty_player_cruiser.station.damage_control.tutorial.text,Dynasty cruiser Damage Control onboarding text,"[Focus shields and dispatch repair teams. Report protection and repair needs to Power, and restore the ship while Helm withdraws for the next attack.]"
 world.combat_test.available_ships.dynasty_cruiser.label,Combat Test Dynasty player cruiser picker label,[Dynasty Cruiser]
 station.gunnery.name,Dynasty player cruiser derived Gunnery station name,[Gunnery]
 station.damage-control.name,Dynasty player cruiser derived Damage Control station name,[Damage Control]
@@ -4499,3 +4499,40 @@ server.snapshot.prepare_import_failed,Host imported-save setup exception. {detai
 server.landing.packs.scan_failed_detail,Native host mod-pack shelf scan failure. {detail} is the filesystem reason,[That folder could not be read. {detail}]
 server.landing.packs.unknown_pack,Native host refusal when a selected archive vanished. {file} is its archive name,[{file} is no longer on this host's mod-pack shelf. Scan the folder again.]
 server.landing.packs.unreadable_archive,Native host refusal when an archive cannot be read. {file} names it and {detail} gives the filesystem error,[{file} could not be read. {detail}]
+dynasty.onboarding.guide,Dynasty role and attack-cycle onboarding,[Role and attack cycle]
+dynasty.onboarding.cycle.title,Dynasty role and attack-cycle onboarding,"[Prepare, approach, strike, recover]"
+dynasty.onboarding.prepare,Dynasty role and attack-cycle onboarding,[Prepare: Power assigns generation to the reserve; Damage Control reports protection and repair needs.]
+dynasty.onboarding.approach,Dynasty role and attack-cycle onboarding,"[Approach: Command coordinates intent, Sensors identifies targets, and Helm plans the attack and escape.]"
+dynasty.onboarding.strike,Dynasty role and attack-cycle onboarding,"[Strike: Gunnery enables ship-wide boost. Fired attacks spend charge for damage only; range, accuracy and cooldown do not change.]"
+dynasty.onboarding.recover,Dynasty role and attack-cycle onboarding,"[Recover: an underfunded attack still fires normally and switches boost off. Withdraw, restore the ship and recharge; Gunnery must enable boost again.]"
+dynasty.onboarding.cycle.text,Dynasty role and attack-cycle onboarding,"[Power prepares charge; Command, Sensors and Helm coordinate the approach; Gunnery enables boost for the attack. If charge cannot fund a shot it fires normally and boost switches off. Withdraw, restore and recharge before enabling boost again.]"
+dynasty.onboarding.backfill.title,Dynasty role and attack-cycle onboarding,[A smaller crew can still fly]
+dynasty.onboarding.backfill.text,Dynasty role and attack-cycle onboarding,"[Unstaffed roles use ordinary Backfill. Take the Stations you need; the other roles continue through the same power, movement and weapon rules. The guide never reserves a Station or waits for six humans.]"
+dynasty.onboarding.inputs.title,Dynasty role and attack-cycle onboarding,[Use your own controls]
+dynasty.onboarding.inputs.text,Dynasty role and attack-cycle onboarding,[Keyboard and selected gamepad actions use the shared controls. Open Settings to inspect or rebind actions and save your operator profile. Tutorial progress is personal; reopen this role guide at any time. No lesson requires a default shortcut.]
+dynasty.onboarding.charging.title,Dynasty role and attack-cycle onboarding,[Charging is an allocation decision]
+dynasty.onboarding.charging.text,Dynasty role and attack-cycle onboarding,[The reserve is charging from its assigned generation. Raising that allocation leaves less for other groups. Reduce charging to hold stored charge while supplying the attack or recovery.]
+dynasty.onboarding.ready.title,Dynasty role and attack-cycle onboarding,[Reserve available]
+dynasty.onboarding.ready.text,Dynasty role and attack-cycle onboarding,"[Stored charge is available, but boosting is a Gunnery decision. Enable ship-wide boost with the ordinary toggle. Each fired weapon pays its own cost; refused fire attempts spend nothing.]"
+dynasty.onboarding.enabled.title,Dynasty role and attack-cycle onboarding,[Boost is enabled]
+dynasty.onboarding.enabled.text,Dynasty role and attack-cycle onboarding,[Every firing weapon now attempts to pay its cost for extra damage. Turning boost off preserves the remaining reserve. An underfunded attack fires normally and switches boost off for the whole ship.]
+dynasty.onboarding.depleted.title,Dynasty role and attack-cycle onboarding,[Boost switched off]
+dynasty.onboarding.depleted.text,Dynasty role and attack-cycle onboarding,"[A fired attack could not pay its boost cost, so it fired normally and disabled boost. Any remaining charge is retained. Power can recharge while Helm withdraws and Damage Control repairs; Gunnery must enable boost again.]"
+dynasty.onboarding.command.role,Dynasty role and attack-cycle onboarding,"[Set the attack intent and coordinate the bridge. You own the viewscreen, red alert and communications; Helm flies and Gunnery fires.]"
+dynasty.console.command.title,Dynasty role and attack-cycle onboarding,[Project Phoenix — Dynasty Command]
+dynasty.console.command.label,Dynasty role and attack-cycle onboarding,[Dynasty Command Console]
+dynasty.onboarding.helm.role,Dynasty role and attack-cycle onboarding,"[Plot the approach on Navigation and fly it with thrust, steering, impulse and boost. Keep an escape route ready while Power balances propulsion against reserve charging.]"
+dynasty.console.helm.title,Dynasty role and attack-cycle onboarding,[Project Phoenix — Dynasty Helm]
+dynasty.console.helm.label,Dynasty role and attack-cycle onboarding,[Dynasty Helm Console]
+dynasty.onboarding.gunnery.role,Dynasty role and attack-cycle onboarding,[Select targets and operate ordinary weapons. Enable the ship-wide strike boost when ready to spend reserve charge. Every weapon spends its authored cost only when it fires.]
+dynasty.console.gunnery.title,Dynasty role and attack-cycle onboarding,[Project Phoenix — Dynasty Gunnery]
+dynasty.console.gunnery.label,Dynasty role and attack-cycle onboarding,[Dynasty Gunnery Console]
+dynasty.onboarding.sensors.role,Dynasty role and attack-cycle onboarding,"[Detect and scan contacts. Give Command and Gunnery useful target information before the approach, and watch for threats during withdrawal.]"
+dynasty.console.sensors.title,Dynasty role and attack-cycle onboarding,[Project Phoenix — Dynasty Sensors]
+dynasty.console.sensors.label,Dynasty role and attack-cycle onboarding,[Dynasty Sensors Console]
+dynasty.onboarding.power.role,Dynasty role and attack-cycle onboarding,"[Allocate generation to the strike reserve. Charging competes with propulsion, weapons and shields; it does not collect unused power automatically. Stored charge remains until Gunnery spends it.]"
+dynasty.console.power.title,Dynasty role and attack-cycle onboarding,[Project Phoenix — Dynasty Power]
+dynasty.console.power.label,Dynasty role and attack-cycle onboarding,[Dynasty Power Console]
+dynasty.onboarding.damage_control.role,Dynasty role and attack-cycle onboarding,"[Focus shields and dispatch repair teams. Report protection and repair needs to Power, and restore the ship while Helm withdraws for the next attack.]"
+dynasty.console.damage_control.title,Dynasty role and attack-cycle onboarding,[Project Phoenix — Dynasty Damage Control]
+dynasty.console.damage_control.label,Dynasty role and attack-cycle onboarding,[Dynasty Damage Control Console]

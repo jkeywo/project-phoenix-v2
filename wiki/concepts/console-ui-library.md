@@ -11,7 +11,7 @@ sources:
   - gui/components/ph-repair-teams.js
   - gui/console.css
   - gui/cruiser/tactical.html
-updated: 2026-08-27
+updated: 2026-09-27
 ---
 
 ## Decision
@@ -56,3 +56,11 @@ The explicit field-repair shortcut also emits the named-team command: it keeps
 an explicit team context or selects the first available team, and recalls the
 team named by the authoritative external claim. The generic internal dispatch
 shortcut never silently selects the field.
+
+The six documents in `gui/dynasty-cruiser/` retain shared controls and semantic
+actions while `gui/themes/dynasty-cruiser.css` supplies their common identity.
+Each carries a reopenable role/attack-cycle guide. The hull's authored tutorials
+use the shared `gui/tutorial-state.js` evaluator: Power observes charging and
+depletion, Gunnery observes available charge, enabled boost and depletion.
+Those lessons consume console projections and private dismissal progress;
+they neither allocate power nor toggle boost. All guide text uses catalogue IDs.

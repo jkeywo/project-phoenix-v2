@@ -2,8 +2,8 @@
 title: Power Runtime
 type: concept
 tags: [power, battery, brownout, modifiers, ai, semantic-actions, feedback]
-sources: [src/ship/power.rs, src/modifiers/power_system.rs, src/snapshot.rs, tests/snapshot_resume.rs, src/console_ai/server.rs, src/server_app/registration.rs, src/modifiers/coordination.rs, src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/action-map.js]
-updated: 2026-09-07
+sources: [src/ship/power.rs, src/modifiers/power_system.rs, src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/snapshot.rs, tests/snapshot_resume.rs, src/console_ai/server.rs, src/server_app/registration.rs, src/modifiers/coordination.rs, src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/components/ph-strike-reserve.js, gui/action-map.js]
+updated: 2026-09-27
 ---
 
 # Power Runtime
@@ -43,3 +43,6 @@ Power does not write `ShipModifiers` directly. `translate_power_modifiers` in `s
 ## Strike reserve policy
 
 The authored `strike_reserve` policy in the Dynasty player hull stores explicitly allocated generation in the same reactor continuation. Its authored charging group shares the demand budget; zero charging preserves charge and an empty reserve does not lock Power. Unallocated generation is not captured. Existing allocation controls and Backfill are shared. The entity digest folds strike-reserve reactor continuation, including allocation order and stored charge; other reactor policies retain their existing digest scope.
+# Strike boost
+
+`modifiers/strike_reserve.rs` owns pure attack-time accounting. The admitted toggle adapter is `console/weapons/strike.rs`; firing adapters spend after their no-fire gates. Paid beam and torpedo damage bonuses travel with active attacks through `snapshot.rs`, while blaster bolts retain their boosted damage in the existing projectile state. Gunnery and Power expose the same reserve readout; `gui/components/ph-strike-reserve.js` supplies the shared status and Gunnery toggle.

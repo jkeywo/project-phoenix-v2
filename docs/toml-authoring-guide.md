@@ -1312,6 +1312,8 @@ chart pushed to the viewscreen.
 | `capacity` | f32 | **required** | Total battery capacity. |
 | `rates` | `[f32; 6]` | **required** | Charge units per second at allocation totals `max_commanded_total - 5` through `max_commanded_total`. Positive charges; negative drains. |
 | `strike_reserve` | table | absent | Alternative storage policy: `group` names an authored power group with `min_level = 0`; `units_per_level` is its positive finite charge rate per allocated point. Charging consumes the same allocation budget as equipment demands. Starts empty, retains charge until spent, and has no exhaustion lock. Unallocated generation is not captured. |
+
+Reserve hulls author `[power.strike_reserve.weapons.<SystemId>]` for every phaser bank, blaster bank and torpedo tube. Each entry has a positive finite `cost` and a finite `damage_multiplier >= 1`. The cost is paid once per beam cycle or emitted projectile, including each delayed burst round. Boost affects damage only; integer projectile damage rounds to the nearest integer. An attack that cannot pay fires normally and disables the ship-wide boost until an explicit enable command. `ai_enable_at` optionally sets Backfill's re-enable threshold in charge units, greater than zero and no larger than capacity. Gunnery's human toggle and Backfill both send `SetStrikeBoost` to the hull's ordinary `phaser-control` System.
 | `emergency_threshold` | f32 | **required** | Recovery threshold, in the same ABSOLUTE units as `capacity`. A reactor locked out by a flat battery stays locked until the charge climbs back to this level. Also published on `PowerBatteryBlackboard` so the gauge can paint the reserve band. |
 
 ##### The exhaustion lock

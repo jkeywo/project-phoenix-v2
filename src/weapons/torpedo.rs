@@ -101,6 +101,7 @@ impl Default for TorpedoConfig {
 
 #[derive(Clone, Debug)]
 pub struct Torpedo {
+    pub strike_damage_bonus: f32,
     pub uuid: String,
     pub x: f32,
     /// Vertical (altitude) position in world space. `0.0` for a torpedo fired
@@ -873,6 +874,7 @@ impl TorpedoSystem {
         self.tubes[idx].active_barrels = vec![barrel0];
         self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
+            strike_damage_bonus: 0.0,
             uuid: uuid.clone(),
             x: origin_x,
             y: origin_y,
@@ -1011,6 +1013,7 @@ impl TorpedoSystem {
                 burst.next_shot_index += 1;
                 pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
+                    strike_damage_bonus: 0.0,
                     uuid: uuid.clone(),
                     x: origin_x,
                     y: origin_y,
@@ -1083,9 +1086,16 @@ impl TorpedoSystem {
     pub fn handle_collision_full(&mut self, torpedo_uuid: &str) -> Option<TorpedoDetonation> {
         let pos = self.in_flight.iter().position(|t| t.uuid == torpedo_uuid)?;
         let removed = self.in_flight.remove(pos);
+        let damage = |base: i32| {
+            if removed.strike_damage_bonus == 0.0 {
+                base
+            } else {
+                (base as f32 * (1.0 + removed.strike_damage_bonus)).round() as i32
+            }
+        };
         Some(TorpedoDetonation {
-            damage_hull: self.config.damage_hull,
-            damage_shields: self.config.damage_shields,
+            damage_hull: damage(self.config.damage_hull),
+            damage_shields: damage(self.config.damage_shields),
             shield_pierce: removed.shield_pierce,
             source_uuid: removed.source_uuid,
             tube_id: removed.tube_id,

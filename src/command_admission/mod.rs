@@ -118,7 +118,11 @@ pub(crate) fn supports_correlated_action_feedback_for_kind(
         || (target.0 == crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID
             && matches!(payload, SystemControlPayload::SetTarget { .. }))
         || (target.0 == crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID
-            && matches!(payload, SystemControlPayload::SetPhaserMode { .. }))
+            && matches!(
+                payload,
+                SystemControlPayload::SetPhaserMode { .. }
+                    | SystemControlPayload::SetStrikeBoost { .. }
+            ))
         || (target.0.starts_with("phaser-") && matches!(payload, SystemControlPayload::FirePhaser))
         || (target.0.starts_with("blaster-")
             && matches!(

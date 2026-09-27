@@ -1495,6 +1495,8 @@ pub struct CoordinationEnqueueState {
 /// call site makes that commitment visible where it is made.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WeaponState {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub beam_strike_bonuses: std::collections::BTreeMap<String, f32>,
     /// Every live phaser beam as `(bank, target uuid, remaining_secs,
     /// damage_accumulator, pending_cooldown_secs)`, in the bank order
     /// `ActiveBeam` already keeps.
@@ -1591,6 +1593,8 @@ pub struct TubeState {
 /// One torpedo mid-flight.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TorpedoInFlight {
+    #[serde(default)]
+    pub strike_damage_bonus: f32,
     pub uuid: String,
     pub position: [f32; 3],
     pub heading: f32,
@@ -3674,6 +3678,14 @@ fn weapon_state(
 ) -> WeaponState {
     let system = torpedoes.map(|t| &t.0);
     WeaponState {
+        beam_strike_bonuses: beam
+            .map(|b| {
+                b.live_banks()
+                    .filter(|(_, slot)| slot.strike_damage_bonus != 0.0)
+                    .map(|(bank, slot)| (bank.clone(), slot.strike_damage_bonus))
+                    .collect()
+            })
+            .unwrap_or_default(),
         beams: beam
             .map(|b| {
                 b.live_banks()
@@ -3726,6 +3738,7 @@ fn weapon_state(
                 s.in_flight
                     .iter()
                     .map(|t| TorpedoInFlight {
+                        strike_damage_bonus: t.strike_damage_bonus,
                         uuid: t.uuid.clone(),
                         position: [t.x, t.y, t.z],
                         heading: t.heading,
@@ -7079,6 +7092,11 @@ fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
                 (
                     bank.clone(),
                     ActiveBeamSlot {
+                        strike_damage_bonus: stored
+                            .beam_strike_bonuses
+                            .get(bank)
+                            .copied()
+                            .unwrap_or(0.0),
                         target_uuid: target.clone(),
                         remaining_secs: *remaining,
                         damage_accumulator: *accumulator,
@@ -7144,6 +7162,7 @@ fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
             .torpedoes_in_flight
             .iter()
             .map(|t| Torpedo {
+                strike_damage_bonus: t.strike_damage_bonus,
                 uuid: t.uuid.clone(),
                 x: t.position[0],
                 y: t.position[1],

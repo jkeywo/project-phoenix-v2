@@ -53,6 +53,8 @@ pub(crate) enum FixedStep {
     AiPhaserAutoFire,
     TickWeaponsArcRequest,
     HandleSetPhaserMode,
+    AiStrikeBoost,
+    HandleSetStrikeBoost,
     HandleSetPhaserFrequency,
     HandleSetTorpedoVolleyTarget,
     RevalidateGmFactionLocks,
@@ -267,6 +269,8 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             AiPhaserAutoFire,
             TickWeaponsArcRequest,
             HandleSetPhaserMode,
+            AiStrikeBoost,
+            HandleSetStrikeBoost,
             HandleSetPhaserFrequency,
             HandleSetTorpedoVolleyTarget,
             // A GM withdrawal of a hostility must drop stranded tactical locks

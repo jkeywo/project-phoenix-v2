@@ -830,6 +830,8 @@ pub(crate) fn publish_weapons_core_blackboard(
             Option<&ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
+            Option<&crate::ship::power::ShipPowerSystem>,
+            Option<&crate::ship::power::PowerConfigResource>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -852,6 +854,8 @@ pub(crate) fn publish_weapons_core_blackboard(
         control_sources,
         mut entity_bbs,
         is_local,
+        power,
+        power_config,
     ) in ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
@@ -1002,6 +1006,9 @@ pub(crate) fn publish_weapons_core_blackboard(
             .unwrap_or_default();
 
         let bb = WeaponsBlackboard {
+            strike_reserve: power
+                .zip(power_config)
+                .and_then(|(power, config)| power.0.strike_read(&config.0)),
             target_uuid,
             locked_target,
             target_name,

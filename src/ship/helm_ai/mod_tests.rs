@@ -9749,6 +9749,7 @@ fn set_torpedoes_in_flight(app: &mut App, n: usize) {
             .0
             .in_flight
             .push(crate::weapons::torpedo::Torpedo {
+                strike_damage_bonus: 0.0,
                 uuid: format!("salvo-{i}"),
                 x: 0.0,
                 y: 0.0,

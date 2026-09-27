@@ -627,6 +627,7 @@ fn find_detonation_hits_handles_multiple_torpedoes_independently() {
     // Manually push a second torpedo so the test can focus on detonation
     // matching rather than tube load state.
     sys.in_flight.push(Torpedo {
+        strike_damage_bonus: 0.0,
         uuid: "t2".into(),
         x: 100.0,
         y: 0.0,

@@ -595,7 +595,7 @@ pub(crate) fn tick_blaster_system(
                 // a volley. `Option<&_>` — a fixture with neither is a ship the
                 // question cannot be asked of.
                 Option<&crate::ship_plugin::ShipConfigComponent>,
-                Option<&crate::ship::power::ShipPowerSystem>,
+                Option<&mut crate::ship::power::ShipPowerSystem>,
             ),
             With<crate::server_app::Ship>,
         >,
@@ -674,7 +674,7 @@ pub(crate) fn tick_blaster_system(
             blackboards_opt,
             mut blaster_res,
             ship_config_opt,
-            power_opt,
+            mut power_opt,
         )) = ship_q.get_mut(shooter)
         else {
             continue;
@@ -720,7 +720,7 @@ pub(crate) fn tick_blaster_system(
             if crate::ship::system_registry::blaster_bank_system_id(&bank_id).is_some_and(|sid| {
                 super::system_power_group_is_cold(
                     ship_config_opt.map(|c| &c.0),
-                    power_opt.map(|p| &p.0),
+                    power_opt.as_deref().map(|p| &p.0),
                     &sid,
                 )
             }) {
@@ -776,6 +776,17 @@ pub(crate) fn tick_blaster_system(
                 },
             );
             for ev in &events {
+                let multiplier = power_opt.as_deref_mut().map_or(1.0, |p| {
+                    crate::ship::system_registry::blaster_bank_system_id(&bank_id)
+                        .map_or(1.0, |id| p.0.fire_strike_weapon(&id.0))
+                });
+                if let Some(projectile) =
+                    bank.in_flight.iter_mut().find(|p| p.id == ev.projectile_id)
+                {
+                    if multiplier != 1.0 {
+                        projectile.damage = (projectile.damage as f32 * multiplier).round() as i32;
+                    }
+                }
                 // ── Recoil impulse (issue #638) ─────────────────────────────
                 // Apply an instantaneous velocity impulse to the firing ship
                 // in the direction opposite to the projectile's heading.

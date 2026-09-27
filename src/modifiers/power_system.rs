@@ -14,6 +14,8 @@ use std::collections::HashMap;
 /// that continuation: the reactor itself is not part of that digest fold.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PowerState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strike_boost: Option<crate::modifiers::strike_reserve::StrikeBoost>,
     /// `(power group id, level)` in reactor insertion order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allocations: Vec<(String, u8)>,
@@ -185,6 +187,9 @@ pub struct PowerSystem {
     /// The ship-wide allocation budget copied from its authored reactor config.
     max_commanded_total: u8,
     reserve_group: Option<PowerGroupId>,
+    strike_boost: Option<crate::modifiers::strike_reserve::StrikeBoost>,
+    strike_weapons:
+        std::collections::BTreeMap<String, crate::modifiers::strike_reserve::StrikeWeaponConfig>,
     pub battery_charge: f32,
 }
 
@@ -231,8 +236,15 @@ impl AuthoredPowerGroup {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StrikeReserveConfig {
+    /// Basic Backfill re-enable threshold in stored charge units. None leaves
+    /// boost decisions with an operator; spending always uses the same command.
+    #[serde(default)]
+    pub ai_enable_at: Option<f32>,
     pub group: String,
     pub units_per_level: f32,
+    #[serde(default)]
+    pub weapons:
+        std::collections::BTreeMap<String, crate::modifiers::strike_reserve::StrikeWeaponConfig>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -345,6 +357,12 @@ impl PowerSystem {
             order,
             locked: false,
             max_commanded_total: config.max_commanded_total,
+            strike_boost: config.strike_reserve.as_ref().map(|_| Default::default()),
+            strike_weapons: config
+                .strike_reserve
+                .as_ref()
+                .map(|r| r.weapons.clone())
+                .unwrap_or_default(),
             reserve_group: config
                 .strike_reserve
                 .as_ref()
@@ -396,6 +414,12 @@ impl PowerSystem {
             order,
             locked: false,
             max_commanded_total: config.max_commanded_total,
+            strike_boost: config.strike_reserve.as_ref().map(|_| Default::default()),
+            strike_weapons: config
+                .strike_reserve
+                .as_ref()
+                .map(|r| r.weapons.clone())
+                .unwrap_or_default(),
             reserve_group: config
                 .strike_reserve
                 .as_ref()
@@ -541,6 +565,7 @@ impl PowerSystem {
     /// Default values are still a complete replacement of bootstrap state.
     pub fn capture_continuation(&self) -> PowerState {
         PowerState {
+            strike_boost: self.strike_boost.clone(),
             allocations: self
                 .iter()
                 .map(|(id, level)| (id.0.clone(), level))
@@ -560,6 +585,43 @@ impl PowerSystem {
             .map(|(id, level)| (PowerGroupId(id.clone()), *level))
             .collect();
         self.restore(&allocations, saved.battery_charge, saved.locked);
+        if self.reserve_group.is_some() {
+            self.strike_boost = Some(saved.strike_boost.clone().unwrap_or_default());
+        }
+    }
+
+    pub fn strike_boost(&self) -> Option<&crate::modifiers::strike_reserve::StrikeBoost> {
+        self.strike_boost.as_ref()
+    }
+
+    pub fn strike_read(
+        &self,
+        config: &PowerConfig,
+    ) -> Option<crate::core::messages::StrikeReserveBlackboard> {
+        self.strike_boost()
+            .map(|boost| crate::core::messages::StrikeReserveBlackboard {
+                charge: self.battery_charge,
+                capacity: config.capacity,
+                charging: self.is_charging(config),
+                enabled: boost.enabled,
+                depleted: boost.depleted,
+            })
+    }
+
+    pub fn set_strike_boost(&mut self, enabled: bool) -> bool {
+        let Some(boost) = self.strike_boost.as_mut() else {
+            return false;
+        };
+        boost.set(enabled);
+        true
+    }
+
+    /// Call once at the actual attack boundary, after every no-fire gate.
+    pub fn fire_strike_weapon(&mut self, system_id: &str) -> f32 {
+        let Some(boost) = self.strike_boost.as_mut() else {
+            return 1.0;
+        };
+        boost.fire(&mut self.battery_charge, self.strike_weapons.get(system_id))
     }
 
     /// Set the allocation for a specific power group to `level`, clamped to
@@ -1002,8 +1064,10 @@ mod tests {
         let reserve = PowerGroupId("strike-reserve".into());
         let config = PowerConfig {
             strike_reserve: Some(StrikeReserveConfig {
+                ai_enable_at: None,
                 group: reserve.0.clone(),
                 units_per_level: 2.0,
+                weapons: Default::default(),
             }),
             ..PowerConfig::default()
         };

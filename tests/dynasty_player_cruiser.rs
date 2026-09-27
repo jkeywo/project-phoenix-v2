@@ -7,6 +7,36 @@ const PLAYER_HULL: &str = "assets/entities/dynasty_player_cruiser.toml";
 const NPC_HULL: &str = "assets/entities/ship_harrow_cruiser.toml";
 
 #[test]
+fn strike_reserve_rejects_missing_invalid_and_unknown_weapon_costs() {
+    use project_phoenix::entities::{config::EntityConfig, include_resolve::resolve_from_disk};
+    let resolved = resolve_from_disk(PLAYER_HULL).unwrap().value;
+    for invalid in ["missing", "zero", "negative_multiplier", "unknown"] {
+        let mut value = resolved.clone();
+        let weapons = value["power"]["strike_reserve"]["weapons"]
+            .as_table_mut()
+            .unwrap();
+        match invalid {
+            "missing" => {
+                weapons.remove("phaser-fore");
+            }
+            "zero" => weapons.get_mut("phaser-fore").unwrap()["cost"] = toml::Value::Float(0.0),
+            "negative_multiplier" => {
+                weapons.get_mut("phaser-fore").unwrap()["damage_multiplier"] =
+                    toml::Value::Float(-1.0)
+            }
+            "unknown" => {
+                weapons.insert("nonexistent".into(), weapons["phaser-fore"].clone());
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            EntityConfig::from_toml(&toml::to_string(&value).unwrap()).is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
 fn dynasty_player_cruiser_has_the_agreed_six_role_authority_map() {
     let hull = load_entity_config(PLAYER_HULL).expect("the composed Dynasty player hull parses");
     let ship = hull

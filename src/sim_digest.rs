@@ -1683,7 +1683,7 @@ fn comms_priority_code(priority: CommsPriority) -> u64 {
 fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
     type EntityRow = (
         FoldKey,
-        bevy::ecs::entity::EntityIndex,
+        Entity,
         Option<ShipPhysics>,
         Option<SystemHull>,
         Option<bool>,
@@ -1703,7 +1703,7 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         .map(|(entity, uuid, physics, hull, alert)| {
             (
                 FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                entity.index(),
+                entity,
                 physics.copied(),
                 hull.map(|h| h.0.clone()),
                 alert.map(|a| a.0),
@@ -1720,16 +1720,45 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         .collect();
     // `entity.index()` is the SAME-KEY tiebreak only, never the primary key —
     // the pattern `handle_collisions` established in #896.
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, physics, hull, alert, power) in rows {
+    for (key, entity, physics, hull, alert, power) in rows {
         acc = fold_str(acc, &key.id);
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());
         if let Some(power) = power {
             acc = fold_str(acc, "strike-reserve");
             acc = fold_serde(acc, &power);
+            // A paid attack keeps its bonus after boost switches off. Include
+            // those in-flight values in the reserve hull's digest frontier.
+            let mut attacks: Vec<(String, f32)> = Vec::new();
+            if let Some(beam) = world.get::<crate::console::weapons::beam::ActiveBeam>(entity) {
+                attacks.extend(
+                    beam.live_banks()
+                        .map(|(id, slot)| (format!("beam:{id}"), slot.strike_damage_bonus)),
+                );
+            }
+            if let Some(torpedoes) =
+                world.get::<crate::console::weapons::TorpedoSystemResource>(entity)
+            {
+                attacks.extend(
+                    torpedoes.0.in_flight.iter().map(|round| {
+                        (format!("torpedo:{}", round.uuid), round.strike_damage_bonus)
+                    }),
+                );
+            }
+            if let Some(blasters) =
+                world.get::<crate::console::weapons::BlasterSystemResource>(entity)
+            {
+                attacks.extend(blasters.0.iter().flat_map(|bank| {
+                    bank.in_flight
+                        .iter()
+                        .map(|round| (format!("blaster:{}", round.id), round.damage as f32))
+                }));
+            }
+            attacks.sort_by(|a, b| a.0.cmp(&b.0));
+            acc = fold_serde(acc, &attacks);
         }
         acc = match alert {
             Some(active) => fold_u64(fold_u64(acc, 1), u64::from(active)),

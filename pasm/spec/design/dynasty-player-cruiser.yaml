@@ -27,3 +27,16 @@ entities:
       status: declared
       paths: [src/modifiers/power_system.rs, src/entities/config/power.rs, src/sim_digest.rs, assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/power.html]
       tests: [cargo test --lib strike_reserve_conserves, cargo test --test dynasty_player_cruiser]
+  - decision: dynasty-global-strike-boost
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Dynasty Global Strike Boost
+      summary: "Gunnery toggles one ship-wide boost through the ordinary phaser-control command target. Each authored firing weapon pays its cost at actual emission and applies only its authored damage multiplier. A beam pays once per cycle; every blaster bolt and torpedo round pays once. An unpaid attack fires normally and disables boost until an explicit admitted enable command."
+      rationale:
+        - "Power and Gunnery publish the same reserve charge, charging state, enabled state and persistent depletion explanation. Enabling costs nothing. Basic Backfill explicitly enables at the authored ai_enable_at charge threshold through ordinary admission on the shared AI cadence."
+        - "Existing fixed-step ordering arbitrates simultaneous families: blaster emissions, delayed torpedo bursts, beam starts, immediate torpedo launches. Authored bank order and admitted command order arbitrate within each family. Paid damage bonuses remain attached to active attacks through snapshot restore and participate in the reserve hull digest."
+    implementation:
+      status: declared
+      paths: [src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/snapshot.rs, gui/components/ph-strike-reserve.js]
+      tests: [cargo test --lib strike_, npx vitest run tests/client/strike-reserve.test.js]

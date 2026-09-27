@@ -2313,6 +2313,9 @@ pub enum SystemControlPayload {
     /// Resets charge progress to 0 with no cooldown and no ammo consumed.
     /// Safe to send even when the bank is not currently charging (no-op).
     ChargeBlasterCancel,
+    SetStrikeBoost {
+        enabled: bool,
+    },
     SetPhaserMode {
         mode: PhaserMode,
     },
@@ -4577,6 +4580,8 @@ pub struct ShieldArcBlackboard {
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strike_reserve: Option<StrikeReserveBlackboard>,
     /// The ship's **Combat Lock**, read from its own frozen
     /// `ViewscreenBlackboard::combat_lock` and filtered for liveness.
     ///
@@ -5307,6 +5312,8 @@ pub struct DossierEvidenceSnapshot {
 /// blackboard (issue #561).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct PowerBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strike_reserve: Option<StrikeReserveBlackboard>,
     /// Per-power-group allocation entries, keyed on `PowerGroupId` (data-driven
     /// from ship config). `#[serde(default)]` lets pre-#616 payloads (which
     /// carried a `consoles` field instead) round-trip cleanly — the missing
@@ -5343,6 +5350,15 @@ pub struct PowerBlackboard {
     /// so payloads predating the lock's restoration still decode.
     #[serde(default)]
     pub locked: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct StrikeReserveBlackboard {
+    pub charge: f32,
+    pub capacity: f32,
+    pub charging: bool,
+    pub enabled: bool,
+    pub depleted: bool,
 }
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.

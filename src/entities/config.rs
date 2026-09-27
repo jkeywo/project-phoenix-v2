@@ -590,6 +590,27 @@ impl EntityConfig {
             .as_ref()
             .and_then(|p| p.strike_reserve.as_ref())
         {
+            let is_weapon =
+                |kind: &str| matches!(kind, "phaser_bank" | "blaster_bank" | "torpedo_tube");
+            if let Some(ship) = &config.ship_config {
+                for system in ship.systems.iter().filter(|s| is_weapon(&s.kind)) {
+                    if !reserve.weapons.get(&system.id.0).is_some_and(|w| w.valid()) {
+                        return Err(SerdeError::custom(format!("strike reserve requires a positive finite cost and damage multiplier >= 1 for weapon '{}'", system.id.0)));
+                    }
+                }
+                for (id, weapon) in &reserve.weapons {
+                    if !weapon.valid()
+                        || !ship
+                            .systems
+                            .iter()
+                            .any(|s| s.id.0 == *id && is_weapon(&s.kind))
+                    {
+                        return Err(SerdeError::custom(format!(
+                            "strike reserve names invalid firing weapon '{id}'"
+                        )));
+                    }
+                }
+            }
             let group = config.ship_config.as_ref().and_then(|ship| {
                 ship.power_groups
                     .get(&crate::core::messages::PowerGroupId(reserve.group.clone()))
@@ -1379,6 +1400,14 @@ fn validate_power_config(power: &PowerConfigSection) -> Result<(), String> {
         ));
     }
     if let Some(reserve) = &power.strike_reserve {
+        if reserve
+            .ai_enable_at
+            .is_some_and(|charge| !charge.is_finite() || charge <= 0.0 || charge > power.capacity)
+        {
+            return Err(
+                "strike reserve ai_enable_at must be positive and no greater than capacity".into(),
+            );
+        }
         if !power.capacity.is_finite()
             || power.capacity <= 0.0
             || reserve.group.is_empty()

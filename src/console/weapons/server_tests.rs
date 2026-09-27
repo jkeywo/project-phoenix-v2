@@ -11,6 +11,9 @@ use crate::ship::damage::SystemHull;
 use crate::sim_rng::InstallSimRng;
 use crate::simmath;
 
+#[path = "strike_tests.rs"]
+mod strike_tests;
+
 #[derive(Resource, Default)]
 struct Outbox(Vec<OutboundMessage>);
 
@@ -3876,6 +3879,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     // detonates on the next tick. We write into both the per-entity component
     // and the resource to stay in sync.
     let torpedo = Torpedo {
+        strike_damage_bonus: 0.0,
         uuid: "test-torp-1".into(),
         x: 1.0, // 1 m away from player at origin — within detonation_radius
         y: 0.0,
@@ -4031,6 +4035,7 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     let fore_before = hp_of(&app, fore_arc);
 
     let torpedo = Torpedo {
+        strike_damage_bonus: 0.0,
         uuid: "test-torp-astern".into(),
         x: start_x,
         y: 0.0,
@@ -4170,6 +4175,7 @@ fn set_payload(app: &mut App, ship: Entity, damage_hull: i32, damage_shields: i3
 fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
     use crate::weapons::torpedo::Torpedo;
     let torpedo = Torpedo {
+        strike_damage_bonus: 0.0,
         uuid: "payload-probe-round".into(),
         x: 0.0,
         y: 0.0,
@@ -10786,6 +10792,7 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
     let mut app = test_app();
     let mut ts = TorpedoSystem::new(TorpedoConfig::default());
     ts.in_flight.push(crate::weapons::torpedo::Torpedo {
+        strike_damage_bonus: 0.0,
         uuid: "flying-1".into(),
         x: 0.0,
         y: 0.0,
@@ -11447,6 +11454,7 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
     enemy_torpedoes
         .in_flight
         .push(crate::weapons::torpedo::Torpedo {
+            strike_damage_bonus: 0.0,
             uuid: "torpedo-uuid".into(),
             x: 0.0,
             y: 0.0,

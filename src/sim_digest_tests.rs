@@ -2475,8 +2475,10 @@ fn reactor_charge_and_allocation_move_the_digest() {
             ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
             crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
                 strike_reserve: Some(crate::modifiers::power_system::StrikeReserveConfig {
+                    ai_enable_at: None,
                     group: "reserve".into(),
                     units_per_level: 2.0,
+                    weapons: Default::default(),
                 }),
                 ..Default::default()
             }),

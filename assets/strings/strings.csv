@@ -4470,3 +4470,9 @@ station.damage-control.name,Dynasty player cruiser derived Damage Control statio
 
 dynasty.reserve.title,Dynasty Power reserve heading,[Strike reserve]
 dynasty.reserve.guidance,Dynasty Power charging tradeoff,[Allocate power to Strike reserve to charge it. These points compete with Helm and weapons and shields. Zero charging holds stored charge until Gunnery spends it. Empty charge never locks these controls.]
+dynasty.boost.toggle,Dynasty Gunnery global boost button,[Strike boost]
+dynasty.boost.enabled,Dynasty global boost armed status,[Boost enabled. Firing weapons spend strike reserve for extra damage.]
+dynasty.boost.disabled,Dynasty global boost off status,[Boost off. Weapons fire normally.]
+dynasty.boost.depleted,Dynasty boost insufficient charge explanation,[Boost switched off: insufficient charge. The attack fired normally. Recharge then explicitly enable boost.]
+semantic_action.tactical.strike_boost.label,Semantic action label,[Strike boost]
+semantic_action.tactical.strike_boost.accessibility,Semantic action accessible label,[Toggle ship-wide strike boost]

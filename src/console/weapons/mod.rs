@@ -11,6 +11,7 @@ pub mod blackboard;
 pub mod blaster;
 pub mod server;
 pub mod shared;
+pub mod strike;
 pub mod torpedo;
 
 pub use server::*;

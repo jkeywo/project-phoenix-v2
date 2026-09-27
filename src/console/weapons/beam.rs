@@ -100,6 +100,7 @@ pub struct LastShipAttacker(pub Option<String>);
 /// beam.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActiveBeamSlot {
+    pub strike_damage_bonus: f32,
     pub target_uuid: String,
     pub remaining_secs: f32,
     pub damage_accumulator: f32,
@@ -232,6 +233,7 @@ impl ActiveBeam {
                 remaining_secs: duration_secs,
                 damage_accumulator: 0.0,
                 pending_cooldown_secs,
+                strike_damage_bonus: 0.0,
             },
         );
     }
@@ -754,7 +756,7 @@ pub(crate) fn handle_fire_phaser(
             // that spawns neither is a ship the question cannot be asked of,
             // not a ship with dead guns.
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&crate::ship::power::ShipPowerSystem>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -782,7 +784,7 @@ pub(crate) fn handle_fire_phaser(
         admitted,
         combat_config_opt,
         ship_config_opt,
-        power_opt,
+        mut power_opt,
     ) in ship_q.iter_mut()
     {
         for cmd in admitted.0.iter() {
@@ -848,7 +850,7 @@ pub(crate) fn handle_fire_phaser(
             if bank_system_id.as_ref().is_some_and(|sid| {
                 super::system_power_group_is_cold(
                     ship_config_opt.map(|c| &c.0),
-                    power_opt.map(|p| &p.0),
+                    power_opt.as_deref().map(|p| &p.0),
                     sid,
                 )
             }) {
@@ -1014,6 +1016,12 @@ pub(crate) fn handle_fire_phaser(
                 beam_duration_secs * factor,
                 cooldown_secs * factor,
             );
+            let multiplier = power_opt
+                .as_deref_mut()
+                .map_or(1.0, |p| p.0.fire_strike_weapon(&cmd.target.0));
+            if let Some(slot) = beam.bank_slot_mut(&bank_id) {
+                slot.strike_damage_bonus = multiplier - 1.0;
+            }
             super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
 
             commands.trigger(BeamStartedEvent {
@@ -1654,8 +1662,10 @@ pub(crate) fn tick_beams_prepare(
             // weaker one would round up on the stronger one's remainder.
             let damage_to_apply = match beam.bank_slot_mut(&active_bank) {
                 Some(slot) => {
-                    slot.damage_accumulator +=
-                        damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
+                    slot.damage_accumulator += damage_per_sec
+                        * modifiers.get(&ModifierSlot::PhaserDamage)
+                        * (1.0 + slot.strike_damage_bonus)
+                        * dt;
                     let whole = slot.damage_accumulator.floor() as i32;
                     // Deduct the integer part now; the snapshot below drives damage
                     // application in phase 2.

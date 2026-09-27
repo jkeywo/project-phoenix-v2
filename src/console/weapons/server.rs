@@ -229,6 +229,16 @@ impl Plugin for WeaponsPlugin {
                     handle_set_phaser_mode
                         .in_set(crate::sim_sets::FixedStep::HandleSetPhaserMode)
                         .in_set(crate::sim_sets::SimSet::Input),
+                    super::strike::handle_set_strike_boost
+                        .after(handle_set_phaser_mode)
+                        .after(super::strike::ai_strike_boost)
+                        .in_set(crate::sim_sets::FixedStep::HandleSetStrikeBoost)
+                        .in_set(crate::sim_sets::SimSet::Input),
+                    super::strike::ai_strike_boost
+                        .after(handle_set_phaser_mode)
+                        .in_set(crate::sim_sets::FixedStep::AiStrikeBoost)
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .run_if(crate::ai::cadence::ai_tick_ready),
                     handle_set_phaser_frequency
                         .in_set(crate::sim_sets::FixedStep::HandleSetPhaserFrequency)
                         .in_set(crate::sim_sets::SimSet::Input),

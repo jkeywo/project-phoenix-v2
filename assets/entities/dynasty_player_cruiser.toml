@@ -274,6 +274,7 @@ rates = [6, 5, 4, 2, -2, -6]
 emergency_threshold = 0
 
 [power.strike_reserve]
+ai_enable_at = 60
 group = "strike-reserve"
 units_per_level = 2
 
@@ -345,3 +346,19 @@ channel = "weapons"
 when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
+
+[power.strike_reserve.weapons.phaser-fore]
+cost = 12
+damage_multiplier = 1.5
+[power.strike_reserve.weapons.phaser-aft]
+cost = 12
+damage_multiplier = 1.5
+[power.strike_reserve.weapons.torpedo-tube-fore-port]
+cost = 8
+damage_multiplier = 1.5
+[power.strike_reserve.weapons.torpedo-tube-fore-starboard]
+cost = 8
+damage_multiplier = 1.5
+[power.strike_reserve.weapons.torpedo-tube-aft]
+cost = 8
+damage_multiplier = 1.5

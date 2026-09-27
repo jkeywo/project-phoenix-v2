@@ -1004,6 +1004,7 @@ pub(crate) fn publish_power_blackboard(
         .collect();
 
     let bb = PowerBlackboard {
+        strike_reserve: power.0.strike_read(&config.0),
         groups: entries,
         total: power.0.total(),
         total_max: power.0.max_commanded_total(),

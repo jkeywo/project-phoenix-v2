@@ -241,6 +241,15 @@ fn dynasty_strike_reserve_backfill_resumes_through_the_complete_schedule() {
         world_digest(live.world()),
         "same seeded Backfill reproduces reserve state"
     );
+    // Capture an explicitly enabled frontier as well as its accumulated charge.
+    // This must replace the disabled bootstrap state when loading the save.
+    for mut power in live
+        .world_mut()
+        .query::<&mut project_phoenix::ship::power::ShipPowerSystem>()
+        .iter_mut(live.world_mut())
+    {
+        power.0.set_strike_boost(true);
+    }
     let payload = capture(live.world());
     let mut resumed = boot_to_restore_point(&config, &payload);
     let report = restore(resumed.world_mut(), &payload);
@@ -1104,6 +1113,7 @@ fn a_beams_drawn_cooldown_survives_capture_and_restore() {
         .restore_live_banks([(
             "fore".to_string(),
             ActiveBeamSlot {
+                strike_damage_bonus: 0.5,
                 target_uuid: "resume-probe-target".to_string(),
                 remaining_secs: DRAWN_REMAINING,
                 damage_accumulator: 0.125,
@@ -1138,6 +1148,10 @@ fn a_beams_drawn_cooldown_survives_capture_and_restore() {
             .next()
             .expect("the restored world carries the mid-cycle bank")
     };
+    assert_eq!(
+        slot.strike_damage_bonus, 0.5,
+        "a paid beam keeps its damage bonus through restore"
+    );
     assert_eq!(
         (
             slot.remaining_secs,

@@ -67,6 +67,10 @@ export const renderGunnery = makeTacticalRender({
     autoBadge: 'auto-badge', targetCard: 'target-card',
   },
   torpedoMaxDefault: 20,
+  tail: (_s, view, doc) => {
+    const reserve = doc.getElementById('strike-reserve');
+    if (reserve) reserve.state = view.strike_reserve || null;
+  },
 });
 
 export const renderSensors = makeScienceRender({
@@ -78,6 +82,10 @@ export const renderSensors = makeScienceRender({
 
 export const renderPower = makeEngineeringRender({
   ids: { power: 'power-controls', battery: 'battery-bar' },
+  tail: (_s, view, doc) => {
+    const reserve = doc.getElementById('strike-reserve');
+    if (reserve) reserve.state = view.power.strike_reserve || null;
+  },
 });
 
 export const renderDamageControl = makeEngineeringRender({

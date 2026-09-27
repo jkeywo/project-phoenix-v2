@@ -594,7 +594,7 @@ pub(crate) fn handle_fire_torpedo(
             // which says what that group is at. Both `Option<&_>` — a fixture
             // that spawns neither is a ship the question cannot be asked of.
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&crate::ship::power::ShipPowerSystem>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -648,7 +648,7 @@ pub(crate) fn handle_fire_torpedo(
             behaviour_opt,
             origin_layer_opt,
             ship_config_opt,
-            power_opt,
+            mut power_opt,
         )) = ship_q.get_mut(shooter)
         else {
             continue;
@@ -765,7 +765,7 @@ pub(crate) fn handle_fire_torpedo(
             // empty the tubes the crew had switched off.
             if super::system_power_group_is_cold(
                 ship_config_opt.map(|c| &c.0),
-                power_opt.map(|p| &p.0),
+                power_opt.as_deref().map(|p| &p.0),
                 &cmd.target,
             ) {
                 super::finish_action_feedback(
@@ -872,6 +872,16 @@ pub(crate) fn handle_fire_torpedo(
                     ..
                 } => {
                     super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
+                    let multiplier = power_opt
+                        .as_deref_mut()
+                        .map_or(1.0, |p| p.0.fire_strike_weapon(&cmd.target.0));
+                    if let Some(torpedo) = torpedo_sys
+                        .in_flight
+                        .iter_mut()
+                        .find(|t| t.uuid == launched_uuid)
+                    {
+                        torpedo.strike_damage_bonus = multiplier - 1.0;
+                    }
                     any_fired = true;
                     // The immediate torpedo's real spawn origin (barrel marker
                     // or ship centre) so the broadcast matches the sim. Burst
@@ -1248,6 +1258,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             Entity,
             Option<&crate::entities::spawner::EntityUuid>,
             &mut TorpedoSystemResource,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1355,7 +1366,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     // uuid-sorted for the same class of reason.
     let mut shooter_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = torpedo_sys_q
         .iter()
-        .map(|(entity, uuid, _)| {
+        .map(|(entity, uuid, _, _)| {
             (
                 (
                     uuid.map(|u| u.0.clone()).unwrap_or_default(),
@@ -1368,7 +1379,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     shooter_order.sort();
 
     for shooter in shooter_order.into_iter().map(|(_, entity)| entity) {
-        let Ok((_, _, mut torpedo_sys)) = torpedo_sys_q.get_mut(shooter) else {
+        let Ok((_, _, mut torpedo_sys, mut power)) = torpedo_sys_q.get_mut(shooter) else {
             continue;
         };
         any_ship_component = true;
@@ -1382,6 +1393,13 @@ pub(crate) fn tick_torpedo_lifecycle(
             ));
         }
         for (tube, uuid, x, y, z, heading) in result.burst_launched {
+            let multiplier = power.as_deref_mut().map_or(1.0, |p| {
+                crate::ship::system_registry::torpedo_tube_system_id(&tube)
+                    .map_or(1.0, |id| p.0.fire_strike_weapon(&id.0))
+            });
+            if let Some(torpedo) = torpedo_sys.0.in_flight.iter_mut().find(|t| t.uuid == uuid) {
+                torpedo.strike_damage_bonus = multiplier - 1.0;
+            }
             outbox.push_reliable((
                 Target::All,
                 ServerMessage::TorpedoLaunched {

@@ -202,8 +202,9 @@ snapshot transfer does not establish converged recovery.
 The effect witness also became unverified before restore: at sample 19 (around
 simulation tick 604), GM-1's activity ring had advanced to oldest tick 508 and
 no longer retained the tick-405 damage event. GM-2 still retained it. The strict
-retention gate correctly fails closed; a future bounded continuous observer
-would need to prove overlap before accepting evidence across ring eviction.
+retention gate correctly fails closed. The later [continuous observer](1534-effect-witness.md)
+requires proven overlap before accepting evidence across ring eviction; its
+first live result is recorded below.
 
 ### No-injection browser control (diagnostic pass)
 
@@ -283,6 +284,56 @@ core diagnostic could not exclude the captured live defect. The added sustained
 boost regression explicitly observes activation, exhaustion and recharge on
 all six replicas.
 
+### Boost-corrected divergence relay run (recurrent GM split; witness refused)
+
+`target/1534-source-browser-divergence-relay-97a6bd01/ws-relay/result.json`
+failed on clean source `97a6bd0195665fc059c8dbe34e8bad12dd029d65` after the
+boost correction and continuous observer were integrated. The source-matched
+receipt and every served bundle hash verified before launch. This run used
+ports 18440/18441, `--seconds 10 --timeout 180 --routes ws-relay`, and the
+unchanged 90-second fault bound. It ran from 14:41:35 to 14:43:27 UTC on
+2026-09-27, exited 1 and completed cleanup without a reported cleanup error.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `target/browser-wasm-receipt-97a6bd01.json` | `073365a7fd686b1630847116b8ee126f236247bb3e5aa85bf6cd1672b53b25a4` |
+| Application WASM | `28c8e35893dc64743cdb2b8db3c8768343317c07f7496bea020c9db45e8c21ce` |
+| Run `manifest.json` | `796f0e94d40fb0b5a1c6cfdc3eac79cf14e6c5136b9bd3198c83d0e57e701ce5` |
+| `ws-relay/result.json` | `75c558081d769e79327bbd153be3edb1298099d849f093c4ce295528dba9d478` |
+| Recovery runner | `0bbd7fd4539bc76c5264136c808bae4a77f1b7d0b8ee81aede107a883c6cc977` |
+| Continuous witness helper | `942918179573a9c935d832404528c1d403e1e96ac01de308c1d8991e0a49ee81` |
+
+The healthy six-peer and transport gates passed. Both GMs recorded the actual
+one-time 5 HP direct-damage event at tick 432, journal sequence 3, with retained
+earlier tick 5. The runner changed only GM-1's incoming owner SetThrust at tick
+435, sequence 45, from approximately 0.8 to -0.7.
+
+All five uninjected peers agreed at every observed checkpoint: 600, 900, 1200,
+1500, 1800 and 2100. The previous additional ship-1 split did not recur. GM-1
+(slot 5) alone differed. It recorded restoration at boundary 1200 from leader
+1, but disagreed again at checkpoint 1500 and restored a second time at boundary
+2100. The final simulation ticks were 2186; no two post-restore checkpoints
+agreed. A successful restore-time fold does not prove subsequent continuation,
+and this recurrent GM-only split remains unresolved. Fresh Helm commands after
+the first restore used the original four ship UUIDs at ticks 1204/1205; no later
+commands were sent after the second restore. The final latest-boundary identity
+gate therefore failed, without establishing a ship reset.
+
+The continuous effect witness independently failed closed on GM-1 at sample
+115 (`changed-or-partially-evicted-tick`), after its last accepted observation
+through tick 528 and before the first restore. The retained trace contains 114
+accepted observations (67,790 bytes), including the original damage event.
+GM-2's witness retained that event with no observer error through 1,989 samples.
+Accepted observation intervals were at most 64.5 ms. The last accepted ring
+had 127 of 128 rows, including four rows at its oldest tick 5; the next outer
+sample began at tick 10 and still retained the damage event. This is consistent
+with partial eviction of the oldest tick. The exact rejected ring was not
+retained, so the artifact cannot identify which row changed or disappeared.
+The failure proves neither a duplicate reducer effect nor exact-once effects
+through recovery: the activity projection did not establish the required
+continuity. Both bounded observer traces remain in `recovery.effectObserverLogs`.
+No additional recovery case was run after this failure.
+
 ## Outstanding
 
 | Case | Browser direct | Browser forced relay | Browser automatic fallback | Native/mixed |
@@ -290,11 +341,11 @@ all six replicas.
 | Non-owner ship loss | Passed at `b4e17e72` | Passed at `b4e17e72` | Passed at `b4e17e72` | Healthy gate failed before injection; no recovery evidence |
 | Owner loss | Untested | Failed at `b4e17e72`; passed at `91f382e6` | Untested | Untested |
 | GM loss | Untested | Untested | Untested | Untested |
-| Divergence restore and exact-once reducer effect | Untested | Failed at `d2b6a8ed`; `fdaf31c2` restores but later diverges | Untested | Untested |
+| Divergence restore and exact-once reducer effect | Untested | Failed at `d2b6a8ed`, `fdaf31c2` and `97a6bd01`; latest run has recurrent GM-only divergence | Untested | Untested |
 | Two replacement contenders and connected-holder challenge | Untested | Untested | Untested | Untested |
 
 The participant-electorate fix passed seven focused Rust recovery tests and a
-WASM configuration check; these are not substitute runtime evidence. The `fdaf31c2` live rerun remains failed for the reasons above. The owner-suffix proof limitation above remains
+WASM configuration check; these are not substitute runtime evidence. The `97a6bd01` live rerun remains failed for the reasons above. The owner-suffix proof limitation above remains
 unresolved even if the ordinary owner-loss cells pass. Native hosts have no
 WebRTC; native-involving routes require relay, with browser legs exercising
 direct or automatic fallback where applicable. No native-only recovery case,

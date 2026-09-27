@@ -766,6 +766,9 @@ describe('collective GM and crew start transport (issue #1290)', () => {
       role: HOST_ROLE_GM,
       name: 'Morgan',
       credentialFactory: credentialSequence('owner'),
+      // Browser GM owners install this callback even when alone. Continuation
+      // needs another technical participant; it must not block the first grant.
+      onContinuation: () => ({ status: 'held' }),
     });
     expect(lead.fleet.setStartValidation(true)).toBe(true);
     expect(lead.fleet.setGmReady(true)).toBe(true);

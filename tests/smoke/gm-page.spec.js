@@ -12,6 +12,7 @@ import {
   waitForJoinCode,
 } from './fixtures';
 import { ts } from './strings';
+import { openReadyGmOnlyFleet } from './gm-fleet-start.js';
 import { bringConsoleIntoView, clickGmControl, dismissTutorialCards, openGmDraft, revealGmPanel } from './dock-helpers.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -441,11 +442,7 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted && state.presentationReady && state.localValidation;
-  });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
   const map = page.locator('#gm-entity-map');
@@ -1090,13 +1087,7 @@ test('rendererless GM maps and inspects stable local ship truth', { tag: '@core'
   const tick0 = await page.evaluate(() => window.wasm_sim_tick());
   await page.waitForFunction((tick) => window.wasm_sim_tick() > tick + 5, tick0);
 
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  });
+  await openReadyGmOnlyFleet(page);
   expect(await page.evaluate(() => window.__hostFleetState().role)).toBe('gm');
 
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
@@ -1371,13 +1362,7 @@ test('a manual gm_event is listed, fired once, and then spent in the GM mission 
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  }, undefined, { timeout: 30_000 });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
@@ -1435,13 +1420,7 @@ test('an automatic event declaring gm_controls is listed and fireable, and an un
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  }, undefined, { timeout: 30_000 });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
@@ -1501,13 +1480,7 @@ test('a GM arms a Skip of an authored event and a second arm reports the No-op',
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  }, undefined, { timeout: 30_000 });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
@@ -1578,13 +1551,7 @@ test('a GM damages and repairs one Entity through the typed action path', { tag:
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  }, undefined, { timeout: 30_000 });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
   await page.waitForFunction(() => {
@@ -1692,13 +1659,7 @@ test('a GM damages and repairs one Station and one System without touching their
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  }, undefined, { timeout: 30_000 });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
   await page.waitForFunction(() => {
@@ -1909,13 +1870,7 @@ test('a GM places palette entries by map drag and by keyboard alone', { tag: '@c
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  }, undefined, { timeout: 30_000 });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
@@ -2003,13 +1958,7 @@ test('a pausable authored event toggles end to end and an undeclared one has no 
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  }, undefined, { timeout: 30_000 });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
@@ -2109,13 +2058,7 @@ test('authored field and layer fixture supports aggregate and Region inspection 
       return dispatch(name, payload);
     };
   });
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  });
+  await openReadyGmOnlyFleet(page);
 
   // Connect before GameStarted so the fixture proves its ordinary asteroid
   // population really exists independently of the GM Host Channel.
@@ -2329,13 +2272,7 @@ test('real damage and destruction stay ordered bounded and selectable after remo
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => {
-    const state = window.__hostGmStartState?.();
-    return state?.admitted === true
-      && state.presentationReady === true
-      && state.localValidation === true;
-  });
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
@@ -3048,13 +2985,7 @@ test(
     const errors = captureServerPageErrors(page);
     await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
     await waitForWasmReady(page);
-    await page.evaluate(() => window.__hostFleetOpen());
-    await page.waitForFunction(() => {
-      const state = window.__hostGmStartState?.();
-      return state?.admitted === true
-        && state.presentationReady === true
-        && state.localValidation === true;
-    });
+    await openReadyGmOnlyFleet(page);
     await page.evaluate(() => document.getElementById('gm-ready-btn').click());
     await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 

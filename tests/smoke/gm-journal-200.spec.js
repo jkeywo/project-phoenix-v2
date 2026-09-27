@@ -1,4 +1,5 @@
 import { test, expect, waitForWasmReady } from './fixtures';
+import { openReadyGmOnlyFleet } from './gm-fleet-start.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
@@ -29,8 +30,7 @@ test('GM saved action history stays readable and operable at 200% text on 1280x7
     await page.setViewportSize({ width: GM_VIEWPORT.width, height: GM_VIEWPORT.height });
     await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
     await waitForWasmReady(page);
-    await page.evaluate(() => window.__hostFleetOpen());
-    await page.waitForFunction(() => window.__hostGmStartState?.().localValidation);
+    await openReadyGmOnlyFleet(page);
     await page.evaluate(() => document.getElementById('gm-ready-btn').click());
     await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 

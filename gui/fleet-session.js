@@ -354,7 +354,10 @@ export function createFleetOwner(opts) {
     if (simulationRosterState !== 'pending') return false;
     if (!roster || !roster.frozen) return true;
     const simulationRoster = simulationRosterOf(roster, fleet.owner);
-    if (simulationRoster && onContinuation && !continuation) {
+    // A lone host has no successor or inter-host stream to retain. The
+    // continuation journal requires at least two technical participants.
+    if (simulationRoster && simulationRoster.participants.length > 1
+        && onContinuation && !continuation) {
       continuation = createOwnerContinuation({
         local: simulationRoster.local, owner: simulationRoster.owner,
         participants: simulationRoster.participants, request: onContinuation,

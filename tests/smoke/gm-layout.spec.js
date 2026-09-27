@@ -1,4 +1,5 @@
 import { test, expect, waitForWasmReady, prepareSmokeContext } from './fixtures';
+import { openReadyGmOnlyFleet } from './gm-fleet-start.js';
 import { WORKSHOP_LAYOUT_VERSION } from '../../gui/workshop-layout-model.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,8 +18,7 @@ async function joinAsReadyGm(page, world) {
   await page.route('**/assets/worlds/default.toml', route => route.fulfill({ contentType: 'text/plain', body: world }));
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => window.__hostGmStartState?.().localValidation);
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 }
@@ -85,8 +85,7 @@ test('GM desktop layout is usable at both host viewport sizes', async ({ context
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(() => window.__hostGmStartState?.().localValidation);
+  await openReadyGmOnlyFleet(page);
   await page.evaluate(() => document.getElementById('gm-ready-btn').click());
   await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
   await expect(page.locator('#gm-roster-ships button').first()).toBeVisible();

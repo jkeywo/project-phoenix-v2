@@ -3,7 +3,7 @@ import { failureOutcome, divergenceOutcome, observeRecovery } from '../../script
 
 function evidence() {
   const before = Array.from({length:6}, (_,i)=>({label:`peer-${i+1}`,mesh:{slot:i+1,tick:100}}));
-  const after = before.slice(1).map(peer=>({...peer,phase:'InProgress',mesh:{...peer.mesh,tick:200,peers:before.slice(1).filter(row=>row!==peer).map(row=>row.mesh.slot)},frames:[150,180].map(tick=>({t:'digest',d:{from:peer.mesh.slot,tick,digest:'same'}}))}));
+  const after = before.slice(1).map(peer=>({...peer,phase:'InProgress',mesh:{...peer.mesh,tick:200,peers:before.slice(1).filter(row=>row!==peer).map(row=>row.mesh.slot)},frames:[150,180].map(tick=>({t:'digest',d:{from:peer.mesh.slot,tick,digest:'0123456789abcdef'}}))}));
   return {before,after,victim:{label:'peer-1',slot:1},atTick:100};
 }
 describe('real runtime recovery evidence gate',()=>{
@@ -17,7 +17,7 @@ describe('real runtime recovery evidence gate',()=>{
     expect(failureOutcome(stale).survivorAgreement).toBe(false);
   });
   it('retains the first post-loss divergence instead of accepting a later matching checkpoint',()=>{
-    const broken=evidence(); broken.after[3].frames[0].d.digest='different';
+    const broken=evidence(); broken.after[3].frames[0].d.digest='fedcba9876543210';
     const outcome=failureOutcome(broken);
     expect(outcome.survivorAgreement).toBe(false);
     expect(outcome.commonDigests.find(row=>!row.agreed).tick).toBe(150);
@@ -54,4 +54,12 @@ it('preserves production hex digest strings without modifying production egress'
     expect(window.wasm_take_mesh_frames()).toBe(raw);
     expect(window.__recoveryEvidence.frames[0].d.digest).toBe('fffffffffffffffe');
   } finally {if(saved===undefined)delete globalThis.window;else globalThis.window=saved;}
+});
+
+it('rejects missing digest values and contradictory repeated checkpoints',()=>{
+  const missing=evidence();missing.after.forEach(peer=>peer.frames.forEach(frame=>delete frame.d.digest));
+  expect(failureOutcome(missing).survivorAgreement).toBe(false);
+  const contradictory=evidence();
+  contradictory.after[0].frames.unshift({t:'digest',d:{...contradictory.after[0].frames[0].d,digest:'ffffffffffffffff'}});
+  expect(failureOutcome(contradictory).survivorAgreement).toBe(false);
 });

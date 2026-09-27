@@ -5,15 +5,20 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { main as browserMatrix } from './fleet-browser-matrix.mjs';
+import { replacementHook } from './fleet-browser-replacement.mjs';
 
 export const FAILURES = ['ship', 'leader', 'gm'];
 export function failureOutcome(evidence) {
   const survivors = evidence.after || [];
   const expected = evidence.before?.filter(peer => peer.label !== evidence.victim.label) || [];
   const ticks = new Map();
+  let invalidDigest = false;
   for (const peer of survivors) for (const digest of peer.frames?.filter(frame => frame.t === 'digest') || []) {
     if (digest.d.from !== peer.mesh?.slot || digest.d.tick <= evidence.atTick) continue;
+    if (typeof digest.d.digest !== 'string' || !/^[0-9a-f]{16}$/.test(digest.d.digest)) { invalidDigest = true; continue; }
     if (!ticks.has(digest.d.tick)) ticks.set(digest.d.tick, new Map());
+    const prior = ticks.get(digest.d.tick).get(peer.label);
+    if (prior !== undefined && prior !== digest.d.digest) invalidDigest = true;
     ticks.get(digest.d.tick).set(peer.label, digest.d.digest);
   }
   const commonDigests = [...ticks].filter(([, peers]) => peers.size === expected.length)
@@ -30,7 +35,7 @@ export function failureOutcome(evidence) {
     peer.mesh.recovery.ships.some(ship => ship.slot === evidence.victim.slot && ship.crewed === false)));
   const ownerCommitted = evidence.failure !== 'leader' || survivors.every(peer =>
     peer.continuation?.status === 'committed' && peer.continuation.loss_tick === applied[0]?.tick);
-  return { resumed, commonDigests, survivorAgreement: resumed && commonDigests.length >= 2 && commonDigests.every(row => row.agreed),
+  return { resumed, commonDigests, survivorAgreement: resumed && !invalidDigest && commonDigests.length >= 2 && commonDigests.every(row => row.agreed),
     lossApplied, lossTick: lossApplied ? applied[0].tick : null, backfillApplicable, backfillVerified, ownerCommitted };
 }
 
@@ -85,9 +90,13 @@ export function divergenceOutcome(evidence) {
   const recovered = !!evidence.injected && restore?.result === 'recovered';
   const boundary = restore?.boundary_tick;
   const checkpoints = new Map();
+  let invalidDigest = false;
   for (const peer of peers) for (const frame of peer.frames || []) {
     if (frame.t !== 'digest' || frame.d.from !== peer.mesh.slot || frame.d.tick <= boundary) continue;
+    if (typeof frame.d.digest !== 'string' || !/^[0-9a-f]{16}$/.test(frame.d.digest)) { invalidDigest = true; continue; }
     if (!checkpoints.has(frame.d.tick)) checkpoints.set(frame.d.tick, new Map());
+    const prior = checkpoints.get(frame.d.tick).get(peer.label);
+    if (prior !== undefined && prior !== frame.d.digest) invalidDigest = true;
     checkpoints.get(frame.d.tick).set(peer.label, frame.d.digest);
   }
   const common = [...checkpoints].filter(([, rows]) => rows.size === 6)
@@ -106,7 +115,7 @@ export function divergenceOutcome(evidence) {
       .filter(command => command.type === 'SetThrust' && command.tick > boundary)
       .some(command => command.ship === before.ship));
   return { recovered, boundary, common, duplicateCommandOrders, shipIdentityStable,
-    passed: peers.length === 6 && recovered && common.length >= 2 && common.every(row => row.agreed)
+    passed: peers.length === 6 && recovered && !invalidDigest && common.length >= 2 && common.every(row => row.agreed)
       && shipIdentityStable && duplicateCommandOrders.length === 0
       && peers.every(peer => peer.phase === 'InProgress' && peer.mesh.tick > boundary) };
 }
@@ -165,8 +174,13 @@ export function divergenceHook({ faultSeconds = 90 } = {}) {
 
 export async function main(args = process.argv.slice(2)) {
   const index = args.indexOf('--failure');
-  if (index < 0 || !args[index+1]) throw new Error('Choose --failure ship|leader|gm|divergence');
+  if (index < 0 || !args[index+1]) throw new Error('Choose --failure ship|leader|gm|divergence|replacement');
   const copy = [...args]; const [,failure] = copy.splice(index,2);
-  return browserMatrix(copy, {kind:'phoenix-real-browser-recovery-v1', provenance:{failure, faultSeconds:failure==='divergence'?90:60, runnerSha256:createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex')}, afterHealthy:failure==='divergence'?divergenceHook():failureHook(failure)});
+  const afterHealthy = failure === 'replacement' ? replacementHook()
+    : failure === 'divergence' ? divergenceHook() : failureHook(failure);
+  return browserMatrix(copy, {kind:'phoenix-real-browser-recovery-v1', provenance:{failure,
+    faultSeconds:['divergence','replacement'].includes(failure)?90:60,
+    runnerSha256:createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex'),
+    replacementHelperSha256:failure==='replacement'?createHash('sha256').update(readFileSync(new URL('./fleet-browser-replacement.mjs',import.meta.url))).digest('hex'):null}, afterHealthy});
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().then(()=>process.exit(process.exitCode || 0),error=>{console.error(error);process.exit(1);});

@@ -535,12 +535,20 @@ fn direct_damage_helm_sequence(inject: bool) {
     let mut injected = false;
     let mut identity_controls_sent = false;
     let mut original_ships = BTreeMap::new();
-    for tick in 0..if inject { 1600 } else { 700 } {
+    for tick in 0..if inject { 1900 } else { 700 } {
         if tick < 300 && tick % 120 == 30 {
             crew_wave(&mut hosts, tick / 120);
         }
         if tick == 360 {
             for host in hosts.iter_mut().take(4) {
+                // Leave the desired boost command engaged through exhaustion.
+                // A recovered peer must retain the depleted/recharging drive,
+                // not reinterpret the captured intent as a fresh activation.
+                host.command(
+                    "helm",
+                    "helm-boost",
+                    SystemControlPayload::SetBoost { active: true },
+                );
                 host.command(
                     "helm",
                     "helm-thrust",
@@ -772,24 +780,26 @@ fn direct_damage_helm_sequence(inject: bool) {
                 record.result,
                 project_phoenix::lockstep::recovery::RecoveryResult::Recovered { .. }
             ) && record.boundary_tick < 1500));
-        let checkpoint = hosts[0]
-            .app
-            .world()
-            .resource::<MeshAgreement>()
-            .local
-            .digest_at(1500)
-            .expect("leader reached the first post-restore checkpoint");
-        for host in &hosts {
-            assert_eq!(
-                host.app
-                    .world()
-                    .resource::<MeshAgreement>()
-                    .local
-                    .digest_at(1500),
-                Some(checkpoint),
-                "post-restore checkpoint on {:?}",
-                host.slot
-            );
+        for tick in [1500, 1800] {
+            let checkpoint = hosts[0]
+                .app
+                .world()
+                .resource::<MeshAgreement>()
+                .local
+                .digest_at(tick)
+                .expect("leader reached both post-restore checkpoints");
+            for host in &hosts {
+                assert_eq!(
+                    host.app
+                        .world()
+                        .resource::<MeshAgreement>()
+                        .local
+                        .digest_at(tick),
+                    Some(checkpoint),
+                    "post-restore checkpoint {tick} on {:?}",
+                    host.slot
+                );
+            }
         }
     }
 }

@@ -332,7 +332,35 @@ retained, so the artifact cannot identify which row changed or disappeared.
 The failure proves neither a duplicate reducer effect nor exact-once effects
 through recovery: the activity projection did not establish the required
 continuity. Both bounded observer traces remain in `recovery.effectObserverLogs`.
-No additional recovery case was run after this failure.
+No additional recovery case was run as part of that acceptance record.
+
+### Recurrent divergence reproduced in native continuation
+
+The six-peer injected-command regression reproduced the `97a6bd01` failure
+after its workload was extended to leave boost engaged through exhaustion.
+The GM restored at tick 1200, then alone differed at tick 1500:
+`292f044513bfff30` versus the canonical `5049e9eb8ca69555`. The retained failing
+command was `cargo test --features headless --test lockstep_six_peer
+injected_gm_command_does_not_diverge_the_other_five_hosts -- --nocapture`, run
+on `f78eddab` plus the regression, before the product correction. Its log is
+`target/1534-boost-restore-red.log`.
+
+`ControlState::restore_into` cleared explicit drive-write flags but marked the
+restored `BoostCommand` and `ImpulseCommand` as Changed. The drive consumer's
+direct-write fallback then treated those values as new commands. An exhausted
+boost retains its true intent while the battery recharges, so a successful
+restore could restart it on the next tick and split the recovered simulation.
+Restore now rebases those two change markers to an already-consumed tick.
+
+The corrected `cargo test --features headless --test lockstep_six_peer` passed
+all four ordinary tests, with two long-running/manual cases ignored. The
+boosted recovery test checks matching checkpoints 1500 and 1800, original ship
+UUIDs in fresh Helm commands, and one applied canonical damage result on every
+peer. Log: `target/1534-boost-restore-green.log`. These runs used the assigned
+worktree and shared native target cache, refreshing `src/lib.rs` before
+switching source trees. They establish native in-process continuation after
+the correction; source-matched browser/native transport recovery is still
+required, and the outstanding matrix below remains authoritative.
 
 ## Outstanding
 

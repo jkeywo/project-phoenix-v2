@@ -193,6 +193,17 @@ impl ControlState {
     /// Component installation remains the bootstrap/LOD owner's responsibility.
     pub fn restore_into(&self, entity_mut: &mut EntityWorldMut<'_>) {
         let control = self;
+        // The drive consumer also accepts Changed direct-intent writes. A
+        // captured command is already consumed, even if a bootstrap command
+        // was changed just before restore. Rebase that edge for every reader;
+        // a subsequent real producer write still stamps the current tick.
+        let consumed = bevy::ecs::change_detection::Tick::new(
+            entity_mut
+                .world()
+                .read_change_tick()
+                .get()
+                .wrapping_sub(bevy::ecs::change_detection::MAX_CHANGE_AGE),
+        );
         // Restored intent values are continuation, not a fresh producer write.
         if let Some(mut writes) = entity_mut.get_mut::<crate::ship::helm::DriveCommandWrites>() {
             *writes = Default::default();
@@ -210,16 +221,18 @@ impl ControlState {
             vertical.0 = control.vertical;
         }
         if let Some(mut boost) = entity_mut.get_mut::<BoostCommand>() {
-            boost.0 = control.boost;
+            boost.bypass_change_detection().0 = control.boost;
+            boost.set_last_changed(consumed);
         }
         if let Some(mut impulse) = entity_mut.get_mut::<ImpulseCommand>() {
-            impulse.0 = match control.impulse_phase {
+            impulse.bypass_change_detection().0 = match control.impulse_phase {
                 1 => ImpulsePhase::Charging,
                 2 => ImpulsePhase::Active,
                 // Including anything this build does not recognise — see
                 // `ControlState::impulse_phase`.
                 _ => ImpulsePhase::Idle,
             };
+            impulse.set_last_changed(consumed);
         }
         if let Some(mut last) = entity_mut.get_mut::<LastHelmInput>() {
             last.thrust = control.last_helm[0];
@@ -427,6 +440,48 @@ mod tests {
         assert!(saved.sensor_lock.is_none());
         assert!(saved.helm_policies.is_none());
         assert!(saved.helm_recovery.is_none());
+    }
+
+    #[test]
+    fn restored_drive_intents_do_not_restart_exhausted_or_cancelled_drives() {
+        let mut app = App::new();
+        app.add_systems(Update, crate::ship::physics_systems::apply_helm_commands);
+        let entity = ship(&mut app);
+        app.world_mut().entity_mut(entity).insert((
+            crate::ai::server::AiHighFidelity,
+            crate::server_app::ShipBoost(crate::ship::boost::BoostState {
+                active: false,
+                battery: 0.5,
+            }),
+            crate::server_app::ShipImpulse(crate::ship::impulse::ImpulseState::new()),
+            crate::ship::helm::DriveCommandWrites::default(),
+        ));
+        app.update(); // consume insertion before restoring a running peer
+        moving().restore_into(&mut app.world_mut().entity_mut(entity));
+        app.update();
+        let ship = app.world().entity(entity);
+        assert!(!ship.get::<crate::server_app::ShipBoost>().unwrap().0.active);
+        assert_eq!(
+            ship.get::<crate::server_app::ShipImpulse>()
+                .unwrap()
+                .0
+                .phase,
+            ImpulsePhase::Idle,
+        );
+        // A subsequent real producer write still engages both drives.
+        let mut ship = app.world_mut().entity_mut(entity);
+        ship.get_mut::<BoostCommand>().unwrap().0 = true;
+        ship.get_mut::<ImpulseCommand>().unwrap().0 = ImpulsePhase::Charging;
+        app.update();
+        let ship = app.world().entity(entity);
+        assert!(ship.get::<crate::server_app::ShipBoost>().unwrap().0.active);
+        assert_eq!(
+            ship.get::<crate::server_app::ShipImpulse>()
+                .unwrap()
+                .0
+                .phase,
+            ImpulsePhase::Charging,
+        );
     }
 
     #[test]

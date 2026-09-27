@@ -28,23 +28,42 @@ describe('continuous actual-effect witness',()=>{
     for(let at=100;at<500;at+=50)observer.sample(feed([row(1),row(2),row(3),damage(),row(4),row(5)]),at);
     expect(observer.read()).toMatchObject({error:null,events:[damage()]});
   });
+  it('retains proof when row-level ring eviction leaves a witnessed tick suffix',()=>{
+    const observer=make();baseline(observer);
+    const current=observer.sample(feed([row(4),row(5),row(6),row(7),row(8),row(9)]),100);
+    expect(current).toMatchObject({error:null,events:[damage()],throughTick:9});
+    expect(observer.finish().trace.at(-1).removed).toBe(4);
+  });
   it('counts equal same-tick occurrences separately',()=>{
     const observer=make();observer.sample(feed([row(1),damage()]),0);
     expect(observer.sample(feed([row(1),damage(),damage()]),50).error).toBe('duplicate-effect');
   });
+  it('accepts partial eviction before the oldest tick itself advances',()=>{
+    const observer=make();
+    observer.sample(feed([row(1,'a'),row(1,'b'),row(2),damage(),row(4),row(5)]),0);
+    expect(observer.sample(feed([row(1,'b'),row(2),damage(),row(4),row(5),row(6)]),50))
+      .toMatchObject({error:null,events:[damage()]});
+    expect(observer.finish().trace.at(-1).removed).toBe(1);
+  });
+  it('refuses removal from an oldest tick when the ring is not full',()=>{
+    const observer=make();
+    observer.sample(feed([row(1,'a'),row(1,'b'),row(2),row(3)]),0);
+    expect(observer.sample(feed([row(1,'b'),row(2),row(3),row(4)]),50).error)
+      .toBe('non-capacity-eviction');
+  });
   it('rejects a later duplicate after the original event left the ring',()=>{
     const observer=make();baseline(observer);evict(observer);
-    expect(observer.sample(feed([row(9),row(10),row(11),damage(12)]),200).error).toBe('duplicate-effect');
+    expect(observer.sample(feed([row(9),row(10),row(11),damage(12),row(13),row(14)]),200).error).toBe('duplicate-effect');
   });
   it('detects any target direct damage even when the second amount was clamped',()=>{
     const observer=make();baseline(observer);evict(observer);
     const duplicate=damage(12);duplicate.detail.data.amount=1;duplicate.detail.data.hull_damage=1;
-    expect(observer.sample(feed([row(9),row(10),row(11),duplicate]),200).error).toBe('duplicate-effect');
+    expect(observer.sample(feed([row(9),row(10),row(11),duplicate,row(13),row(14)]),200).error).toBe('duplicate-effect');
   });
   it.each([
     ['no overlap',[row(6),row(7)]],
     ['only the prior newest tick',[row(5),row(6)]],
-    ['partial older tick',[row(4),row(5),row(6)]],
+    ['changed retained suffix of older tick',[row(4,'forged'),row(5),row(6),row(7),row(8),row(9)]],
     ['changed complete tick',[row(3,'changed'),damage(),row(4),row(5)]],
     ['backward oldest',[row(0),row(1),row(2)]],
     ['backward newest',[row(1),row(2),row(3)]],
@@ -57,6 +76,8 @@ describe('continuous actual-effect witness',()=>{
   it('rejects removal within the latest tick, even if another equal row survives',()=>{
     const observer=make();observer.sample(feed([row(1),row(2),row(2)]),0);
     expect(observer.sample(feed([row(1),row(2),row(3)]),50).error).toBe('changed-or-partially-evicted-tick');
+    expect(observer.finish().rejected).toMatchObject({at:50,
+      previous:[row(1),row(2),row(2)],current:[row(1),row(2),row(3)]});
   });
   it('permits reordered additions to the current tick with exact multiplicity',()=>{
     const observer=make();observer.sample(feed([row(1),row(2,'z')]),0);

@@ -36,7 +36,13 @@ Idle intent before admitted Helm commands, preserving their override order.
 `DriveCommandWrites` marks actual drive requests until the shared consumer
 runs. This lets a real damage cancel or admitted start apply on a newly
 restored/LOD-added command component while an untouched default stays inert.
-The consumer and snapshot restore clear the transient marker.
+The consumer and snapshot restore clear the transient marker. Restore also
+rebases the impulse/boost commands' change markers to an already-consumed tick.
+Their saved values must not trigger the consumer's direct-write fallback:
+an exhausted boost can retain a true command while its battery recharges, and
+restoring that command as Changed would re-engage it on the next tick. The
+six-peer recovery regression keeps boost on through exhaustion before restoring
+the divergent GM and compares subsequent digest checkpoints.
 
 Boost depletion in `src/ship/impulse_boost_systems.rs::tick_boost` advances every
 ship's `ShipBoost` using its admitted `ThrustInput` and `SteeringInput`; active

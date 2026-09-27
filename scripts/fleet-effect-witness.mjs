@@ -4,11 +4,12 @@ export function createEffectWitness({entity, correlation, observe = false,
   intervalMs = 50, maxGapMs = 1000, maxSamples = 3000, maxBytes = 8 * 1024 * 1024,
   maxDurationMs = 120000} = {}) {
   let previous = null, previousAt = null, startedAt = null, capacity = null;
-  let samples = 0, bytes = 0, error = null, throughTick = null;
+  let samples = 0, bytes = 0, error = null, throughTick = null, rejected = null;
   const events = [], trace = [];
   const fail = reason => { error ||= reason; };
   const key = row => JSON.stringify(row);
   const group = (rows, tick) => rows.filter(row => row.tick === tick).map(key).sort();
+  const orderedGroup = (rows, tick) => rows.filter(row => row.tick === tick).map(key);
   const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const isEffect = row => row.category === 'damage' && row.detail?.type === 'damage'
     && row.detail.data?.weapon === 'gm.direct'
@@ -25,7 +26,12 @@ export function createEffectWitness({entity, correlation, observe = false,
       || activity.capacity > 4096 || rows.length > activity.capacity || !rows.length
       || rows.some((row, i) => !Number.isSafeInteger(row.tick) || row.tick < 0 || (i && row.tick < rows[i - 1].tick)))
       fail('invalid-activity');
-    if (error) return read();
+    if (error) {
+      // Keep the first rejected projection so a failed proof identifies the
+      // precise missing or rewritten rows, rather than just its reason code.
+      rejected = {at, previous: structuredClone(previous), current: structuredClone(rows)};
+      return read();
+    }
     if (capacity !== null && capacity !== activity.capacity) fail('capacity-changed');
     capacity = activity.capacity;
     const oldest = rows[0].tick, newest = rows.at(-1).tick;
@@ -34,12 +40,22 @@ export function createEffectWitness({entity, correlation, observe = false,
       const oldFirst = previous[0].tick, oldLast = previous.at(-1).tick;
       if (oldest < oldFirst || newest < oldLast) fail('backward-history');
       // A strictly earlier retained tick proves the old latest tick is whole.
-      // Do not infer overlap from identical row suffixes or a partial tick.
+      // A partial oldest tick is handled below only with exact suffix evidence.
       if (oldest > oldFirst && oldest >= oldLast) fail('sampling-gap-no-complete-overlap');
       for (const tick of new Set(previous.map(row => row.tick))) {
         if (tick < oldest) continue;
         const before = group(previous, tick), after = group(rows, tick);
-        if (tick < oldLast && !equal(before, after)) fail('changed-or-partially-evicted-tick');
+        if (tick < oldLast && tick === oldest) {
+          // The bounded ring evicts individual rows, not whole ticks. Its
+          // oldest retained tick may therefore be a suffix of a tick already
+          // witnessed. Keep the complete intervening ticks as the continuity
+          // anchor and retain evicted effects in `events`.
+          const oldOrder = orderedGroup(previous, tick), newOrder = orderedGroup(rows, tick);
+          if (!equal(oldOrder.slice(-newOrder.length), newOrder))
+            fail('changed-or-partially-evicted-tick');
+        } else if (tick < oldLast && !equal(before, after)) {
+          fail('changed-or-partially-evicted-tick');
+        }
         if (tick === oldLast) {
           const remaining = [...after];
           for (const item of before) {
@@ -58,9 +74,13 @@ export function createEffectWitness({entity, correlation, observe = false,
         if (count) oldCounts.set(encoded, count - 1);
         else { if (row.tick < oldLast) fail('backdated-history'); added.push(row); }
       }
-      removed = previous.filter(row => row.tick < oldest).length;
+      removed = [...oldCounts.values()].reduce((sum, count) => sum + count, 0);
+      if (removed && rows.length !== capacity) fail('non-capacity-eviction');
     }
-    if (error) return read();
+    if (error) {
+      rejected = {at, previous: structuredClone(previous), current: structuredClone(rows)};
+      return read();
+    }
     const record = {at, oldest, newest, removed, added};
     const encoded = JSON.stringify(record);
     bytes += new TextEncoder().encode(encoded).length;
@@ -71,7 +91,8 @@ export function createEffectWitness({entity, correlation, observe = false,
     previous = structuredClone(rows); previousAt = at; throughTick = newest;
     return read();
   }
-  const observer = {sample, read, finish: () => ({...read(), capacity, trace: structuredClone(trace)})};
+  const observer = {sample, read, finish: () => ({...read(), capacity,
+    trace: structuredClone(trace), rejected: structuredClone(rejected)})};
   if (!observe) return observer;
   if (window.__recoveryEffectWitness) throw new Error('Effect observer already installed');
   const poll = () => {

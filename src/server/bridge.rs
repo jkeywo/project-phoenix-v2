@@ -4272,10 +4272,7 @@ pub fn wasm_delivery_stamp_field() -> String {
     let manifest_toml =
         crate::entities::config_cache::get_scenario_manifest_toml().unwrap_or_default();
     let stamp = crate::delivery::stamp::DeliveryStamp::for_manifest(&manifest_toml);
-    format!(
-        "{}/{}/{}",
-        stamp.protocol, stamp.content_id, stamp.content_epoch
-    )
+    stamp.to_field()
 }
 
 /// Return the Rhai host-fn signature registry for the scenario script editor

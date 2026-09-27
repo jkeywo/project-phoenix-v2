@@ -1,0 +1,105 @@
+// Review-only workload scripts injected into a private native bundle.
+// They use the normal participant and private-GM adapters, including admission
+// and correlated terminal feedback. No authoritative state is written here.
+export function paneWorkloadScript(endpoint) {
+  return `(() => {
+    const pane = window.__phoenixPane;
+    if (!pane || !/^matrix-(captain|helm|engineering)$/.test(pane.name)) return;
+    const station = pane.name.slice(7);
+    const images = new Set();
+    let overflow = false;
+    const report = (kind, value) => {
+      if (images.size >= 256) {
+      if (!overflow) { overflow = true; fetch(${JSON.stringify(endpoint)} + '?event=' + encodeURIComponent(JSON.stringify({kind:'observer-overflow',value:{reason:'pending-telemetry'}}))).catch(() => {}); }
+      return;
+    }
+      const request = fetch(${JSON.stringify(endpoint)} + '?event=' + encodeURIComponent(JSON.stringify({kind,value:{station,...value}})));
+      images.add(request); request.catch(() => {}).finally(() => images.delete(request));
+    };
+    let welcomed = false, assigned = false, ready = false, started = false, claimSent = false, sequence = 0;
+    const original = window.__phoenixPaneApply;
+    window.__phoenixPaneApply = function(json) {
+      const result = original.apply(this, arguments);
+      try {
+        const message = JSON.parse(json), data = message.data || {};
+        if (message.type === 'Welcome') { welcomed = true; report('station-welcome', {}); }
+        if (message.type === 'StationAssigned' && data.token === pane.token) {
+          const actual = typeof data.station_id === 'string' ? data.station_id : data.station_id?.id;
+          assigned = actual === station; report('station-assigned', {actual,assigned});
+        }
+        if (message.type === 'ReadyChanged' && data.token === pane.token) { ready = !!data.ready; report('station-ready', {ready}); }
+        if (message.type === 'GameStarted') { started = true; report('station-started', {}); }
+        if (message.type === 'ActionFeedback') report('station-feedback', data);
+      } catch (error) { report('station-error', {message:error.message}); }
+      return result;
+    };
+    const send = (type,data) => window.phoenixLink?.send(type,data,'reliable');
+    let readySent = false;
+    setInterval(() => {
+      if (!welcomed || !window.phoenixLink) return;
+      if (!claimSent) { send('SelectStation',{station}); claimSent = true; }
+      if (assigned && !readySent) { send('SetReady',{ready:true}); readySent = true; }
+      if (!assigned || !ready || !started) return;
+      const correlation = 'native-matrix-' + station + '-' + (++sequence);
+      const payload = station === 'captain'
+        ? {target:'red-alert',payload:{type:'SetRedAlert',data:{active:sequence%2===0}}}
+        : station === 'helm'
+          ? {target:'helm-boost',payload:{type:'SetBoost',data:{active:sequence%2===0}}}
+          : {target:'power-reactor',payload:{type:'SetPowerGroupAllocation',data:{group:'weapons',level:sequence%2 ? 3 : 2}}};
+      send('ControlSystemCorrelated',{correlation,...payload});
+      report('station-command', {correlation});
+    }, 1000);
+    report('station-engine', {userAgent:navigator.userAgent});
+  })();`;
+}
+
+export function instrumentNativeGmModule(source, endpoint) {
+  const declaration = 'export function mountNativeGmWorkspace(';
+  if (source.split(declaration).length !== 2) throw new Error('Native GM factory declaration changed');
+  return source.replace(declaration, 'function observedNativeGmWorkspace(') + `
+export function mountNativeGmWorkspace(options) {
+  const workspace = observedNativeGmWorkspace(options);
+  const bridge = options.bridge;
+  const images = new Set();
+    let overflow = false;
+  const report = (kind,value) => {
+    if (images.size >= 256) {
+      if (!overflow) { overflow = true; fetch(${JSON.stringify(endpoint)} + '?event=' + encodeURIComponent(JSON.stringify({kind:'observer-overflow',value:{reason:'pending-telemetry'}}))).catch(() => {}); }
+      return;
+    }
+    const request = fetch(${JSON.stringify(endpoint)} + '?event=' + encodeURIComponent(JSON.stringify({kind,value})));
+    images.add(request); request.catch(() => {}).finally(() => images.delete(request));
+  };
+  let phase = 'Lobby', readySent = false, sequence = 0, busy = false;
+  let lastMetadata = '';
+  bridge.subscribe((channel,payload) => {
+    if (channel === 'metadata') {
+      phase = payload.phase;
+      const metadata = {phase,local_operator_id:payload.local_operator_id,gms:payload.gms,start_policy:payload.start_policy};
+      const text = JSON.stringify(metadata);
+      if (text !== lastMetadata) { lastMetadata = text; report('gm-metadata',metadata); }
+      if (bridge.getOperator()?.connected && !readySent) { bridge.setReady(true); readySent = true; report('gm-ready-requested',{}); }
+    }
+    if (channel === 'gm_activity') report('gm-activity',payload);
+    if (channel === 'gm_session') report('gm-session',payload);
+  });
+  setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const response = await fetch(${JSON.stringify(endpoint + '/control')});
+      const command = await response.json();
+      if (command?.kind === 'force-start') { bridge.forceStart(); report('gm-force-start-requested',{}); }
+    } catch (error) { report('gm-control-error',{message:error.message}); }
+    finally { busy = false; }
+    if (phase !== 'InProgress' || !bridge.getOperator()?.connected) return;
+    const correlation = 'native-matrix-gm-' + (++sequence);
+    const reverse = Number((bridge.getOperator().id.match(/[0-9]+$/) || ['0'])[0]) % 2 === 1;
+    const accepted = window.__hostSetFactionHostility({correlation,faction:reverse?'Alliance':'Harrow',enemy:reverse?'Harrow':'Alliance',hostile:sequence%2===0});
+    report('gm-action-requested',{correlation,accepted});
+  }, 2000);
+  report('gm-engine',{userAgent:navigator.userAgent});
+  return workspace;
+}
+`;
+}

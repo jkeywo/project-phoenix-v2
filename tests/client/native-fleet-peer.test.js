@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { createNativeFleetPeer } from '../../gui/native-fleet-peer.js';
 
 describe('native technical fleet peer', () => {
+  it('health-only ticks cannot flood control frames while changed state and every edge still publish', () => {
+    let options;
+    const handle = {update:vi.fn(),setCrewReadiness:vi.fn(),setGmReady:vi.fn(),setStartValidation:vi.fn(),broadcast:vi.fn(),forceStart:vi.fn(),close:vi.fn()};
+    const peer = createNativeFleetPeer({send:vi.fn(),createOwner:value => {options=value;return handle;}});
+    peer.configure({base:'https://fleet.test',owner:true,credentials:['one']});
+    const state={ship:{template_path:'ship'},ship_ready:true,crew:{connected:3,ready:2},station_ratings:[['helm','Std']],gm_ready:false,validation:true};
+    for(let tick=0;tick<512;tick++) peer.update({...state,health:{tick},frames:[String(tick)]});
+    for(const method of ['update','setCrewReadiness','setGmReady','setStartValidation']) expect(handle[method]).toHaveBeenCalledTimes(1);
+    expect(handle.broadcast.mock.calls.map(args=>args[0])).toEqual(Array.from({length:512},(_,i)=>String(i)));
+    peer.update({...state,crew:{connected:3,ready:3},validation:false,force_start:true});
+    peer.update({...state,crew:{connected:3,ready:3},validation:false,force_start:true});
+    expect(handle.setCrewReadiness).toHaveBeenCalledTimes(2);
+    expect(handle.setStartValidation).toHaveBeenCalledTimes(2);
+    expect(handle.forceStart).toHaveBeenCalledTimes(2);
+    const adopted=options.onSimulationRoster({participants:[]});
+    peer.update({...state,roster_result:{generation:1,accepted:true}});
+    peer.update({...state,roster_result:{generation:1,accepted:true}});
+    return expect(adopted).resolves.toBe(true);
+  });
   it('retains reliable frames until the bridge socket handlers are registered', async () => {
     const received = [];
     let options;
@@ -27,7 +46,7 @@ describe('native technical fleet peer', () => {
       kind: 'fleet_fault', reason: 'pending-frame-overflow', detail: '',
     });
   });
-  it('admits a selected native ship through the ordinary fleet member path', () => {
+  it('admits a selected native ship and replays its control snapshot without a later Rust update', async () => {
     const sent = [];
     let options;
     const handle = {
@@ -39,17 +58,22 @@ describe('native technical fleet peer', () => {
       createMember: candidate => { options = candidate; return handle; },
     });
     peer.configure({ base: 'https://fleet.test', owner: false,
-      ship_path: 'assets/entities/alliance_cruiser.toml', credentials: ['configuration'] });
+      ship_path: 'assets/entities/alliance_cruiser.toml', stamp:'4/phoenix-base/1',stamp_valid:true,credentials: ['configuration'] });
     expect(peer.join('SERVER-CODE', {}, null, 'ship')).toBe(true);
     expect(options.role).toBe('ship');
+    expect(options.stamp).toBe('4/phoenix-base/1');
     expect(options.ship.template_path).toBe('assets/entities/alliance_cruiser.toml');
     expect(options.transports).toEqual(['ws-relay']);
-    options.onWelcome();
-    expect(sent).toContainEqual({ kind: 'fleet_join_status', status: 'admitted' });
+    if (options.role === 'ship') expect(options.levers).toMatchObject({mode:'ws-relay',wsRelay:'only',pinned:true});
     peer.update({ ship: options.ship, ship_ready: true,
-      crew: { connected: 3, ready: 3 }, station_ratings: [['helm', 'Std']] });
+      crew: { connected: 3, ready: 3 }, station_ratings: [['helm', 'Std']],frames:['one-shot'] });
     expect(handle.setCrewReadiness).toHaveBeenCalledWith(
       { connected: 3, ready: 3 }, [['helm', 'Std']]);
+    options.onWelcome();
+    await Promise.resolve();
+    expect(sent).toContainEqual({ kind: 'fleet_join_status', status: 'admitted' });
+    expect(handle.update).toHaveBeenCalledTimes(2);
+    expect(handle.broadcast).toHaveBeenCalledExactlyOnceWith('one-shot');
   });
   it('opens one relay-only owner carrying ship and GM capabilities', async () => {
     const sent = [];
@@ -64,7 +88,7 @@ describe('native technical fleet peer', () => {
     });
     expect(peer.configure({
       base: 'https://fleet.test',
-      stamp: '{"protocol":14,"content_id":"base","content_epoch":3}', max_slots: 4,
+      stamp: '14/base/3', stamp_valid:true, max_slots: 4,
       max_name_length: 48, max_ship_path_length: 160,
       ship_path: 'assets/entities/ship.toml', gm_name: 'GM', operator_id: 'native-gm',
       credentials: ['owner-secret', 'join-secret'],
@@ -74,8 +98,10 @@ describe('native technical fleet peer', () => {
     expect(options.ship.template_path).toBe('assets/entities/ship.toml');
     expect(options.ownerOperatorId).toBe('native-gm');
     expect(options.credentialFactory()).toBe('owner-secret');
-    expect(options.checkStamp('{"content_epoch":3,"content_id":"base","protocol":14}'))
-      .toEqual({ ok: true });
+    expect(options.checkStamp('14/base/3')).toEqual({ok:true});
+    for (const stamp of [null,'','14//3','15/base/3','14/base/4','14/other/3','{"protocol":14,"content_id":"base","content_epoch":3}']) {
+      expect(options.checkStamp(stamp).ok).toBe(false);
+    }
 
     options.onCode({ full: 'server_code', suffix: 'CODE' });
     const adoption = options.onSimulationRoster({ frozen: true, local: 1, participants: [1, 2] });
@@ -155,7 +181,7 @@ describe('native technical fleet peer', () => {
     expect(options).toMatchObject({
       code: 'SERVER-ABCD', role: 'gm', name: 'Morgan',
       reconnectCredential: 'private-capability', claim: 'slot-2',
-      transports: ['ws-relay'],
+      transports: ['ws-relay'], levers:{mode:'ws-relay',wsRelay:'only',pinned:true},
     });
 
     options.onIdentity({

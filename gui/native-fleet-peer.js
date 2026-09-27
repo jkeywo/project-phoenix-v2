@@ -1,4 +1,5 @@
 import { createFleetMember, createFleetOwner } from './fleet-session.js';
+import { transportLeversFromLocation } from './transport-levers.js';
 import { HOST_ROLE_GM, HOST_ROLE_SHIP, HOST_ROLE_SHIP_GM } from './host-mesh.js';
 
 /**
@@ -16,6 +17,8 @@ export function createNativeFleetPeer({
   let nextRosterGeneration = 1;
   const pendingRosters = new Map();
   let config = null;
+  const publishedControl = new Map();
+  let latestControl = null;
   const pendingWire = [];
   let wireReady = false;
   let wireFailed = false;
@@ -63,16 +66,27 @@ export function createNativeFleetPeer({
       return false;
     }
   };
-  const sameStamp = (left, right) => {
-    try {
-      const a = typeof left === 'string' ? JSON.parse(left) : left;
-      const b = typeof right === 'string' ? JSON.parse(right) : right;
-      return a?.protocol === b?.protocol
-        && a?.content_id === b?.content_id
-        && a?.content_epoch === b?.content_epoch;
-    } catch (_) {
-      return false;
-    }
+  // Both runtime producers use Rust's DeliveryStamp::to_field. Rust also
+  // validates the native configured identity, so equality needs no second
+  // parser and cannot admit two matching but unidentified content sets.
+  const sameStamp = stamp => config.stamp_valid === true
+    && typeof stamp === 'string' && stamp === config.stamp;
+
+  const publishControl = state => {
+    // Health ticks and simulation frames are frequent; unchanged lobby
+    // control values must not fan out fresh roster frames on every tick.
+    const changed = (key, value, publish) => {
+      const json = JSON.stringify(value);
+      if (publishedControl.get(key) === json) return;
+      publish();
+      publishedControl.set(key, json);
+    };
+    const ship = { ship: state.ship, ready: !!state.ship_ready };
+    changed('ship', ship, () => handle.update(ship));
+    const crew = state.crew || {}, ratings = state.station_ratings || [];
+    changed('crew', [crew, ratings], () => handle.setCrewReadiness(crew, ratings));
+    changed('gm', !!state.gm_ready, () => handle.setGmReady(!!state.gm_ready));
+    changed('validation', !!state.validation, () => handle.setStartValidation(!!state.validation));
   };
 
   return {
@@ -106,7 +120,7 @@ export function createNativeFleetPeer({
         },
         name: config.ship_name || config.gm_name || 'GM',
         ship: { template_path: config.ship_path || null, name: config.ship_name || '' },
-        checkStamp: (stamp) => sameStamp(stamp, config.stamp)
+        checkStamp: (stamp) => sameStamp(stamp)
           ? { ok: true }
           : { ok: false, code: 'version-mismatch' },
         authenticateFrame,
@@ -140,6 +154,9 @@ export function createNativeFleetPeer({
         stamp: config.stamp,
         iceServers: [],
         transports: ['ws-relay'],
+        // Member joiners select transport through levers, including when a
+        // browser owner also advertises WebRTC that native cannot provide.
+        levers: transportLeversFromLocation('?transport=ws-relay'),
         factories: {
           socket: bridgeSocket,
           peer: () => { throw new Error('native fleet is relay-only'); },
@@ -152,7 +169,14 @@ export function createNativeFleetPeer({
         name: role === HOST_ROLE_SHIP ? config.ship_name || '' : config.gm_name || 'GM',
         reconnectCredential: reconnect && reconnect.reconnectCredential,
         claim: reconnect && reconnect.claim,
-        onWelcome: () => emit({ kind: 'fleet_join_status', status: 'admitted' }),
+        onWelcome: () => {
+          // An initial patch may precede transport admission. Republish the
+          // current snapshot once after Welcome, even if Rust has no newer
+          // update. The cached snapshot excludes frames and one-shot edges.
+          publishedControl.clear();
+          queueMicrotask(() => { if (handle && latestControl) publishControl(latestControl); });
+          emit({ kind: 'fleet_join_status', status: 'admitted' });
+        },
         // createFleetMember can announce identity synchronously while its
         // factory call is still assigning `handle`. Defer one microtask so the
         // persisted reconnect claim contains the admitted mesh slot as well as
@@ -190,10 +214,9 @@ export function createNativeFleetPeer({
       let state;
       try { state = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) { return false; }
       if (state.health) onHealth(state.health);
-      handle.update({ ship: state.ship, ready: !!state.ship_ready });
-      handle.setCrewReadiness(state.crew || {}, state.station_ratings || []);
-      handle.setGmReady(!!state.gm_ready);
-      handle.setStartValidation(!!state.validation);
+      latestControl = {ship:state.ship,ship_ready:state.ship_ready,crew:state.crew,
+        station_ratings:state.station_ratings,gm_ready:state.gm_ready,validation:state.validation};
+      publishControl(latestControl);
       if (state.roster_result) {
         const resolve = pendingRosters.get(state.roster_result.generation);
         if (resolve) {
@@ -210,6 +233,8 @@ export function createNativeFleetPeer({
     close() {
       if (handle) handle.close();
       handle = null;
+      publishedControl.clear();
+      latestControl = null;
       configured = false;
       pendingWire.length = 0;
       wireReady = false;

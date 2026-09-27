@@ -44,6 +44,14 @@ pub struct DeliveryStamp {
 }
 
 impl DeliveryStamp {
+    /// Canonical field shared by browser and native fleet handshakes.
+    pub fn to_field(&self) -> String {
+        format!(
+            "{}/{}/{}",
+            self.protocol, self.content_id, self.content_epoch
+        )
+    }
+
     /// The stamp of a host serving `manifest_toml`.
     ///
     /// A manifest declaring no `[content]` block yields the same empty identity
@@ -219,6 +227,18 @@ mod tests {
 
     fn host() -> DeliveryStamp {
         DeliveryStamp::for_manifest(BASE)
+    }
+
+    #[test]
+    fn fleet_field_round_trips_through_the_shared_native_and_browser_checker() {
+        let stamp = host();
+        assert_eq!(
+            crate::delivery::parse_stamp_field(&stamp.to_field()),
+            Some(stamp.clone())
+        );
+        assert!(crate::delivery::check_host_stamp(&stamp, Some(&stamp.to_field())).is_ok());
+        let missing = DeliveryStamp::for_manifest("");
+        assert!(crate::delivery::check_host_stamp(&missing, Some(&missing.to_field())).is_err());
     }
 
     #[test]

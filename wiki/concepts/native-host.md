@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [assets/audio/reduced-range.toml, src/native_host/audio/range.rs, gui/audio-range.js, tests/smoke/audio-range.spec.js, assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/engine.rs, src/native_host/audio/private.rs, src/native_host/audio/private_tests.rs, src/native_host/panes/operator_storage.js, tests/smoke/native-private-audio.spec.js, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/audio/combat_tests.rs, src/server/audio.rs, tests/smoke/native-combat-audio.spec.js, src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/decoder.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, gui/native-audio.js, tests/client/native-audio.test.js, pasm/spec/architecture/presentation-loading.yaml, src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/viewscreen_presentation.rs, src/native_host/viewscreen_locale.rs, gui/locale-preference.js, src/native_host/host_lobby/host_lobby_link.js, pasm/spec/architecture/client-shell.yaml, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs, src/native_host/audio/private_audition.rs, src/sound_cues.rs, gui/sound-audition-panel.js, src/gm_presentation/sound.rs, src/native_host/audio/authored_tests.rs, tests/smoke/live-authored-audio.spec.js]
+sources: [src/native_host/fleet_identity.rs, src/delivery/stamp.rs, gui/native-fleet-peer.js, src/native_host/host_lobby/fleet.rs, scripts/fleet-native-matrix.mjs, scripts/fleet-native-probe.mjs, scripts/fleet-native-workload.mjs, assets/audio/reduced-range.toml, src/native_host/audio/range.rs, gui/audio-range.js, tests/smoke/audio-range.spec.js, assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/engine.rs, src/native_host/audio/private.rs, src/native_host/audio/private_tests.rs, src/native_host/panes/operator_storage.js, tests/smoke/native-private-audio.spec.js, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/audio/combat_tests.rs, src/server/audio.rs, tests/smoke/native-combat-audio.spec.js, src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/decoder.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, gui/native-audio.js, tests/client/native-audio.test.js, pasm/spec/architecture/presentation-loading.yaml, src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/viewscreen_presentation.rs, src/native_host/viewscreen_locale.rs, gui/locale-preference.js, src/native_host/host_lobby/host_lobby_link.js, pasm/spec/architecture/client-shell.yaml, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs, src/native_host/audio/private_audition.rs, src/sound_cues.rs, gui/sound-audition-panel.js, src/gm_presentation/sound.rs, src/native_host/audio/authored_tests.rs, tests/smoke/live-authored-audio.spec.js]
 updated: 2026-09-27
 ---
 
@@ -2602,3 +2602,45 @@ Informative text uses the existing HUD live-equivalent row independently of the
 audio device. An optional source contact applies the shared M7 suppression rule
 in the effective Sensors view before either sound or equivalent is emitted.
 Normal GM command attribution remains intact; audio has no history or replay.
+
+### Native fleet runtime verification
+
+`host_lobby/fleet.rs` defers an explicit rendezvous owner's configuration until
+a world is selected or an accepted landing Join as Peer request chooses
+membership. This lets a world-less native GM join a local service without first
+creating a different fleet. `host_lobby/bridge.rs` preserves fleet updates in an
+ordered, bounded queue because they carry one-shot join/launch requests and
+drained simulation frames; delayed Ultralight loading cannot replace those
+with newer presentation state. Overflow closes the fleet with a terminal fault.
+
+`scripts/fleet-native-matrix.mjs` runs four native ship processes and two native
+GM processes with an optional twelve-pane command workload. It observes real
+relay routes, command receipts, attributed GM outcomes and common digest ticks.
+The bounded run's evidence and limitations are described in
+`docs/acceptance/1530-native-runtime.md`; adding the runner does not itself mark
+any runtime-matrix cell as passed.
+Selected native fleet owners and joining members engage `FleetManagedLobby`
+before local fixed-tick lobby handlers. This blocks independent crew countdowns
+while the retained page loads and until the fleet adopts its shared roster and
+start grant; merely configuring the default member adapter does not block an
+ordinary LAN-only host.
+
+`gui/native-fleet-peer.js` publishes changed lobby controls independently from
+frequent health ticks and mesh frames. `NativeFleetGmAdmission` carries only the
+admitted local GM's public row for pre-freeze Ready; frozen `FleetRoster`
+membership replaces it and join/fault transitions clear it.
+
+The matrix sets an explicit absolute `PHOENIX_FLEET_IDENTITY_DIR` per process
+because Windows Known Folders does not follow overridden APPDATA variables.
+Default user reconnect storage remains unchanged. Fleet join stamps come from
+the same `DeliveryStamp::to_field()` formatter as the browser WASM export;
+native configured identity validity is checked by `delivery::check_host_stamp`.
+
+The measured native #1530 loopback smoke run uses four actual ship processes,
+twelve embedded Station documents and two separate GM processes. Its accepted
+simulation roster, Applied command receipts and two shared post-action digest
+ticks are recorded in `docs/acceptance/1530-native-runtime-result.json`. The
+owner retains its combined GM role, so the run uses a separate GM's ordinary
+Force Start; it does not establish automatic all-ready launch or internet,
+impairment or endurance acceptance. Post-Welcome control replay is snapshot-only:
+it cannot repeat mesh frames, Force Start edges or roster-result generations.

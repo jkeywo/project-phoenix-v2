@@ -766,9 +766,12 @@ fn main() {
                     base: base.to_string(),
                     origin: origin.to_string(),
                     owner: explicit_owner,
-                    stamp: project_phoenix::core::codec::encode_delivery_stamp(
+                    stamp: content.manifest.stamp.to_field(),
+                    stamp_valid: project_phoenix::delivery::check_host_stamp(
                         &content.manifest.stamp,
-                    ),
+                        Some(&content.manifest.stamp.to_field()),
+                    )
+                    .is_ok(),
                     max_slots: table.limits.max_fleet_hosts,
                     max_name_length: table.limits.max_slot_name_length,
                     max_ship_path_length: table.limits.max_slot_ship_path_length,

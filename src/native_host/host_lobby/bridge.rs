@@ -22,13 +22,13 @@
 //! the viewscreen" — a question with no honest answer. So it gets its own
 //! bridge, and the pane bus keeps meaning exactly one thing.
 //!
-//! # Latest-wins, not a queue
+//! # Presentation snapshots and ordered fleet traffic
 //!
 //! `pump_pane` carries a *backlog* and is careful never to lose a message,
 //! because `Welcome`/`StationAssigned`/`GameStarted` are one-shot transitions
 //! and a pane that missed one sits in the lobby forever.
 //!
-//! Nothing here is one-shot. A `LobbyStatePayload` is a snapshot of the whole
+//! A `LobbyStatePayload` is a snapshot of the whole
 //! lobby, pushed every frame the lobby changes; the scenario-panel state is a
 //! snapshot of the whole picker (issue #1328); the monitor row is a snapshot of
 //! the whole bridge layout (issue #1330); and the reveal flag is a current
@@ -39,8 +39,11 @@
 //! reveal, the join invitation, the landing screen, the mod-pack shelf, the
 //! picker, the monitor row and the lobby state — at most one push each a frame.
 //!
-//! The one exception is the QR toggle, which is an *edge* and is counted rather
+//! The QR toggle is an *edge* and is counted rather
 //! than collapsed — see [`HostLobbyBridge::push_qr_toggle`].
+//! Fleet updates and wire frames have separate ordered, bounded queues: updates
+//! carry one-shot join/launch requests and drained simulation frames. Overflow
+//! faults the fleet explicitly; it must never discard those records as stale paint.
 //!
 //! A push that fails is still not lost: it goes back in its slot unless
 //! something newer has already taken it, which is the same "the page's modules
@@ -135,7 +138,7 @@ struct Inner {
     hud_reading: Option<String>,
     hud_locale: Option<String>,
     fleet_config: Option<String>,
-    fleet_update: Option<String>,
+    fleet_updates: VecDeque<String>,
     /// Ordered reliable rendezvous frames for the native fleet control plane.
     fleet_wire: VecDeque<String>,
     hud_os_defaults: crate::native_host::panes::os_prefs::OsAccessibilityPrefs,
@@ -318,7 +321,7 @@ impl HostLobbyBridge {
     pub fn has_pending(&self) -> bool {
         let inner = self.lock();
         inner.fleet_config.is_some()
-            || inner.fleet_update.is_some()
+            || !inner.fleet_updates.is_empty()
             || !inner.fleet_wire.is_empty()
             || inner.payload.is_some()
             || inner.reveal.is_some()
@@ -404,7 +407,7 @@ impl HostLobbyBridge {
         let mut inner = self.lock();
         Pending {
             fleet_config: inner.fleet_config.take(),
-            fleet_update: inner.fleet_update.take(),
+            fleet_updates: std::mem::take(&mut inner.fleet_updates),
             fleet_wire: std::mem::take(&mut inner.fleet_wire),
             reveal: inner.reveal.take(),
             join: inner.join.take(),
@@ -482,7 +485,38 @@ impl HostLobbyBridge {
         self.lock().fleet_config = Some(json.into());
     }
     pub fn push_fleet_update(&self, json: impl Into<String>) {
-        self.lock().fleet_update = Some(json.into());
+        let mut inner = self.lock();
+        if inner.fleet_faulted {
+            return;
+        }
+        if inner.fleet_updates.len() >= RECORD_CAP {
+            Self::fault_fleet_updates(&mut inner);
+            return;
+        }
+        // Unlike lobby paint snapshots, these updates carry one-shot join and
+        // launch requests and drained MeshOutbox frames. Keep them in order
+        // while the asynchronous embedded surface loads or defers a push.
+        inner.fleet_updates.push_back(json.into());
+    }
+    fn restore_fleet_updates(&self, mut updates: VecDeque<String>) {
+        let mut inner = self.lock();
+        if inner.fleet_faulted {
+            return;
+        }
+        if updates.len() + inner.fleet_updates.len() > RECORD_CAP {
+            Self::fault_fleet_updates(&mut inner);
+            return;
+        }
+        updates.append(&mut inner.fleet_updates);
+        inner.fleet_updates = updates;
+    }
+    fn fault_fleet_updates(inner: &mut Inner) {
+        inner.fleet_updates.clear();
+        inner.fleet_faulted = true;
+        inner.records.clear();
+        inner.records.push_back(
+            r#"{"kind":"fleet_fault","reason":"bridge-overflow","detail":"native fleet update capacity exceeded"}"#.to_string(),
+        );
     }
     pub fn push_fleet_wire(&self, frame: impl Into<String>) {
         let mut inner = self.lock();
@@ -555,7 +589,7 @@ fn is_fleet_record(json: &str) -> bool {
 /// One frame's worth of everything waiting to cross.
 struct Pending {
     fleet_config: Option<String>,
-    fleet_update: Option<String>,
+    fleet_updates: VecDeque<String>,
     fleet_wire: VecDeque<String>,
     audio: Option<String>,
     reveal: Option<bool>,
@@ -659,23 +693,25 @@ pub fn pump_host_lobby(
         }
     }
 
-    if let Some(json) = pending.fleet_update {
+    let mut unsent_updates = VecDeque::new();
+    for json in pending.fleet_updates {
         if failed {
-            report.deferred += 1;
-            bridge.push_fleet_update(json);
-        } else {
-            match surface.push(&super::document::host_lobby_fleet_update_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.push_fleet_update(json);
-                    failed = true;
-                }
+            unsent_updates.push_back(json);
+            continue;
+        }
+        match surface.push(&super::document::host_lobby_fleet_update_script(&json)) {
+            Ok(()) => report.pushed += 1,
+            Err(e) => {
+                report.push_failure = Some(e);
+                unsent_updates.push_back(json);
+                failed = true;
             }
         }
     }
-
+    report.deferred += unsent_updates.len();
+    if !unsent_updates.is_empty() {
+        bridge.restore_fleet_updates(unsent_updates);
+    }
     if failed {
         report.deferred += pending.fleet_wire.len();
         bridge.restore_fleet_wire(pending.fleet_wire);
@@ -923,6 +959,69 @@ mod tests {
         assert!(records[0].contains("bridge-overflow"));
     }
 
+    #[test]
+    fn fleet_join_and_frames_survive_delayed_surface_loading_in_order() {
+        let bridge = HostLobbyBridge::new();
+        let updates = [
+            r#"{"join_request":{"code":"ABCDEFGH","role":"ship"},"frames":[]}"#,
+            r#"{"join_request":null,"frames":["tick-first"]}"#,
+            r#"{"force_start":true,"frames":["tick-second"]}"#,
+            r#"{"force_start":false,"frames":[]}"#,
+        ];
+        for update in updates {
+            bridge.push_fleet_update(update);
+        }
+        let mut surface = RecordingSurface::default();
+        pump_host_lobby(&bridge, &mut surface);
+        assert!(surface.pushed.is_empty());
+        surface = RecordingSurface::ready();
+        assert_eq!(pump_host_lobby(&bridge, &mut surface).pushed, 4);
+        assert_eq!(
+            surface.pushed,
+            updates.map(super::super::document::host_lobby_fleet_update_script)
+        );
+    }
+
+    #[test]
+    fn deferred_fleet_updates_precede_newer_updates() {
+        let bridge = HostLobbyBridge::new();
+        bridge.push_fleet_update("first");
+        bridge.push_fleet_update("second");
+        let mut surface = RecordingSurface::ready();
+        surface.failing_pushes = 1;
+        assert_eq!(pump_host_lobby(&bridge, &mut surface).deferred, 2);
+        bridge.push_fleet_update("third");
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(
+            surface.pushed,
+            ["first", "second", "third"]
+                .map(super::super::document::host_lobby_fleet_update_script)
+        );
+    }
+
+    #[test]
+    fn fleet_update_overflow_and_concurrent_restore_are_terminal_and_bounded() {
+        let bridge = HostLobbyBridge::new();
+        bridge.push_fleet_update("in flight");
+        let pending = bridge.take_pending();
+        for _ in 0..RECORD_CAP {
+            bridge.push_fleet_update("queued");
+        }
+        bridge.restore_fleet_updates(pending.fleet_updates);
+        assert!(bridge.fleet_faulted());
+        bridge.push_fleet_update("refused after fault");
+        assert!(bridge.take_pending().fleet_updates.is_empty());
+        let records = bridge.take_records();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].contains("bridge-overflow"));
+
+        let bridge = HostLobbyBridge::new();
+        for _ in 0..=RECORD_CAP {
+            bridge.push_fleet_update("queued");
+        }
+        assert!(bridge.fleet_faulted());
+        assert!(bridge.take_pending().fleet_updates.is_empty());
+    }
     const PLAYING: &str = r#"{"phase":"InProgress","crew_count":3}"#;
 
     #[test]

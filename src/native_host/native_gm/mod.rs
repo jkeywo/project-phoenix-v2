@@ -333,6 +333,7 @@ fn sync_presence(
     role: Option<Res<super::session_role::NativeSessionRoleState>>,
     fleet_roster: Option<Res<crate::lockstep::FleetRoster>>,
     frozen_ship_slots: Option<Res<crate::ship_slots::FrozenShipSlots>>,
+    admission: Option<Res<super::host_lobby::fleet::NativeFleetGmAdmission>>,
 ) {
     let primary_gm = role.as_ref().is_some_and(|state| {
         state.committed()
@@ -390,11 +391,24 @@ fn sync_presence(
     authority.connected = connected;
     let bound_operator = primary_gm
         .then(|| {
-            let fleet = fleet_roster.as_ref()?;
-            let id = fleet.gm_operator(fleet.local())?;
-            roster.operators().iter().find(|row| row.id == id).cloned()
+            if let Some(fleet) = fleet_roster.as_ref().filter(|fleet| !fleet.is_solo()) {
+                let id = fleet.gm_operator(fleet.local())?;
+                roster.operators().iter().find(|row| row.id == id).cloned()
+            } else {
+                // A GM must be able to Ready before the collective roster freezes.
+                // Frozen membership always wins; this is only its admitted own row.
+                admission
+                    .as_ref()
+                    .map(|admission| admission.0.clone())
+                    .or_else(|| {
+                        let fleet = fleet_roster.as_ref()?;
+                        let id = fleet.gm_operator(fleet.local())?;
+                        roster.operators().iter().find(|row| row.id == id).cloned()
+                    })
+            }
         })
         .flatten();
+    authority.connected = connected && (!primary_gm || bound_operator.is_some());
     let operator_id = bound_operator
         .as_ref()
         .map(|row| row.id.as_str())
@@ -595,6 +609,47 @@ mod tests {
                 crate::native_host::bridge_layout::LayoutRefusal::GameMasterRoleFrozen
             )
         )));
+    }
+
+    #[test]
+    fn admitted_gm_can_ready_before_freeze_and_frozen_membership_replaces_admission() {
+        use crate::command_admission::HostSlot;
+        use crate::native_host::host_lobby::fleet::NativeFleetGmAdmission;
+        use crate::native_host::session_role::{NativeSessionRole, NativeSessionRoleState};
+        let mut world = fixture();
+        let mut role = NativeSessionRoleState::default();
+        role.request(NativeSessionRole::FleetGameMaster);
+        role.commit();
+        world.insert_resource(role);
+        let bridge = world.resource::<NativeGmSurface>().bridge.clone();
+        bridge.activate(PaneId(1));
+        bridge.mark_live();
+        world.run_system_once(sync_presence).unwrap();
+        assert!(!world.resource::<NativeGmAuthority>().connected);
+        assert!(world.resource::<GmRoster>().operators().is_empty());
+        world.insert_resource(NativeFleetGmAdmission(GmOperator::new(
+            "gm-2".into(),
+            "GM".into(),
+            false,
+        )));
+        world.run_system_once(sync_presence).unwrap();
+        world.resource_mut::<NativeGmLifecycle>().ready = true;
+        world.run_system_once(sync_presence).unwrap();
+        assert!(world.resource::<NativeGmAuthority>().connected);
+        assert!(world.resource::<GmRoster>().operators()[0].ready);
+        let roster = crate::lockstep::FleetRoster::with_participants(
+            vec![crate::lockstep::FleetShip::new(HostSlot(1))],
+            vec![HostSlot(1), HostSlot(2)],
+            HostSlot(2),
+            HostSlot(1),
+        )
+        .unwrap();
+        world.insert_resource(roster);
+        world.run_system_once(sync_presence).unwrap();
+        assert!(
+            !world.resource::<NativeGmAuthority>().connected,
+            "frozen membership without this GM must not retain provisional authority"
+        );
     }
 
     #[test]

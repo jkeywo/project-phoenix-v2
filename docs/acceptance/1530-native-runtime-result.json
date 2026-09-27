@@ -1,0 +1,264 @@
+{
+  "issue": 1530,
+  "measuredUtc": "2026-09-27T10:25:41Z",
+  "sourceRevision": "178d2274acddb9052746c713c872857f1c6e4fc4",
+  "sourceWasDirty": true,
+  "artifactRoot": ".phoenix/native-six-workload-welcome-replay-1530",
+  "matrixSha256": "9258e03d5c37a102f0d29d4b9bc6382679e79ba74f4caa2fb9741ecf7b262f1f",
+  "binarySha256": "9df9fde30250e1a511fd724a7924f65a590506ec29f8d10dac06cf4812820822",
+  "buildReceipt": {
+    "path": ".phoenix/native-build-isolated-stamp-1530.json",
+    "sha256": "8fd5338200f343874a8b85c9ecd73e52cdb9aa8513b74ef654f8eb20e558a6b4"
+  },
+  "bundleReceipt": {
+    "path": ".phoenix/native-bundle-welcome-1530.json",
+    "sha256": "533a125d75d2629ff77c22eeef36535147db8e214e14a7dad141441c03ad4eea"
+  },
+  "bundle": {
+    "indexSha256": "c170e0291e1cf83e878f2cfbb8bdb8c2ea36c6282981a3acd50f7e8becc81cb4",
+    "guiSha256": "517922d5d35efdf78567a4d7b6d3f01c7e5addc0a7a7ac5daf1208d348989b21",
+    "instrumentedModuleSha256": "b7e019f79ff277729496a592f156b8d8b55c5d6c28664bfda39b00b38d8c3dc0",
+    "originalModuleSha256": "d7dd8cf4495a4864eeaeafc0a500ef5a2d97d38278ce4bd4d684fed79c06ac26"
+  },
+  "elapsedMs": 107192,
+  "passed": true,
+  "forceRequested": true,
+  "digestAfter": "2026-09-27T10:24:54.197Z",
+  "peers": [
+    {
+      "id": "ship-1",
+      "role": "ship",
+      "local": 1,
+      "acceptedGeneration": 1,
+      "manifestSha256": "10d4da008df3db833d4a95d358342e474b36975d0c2eb2d42513a9b942667bec",
+      "eventsSha256": "e84259386a77c73dcb8c38151570aca74888a09c76d3beaca9c220cc8a029b8c",
+      "sourcePatchSha256": "c3ae24dc9679c90734339710790de9dd12a06043d803b565a051afa0f2ee3d0e",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "ship-2",
+      "role": "ship",
+      "local": 4,
+      "acceptedGeneration": 1,
+      "manifestSha256": "c73c0b7fc94d46aab58fb68631f8567d001b3f73fd4ed87f13002e74746b692a",
+      "eventsSha256": "a305c4bb6e3c858c8eced07134c080e4bc462e74715af332a8b7d2f3e14708fd",
+      "sourcePatchSha256": "c3ae24dc9679c90734339710790de9dd12a06043d803b565a051afa0f2ee3d0e",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "ship-3",
+      "role": "ship",
+      "local": 2,
+      "acceptedGeneration": 1,
+      "manifestSha256": "0196e01897c5c6ee79cc07645c220fadfdd136b8d5c951911fe48602e6abad2c",
+      "eventsSha256": "138fa03b2d0583877d13e1e58157aee4988b1295a900e1cbb85b0b0f34026740",
+      "sourcePatchSha256": "c3ae24dc9679c90734339710790de9dd12a06043d803b565a051afa0f2ee3d0e",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "ship-4",
+      "role": "ship",
+      "local": 3,
+      "acceptedGeneration": 1,
+      "manifestSha256": "2cc905c3c63d5e64a90fd487626d180caf6fed45a166cdd8b8391c7b58ff804d",
+      "eventsSha256": "c65620794c622f1f6a624b581d1caf3f2a76a64ce2cb32ce4e85261de2f2c7c5",
+      "sourcePatchSha256": "c3ae24dc9679c90734339710790de9dd12a06043d803b565a051afa0f2ee3d0e",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "gm-1",
+      "role": "gm",
+      "local": 5,
+      "acceptedGeneration": 1,
+      "manifestSha256": "d748c74f7537a4d4e6bf643ca7f65e1481a7a1a25f072fc5e5faa0ac33a21d18",
+      "eventsSha256": "c95b96dfd64a590aa96c8fcd6437392efa26527bf66ae71257d32dffbf0c435a",
+      "sourcePatchSha256": "c3ae24dc9679c90734339710790de9dd12a06043d803b565a051afa0f2ee3d0e",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    },
+    {
+      "id": "gm-2",
+      "role": "gm",
+      "local": 6,
+      "acceptedGeneration": 1,
+      "manifestSha256": "c33a308c58114d181ddea310601e03098b2468c98017c4e3d36ee00fe1e088bc",
+      "eventsSha256": "470d3bc735ed6d5618218a65042cf909e345f6f1f24ab31e9725b327a89437d9",
+      "sourcePatchSha256": "c3ae24dc9679c90734339710790de9dd12a06043d803b565a051afa0f2ee3d0e",
+      "processExit": null,
+      "failure": null,
+      "cleanupExitObserved": true,
+      "binaryUnchanged": true
+    }
+  ],
+  "stations": [
+    {
+      "peer": "ship-1",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-1",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-1",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-2",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-2",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-2",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-3",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-3",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-3",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-4",
+      "station": "captain",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-4",
+      "station": "helm",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    },
+    {
+      "peer": "ship-4",
+      "station": "engineering",
+      "assigned": true,
+      "ready": true,
+      "started": true,
+      "commands": 50,
+      "applied": 50
+    }
+  ],
+  "gms": [
+    {
+      "peer": "gm-1",
+      "operator": "gm-2",
+      "requests": 25,
+      "applied": 2
+    },
+    {
+      "peer": "gm-2",
+      "operator": "gm-3",
+      "requests": 25,
+      "applied": 3
+    }
+  ],
+  "commonDigests": [
+    {
+      "tick": 300,
+      "byPeer": {
+        "ship-1": "b3da68e4cf499292",
+        "ship-2": "b3da68e4cf499292",
+        "ship-3": "b3da68e4cf499292",
+        "ship-4": "b3da68e4cf499292",
+        "gm-1": "b3da68e4cf499292",
+        "gm-2": "b3da68e4cf499292"
+      },
+      "agreed": true
+    },
+    {
+      "tick": 600,
+      "byPeer": {
+        "ship-1": "113057e2b1642152",
+        "ship-2": "113057e2b1642152",
+        "ship-3": "113057e2b1642152",
+        "ship-4": "113057e2b1642152",
+        "gm-1": "113057e2b1642152",
+        "gm-2": "113057e2b1642152"
+      },
+      "agreed": true
+    }
+  ],
+  "limits": [
+    "Loopback relay only; no ordinary internet or mobile-network evidence",
+    "Bounded smoke run; no performance or endurance acceptance",
+    "Binary source-build provenance must be verified against the recorded external build command",
+    "Two stationless GM peers plus the native ship-owner combined GM role; Force Start was used, so this does not prove automatic all-ready launch.",
+    "Loopback smoke measurement from recorded dirty source; build receipt and per-peer source patches define the tested bytes."
+  ]
+}

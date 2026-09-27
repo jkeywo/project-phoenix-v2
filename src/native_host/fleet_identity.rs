@@ -26,10 +26,16 @@ pub struct NativeFleetIdentityStore {
 
 impl NativeFleetIdentityStore {
     pub fn user() -> Self {
-        Self {
-            root: directories::BaseDirs::new()
+        let override_dir = std::env::var_os("PHOENIX_FLEET_IDENTITY_DIR");
+        let root = identity_root(
+            override_dir.clone(),
+            directories::BaseDirs::new()
                 .map(|base| base.data_dir().join(APP_DIR).join(IDENTITIES_DIR)),
+        );
+        if override_dir.is_some() && root.is_none() {
+            eprintln!("phoenix-host: PHOENIX_FLEET_IDENTITY_DIR must be absolute; reconnect storage is disabled");
         }
+        Self { root }
     }
 
     #[cfg(test)]
@@ -67,6 +73,23 @@ impl NativeFleetIdentityStore {
     }
 }
 
+// Windows Known Folders ignores APPDATA changes. A bounded local matrix needs
+// an explicit root per process so a second GM does not reclaim the first's
+// saved capability. An invalid override fails closed instead of touching the
+// ordinary user's store. The normal application path remains unchanged.
+fn identity_root(
+    override_dir: Option<std::ffi::OsString>,
+    default: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match override_dir {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            path.is_absolute().then_some(path)
+        }
+        None => default,
+    }
+}
+
 /// Stable FNV-1a rather than `DefaultHasher`, whose algorithm is not a storage
 /// format. The code is an index, not the capability; the capability remains in
 /// the private file contents and is never logged.
@@ -82,6 +105,29 @@ fn code_hash(code: &str) -> u64 {
 #[allow(clippy::disallowed_methods)] // UUID isolates a disposable temp fixture.
 mod tests {
     use super::*;
+
+    #[test]
+    fn matrix_identity_override_is_absolute_and_never_falls_back_to_user_storage() {
+        let default = std::env::temp_dir().join("ordinary-user-identities");
+        let isolated = std::env::temp_dir().join("isolated-native-peer");
+        assert_eq!(
+            identity_root(None, Some(default.clone())),
+            Some(default.clone())
+        );
+        assert_eq!(
+            identity_root(
+                Some(isolated.clone().into_os_string()),
+                Some(default.clone())
+            ),
+            Some(isolated)
+        );
+        for invalid in ["", "relative/identities"] {
+            assert_eq!(
+                identity_root(Some(invalid.into()), Some(default.clone())),
+                None
+            );
+        }
+    }
 
     #[test]
     fn identity_round_trips_under_a_hashed_name() {

@@ -70,6 +70,7 @@
   <!-- Crew-public Spectator summary surface (issue #1105). Depends on
        gui/hero-bar.js for the shared health/importance classifiers. -->
   <script type="module" src="gui/spectator-view.js"></script>
+  <script type="module" src="gui/crew-spectator-view.js"></script>
   <!-- Onboarding/session-flow state (PRD #1023 module 4): the in-flight
        scenario/ship pick, the game-over frame, and whether a console's link is
        live, still loading or dead. All three are pure rules the inline script
@@ -1144,8 +1145,8 @@
       pointer-events: auto;
     }
     /* -- Spectator summary surface (issue #1105) ------------------------- */
-    #spectator-ui { display: none; }
-    #spectator-ui.active {
+    #spectator-ui, #crew-spectator-ui { display: none; }
+    #spectator-ui.active, #crew-spectator-ui.active {
       display: flex; flex-direction: column; gap: 12px;
       position: fixed; inset: 0; z-index: 6; overflow: auto;
       padding: 48px 12px 12px;
@@ -2097,6 +2098,7 @@
          station-select lobby. It shows only Audience::All crew-public data —
          objectives, red-alert, ship-wide hull, per-Station health — never any
          per-station private feed (a seatless client never receives one). -->
+    <section id="crew-spectator-ui" aria-hidden="true" tabindex="-1"></section>
     <section id="spectator-ui" aria-hidden="true">
       <div id="spectator-header" data-i18n="client.spectator.title">Spectating</div>
       <div id="spectator-alert" role="status" aria-live="polite"></div>
@@ -2302,8 +2304,14 @@
     import { t, has, applyToDom, wireText } from './gui/strings.js';
     import { createLocalePreference } from './gui/locale-preference.js';
     window.phStrings = { t, has, applyToDom, wireText };
-    window.phLocale = createLocalePreference({ doc: document, nav: navigator,
-      storage: window.localStorage });
+    window.phLocale = createLocalePreference({ doc: document,
+      nav: window.PhoenixOsLocale ? { nativeLocale: window.PhoenixOsLocale } : navigator,
+      storage: window.PhoenixLocaleStorage || window.localStorage,
+      onChange: () => window.phLocale?.relocaliseRetained?.({
+        simState: window.simState, commsState: window.commsState,
+      }),
+    });
+    window.addEventListener('phoenix-native-locale-loaded', () => window.phLocale?.reloadStored?.());
     applyToDom(document);
   </script>
 
@@ -3138,17 +3146,24 @@
       // instead of the station-select lobby OR the game shell. Checked first so
       // it wins over the mid-game-claimant lobby override below.
       const spectating = spectatingInGame(s);
+      const crewSpectating = s.phase === 'InProgress' && !!window.simState?.crewSpectator?.active;
+      const crewSurface = $('crew-spectator-ui');
+      const wasCrewSpectating = crewSurface?.getAttribute('aria-hidden') === 'false';
+      if (crewSurface) {
+        crewSurface.className = crewSpectating ? 'active' : '';
+        crewSurface.setAttribute('aria-hidden', String(!crewSpectating));
+      }
       // Pending mid-game claimants (and stationless non-spectators) stay in the
       // lobby. Ready is the point where the server hands the station over from AI.
-      if (spectating) {
+      if (crewSpectating || spectating) {
         vis.lobby = false; vis.game = false; vis.bezel = false;
       } else if (showingLobbyDuringGame(s)) {
         vis.lobby = true; vis.game = false; vis.bezel = false;
       }
       const specSection = $('spectator-ui');
       if (specSection) {
-        specSection.className = spectating ? 'active' : '';
-        specSection.setAttribute('aria-hidden', spectating ? 'false' : 'true');
+        specSection.className = spectating && !crewSpectating ? 'active' : '';
+        specSection.setAttribute('aria-hidden', spectating && !crewSpectating ? 'false' : 'true');
       }
       const inGame = vis.game;
       $('lobby-ui').className = vis.lobby ? 'active' : '';
@@ -3300,7 +3315,11 @@
       // how both came to be displayed at once. It is decided with the rest of
       // the pre-play surfaces at the top of this function now (issue #1359).
 
-      if (spectating) {
+      if (crewSpectating) {
+        window.renderCrewSpectator?.(crewSurface, window.simState.crewSpectator,
+          { t, send });
+        if (!wasCrewSpectating) crewSurface?.focus();
+      } else if (spectating) {
         renderSpectator(s);
       } else {
         // A successful claim (issue #1106) seats the ex-Spectator and clears the
@@ -4355,6 +4374,7 @@
         return;
       }
       if (event.data.type !== 'console_action') return;
+      if (window.simState?.crewSpectator?.active) return;
       let action;
       try { action = JSON.parse(event.data.payload); } catch (_) { return; }
       if (!action || !action.action) return;
@@ -4457,6 +4477,7 @@
     // -- Incoming message handler --------------------------------
 
     function handleMessage(msg) {
+      window.phLocale?.capture?.(msg);
       // The host has said something, so the console's panels are showing real
       // numbers rather than their empty shape — it may leave CONNECTING (PRD
       // #1023 user story 15). Any message counts: the point is that the link
@@ -4779,12 +4800,17 @@
           getLocales: () => window.phLocale?.presentation?.().locales || ['en'],
           getLocale: () => window.phLocale?.locale?.() || 'en',
           onLocale: (locale) => {
+            const settingsOverlay = document.getElementById('settings-overlay');
+            const scrollTop = settingsOverlay?.scrollTop || 0;
+            const focusedLanguage = document.activeElement?.getAttribute?.('data-control') === 'private-locale';
             window.phLocale?.select?.(locale);
             scheduleRender();
             for (const station of uiState.shipStations?.stations || []) {
               pushConsoleStateFor(station.id, pushCause().RENDER);
             }
             settingsPanel?.rebuildContent?.();
+            if (settingsOverlay) settingsOverlay.scrollTop = scrollTop;
+            if (focusedLanguage) settingsOverlay?.querySelector('[data-control="private-locale"]')?.focus();
           },
           // The Accessibility tab's write path (issue #1102): update the
           // client-local profile, persist it privately, and re-apply to the

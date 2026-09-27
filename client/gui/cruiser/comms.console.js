@@ -27,6 +27,7 @@
 import { makeCommsRender } from '../stations/comms-console.js';
 import { makeNavigationRender } from '../stations/navigation-console.js';
 import { familyView } from '../console-payload.js';
+import { tPlural } from '../strings.js';
 
 /**
  * Resolve a Console Family view, shape-agnostic (issue #1379 review finding
@@ -76,7 +77,7 @@ export const renderStation = makeCommsRender({
   // (navigation_auto included, issue #825), which can lag a rating
   // change by one tick.
   autoState: (s, view) => !!(view.comms_auto && resolveFamilyView(s, 'navigation').navigation_auto),
-  tail: (s, view, doc, t) => {
+  tail: (s, view, doc) => {
     const nav = resolveFamilyView(s, 'navigation');
     renderNavigationView(nav, doc);
 
@@ -91,9 +92,7 @@ export const renderStation = makeCommsRender({
     const msgCount = (view.messages || []).length;
     const footerRightEl = doc.getElementById('footer-right');
     if (footerRightEl) {
-      footerRightEl.textContent = msgCount === 1
-        ? t('console.comms.messages.one', { n: 1 })
-        : t('console.comms.messages.other', { n: msgCount });
+      footerRightEl.textContent = tPlural('console.comms.messages', msgCount);
     }
 
     // A visiting Navigation view must not replace this Comms Station's view.

@@ -3,6 +3,8 @@ import './strings-boot.js';
 import { mountGmWorkspace } from './gm-workspace.js';
 import { createHostChannel } from './host-channel.js';
 import { t, has, localiseTree, applyToDom } from './strings.js';
+import { createLocalePreference, GM_LOCALE_STORAGE_KEY } from './locale-preference.js';
+import { mountSurfaceLanguage } from './surface-language.js';
 
 // These are the existing GM verbs, not a native command vocabulary. Rust binds
 // operator identity and admits the same typed request used by browser GMs.
@@ -11,6 +13,7 @@ const ACTIONS = Object.freeze({
   __hostSetGmEventPaused: 'set_event_paused',
   __hostArmGmEventSkip: 'arm_gm_event_skip',
   __hostObjectiveAction: 'objective_action',
+  __hostObjectiveInstanceAction: 'objective_instance_action',
   __hostTransmitComms: 'transmit_comms',
   __hostSpawnPaletteEntity: 'spawn_palette_entity',
   __hostApplyDirectEffect: 'apply_direct_effect',
@@ -95,6 +98,15 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
 
   applyToDom(doc);
   const workspace = mountGmWorkspace({ win, doc, requireNativeProvider: true });
+  const locale = createLocalePreference({ doc,
+    nav: win.PhoenixOsLocale ? { nativeLocale: win.PhoenixOsLocale } : win.navigator,
+    storage: win.PhoenixLocaleStorage || win.localStorage, storageKey: GM_LOCALE_STORAGE_KEY,
+    findConsoles: () => [], onChange: () => workspace.refreshLanguage() });
+  const languageHost = doc.getElementById('gm-language-control');
+  if (languageHost) languageHost.append(mountSurfaceLanguage({ doc, id: 'gm-language', preference: locale }).root);
+  const reloadLanguage = () => locale.reloadStored();
+  win.addEventListener('phoenix-native-locale-loaded', reloadLanguage);
+  locale.apply();
   const dispatch = createHostChannel({
     handlers: workspace.handlers,
     strings: { t, has, localiseTree },
@@ -215,6 +227,7 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
   return {
     workspace,
     dispose() {
+      win.removeEventListener('phoenix-native-locale-loaded', reloadLanguage);
       disposed = true;
       if (typeof unsubscribe === 'function') unsubscribe();
       readyButton?.removeEventListener('click', setReady);

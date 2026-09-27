@@ -112,6 +112,10 @@ import {
   emitActionFeedbackTransition,
   normalizeActionFeedbackPreferences,
 } from './action-feedback.js';
+import { preserveLocaleEditContext } from './locale-edit-context.js';
+export { preserveLocaleEditContext as preserveConsoleEditContext } from './locale-edit-context.js';
+
+const preserveConsoleEditContext = preserveLocaleEditContext;
 
 export function initConsole({
   name,
@@ -431,7 +435,11 @@ export function initConsole({
     }
     s = normalizeConsolePayload(s);
     _latestState = s;
-    render(s);
+    const languageSwitch = _root.__languageSwitchPending === true;
+    _root.__languageSwitchPending = false;
+    if (languageSwitch && typeof document !== 'undefined') {
+      preserveConsoleEditContext(document, () => render(s));
+    } else render(s);
     _updateGmTakeover(s);
     _updateTutorialOverlay(s);
     _publishConsoleHull(s);

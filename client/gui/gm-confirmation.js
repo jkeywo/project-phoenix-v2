@@ -74,6 +74,7 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   ArmGmEventSkip: ['event.skip'],
   DespawnEntity: ['world.despawn'],
   ObjectiveAction: ['objective.activate', 'objective.complete', 'objective.fail'],
+  ObjectiveInstanceAction: ['objective.activate', 'objective.complete', 'objective.fail'],
   SetContactOverride: ['contact.override'],
   SetContactInformation: ['contact.override'],
   SetContactClassification: ['contact.override'],

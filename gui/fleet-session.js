@@ -70,6 +70,8 @@
  * has something to do about it.
  */
 
+import { sendContinuationWire, createContinuationWireReceiver } from './fleet-continuation-wire.js';
+import { createOwnerContinuation, isContinuationEnvelope } from './fleet-owner-continuation.js';
 import { NAMESPACE_SERVER } from './join-code.js';
 import { createRendezvousHost, createRendezvousJoiner } from './rendezvous-transport.js';
 import {
@@ -102,6 +104,8 @@ import {
   admitHost,
   asHostFrame,
   claimSlot,
+  continueFrozenFleet,
+  bindFleetContinuation,
   decodeHostFrame,
   dropHost,
   encodeHostFrame,
@@ -271,6 +275,10 @@ export function createFleetOwner(opts) {
     role = HOST_ROLE_SHIP,
     credentialFactory,
     ownerOperatorId,
+    onContinuation = null,
+    initialFleet = null,
+    continuationRuntime = null,
+    takeover = null,
     onCode = () => {},
     onRoster = () => {},
     onSimulationRoster = () => {},
@@ -288,11 +296,13 @@ export function createFleetOwner(opts) {
     onError = () => {},
     onLog = () => {},
     authenticateFrame = defaultAuthenticateFrame,
+    levers,
+    onDiag = () => {},
     transports,
     factories,
   } = opts;
 
-  let fleet = openFleet({
+  let fleet = initialFleet || openFleet({
     ship,
     name,
     role,
@@ -315,7 +325,9 @@ export function createFleetOwner(opts) {
    * centre before it can be relayed to a sibling.
    */
   const connSlots = new Map();
-  let simulationRosterState = 'pending';
+  let simulationRosterState = initialFleet ? 'accepted' : 'pending';
+  let continuation = continuationRuntime;
+  let successorsArmed = false;
   let simulationRosterPromise = null;
   let closed = false;
   let code = null;
@@ -342,6 +354,19 @@ export function createFleetOwner(opts) {
     if (simulationRosterState !== 'pending') return false;
     if (!roster || !roster.frozen) return true;
     const simulationRoster = simulationRosterOf(roster, fleet.owner);
+    // A lone host has no successor or inter-host stream to retain. The
+    // continuation journal requires at least two technical participants.
+    if (simulationRoster && simulationRoster.participants.length > 1
+        && onContinuation && !continuation) {
+      continuation = createOwnerContinuation({
+        local: simulationRoster.local, owner: simulationRoster.owner,
+        participants: simulationRoster.participants, request: onContinuation,
+        deliver: onSimulationFrame, replayFrame: opts.onContinuationFrame, onError,
+        send: (slot, raw) => {
+          for (const [peer, conn] of links) if (connSlots.get(peer) === slot) sendContinuationWire(value => conn.send(value), raw);
+        },
+      });
+    }
     if (!simulationRoster) {
       return refuseSimulationRoster('invalid-topology');
     }
@@ -365,6 +390,12 @@ export function createFleetOwner(opts) {
   };
 
   const emitRoster = (roster) => {
+    continuation?.updateRoster(roster.participants.map(hostSlotOrdinal));
+    if (continuation && roster.frozen && !successorsArmed && !takeover && host) {
+      successorsArmed = true;
+      host.setFleetSuccessors({ frozen: true, epoch: 0, owner_slot: hostSlotOrdinal(fleet.owner),
+        members: [...connSlots].map(([peer, slot]) => ({ peer, slot })) });
+    }
     const json = encodeHostFrame(hostFrame(HOST_FRAME_ROSTER, { roster }));
     for (const conn of links.values()) conn.send(json);
     onRoster(roster);
@@ -434,7 +465,8 @@ export function createFleetOwner(opts) {
   };
 
   const broadcastSimulationFrame = (raw) => {
-    for (const conn of links.values()) conn.send(raw);
+    const wire = continuation ? continuation.broadcast(raw) : raw;
+    if (wire) for (const conn of links.values()) sendContinuationWire(value => conn.send(value), wire);
     const frame = decodeHostFrame(raw);
     if (frame && (frame.t === HOST_FRAME_GM_JOIN
         || frame.t === HOST_FRAME_SNAPSHOT
@@ -530,7 +562,31 @@ export function createFleetOwner(opts) {
       ? ADMISSION_OPEN
       : fleet.admission;
 
+  function continuationFrontier() {
+    if (!continuation) return null;
+    continuation.updateRoster(rosterOf(fleet).participants.map(hostSlotOrdinal));
+    return continuation.frontier();
+  }
+
   function onHello(conn, body) {
+    if (takeover && conn.continuation?.epoch === takeover.epoch) {
+      const slot = conn.continuation.slot;
+      const rebound = bindFleetContinuation(fleet, conn.peer, slot, body.reconnect_credential);
+      if (!rebound) {
+        conn.send(encodeHostFrame(refusedFrame('slot-connected', { of: HOST_FRAME_HELLO })));
+        setTimeout(() => conn.close(), 250);
+        return;
+      }
+      fleet = rebound;
+      links.set(conn.peer, conn); connSlots.set(conn.peer, slot);
+      const gm = gmForPeer(fleet, conn.peer), ship = slotForPeer(fleet, conn.peer);
+      conn.send(encodeHostFrame(welcomeFrame(`slot-${slot}`, rosterOf(fleet), {
+        role: gm && ship ? HOST_ROLE_SHIP_GM : gm ? HOST_ROLE_GM : HOST_ROLE_SHIP,
+        operatorId: gm?.id, reconnectCredential: gm?.credential,
+      })));
+      onRoster(rosterOf(fleet));
+      return;
+    }
     // A replacement machine reclaiming a specific disconnected slot (issue #1120)
     // is judged by `claimSlot`, not `admitHost`: it names the slot in `body.claim`,
     // and the answer turns on whether that slot is a recoverable disconnected one
@@ -552,10 +608,12 @@ export function createFleetOwner(opts) {
       fleet = result.fleet;
       links.set(conn.peer, conn);
       connSlots.set(conn.peer, hostSlotOrdinal(result.slot.id));
+      reportLink(conn.peer, { event: 'open' });
       conn.send(encodeHostFrame(welcomeFrame(result.slot.id, rosterOf(fleet), {
         role: result.role,
         operatorId: result.operatorId,
         reconnectCredential: result.reconnectCredential,
+        streamFrontier: continuationFrontier(),
       })));
       // Broadcast the granted claim to the fleet: the simulation mints one
       // deterministic SlotClaimFrame from it, and every host recovers the same
@@ -586,6 +644,7 @@ export function createFleetOwner(opts) {
       fleet = verdict.fleet;
       pendingLinks.set(conn.peer, conn);
       connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));
+      reportLink(conn.peer, { event: 'open' });
       const provisional = provisionalGmJoinRoster(fleet);
       conn.send(encodeHostFrame(gmJoinPendingFrame(verdict.request, provisional)));
       if (verdict.request.kind === GM_JOIN_RECONNECT) {
@@ -614,10 +673,12 @@ export function createFleetOwner(opts) {
     fleet = verdict.fleet;
     links.set(conn.peer, conn);
     connSlots.set(conn.peer, hostSlotOrdinal(verdict.meshSlot));
+    reportLink(conn.peer, { event: 'open' });
     conn.send(encodeHostFrame(welcomeFrame(verdict.meshSlot, rosterOf(fleet), {
       role: verdict.role,
       operatorId: verdict.operatorId,
       reconnectCredential: verdict.reconnectCredential,
+      streamFrontier: continuationFrontier(),
     })));
     publish();
   }
@@ -693,12 +754,26 @@ export function createFleetOwner(opts) {
   // Declared before the transport because its own callbacks reach back for it;
   // they only ever run off a socket event, but a `const` in a temporal dead
   // zone is a footgun aimed at whoever next makes one of those synchronous.
+  function reportLink(peer, event) {
+    const ship = slotForPeer(fleet, peer);
+    const gm = gmForPeer(fleet, peer);
+    onDiag({ ...event, link: peer, identity: ship?.id || gm?.id || null,
+      name: ship?.name || ship?.ship?.name || gm?.name || '' });
+  }
   let host = null;
   host = createRendezvousHost({
     base,
     namespace: NAMESPACE_SERVER,
+    takeover,
     transports,
     iceServers,
+    levers,
+    onPeerIce: (peer, state) => reportLink(peer, state === 'ws-relay'
+      ? { event: 'transport', transport: 'ws-relay' }
+      : state === 'connected' || state === 'completed'
+        ? { event: 'transport', transport: 'webrtc' }
+      : { event: state === 'closed' || state === 'failed' ? 'closed' : 'ice-state', state }),
+    onPeerShedding: (peer, dropped) => reportLink(peer, { event: 'relay-degraded', dropped }),
     factories,
     checkStamp,
     onCode: (issued) => {
@@ -712,6 +787,7 @@ export function createFleetOwner(opts) {
       if (!reissued) return;
       onLog(`[fleet] issued fleet code ${issued.suffix}`);
       onCode(issued);
+      if (takeover) continuation?.connected();
       // A replacement registration starts in the service's default state, so
       // whatever this fleet last told the SERVICE has to be said again.
       //
@@ -732,10 +808,35 @@ export function createFleetOwner(opts) {
       }
     },
     onConnection: (conn) => {
+      const receiveContinuationWire = createContinuationWireReceiver();
       conn.on('data', (raw) => {
+        let envelope;
+        try { envelope = receiveContinuationWire(JSON.parse(raw)); } catch (error) { onError('continuation-wire-refused', error.message); conn.close(); return; }
+        if (!envelope) return;
+        raw = JSON.stringify(envelope);
+        if (isContinuationEnvelope(envelope)) {
+          // A private GM candidate cannot advance or poison an admitted stream.
+          // Its only ingress is the authenticated raw GM recovery lane below.
+          if (pendingLinks.has(conn.peer)) return;
+          const authSlot = connSlots.get(conn.peer);
+          if (!continuation || authSlot == null) return;
+          if (envelope.kind !== 'stream') {
+            continuation.control(envelope.kind, envelope.body, authSlot);
+            return;
+          }
+          if (!authenticateFrame(envelope.body?.raw, authSlot)) return;
+          const deliverAndRelay = fresh => {
+            onSimulationFrame(fresh, authSlot);
+            for (const [peer, other] of links) if (peer !== conn.peer) sendContinuationWire(value => other.send(value), raw);
+          };
+          const fresh = continuation.receive(envelope.body, authSlot, deliverAndRelay);
+          if (fresh) deliverAndRelay(fresh);
+          return;
+        }
         const frame = decodeHostFrame(raw);
         if (!frame) return;
         if (isSimulationFrame(frame)) {
+          if (continuation && !pendingLinks.has(conn.peer)) return;
           const pendingCandidate = pendingLinks.has(conn.peer);
           // Before digest proof the reserved socket has exactly one simulation
           // utterance: Rust's typed `Restored` join proof. It cannot publish
@@ -864,6 +965,9 @@ export function createFleetOwner(opts) {
   return {
     get code() { return code; },
     get isOwner() { return true; },
+    sendContinuation(slot, raw) {
+      for (const [peer, conn] of links) if (connSlots.get(peer) === slot) sendContinuationWire(value => conn.send(value), raw);
+    },
     get slot() { return fleet.owner; },
     get role() { return ownerRole; },
     get operatorId() { return ownerGm ? ownerGm.id : null; },
@@ -914,6 +1018,7 @@ export function createFleetOwner(opts) {
         role: HOST_ROLE_GM,
         operatorId: result.gm.id,
         reconnectCredential: result.gm.credential,
+        streamFrontier: continuationFrontier(),
       })));
       publishGmJoinStatus(pending, 'committed');
       publishRoster();
@@ -1121,14 +1226,23 @@ export function createFleetMember(opts) {
     onGmJoinStatus = () => {},
     onGmJoinPending = () => {},
     onSimulationFrame = () => {},
+    onContinuation = null,
     onError = () => {},
     onRefusedSlot = () => {},
     onStatus = () => {},
     onLog = () => {},
+    levers,
+    onDiag = () => {},
     factories,
   } = opts;
 
+  let receiveContinuationWire = createContinuationWireReceiver();
   let mine = null;
+  let continuation = null;
+  let promoted = null;
+  let continuationReconnect = false;
+  let announcedOwnerEpoch = 0;
+  let streamBaseline = null;
   let roster = null;
   let acceptedRole = role === HOST_ROLE_GM || role === HOST_ROLE_SHIP_GM
     ? role : HOST_ROLE_SHIP;
@@ -1181,14 +1295,31 @@ export function createFleetMember(opts) {
   };
 
   const deliverSimulationRoster = (candidate) => {
-    if (simulationRosterState === 'accepted') return true;
-    if (simulationRosterState === 'delivering') return simulationRosterPromise;
-    if (simulationRosterState !== 'pending') return false;
-    if (!candidate || !candidate.frozen) return true;
+    if (!candidate || !candidate.frozen || gmJoinCandidate) return true;
     if (!mine) {
       return refuseSimulationRoster('missing-local-slot');
     }
     const simulationRoster = simulationRosterOf(candidate, mine);
+    if (simulationRoster && onContinuation && !continuation) {
+      continuation = createOwnerContinuation({
+        local: simulationRoster.local, owner: simulationRoster.owner,
+        participants: simulationRoster.participants, request: onContinuation,
+        deliver: onSimulationFrame, replayFrame: opts.onContinuationFrame, onError,
+        send: (slot, raw) => promoted ? promoted.sendContinuation(slot, raw) : sendContinuationWire(value => joiner.sendFrame(value), raw),
+        onCommit: ({ owner, departed }) => {
+          roster = { ...roster, owner: `slot-${owner}`,
+            participants: roster.participants.filter(slot => hostSlotOrdinal(slot) !== departed),
+            slots: roster.slots.map(slot => ({ ...slot, owner: hostSlotOrdinal(slot.id) === owner,
+              connected: hostSlotOrdinal(slot.id) === departed ? false : slot.connected })) };
+          onRoster(roster);
+        },
+      });
+      continuation.updateRoster(simulationRoster.participants, streamBaseline);
+      streamBaseline = null;
+    }
+    if (simulationRosterState === 'accepted') return true;
+    if (simulationRosterState === 'delivering') return simulationRosterPromise;
+    if (simulationRosterState !== 'pending') return false;
     if (!simulationRoster) {
       return refuseSimulationRoster('invalid-topology');
     }
@@ -1257,6 +1388,10 @@ export function createFleetMember(opts) {
     localise: false,
     onAccepted: ({ generation } = {}) => {
       const realGeneration = Number.isInteger(generation) ? generation : null;
+      if (realGeneration !== acceptedTransportGeneration) {
+        // A fragment belongs to one authenticated connection, never its replacement.
+        receiveContinuationWire = createContinuationWireReceiver();
+      }
       const reconnected = realGeneration !== null
         && acceptedTransportGeneration !== null
         && realGeneration !== acceptedTransportGeneration;
@@ -1274,17 +1409,68 @@ export function createFleetMember(opts) {
       joiner.sendFrame(encodeHostFrame(helloFrame({
         ship: announced.ship,
         name: announced.name,
-        // A replacement machine names the disconnected slot it is reclaiming
-        // (issue #1120); a plain join leaves this null.
-        claim,
+        // A replacement machine names its target explicitly. An admitted ship
+        // whose own transport redials must reclaim its existing slot too;
+        // a plain first join still requests a new slot. The owner's claim gate
+        // continues to refuse a slot already held by another live connection.
+        claim: claim || (reconnected && acceptedRole === HOST_ROLE_SHIP ? mine : null),
         role: acceptedRole,
         reconnectCredential: privateReconnectCredential,
       })));
     },
+    onFleetControl: async event => {
+      if (!continuation) return;
+      if (event.type === 'fleet-owner-lost' && event.mediaFailed) {
+        const nextEpoch = event.epoch + 1;
+        if (await continuation.begin(nextEpoch) && announcedOwnerEpoch < nextEpoch) joiner.requestTakeover();
+      } else if (event.type === 'fleet-takeover-grant') {
+        if (continuation.phase !== 'held' || event.slot !== hostSlotOrdinal(mine)
+            || event.epoch !== continuation.epoch) return;
+        const initialFleet = continueFrozenFleet(roster, mine, roster.owner, {
+          maxNameLength: opts.maxNameLength, maxShipPathLength: opts.maxShipPathLength,
+          credentialFactory: opts.credentialFactory,
+          localReconnectCredential: privateReconnectCredential,
+        });
+        joiner.close();
+        promoted = createFleetOwner({ ...opts, initialFleet, continuationRuntime: continuation,
+          takeover: { suffix: event.suffix, epoch: event.epoch, capability: event.capability },
+          checkStamp: opts.checkStamp || (candidate => ({ ok: !!stamp && candidate === stamp })),
+          onSimulationRoster: () => true,
+          onRoster: value => { roster = value; onRoster(value); },
+        });
+      } else if (event.type === 'fleet-owner-changed' && event.epoch >= continuation.epoch) {
+        // Service takeover can complete while this peer still awaits its Rust
+        // hold acknowledgement. Remember that authority before awaiting, so a
+        // delayed owner-lost handler cannot request takeover in the old epoch.
+        announcedOwnerEpoch = Math.max(announcedOwnerEpoch, event.epoch);
+        if (event.slot !== hostSlotOrdinal(mine) && await continuation.begin(event.epoch)
+            && continuation.phase === 'held' && continuation.epoch === event.epoch) {
+          continuationReconnect = joiner.reconnectContinuation(event.epoch) || continuationReconnect;
+        }
+      }
+    },
     onData: (frame) => {
+      try { frame = receiveContinuationWire(frame); } catch (error) { onError('continuation-wire-refused', error.message); joiner.close(); return; }
+      if (!frame) return;
+      if (isContinuationEnvelope(frame)) {
+        if (!continuation) return;
+        if (frame.kind !== 'stream') {
+          continuation.control(frame.kind, frame.body, continuation.successor);
+          return;
+        }
+        const fresh = continuation.receive(frame.body, frame.body?.origin);
+        if (fresh) {
+          if (simulationRosterState === 'delivering') {
+            if (pendingSimulationFrames.length >= MAX_PENDING_SIMULATION_FRAMES) return refuseSimulationRoster('pending-frame-overflow');
+            pendingSimulationFrames.push({ raw: fresh, authSlot: continuation.owner });
+          } else if (simulationRosterState === 'accepted') onSimulationFrame(fresh, continuation.owner);
+        }
+        return;
+      }
       const decoded = asHostFrame(frame);
       if (!decoded) return;
       if (isSimulationFrame(decoded)) {
+        if (continuation) return;
         // A peer that refused the frozen topology cannot safely consume any
         // later tick under a wait-set it never adopted.
         if (simulationRosterState === 'refused') return;
@@ -1317,6 +1503,7 @@ export function createFleetMember(opts) {
       if (decoded.t === HOST_FRAME_WELCOME) {
         gmJoinCandidate = false;
         mine = decoded.d.slot || null;
+        streamBaseline = continuation ? null : decoded.d.stream_frontier || null;
         roster = decoded.d.roster || null;
         acceptedRole = decoded.d.role === HOST_ROLE_GM || decoded.d.role === HOST_ROLE_SHIP_GM
           ? decoded.d.role : HOST_ROLE_SHIP;
@@ -1340,6 +1527,7 @@ export function createFleetMember(opts) {
         // still settling. Admission binds this connection first; now flush
         // the cached role-appropriate state in one authenticated frame.
         sendLocalStartState();
+        if (continuationReconnect) { continuationReconnect = false; continuation.connected(); }
         return;
       }
       if (decoded.t === HOST_FRAME_GM_JOIN_PENDING) {
@@ -1348,6 +1536,14 @@ export function createFleetMember(opts) {
         if (!request || !candidateRoster || acceptedRole !== HOST_ROLE_GM) return;
         mine = decoded.d.slot || null;
         gmJoinCandidate = true;
+        if (request.kind === GM_JOIN_RECONNECT) {
+          // Rows minted while this handle was disconnected are not a proven
+          // delivery suffix. Canonical restore replaces the stale simulation;
+          // use the private raw lane until Commit, then Welcome seeds a fresh
+          // journal from the owner's authenticated delivery frontier.
+          continuation = null;
+          streamBaseline = null;
+        }
         roster = candidateRoster;
         operatorId = decoded.d.operator_id || null;
         privateReconnectCredential = decoded.d.reconnect_credential || null;
@@ -1379,6 +1575,7 @@ export function createFleetMember(opts) {
       }
       if (decoded.t === HOST_FRAME_ROSTER) {
         roster = decoded.d.roster || null;
+        if (roster) continuation?.updateRoster(roster.participants.map(hostSlotOrdinal));
         onRoster(roster);
         deliverSimulationRoster(roster);
         return;
@@ -1424,15 +1621,22 @@ export function createFleetMember(opts) {
         }
         onLog(`[fleet] the fleet refused this host: ${code}`);
         onError(code, detail);
+        closed = true;
+        joiner?.close();
       }
     },
-    onStatus,
+    onStatus: status => {
+      if (status === 'disconnected' || status === 'error') onDiag({ event: 'closed' });
+      onStatus(status);
+    },
     onError,
     onLog,
+    levers,
+    onDiag,
   });
 
   return {
-    get isOwner() { return false; },
+    get isOwner() { return !!promoted; },
     get slot() { return mine; },
     get role() { return acceptedRole; },
     get operatorId() { return operatorId; },
@@ -1440,11 +1644,16 @@ export function createFleetMember(opts) {
     get gmJoinCandidate() { return gmJoinCandidate; },
     get pendingGmJoin() { return gmJoinCandidate; },
     get canDecideGmJoin() { return !gmJoinCandidate && !!mine; },
-    get code() { return joiner.failed ? null : { suffix: joiner.suffix, full: joiner.full }; },
+    get code() { if (promoted) return promoted.code; return joiner.failed ? null : { suffix: joiner.suffix, full: joiner.full }; },
     roster: () => roster,
+    freeze() { return promoted?.freeze(); },
+    setAdmission(state) { return promoted?.setAdmission(state); },
+    rotate() { return promoted?.rotate(); },
+    completeGmJoin(id, status, reason = null) { return promoted?.completeGmJoin(id, status, reason) || false; },
 
     /** Existing admitted peers may answer the visible request; candidates may not. */
     decideGmJoin(id, accepted) {
+      if (promoted) return promoted.decideGmJoin(id, accepted);
       if (closed || gmJoinCandidate || !mine || !roster) return false;
       const publicAdmitted = Array.isArray(roster.participants)
         && roster.participants.includes(mine)
@@ -1463,11 +1672,14 @@ export function createFleetMember(opts) {
      * it came rather than re-wrapped.
      */
     broadcast(raw) {
-      joiner.sendFrame(raw);
+      if (promoted) return promoted.broadcast(raw);
+      const wire = continuation ? continuation.broadcast(raw) : raw;
+      if (wire) sendContinuationWire(value => joiner.sendFrame(value), wire);
     },
 
     /** Announce this host's own ship or readiness to the fleet owner. */
     update(patch) {
+      if (promoted) return promoted.update(patch);
       // A GM has no ship slot to patch. Later GM controls use their own typed
       // commands; sending a `slot` frame here would imply the ship record this
       // role deliberately does not own.
@@ -1479,6 +1691,7 @@ export function createFleetMember(opts) {
 
     /** Cache/send this ship host's spectator-free player readiness tally. */
     setCrewReadiness(tally = {}, stationRatings = []) {
+      if (promoted) return promoted.setCrewReadiness(tally, stationRatings);
       if (acceptedRole === HOST_ROLE_GM || closed || (roster && roster.frozen)) return false;
       const ratings = canonicalStationRatings(stationRatings);
       if (ratings === null) return false;
@@ -1495,6 +1708,7 @@ export function createFleetMember(opts) {
 
     /** Cache/send this GM operator's one equal ready vote. */
     setGmReady(ready) {
+      if (promoted) return promoted.setGmReady(ready);
       if (acceptedRole === HOST_ROLE_SHIP || closed || (roster && roster.frozen)) return false;
       localGmReady = !!ready;
       if (mine) sendLocalStartState();
@@ -1503,6 +1717,7 @@ export function createFleetMember(opts) {
 
     /** Cache/send this host simulation's non-readiness validation verdict. */
     setStartValidation(valid) {
+      if (promoted) return promoted.setStartValidation(valid);
       if (closed || (roster && roster.frozen)) return false;
       localStartValidation = !!valid;
       if (mine) sendLocalStartState();
@@ -1511,12 +1726,14 @@ export function createFleetMember(opts) {
 
     /** Submit an empty authenticated force request; result arrives by callback. */
     forceStart() {
+      if (promoted) return promoted.forceStart();
       if (closed || acceptedRole === HOST_ROLE_SHIP || !mine || !operatorId) return false;
       joiner.sendFrame(encodeHostFrame(startForceFrame()));
       return true;
     },
 
     close() {
+      promoted?.close();
       closed = true;
       simulationRosterState = 'refused';
       simulationRosterPromise = null;

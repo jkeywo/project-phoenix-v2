@@ -350,6 +350,7 @@
       // panes/ultralight.rs).
       var hud = { json: null, render: null };
       window.__phoenixHud = hud;
+      window.__phoenixSetHudLocale = function(locale) { window.__phoenixHudLocale = locale; };
 
       // ── The DOM plumbing, shared by both renderers ──────────────────────
       // Kept here rather than in the module so the fallback below and the
@@ -593,7 +594,7 @@
     // here reaches the internet: a bridge machine with no route out still
     // localises, exactly as the native lobby surface does.
     import './strings-boot.js';
-    import { applyToDom, getTable, localiseTree, t } from './strings.js';
+    import { applyToDom, getTable, localiseTree, setLocale, t } from './strings.js';
     import { localiseHostPayload } from './host-channel.js';
     import { gameOverView } from './game-over-view.js';
     import { createPresentationCard } from './presentation-card.js';
@@ -613,6 +614,9 @@
     // happens only when there is a table to substitute from. With one, this is
     // server.html's own call over server.html's own ids; without one, the frame
     // reads as it always did instead of filling with angle brackets.
+    if (window.__phoenixHudLocale || window.PhoenixOsLocale) {
+      setLocale(window.__phoenixHudLocale || window.PhoenixOsLocale);
+    }
     const hasTable = getTable().size > 0;
     if (hasTable) applyToDom(document);
 
@@ -700,6 +704,13 @@
       presentationCard.update(state?.presentation_card || null);
       computerMessage.update(state?.computer_message || null);
       renderReport(state?.sensor_report || null);
+    };
+
+    window.__phoenixSetHudLocale = function(locale) {
+      window.__phoenixHudLocale = locale;
+      setLocale(locale || window.PhoenixOsLocale || navigator.language || 'en');
+      if (hasTable) applyToDom(document);
+      hud.paint();
     };
 
     // Paint whatever landed while this module was still being fetched — with

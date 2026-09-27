@@ -418,7 +418,7 @@ export function createGmSpawnPanel({
     row.textContent = t(`server.gm.spawn.result_${suffix}`, {
       name: operatorName(result.operator_id),
       entry: entryLabel(result.target),
-      tick: String(result.tick),
+      tick: result.tick,
       correlation: result.correlation,
       reason: refusalText(result.reason),
     });
@@ -448,7 +448,7 @@ export function createGmSpawnPanel({
       row.textContent = t(`server.gm.spawn.result_${outcome === 'no-op' ? 'no_op' : outcome}`, {
         name: meta.operatorName,
         entry: rowEntryLabel(meta),
-        tick: String(meta.tick),
+        tick: meta.tick,
         correlation: meta.correlation,
         reason: refusalText(reason),
       });

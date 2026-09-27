@@ -73,6 +73,7 @@
       const on = wanted !== false;
       window.__phoenixGmPage = on;
       document.documentElement.classList.toggle('phoenix-gm-page', on);
+      window.dispatchEvent(new Event('phoenix-gm-page-changed'));
       if (on) document.documentElement.dataset.phoenixBootRequest = 'browser-game-master';
       else delete document.documentElement.dataset.phoenixBootRequest;
     };
@@ -1557,7 +1558,7 @@
        reports. The attribute, the guards and the duplicated rotated-phone
        blocks in those four sheets are all gone with the rotation. */
   </style>
-<link rel="modulepreload" href="./project-phoenix-b4f3ac2993c207e.js" crossorigin="anonymous" integrity="sha384-ZXQTQ3b+Jt8BVYMbKNPdeEEVqAO3BAlITHh0IP4QwhibqquSb/Puqq6o9EQFQ439"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-b4f3ac2993c207e_bg.wasm" crossorigin="anonymous" integrity="sha384-bVZzxuy5isaQVqE8PkxvvNLXi2bt3J+Emm/EAGuJSX8XnXBhxTEBOSr6LhKSjOOg" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-90e29b7e042521ce.js" crossorigin="anonymous" integrity="sha384-oXFI3z7P2NTn5LYVVGQ8fsnub7lJ7v/7ig6c8b9mVNFEr/ncW/IWNAu/4d5l+feQ"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-90e29b7e042521ce_bg.wasm" crossorigin="anonymous" integrity="sha384-o9tuf7gbDrAy56pDE586De0SDiF0ob4sdaMmblD00BHeT8VQ3tGIbKDaUoUcX4b3" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1578,13 +1579,9 @@
     // version gate. Neither can return its answer to the caller, so both post
     // it and the host page collects it here.
     //
-    // The one rule that matters: the message is Rust's, rendered verbatim. For
-    // a refused resume it is `vellum_save::Moved`'s own sentence, which names
-    // WHICH version dimension moved; for a failed save it is the browser's own
-    // exception text, which is how a host learns the word QuotaExceededError.
-    // Paraphrasing either here would throw away the only part worth reading —
-    // which is also why these strings are not string-table ids: they are
-    // composed in Rust at the moment of failure, not chosen from a list.
+    // Rust sends a semantic outcome and parameters; translate it at this
+    // display edge. External storage and version details remain visible inside
+    // a translated frame, including useful names such as QuotaExceededError.
     var _snapshotStatusTimer = null;
     function showSnapshotStatus(ok, message) {
       var el = document.getElementById('snapshot-status');
@@ -1609,7 +1606,7 @@
     }
 
     // Poll the drained status. Rust hands back "" (nothing to report) or
-    // "<ok|error>\t<save|resume>\t<sentence>"; taking it on read is what makes
+    // "<ok|error>\t<save|resume>\t<outcome>"; taking it on read is what makes
     // a poll safe — each outcome is delivered exactly once.
     function pollSnapshotStatus() {
       if (typeof wasm_snapshot_status !== 'function') return;
@@ -1621,7 +1618,7 @@
       var ok = parts[0] === 'ok';
       // Only the message may contain a tab, so everything past the second one
       // is rejoined rather than dropped.
-      var message = parts.slice(2).join('\t');
+      var message = window.phSnapshotStatus.snapshotDiagnosticText(parts.slice(2).join('\t'));
       showSnapshotStatus(ok, message);
       if (parts[1] === 'save') {
         if (window.phSaveSlotsController) {
@@ -2123,6 +2120,7 @@
         <header>
           <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
           <p data-i18n="server.gm.console.local_truth"></p>
+          <div id="gm-language-control"></div>
           <!-- Presentation-only role preset (issue #1319): filters which
                panels/quick actions THIS browser shows. Never authority --
                see gui/gm-role-presets.js. Defaults to the built-in All, which
@@ -2939,8 +2937,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-b4f3ac2993c207e.js';
-const wasm = await init({ module_or_path: './project-phoenix-b4f3ac2993c207e_bg.wasm' });
+import init, * as bindings from './project-phoenix-90e29b7e042521ce.js';
+const wasm = await init({ module_or_path: './project-phoenix-90e29b7e042521ce_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2988,6 +2986,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // mechanics of both are in a module so vitest can reach them.
     import * as snapshotTransfer from './gui/snapshot-transfer.js';
     window.phSnapshotTransfer = snapshotTransfer;
+    import * as snapshotStatus from './gui/snapshot-status.js';
+    window.phSnapshotStatus = snapshotStatus;
     import * as saveSlots from './gui/save-slots.js';
     window.phSaveSlots = saveSlots;
     // Peer-local Store identity is an async serialized claim (Web Lock first,
@@ -3306,11 +3306,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
     import { mountGmWorkspace } from './gui/gm-workspace.js';
+    import { mountGmLanguage } from './gui/gm-language.js';
     import { mountSensorReport } from './gui/sensor-report.js';
     window.__renderSensorReport = mountSensorReport(document);
     window.__renderSensorReport(window.__sensorReport);
     import { t, has, localiseTree } from './gui/strings.js';
     const gmWorkspace = mountGmWorkspace({ win: window, doc: document });
+    mountGmLanguage({ doc: document, win: window, workspace: gmWorkspace });
     const hostChannelDispatch = createHostChannel({
       handlers: {
         hud:          function(p) { window.__updateHud(p); },
@@ -3349,6 +3351,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   <script type="module" src="gui/host-mesh.js"></script>
   <script type="module" src="gui/fleet-selection-gate.js"></script>
   <script type="module" src="gui/fleet-session.js"></script>
+  <script type="module" src="gui/fleet-health.js"></script>
 
   <!-- Which transport rung(s) this host may use, and what the #conn-diag
        readout says about the ones its crew ended up on (issue #1113). Both
@@ -4163,6 +4166,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     /** The fleet handle from gui/fleet-session.js, or null when there is none. */
     let fleetHandle = null;
+    let fleetHealthPanel = null;
+    function getFleetHealth() {
+      if (!fleetHealthPanel && window.fleetHealth) {
+        fleetHealthPanel = window.fleetHealth.createFleetHealth({
+          doc: document, root: () => document.body, t,
+        });
+      }
+      return fleetHealthPanel;
+    }
     /** The most recent roster body — the owner's own, or the lead's sync. */
     let fleetRoster = null;
     /** The code on screen: this host's own code, or the one it typed. */
@@ -4627,6 +4639,21 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * This seam composes neither, so a GM can neither name a template the
      * simulation did not publish nor submit screen pixels.
      */
+    window.__hostObjectiveInstanceAction = function(request) {
+      const gm = localGm();
+      if (!gm || !request || request.operator_id !== gm.id
+          || typeof request.objective !== 'string' || !request.objective
+          || !['activate', 'complete', 'fail'].includes(request.verb)
+          || !(request.scope === 'all' || request.scope && typeof request.scope.instance === 'string'
+            && request.scope.instance && Object.keys(request.scope).length === 1)
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({ action: 'objective_instance_action',
+          operator_id: gm.id, correlation: request.correlation, objective: request.objective,
+          verb: request.verb, scope: request.scope })) !== false;
+      } catch (_) { return false; }
+    };
     window.__hostObjectiveAction = function(request) {
       const gm = localGm();
       if (!gm || !request || request.operator_id !== gm.id
@@ -5770,6 +5797,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     /** Paint the fleet panel from the pure view model. */
     function paintFleetPanel() {
+      getFleetHealth()?.roster(fleetRoster);
       const panel = document.getElementById('fleet-panel');
       // Boot race, the same one __updateLobby guards: this can run before the
       // module islands have evaluated, and the next paint re-renders.
@@ -5899,6 +5927,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
       setFleetManagedLobby(false);
       fleetHandle = null;
+      getFleetHealth()?.reset();
       fleetRoster = null;
       fleetSuffix = null;
       fleetFault = reason;
@@ -6020,6 +6049,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       return !!adoptFleet(window.fleetSession.createFleetOwner({
         base: rendezvousBase,
         iceServers: fleetIceServers,
+        levers: window.transportLevers?.transportLeversFromLocation(location.search),
+        onDiag: event => getFleetHealth()?.diagnostic(event),
         maxSlots: data.limits.max_fleet_hosts,
         maxNameLength: data.limits.max_slot_name_length,
         maxShipPathLength: data.limits.max_slot_ship_path_length,
@@ -6050,6 +6081,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         onBeginGmJoin: beginFleetGmJoin,
         onRefuseGmJoin: refuseFleetGmJoin,
         onSimulationFrame: receiveMeshFrame,
+        onContinuation: continueFleetOwner,
+        onContinuationFrame: receiveFleetContinuationFrame,
         // A member host dropped mid-mission (issue #1119). Tell the simulation
         // the slot; it agrees the disconnect tick from that host's own watermark
         // and flips its ship to Backfill there, then mints a host-loss frame the
@@ -6140,6 +6173,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         claim,
         stamp: hostStampField(),
         iceServers: fleetIceServers,
+        levers: window.transportLevers?.transportLeversFromLocation(location.search),
+        onDiag: event => getFleetHealth()?.diagnostic(event),
         role: fleetRole,
         name: fleetRoleHasGm() ? t('settings.fleet.role_gm') : '',
         reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null,
@@ -6182,6 +6217,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         onGmJoinStatus: receiveFleetGmJoinStatus,
         onGmJoinPending: ({ request }) => receiveFleetGmJoinRequest(request),
         onSimulationFrame: receiveMeshFrame,
+        onContinuation: continueFleetOwner,
+        onContinuationFrame: receiveFleetContinuationFrame,
+        // A member can become the transport owner without replacing its handle.
+        onBeginGmJoin: beginFleetGmJoin,
+        onRefuseGmJoin: refuseFleetGmJoin,
+        onHostLost: slot => window.wasm_host_departed?.(slot),
+        onSlotClaimed: slot => window.wasm_claim_slot?.(slot),
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
         // tearing the link down would evict a member for touching its loadout.
@@ -6371,6 +6413,36 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * frame whose declared origin disagrees with it. `authSlot` is `0` (never a
      * real slot) when the page could not resolve one, which the sim trusts.
      */
+    function continueFleetOwner(request) {
+      if (typeof window.wasm_fleet_continuation !== 'function'
+          || typeof window.wasm_fleet_continuation_status !== 'function') {
+        return Promise.resolve({ status: 'refused', reason: 'continuation-unavailable' });
+      }
+      let queued;
+      try { queued = JSON.parse(window.wasm_fleet_continuation(JSON.stringify(request))); }
+      catch (_) { return Promise.resolve({ status: 'refused', reason: 'continuation-unreadable' }); }
+      if (queued.status === 'refused') return Promise.resolve(queued);
+      const expected = { begin: 'held', replayed: 'replayed', commit: 'committed' }[request.op];
+      const started = performance.now();
+      return new Promise(resolve => {
+        const poll = () => {
+          let state;
+          try { state = JSON.parse(window.wasm_fleet_continuation_status()); } catch (_) {}
+          if (state?.generation === queued.generation && (state.status === expected || state.status === 'refused')) {
+            resolve(state);
+          } else if (performance.now() - started > 15000) {
+            resolve({ status: 'refused', reason: 'continuation-timeout' });
+          } else setTimeout(poll, 16);
+        };
+        poll();
+      });
+    }
+
+    function receiveFleetContinuationFrame(raw, source, epoch) {
+      return typeof window.wasm_fleet_continuation_frame === 'function'
+        && window.wasm_fleet_continuation_frame(BigInt(epoch), source, raw);
+    }
+
     function receiveMeshFrame(raw, authSlot) {
       if (window.wasm_receive_mesh_frame) window.wasm_receive_mesh_frame(authSlot || 0, raw);
     }
@@ -6385,6 +6457,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * each frame carries its own tick, so nothing is lost by batching.
      */
     function pumpMeshFrames() {
+      if (fleetHandle) getFleetHealth()?.health(window.__hostGmHealthState?.()?.projection);
       flushFleetLobbyInputs();
       flushFleetStartGrants();
       if (pollFleetSimulationRoster()) {
@@ -8268,8 +8341,11 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {
     // Step 1: Set up the config request callback
     window.set_config_request_callback = wasmBindings.set_config_request_callback;
     set_config_request_callback(handleConfigRequest);
-    window.registerContentFetch(wasmBindings, settleContentPreload);
-    await window.preloadSoundCatalog(wasmBindings);
+    // Trunk can finish before independently loaded module scripts evaluate.
+    // Await the actual content module before installing its preload callbacks.
+    const contentFetch = await import('./gui/host-content-fetch.js');
+    contentFetch.registerContentFetch(wasmBindings, settleContentPreload);
+    await contentFetch.preloadSoundCatalog(wasmBindings);
 
     // Step 2: Fetch and load the unified world TOML (map + scenario in one file)
     let worldToml = wasmBindings.wasm_preload_world_source(scenarioPath);
@@ -8439,6 +8515,9 @@ function finishInit() {
   window.wasm_take_mesh_frames = wasmBindings.wasm_take_mesh_frames;
   window.wasm_join_fleet = wasmBindings.wasm_join_fleet;
   window.wasm_fleet_join_status = wasmBindings.wasm_fleet_join_status;
+  window.wasm_fleet_continuation = wasmBindings.wasm_fleet_continuation;
+  window.wasm_fleet_continuation_status = wasmBindings.wasm_fleet_continuation_status;
+  window.wasm_fleet_continuation_frame = wasmBindings.wasm_fleet_continuation_frame;
   window.wasm_leave_fleet = wasmBindings.wasm_leave_fleet;
   window.wasm_set_gm_roster = wasmBindings.wasm_set_gm_roster;
   // First typed GM action tracer (#1292). The page supplies the admitted
@@ -8914,12 +8993,10 @@ async function startServer() {
         ? window.phSaveSlots.startPreparationResult(refusal)
         : { ok: !refusal, message: refusal };
       if (!startAnswer.ok) {
-        // `vellum_save::Moved`'s own sentence, verbatim — it names which
-        // version dimension moved, which no phoenix-invented status would.
         // Shown, not logged: the host is about to play a session they think
         // they resumed, and a console.warn tells nobody who is not looking at
         // DevTools (issue #862 AC4).
-        showSnapshotStatus(false, startAnswer.message);
+        showSnapshotStatus(false, t('server.snapshot.resume_refused', { detail: startAnswer.message }));
         console.warn('[Phoenix] the saved session was refused: ' + startAnswer.message);
       }
       // Strip the parameter either way. It has been consumed — a refused
@@ -8936,7 +9013,7 @@ async function startServer() {
     }
   } catch (e) {
     console.error('[Phoenix] resume preparation failed:', e);
-    showSnapshotStatus(false, 'the saved session could not be prepared: ' + e);
+    showSnapshotStatus(false, t('server.snapshot.prepare_resume_failed', { detail: String(e) }));
   }
 
   // The IMPORT half of the same gate (issue #866), at the same point and for
@@ -8961,7 +9038,7 @@ async function startServer() {
     }
   } catch (e) {
     console.error('[Phoenix] save import failed:', e);
-    showSnapshotStatus(false, 'the saved game could not be prepared: ' + e);
+    showSnapshotStatus(false, t('server.snapshot.prepare_import_failed', { detail: String(e) }));
   }
 
   // This is the first point at which every local prerequisite has succeeded:
@@ -9049,7 +9126,7 @@ window.addEventListener('TrunkApplicationStarted', () => {
     // same way, so they say it in one place rather than in two copies that can
     // drift (issue #866 added the second caller).
     function reportNoSimulationToSave() {
-      showSnapshotStatus(false, 'the simulation is not running yet, so there is nothing to save');
+      showSnapshotStatus(false, t('server.snapshot.no_run'));
     }
     window.__hostSaveSnapshot = function() {
       // Fire-and-forget: the capture itself is taken by a Bevy system on the

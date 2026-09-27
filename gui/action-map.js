@@ -257,6 +257,15 @@ export const ACTION_MAP = Object.freeze({
   /** Switch phaser firing mode (Auto / Manual / etc.).
    *  Wire target is 'phaser-control' (issue #801): the ship-wide phaser
    *  settings system. */
+  set_strike_boost: (a, send) => {
+    if (typeof a.enabled !== 'boolean') return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: 'phaser-control',
+      payload: { type: 'SetStrikeBoost', data: { enabled: a.enabled } },
+    });
+  },
   set_phaser_mode: (a, send) => {
     if (a.mode)
       {

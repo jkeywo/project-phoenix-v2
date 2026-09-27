@@ -20,6 +20,7 @@ export const TACTICAL_BLASTER_CANCEL_ACTION_ID = 'tactical.blaster-cancel';
 export const TACTICAL_TORPEDO_VOLLEY_DOWN_ACTION_ID = 'tactical.torpedo-volley-down';
 export const TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID = 'tactical.torpedo-volley-up';
 export const TACTICAL_TORPEDO_FIRE_ACTION_ID = 'tactical.torpedo-fire';
+export const TACTICAL_STRIKE_BOOST_ACTION_ID = 'tactical.strike-boost';
 
 function action(id, label, accessibility, keyboard, gamepad) {
   return Object.freeze({
@@ -51,6 +52,7 @@ export const TACTICAL_ACTIONS = Object.freeze([
   action(TACTICAL_TORPEDO_VOLLEY_DOWN_ACTION_ID, 'torpedo_volley_down', 'torpedo_volley_down', key('KeyQ'), axis('left-stick-x', 'positive')),
   action(TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID, 'torpedo_volley_up', 'torpedo_volley_up', key('KeyE'), axis('left-stick-y', 'negative')),
   action(TACTICAL_TORPEDO_FIRE_ACTION_ID, 'torpedo_fire', 'torpedo_fire', key('KeyG'), axis('left-stick-y', 'positive')),
+  action(TACTICAL_STRIKE_BOOST_ACTION_ID, 'strike_boost', 'strike_boost', key('KeyV'), button('face-top')),
 ]);
 
 export function tacticalActionView(state) {
@@ -144,6 +146,12 @@ export function registerTacticalActions(registry, options = {}) {
     sendAction(name, correlated);
     return true;
   };
+
+  registry.register(TACTICAL_ACTIONS[9], ({ actionId, correlation, inputMs } = {}) => {
+    const view = tacticalActionView(getState());
+    if (!view || !view.strike_reserve || view.tactical_auto) return false;
+    return send(actionId, correlation, inputMs, 'set_strike_boost', { enabled: !view.strike_reserve.enabled });
+  });
 
   registry.register(TACTICAL_ACTIONS[0], ({ actionId, correlation, inputMs, detail } = {}) => {
     const view = tacticalActionView(getState());

@@ -129,6 +129,11 @@ button:not(:disabled) { cursor: pointer; }
 .workshop-role-presets :is(p, label, legend) { overflow-wrap: anywhere; }
 .workshop-scripts { display: flex; flex-direction: column; min-height: 28rem; gap: .5rem; }
 .workshop-scripts > select { width: 100%; }
+.workshop-scripts > fieldset { min-width: 0; display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(0, 2fr); gap: .4rem .7rem; }
+.workshop-scripts > fieldset :is(legend, p, button) { grid-column: 1 / -1; }
+.workshop-scripts > fieldset :is(label, p) { overflow-wrap: anywhere; }
+.workshop-scripts > fieldset input[type="text"], .workshop-scripts > fieldset input[type="number"] { width: 100%; min-width: 0; }
+@media (max-width: 42rem) { .workshop-scripts > fieldset { grid-template-columns: 1fr; } }
 .script-list-row { padding: .35rem; cursor: pointer; border: 1px solid transparent; }
 .script-list-row.active { border-color: currentColor; font-weight: 700; }
 .script-editor { display: flex; flex-direction: column; min-height: 22rem; }
@@ -173,6 +178,11 @@ button:not(:disabled) { cursor: pointer; }
 details { margin-top: 1.5rem; }
 .workshop-localisation { display: grid; align-content: start; gap: .5rem; }
 .workshop-localisation > select { width: 100%; }
+.workshop-localisation > input, .workshop-localisation-editor textarea,
+.workshop-localisation-editor input { width: 100%; box-sizing: border-box; }
+.workshop-localisation-editor { display: grid; gap: .45rem; border: 1px solid #8195a8; padding: .7rem; }
+.workshop-localisation-editor[hidden] { display: none; }
+.workshop-localisation-editor p { margin: .1rem 0; overflow-wrap: anywhere; }
 .workshop-localisation-entry { border: 1px solid #8195a8; padding: .65rem; margin-block: .5rem; overflow-wrap: anywhere; }
 .workshop-localisation-entry h3 { font-family: ui-monospace, monospace; margin-block-start: 0; }
 .workshop-localisation-entry[data-status="stale"],

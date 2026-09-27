@@ -85,7 +85,10 @@ export class PhElement extends Base {
     phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = this.template();
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
+    this._localeTemplate = tpl.innerHTML;
+    const content = tpl.content.cloneNode(true);
+    this._localeRoots = [...content.childNodes];
+    this.shadowRoot.appendChild(content);
     // See the field-initialiser ordering hazard note above: this is the
     // first point at which the template is guaranteed to exist, so it is
     // where a subclass caches its shadow refs — as plain properties, never
@@ -131,6 +134,46 @@ export class PhElement extends Base {
    * @returns {string}
    */
   template() { return ''; }
+
+  /** Refresh template-authored text in place, retaining live controls and state. */
+  refreshLocale() {
+    const next = this.template();
+    if (next === this._localeTemplate) return;
+    const oldTemplate = document.createElement('template');
+    oldTemplate.innerHTML = this._localeTemplate;
+    const nextTemplate = document.createElement('template');
+    nextTemplate.innerHTML = next;
+    const refreshNode = (oldNode, fresh, live) => {
+      if (!oldNode || !fresh || !live || oldNode.nodeType !== fresh.nodeType
+        || oldNode.nodeType !== live.nodeType) return;
+      if (oldNode.nodeType === 3) {
+        if (oldNode.nodeValue !== fresh.nodeValue && live.nodeValue === oldNode.nodeValue) {
+          live.nodeValue = fresh.nodeValue;
+        }
+        return;
+      }
+      if (oldNode.nodeType !== 1 || oldNode.tagName !== fresh.tagName
+        || oldNode.tagName !== live.tagName) return;
+      for (const name of new Set([...oldNode.getAttributeNames(), ...fresh.getAttributeNames()])) {
+        const oldValue = oldNode.getAttribute(name);
+        const newValue = fresh.getAttribute(name);
+        if (oldValue === newValue || live.getAttribute(name) !== oldValue) continue;
+        if (newValue === null) live.removeAttribute(name);
+        else live.setAttribute(name, newValue);
+      }
+      const oldChildren = [...oldNode.childNodes];
+      const newChildren = [...fresh.childNodes];
+      const liveChildren = [...live.childNodes];
+      if (oldChildren.length !== newChildren.length) return;
+      oldChildren.forEach((child, index) => refreshNode(child, newChildren[index], liveChildren[index]));
+    };
+    const oldRoots = [...oldTemplate.content.childNodes];
+    const newRoots = [...nextTemplate.content.childNodes];
+    if (oldRoots.length === newRoots.length) {
+      oldRoots.forEach((oldNode, index) => refreshNode(oldNode, newRoots[index], this._localeRoots[index]));
+    }
+    this._localeTemplate = next;
+  }
 
   /**
    * Shadow-root element lookup — the `root.getElementById(id)` one-liner

@@ -9,3 +9,67 @@
   --edge: rgba(255, 139, 85, 0.48);
   --line-soft: rgba(255, 176, 128, 0.22);
 }
+
+/* Guidance shares the ordinary reading order and can always be reopened.
+   Long translations scroll with the working panels instead of clipping them. */
+.dynasty-guidance {
+  grid-column: 1 / -1;
+  flex: 0 0 auto;
+  border: 1px solid var(--edge);
+  border-inline-start: 4px solid var(--cyan);
+  padding: .35rem .8rem;
+  background: var(--surface-panel);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+.dynasty-guidance summary {
+  min-height: var(--control-hit-min);
+  padding-block: .6rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-weight: 600;
+}
+.dynasty-guidance summary:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 3px;
+}
+.dynasty-guidance p, .dynasty-guidance li { max-width: 80ch; }
+.dynasty-guidance li + li { margin-top: .35rem; }
+.dynasty-layout {
+  overflow: auto;
+  grid-template-rows: auto minmax(24rem, 1fr);
+}
+.dynasty-power > ph-power-controls {
+  flex: 1 0 18rem;
+}
+.dynasty-aux-panel {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--edge);
+  padding-block: .6rem;
+  line-height: 1.5;
+}
+.dynasty-aux-panel[hidden], .dynasty-aux-panel [hidden] { display: none; }
+.dynasty-aux-panel h2 { margin: 0 0 .4rem; }
+.dynasty-aux-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.dynasty-aux-row button {
+  min-height: var(--control-hit-min);
+  min-width: var(--control-hit-min);
+  padding: .35rem .65rem;
+  border: 1px solid var(--edge);
+  background: var(--surface-panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+.dynasty-aux-row button:focus-visible { outline: 3px solid var(--cyan); outline-offset: 2px; }
+@media (orientation: portrait) {
+  .dynasty-layout:not(.dynasty-power) {
+    grid-template-rows: auto minmax(24rem, 1fr) minmax(24rem, 1fr);
+  }
+}
+@media (forced-colors: active) {
+  .dynasty-guidance { border-color: CanvasText; background: Canvas; color: CanvasText; }
+  .dynasty-guidance summary:focus-visible { outline-color: Highlight; }
+  .dynasty-aux-row button { border-color: ButtonText; background: ButtonFace; color: ButtonText; }
+  .dynasty-aux-row button:focus-visible { outline-color: Highlight; }
+}

@@ -126,7 +126,7 @@ export function entityRadius(e) {
 function activeObjectiveTargetNames(objectives) {
   const names = new Set();
   for (const obj of (objectives || [])) {
-    if (!obj || obj.status && obj.status !== 'Active') continue;
+    if (!obj || obj.unassigned || obj.status && obj.status !== 'Active') continue;
     for (const target of (obj.targets || [])) {
       if (target != null && String(target).trim() !== '') names.add(String(target));
     }
@@ -850,6 +850,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
     torpedo_count: torpedoCount,
     torpedo_max:   torpedoMax,
     phaser_mode:   phaserMode,
+    strike_reserve: bb.strike_reserve || null,
     blips,
     regions,
     ship_heading:  (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
@@ -1720,6 +1721,7 @@ export function buildPowerConsoleState(state, systemIds = []) {
     // legacy `consoles` mirror was removed from the wire when the parent
     // issue #516 cleanup closed out).
     consoles:       bb.groups        || [],
+    strike_reserve: bb.strike_reserve || null,
     total:          bb.total          ?? 0,
     total_max:      bb.total_max      ?? 8,
     battery_charge: bb.battery_charge ?? 0,

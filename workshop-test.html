@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="workshop.test_heading"></title>
+  <script type="importmap">{"imports":{"smol-toml":"./vendor/smol-toml/index.js"}}</script>
   <style>
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
     #canvas, #test-hud { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
@@ -20,6 +21,7 @@
         <header>
           <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
           <p data-i18n="server.gm.console.local_truth"></p>
+          <div id="gm-language-control"></div>
           <!-- Presentation-only role preset (issue #1319): filters which
                panels/quick actions THIS browser shows. Never authority --
                see gui/gm-role-presets.js. Defaults to the built-in All, which

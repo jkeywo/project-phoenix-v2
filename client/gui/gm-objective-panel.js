@@ -11,6 +11,9 @@ const OUTCOMES = ['applied', 'no-op', 'refused'];
 const nonempty = (value) => typeof value === 'string' && value.length > 0;
 const scopeValid = (value) => Array.isArray(value) && value.every(nonempty)
   && new Set(value).size === value.length;
+export const validInstanceScope = value => value === 'all' || !!value && typeof value === 'object'
+  && !Array.isArray(value) && Object.keys(value).length === 1 && nonempty(value.instance);
+const sameInstanceScope = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const sameScope = (a, b) => a.length === b.length && a.every((id) => b.includes(id));
 
 function parseObjective(row, palette) {
@@ -20,7 +23,12 @@ function parseObjective(row, palette) {
       || (palette && !nonempty(row.label))
       || (row.text_params != null && (typeof row.text_params !== 'object'
         || Array.isArray(row.text_params) || !Object.values(row.text_params).every((v) => typeof v === 'string')))) return null;
-  return { id: row.id, text: row.text, text_params: { ...(row.text_params || {}) },
+  if (row.instance_id != null && (!nonempty(row.instance_id) || !nonempty(row.objective_id)
+      || row.progress != null && (!Number.isFinite(row.progress) || row.progress < 0)
+      || row.completion_members != null && !scopeValid(row.completion_members))) return null;
+  return { id: row.id, ...(row.instance_id == null ? {} : { objective_id: row.objective_id,
+    instance_id: row.instance_id, instance_scope: { instance: row.instance_id },
+    progress: row.progress ?? null, completion_members: [...(row.completion_members || [])] }), text: row.text, text_params: { ...(row.text_params || {}) },
     recipients: [...row.recipients], available: row.available, status: row.status,
     ...(palette ? { label: row.label } : {}) };
 }
@@ -40,9 +48,26 @@ export function parseGmObjectivePayload(payload) {
     if (!row || row.action_kind !== 'objective-control' || !nonempty(row.target)
         || !nonempty(row.operator_id) || !nonempty(row.correlation)
         || !VERBS.includes(row.objective_verb) || !scopeValid(row.objective_recipients)
+        || row.objective_instance_scope != null && !validInstanceScope(row.objective_instance_scope)
         || !OUTCOMES.includes(row.outcome) || !Number.isSafeInteger(row.tick) || row.tick < 0
         || (row.reason != null && !nonempty(row.reason))) return null;
     results.push({ ...row, objective_recipients: [...row.objective_recipients] });
+  }
+    // Bulk controls are distinct rows, built from authoritative records, never
+  // from the current map selection. An empty instance membership is not global.
+  const ids = [...new Set([...palette, ...objectives].filter(row => row.instance_id).map(row => row.objective_id))].sort();
+  for (const id of ids) {
+    const live = objectives.filter(row => row.objective_id === id);
+    const authored = palette.filter(row => row.objective_id === id);
+    const all = [...authored, ...live];
+    const bulk = { ...all[0], id: `all-instances:${id}`, objective_id: id, instance_id: null,
+      instance_scope: 'all', instance_count: new Set(all.map(row => row.instance_id)).size, recipients: [...new Set(all.flatMap(row => row.recipients))].sort(),
+      available: all.every(row => row.available), status: live.some(row => row.status === 'Active') ? 'Active' : null,
+      verbs: { activate: authored.some(row => row.status === null),
+        complete: live.some(row => row.status === 'Active') && live.every(row => row.status !== 'Failed'),
+        fail: live.some(row => row.status === 'Active') && live.every(row => row.status !== 'Completed') } };
+    if (authored.length) palette.push(bulk);
+    objectives.push(bulk);
   }
   return { palette, objectives, results };
 }
@@ -63,14 +88,18 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
   // every ship); any other selection, or none, lists everything.
   let scopeShip = null;
   const SHIP_KINDS = new Set(['player_ship', 'npc_ship']);
-  const inScope = (row) => !scopeShip || row.recipients.length === 0 || row.recipients.includes(scopeShip.id);
+  const inScope = (row) => !scopeShip || !row.instance_scope && row.recipients.length === 0 || row.recipients.includes(scopeShip.id);
   const text = (value, params) => has(value) ? t(value, params) : value;
   const scopeText = (recipients) => recipients.length ? recipients.map(getShipName).join(', ')
     : t('server.gm.objective.all_ships');
+  const instanceText = scope => scope === 'all' ? t('server.gm.objective.all_instances')
+    : t('server.gm.objective.instance', { instance: scope.instance });
+  const rowScopeText = row => row.instance_scope ? instanceText(row.instance_scope)
+    : scopeText(row.recipients);
   const rowFor = (id, verb) => (verb === 'activate' ? projection.palette : projection.objectives)
     .find((row) => row.id === id);
   const eligible = (row, verb) => !!getOperator()?.id && !pending && row?.available === true
-    && (verb === 'activate' ? row.status === null : row.status === 'Active');
+    && (row.verbs ? row.verbs[verb] : verb === 'activate' ? row.status === null : row.status === 'Active');
   function closePreview(restoreFocus = false) {
     preview = null;
     if (el('confirmation')) el('confirmation').hidden = true;
@@ -99,7 +128,7 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     if (!VERBS.includes(verb) || !eligible(row, verb)) return false;
     const chosen = { ...row, recipients: [...row.recipients], verb, operator: getOperator().id };
     const description = t(`server.gm.objective.preview_${verb}`, {
-      objective: text(row.text, row.text_params), ships: scopeText(row.recipients),
+      objective: text(row.text, row.text_params), ships: rowScopeText(row),
     });
     if (confirmAction) return confirmAction({ category: `objective.${verb}`, description,
       preview: () => description, accept: () => submitChosen(chosen) });
@@ -121,7 +150,8 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     if (pending || getOperator()?.id !== chosen.operator) return false;
     const action = actionFeedback.press(`gm.objective.${chosen.verb}:${chosen.id}`);
     const request = { operator_id: chosen.operator, correlation: action.correlation,
-      objective: chosen.id, verb: chosen.verb, recipients: [...chosen.recipients] };
+      objective: chosen.objective_id || chosen.id, verb: chosen.verb,
+      ...(chosen.instance_scope ? { scope: chosen.instance_scope } : { recipients: [...chosen.recipients] }) };
     pending = request;
     actionFeedback.pending(request.correlation);
     let accepted = false;
@@ -186,19 +216,26 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
         const label = doc.createElement('h4'); label.textContent = text(objective.label); row.appendChild(label);
       }
       const description = doc.createElement('p');
-      description.textContent = text(objective.text, objective.text_params); row.appendChild(description);
+      description.textContent = (objective.instance_scope ? `${instanceText(objective.instance_scope)} — ` : '') + text(objective.text, objective.text_params); row.appendChild(description);
       const scope = doc.createElement('p');
-      scope.textContent = t('server.gm.objective.scope', { ships: scopeText(objective.recipients),
+      scope.textContent = objective.instance_scope === 'all' ? t('server.gm.objective.instance_count', { count: objective.instance_count }) : t('server.gm.objective.scope', { ships: objective.instance_scope && !objective.recipients.length ? t('server.gm.objective.no_members') : scopeText(objective.recipients),
         status: t(`server.gm.objective.status_${objective.available ? objective.status || 'Unstarted' : 'Unavailable'}`) });
       row.appendChild(scope);
+      if (objective.instance_id) {
+        const progress = doc.createElement('p');
+        progress.textContent = t('server.gm.objective.instance_progress', { progress: objective.progress ?? 0,
+          ships: objective.completion_members.length ? objective.completion_members.map(getShipName).join(', ') : t('server.gm.objective.no_members') });
+        row.appendChild(progress);
+      }
       for (const verb of VERBS) {
         if (verb === 'activate' && !objective.palette) continue;
         const button = doc.createElement('button'); button.type = 'button';
         button.dataset.objective = objective.id; button.dataset.verb = verb;
         button.dataset.actionId = `gm.objective.${verb}:${objective.id}`;
-        button.textContent = t(`server.gm.objective.${verb}`);
+        button.textContent = objective.instance_scope === 'all' ? t(`server.gm.objective.${verb}_all`) : t(`server.gm.objective.${verb}`);
         button.setAttribute('aria-label', t('server.gm.objective.action_label', {
-          verb: button.textContent, objective: text(objective.label || objective.text, objective.text_params),
+          verb: button.textContent, objective: (objective.instance_scope ? `${instanceText(objective.instance_scope)} — ` : '')
+            + text(objective.label || objective.text, objective.text_params),
         }));
         button.addEventListener('click', () => openPreview(objective.id, verb));
         row.appendChild(button);
@@ -220,7 +257,7 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
       if (result.reason) row.dataset.reason = result.reason;
       row.textContent = t('server.gm.objective.result', { operator: getOperatorName(result.operator_id),
         verb: t(`server.gm.objective.${result.objective_verb}`), objective: result.target,
-        ships: scopeText(result.objective_recipients), tick: result.tick, correlation: result.correlation,
+        ships: result.objective_instance_scope ? instanceText(result.objective_instance_scope) : scopeText(result.objective_recipients), tick: result.tick, correlation: result.correlation,
         outcome: t(`server.gm.objective.feedback_${result.outcome.replace('-', '_')}`),
         reason: result.reason ? t(GM_ACTION_REFUSAL_REASON_LABELS[result.reason]
           || 'server.gm.effect.reason_unknown', { reason: result.reason }) : '' });
@@ -233,7 +270,8 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     projection = next;
     const result = pending && projection.results.find((r) => r.operator_id === pending.operator_id
       && r.correlation === pending.correlation && r.target === pending.objective
-      && r.objective_verb === pending.verb && sameScope(r.objective_recipients, pending.recipients));
+      && r.objective_verb === pending.verb && sameInstanceScope(r.objective_instance_scope, pending.scope)
+      && (pending.scope || sameScope(r.objective_recipients, pending.recipients)));
     if (result) {
       if (timer !== null) cancelSchedule(timer);
       timer = null;
@@ -269,5 +307,6 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
   });
   renderRows();
   return { update, confirm, reset, refreshAdmission, select, focusObjective,
+    refreshLanguage() { renderRows(); renderResults(); },
     state: () => ({ ...projection, preview, pending, scope: scopeShip ? scopeShip.id : null }) };
 }

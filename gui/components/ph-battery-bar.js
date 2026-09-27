@@ -64,11 +64,11 @@ export class PhBatteryBar extends PhElement {
   }
 
   static get observedAttributes() {
-    return ['orientation'];
+    return ['orientation', 'reserve'];
   }
 
   attributeChangedCallback(name) {
-    if (name === 'orientation') this.render(this.state);
+    if (name === 'orientation' || name === 'reserve') this.render(this.state);
   }
 
   render(state) {
@@ -92,6 +92,20 @@ export class PhBatteryBar extends PhElement {
     const label = root.getElementById('bar-label');
     const thresholdMarker = root.getElementById('threshold-marker');
     const chargingIndicator = root.getElementById('charging-indicator');
+    const gauge = root.querySelector('.bar-wrap');
+    const reserve = this.hasAttribute('reserve');
+    thresholdMarker.hidden = reserve;
+    if (reserve) {
+      gauge.setAttribute('role', 'progressbar');
+      gauge.setAttribute('aria-valuemin', '0');
+      gauge.setAttribute('aria-valuemax', '100');
+      gauge.setAttribute('aria-valuenow', String(Math.round(levelPct)));
+      gauge.setAttribute('aria-label', t('dynasty.reserve.title'));
+    } else {
+      for (const name of ['role', 'aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-label']) {
+        gauge.removeAttribute(name);
+      }
+    }
 
     // Vertical gauges fill from the bottom; the threshold marker travels up
     // from it too. Horizontal stays the left→right default.
@@ -109,9 +123,9 @@ export class PhBatteryBar extends PhElement {
     }
 
     let cls = 'fill';
-    if (levelPct <= emergencyThreshold) {
+    if (!reserve && levelPct <= emergencyThreshold) {
       cls += ' red';
-    } else if (levelPct <= emergencyThreshold + 10) {
+    } else if (!reserve && levelPct <= emergencyThreshold + 10) {
       cls += ' amber';
     }
     fill.className = cls;

@@ -412,6 +412,19 @@ const REASON_STRING_IDS = {
   // test's demand is met by a DECISION about each reason rather than by silence.
   'already-hosting': 'client.join.error_unknown',
   'not-hosting': 'client.join.error_unknown',
+  // Frozen-fleet continuity can refuse a correct code for reasons unrelated to
+  // code lookup. The host-only reasons point straight to host copy; the shared
+  // reasons below have host overrides so each surface tells the truth.
+  'host-present': 'client.join.error_fleet_host_present',
+  'takeover-pending': 'server.fleet.error_takeover_pending',
+  'forbidden-resume': 'server.fleet.error_forbidden_resume',
+  'not-hosting-fleet': 'server.fleet.error_not_hosting',
+  'invalid-member': 'server.fleet.error_invalid_member',
+  'already-configured': 'server.fleet.error_already_configured',
+  'forbidden-continuation': 'client.join.error_forbidden_continuation',
+  'forbidden-takeover': 'client.join.error_forbidden_takeover',
+  'stale-fleet-epoch': 'client.join.error_stale_fleet_epoch',
+  'slot-connected': 'client.join.error_slot_connected',
   // ── The host's own verdict (StampMismatch::code()) ────────────────────────
   // A protocol difference and a content difference have the same fix for the
   // player — reload this page against the ship they are joining — but they are
@@ -460,6 +473,9 @@ const SERVER_STRING_IDS = {
   'content-epoch-mismatch': 'server.fleet.error_content',
   'bundle-content-missing': 'server.fleet.error_content',
   'client-stamp-missing': 'server.fleet.error_stamp_missing',
+  'host-present': 'server.fleet.error_host_present',
+  'forbidden-takeover': 'server.fleet.error_forbidden_takeover',
+  'stale-fleet-epoch': 'server.fleet.error_stale_fleet_epoch',
 };
 
 /**

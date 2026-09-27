@@ -75,7 +75,7 @@ export function renderStationPanel(doc, station) {
   if (station.overview) {
     const overview = doc.createElement('div');
     overview.className = 'manual-overview';
-    overview.textContent = station.overview;
+    overview.textContent = wireText(station.overview, station.overview);
     panel.appendChild(overview);
   }
   for (const section of station.sections || []) panel.appendChild(renderSection(doc, section));

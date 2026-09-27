@@ -286,13 +286,14 @@ function renderPacks(doc, vm, t, h) {
   setOptionalText(doc, 'landing-packs-title', t, packs && packs.titleId);
   setText(doc, 'landing-packs-folder', packs ? t(packs.folder.id, packs.folder.params) : '');
 
-  // The empty state carries BOTH halves when there are both: the id says which
-  // emptiness this is, and the host's own sentence names the folder it could
-  // not read. A scan failure with no sentence still says something.
+  // The empty state keeps the host's filesystem detail inside a translated
+  // diagnostic frame. A scan failure without detail still says something.
   const empty = doc.getElementById('landing-packs-empty');
   if (empty) {
     const words = packs && packs.emptyId
-      ? [t(packs.emptyId), packs.scanError || ''].filter(Boolean).join(' ')
+      ? (packs.scanError
+        ? t('server.landing.packs.scan_failed_detail', { detail: packs.scanError })
+        : t(packs.emptyId))
       : '';
     empty.textContent = words;
     empty.style.display = words ? '' : 'none';
@@ -330,13 +331,18 @@ function renderPacks(doc, vm, t, h) {
         appendNote(doc, notes, packs.outcome.tone, '',
           t(packs.outcome.line.id, packs.outcome.line.params));
       }
-      // What is wrong, in the validator's own words. This is the acceptance
-      // criterion "a pack that fails validation says what is wrong", and it is
-      // drawn whether the attempt was accepted or not — a warning-only accept
-      // still has something to say.
+      // Keep validator detail; host-owned shelf failures have stable causes
+      // and can use complete translated sentences.
       packs.findings.forEach(function (finding) {
+        const detail = finding.category === 'unknown-pack'
+          ? t('server.landing.packs.unknown_pack', { file: finding.file })
+          : finding.category === 'unreadable-archive'
+            ? t('server.landing.packs.unreadable_archive', {
+              file: finding.file, detail: finding.message,
+            })
+            : [finding.file, finding.message].filter(Boolean).join(' — ');
         appendNote(doc, notes, finding.tone, t(finding.labelId),
-          [finding.file, finding.message].filter(Boolean).join(' — '));
+          detail);
       });
       if (packs.installedHeadingId) {
         appendNote(doc, notes, 'head', '', t(packs.installedHeadingId));

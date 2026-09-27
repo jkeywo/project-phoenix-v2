@@ -6,10 +6,12 @@
  */
 import { familyView } from '../console-payload.js';
 import { makeCaptainRender } from '../stations/captain-console.js';
-import { makeHelmRender } from '../stations/helm-console.js';
+import { makeHelmRender, renderDockPanel, renderTowLoadPanel } from '../stations/helm-console.js';
 import { makeTacticalRender } from '../stations/tactical-console.js';
 import { makeScienceRender } from '../stations/science-console.js';
-import { makeEngineeringRender } from '../stations/engineering-console.js';
+import {
+  makeEngineeringRender, renderTractorPanel, renderUmbilicalPanel,
+} from '../stations/engineering-console.js';
 
 // Ship CSS is installed on the client shell, while each Station is an iframe
 // realm. Load the same theme here so the authored Dynasty identity reaches the
@@ -45,6 +47,10 @@ const renderHelmFamily = makeHelmRender({
     radar: 'helm-radar', joystick: 'helm-joystick', lateral: 'lateral-thrust',
     impulse: 'impulse', boost: 'boost', autoBadge: 'auto-badge',
   },
+  tail: (helm, doc, tr) => {
+    renderDockPanel(helm, doc, tr);
+    renderTowLoadPanel(helm, doc, tr);
+  },
 });
 export function renderHelm(s, doc = document) {
   renderHelmFamily(familyView(s, 'helm'), doc);
@@ -67,6 +73,10 @@ export const renderGunnery = makeTacticalRender({
     autoBadge: 'auto-badge', targetCard: 'target-card',
   },
   torpedoMaxDefault: 20,
+  tail: (_s, view, doc) => {
+    const reserve = doc.getElementById('strike-reserve');
+    if (reserve) reserve.state = view.strike_reserve || null;
+  },
 });
 
 export const renderSensors = makeScienceRender({
@@ -78,6 +88,10 @@ export const renderSensors = makeScienceRender({
 
 export const renderPower = makeEngineeringRender({
   ids: { power: 'power-controls', battery: 'battery-bar' },
+  tail: (_s, view, doc) => {
+    const reserve = doc.getElementById('strike-reserve');
+    if (reserve) reserve.state = view.power.strike_reserve || null;
+  },
 });
 
 export const renderDamageControl = makeEngineeringRender({
@@ -85,5 +99,9 @@ export const renderDamageControl = makeEngineeringRender({
     shieldFacings: 'shield-facings', threatRow: 'threat-row',
     threatBearing: 'threat-bearing', hullIntegrity: 'hull-integrity',
     coreDamage: 'core-damage', repairTeams: 'repair-teams',
+  },
+  tail: (s, _views, doc, tr) => {
+    renderTractorPanel(s, doc, tr);
+    renderUmbilicalPanel(s, doc, tr);
   },
 });

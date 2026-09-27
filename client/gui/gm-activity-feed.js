@@ -1,3 +1,4 @@
+import { validInstanceScope } from './gm-objective-panel.js';
 import { wireText } from './strings.js';
 // The milli-HP unit is spelled once, in the module that owns the directed
 // world-effect vocabulary (issue #1310); a second conversion here is exactly
@@ -125,8 +126,9 @@ function normaliseAction(value) {
   if (value.type === 'objective_action' && typeof value.objective === 'string' && value.objective
       && ['activate', 'complete', 'fail'].includes(value.verb) && Array.isArray(value.recipients)
       && value.recipients.every((id) => typeof id === 'string' && id)
-      && new Set(value.recipients).size === value.recipients.length) {
-    return { type: value.type, objective: value.objective, verb: value.verb, recipients: [...value.recipients] };
+      && new Set(value.recipients).size === value.recipients.length
+      && (value.instance_scope == null || validInstanceScope(value.instance_scope))) {
+    return { type: value.type, objective: value.objective, verb: value.verb, recipients: [...value.recipients], ...(value.instance_scope == null ? {} : { instance_scope: value.instance_scope }) };
   }
   if (value.type === 'spawn_palette_entity'
       && typeof value.palette === 'string' && value.palette.length > 0) {
@@ -428,9 +430,9 @@ export function createGmActivityFeed({
     switch (entry.category) {
       case 'damage':
         return t('server.gm.activity.damage_detail', {
-          amount: String(detail.amount),
-          shield: String(detail.shield_absorbed),
-          hull: String(detail.hull_damage),
+          amount: detail.amount,
+          shield: detail.shield_absorbed,
+          hull: detail.hull_damage,
           weapon: detail.weapon,
           kind: t(`server.gm.activity.victim_kind.${detail.victim_kind}`),
         });
@@ -470,7 +472,7 @@ export function createGmActivityFeed({
             `server.gm.activity.action.apply_direct_${detail.action.heal ? 'heal' : 'damage'}`,
             {
               entity: detail.action.entity,
-              amount: hullPoints(detail.action.applied_milli_hp),
+              amount: Number(hullPoints(detail.action.applied_milli_hp)),
             },
           );
           if (detail.action.scope) {
@@ -484,7 +486,7 @@ export function createGmActivityFeed({
           }
           if (detail.action.discarded_milli_hp > 0) {
             action += t('server.gm.activity.action.direct_effect_discarded', {
-              amount: hullPoints(detail.action.discarded_milli_hp),
+              amount: Number(hullPoints(detail.action.discarded_milli_hp)),
             });
           }
         } else if (detail.action.type === 'set_system_disabled') {
@@ -504,7 +506,7 @@ export function createGmActivityFeed({
         } else if (detail.action.type === 'objective_action') {
           action = t(`server.gm.activity.action.objective_${detail.action.verb}`, {
             objective: detail.action.objective,
-            ships: detail.action.recipients.length ? detail.action.recipients.join(', ')
+            ships: detail.action.instance_scope ? (detail.action.instance_scope === 'all' ? t('server.gm.objective.all_instances') : t('server.gm.objective.instance', { instance: detail.action.instance_scope.instance })) : detail.action.recipients.length ? detail.action.recipients.join(', ')
               : t('server.gm.objective.all_ships'),
           });
         } else if (detail.action.type === 'set_npc_doctrine') {
@@ -564,7 +566,7 @@ export function createGmActivityFeed({
     metadata.className = 'gm-activity-metadata';
     const tick = doc.createElement('span');
     tick.className = 'gm-activity-tick';
-    tick.textContent = t('server.gm.activity.tick', { tick: String(entry.tick) });
+    tick.textContent = t('server.gm.activity.tick', { tick: entry.tick });
     const category = doc.createElement('span');
     category.className = 'gm-activity-category';
     category.textContent = t(`server.gm.activity.category.${entry.category}`);
@@ -663,6 +665,19 @@ export function createGmActivityFeed({
 
   return {
     update,
+    refreshLanguage() {
+      const focused = list?.contains(doc.activeElement) && doc.activeElement?.classList.contains('gm-activity-link')
+        ? { row: [...list.children].indexOf(doc.activeElement.closest('.gm-activity-entry')),
+          link: [...doc.activeElement.closest('.gm-activity-entry').querySelectorAll('.gm-activity-link')]
+            .indexOf(doc.activeElement) } : null;
+      renderedSignature = '';
+      entryNodes = new Map();
+      list?.replaceChildren();
+      render({ rebuildShips: false });
+      if (focused && focused.row >= 0) {
+        list.children[focused.row]?.querySelectorAll('.gm-activity-link')[focused.link]?.focus({ preventScroll: true });
+      }
+    },
     clearFilters,
     reconcileAvailability,
     state: () => ({ capacity: state.capacity, entries: [...state.entries] }),

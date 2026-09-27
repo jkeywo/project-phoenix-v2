@@ -164,7 +164,7 @@ export function registerCaptainActions(registry, options = {}) {
     const view = captainActionView(getState());
     if (!view || !sendAction) return false;
     const objectiveIds = (Array.isArray(view.objectives) ? view.objectives : [])
-      .map((objective) => objective && objective.id)
+      .map((objective) => objective && !objective.unassigned && objective.id)
       .filter((id) => typeof id === 'string' && id);
     const id = selectedOrNext(
       objectiveIds,

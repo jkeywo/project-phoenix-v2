@@ -1,24 +1,27 @@
 import {
-  applyToDom, getCataloguePresentation, getLocale, setLocale,
+  applyToDom, getCataloguePresentation, getLocale, localiseTree,
+  rawDeliveredMessage, setLocale,
 } from './strings.js';
 
 export const LOCALE_STORAGE_KEY = 'phoenix-private-locale';
+export const GM_LOCALE_STORAGE_KEY = 'phoenix-private-gm-locale';
+export const WORKSHOP_LOCALE_STORAGE_KEY = 'phoenix-private-workshop-locale';
 
 function browserLocale(nav) {
-  const raw = nav?.languages?.[0] || nav?.language || 'en';
+  const raw = nav?.nativeLocale || nav?.languages?.[0] || nav?.language || 'en';
   return String(raw).trim() || 'en';
 }
 
-export function loadPrivateLocale(storage, nav) {
+export function loadPrivateLocale(storage, nav, key = LOCALE_STORAGE_KEY) {
   try {
-    const saved = storage?.getItem(LOCALE_STORAGE_KEY);
+    const saved = storage?.getItem(key);
     if (saved) return saved;
   } catch (_) { /* private storage may be unavailable */ }
   return browserLocale(nav);
 }
 
-export function persistPrivateLocale(storage, locale) {
-  try { storage?.setItem(LOCALE_STORAGE_KEY, locale); } catch (_) { /* session still works */ }
+export function persistPrivateLocale(storage, locale, key = LOCALE_STORAGE_KEY) {
+  try { storage?.setItem(key, locale); } catch (_) { /* session still works */ }
 }
 
 export function matchAvailableLocale(requested, locales) {
@@ -35,6 +38,7 @@ export function installPresentationInIframe(iframe, presentation = getCatalogueP
     const install = iframe?.contentWindow?.phStringCatalogue?.install;
     if (typeof install !== 'function') return false;
     install(presentation);
+    if (!reload) iframe.contentWindow.__languageSwitchPending = true;
     if (reload && typeof iframe.contentWindow?.location?.reload === 'function') {
       iframe.contentWindow.location.reload();
     }
@@ -53,11 +57,13 @@ export function installPresentationInConsoles(doc, presentation = getCataloguePr
 
 /** Owns the private language choice and fans it into every same-origin realm. */
 export function createLocalePreference({ doc = document, nav = navigator, storage = localStorage,
-  onChange = () => {}, findConsoles = null } = {}) {
-  let requested = loadPrivateLocale(storage, nav);
+  onChange = () => {}, findConsoles = null, storageKey = LOCALE_STORAGE_KEY } = {}) {
+  let requested = loadPrivateLocale(storage, nav, storageKey);
+  let rawComms = null;
+  let rawObjectives = null;
   setLocale(requested);
-  const apply = ({ reload = false } = {}) => {
-    setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
+  const apply = ({ reload = false, preview = null } = {}) => {
+    setLocale(matchAvailableLocale(preview || requested, getCataloguePresentation().locales));
     const presentation = getCataloguePresentation();
     applyToDom(doc);
     const consoleRoot = typeof findConsoles === 'function'
@@ -71,12 +77,47 @@ export function createLocalePreference({ doc = document, nav = navigator, storag
     apply,
     locale: getLocale,
     presentation: getCataloguePresentation,
+    /** Capture only full-replacement presentation payloads, never authority. */
+    capture(delivered) {
+      const raw = rawDeliveredMessage(delivered);
+      if (raw?.type === 'Welcome') {
+        rawComms = null;
+        rawObjectives = null;
+      } else if (raw?.type === 'CommsState') {
+        rawComms = raw;
+        rawObjectives = raw;
+      } else if (raw?.type === 'ObjectiveSummary') {
+        rawObjectives = raw;
+      }
+    },
+    /** Re-render retained prose without replaying commands or reducer effects. */
+    relocaliseRetained({ simState, commsState } = {}) {
+      if (rawComms) {
+        const data = localiseTree(rawComms).data || {};
+        if (commsState) {
+          commsState.messages = data.messages || [];
+          commsState.objectives = data.objectives || [];
+          commsState.contacts = data.contacts || [];
+          commsState.version += 1;
+        }
+      }
+      if (rawObjectives && simState) {
+        simState.objectives = localiseTree(rawObjectives).data?.objectives || [];
+      }
+    },
     select(next) {
       requested = String(next || 'en');
-      const selected = setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
-      persistPrivateLocale(storage, requested);
-      return apply({ reload: true });
+      setLocale(matchAvailableLocale(requested, getCataloguePresentation().locales));
+      persistPrivateLocale(storage, requested, storageKey);
+      return apply();
     },
+    /** A host-backed native profile may arrive after the page first paints. */
+    reloadStored() {
+      requested = loadPrivateLocale(storage, nav, storageKey);
+      return apply();
+    },
+    /** Temporary presentation for an editor preview; leaves the saved choice alone. */
+    preview(next) { return apply({ preview: next }); },
     installIframe(iframe) { return installPresentationInIframe(iframe); },
   };
 }

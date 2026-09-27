@@ -94,13 +94,10 @@ max_lookups_per_connection = 60
 # their own (AdmissionBudgets::unjoined_total) so that silence cannot spend the
 # room's places.
 max_peers_per_record = 32
-# How many player-ship slots one fleet may hold, the owner's own included
-# (issue #1114). This is a DESIGN number — how big a fleet the game is meant to
-# field — and it is deliberately smaller than `max_peers_per_record`, which is
-# the service's memory bound on any record and knows nothing about ships. The
-# fleet owner refuses a further host with `fleet-full` before the record's own
-# cap is ever reached.
-max_fleet_hosts = 4
+# Fleet metadata safety bound, aligned with the service's existing peer bound.
+# The supported target is four ships plus two GM peers (#1090), shown as a
+# warning above that composition rather than an admission refusal (#1535).
+max_fleet_hosts = 32
 # What one ship host may say about ITSELF in a fleet roster (issue #1114). The
 # display name and the hull's template path are the only two fields a member
 # writes, and the fleet lead re-broadcasts the whole roster to every admitted

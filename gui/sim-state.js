@@ -89,6 +89,7 @@ export class ClientSimState {
     const stationPuppets = preserveAuthorityProjection ? this.stationPuppets : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
+    this.crewSpectator = preserveAuthorityProjection ? this.crewSpectator : null;
     /** 'Auto' | 'Manual' */
     this.phaserMode = 'Auto';
     this.lastPhaserTarget = null;
@@ -694,6 +695,10 @@ export class ClientSimState {
         }
         break;
       }
+      case 'CrewSpectatorState':
+        this.crewSpectator = d;
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER, force: true });
+        break;
       case 'ShipDestroyed':
         changes.effects.push(
           { effect: REDUCER_EFFECTS.SHIP_DESTROYED },

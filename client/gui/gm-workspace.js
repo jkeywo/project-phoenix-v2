@@ -14,6 +14,7 @@ import { createGmObjectivePanel } from './gm-objective-panel.js';
 import { createGmCommsPanel } from './gm-comms-panel.js';
 import { createGmSpawnPanel } from './gm-spawn-panel.js';
 import { createGmSystemPanel } from './gm-system-panel.js';
+import { createGmRecipientDiagnostics } from './gm-recipient-diagnostics.js';
 import { createGmContactPanel } from './gm-contact-panel.js';
 import { createGmPresentationPanel } from './gm-presentation-panel.js';
 import { createGmDespawnPanel } from './gm-despawn-panel.js';
@@ -57,7 +58,8 @@ import {
   emitActionFeedbackTransition,
 } from './action-feedback.js';
 import { createHostActionRegistry } from './host-actions.js';
-import { t, has } from './strings.js';
+import { t, has, applyToDom } from './strings.js';
+import { preserveLocaleEditContext } from './locale-edit-context.js';
 import { mountGmWorkspaceShell } from './gm-workspace-shell.js';
 import { mountWorkshopSourceLink } from './workshop-source-link.js';
 import { createPrivateAudio, attachPrivateAudioLifecycle, privateFeedbackReceiver } from './private-audio.js';
@@ -330,7 +332,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       const ship = win.__hostGmStationState?.().projection?.ships?.find((row) => row.ship_id === id);
       return ship?.name ? (has(ship.name) ? t(ship.name) : ship.name) : id;
     },
-    submit: (request) => win.__hostObjectiveAction?.(request) ?? false,
+    submit: (request) => (request.scope ? win.__hostObjectiveInstanceAction?.(request) : win.__hostObjectiveAction?.(request)) ?? false,
   });
   win.__hostGmObjectiveState = gmObjectivePanel.state;
   win.__hostGmMissionRefresh = () => { gmMissionPanel.refreshAdmission(); gmObjectivePanel.refreshAdmission(); };
@@ -603,6 +605,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
     submit: request => privateSubmit('gm.system', request, () => win.__hostSetSystemDisabled(request)),
   });
   win.__hostGmSystemState = gmSystem.state;
+  const recipientDiagnostics = createGmRecipientDiagnostics({ doc, t });
   gmContact = createGmContactPanel({ doc: doc, t,
     confirmAction: gmConfirmations.request,
     getOperator: () => typeof win.__hostLocalGm === 'function' ? win.__hostLocalGm() : null,
@@ -698,7 +701,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   win.__hostGmPresentationFieldsState = gmPresentationFields.state;
   win.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmPresentation.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); gmRegionFields.reset(); gmPresentationFields.reset(); };
+  win.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmPresentation.reset(); gmSystem.reset(); recipientDiagnostics.reset(); gmNpc.reset(); gmEntityFields.reset(); gmWorldFields.reset(); gmShipFields.reset(); gmRegionFields.reset(); gmPresentationFields.reset(); };
   win.__hostGmEffectState = gmDirectEffect.state;
   win.__hostSemanticActions = hostSemanticActions;
   win.__hostActionFeedback = hostActionFeedback;
@@ -712,6 +715,7 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
       gmSpawnPanel.updateContacts(p);
       gmPresentation.update(p);
       gmSystem.update(p);
+      recipientDiagnostics.update(p);
       gmNpc.update(p);
       updateReading('entity-fields', gmEntityFields, p);
       updateReading('world-fields', gmWorldFields, p);
@@ -782,6 +786,25 @@ export function mountGmWorkspace({ win = window, doc = win.document, requireNati
   };
   return {
     handlers,
+    refreshLanguage() {
+      const active = doc.activeElement;
+      const activeId = active?.id;
+      preserveLocaleEditContext(doc, () => {
+        applyToDom(doc.getElementById('gm-console'));
+        gmActivity.refreshLanguage();
+        gmMissionPanel.refreshLanguage();
+        gmObjectivePanel.refreshLanguage();
+        gmCommsPanel.refreshLanguage();
+        gmDirectEffect.refreshLanguage();
+        gmJournalPanel.refreshLanguage();
+        gmSessionControls.refreshAdmission();
+        sessionWidget.render();
+        shell.refresh();
+        const projection = gmProjection.state();
+        shell.refreshSelection(projection.entities.find(entity => entity.entity_id === projection.selectedId) || null);
+      });
+      if (activeId && active !== doc.activeElement) doc.getElementById(activeId)?.focus?.({ preventScroll: true });
+    },
     // The live host and disposable Workshop Test both feed the same ordinary
     // presentation controller. Keeping this on the workspace avoids a second
     // parser or widget renderer in the Test adapter.

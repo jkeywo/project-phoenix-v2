@@ -130,6 +130,7 @@ export const NATIVE_SETTINGS_CONTROLS = [
     // status lines, so a heading here would be the same words twice.
     sectionId: null,
   },
+  { id: 'language', kind: 'language', tab: 'presentation', sectionId: null },
 ];
 
 /**
@@ -282,6 +283,7 @@ export function mountNativeSettings(doc, hooks, opts) {
   const rows = (Array.isArray(o.controls) ? o.controls : NATIVE_SETTINGS_CONTROLS)
     .filter(function (entry) {
       return !entry || ((entry.kind !== 'presentation' || !!h.presentation)
+        && (entry.kind !== 'language' || !!h.language)
         && (entry.kind !== 'audio' || !!h.audio));
     });
 
@@ -344,6 +346,23 @@ export function mountNativeSettings(doc, hooks, opts) {
         });
         return;
       }
+      if (spec.kind === 'language') {
+        const el = section('settings.language');
+        const select = doc.createElement('select');
+        select.className = 'native-settings-language';
+        select.setAttribute('aria-label', t('settings.language'));
+        for (const locale of h.language.locales()) {
+          const option = doc.createElement('option');
+          option.value = locale;
+          option.textContent = locale === 'de' ? 'Deutsch' : locale === 'en' ? 'English' : locale;
+          select.appendChild(option);
+        }
+        select.value = h.language.locale();
+        select.addEventListener('change', () => h.language.select(select.value));
+        el.appendChild(select);
+        body.appendChild(el);
+        return;
+      }
       const el = section(spec.headingId);
       if (spec.hintId) el.appendChild(hint(spec.hintId));
       const controls = row();
@@ -367,6 +386,12 @@ export function mountNativeSettings(doc, hooks, opts) {
     open: shell.open,
     close: shell.close,
     isOpen: shell.isOpen,
+    refresh: function () {
+      if (!shell.isOpen()) return;
+      const languageFocused = doc.activeElement?.classList?.contains('native-settings-language');
+      buildPanel();
+      if (languageFocused) shell.overlay.querySelector('.native-settings-language')?.focus();
+    },
     selectTab: function (id) {
       activeTab = id;
       if (shell.isOpen()) buildPanel();

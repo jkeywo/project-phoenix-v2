@@ -1,3 +1,5 @@
+import { wireText } from './strings.js';
+
 /** Keyed presentation tree. Selection never grants station authority. */
 export function createGmEntityTree({ root, doc, t, onSelect }) {
   const search = doc.createElement('input'); search.type = 'search';
@@ -84,29 +86,41 @@ export function createGmEntityTree({ root, doc, t, onSelect }) {
   }
   search.addEventListener('input', paint);
   return { update({ entities = [], worlds = {}, membership = {}, stations = [], slots = [] }) {
+    const searchText = t('server.gm.tree.search');
+    if (search.placeholder !== searchText) search.placeholder = searchText;
+    if (search.getAttribute('aria-label') !== searchText) search.setAttribute('aria-label', searchText);
+    const treeTitle = t('server.gm.tree.title');
+    if (tree.getAttribute('aria-label') !== treeTitle) tree.setAttribute('aria-label', treeTitle);
+    const ratingName = (rating) => ({
+      Std: 'station.rating.std.name',
+      Simplified: 'station.rating.simplified.name',
+      Backfill: 'station.rating.backfill.name',
+    })[rating];
     const next = [];
     const worldIds = new Set([...Object.keys(worlds), ...entities.map(entity => membership[entity.entity_id] || 'unassigned')]);
     if (slots.length) worldIds.add('root');
     for (const world of [...worldIds].sort()) {
       const id = `world:${world}`;
-      next.push({ id, kind: 'world', world, label: worlds[world]?.label || (world === 'unassigned' ? t('server.gm.tree.unassigned') : world) });
+      next.push({ id, kind: 'world', world, label: worlds[world]?.label
+        ? wireText(worlds[world].label) : (world === 'unassigned' ? t('server.gm.tree.unassigned') : world) });
       const members = entities.filter(entity => (membership[entity.entity_id] || 'unassigned') === world);
-      const factions = new Map(members.map(entity => [entity.faction?.entity_id || 'none', entity.faction?.name || t('server.gm.tree.no_faction')]));
+      const factions = new Map(members.map(entity => [entity.faction?.entity_id || 'none', entity.faction?.name
+        ? wireText(entity.faction.name) : t('server.gm.tree.no_faction')]));
       for (const [faction, label] of [...factions].sort((a, b) => a[1].localeCompare(b[1]))) {
         const factionId = `${id}:faction:${faction}`;
         next.push({ id: factionId, parent: id, kind: 'faction', world, faction, label });
         for (const entity of members.filter(entity => (entity.faction?.entity_id || 'none') === faction).sort((a, b) => a.name.localeCompare(b.name))) {
           const entityId = `entity:${entity.entity_id}`;
-          next.push({ id: entityId, parent: factionId, kind: 'entity', entity, label: entity.name || entity.entity_id });
+          next.push({ id: entityId, parent: factionId, kind: 'entity', entity, label: wireText(entity.name || entity.entity_id) });
           for (const station of stations.find(ship => ship.ship_id === entity.entity_id)?.stations || []) {
             next.push({ id: `${entityId}:station:${station.station_id}`, parent: entityId, kind: 'station', entity, station,
-              label: `${station.name} · ${station.rating}` });
+              label: `${wireText(station.name)} · ${ratingName(station.rating) ? t(ratingName(station.rating)) : wireText(station.rating)}` });
           }
         }
       }
       if (world === 'root') for (const slot of slots.filter(slot => slot.state === 'empty')) {
         next.push({ id: `slot:${slot.slot_id || slot.id}`, parent: id, kind: 'slot', slot,
-          label: slot.label || slot.slot_id || slot.id });
+          label: wireText(slot.label || slot.slot_id || slot.id) });
       }
     }
     if (!rows.length) next.filter(row => row.kind === 'world').forEach(row => expanded.add(row.id));
@@ -117,7 +131,8 @@ export function createGmEntityTree({ root, doc, t, onSelect }) {
       return;
     }
     signature = nextSignature; paint();
-  }, selectEntity(id) {
+  }, selectedRow: () => rows.find(row => row.id === selected) || null,
+  selectEntity(id) {
     const next = id ? `entity:${id}` : null;
     if (next === selected) return;
     selected = next;

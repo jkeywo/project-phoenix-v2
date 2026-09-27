@@ -355,7 +355,7 @@ export function createGmMissionPanel({
       name: operatorName(result.operator_id),
       verb: t(verbTextId(result.verb, result.requested_active)),
       event: result.target || '',
-      tick: String(result.tick),
+      tick: result.tick,
       correlation: result.correlation,
       reason: refusalText(result.reason),
     });
@@ -805,6 +805,7 @@ export function createGmMissionPanel({
     update,
     reset,
     refreshAdmission,
+    refreshLanguage() { renderEvents(); renderLog(); refreshAdmission(); },
     state: () => ({
       events: events.length,
       fireable: events.filter(eventIsFireable).length,

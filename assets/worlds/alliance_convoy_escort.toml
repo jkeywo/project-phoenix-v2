@@ -1,0 +1,299 @@
+# Alliance Convoy Escort (#1548). The route itself decides each transport's
+# fate. Escort loss never ends the mission and there is no deadline.
+[global]
+seed = 1548
+title = "world.alliance_convoy.global.title"
+description = "world.alliance_convoy.global.description"
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[anchors]
+safe_harbour = [0.0, 0.0, -2400.0]
+recovery_site = [220.0, 0.0, -900.0]
+
+[[route]]
+id = "convoy_lane"
+on_complete = "terminate"
+[[route.leg]]
+anchor = "safe_harbour"
+speed = 0.18
+
+[[available_ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "lead"
+label = "world.alliance_convoy.slot.lead"
+default_ship = "assets/entities/alliance_cruiser.toml"
+unclaimed = "absent"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "port"
+label = "world.alliance_convoy.slot.port"
+default_ship = "assets/entities/alliance_destroyer.toml"
+unclaimed = "absent"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "starboard"
+label = "world.alliance_convoy.slot.starboard"
+default_ship = "assets/entities/alliance_destroyer.toml"
+unclaimed = "absent"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[ship_slot]]
+id = "rear"
+label = "world.alliance_convoy.slot.rear"
+default_ship = "assets/entities/alliance_cruiser.toml"
+unclaimed = "absent"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+id = "escort-lead"
+name = "world.alliance_convoy.escort.lead"
+template_path = "assets/entities/alliance_cruiser.toml"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+[[entity]]
+id = "escort-port"
+name = "world.alliance_convoy.escort.port"
+template_path = "assets/entities/alliance_destroyer.toml"
+spawn_on = "game_start"
+transform = { position = [-90.0, 0.0, 40.0] }
+[[entity]]
+id = "escort-starboard"
+name = "world.alliance_convoy.escort.starboard"
+template_path = "assets/entities/alliance_destroyer.toml"
+spawn_on = "game_start"
+transform = { position = [90.0, 0.0, 40.0] }
+[[entity]]
+id = "escort-rear"
+name = "world.alliance_convoy.escort.rear"
+template_path = "assets/entities/alliance_cruiser.toml"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 120.0] }
+
+[[entity]]
+name = "world.alliance_convoy.transport.aster"
+template_path = "assets/entities/ship_civilian_hauler.toml"
+transform = { position = [-45.0, 0.0, -100.0] }
+overrides = { civilian = { route = "convoy_lane", use_impulse = false } }
+[[entity]]
+name = "world.alliance_convoy.transport.bell"
+template_path = "assets/entities/ship_civilian_hauler.toml"
+transform = { position = [0.0, 0.0, -80.0] }
+overrides = { civilian = { route = "convoy_lane", use_impulse = false } }
+[[entity]]
+name = "world.alliance_convoy.transport.cedar"
+template_path = "assets/entities/ship_civilian_hauler.toml"
+transform = { position = [45.0, 0.0, -100.0] }
+overrides = { civilian = { route = "convoy_lane", use_impulse = false } }
+
+# The baseline interception. #1551 scales later waves from the actual crew
+# count; this ship ensures the route already demands an escort at its midpoint.
+[[entity]]
+name = "world.alliance_convoy.raider.first"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
+transform = { position = [-180.0, 0.0, -710.0] }
+
+[[entity]]
+name = "world.alliance_convoy.recovery_zone"
+template_path = "assets/entities/region_convoy_recovery.toml"
+transform = { anchor = "recovery_site" }
+
+[script]
+setup = """
+on_world_loaded("on_load");
+on_waypoint_reached("world.alliance_convoy.transport.aster", "safe_harbour", "aster_arrived");
+on_waypoint_reached("world.alliance_convoy.transport.bell", "safe_harbour", "bell_arrived");
+on_waypoint_reached("world.alliance_convoy.transport.cedar", "safe_harbour", "cedar_arrived");
+on_destroyed("world.alliance_convoy.transport.aster", "aster_lost");
+on_destroyed("world.alliance_convoy.transport.bell", "bell_lost");
+on_destroyed("world.alliance_convoy.transport.cedar", "cedar_lost");
+on_destroyed("world.alliance_convoy.raider.first", "first_raider_lost");
+on_entered_region("world.alliance_convoy.recovery_zone", "escort_entered_recovery").when("flag(convoy_recovery_task_active)");
+on_timer(1, "scale_at_launch");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Requiem");
+    ctx.effects.add_faction_enemy("Requiem", "Harrow");
+    ctx.effects.add_objective(#{
+        id: "escort_convoy",
+        instance_id: "shared_escort",
+        text: "world.alliance_convoy.objective.escort",
+        all_player_ships: true,
+        base_priority: 80,
+    });
+}
+
+// The launch roster is written once from the GameStart ships that actually
+// spawned. Disconnects later hand their stations to ordinary Backfill; this
+// authored threat/task plan stays put for the whole mission.
+fn scale_at_launch(ctx) {
+    let ships = ctx.flags["fleet.initial_player_ships"];
+    if ships >= 2 {
+        ctx.schedule.after(180, |ctx| { spawn_second_raider(ctx); });
+    }
+    if ships >= 3 {
+        ctx.schedule.after(360, |ctx| { spawn_third_raider(ctx); });
+        let recovery = preferred_slot(ctx, "port", "lead", "rear", "starboard");
+        ctx.flags.convoy_recovery_task_active = 1;
+        ctx.effects.add_objective(#{
+            id: "recover_survivors", instance_id: "ship_recovery",
+            text: "world.alliance_convoy.objective.recovery",
+            recipient_ship_slots: [recovery], mandatory: false, source: "mission",
+            directive_kind: "Reach", directive_anchor: "recovery_site",
+            base_priority: 65,
+        });
+    }
+    if ships >= 4 {
+        ctx.schedule.after(540, |ctx| { spawn_fourth_raider(ctx); });
+        let pursuit = preferred_slot(ctx, "starboard", "rear", "lead", "port");
+        ctx.flags.convoy_pursuit_task_active = 1;
+        ctx.effects.add_objective(#{
+            id: "pursue_raider", instance_id: "ship_pursuit",
+            text: "world.alliance_convoy.objective.pursuit",
+            recipient_ship_slots: [pursuit], mandatory: false, source: "mission",
+            directive_kind: "Destroy", target: "world.alliance_convoy.raider.first",
+            targets: ["world.alliance_convoy.raider.first"], base_priority: 55,
+        });
+        if ctx.flags.convoy_first_raider_destroyed > 0 { finish_pursuit(ctx); }
+    }
+}
+
+fn preferred_slot(ctx, first, second, third, fourth) {
+    if ctx.flags["fleet.slot." + first + ".present"] > 0 { return first; }
+    if ctx.flags["fleet.slot." + second + ".present"] > 0 { return second; }
+    if ctx.flags["fleet.slot." + third + ".present"] > 0 { return third; }
+    fourth
+}
+
+fn spawn_second_raider(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_harrow_destroyer.toml",
+        name: "world.alliance_convoy.raider.second", position: [200, 0, -1150],
+    });
+}
+fn spawn_third_raider(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_harrow_destroyer.toml",
+        name: "world.alliance_convoy.raider.third", position: [-220, 0, -1600],
+    });
+}
+fn spawn_fourth_raider(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_harrow_destroyer.toml",
+        name: "world.alliance_convoy.raider.fourth", position: [180, 0, -2050],
+    });
+}
+
+// The assigned escort receives the directive. Another surviving player escort
+// may still secure survivors if it reaches the same physical site first.
+fn escort_entered_recovery(ctx) {
+    if ctx.flags.convoy_recovery_task_active == 0 || ctx.flags.convoy_recovered > 0 { return; }
+    ctx.flags.convoy_recovered = 1;
+    ctx.effects.complete_objective("recover_survivors", "ship_recovery");
+    ctx.effects.report_row(#{
+        id: "recovery", heading: "world.alliance_convoy.report.recovery.heading",
+        outcome: "world.alliance_convoy.report.recovery.saved",
+        state: "saved", score: 1,
+    });
+}
+
+fn first_raider_lost(ctx) {
+    ctx.flags.convoy_first_raider_destroyed = 1;
+    if ctx.flags.convoy_pursuit_task_active > 0 { finish_pursuit(ctx); }
+}
+fn finish_pursuit(ctx) {
+    if ctx.flags.convoy_pursuit_resolved > 0 { return; }
+    ctx.flags.convoy_pursuit_resolved = 1;
+    ctx.effects.complete_objective("pursue_raider", "ship_pursuit");
+    ctx.effects.report_row(#{
+        id: "pursuit", heading: "world.alliance_convoy.report.pursuit.heading",
+        outcome: "world.alliance_convoy.report.pursuit.stopped",
+        state: "saved", score: 1,
+    });
+}
+
+fn record_fate(ctx, key, arrived) {
+    if ctx.flags[key] > 0 { return; }
+    ctx.flags[key] = 1;
+    if arrived { ctx.flags.increment("convoy_saved", 1); }
+    else { ctx.flags.increment("convoy_lost", 1); }
+    resolve_convoy(ctx);
+}
+
+fn aster_arrived(ctx) {
+    record_fate(ctx, "convoy_aster_resolved", true);
+    ctx.effects.destroy_entity("world.alliance_convoy.transport.aster");
+}
+fn bell_arrived(ctx) {
+    record_fate(ctx, "convoy_bell_resolved", true);
+    ctx.effects.destroy_entity("world.alliance_convoy.transport.bell");
+}
+fn cedar_arrived(ctx) {
+    record_fate(ctx, "convoy_cedar_resolved", true);
+    ctx.effects.destroy_entity("world.alliance_convoy.transport.cedar");
+}
+fn aster_lost(ctx) { record_fate(ctx, "convoy_aster_resolved", false); }
+fn bell_lost(ctx) { record_fate(ctx, "convoy_bell_resolved", false); }
+fn cedar_lost(ctx) { record_fate(ctx, "convoy_cedar_resolved", false); }
+
+fn resolve_convoy(ctx) {
+    if ctx.flags.convoy_saved + ctx.flags.convoy_lost != 3 { return; }
+    let count = ctx.flags.convoy_saved;
+    let outcome = "world.alliance_convoy.report.zero";
+    let state = "lost";
+    if count == 3 { outcome = "world.alliance_convoy.report.three"; state = "saved"; }
+    else if count == 2 { outcome = "world.alliance_convoy.report.two"; state = "partial"; }
+    else if count == 1 { outcome = "world.alliance_convoy.report.one"; state = "partial"; }
+    ctx.effects.complete_objective("escort_convoy");
+    ctx.effects.report_row(#{
+        id: "convoy_fate",
+        heading: "world.alliance_convoy.report.heading",
+        outcome: outcome,
+        state: state,
+        score: count,
+    });
+    if ctx.flags.convoy_recovery_task_active > 0 {
+        if ctx.flags.convoy_recovered == 0 {
+            ctx.effects.fail_objective("recover_survivors", "ship_recovery");
+            ctx.effects.report_row(#{
+                id: "recovery", heading: "world.alliance_convoy.report.recovery.heading",
+                outcome: "world.alliance_convoy.report.recovery.missed",
+                state: "lost", score: 0,
+            });
+        }
+    }
+    if ctx.flags.convoy_pursuit_task_active > 0 {
+        if ctx.flags.convoy_pursuit_resolved == 0 {
+            ctx.effects.fail_objective("pursue_raider", "ship_pursuit");
+            ctx.effects.report_row(#{
+                id: "pursuit", heading: "world.alliance_convoy.report.pursuit.heading",
+                outcome: "world.alliance_convoy.report.pursuit.escaped",
+                state: "neutral", score: 0,
+            });
+        }
+    }
+    ctx.effects.game_over("world.alliance_convoy.game_over");
+}
+"""

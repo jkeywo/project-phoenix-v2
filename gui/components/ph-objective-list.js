@@ -36,6 +36,7 @@ export class PhObjectiveList extends PhElement {
     .row.done .text { text-decoration: line-through; color: var(--ink-dim); }
     .row { cursor: pointer; border-radius: 2px; padding: 0.1rem 0.2rem; }
     .row.boosted { background: var(--surface-panel-up); border-left: 2px solid var(--cyan); }
+    .row.unassigned { color: var(--ink-dim); cursor: default; }
   </style>
   <div class="list" id="list"></div>
 `;
@@ -87,7 +88,9 @@ export class PhObjectiveList extends PhElement {
     raw.forEach(o => {
       const key = o.id || o.text || '';
       const done = o.done != null ? o.done : (o.status === 'Completed');
-      const text = o.text || '';
+      const progress = Number.isFinite(o.progress) && o.progress >= 0
+        ? t('component.objectives.progress', { progress: o.progress }) : '';
+      const text = [o.text || '', progress].filter(Boolean).join(' — ');
       const boosted = key !== '' && boostedId === key;
       let el = this.#rowCache.get(key);
       if (!el) {
@@ -98,6 +101,7 @@ export class PhObjectiveList extends PhElement {
         // Enter/Space (native to the button) and a pointer tap alike run this
         // one handler, dispatching the same stable semantic action identity.
         el.addEventListener('click', () => {
+          if (el.dataset.unassigned === 'true') return;
           const activate = typeof window !== 'undefined' && window.activateSemanticAction;
           if (key && typeof activate === 'function') {
             activate(CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID, {
@@ -110,11 +114,14 @@ export class PhObjectiveList extends PhElement {
         this.#rowCache.set(key, el);
         list.appendChild(el);
       }
-      el.className = ['row', done && 'done', boosted && 'boosted'].filter(Boolean).join(' ');
+      const unassigned = o.unassigned === true;
+      el.dataset.unassigned = String(unassigned);
+      el.className = ['row', done && 'done', !unassigned && boosted && 'boosted', unassigned && 'unassigned'].filter(Boolean).join(' ');
       // The boosted objective is the listbox's selected option.
-      el.setAttribute('aria-selected', String(boosted));
+      el.setAttribute('aria-selected', String(!unassigned && boosted));
+      el.setAttribute('aria-disabled', String(unassigned));
       el.firstChild.className = done ? 'indicator done' : 'indicator pending';
-      el.lastChild.textContent = text;
+      el.lastChild.textContent = unassigned ? `${text} — ${t('component.objectives.unassigned')}` : text;
     });
     this.#syncRoving();
   }

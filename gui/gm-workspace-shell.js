@@ -100,7 +100,7 @@ export const GM_LIVE_DOCK_MENUS = Object.freeze([
 
 export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native = false }) {
   const root = doc.getElementById('gm-console');
-  if (!root) return { refresh() {}, metadata() {}, selection() {}, dispose() {},
+  if (!root) return { refresh() {}, metadata() {}, selection() {}, refreshSelection() {}, dispose() {},
     mountLiveLayout() {}, setLiveLayout() {}, liveLayoutState() { return null; },
     showLog() { return false; } };
   phAdoptConsoleStyles(doc);
@@ -187,12 +187,19 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
     get('gm-inspector').dataset.groupInspection = String(!groupSummary.hidden);
     if (row.kind === 'station') { win.__hostGmFocusStation?.(row.entity.entity_id, row.station.station_id); return; }
     if (row.kind === 'entity') { selectEntity(row.entity.entity_id); liveLayout?.reveal('inspector'); return; }
-    const title = element('h3'); title.textContent = row.label;
-    const detail = element('p');
+    paintGroupSummary(row);
+    liveLayout?.reveal('inspector');
+  } });
+  function paintGroupSummary(row, preserveControls = false) {
+    if (!row) return;
+    const title = preserveControls ? groupSummary.querySelector('h3') || element('h3') : element('h3');
+    title.textContent = row.label;
+    const detail = preserveControls ? groupSummary.querySelector('p') || element('p') : element('p');
     const members = entities.filter(entity => (worldMembership[entity.entity_id] || 'unassigned') === row.world
       && (row.kind !== 'faction' || (entity.faction?.entity_id || 'none') === row.faction));
     detail.textContent = row.kind === 'slot' ? t(`server.gm.shell.ship_slot.${row.slot.state}`)
       : t('server.gm.tree.group_summary', { id: row.kind === 'world' ? row.world : row.faction, count: members.length });
+    if (preserveControls) return;
     groupSummary.replaceChildren(title, detail);
     if (row.kind === 'slot' && row.slot.can_backfill) {
       const fill = element('button', null, 'server.gm.shell.ship_slot.spawn_backfill');
@@ -202,8 +209,7 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
           correlation: `slot-backfill-${Date.now()}-${++backfillSequence}` });
       }); groupSummary.append(fill);
     }
-    liveLayout?.reveal('inspector');
-  } });
+  }
   // Spawn left the roster to become a temporary action panel (issue #1506).
   // It stays in the document for the ordinary browser host, which has no dock.
   root.append(get('gm-spawn-panel'));
@@ -504,12 +510,26 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
   function paintRoster() {
     entityTree.update({ entities, worlds: worldReadings, membership: worldMembership,
       stations: stationProjection.ships, slots: shipSlots });
-    const signature = JSON.stringify(gms);
+    const signature = JSON.stringify([gms,
+      t('server.gm.shell.disconnected'), t('server.gm.shell.ready'), t('server.gm.shell.waiting')]);
     if (operators.dataset.signature !== signature) {
       operators.dataset.signature = signature;
       operators.replaceChildren(...gms.map(gm => { const row = element('p'); row.textContent = `${gm.name || gm.id} · ${t(gm.connected === false ? 'server.gm.shell.disconnected' : gm.ready ? 'server.gm.shell.ready' : 'server.gm.shell.waiting')}`; return row; }));
     }
     putText(peers, t('server.gm.shell.peers', { gms: gms.length, ships: entities.filter(row => row.kind === 'player_ship').length }));
+  }
+  function paintSelection(entity) {
+    putText(chip, entity ? label(entity.name) : t('server.gm.inspector.empty'));
+    const systemSignature = JSON.stringify((entity?.status.systems || [])
+      .map(system => [system, label(system.name)]));
+    if (systems.dataset.readings === systemSignature) return;
+    systems.dataset.readings = systemSignature;
+    systems.replaceChildren();
+    for (const system of entity?.status.systems || []) {
+      const pill = element('span');
+      pill.textContent = `${label(system.name)} · ${system.max_milli_hp ? Math.round(system.current_milli_hp / system.max_milli_hp * 100) : 0}%`;
+      systems.append(pill);
+    }
   }
   function styleButtons() { segments.forEach(paint => paint()); }
   const observer = new win.MutationObserver(() => { liveLayout?.syncAvailability(); });
@@ -751,16 +771,12 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity, native =
       get('gm-inspector').dataset.groupInspection = 'false';
       entityTree.selectEntity(entity?.entity_id);
       selected = entity?.entity_id || null;
-      putText(chip, entity ? label(entity.name) : t('server.gm.inspector.empty'));
-      const systemSignature = JSON.stringify(entity?.status.systems || []);
-      if (systems.dataset.readings === systemSignature) return;
-      systems.dataset.readings = systemSignature;
-      systems.replaceChildren();
-      for (const system of entity?.status.systems || []) {
-        const pill = element('span');
-        pill.textContent = `${label(system.name)} · ${system.max_milli_hp ? Math.round(system.current_milli_hp / system.max_milli_hp * 100) : 0}%`;
-        systems.append(pill);
-      }
+      paintSelection(entity);
+    },
+    /** Repaint retained names without changing the selected row or a group inspection. */
+    refreshSelection(entity) {
+      paintSelection(entity);
+      if (!groupSummary.hidden) paintGroupSummary(entityTree.selectedRow(), true);
     },
     refresh(projection, stations) {
       const density = win.__hostGmConfirmationProfile?.density() || 'compact';

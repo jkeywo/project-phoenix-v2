@@ -23,7 +23,7 @@ import { t, applyToDom } from './strings.js';
 export const TEST_GM_REFUSED_ACTIONS = Object.freeze([
   '__hostSetSessionPaused', '__hostGmCheckpointCreate',
   '__hostFireGmEvent', '__hostSetGmEventPaused', '__hostArmGmEventSkip',
-  '__hostObjectiveAction', '__hostTransmitComms', '__hostSpawnPaletteEntity',
+  '__hostObjectiveInstanceAction', '__hostObjectiveAction', '__hostTransmitComms', '__hostSpawnPaletteEntity',
   '__hostApplyDirectEffect', '__hostSetSystemDisabled', '__hostSetContactOverride',
   '__hostSetContactClassification', '__hostPresentation', '__hostSetContactInformation',
   '__hostDespawnEntity', '__hostSetNpcDoctrine', '__hostSetNpcDoctrineChecked',

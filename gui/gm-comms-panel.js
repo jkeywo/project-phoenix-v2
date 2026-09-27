@@ -193,5 +193,6 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
     return true;
   }
   return { update, reset, refreshAdmission, requestSend, focusRoute,
+    refreshLanguage() { renderLog(); refreshAdmission(); },
     state: () => structuredClone({ ...projection, pending: [...pending.values()].map(({ timer, ...row }) => row) }) };
 }

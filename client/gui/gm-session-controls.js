@@ -229,7 +229,7 @@ export function createGmSessionControls({
     return t(`server.gm.session.result_${suffix}`, {
       name: operatorName(result.operator_id),
       state: requestedState(result.requested_active),
-      tick: String(result.tick),
+      tick: result.tick,
       correlation: result.correlation,
       reason: refusalText(result.reason),
     });

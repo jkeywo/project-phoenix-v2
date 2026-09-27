@@ -182,12 +182,9 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
   // The configured files are actually fetched — by the name the TOML gives,
   // which is the whole point (a hardcoded JS filename would fetch its own).
   const ambientFile = EXPECTED.ambient.split('/').pop();
-  await serverPage.waitForFunction(
-    (name) =>
-      performance.getEntriesByType('resource').some((e) => e.name.endsWith(name)),
-    ambientFile,
-    { timeout: 10_000 },
-  );
+  // Resource Timing can discard late entries after the WASM/content load fills
+  // its buffer. The browser request event was captured before navigation.
+  await expect.poll(() => audioRequests.includes(ambientFile), { timeout: 10_000 }).toBe(true);
   expect(audioRequests).toEqual(expect.arrayContaining([ambientFile]));
 
   // Effective gains remain bounded; inspect the provider, not a DOM audio tag.

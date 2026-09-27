@@ -964,8 +964,18 @@ export function createRendezvousHost(opts) {
         onError(msg.reason || 'relay-overflow');
         break;
       case 'error':
-        if (msg.reason === 'unreachable') lostService('unreachable');
-        else onError(msg.reason, msg.detail);
+        if (msg.reason === 'unreachable') {
+          lostService('unreachable');
+        } else if (msg.reason === 'no-peer'
+            && (msg.request === 'relay' || msg.request === 'relay-close')) {
+          // A peer may leave between a host enqueueing a game frame (or close)
+          // and the registry handling it. The refusal names that one request,
+          // not a failure of this host's registration or its other links. The
+          // service sends relay-peer-left separately for the actual departure.
+          onLog(`[rendezvous] ${msg.request} target already left`);
+        } else {
+          onError(msg.reason, msg.detail);
+        }
         break;
       default:
         break;

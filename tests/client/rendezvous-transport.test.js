@@ -1969,6 +1969,71 @@ describe('the WebSocket game relay', () => {
     joiner.close();
   });
 
+  it('keeps other relayed links when the service refuses a stale departed target', async () => {
+    const world = makeWorld({ queued: true });
+    let hostSocket;
+    const factories = {
+      socket: (url) => {
+        const socket = world.socket(url);
+        if (String(url).endsWith('/v1/host')) hostSocket = socket;
+        return socket;
+      },
+      peer: makePeerFactory(),
+    };
+    const errors = [];
+    const logs = [];
+    const { host, code, announced } = await hostOn(world, {
+      factories, transports: ['ws-relay'],
+      onError: (reason) => errors.push(reason),
+      onLog: (line) => logs.push(line),
+    });
+    const first = createRendezvousJoiner({
+      base: 'https://rendezvous.test', data: DATA, code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+    });
+    const received = [];
+    const second = createRendezvousJoiner({
+      base: 'https://rendezvous.test', data: DATA, code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      onData: (frame) => received.push(frame),
+    });
+    await settle();
+    expect(announced).toHaveLength(2);
+    expect(first.connected).toBe(true);
+    expect(second.connected).toBe(true);
+
+    const departed = announced[0].peer;
+    first.close();
+    await settle();
+    // A queued owner broadcast or duplicate close can race the departure. Use
+    // the real registry to answer both stale requests, as it does on a socket.
+    for (const type of ['relay', 'relay-close']) {
+      hostSocket.send(JSON.stringify({ v: 1, type, to: departed,
+        ...(type === 'relay' ? { class: 'reliable', payload: 'late' } : {}) }));
+    }
+    await settle();
+    expect(errors).toEqual([]);
+    expect(logs.some(line => line.includes('relay target already left'))).toBe(true);
+    expect(logs.some(line => line.includes('relay-close target already left'))).toBe(true);
+    expect(second.connected).toBe(true);
+    announced[1].send(JSON.stringify({ type: 'Probe', data: { still: 'connected' } }));
+    await settle();
+    expect(received).toContainEqual({ type: 'Probe', data: { still: 'connected' } });
+
+    // Only the two exact stale-target refusals are notices. A reliable frame
+    // rejected for another reason, or a missing signalling peer, remains an
+    // error for the host operator.
+    hostSocket.onmessage({ data: JSON.stringify({ v: 1, type: 'error',
+      request: 'relay', reason: 'relay-too-large' }) });
+    hostSocket.onmessage({ data: JSON.stringify({ v: 1, type: 'error',
+      request: 'signal', reason: 'no-peer' }) });
+    expect(errors).toEqual(['relay-too-large', 'no-peer']);
+    second.close();
+    host.close();
+  });
+
   it('tells a relayed phone it has been detached when the host cannot fit a reliable frame', async () => {
     // The one frame that will never fit (gui/rendezvous-relay.js's header)
     // fails the LINK rather than silently dropping a command. That failure

@@ -1,0 +1,15 @@
+entities:
+  - decision: dynasty-cruiser-parity-evaluation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ratified Cruiser Parity Evaluation
+      summary: "The user ratified 200 seeded Alliance–Dynasty duels across mirrored starts and varied engagement conditions. Draws and simulation timeouts contribute half a win to each cruiser; each rate uses all 200 duels. Approximate parity is 40–60 percent. Process failures invalidate acceptance. A working 2v2 follow-up and crew usability evidence remain separate requirements."
+      rationale:
+        - "Five range/heading conditions, twenty explicit seeds and two mirrored placements make comparisons repeatable without requiring identical playstyles. A further twenty mirrored reference team fights expose interactions outside a duel."
+        - "Fixed authored crew slots preserve each hull's faction and ordinary Backfill controls. The runner records source revision/patch, binary and runner hashes, authored content hashes, generated worlds, arguments, raw reports and counts. Fresh output directories prevent stale reports from satisfying a new run."
+        - "Only the distinct playable Dynasty variant may be tuned. Existing NPC cruiser content and the Alliance baseline remain unchanged. A numerical pass is not human crew acceptance; unrun evaluation remains explicitly unverified."
+    implementation:
+      status: declared
+      paths: [scripts/balance-dynasty.mjs, tests/client/balance-dynasty.test.js, docs/balance/dynasty-evaluation.md]
+      tests: [npx vitest run tests/client/balance-dynasty.test.js]

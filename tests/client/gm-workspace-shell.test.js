@@ -115,6 +115,8 @@ it('uses compact categorised window menus instead of a master tab strip', () => 
     .toEqual(['Session', 'Crew', 'Communications', 'World', 'Inspect', 'Layout']);
   expect(bar.querySelector(':scope > [data-layout-control="switcher"]')).toBeNull();
   expect(bar.querySelector('[data-layout-panel="entity-fields"]').textContent).toBe('Entity fields');
+  bar.querySelector('[data-layout-panel="attention"]').click();
+  expect(document.querySelector('[data-panel="attention"]').hidden).toBe(false);
 });
 
 it('keeps every operator and session status control in the fixed bar outside Live docking', () => {

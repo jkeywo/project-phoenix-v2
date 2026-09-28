@@ -3,7 +3,7 @@ import { openReadyGmOnlyFleet } from './gm-fleet-start.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
-import { revealGmPanel } from './dock-helpers.js';
+import { revealGmPanel, useGmTouchDensity } from './dock-helpers.js';
 
 // The GM console's smallest supported landscape surface and the top of the
 // enlargement range, both taken from #1421's shared matrix rather than
@@ -53,6 +53,7 @@ test('a GM restores a checkpoint and resumes it at 200% text on 1280x720',
     await openReadyGmOnlyFleet(page);
     await page.evaluate(() => document.getElementById('gm-ready-btn').click());
     await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+    await useGmTouchDensity(page);
 
     await page.evaluate((scale) => document.documentElement.style
       .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
@@ -86,6 +87,8 @@ test('a GM restores a checkpoint and resumes it at 200% text on 1280x720',
     await expect(page.locator('#gm-restore-summary')).toContainText(name);
     await expect(page.locator('#gm-restore-apply')).toHaveAttribute('aria-disabled', 'false');
 
+    // Close the floating draft before selecting the checkpoint beneath it.
+    await page.locator('[data-layout-actions-for="restore"] [data-layout-control="close"]').click();
     // Touch/pointer reach at this size.
     await revealGmPanel(page, 'checkpoint');
     const row = page.locator(`#gm-checkpoint-list .gm-checkpoint-row[data-checkpoint-slot-id="${slotId}"]`);

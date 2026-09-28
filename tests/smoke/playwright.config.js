@@ -86,7 +86,9 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npx serve "${distDir}" -p ${port} --no-clipboard`,
+    // Preserve .html bookmarks and their query parameters. serve's default
+    // clean-URL redirects drop the query before the migration page sees it.
+    command: `npx serve "${distDir}" -p ${port} --no-clipboard --config "${path.resolve(__dirname, 'serve.json')}"`,
     url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI && !ownPort,
     timeout: 15_000,

@@ -2,8 +2,8 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
-sources: [Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-09-20
+sources: [tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+updated: 2026-09-28
 ---
 
 # Build & Deployment
@@ -65,6 +65,10 @@ uses SwiftShader, hides the WebDriver flag, and boots the real render path so a
 blank or broken viewscreen fails CI. The host stays on continuous Bevy updates
 when unfocused so a backgrounded server page still drains inbound messages and
 sends lobby responses.
+
+The smoke server uses `tests/smoke/serve.json` to preserve explicit `.html`
+URLs and their query parameters, with directory indexes for the host and client.
+This lets legacy editor/viewer bookmarks reach Workshop's migration code intact.
 
 ## Cargo notes
 

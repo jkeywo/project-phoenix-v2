@@ -1,4 +1,16 @@
 import { expect } from './fixtures';
+import { ts } from './strings';
+
+export async function useGmTouchDensity(page) {
+  const root = page.locator('#gm-console');
+  if (await root.getAttribute('data-density') === 'touch') return;
+  const menu = page.locator('#gm-live-layout .workshop-window-menu').filter({
+    has: page.locator('[data-layout-control="reset"]'),
+  });
+  if (!(await menu.evaluate(node => node.open))) await menu.locator('summary').click();
+  await menu.getByRole('menuitem', { name: ts('server.gm.layout.toggle_density'), exact: true }).click();
+  await expect(root).toHaveAttribute('data-density', 'touch');
+}
 
 export async function revealGmPanel(page, panel) {
   panel = { objective: 'mission', station: 'station-console', join: 'readiness',

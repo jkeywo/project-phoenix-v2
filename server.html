@@ -7738,7 +7738,9 @@
         },
         // The single-hull auto-resolve calls this page's arbiter DIRECTLY, as
         // it always has — not through the action map a click goes through.
-        autoSelectShip: arbiterSelectShip,
+        autoSelectShip: function (templatePath) {
+          arbiterSelectShip(templatePath, LOCAL_CONSOLE_TOKEN);
+        },
         // Re-checked after the ph-ship-picker module has loaded, because that
         // load is async. BOTH halves of the selection are asked about: a hull
         // locked meanwhile is the case this hook was written for (#917), and a

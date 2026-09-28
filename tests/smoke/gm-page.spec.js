@@ -2429,14 +2429,18 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   // Select the exact projected Helm row. Its URL and Backfill rating both
   // come from the authoritative local ship projection; the test never supplies
   // a console path or clones a Helm control.
+  await revealGmPanel(gm, 'station-console');
   await gm.waitForFunction(
-    () => window.__hostGmStationState?.().projection?.ships?.some(shipRow =>
-      shipRow.stations?.some(station => station.station_id === 'helm'
-        && station.rating === 'Backfill')
-      && shipRow.entities?.length > 0
-      && shipRow.entity_states?.some(entity => Array.isArray(entity.position))
-      && Number.isFinite(shipRow.ship_pose?.x)
-      && Number.isFinite(shipRow.ship_pose?.yaw)),
+    () => {
+      const projection = window.__hostGmStationState?.().projection;
+      return projection?.entities?.length > 0
+        && projection.entity_states?.some(entity => Array.isArray(entity.position))
+        && projection.ships?.some(shipRow =>
+          shipRow.stations?.some(station => station.station_id === 'helm'
+            && station.rating === 'Backfill')
+          && Number.isFinite(shipRow.ship_pose?.x)
+          && Number.isFinite(shipRow.ship_pose?.yaw));
+    },
     undefined,
     { timeout: 30_000 },
   );
@@ -2628,7 +2632,6 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   const loadedTorpedoFire = torpedoControls.locator('.tube-row .btn.armed').first();
   await expect(torpedoControls).toBeVisible({ timeout: 20_000 });
   await expect(loadedTorpedoFire).toBeEnabled({ timeout: 30_000 });
-  await dismissTutorialCards(gm, '#gm-station-frame');
 
   await revealGmPanel(gm, 'station');
   await takeover.scrollIntoViewIfNeeded();
@@ -2642,6 +2645,9 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     operatorId,
     { timeout: 30_000 },
   );
+  // Observation blocks pointer input into the console. Take over before
+  // dismissing its tutorial, just as the operator must before firing.
+  await dismissTutorialCards(gm, '#gm-station-frame');
   await loadedTorpedoFire.scrollIntoViewIfNeeded();
   const torpedoFireBox = await loadedTorpedoFire.boundingBox();
   expect(torpedoFireBox.y).toBeGreaterThanOrEqual(0);
@@ -2694,8 +2700,8 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     timeout: 30_000,
   });
 
-  // Release only Tactical, then return to the still-active Helm takeover for
-  // the existing spatial input, crew visibility and ordered release proof.
+  // Switching stations releases the previous takeover. Release Tactical, then
+  // take Helm again for the spatial input, crew visibility and release proof.
   await revealGmPanel(gm, 'station');
   await takeover.scrollIntoViewIfNeeded();
   await takeover.click();
@@ -2716,9 +2722,15 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     operator => {
       const row = window.__hostGmStationState?.().selectedRow;
       return row?.station?.station_id === 'helm'
-        && row.station.operators?.includes(operator)
+        && !row.station.operators?.includes(operator)
         && row.station.console === 'gui/cruiser/helm.html';
     },
+    operatorId,
+    { timeout: 30_000 },
+  );
+  await takeover.click();
+  await gm.waitForFunction(
+    operator => window.__hostGmStationState?.().selectedRow?.station.operators?.includes(operator),
     operatorId,
     { timeout: 30_000 },
   );
@@ -2809,11 +2821,11 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     { timeout: 15_000 },
   );
 
-  // Freeze fixed ticks through the real GM Pause control. Release and then
-  // click the still-mounted authentic Impulse control while the projection is
-  // intentionally unchanged; Resume applies those two canonical actions in
-  // submission order. The command is therefore refused after release, and its
-  // exact iframe-minted correlation must settle rather than timing out Pending.
+  // Freeze fixed ticks through the real GM Pause control. Model an in-flight
+  // command overtaken by release at the submission boundary: the console now
+  // blocks pointer input as soon as release is published, so separate clicks
+  // cannot construct this race. Keep the authentic iframe command and its
+  // correlation, and prove the host refuses it after the ordered release.
   const pause = gm.locator('#gm-session-pause');
   const resume = gm.locator('#gm-session-resume');
   await pause.scrollIntoViewIfNeeded();
@@ -2823,10 +2835,18 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     undefined,
     { timeout: 30_000 },
   );
-  await gm.evaluate(() => { window.__gmStationCorrelatedActions = []; });
-  await revealGmPanel(gm, 'station');
-  await takeover.scrollIntoViewIfNeeded();
-  await takeover.click();
+  await gm.evaluate(() => {
+    window.__gmStationCorrelatedActions = [];
+    const submit = window.__hostIssueStationCommand;
+    window.__hostIssueStationCommand = request => {
+      window.__hostIssueStationCommand = submit;
+      if (!window.__hostSetStationPuppet({
+        ship: request.ship, station: request.station, active: false,
+        correlation: `release-before-${request.correlation}`,
+      })) throw new Error('Ordered Station release was not submitted');
+      return submit(request);
+    };
+  });
   await revealGmPanel(gm, 'station-console');
   await frameElement.scrollIntoViewIfNeeded();
   await expect(impulse).toBeEnabled({ timeout: 20_000 });
@@ -2913,6 +2933,8 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   // localised/unlocalised Host Channel payloads through the panel, renders a
   // comparison that never leaks a raw Truth String Table id (finding 1) or a
   // double-resolved `⟨...⟩` wrapper (finding 2) into a rendered cell.
+  await revealGmPanel(gm, 'inspector');
+  await gm.locator('#gm-tab-difference').click();
   await gm.waitForFunction(() => {
     const panel = document.getElementById('gm-knowledge-panel');
     return !!panel && !panel.hidden && !!window.__hostGmKnowledgeState?.().selectedShipId;

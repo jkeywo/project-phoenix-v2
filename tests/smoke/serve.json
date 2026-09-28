@@ -1,0 +1,8 @@
+{
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/client", "destination": "/client/index.html" },
+    { "source": "/client/", "destination": "/client/index.html" }
+  ]
+}

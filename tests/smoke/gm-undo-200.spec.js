@@ -3,7 +3,7 @@ import { openReadyGmOnlyFleet } from './gm-fleet-start.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEVICE_MATRIX, TEXT_SCALES } from '../fixtures/device-matrix.mjs';
-import { revealGmPanel } from './dock-helpers.js';
+import { revealGmPanel, useGmTouchDensity } from './dock-helpers.js';
 
 // The GM console's smallest supported landscape surface and the top of the
 // enlargement range, both from #1421's shared matrix (PRD #1418).
@@ -33,6 +33,7 @@ test('GM faction change and its undo stay readable and operable at 200% text on 
     await openReadyGmOnlyFleet(page);
     await page.evaluate(() => document.getElementById('gm-ready-btn').click());
     await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+    await useGmTouchDensity(page);
 
     await page.evaluate((scale) => document.documentElement.style
       .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
@@ -70,9 +71,8 @@ test('GM faction change and its undo stay readable and operable at 200% text on 
 
     // The journal row for it offers an Undo, with the before/after pair spelled
     // out and the "already witnessed" sentence that is never suppressible.
-    // The action log shares the centre region behind one tab strip (the
-    // post-M5 screen); bring it to the front the way an operator does.
-    await page.locator('[role="tab"][data-layout-panel="journal"]').click();
+    // The action log is part of the grouped Activity panel.
+    await revealGmPanel(page, 'activity');
     const row = page.locator('.gm-journal-row[data-outcome="applied"]').last();
     await row.click();
     const eligibility = page.locator('#gm-journal-inverse .gm-inverse-eligibility');

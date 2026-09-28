@@ -1023,12 +1023,12 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     expect(gmTwoIdentity.reconnectCredential.length).toBeGreaterThan(10);
 
     // Live-switch this operator's own presentation-only role preset (issue
-    // #1319) through the real authored <select> before it disconnects. The
+    // #1319) through the real preset buttons before it disconnects. The
     // choice must persist alongside this same reconnectable identity and
     // come back verbatim after rejoin -- never silently reset to the
     // built-in All the way an unconditional restore-on-join would.
     const gmTwoRolePresetId = 'gm-m1-tactical';
-    await gmTwo.selectOption('#gm-role-preset-select', gmTwoRolePresetId);
+    await gmTwo.locator(`#gm-role-preset-label .gm-segment [data-value="${gmTwoRolePresetId}"]`).click();
     await gmTwo.waitForFunction(
       ({ key, presetId }) => JSON.parse(localStorage.getItem(key) || 'null')?.rolePreset === presetId,
       { key: GM_IDENTITY_KEY, presetId: gmTwoRolePresetId },
@@ -1107,10 +1107,9 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     expect(returnedIdentity.rolePreset).toBe(gmTwoRolePresetId);
     // Prove the restored gm-m1-tactical preset actually filtered THIS
     // reconnected browser, not just that its id round-tripped through
-    // localStorage: gm-session-resume and gm-inspector sit outside the
-    // preset's quick_actions/panels and must stay hidden, while
-    // gm-map-panel is inside it and must stay visible.
-    await expect(gmTwoReturning.locator('#gm-session-resume')).toBeHidden();
+    // localStorage: Inspector is excluded while Map remains visible.
+    // Session state owns Resume, so a role preset cannot hide it while paused.
+    await expect(gmTwoReturning.locator('#gm-session-resume')).toBeVisible();
     await expect(gmTwoReturning.locator('#gm-inspector')).toBeHidden();
     // And the dock really dropped it rather than merely framing it hidden.
     await expect(gmTwoReturning.locator('.workshop-dock-parked #gm-inspector')).toHaveCount(1);
@@ -1140,11 +1139,8 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       committed: true,
       pausedAfterCommit: true,
     };
-    // Switch this reconnected browser back to the built-in default before
-    // driving gm-session-resume: gm-m1-tactical's own quick_actions list
-    // (asserted above) never includes it, so leaving the restored preset
-    // in place would hide the control this test needs to click next.
-    await gmTwoReturning.selectOption('#gm-role-preset-select', 'all');
+    // Switch back to All through the preset buttons, then resume the session.
+    await gmTwoReturning.locator('#gm-role-preset-label .gm-segment [data-value="all"]').click();
     await expect(gmTwoReturning.locator('#gm-session-resume')).toBeVisible();
     await clickGmControl(gmTwoReturning, 'gm-session-resume');
     await Promise.all([ship, gmOne, gmTwoReturning].map((page) => page.waitForFunction(
@@ -1192,6 +1188,7 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       undefined,
       { timeout: 30_000 },
     );
+    await revealGmPanel(gmOne, 'station-console');
     await expect(gmOne.locator('#gm-station-frame'))
       .toHaveAttribute('src', 'gui/cruiser/helm.html');
     expect(gmOne.viewportSize()).toEqual({ width: 1280, height: 720 });

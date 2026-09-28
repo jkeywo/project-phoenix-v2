@@ -466,7 +466,7 @@ test('catalogue parity: two real packs survive selection and a late phone reconn
     const restored = await fold(late);
     expect(restored.packs).toEqual(expected);
     expect(restored.rows).toEqual(locked.rows);
-    expect(restored.locked).toEqual({ scenario_id: 'combat_test', template_path: destroyerPath });
+    expect(restored.locked).toEqual({ scenario_id: 'combat_test', slot_id: 'player', template_path: destroyerPath });
     expect(restored.picker).toBeNull();
     await late.close();
   }

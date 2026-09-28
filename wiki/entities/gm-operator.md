@@ -46,7 +46,7 @@ requests. The browser has no BackfillShipSlot route and explicitly refuses it.
 The shared browser/native workspace starts with four dock panes: **Entity Tree,
 Map, Inspector and Activity**. The categorised menu opens Session (readiness,
 join requests, GM presence and peer health), Mission (events and objectives),
-Comms, Presentation and checkpoints. Activity filters the feed, action journal
+Attention, Comms, Presentation and checkpoints. Activity filters the feed, action journal
 and session history without merging their distinct records. Critical warnings
 remain in the header even when Session is closed.
 

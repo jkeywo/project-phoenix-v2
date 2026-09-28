@@ -68,8 +68,21 @@ async function bootViewscreen(context) {
     helm.token,
     { timeout: 30_000 },
   );
+  const captain = await createTestClient(context, hostId, { name: 'Captain' });
+  await captain.send('SelectStation', { station: 'Captain' });
+  await captain.page.waitForFunction(
+    token => window.__messages?.some(message => message.type === 'StationAssigned' && message.data.token === token),
+    captain.token,
+    { timeout: 30_000 },
+  );
+  await captain.send('SetReady', { ready: true });
   await helm.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 60_000);
+  await captain.send('ControlSystem', {
+    target: 'red-alert',
+    payload: { type: 'SetRedAlert', data: { active: true } },
+  });
+  await expect(page.locator('#hud-overlay')).toHaveClass(/alert-on/);
   await page.bringToFront();
 
   await page.waitForFunction(
@@ -129,14 +142,11 @@ async function sampleShake(page, frames = 30) {
   }));
 }
 
-/** The rendered red-alert vignette with the alert class forced on, so the check
- *  is on the effect rule rather than on red-alert plumbing. Returns what is
+/** The rendered vignette with Captain's authoritative Red Alert active. Returns what is
  *  drawn AND what the state is still saying, which is the pair story 15 is
  *  about: the pulse may stop, the alert may not disappear. */
 async function vignetteState(page) {
   return page.evaluate(async () => {
-    const overlay = document.getElementById('hud-overlay');
-    overlay.classList.add('alert-on');
     const vignette = document.getElementById('hud-vignette');
     // The vignette fades in over `transition: opacity .25s`. With the pulse
     // running, the keyframes own the opacity and a read is immediate; with the

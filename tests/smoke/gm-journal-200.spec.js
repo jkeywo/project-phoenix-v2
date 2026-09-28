@@ -1,3 +1,4 @@
+import { revealGmPanel, useGmTouchDensity } from './dock-helpers.js';
 import { test, expect, waitForWasmReady } from './fixtures';
 import { openReadyGmOnlyFleet } from './gm-fleet-start.js';
 import fs from 'node:fs';
@@ -33,6 +34,7 @@ test('GM saved action history stays readable and operable at 200% text on 1280x7
     await openReadyGmOnlyFleet(page);
     await page.evaluate(() => document.getElementById('gm-ready-btn').click());
     await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+    await useGmTouchDensity(page);
 
     await page.evaluate((scale) => document.documentElement.style
       .setProperty('--a11y-text-scale', String(scale)), MAX_TEXT_SCALE);
@@ -41,11 +43,10 @@ test('GM saved action history stays readable and operable at 200% text on 1280x7
     await page.locator('#gm-session-pause').click();
     await page.waitForFunction(() => (window.__hostGmJournalState?.().entries.length || 0) > 0);
 
-    // The action log shares the desk's centre region with Comms and the
-    // activity feed behind one tab strip (the post-M5 screen), so it is
-    // brought to the front the way an operator brings it: by its own tab,
-    // which is itself part of the 200% contract this spec is about.
-    const logTab = page.locator('[role="tab"][data-layout-panel="journal"]');
+    // The action log lives in the grouped Activity panel. Open it through
+    // the menu and check its tab at the same text scale and touch density.
+    await revealGmPanel(page, 'activity');
+    const logTab = page.locator('[role="tab"][data-layout-panel="activity"]');
     await expect(logTab).toBeVisible();
     expect((await logTab.boundingBox()).height).toBeGreaterThanOrEqual(44);
     await logTab.click();

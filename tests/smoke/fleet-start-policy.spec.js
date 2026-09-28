@@ -186,7 +186,11 @@ const clickGmControl = async (page, controlId) => {
     await page.keyboard.press('Escape');
     await expect(page.locator('#server-settings-overlay')).toBeHidden();
   }
-  await revealGmPanel(page, 'readiness');
+  // The pre-content refusal case deliberately has no usable desk yet.
+  // Submit through the bound control to exercise the admission gate anyway.
+  if (!await page.locator('#landing-panel').isVisible()) {
+    await revealGmPanel(page, 'readiness');
+  }
   await page.evaluate((id) => {
     const control = document.getElementById(id);
     if (!control) throw new Error(`missing GM control: ${id}`);

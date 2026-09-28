@@ -24,6 +24,8 @@ describe('real DataChannel boundary impairment', () => {
     expect(counters.pending).toBe(0);
   });
   it('makes snapshot loss reproducible while never applying it to reliable traffic', () => {
+    // Compare seeded loss with the same clock; real elapsed send time is not seeded.
+    vi.useFakeTimers();
     const run = label => { const link = channel(label), counters = {}; impairDataChannel(link, { ...profile, delayMs: 0 }, counters, clock); for (let i = 0; i < 100; i++) link.send(i); return { sent: link.sent, counters }; };
     expect(run('snapshot')).toEqual(run('snapshot'));
     expect(run('snapshot').counters.snapshot.dropped).toBeGreaterThan(0);

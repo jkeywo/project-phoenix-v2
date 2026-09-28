@@ -110,6 +110,7 @@ entities:
         - "[ai] Exact-source entity transactions replace one top-level `includes` array, append one new component or field override, or remove only the local component's source spans. No operation serializes the existing template or any fragment, so unknown fields, comments, ordering and untouched include declarations retain their bytes."
         - "[ai] Dependency fragments are composition inputs rather than editing capabilities. Provenance names their owner, but only a deliberate materialisation copies an effective value into the selected draft template."
         - "[ai] The component schema defines what can be added and the include resolver defines what the candidate means. Runtime validation remains final authority over required values and component compatibility."
+        - "[ai] Issue #1556 makes acceptWorkshopChanges the shared acceptance owner for Entity and playable Ship forms. It captures the document and revision before dependency or schema awaits, prepares on a provider-restored private copy, checks captured dependency content and caller currency, validates the exact candidate, and adopts all changes as one chronological group. Native references stay native through preparation and validation. Raw Source edits retain their separate repair workflow."
     architecture:
       kind: authoring-presentation
       authority: local
@@ -120,6 +121,7 @@ entities:
       status: declared
       paths:
         - editor/workshop-entity-composition.js
+        - editor/workshop-acceptance.js
         - editor/entity-includes.js
         - editor/component-schema.js
         - gui/workshop-ship-authoring-panel.js
@@ -129,9 +131,11 @@ entities:
         - inspectEntityComposition
         - prepareEntityOperation
         - applyEntityOperation
+        - acceptWorkshopChanges
         - mountWorkshopShipAuthoring
       tests:
         - npx vitest run editor/tests/workshop-ship-authoring.test.js tests/client/workshop-ship-authoring-panel.test.js
+        - npx vitest run editor/tests/workshop-acceptance.test.js
         - npx vitest run tests/client/workshop-authoring.test.js
   - component: workshop-gm-role-preset-authoring
     core:

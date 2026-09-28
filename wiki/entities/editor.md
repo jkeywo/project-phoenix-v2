@@ -322,6 +322,14 @@ the parity workflow is delivered.
 
 ## Validation boundary
 
+Entity and playable Ship forms share `editor/workshop-acceptance.js` for candidate
+acceptance (#1556). It captures the document and revision before asynchronous
+dependency/schema preparation, restores through the selected provider, validates
+the exact candidate and commits one grouped history entry. Changed source,
+undo/redo, document replacement or changed captured dependencies refuse adoption.
+Native asset references survive the same path; raw Source edits keep their
+existing repair workflow.
+
 The Authoring sound panel reads `assets/audio/sound-cues.toml` from the current
 draft. A catalog declares packaged MP3/OGG/WAV assets, categories, audiences and
 informative equivalents; shared JavaScript checks and `src/sound_cues.rs` reject

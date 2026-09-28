@@ -1,6 +1,6 @@
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
-import { WorkshopDocument } from './workshop-document.js';
+import { acceptWorkshopChanges } from './workshop-acceptance.js';
 
 const quote = value => JSON.stringify(String(value));
 const newlineOf = source => source.includes('\r\n') ? '\r\n' : '\n';
@@ -235,22 +235,16 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     after = move(after, list, index, operation.direction);
   }
   else throw new Error('invalid-ship-operation');
-  const candidate = WorkshopDocument.restore(draft.snapshot());
-  candidate.apply([{ path: operation.path, before, after }]);
+  const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path),
+    read: path => path === operation.path ? after : draft.read(path) };
   const effectiveValue = inspectShipAuthoring(candidate, dependencies, operation.path).composition.resolved.value;
   verify(operation.path, after, schema, effectiveValue);
   return { inspection, changes: [{ path: operation.path, before, after }] };
 }
 
 export async function applyShipOperation({ draft, provider, runtime, dependencies, operation, current = () => true }) {
-  const revision = draft.sourceRevision, effective = dependencies || await runtime.dependencies(), schema = await runtime.shipSchema();
-  const prepared = prepareShipOperation(draft, effective, schema, operation);
-  const candidate = provider?.restoreDocument ? provider.restoreDocument(draft.snapshot()) : WorkshopDocument.restore(draft.snapshot());
-  candidate.apply(prepared.changes);
-  inspectShipAuthoring(candidate, effective, operation.path);
-  const report = await runtime.validate(candidate.kind === 'mod' && !provider?.save ? candidate.archive() : null, candidate);
-  if (!report?.accepted) { const error = new Error('runtime-validation-refused'); error.report = report; throw error; }
-  if (!current() || draft.sourceRevision !== revision || draft.read(operation.path) !== prepared.changes[0].before) throw new Error('stale-ship-operation');
-  draft.apply(prepared.changes);
-  return { report, inspection: inspectShipAuthoring(draft, effective, operation.path) };
+  const selected = structuredClone(operation);
+  return acceptWorkshopChanges({ draft, provider, runtime, dependencies, current, stale: 'stale-ship-operation',
+    prepare: async (captured, effective) => prepareShipOperation(captured, effective, await runtime.shipSchema(), selected).changes,
+    inspect: (candidate, effective) => inspectShipAuthoring(candidate, effective, selected.path) });
 }

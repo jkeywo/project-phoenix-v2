@@ -2,7 +2,7 @@ import { parse, stringify } from 'smol-toml';
 import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from './component-schema.js';
 import { getRawSectionDefaults } from './component-templates.js';
 import { canonicalIncludePath, materialiseOverride, parseFieldPath, resolveTemplate } from './entity-includes.js';
-import { WorkshopDocument } from './workshop-document.js';
+import { acceptWorkshopChanges } from './workshop-acceptance.js';
 
 const ENTITY_PREFIX = 'assets/entities/';
 const entityPath = value => typeof value === 'string' && value.startsWith(ENTITY_PREFIX)
@@ -351,17 +351,8 @@ export function prepareEntityOperation(draft, dependencies, operation) {
 }
 
 export async function applyEntityOperation({ draft, provider, runtime, dependencies, operation, current = () => true }) {
-  const revision = draft.sourceRevision;
-  const effective = dependencies || await runtime.dependencies();
-  const prepared = prepareEntityOperation(draft, effective, operation);
-  const candidate = provider?.restoreDocument ? provider.restoreDocument(draft.snapshot()) : WorkshopDocument.restore(draft.snapshot());
-  candidate.apply(prepared.changes);
-  inspectEntityComposition(candidate, effective, operation.path);
-  const report = await runtime.validate(candidate.kind === 'mod' && !provider?.save ? candidate.archive() : null, candidate);
-  if (!report?.accepted) { const error = new Error('runtime-validation-refused'); error.report = report; throw error; }
-  if (!current() || draft.sourceRevision !== revision || prepared.changes.some(change => draft.read(change.path) !== change.before)) {
-    throw new Error('stale-entity-operation');
-  }
-  draft.apply(prepared.changes);
-  return { changes: prepared.changes, report, inspection: inspectEntityComposition(draft, effective, operation.path) };
+  const selected = structuredClone(operation);
+  return acceptWorkshopChanges({ draft, provider, runtime, dependencies, current, stale: 'stale-entity-operation',
+    prepare: (captured, effective) => prepareEntityOperation(captured, effective, selected).changes,
+    inspect: (candidate, effective) => inspectEntityComposition(candidate, effective, selected.path) });
 }

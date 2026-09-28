@@ -5,7 +5,7 @@ const SERVER_HTML = readFileSync(new URL('../../server.html', import.meta.url), 
 const WORKSPACE = readFileSync(new URL('../../gui/gm-workspace.js', import.meta.url), 'utf8');
 
 function compileClassicSeam({ localGm, wasmSubmit }) {
-  const marker = 'window.__hostSetSessionPaused = function(active, correlation) {';
+  const marker = 'window.__browserGmActions.__hostSetSessionPaused = function(active, correlation) {';
   const start = SERVER_HTML.indexOf(marker);
   const end = SERVER_HTML.indexOf('\n    };', start);
   if (start < 0 || end < 0) throw new Error('GM session classic seam not found');
@@ -14,6 +14,7 @@ function compileClassicSeam({ localGm, wasmSubmit }) {
     wasm_submit_gm_action: wasmSubmit,
     wasm_toggle_pause: vi.fn(() => { throw new Error('legacy toggle must not be called'); }),
   };
+  win.__browserGmActions = win;
   new Function('window', 'localGm', source)(win, localGm);
   return { win, source };
 }

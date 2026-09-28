@@ -89,7 +89,9 @@ describe('native GM workspace over the shared GM presenters', () => {
     expect(app.bridge.submitAction).toHaveBeenCalledExactlyOnceWith({ ...request,
       action: 'set_contact_classification', operator_id: 'native-gm' });
     expect(window.__hostSetContactClassification({ ...request, operator_id: 'other' })).toBe(false);
-    app.view.dispose(); expect(window.__hostSetContactClassification(request)).toBe(false);
+    const retained = window.__hostSetContactClassification;
+    app.view.dispose(); expect(retained(request)).toBe(false);
+    expect(window.__hostSetContactClassification).toBeUndefined();
   });
 
   it('sends explicit Objective instance scope through ordinary native GM authority', () => {
@@ -143,6 +145,21 @@ describe('native GM workspace over the shared GM presenters', () => {
     expect(panel.querySelector('button').disabled).toBe(false);
     app.view.dispose();
   });
+  it('does not deliver an in-flight checkpoint result or start another save after disposal', async () => {
+    let complete;
+    const saveRequest = vi.fn(kind => kind === 'list' ? Promise.resolve([])
+      : new Promise(resolve => { complete = resolve; }));
+    const app = mount({ saveRequest });
+    const retained = window.__hostGmCheckpointCreate;
+    const pending = retained('Before battle');
+    app.view.dispose();
+    expect(retained('Too late')).toBe(false);
+    complete('old-slot');
+    expect(await pending).toBe('');
+    expect(saveRequest.mock.calls.filter(([kind]) => kind === 'create'))
+      .toEqual([['create', 'Before battle']]);
+  });
+
   it('requires an explicit native private audio provider even without an operator capability declaration', async () => {
     delete window.PhoenixOperatorCapabilities;
     const audioContext = vi.fn(); window.AudioContext = audioContext;
@@ -218,8 +235,10 @@ describe('native GM workspace over the shared GM presenters', () => {
     expect(app.bridge.submitAction).toHaveBeenCalledWith(expect.objectContaining({
       action: 'set_session_paused', active: false, operator_id: 'native-gm',
     }));
+    const retained = window.__hostSetSessionPaused;
     app.view.dispose();
-    expect(window.__hostSetSessionPaused(false, 'closed-screen')).toBe(false);
+    expect(retained(false, 'closed-screen')).toBe(false);
+    expect(window.__hostSetSessionPaused).toBeUndefined();
   });
 
   it('shows native readiness totals and attributed authoritative start outcomes', () => {

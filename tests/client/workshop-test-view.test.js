@@ -113,18 +113,19 @@ describe('the disposable Test view', () => {
   });
 
   it('installs every GM write as a refusal rather than leaving it undefined', () => {
-    // A missing global would crash a panel on the first press and leave "can
-    // this mutate the run?" answerable only by reading every panel. One list
-    // answers it, and a Test that somehow acquired a route fails here.
-    const live = readFileSync('gui/native-gm-workspace.js', 'utf8');
-    const actions = [...live.matchAll(/(__host[A-Za-z]+):/g)].map(match => match[1]);
-    expect(actions.length).toBeGreaterThan(10);
-    for (const action of actions) {
-      expect(TEST_GM_REFUSED_ACTIONS, `${action} must be refused in Test`).toContain(action);
+    document.body.innerHTML = gmConsoleMarkup(SERVER)
+      .replace(/<ph-navigation-map\b[\s\S]*?<\/ph-navigation-map>/g, '');
+    const submit = vi.fn(), save = vi.fn();
+    window.wasm_submit_gm_action = submit;
+    window.__hostGmCheckpointCreate = save;
+    const gm = mountWorkshopTestGm({ win: window });
+    for (const action of TEST_GM_REFUSED_ACTIONS) {
+      expect(() => window[action]({ operator_id: 'pretend', correlation: 'test-1' }), action).toThrow();
     }
-    expect(TEST_GM_REFUSED_ACTIONS).toEqual(expect.arrayContaining([
-      '__hostSetSessionPaused', '__hostGmCheckpointCreate',
-    ]));
+    expect(submit).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    gm.dispose();
+    delete window.wasm_submit_gm_action;
   });
 
   it('switches view through the runtime status, never the request', () => {

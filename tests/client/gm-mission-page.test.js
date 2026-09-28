@@ -5,12 +5,13 @@ const SERVER_HTML = readFileSync(new URL('../../server.html', import.meta.url), 
 const WORKSPACE = readFileSync(new URL('../../gui/gm-workspace.js', import.meta.url), 'utf8');
 
 /** Compile the classic-page Fire seam out of server.html, as #1292's twin does. */
-function compileFireSeam({ localGm, wasmSubmit, marker = 'window.__hostFireGmEvent = function(request) {' }) {
+function compileFireSeam({ localGm, wasmSubmit, marker = 'window.__browserGmActions.__hostFireGmEvent = function(request) {' }) {
   const start = SERVER_HTML.indexOf(marker);
   const end = SERVER_HTML.indexOf('\n    };', start);
   if (start < 0 || end < 0) throw new Error('GM event fire seam not found');
   const source = SERVER_HTML.slice(start, end + '\n    };'.length);
   const win = { wasm_submit_gm_action: wasmSubmit };
+  win.__browserGmActions = win;
   new Function('window', 'localGm', source)(win, localGm);
   return { win, source };
 }
@@ -98,7 +99,7 @@ describe('server GM mission page seam', () => {
 
   it('submits only the authored Objective vocabulary for the authenticated local operator', () => {
     const wasmSubmit = vi.fn(() => true);
-    const marker = 'window.__hostObjectiveAction = function(request) {';
+    const marker = 'window.__browserGmActions.__hostObjectiveAction = function(request) {';
     const { win } = compileFireSeam({ localGm: () => ({ id: 'gm-alex' }), wasmSubmit, marker });
     const request = { operator_id: 'gm-alex', correlation: 'objective-page-1', objective: 'rescue',
       verb: 'activate', recipients: ['ship-a'], text: 'cannot override authored text', score: 999 };

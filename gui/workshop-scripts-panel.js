@@ -68,11 +68,11 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
   };
   create.addEventListener('click', async () => {
     if (busy() || !world.value) return;
-    const target = draft(), path = world.value, revision = target.sourceRevision;
+    const target = draft(), path = world.value;
     setBusy(true);
     try {
       await createWorkshopScript({ draft: target, provider, runtime, worldPath: path,
-        current: () => !disposed && draft() === target && target.sourceRevision === revision });
+        current: () => !disposed && draft() === target && world.value === path });
       if (!disposed) { changed(path); setBusy(false); refresh(); await open(units()[0]); show('workshop.scripts.created'); }
     } catch (error) {
       if (!disposed) show(error?.message || 'workshop.scripts.validation_refused', true,
@@ -138,11 +138,11 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
   }
   async function save(unit, source) {
     if (busy() || !currentUnit(unit)) { show('workshop.scripts.stale', true); return; }
-    const target = draft(), revision = target.sourceRevision;
+    const target = draft();
     setBusy(true);
     try {
       const edited = await applyWorkshopScript({ draft: target, provider, runtime, unit, source,
-        current: () => !disposed && draft() === target && target.sourceRevision === revision });
+        current: () => !disposed && draft() === target && active?.id === unit.id && currentUnit(unit) });
       if (edited) { changed(unit.documentPath); show('workshop.scripts.applied'); }
       else show('workshop.scripts.unchanged');
     } catch (error) {

@@ -1,7 +1,7 @@
 import { parse } from 'smol-toml';
 import { setExtraWorlds } from './workshop-composition.js';
 import { resolveTemplate } from './entity-includes.js';
-import { WorkshopDocument } from './workshop-document.js';
+import { acceptWorkshopChanges } from './workshop-acceptance.js';
 
 const WORLD_PREFIX = 'assets/worlds/';
 const worldPath = path => typeof path === 'string' && path.startsWith(WORLD_PREFIX)
@@ -330,16 +330,10 @@ export function prepareSpatialOperation(draft, operation) {
 }
 
 export async function applySpatialOperation({ draft, provider, runtime, operation, dependencies, current = () => true }) {
-  const revision = draft.sourceRevision, prepared = prepareSpatialOperation(draft, operation);
-  const candidate = provider?.restoreDocument ? provider.restoreDocument(draft.snapshot()) : WorkshopDocument.restore(draft.snapshot());
-  candidate.apply(prepared.changes);
-  spatialInventory(candidate, dependencies);
-  const report = await runtime.validate(candidate.kind === 'mod' && !provider?.save ? candidate.archive() : null, candidate);
-  if (!report?.accepted) { const error = new Error('runtime-validation-refused'); error.report = report; throw error; }
-  if (!current() || draft.sourceRevision !== revision
-    || prepared.changes.some(change => (draft.read(change.path) ?? null) !== change.before)) {
-    throw new Error('stale-spatial-operation');
-  }
-  draft.apply(prepared.changes);
-  return { changes: prepared.changes, report, inventory: spatialInventory(draft, dependencies) };
+  const selected = structuredClone(operation);
+  const { changes, report, inspection } = await acceptWorkshopChanges({ draft, provider, runtime,
+    dependencies: dependencies || {}, current, stale: 'stale-spatial-operation',
+    prepare: captured => prepareSpatialOperation(captured, selected).changes,
+    inspect: (candidate, effective) => spatialInventory(candidate, effective) });
+  return { changes, report, inventory: inspection };
 }

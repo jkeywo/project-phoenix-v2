@@ -18,21 +18,9 @@ import { mountGmWorkspace } from './gm-workspace.js';
 import { createHostChannel } from './host-channel.js';
 import { t, applyToDom } from './strings.js';
 
-/** Every write a GM surface can attempt. Kept as a list so a new action added
- * to the live console is a visible addition here rather than a silent gap. */
-export const TEST_GM_REFUSED_ACTIONS = Object.freeze([
-  '__hostSetSessionPaused', '__hostGmCheckpointCreate',
-  '__hostFireGmEvent', '__hostSetGmEventPaused', '__hostArmGmEventSkip',
-  '__hostObjectiveInstanceAction', '__hostObjectiveAction', '__hostTransmitComms', '__hostSpawnPaletteEntity',
-  '__hostApplyDirectEffect', '__hostSetSystemDisabled', '__hostSetContactOverride',
-  '__hostSetContactClassification', '__hostPresentation', '__hostSetContactInformation',
-  '__hostDespawnEntity', '__hostSetNpcDoctrine', '__hostSetNpcDoctrineChecked',
-  '__hostSetFactionHostility', '__hostUndoGmAction', '__hostRequestLiveRestore',
-  '__hostSetStationPuppet', '__hostIssueStationCommand',
-  '__hostBackfillShipSlot',
-  // Save authority, refused for the same reason and in the same place.
-  '__hostSaveSlotCapture', '__hostSaveSlotRestore',
-]);
+import { GM_ACTION_NAMES, refusingGmActionAdapter, installGmActionBindings } from './gm-action-bindings.js';
+
+export const TEST_GM_REFUSED_ACTIONS = GM_ACTION_NAMES;
 
 export function mountWorkshopTestGm({ win = window, doc = win.document } = {}) {
   const root = doc.getElementById('gm-console');
@@ -43,9 +31,10 @@ export function mountWorkshopTestGm({ win = window, doc = win.document } = {}) {
     doc.getElementById(id)?.remove();
   }
   const refused = () => { throw new Error(t('workshop.test_gm_read_only')); };
-  for (const name of TEST_GM_REFUSED_ACTIONS) win[name] = refused;
+  const bindings = installGmActionBindings(win, refusingGmActionAdapter(refused));
   // A Test has no operator identity, because it admits nothing.
-  win.__hostLocalGm = () => null;
+  const noOperator = () => null;
+  win.__hostLocalGm = noOperator;
 
   applyToDom(doc);
   // Isolated: this page may read nothing its capture did not hand it. The
@@ -63,9 +52,11 @@ export function mountWorkshopTestGm({ win = window, doc = win.document } = {}) {
     rolePresetState() { return workspace.rolePresetState(); },
     dispose() {
       workspace.dispose?.();
-      for (const name of TEST_GM_REFUSED_ACTIONS) delete win[name];
-      delete win.__hostLocalGm;
-      delete win.__phoenixGmPage;
+      bindings.dispose();
+      if (win.__hostLocalGm === noOperator) {
+        delete win.__hostLocalGm;
+        delete win.__phoenixGmPage;
+      }
     },
   };
 }

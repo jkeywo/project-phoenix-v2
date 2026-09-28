@@ -6,32 +6,7 @@ import { t, has, localiseTree, applyToDom } from './strings.js';
 import { createLocalePreference, GM_LOCALE_STORAGE_KEY } from './locale-preference.js';
 import { mountSurfaceLanguage } from './surface-language.js';
 
-// These are the existing GM verbs, not a native command vocabulary. Rust binds
-// operator identity and admits the same typed request used by browser GMs.
-const ACTIONS = Object.freeze({
-  __hostFireGmEvent: 'fire_gm_event',
-  __hostSetGmEventPaused: 'set_event_paused',
-  __hostArmGmEventSkip: 'arm_gm_event_skip',
-  __hostObjectiveAction: 'objective_action',
-  __hostObjectiveInstanceAction: 'objective_instance_action',
-  __hostTransmitComms: 'transmit_comms',
-  __hostSpawnPaletteEntity: 'spawn_palette_entity',
-  __hostApplyDirectEffect: 'apply_direct_effect',
-  __hostSetSystemDisabled: 'set_system_disabled',
-  __hostSetContactOverride: 'set_contact_override',
-  __hostSetContactClassification: 'set_contact_classification',
-  __hostPresentation: 'presentation',
-  __hostSetContactInformation: 'set_contact_information',
-  __hostDespawnEntity: 'despawn_entity',
-  __hostSetNpcDoctrine: 'set_npc_doctrine',
-  __hostSetNpcDoctrineChecked: 'set_npc_doctrine_checked',
-  __hostSetFactionHostility: 'set_faction_hostility',
-  __hostUndoGmAction: 'undo_gm_action',
-  __hostRequestLiveRestore: 'request_live_restore',
-  __hostSetStationPuppet: 'set_station_puppet',
-  __hostIssueStationCommand: 'issue_station_command',
-  __hostBackfillShipSlot: 'backfill_ship_slot',
-});
+import { nativeGmActionAdapter, installGmActionBindings } from './gm-action-bindings.js';
 
 export function mountNativeGmWorkspace({ bridge, win = window, doc = win.document }) {
   win.__phoenixGmPage = true;
@@ -46,7 +21,9 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
   let lastStartResult = null;
   let saveOutcomes = [];
   let manualSave = null;
+  let actionBindings;
   const settleCheckpoint = () => {
+    if (disposed || !actionBindings?.isCurrent('__hostGmCheckpointCreate')) return;
     const state = win.__hostGmCheckpointState?.();
     const outcome = saveOutcomes.find(row => row.slot === state?.pendingSlotId);
     if (outcome) win.__hostGmCheckpointPanel?.reportOutcome(outcome.ok, outcome.error || '');
@@ -65,6 +42,7 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
     }
   };
   const getOperator = () => {
+    if (disposed) return null;
     const operator = bridge.getOperator();
     return operator && operator.connected !== false && typeof operator.id === 'string'
       ? operator : null;
@@ -73,28 +51,21 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
   win.__hostGmInspectorInterest = panels => bridge.inspectorInterest?.(panels);
   win.__hostGmConsoleInterest = request => bridge.consoleInterest?.(request);
   if (bridge.saveRequest) {
-    win.__hostGmCheckpointList = () => bridge.saveRequest('list');
-    win.__hostGmCheckpointCreate = name => bridge.saveRequest('create', name).then(slot => {
-      win.setTimeout(settleCheckpoint, 0); return slot;
-    });
+    win.__hostGmCheckpointList = () => disposed ? [] : bridge.saveRequest('list');
   }
   win.__hostGmName = id => metadata.gms.find(row => row.id === id)?.name || id;
-  const submit = (action, request) => {
-    const operator = getOperator();
-    if (disposed || !operator || !request || typeof request !== 'object'
-        || typeof request.correlation !== 'string' || !request.correlation
-        || (request.operator_id != null && request.operator_id !== operator.id)) return false;
-    try {
-      return bridge.submitAction({ ...request, action, operator_id: operator.id }) === true;
-    } catch (_) {
-      return false;
-    }
-  };
-  for (const [callback, action] of Object.entries(ACTIONS)) {
-    win[callback] = request => submit(action, request);
-  }
-  win.__hostSetSessionPaused = (active, correlation) => typeof active === 'boolean'
-    && submit('set_session_paused', { active, correlation });
+  actionBindings = installGmActionBindings(win, nativeGmActionAdapter({
+    getOperator,
+    submitAction: request => bridge.submitAction(request),
+    createCheckpoint: bridge.saveRequest ? name => bridge.saveRequest('create', name).then(slot => {
+      if (!actionBindings.isCurrent('__hostGmCheckpointCreate')) return '';
+      win.setTimeout(settleCheckpoint, 0);
+      return slot;
+    }, error => {
+      if (!actionBindings.isCurrent('__hostGmCheckpointCreate')) return '';
+      throw error;
+    }) : undefined,
+  }));
 
   applyToDom(doc);
   const workspace = mountGmWorkspace({ win, doc, requireNativeProvider: true });
@@ -124,15 +95,18 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
       const status = doc.createElement('p'); status.setAttribute('role', 'status');
       manualSave = { button, status, input, slot: null, name: '', pending: false };
       button.addEventListener('click', async () => {
-        if (manualSave.pending) return;
+        if (manualSave.pending || disposed || !actionBindings.isCurrent('__hostGmCheckpointCreate')) return;
         manualSave.pending = true;
         button.disabled = true;
         try {
           manualSave.name = input.value;
-          manualSave.slot = await bridge.saveRequest('create', input.value);
+          const slot = await bridge.saveRequest('create', input.value);
+          if (disposed || !actionBindings.isCurrent('__hostGmCheckpointCreate')) return;
+          manualSave.slot = slot;
           status.textContent = t('server.gm.checkpoint.pending', { name: input.value });
           settleCheckpoint();
         } catch (error) {
+          if (disposed || !actionBindings.isCurrent('__hostGmCheckpointCreate')) return;
           manualSave.pending = false;
           status.textContent = error.message; button.disabled = metadata.phase !== 'InProgress';
         }
@@ -229,6 +203,8 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
     dispose() {
       win.removeEventListener('phoenix-native-locale-loaded', reloadLanguage);
       disposed = true;
+      actionBindings.dispose();
+      if (win.__hostLocalGm === getOperator) delete win.__hostLocalGm;
       if (typeof unsubscribe === 'function') unsubscribe();
       readyButton?.removeEventListener('click', setReady);
       forceButton?.removeEventListener('click', forceStart);

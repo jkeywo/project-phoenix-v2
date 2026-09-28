@@ -1558,7 +1558,7 @@
        reports. The attribute, the guards and the duplicated rotated-phone
        blocks in those four sheets are all gone with the rotation. */
   </style>
-<link rel="modulepreload" href="./project-phoenix-90e29b7e042521ce.js" crossorigin="anonymous" integrity="sha384-oXFI3z7P2NTn5LYVVGQ8fsnub7lJ7v/7ig6c8b9mVNFEr/ncW/IWNAu/4d5l+feQ"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-90e29b7e042521ce_bg.wasm" crossorigin="anonymous" integrity="sha384-o9tuf7gbDrAy56pDE586De0SDiF0ob4sdaMmblD00BHeT8VQ3tGIbKDaUoUcX4b3" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-ab7ff0bfb92ad40b.js" crossorigin="anonymous" integrity="sha384-oXFI3z7P2NTn5LYVVGQ8fsnub7lJ7v/7ig6c8b9mVNFEr/ncW/IWNAu/4d5l+feQ"><link rel="modulepreload" href="./snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="./project-phoenix-ab7ff0bfb92ad40b_bg.wasm" crossorigin="anonymous" integrity="sha384-lmPzrevWSfMKTe2ZDnz39Fto6EZIUAQiQnRIHavZu3/PkUrxxGskBOykDJ9cwgj8" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -2937,8 +2937,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-90e29b7e042521ce.js';
-const wasm = await init({ module_or_path: './project-phoenix-90e29b7e042521ce_bg.wasm' });
+import init, * as bindings from './project-phoenix-ab7ff0bfb92ad40b.js';
+const wasm = await init({ module_or_path: './project-phoenix-ab7ff0bfb92ad40b_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -3022,7 +3022,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (!bindings || typeof bindings.wasm_list_save_slots !== 'function') return [];
       return Array.from(bindings.wasm_list_save_slots() || []);
     };
-    window.__hostGmCheckpointCreate = function (name) {
+    window.__browserGmActions.__hostGmCheckpointCreate = function (name) {
       const bindings = window.wasmBindings;
       if (!bindings || typeof bindings.wasm_create_save_slot !== 'function') return '';
       return bindings.wasm_create_save_slot(name);
@@ -3306,11 +3306,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
     import { mountGmWorkspace } from './gui/gm-workspace.js';
+    import { browserGmActionAdapter, installGmActionBindings } from './gui/gm-action-bindings.js';
     import { mountGmLanguage } from './gui/gm-language.js';
     import { mountSensorReport } from './gui/sensor-report.js';
     window.__renderSensorReport = mountSensorReport(document);
     window.__renderSensorReport(window.__sensorReport);
     import { t, has, localiseTree } from './gui/strings.js';
+    const gmActionBindings = installGmActionBindings(window, browserGmActionAdapter(window.__browserGmActions));
+    delete window.__browserGmActions;
+    // A cached page keeps its desk; a departing page revokes retained calls.
+    window.addEventListener('pagehide', event => {
+      if (!event.persisted) gmActionBindings.dispose();
+    });
     const gmWorkspace = mountGmWorkspace({ win: window, doc: document });
     mountGmLanguage({ doc: document, win: window, workspace: gmWorkspace });
     const hostChannelDispatch = createHostChannel({
@@ -4514,13 +4521,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     };
     window.dispatchEvent(new Event('PhoenixWorkshopSourceReady'));
 
+    window.__browserGmActions = {};
     /**
      * Submit one explicit, attributed GM session state command.
      *
      * This is intentionally not `wasm_toggle_pause`: the typed command carries
      * the absolute state and crosses deterministic GM Admission in Rust.
      */
-    window.__hostSetSessionPaused = function(active, correlation) {
+    window.__browserGmActions.__hostSetSessionPaused = function(active, correlation) {
       const gm = localGm();
       if (!gm || typeof correlation !== 'string' || correlation.length === 0
           || typeof window.wasm_submit_gm_action !== 'function') return false;
@@ -4543,7 +4551,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * authoritative projection; this seam never composes one, so the GM cannot
      * name an event the simulation did not publish.
      */
-    window.__hostFireGmEvent = function(request) {
+    window.__browserGmActions.__hostFireGmEvent = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'
           || typeof request.event !== 'string' || !request.event
@@ -4569,7 +4577,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * must not be able to arm a skip by getting one field wrong. `event` is
      * still the layer-qualified id read out of the authoritative projection.
      */
-    window.__hostArmGmEventSkip = function(request) {
+    window.__browserGmActions.__hostArmGmEventSkip = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'
           || typeof request.event !== 'string' || !request.event
@@ -4600,7 +4608,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * both are ALWAYS sent — `scope_id` null for the whole entity — because the
      * typed ingress guards an exact field set rather than accepting two shapes.
      */
-    window.__hostApplyDirectEffect = function(request) {
+    window.__browserGmActions.__hostApplyDirectEffect = function(request) {
       const gm = localGm();
       const scope = request && request.scope;
       const scopeId = request && request.scope_id;
@@ -4639,7 +4647,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * This seam composes neither, so a GM can neither name a template the
      * simulation did not publish nor submit screen pixels.
      */
-    window.__hostObjectiveInstanceAction = function(request) {
+    window.__browserGmActions.__hostObjectiveInstanceAction = function(request) {
       const gm = localGm();
       if (!gm || !request || request.operator_id !== gm.id
           || typeof request.objective !== 'string' || !request.objective
@@ -4654,7 +4662,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           verb: request.verb, scope: request.scope })) !== false;
       } catch (_) { return false; }
     };
-    window.__hostObjectiveAction = function(request) {
+    window.__browserGmActions.__hostObjectiveAction = function(request) {
       const gm = localGm();
       if (!gm || !request || request.operator_id !== gm.id
           || typeof request.objective !== 'string' || !request.objective
@@ -4669,7 +4677,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           verb: request.verb, recipients: request.recipients })) !== false;
       } catch (_) { return false; }
     };
-    window.__hostSetSystemDisabled = function(request) {
+    window.__browserGmActions.__hostSetSystemDisabled = function(request) {
       const operator = localGm();
       if (!operator || !request || request.operator_id !== operator.id || typeof request.target !== 'string'
           || typeof request.system !== 'string' || typeof request.disabled !== 'boolean'
@@ -4677,20 +4685,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_system_disabled', target: request.target, system: request.system, disabled: request.disabled }));
     };
-    window.__hostPresentation = function(request) {
+    window.__browserGmActions.__hostPresentation = function(request) {
       const operator = localGm();
       if (!operator || !request || request.operator_id !== operator.id || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
         correlation: request.correlation, action: 'presentation', ship: request.ship, cue: request.cue }));
     };
-    window.__hostSetContactInformation = function(request) {
+    window.__browserGmActions.__hostSetContactInformation = function(request) {
       const operator = localGm();
       if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
           || !request.change || typeof request.change !== 'object' || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_contact_information', ship: request.ship, change: request.change }));
     };
-    window.__hostSetContactClassification = function(request) {
+    window.__browserGmActions.__hostSetContactClassification = function(request) {
       const operator = localGm();
       if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
           || typeof request.target !== 'string' || !(request.palette === null || typeof request.palette === 'string')
@@ -4698,7 +4706,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_contact_classification', ship: request.ship, target: request.target, palette: request.palette }));
     };
-    window.__hostSetContactOverride = function(request) {
+    window.__browserGmActions.__hostSetContactOverride = function(request) {
       const operator = localGm();
       if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
           || typeof request.target !== 'string' || !['reveal', 'conceal', 'normal'].includes(request.mode)
@@ -4714,7 +4722,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * neither composes one nor reads storage: it forwards the id the checkpoint
      * picker read back out of that same catalogue.
      */
-    window.__hostRequestLiveRestore = function(request) {
+    window.__browserGmActions.__hostRequestLiveRestore = function(request) {
       const operator = window.__hostLocalGm();
       if (!operator || !request || request.operator_id !== operator.id
           || typeof request.candidate !== 'string' || !request.candidate
@@ -4724,14 +4732,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         operator_id: operator.id, correlation: request.correlation,
         candidate: request.candidate })) !== false;
     };
-    window.__hostSetNpcDoctrine = function(request) {
+    window.__browserGmActions.__hostSetNpcDoctrine = function(request) {
       const operator = window.__hostLocalGm();
       if (!operator || !request || request.operator_id !== operator.id
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine', operator_id: operator.id,
         correlation: request.correlation, target: request.target, doctrine: request.doctrine })) !== false;
     };
-    window.__hostSetNpcDoctrineChecked = function(request) {
+    window.__browserGmActions.__hostSetNpcDoctrineChecked = function(request) {
       const operator = window.__hostLocalGm();
       if (!operator || !request || request.operator_id !== operator.id
           || !/^[0-9a-f]{16}$/.test(request.expected_revision)
@@ -4740,7 +4748,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         correlation: request.correlation, target: request.target, doctrine: request.doctrine,
         expected_revision: request.expected_revision })) !== false;
     };
-    window.__hostSetFactionHostility = function(request) {
+    window.__browserGmActions.__hostSetFactionHostility = function(request) {
       const operator = window.__hostLocalGm();
       if (!operator || !request || request.operator_id !== operator.id
           || typeof request.faction !== 'string' || typeof request.enemy !== 'string'
@@ -4754,7 +4762,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // projection published, forwarded VERBATIM: this seam must not reshape it,
     // because the canonical reducer compares it against the recorded fact to
     // decide whether the page was reading the truth.
-    window.__hostUndoGmAction = function(request) {
+    window.__browserGmActions.__hostUndoGmAction = function(request) {
       const operator = window.__hostLocalGm();
       if (!operator || !request || request.operator_id !== operator.id
           || typeof request.original !== 'string' || !request.original
@@ -4767,20 +4775,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         original_operator: request.original_operator,
         original_sequence: request.original_sequence, expected: request.expected })) !== false;
     };
-    window.__hostDespawnEntity = function(request) {
+    window.__browserGmActions.__hostDespawnEntity = function(request) {
       const operator = localGm();
       if (!operator || !request || typeof request.target !== 'string'
           || request.operator_id !== operator.id || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
         correlation: request.correlation, action: 'despawn_entity', target: request.target }));
     };
-    window.__hostTransmitComms = function(request) {
+    window.__browserGmActions.__hostTransmitComms = function(request) {
       const gm = window.__hostLocalGm?.();
       if (!gm || gm.id !== request?.operator_id || typeof window.wasm_submit_gm_action !== 'function') return false;
       try { return window.wasm_submit_gm_action(JSON.stringify({ ...request, action: 'transmit_comms' })) === true; }
       catch { return false; }
     };
-    window.__hostSpawnPaletteEntity = function(request) {
+    window.__browserGmActions.__hostSpawnPaletteEntity = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'
           || typeof request.palette !== 'string' || !request.palette
@@ -4814,7 +4822,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
      * absolute state requested, so two GMs pressing at once cannot depend on
      * arrival order for where the toggle ends up.
      */
-    window.__hostSetGmEventPaused = function(request) {
+    window.__browserGmActions.__hostSetGmEventPaused = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'
           || typeof request.event !== 'string' || !request.event
@@ -4835,7 +4843,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     };
 
     /** Submit one absolute Station takeover membership assignment. */
-    window.__hostSetStationPuppet = function(request) {
+    window.__browserGmActions.__hostSetStationPuppet = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'
           || typeof request.ship !== 'string' || !request.ship
@@ -4858,7 +4866,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     };
 
     /** Submit one existing Station System command through typed GM Admission. */
-    window.__hostIssueStationCommand = function(request) {
+    window.__browserGmActions.__hostIssueStationCommand = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'
           || typeof request.ship !== 'string' || !request.ship

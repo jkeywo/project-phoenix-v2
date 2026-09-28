@@ -91,7 +91,7 @@ export const GM_LIVE_DOCK_PANEL_IDS = Object.freeze([
 /** Visual-Studio-style window menus. They are deliberately presentation-only:
  * every item still invokes the dock's ordinary reveal/reopen operation. */
 export const GM_LIVE_DOCK_MENUS = Object.freeze([
-  ['session', ['roster', 'readiness', 'manual-save', 'mission', 'checkpoint', 'restore']],
+  ['session', ['roster', 'readiness', 'manual-save', 'mission', 'attention', 'checkpoint', 'restore']],
   ['crew', ['workload', 'station-console']],
   ['communications', ['comms', 'activity', 'presentation', 'audition']],
   ['world', ['map', 'spawn', 'contact', 'npc', 'misclassify', 'report-policy', 'system', 'effect', 'despawn', 'faction']],

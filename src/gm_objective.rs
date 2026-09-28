@@ -211,16 +211,7 @@ pub struct ObjectiveControl<'w, 's> {
         &'static crate::entities::spawner::EntityUuid,
         With<crate::lockstep::FleetSlotOf>,
     >,
-    pub fleet_members: Query<
-        'w,
-        's,
-        (
-            &'static crate::entities::spawner::EntityUuid,
-            &'static crate::ship_slots::AuthoredShipSlotId,
-            Option<&'static crate::entities::spawner::FactionComponent>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    pub(crate) recipient_sources: crate::recipients::RecipientSources<'w, 's>,
 }
 
 pub struct InstanceControlResult {

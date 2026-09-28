@@ -3,7 +3,7 @@ title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
 sources: [src/world/script/recipient_refs.rs, src/workshop/mod.rs, gui/components/ph-objective-list.js, src/core/messages.rs, src/gm_objective.rs, src/objective_instances/control.rs, gui/gm-objective-panel.js, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/recipients.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 
 # Objectives
@@ -80,6 +80,16 @@ the recorded recipients as semantic ship references and Ship links; cached names
 or UUID fallbacks keep those rows addressable by the activity feed's ship filter.
 
 ## Explicit multi-ship instances
+
+`src/recipients.rs` owns shared authoritative input preparation through
+`RecipientSources` and its exclusive-World adapter `prepare_in_world` (#1559).
+Addressed actions, Comms, and script/GM named-instance commands reuse the same
+authored slot, live faction and player-ship membership projection. Delivery
+resolution adds loaded runtime declarations and current Objective records;
+nothing is cached as another authoritative catalogue. Actions still filter
+destroyed hulls at deferred execution, while Comms separately checks live
+endpoints and the receiving Comms System. Neither eligibility filter changes
+Objective assignment, frozen history or completion credit.
 
 `src/recipients.rs` also reads effective current instance members for addressed
 script actions and Comms. This union does not change Objective assignment

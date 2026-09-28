@@ -562,29 +562,7 @@ pub(crate) fn match_specificity(
 /// lifecycle mutation. Authored slot identity is never reconstructed from
 /// transport `HostSlot` ordering.
 pub fn player_ship_memberships(world: &mut World) -> Vec<PlayerShipMembership> {
-    let mut query = world.query_filtered::<(
-        &crate::entities::spawner::EntityUuid,
-        &crate::ship_slots::AuthoredShipSlotId,
-        Option<&crate::entities::spawner::FactionComponent>,
-    ), With<crate::server_app::Ship>>();
-    let raw: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, slot, faction)| (uuid.0.clone(), slot.0.clone(), faction.map(|f| f.0)))
-        .collect();
-    let registry = world.get_resource::<crate::entities::config_cache::FactionRegistryResource>();
-    let mut fleet: Vec<_> = raw
-        .into_iter()
-        .map(|(ship_id, slot_id, faction)| PlayerShipMembership {
-            ship_id,
-            slot_id,
-            faction: faction
-                .and_then(|id| registry.and_then(|registry| registry.get(&id)))
-                .map(|faction| faction.name.clone())
-                .unwrap_or_default(),
-        })
-        .collect();
-    fleet.sort_by(|a, b| a.ship_id.cmp(&b.ship_id).then(a.slot_id.cmp(&b.slot_id)));
-    fleet
+    crate::recipients::prepare_in_world(world).fleet
 }
 
 pub fn reconcile_memberships(world: &mut World) {
@@ -658,26 +636,7 @@ pub fn apply_command(
     command: crate::world::dispatch::ActionCmd,
     origin: &ObjectiveCommandOrigin,
 ) {
-    let fleet = player_ship_memberships(world);
-    let known_slots: BTreeSet<_> = world
-        .get_resource::<crate::world::config::WorldConfig>()
-        .map(|config| {
-            config
-                .effective_ship_slots()
-                .into_iter()
-                .map(|slot| slot.id)
-                .collect()
-        })
-        .unwrap_or_default();
-    let known_factions: BTreeSet<_> = world
-        .get_resource::<crate::entities::config_cache::FactionRegistryResource>()
-        .map(|registry| {
-            registry
-                .iter()
-                .map(|faction| faction.name.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let prepared = crate::recipients::prepare_in_world(world);
     let applied = world.resource_scope(
         |world, mut instances: Mut<crate::world::server::ObjectiveInstanceManagerRes>| {
             let mut objectives = world.resource_mut::<crate::world::server::ObjectiveManagerRes>();
@@ -685,9 +644,9 @@ pub fn apply_command(
                 command,
                 &mut instances.0,
                 &mut objectives.0,
-                &fleet,
-                &known_slots,
-                &known_factions,
+                &prepared.fleet,
+                &prepared.catalog.ship_slots,
+                &prepared.catalog.factions,
             )
         },
     );

@@ -3692,42 +3692,9 @@ pub fn apply_due_actions(
                 scope,
                 verb,
             } => {
-                let registry = factions.registry.as_deref();
-                let mut fleet: Vec<_> = objective_control
-                    .fleet_members
-                    .iter()
-                    .map(
-                        |(uuid, slot, faction)| crate::objective_instances::PlayerShipMembership {
-                            ship_id: uuid.0.clone(),
-                            slot_id: slot.0.clone(),
-                            faction: faction
-                                .and_then(|faction| {
-                                    registry.and_then(|registry| registry.get(&faction.0))
-                                })
-                                .map(|faction| faction.name.clone())
-                                .unwrap_or_default(),
-                        },
-                    )
-                    .collect();
-                fleet.sort_by(|a, b| a.ship_id.cmp(&b.ship_id));
-                let known_slots = world_config
-                    .as_deref()
-                    .map(|config| {
-                        config
-                            .effective_ship_slots()
-                            .into_iter()
-                            .map(|slot| slot.id)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let known_factions = registry
-                    .map(|registry| {
-                        registry
-                            .iter()
-                            .map(|faction| faction.name.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let prepared = objective_control
+                    .recipient_sources
+                    .prepare(factions.registry.as_deref());
                 match (
                     content.as_deref(),
                     objective_control.manager.as_deref_mut(),
@@ -3741,9 +3708,9 @@ pub fn apply_due_actions(
                             objective,
                             scope,
                             *verb,
-                            &fleet,
-                            &known_slots,
-                            &known_factions,
+                            &prepared.fleet,
+                            &prepared.catalog.ship_slots,
+                            &prepared.catalog.factions,
                         );
                         for effect in &result.effects {
                             crate::objective_instances::control::publish_instance_apply(

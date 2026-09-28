@@ -108,13 +108,115 @@ pub struct RecipientCatalog {
     pub objective_instances: BTreeSet<ObjectiveInstanceKey>,
 }
 
+/// Read the same authored slots and player-ship identity in every execution
+/// adapter. Factions are borrowed from the caller because action/Comms systems
+/// also mutate that registry; taking another resource borrow would conflict.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct RecipientSources<'w, 's> {
+    config: Option<bevy::prelude::Res<'w, crate::world::config::WorldConfig>>,
+    ships: bevy::prelude::Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::ship_slots::AuthoredShipSlotId,
+            Option<&'static crate::entities::spawner::FactionComponent>,
+        ),
+        bevy::prelude::With<crate::server_app::Ship>,
+    >,
+}
+
+/// Ephemeral inputs, rebuilt at execution. Hull/endpoint eligibility belongs to
+/// the delivery adapter, not Objective assignment or its frozen crew history.
+pub(crate) struct PreparedRecipients {
+    pub fleet: Vec<PlayerShipMembership>,
+    pub catalog: RecipientCatalog,
+}
+
+impl RecipientSources<'_, '_> {
+    pub(crate) fn prepare(
+        &self,
+        registry: Option<&crate::entities::config_cache::FactionRegistryResource>,
+    ) -> PreparedRecipients {
+        let mut fleet: Vec<_> = self
+            .ships
+            .iter()
+            .map(|(uuid, slot, faction)| PlayerShipMembership {
+                ship_id: uuid.0.clone(),
+                slot_id: slot.0.clone(),
+                faction: faction
+                    .and_then(|id| registry.and_then(|registry| registry.get(&id.0)))
+                    .map(|faction| faction.name.clone())
+                    .unwrap_or_default(),
+            })
+            .collect();
+        fleet.sort_by(|a, b| a.ship_id.cmp(&b.ship_id).then(a.slot_id.cmp(&b.slot_id)));
+        PreparedRecipients {
+            fleet,
+            catalog: RecipientCatalog {
+                ship_slots: self
+                    .config
+                    .as_deref()
+                    .map(|config| {
+                        config
+                            .effective_ship_slots()
+                            .into_iter()
+                            .map(|slot| slot.id)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                factions: registry
+                    .map(|registry| {
+                        registry
+                            .iter()
+                            .map(|faction| faction.name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                objective_instances: BTreeSet::new(),
+            },
+        }
+    }
+}
+
+impl PreparedRecipients {
+    /// Loaded declarations and current records augment the catalogue at the
+    /// actual resolution point. Never re-read raw authored scripts or cached
+    /// last-known crew views to infer current instance membership.
+    pub(crate) fn resolve(
+        mut self,
+        selection: &RecipientSelection,
+        script: Option<&crate::world::server::WorldScriptRuntime>,
+        instances: &ObjectiveInstanceManager,
+    ) -> Result<Vec<String>, RecipientRefusal> {
+        if let Some(script) = script {
+            self.catalog
+                .objective_instances
+                .extend(script.recipient_declarations.iter().cloned());
+        }
+        self.catalog
+            .objective_instances
+            .extend(instances.records().iter().map(|row| row.spec.key.clone()));
+        selection.resolve(&self.catalog, &self.fleet, instances)
+    }
+}
+
+/// Exclusive World adapter for deferred actions and script Objective commands.
+/// Uses the same source query as ordinary systems; no catalogue is stored.
+pub(crate) fn prepare_in_world(world: &mut bevy::prelude::World) -> PreparedRecipients {
+    let mut sources = bevy::ecs::system::SystemState::<RecipientSources>::new(world);
+    sources
+        .get(world)
+        .prepare(world.get_resource::<crate::entities::config_cache::FactionRegistryResource>())
+}
+
 /// Resolve at the deferred application boundary, after earlier Objective
 /// commands have landed. Authored declarations augment the live registry.
 pub(crate) fn resolve_in_world(
     world: &mut bevy::prelude::World,
     selection: &RecipientSelection,
 ) -> Result<Vec<String>, RecipientRefusal> {
-    let mut fleet = crate::objective_instances::player_ship_memberships(world);
+    let mut prepared = prepare_in_world(world);
     // Lethal damage retains crew hull identity and Objective history. Delivery
     // excludes those hulls without changing their assignment or frozen view.
     let mut hulls = world.query::<(
@@ -126,37 +228,19 @@ pub(crate) fn resolve_in_world(
         .filter(|(_, hull)| hull.0.total_current() <= 0.0)
         .map(|(uuid, _)| uuid.0.clone())
         .collect();
-    fleet.retain(|ship| !destroyed.contains(&ship.ship_id));
-    let mut catalog = RecipientCatalog::default();
-    if let Some(script) = world.get_resource::<crate::world::server::WorldScriptRuntime>() {
-        catalog
-            .objective_instances
-            .extend(script.recipient_declarations.iter().cloned());
-    }
-    if let Some(config) = world.get_resource::<crate::world::config::WorldConfig>() {
-        catalog.ship_slots.extend(
-            config
-                .effective_ship_slots()
-                .into_iter()
-                .map(|slot| slot.id),
-        );
-    }
-    if let Some(registry) =
-        world.get_resource::<crate::entities::config_cache::FactionRegistryResource>()
-    {
-        catalog
-            .factions
-            .extend(registry.iter().map(|faction| faction.name.clone()));
-    }
+    prepared
+        .fleet
+        .retain(|ship| !destroyed.contains(&ship.ship_id));
     let empty = ObjectiveInstanceManager::default();
     let instances = world
         .get_resource::<crate::world::server::ObjectiveInstanceManagerRes>()
         .map(|manager| &manager.0)
         .unwrap_or(&empty);
-    catalog
-        .objective_instances
-        .extend(instances.records().iter().map(|row| row.spec.key.clone()));
-    selection.resolve(&catalog, &fleet, instances)
+    prepared.resolve(
+        selection,
+        world.get_resource::<crate::world::server::WorldScriptRuntime>(),
+        instances,
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

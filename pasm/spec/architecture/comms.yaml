@@ -8,6 +8,7 @@ entities:
       rationale:
         - "Addressed actions retarget the ordinary typed dispatcher, retaining action gates and information boundaries. Comms evaluates one root, then uses private ordinary recipient-bound dialogue, projection and reply admission. Pending Comms selectors are captured and digested with the existing open queue; membership is resolved after restore when the request runs."
         - "Workshop Save checks structural literal selectors in the resolved script set without executing expressions. Computed selectors are validated at execution. Recipient diagnostics are a bounded presentation resource, excluded from authoritative continuation."
+        - "[ai] Issue #1559: RecipientSources prepares authored slot names, current Ship/authored-slot/faction membership and known factions for both delivery adapters and script/GM Objective-instance commands. PreparedRecipients resolves loaded runtime declarations and retained instance records at execution without stored authoritative catalogue state. The action adapter retains living-hull filtering and deferred authored order; Comms retains endpoint, System and living-hull eligibility after selection. Frozen history, completion credit and Membership rollback ordering remain with the Objective owner."
     architecture:
       kind: admission-policy
       authority: authoritative
@@ -16,7 +17,7 @@ entities:
     implementation:
       status: declared
       paths: [src/recipients.rs, src/world/script/recipient_refs.rs, src/world/script/effects.rs, src/world/server.rs, src/comms/scripted.rs, src/workshop/mod.rs, gui/gm-recipient-diagnostics.js]
-      symbols: [RecipientSelection, RecipientCatalog, RecipientDiagnostics, addressed_action, apply_addressed_action]
+      symbols: [RecipientSelection, RecipientCatalog, RecipientSources, PreparedRecipients, prepare_in_world, RecipientDiagnostics, addressed_action, apply_addressed_action]
       tests: [cargo test --lib addressed, cargo test --lib recipients]
 
   - component: comms-dialogue-controller

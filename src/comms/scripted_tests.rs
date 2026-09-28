@@ -193,6 +193,192 @@ fn addressed_comms_runs_root_once_and_uses_ordinary_ship_projection() {
 }
 
 #[test]
+fn addressed_delivery_adapters_share_live_layer_declarations_and_absent_slots() {
+    use crate::objective_instances::{ObjectiveInstanceKey, RecipientSelector};
+    use crate::recipients::{RecipientRefusal, RecipientSelection};
+    let layer_key = ObjectiveInstanceKey {
+        objective_id: "layer-orders".into(),
+        instance_id: "reserve".into(),
+    };
+    let selection = |selectors| RecipientSelection {
+        selectors,
+        objective_instances: vec![],
+    };
+    let cases = [
+        (
+            selection(vec![RecipientSelector::ShipSlot("lead".into())]),
+            Ok(vec!["lead"]),
+        ),
+        (
+            selection(vec![RecipientSelector::Faction("Pirate".into())]),
+            Ok(vec!["wing"]),
+        ),
+        (
+            selection(vec![RecipientSelector::AllPlayerShips]),
+            Ok(vec!["lead", "wing"]),
+        ),
+        (
+            selection(vec![RecipientSelector::ShipSlot("absent".into())]),
+            Ok(vec![]),
+        ),
+        (selection(vec![]), Ok(vec![])),
+        (
+            RecipientSelection {
+                selectors: vec![],
+                objective_instances: vec![layer_key.clone()],
+            },
+            Ok(vec![]),
+        ),
+        (
+            selection(vec![
+                RecipientSelector::AllPlayerShips,
+                RecipientSelector::ShipSlot("typo".into()),
+            ]),
+            Err(RecipientRefusal::UnknownShipSlot("typo".into())),
+        ),
+    ];
+    for (selection, expected) in cases {
+        let mut app = recipient_comms_app();
+        let compiled =
+            crate::world::script::load::compile_scripts(&[vellum_script::ScriptSource {
+                path: "fixture/recipient-layer.rhai".into(),
+                source: r#"fn reserve(ctx) {
+                ctx.effects.add_objective(#{ id: "layer-orders", instance_id: "reserve",
+                    text: "objective.reserve", recipient_ship_slots: ["absent"] });
+            }"#
+                .into(),
+            }]);
+        assert!(compiled.findings.is_empty(), "{:?}", compiled.findings);
+        app.world_mut()
+            .resource_scope(|world, mut runtime: Mut<WorldContentRuntime>| {
+                crate::world::server::merge_layer_scripts(
+                    "fixture/recipient-layer.toml",
+                    compiled,
+                    &mut runtime,
+                    &mut world.resource_mut::<WorldScriptRuntime>(),
+                );
+            });
+        // This declaration only exists in the loaded layer runtime, never in
+        // the base config. A declared but inactive instance is valid and empty.
+        let resolved = crate::recipients::resolve_in_world(app.world_mut(), &selection);
+        assert_eq!(
+            resolved,
+            expected
+                .clone()
+                .map(|ships| ships.into_iter().map(String::from).collect()),
+            "{selection:?}"
+        );
+        app.world_mut()
+            .resource_mut::<WorldScriptRuntime>()
+            .pending_comms_opens
+            .push(OpenCommsRequest {
+                recipients: Some(selection.clone()),
+                ..request("hail", "control")
+            });
+        app.update();
+        let expected_ships = expected.unwrap_or_default();
+        for ship in ["lead", "wing"] {
+            assert_eq!(
+                recipient_messages(&mut app, ship).len(),
+                usize::from(expected_ships.contains(&ship)),
+                "{selection:?}: {ship}"
+            );
+        }
+        assert_eq!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter("root_calls"),
+            i64::from(!expected_ships.is_empty())
+        );
+        if expected_ships.is_empty() {
+            let diagnostics = &app
+                .world()
+                .resource::<crate::recipients::RecipientDiagnostics>()
+                .0;
+            let message = &diagnostics.back().unwrap().message;
+            if selection.objective_instances.contains(&layer_key) {
+                assert!(message.contains("No current player ships"), "{message}");
+            }
+        }
+    }
+}
+
+#[test]
+fn addressed_comms_keeps_endpoint_system_and_hull_eligibility_separate_from_membership() {
+    for ineligible in ["dead", "no-endpoint", "no-comms"] {
+        let mut app = recipient_comms_app();
+        let lead = app
+            .world_mut()
+            .query::<(Entity, &EntityUuid)>()
+            .iter(app.world())
+            .find(|(_, uuid)| uuid.0 == "lead")
+            .unwrap()
+            .0;
+        match ineligible {
+            "dead" => {
+                app.world_mut().entity_mut(lead).insert(
+                    crate::entities::spawner::EntitySystemHull(
+                        crate::ship::damage::SystemHull::from_config(&[(
+                            crate::core::messages::SystemId("hull".into()),
+                            0.0,
+                        )]),
+                    ),
+                );
+            }
+            "no-endpoint" => {
+                app.world_mut()
+                    .entity_mut(lead)
+                    .remove::<crate::lockstep::FleetSlotOf>();
+            }
+            "no-comms" => {
+                app.world_mut()
+                    .get_mut::<crate::ship::components::ShipConfigComponent>(lead)
+                    .unwrap()
+                    .0
+                    .systems
+                    .retain(|system| system.id != crate::ship::system_registry::comms_system_id());
+            }
+            _ => unreachable!(),
+        }
+        let selection =
+            crate::recipients::RecipientSelection::from_fields(None, None, Some(true), None)
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            crate::objective_instances::player_ship_memberships(app.world_mut()).len(),
+            2,
+            "delivery eligibility never removes Objective membership"
+        );
+        assert_eq!(
+            crate::recipients::resolve_in_world(app.world_mut(), &selection).unwrap(),
+            if ineligible == "dead" {
+                vec!["wing"]
+            } else {
+                vec!["lead", "wing"]
+            }
+        );
+        app.world_mut()
+            .resource_mut::<WorldScriptRuntime>()
+            .pending_comms_opens
+            .push(OpenCommsRequest {
+                recipients: Some(selection),
+                ..request("hail", "control")
+            });
+        app.update();
+        assert!(
+            recipient_messages(&mut app, "lead").is_empty(),
+            "{ineligible}"
+        );
+        assert_eq!(
+            recipient_messages(&mut app, "wing").len(),
+            1,
+            "{ineligible}"
+        );
+    }
+}
+
+#[test]
 fn addressed_comms_authored_threads_are_private_and_stable_on_reopen() {
     let mut app = recipient_comms_app();
     let open = OpenCommsRequest {
@@ -324,6 +510,18 @@ fn addressed_comms_resolves_changed_instance_membership_after_snapshot_restore()
             faction.0 = if uuid.0 == "wing" { alliance } else { pirate };
         }
         crate::objective_instances::reconcile_memberships(app.world_mut());
+        let selection = app
+            .world()
+            .resource::<WorldScriptRuntime>()
+            .pending_comms_opens[0]
+            .recipients
+            .clone()
+            .unwrap();
+        assert_eq!(
+            crate::recipients::resolve_in_world(app.world_mut(), &selection).unwrap(),
+            ["wing"],
+            "deferred actions and Comms read current membership after restore, not frozen history"
+        );
         app.update();
         assert!(recipient_messages(app, "lead").is_empty());
         assert_eq!(recipient_messages(app, "wing").len(), 1);

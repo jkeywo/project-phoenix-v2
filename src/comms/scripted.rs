@@ -51,7 +51,8 @@ use crate::world::server::{
 /// mission clock a dialogue fn's `in_seconds`/`after` work is stamped against,
 /// and `balance_events` is the ledger the shared apply path writes.
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct ScriptedCommsAux<'w> {
+pub(crate) struct ScriptedCommsAux<'w, 's> {
+    recipient_sources: crate::recipients::RecipientSources<'w, 's>,
     objective_instances: Option<Res<'w, crate::world::server::ObjectiveInstanceManagerRes>>,
     id_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Entity as usize }>,
     message_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Message as usize }>,
@@ -122,8 +123,6 @@ pub(crate) fn open_scripted_comms_threads(
         Has<crate::comms::component::CommsRange>,
         Option<&crate::entities::spawner::EntitySystemHull>,
         Option<&crate::ship::components::ShipConfigComponent>,
-        Option<&crate::ship_slots::AuthoredShipSlotId>,
-        Option<&crate::entities::spawner::FactionComponent>,
     )>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
     mut ai_query: Query<
@@ -231,55 +230,17 @@ pub(crate) fn open_scripted_comms_threads(
                 );
                 continue;
             }
-            let mut catalog = crate::recipients::RecipientCatalog::default();
-            catalog
-                .objective_instances
-                .extend(sr.recipient_declarations.iter().cloned());
-            if let Some(config) = world_layers.base_world_config.as_deref() {
-                catalog.ship_slots.extend(
-                    config
-                        .effective_ship_slots()
-                        .into_iter()
-                        .map(|slot| slot.id),
-                );
-            }
-            if let Some(registry) = faction_dispatch.registry.as_deref() {
-                catalog
-                    .factions
-                    .extend(registry.iter().map(|faction| faction.name.clone()));
-            }
             let empty = crate::objective_instances::ObjectiveInstanceManager::default();
             let instances = aux
                 .objective_instances
                 .as_deref()
                 .map(|manager| &manager.0)
                 .unwrap_or(&empty);
-            catalog
-                .objective_instances
-                .extend(instances.records().iter().map(|row| row.spec.key.clone()));
-            let fleet = routed_endpoints
-                .iter()
-                .filter_map(|(uuid, _, is_ship, _, _, _, _, slot, faction)| {
-                    if !is_ship {
-                        return None;
-                    }
-                    let slot = slot?;
-                    Some(crate::objective_instances::PlayerShipMembership {
-                        ship_id: uuid.0.clone(),
-                        slot_id: slot.0.clone(),
-                        faction: faction
-                            .and_then(|faction| {
-                                faction_dispatch
-                                    .registry
-                                    .as_deref()
-                                    .and_then(|registry| registry.get(&faction.0))
-                            })
-                            .map(|faction| faction.name.clone())
-                            .unwrap_or_default(),
-                    })
-                })
-                .collect::<Vec<_>>();
-            match selection.resolve(&catalog, &fleet, instances) {
+            match aux
+                .recipient_sources
+                .prepare(faction_dispatch.registry.as_deref())
+                .resolve(selection, Some(sr), instances)
+            {
                 Ok(ships) if ships.is_empty() => {
                     bevy::log::warn!("open_comms selected no current player ships");
                     diagnostic(
